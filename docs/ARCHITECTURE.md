@@ -6,9 +6,14 @@ for each artifact. It is the "big picture" companion to `CLAUDE.md` (which cover
 commands and code layout). For how the dashboard is *deployed* with a workspace
 (pip dependency, run from the workspace venv) see [USAGE.md](USAGE.md).
 
-> Status: descriptive of the code as of mid-2026. Schema versions (study/spec
-> v2→v3→v4) and emitter backends (SQLite / Parquet / XArray) coexist; where a
-> field or table is version- or backend-specific this is called out.
+> Status: descriptive of the code as of mid-2026, reconciled against a
+> code-first audit on 2026-07-07 (stale claims corrected in place). Schema
+> versions (study/spec v2→v3→v4) and emitter backends (SQLite / Parquet /
+> XArray) coexist; where a field or table is version- or backend-specific this
+> is called out. For the exhaustive, file:line-cited version of this audit —
+> including the ranked architectural risks and the full reality-vs-docs
+> divergence table — see [ARCHITECTURE-DEEP-DIVE.md](ARCHITECTURE-DEEP-DIVE.md).
+> Passages below marked **⚠ Correction** were inaccurate in earlier revisions.
 
 ---
 
@@ -115,20 +120,44 @@ Limitations · References; the v4 schema expands this with authored
 machinery auto-migrates older v2/v3 specs in memory (`lib/spec_migration.py`,
 `lib/investigations.py`).
 
+> **⚠ Schema hazard worth knowing:** `schema_version: 4` is **ambiguous — two
+> incompatible study shapes share the number**, disambiguated only by whether a
+> top-level `conditions:` block is present. With it, the "redesign v4"
+> (`question`/`conditions`/`tests`-as-a-*list*) is validated and then projected
+> back onto legacy v3 field names in-memory by a ~170-line synthesizer so the v3
+> renderer works unchanged; without it, "legacy v4" (`tests`-as-a-*dict*) is
+> used. Adding a `conditions:` key to a legacy study silently flips the entire
+> validation + render path. (There are also two study-directory resolvers that
+> can disagree for the same slug — see the deep-dive §4.)
+
 Two derived concepts drive the UI's "is this study OK?" signal:
 
 - **Behavior tests / expected behavior** (`lib/expected_behavior.py`): a small
   declarative DSL. Each entry extracts a measure from run history (a trajectory
-  or scalar) and evaluates it against an expectation (`in_range`,
-  `monotonic_decreasing`, correlation thresholds, etc.). `evaluate()` returns
-  `(passed, message)` — it never raises.
+  or scalar) and evaluates it against an expectation. The actual operators are
+  broader than older revisions of this doc (and the module docstring) claimed:
+  **8 expect ops** (`in_range`, `rolling_cv_below`, `ratio_at_most`,
+  `ratio_at_least`, `monotonic_decreasing`, `pearson_below`, `pearson_above`,
+  `pre_post_event_ratio`), **6 reduce modes**, and **6 measure kinds**.
+  `evaluate()` returns `(passed, message)`. **⚠ Correction:** it does *not*
+  categorically "never raise" — it catches only the two custom
+  `Missing{Measure,Expect}Error`s; a malformed entry raising `KeyError`/
+  `TypeError` on `entry["measure"]`/`entry["expect"]` still propagates.
 - **Pipeline gate / verdict**: a study's acceptance verdict, computed (not
-  authored) from test outcomes + run status + findings. Predecessor studies
-  must pass their gate before a downstream study proceeds — this is what makes
-  an investigation a true dependency DAG.
+  authored) from test outcomes + run status + findings. The investigation
+  declares a study-to-study dependency DAG (`pipeline_gate.prerequisites`, with
+  a legacy `parent_studies` fallback). **⚠ Correction:** this DAG is currently
+  **advisory/display-only** — `build_investigations` computes `blocked`/
+  `blocked_by` for the UI, but **no run endpoint consults it**, so a downstream
+  study *can* be launched before its predecessors pass. (Earlier revisions
+  claimed predecessors "must pass before a downstream study proceeds"; that is
+  not enforced in code.) The only run-time gating is a study's *own*
+  `conditions.model_settings` entries marked `gate: required-before-run` with an
+  unset value (`run_jobs.enumerate_unblocked`).
 
 **`effective_status`** is a multi-axis precedence rollup: the most-downstream
-axis that is set wins (gate > evaluation > simulation > implementation > design).
+axis that is set wins. **⚠ Correction:** there are **6 axes**, not 5 —
+`gate > evaluation > simulation > implementation > design > expert_review`.
 This is why a study can show "passed" even while a later sim is still "running".
 Rollup logic lives largely in `pbg_superpowers` (`study_verdict`, `study_status`)
 and is computed on read — it is not persisted.
@@ -189,7 +218,7 @@ under `investigations/<inv>/studies/<slug>/`. Resolution is nested-first
 | Research-arc structure | `investigations/<slug>/investigation.yaml` | dashboard + `/pbg-*` skills |
 | Model definition | `*.composite.yaml` / generator fn | workspace package / installed pbg-* / pbg-superpowers |
 | **Run results** | `studies/<slug>/runs.db` (or backend emitter output) | written by process-bigraph emitter during a run |
-| Audit trail | the workspace's **git history** | dashboard auto-commits every mutation |
+| Audit trail | the workspace's **git history** (+ `.pbg/events.jsonl` event log) | dashboard commits most mutations; catalog ops are an exception (see §6) |
 | Validation schemas | `.pbg/schemas/*.json` | **pbg-template** (read-only here) |
 | Cross-dashboard discovery | `~/.pbg/servers/` | `pbg_superpowers.workspace_catalog` |
 | Derived status/verdicts | *(not persisted — computed on read)* | `pbg_superpowers` rollups |
@@ -203,8 +232,23 @@ no separate dashboard database.
 
 ## 4. Data lifecycle: a simulation run
 
-This is the most important flow to understand. Runs can take tens of minutes, so
-they execute in **detached subprocesses** decoupled from the HTTP request.
+This is the most important flow to understand. Runs can take tens of minutes.
+
+> **⚠ Correction — there are actually *two* run engines, and the diagram below
+> describes only one of them.** The clean detached-subprocess model (request
+> file → `spawn_detached` → `run_runner.execute`, PID-tracked, heartbeat,
+> `MAX_RUNTIME_SEC` self-terminate, reconciled on restart) is **Engine A**, used
+> by `POST /api/composite-test-run` — the *Composite Explorer scratch* path
+> (writes `.pbg/composite-runs.db`). The core scientific path —
+> `POST /api/study-run-baseline` / `-variant` (writes `studies/<slug>/runs.db`)
+> — is **Engine B** (`study_runs.py` → `composite_subprocess.py`): it builds a
+> ~240-line `python -c` script and runs it **synchronously inside the HTTP
+> request** via `subprocess.run(..., timeout=1800)`. Engine B has **no** PID
+> tracking, heartbeat, self-terminate, concurrency cap, or restart
+> reconciliation — an interrupted study run is left `status='running'`
+> permanently (`startup.reconcile_stale_runs` only ever runs against
+> `composite-runs.db`). The steps below are accurate **for Engine A**; Engine B
+> is the weaker path despite owning the durable results. See the deep-dive §5.
 
 ```
 1. TRIGGER   User clicks "Run" → POST /api/composite-test-run | /api/study-run-baseline | …
@@ -252,6 +296,14 @@ CREATE TABLE runs_meta (
 -- nullable columns added by migration: pid, progress_step, log_path, heartbeat_at, generation_id
 ```
 
+> **⚠ Correction:** this DDL is the dashboard's own; the repo actually carries
+> **three separate hand-maintained `runs_meta` DDLs** (this one, a byte-vendored
+> copy in `run_registry.py`, and an inline one in `copy_run_to_new_db`). They
+> have drifted: the vendored copy + `backfill_runs` write an `emitter_path`
+> column the dashboard's own migration never adds — a latent
+> `no such column: emitter_path` if backfill is ever wired against a
+> dashboard-created study `runs.db`.
+
 The **per-step trajectory** tables (`history`, `simulations`) are created and
 written by **process-bigraph's `SQLiteEmitter`**, not by this repo. By
 convention `history.simulation_id == runs_meta.run_id`, so the dashboard joins
@@ -261,7 +313,12 @@ metadata (its own) to trajectory (the engine's) on that id.
 
 Run output may land in different backends depending on the composite/workspace:
 SQLite (`runs.db`), a **Parquet hive** (`studies/<slug>/parquet-runs/…`), or
-**XArray/Zarr** (`.pbg/runs/<id>/store.zarr`). `lib/simulations_index.py` is the
+**XArray/Zarr** (`.pbg/runs/<id>/store.zarr`). **⚠ Correction:** the **default
+emitter is now `xarray`** (`emitters.DEFAULT_EMITTER`, flipped from SQLite by
+"Task 6") — the SQLite-centric framing elsewhere in this section is historical.
+In practice the xarray path is fragile on short runs (it under-fills a size-3
+buffer and *silently falls back to SQLite* via a content probe), so the emitted
+backend is often not the declared one. `lib/simulations_index.py` is the
 unifier — it discovers runs across *all* backends and presents one normalized
 list. `lib/backfill_runs.py` registers on-disk emitter output that was produced
 outside dashboard tracking back into `runs_meta`, so externally-run sims still
@@ -305,11 +362,20 @@ it pre-computes `api/*.json` + per-study HTML shells so the *same* frontend JS
 backend. This is why recent fixes concern features degrading gracefully in the
 snapshot (no Launch buttons, no GitHub mark, etc.).
 
+> **⚠ Two caveats on "self-contained / read-only":** (1) charts are hand-rolled
+> inline SVG and survive offline, **except** the multi-run *comparative* charts
+> (`comparative_viz.py`), which reference Plotly from `cdn.plot.ly` rather than
+> inlining it — so they silently fail to render offline or under a strict CSP,
+> despite a docstring claiming otherwise. (2) The `VIVARIUM_WORKBENCH_READONLY=1`
+> mode on a *live* server is **not** fully read-only: its allow-list still
+> exposes run-launch, `run-delete`, `save-run-as-variant`, and workspace-switch.
+> Only the statically-published bundle (no backend at all) is truly read-only.
+
 ---
 
 ## 6. Git as the audit trail
 
-Every mutating endpoint runs its file writes inside
+Most mutating endpoints run their file writes inside
 `lib/work_state.py: active_branch_action` (and the per-mutation commit helpers),
 which:
 1. ensures work is on a workstream branch (creating one if needed),
@@ -317,16 +383,35 @@ which:
 3. stages the authored paths and `git commit`s with a conventional message,
 4. returns the new commit SHA to the UI.
 
-So **the workspace's git history *is* the audit trail** — there is no separate
-event log. The GitHub Branches tab (`lib/github_auth.py`, device-flow OAuth,
-token in the OS keychain) pushes the branch and opens a PR. Merging to the
-workspace's `main` makes the work permanent. Per-developer workstream state
-(active branch, PR number) is cached in `.pbg/state.json` (`lib/work_state.py`),
-which is gitignored.
+So **the workspace's git history is the primary audit trail.** **⚠ Corrections
+to two over-broad claims in earlier revisions:**
+- **There *is* a separate event log** alongside git: `.pbg/events.jsonl` (typed
+  RFC-0002 events, served by `GET /api/events/log`) plus the `/api/click`
+  append log. Git is the *durable* trail; the event log is an additional stream.
+- **Not literally every mutation commits.** Most do (via `active_branch_action`),
+  but **catalog install/uninstall commit nothing** under the FastAPI seam — they
+  mutate `workspace.yaml`/`pyproject.toml`/submodules and leave the tree dirty.
+  And because `active_branch_action` **hardcodes its git-staging pathspec**
+  (`studies/`, `investigations/`, …) rather than resolving it through
+  `workspace_paths`, a workspace that relocates a dir via `layout:` would have
+  its files *discovered but never staged/committed* — a silent audit-trail hole.
 
-Mutating requests are guarded by `_csrf_ok()`: requests with no `Origin` (curl,
-local CLI) are allowed; a present `Origin` must match `Host`
-(bypass with `VIVARIUM_WORKBENCH_DISABLE_CSRF=1`).
+The GitHub Branches tab (`lib/github_auth.py`, device-flow OAuth, token in the
+OS keychain) pushes the branch and opens a PR. Merging to the workspace's `main`
+makes the work permanent. Per-developer workstream state (active branch, PR
+number) is cached in `.pbg/state.json` (`lib/work_state.py`), which is
+gitignored. Commits are authored under a fixed synthetic identity
+(`pbg-template@local`), not the authenticated GitHub user.
+
+Mutating requests are guarded by a **CSRF/origin middleware** (`api/app.py` →
+`lib/csrf.is_request_allowed`): requests with no `Origin` (curl, local CLI) are
+allowed; a present `Origin` must match `Host` (bypass with
+`VIVARIUM_WORKBENCH_DISABLE_CSRF=1`). **⚠ Correction:** there is no `_csrf_ok()`
+function — that name survives only in docstrings from the retired stdlib server.
+Note this guard has **no `Host` allowlist and no token**, so it is bypassable by
+DNS rebinding and by any `Origin`-less client; combined with the API having **no
+authentication** (while `--host 0.0.0.0` is a documented flag), the security
+model assumes a trusted-localhost deployment. See the deep-dive §10.
 
 ---
 
@@ -339,6 +424,18 @@ local CLI) are allowed; a present `Origin` must match `Host`
 | Interactive **state-tree (bigraph) explorer** | **bigraph-loom** | Embedded viewer; the dashboard feeds it composite-state JSON. Assets copied into the publish bundle. |
 | Workspace **scaffold** + `.pbg/schemas/` validators | **pbg-template** | Read-only here. Schemas are loaded at save time (`lib/workspace_yaml.py` → `Draft7Validator`); invalid YAML is rejected with HTTP 400 *before* any commit. pbg-template owns the schema versions. |
 | **AI-assisted authoring** + many runtime computations | **pbg-superpowers** | A *runtime library*, not just a plugin. Provides `workspace_catalog` (multi-dashboard discovery via `~/.pbg/servers/`), `composite_generator`, visualization discovery, and the verdict/status/rigor rollups the dashboard computes on read. Its `/pbg-*` Claude Code skills write the **same** workspace files the dashboard does. |
+
+> **⚠ Coupling note:** this is the deepest and leakiest dependency in the repo —
+> **~170 references across 57 of ~151 `lib/` modules**, imported symbol-by-symbol
+> with no facade, and (in ≥6 modules) reaching into the private
+> `composite_generator._REGISTRY`. Calls are defensively guarded (they degrade if
+> the package is absent), so the dashboard *runs* without pbg-superpowers — but
+> the entire gate/verdict/derived-status layer then silently vanishes, and
+> `pbg-superpowers>=0.14.0` is in fact a **hard** dependency. A single upstream
+> version bump can affect dozens of unrelated modules at once. (`composite_lookup.py`
+> even carries a docstring claiming it is "self-contained: no dependency on
+> pbg-superpowers" while importing that private registry.) By contrast,
+> `investigation_contracts` and the bigraph-loom asset seam are narrow and clean.
 
 ### Dual authoring (dashboard ⇄ /pbg-* skills)
 
@@ -359,11 +456,14 @@ You point `vivarium-workbench serve` at a process-bigraph workspace. The
 workspace's YAML files (`workspace.yaml`, `studies/*/study.yaml`,
 `investigations/*/investigation.yaml`) are the source of truth for *design*;
 `runs.db` files are the source of truth for *results*; the workspace's git
-history is the *audit trail*. The dashboard authors those YAML files through a
-UI (committing every change), orchestrates simulations by writing a run-request
-and spawning a detached `run-composite` process that delegates to
-process-bigraph and writes `runs.db`, then renders specs+results into verdicts
-and charts — both for the live server and for a static read-only bundle. It is
-schema-validated by pbg-template, AI-co-authored by pbg-superpowers, and uses
-bigraph-loom to visualize state trees. The dashboard itself stores nothing
-outside the workspace.
+history is the *audit trail* (with an auxiliary `.pbg/events.jsonl` event log).
+The dashboard authors those YAML files through a UI (committing most changes),
+orchestrates simulations — either as detached `run-composite` processes
+(Explorer scratch runs) or as synchronous in-request subprocesses (study runs;
+see the §4 correction) that delegate to process-bigraph and write `runs.db` —
+then renders specs+results into verdicts and charts, for both the live server
+and a static read-only bundle. It is schema-validated by pbg-template,
+AI-co-authored by pbg-superpowers, and uses bigraph-loom to visualize state
+trees. The dashboard itself stores nothing outside the workspace. For the
+code-verified detail behind every claim here, see
+[ARCHITECTURE-DEEP-DIVE.md](ARCHITECTURE-DEEP-DIVE.md).

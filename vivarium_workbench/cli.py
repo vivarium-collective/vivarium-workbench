@@ -45,10 +45,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from vivarium_workbench.lib._root import set_workspace_root
     set_workspace_root(workspace)
 
+    from vivarium_workbench.publish import _normalize_base_path
+    base_path = _normalize_base_path(getattr(args, "base_path", "") or "")
+
     # Render the dashboard HTML once before serving.
     try:
         from vivarium_workbench.lib.report import render_dashboard
-        render_dashboard(workspace, write_all=True)
+        render_dashboard(workspace, write_all=True, base_path=base_path)
     except Exception as e:
         print(f"warning: dashboard render failed: {e}", file=sys.stderr)
 
@@ -123,7 +126,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # Boot the FastAPI app under uvicorn (the migration's typed seam is now the
     # served entrypoint; the legacy stdlib server.serve path is retired).
     from vivarium_workbench.lib.startup import serve_fastapi
-    return serve_fastapi(workspace=workspace, port=port, host=host)
+    return serve_fastapi(workspace=workspace, port=port, host=host, base_path=base_path)
 
 
 def migrate_investigations_to_studies(ws_root: Path, dry_run: bool = False) -> dict:
@@ -428,6 +431,11 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument(
         "--host", default="127.0.0.1",
         help="Bind host (default 127.0.0.1; pass 0.0.0.0 to expose outside this machine, e.g. when running in a container)",
+    )
+    p_serve.add_argument(
+        "--base-path", default="",
+        help="Serve under a URL path prefix (e.g. /workbench) for hosting behind a "
+             "shared reverse proxy / ALB. Default empty = serve at root.",
     )
     p_serve.set_defaults(func=cmd_serve)
 

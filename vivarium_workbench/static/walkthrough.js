@@ -8640,7 +8640,9 @@
         var isSnap = cfg.mode === 'snapshot';
         var origin = (typeof location !== 'undefined' && location.origin
                       && /^https?:/.test(location.origin)) ? location.origin : '';
-        var base = origin + (isSnap ? (cfg.basePath || '') : '');
+        // basePath applies in both snapshot and live-under-a-prefix (/workbench);
+        // empty in normal local serving.
+        var base = origin + (cfg.basePath || '');
         var stateUrl = isSnap
           ? base + '/api/composite-state/' + encodeURIComponent(composite) + '.json'
           : base + '/api/composite-state?ref=' + encodeURIComponent(composite);
