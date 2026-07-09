@@ -5,9 +5,10 @@ cluster — same Kustomize + `TargetGroupBinding` + ghcr pattern. See
 [`docs/REFACTOR-PLAN.md`](../docs/REFACTOR-PLAN.md) §2B (deployment & storage) and
 §5C (demo track & rollout) for the decisions behind this.
 
-> **Status:** WIP, landing as a series of small PRs. This first PR scaffolds the
-> directory and a first-cut Kustomize `base`. Overlays, the Dockerfile, and the
-> in-cluster smoke test follow as separate PRs.
+> **Status:** the app, image, and manifests are ready. Base-path support is on
+> `main`; the combined image builds and serves `/workbench` (verified in a
+> container). What remains is infra wiring — the target-group ARN, the amd64
+> image push, and three cluster values (see the runbook + Open items below).
 
 ## Design (from RFC §2B)
 
@@ -69,9 +70,63 @@ sims. Build: `docker build -t ghcr.io/vivarium-collective/vivarium-workbench:dev
 - **Secrets** — GitHub token for git push (if the demo pushes), via the sealed
   secret pattern.
 
-## Applying (once complete)
+## Deploy runbook
 
+Prereqs: a `kubectl` context on the cluster, `docker buildx`, a ghcr login, and
+`aws sso login --profile stanford-sso` for the CDK/CloudFormation steps.
+
+**0. (pre-deploy sanity) run the image locally under the prefix**
 ```bash
-kubectl apply -k deploy/kustomize/overlays/dev     # persistent staging
-kubectl apply -k deploy/kustomize/overlays/prod    # customer demo (pinned tag)
+docker run --rm -p 8090:8000 vivarium-workbench:dev \
+  serve --workspace /app/v2ecoli --host 0.0.0.0 --port 8000 --base-path /workbench
+# open http://localhost:8090/workbench/  → Composites → Explore renders
 ```
+
+**1. Provision the ALB target group (sms-cdk, one-time)**
+The `/workbench/*` + `/bigraph-loom/*` listener rules and the workbench target
+group live in `../sms-cdk`. After `cdk deploy`, grab the ARN:
+```bash
+aws cloudformation describe-stacks --stack-name smscdk-internal-alb \
+  --query "Stacks[0].Outputs"      # -> WorkbenchTargetGroupArn
+```
+
+**2. Fill in the cluster values (one-time)**
+- `overlays/dev/target-group-binding.yaml` → set `targetGroupARN` to that ARN.
+- `overlays/dev/kustomization.yaml` → `namespace` (and the `SMS_API_BASE`
+  override patch if the sms-api namespace differs from `sms-api-stanford`).
+- `overlays/dev/pvc.yaml` → `storageClassName` (the EBS `gp3` class; sms-api's
+  eks overlay ships `storageclass-gp3-retain`).
+- Ensure the `ghcr-secret` pull secret exists in the namespace (sealed-secret
+  pattern — mirror `../sms-api/kustomize/overlays/sms-api-stanford`).
+
+**3. Build + push the image (`linux/amd64`) and pin the tag**
+```bash
+deploy/build-and-push.sh          # -> ghcr.io/vivarium-collective/vivarium-workbench:<git-sha>
+```
+Set that tag in `overlays/dev/kustomization.yaml` under `images: … newTag:`.
+
+**4. Apply and watch the rollout**
+```bash
+kubectl apply -k deploy/kustomize/overlays/dev
+kubectl -n <ns> rollout status deploy/workbench
+kubectl -n <ns> get targetgroupbinding,pvc,pods
+```
+
+**5. In-cluster smoke test (the Day-1 integration check)**
+```bash
+# workbench pod can reach sms-api in-cluster:
+kubectl -n <ns> exec deploy/workbench -- \
+  curl -s -o /dev/null -w '%{http_code}\n' \
+  http://api.sms-api-stanford.svc.cluster.local:8000/health
+```
+Then, via the ALB tunnel, open `http://<tunnel-host>/workbench/`, and drive a
+**remote run** end-to-end (submit → land → render) — the whole point of the
+in-cluster deployment.
+
+**Rollback:** `kubectl -n <ns> rollout undo deploy/workbench`, or repin the
+previous image tag and re-apply.
+
+> **Prod / customer demo:** create `overlays/prod` mirroring dev with its own
+> image tag. Note the single-target-group caveat in
+> `overlays/dev/target-group-binding.yaml` — dev and prod can't both bind the one
+> workbench TG; a true split needs a second sms-cdk TG + rule.
