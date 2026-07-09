@@ -126,7 +126,9 @@ in-cluster deployment.
 **Rollback:** `kubectl -n <ns> rollout undo deploy/workbench`, or repin the
 previous image tag and re-apply.
 
-> **Prod / customer demo:** create `overlays/prod` mirroring dev with its own
-> image tag. Note the single-target-group caveat in
-> `overlays/dev/target-group-binding.yaml` — dev and prod can't both bind the one
-> workbench TG; a true split needs a second sms-cdk TG + rule.
+> **Prod / customer demo:** `overlays/prod` mirrors dev with its own namespace,
+> PVC, and a **pinned validated tag** — deploy it the same way (`kubectl apply -k
+> deploy/kustomize/overlays/prod`). ⚠ There is ONE workbench target group, so
+> apply **either** dev's **or** prod's `target-group-binding.yaml`, not both (see
+> the note in that file). A true simultaneous dev+prod split needs a second
+> sms-cdk TG + listener rule (e.g. `/workbench-dev/*`).
