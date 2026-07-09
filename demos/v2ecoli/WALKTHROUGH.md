@@ -320,7 +320,6 @@ Skip Part B. Show the 4 pre-landed remote ☁️ runs in Simulations DB and narr
 
 ### Actions
 1. Click **Analyses** — visualization class gallery
-2. **3D viewer**: Show `ecoli_3d` pack (birth and pre-division states), served from Cloudflare R2
 3. **PTools omics viewer**: If sms-ptools is running on `localhost:1555`, launch Pathway Tools Cellular Overview with study omics data overlaid on E. coli metabolic map
 4. **Visualization preview**: Show a `demo()` method rendering instantly against synthetic data
 
