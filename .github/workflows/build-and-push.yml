@@ -1,0 +1,56 @@
+name: Build and Push Image
+
+# Builds the combined workbench+v2ecoli image (linux/amd64, for the EKS nodes) and
+# pushes it to ghcr.io. Triggered by publishing a GitHub Release (image tag = the
+# release tag, minus a leading "v", to match sms-api's kustomize `newTag`
+# convention) or manually via workflow_dispatch. Runs natively on an amd64 runner
+# so there is no local QEMU cross-build. The image is ~15 GB, so we free runner
+# disk first.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image tag to build+push (default: git short sha)"
+        required: false
+        default: ""
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push to ghcr.io
+    steps:
+      - name: Free disk space (image is ~15 GB)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: true
+          docker-images: false
+          swap-storage: false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # Reuse the org GHCR_PAT (as sms-api does); fall back to GITHUB_TOKEN.
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Build + push (linux/amd64)
+        run: |
+          set -euo pipefail
+          chmod +x deploy/build-and-push.sh
+          # Release tag wins; else the manual input; else the script's git-sha default.
+          VERSION="${{ github.event.release.tag_name || inputs.version }}"
+          VERSION="${VERSION#v}"   # strip a leading v -> matches sms-api newTag (e.g. 0.1.0)
+          deploy/build-and-push.sh "$VERSION"
