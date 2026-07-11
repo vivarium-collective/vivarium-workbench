@@ -54,8 +54,20 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/v2ecoli/.venv/bin/python --no-deps .
 
-# Sanity: the workspace package and the workbench both import in one interpreter.
-RUN python -c "import pbg_v2ecoli, vivarium_workbench; print('combined env ok')"
+# ─── overlay the Pathway Tools Omics-Viewer plugin (pbg-ptools) ───────────────
+# The workbench discovers this at runtime via its pbg-* distribution scan and
+# renders the PTools viewer (self-gated on ui.ptools_server_url). It MUST be
+# installed explicitly: the `--no-deps` workbench install above does not pull the
+# `ptools` extra, so without this line the viewer would be absent. `--no-deps`
+# again because its deps (vivarium-workbench, pyyaml) are already in the venv.
+ARG PBG_PTOOLS_REF=main
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/v2ecoli/.venv/bin/python --no-deps \
+        "pbg-ptools @ git+https://github.com/vivarium-collective/pbg-ptools.git@${PBG_PTOOLS_REF}"
+
+# Sanity: the workspace package, the workbench, and the viewer plugin all import
+# in one interpreter (the plugin's top-level imports exercise the workbench too).
+RUN python -c "import pbg_v2ecoli, vivarium_workbench, pbg_ptools.workbench_viewers; print('combined env ok')"
 
 # ─── serve ───────────────────────────────────────────────────────────────────
 # The workspace (v2ecoli's workspace.yaml + studies/investigations/.git/runs.db)
