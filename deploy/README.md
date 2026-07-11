@@ -16,10 +16,13 @@ The workbench must import the workspace's package (`pbg_v2ecoli`, via
 v2ecoli runs in. The [`Dockerfile`](../Dockerfile) therefore **mirrors
 v2ecoli's Dockerfile** — clones v2ecoli, `uv sync`s its locked env *including*
 the workbench's deps, then overlays this repo's workbench (`uv pip install
---no-deps .`) and serves. The sim-runtime layers (upstream vEcoli/Cython, AWS
-CLI, Ray-on-Batch entrypoint) are omitted — the workbench renders, it doesn't run
-sims. The v2ecoli workspace is baked in at `/app/v2ecoli` (used to seed the
-deployment's workspace volume).
+--no-deps .`) and serves. It then installs the **`pbg-ptools`** viewer plugin
+explicitly (also `--no-deps`) — the workbench discovers it via the `pbg-*` scan to
+render the Pathway Tools Omics Viewer; because the workbench itself is installed
+`--no-deps`, nothing transitive is pulled, so the plugin must be added by hand.
+The sim-runtime layers (upstream vEcoli/Cython, AWS CLI, Ray-on-Batch entrypoint)
+are omitted — the workbench renders, it doesn't run sims. The v2ecoli workspace is
+baked in at `/app/v2ecoli` (used to seed the deployment's workspace volume).
 
 > A **v2ecoli sidecar** was considered and rejected for now: the workbench imports
 > `pbg_v2ecoli` in-process, which can't cross a container boundary. A separate
