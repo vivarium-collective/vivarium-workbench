@@ -238,6 +238,12 @@ weakest → strongest:
   results couple to services only through S3.
 - **Rollout settled** (§5C) — dev/prod split; continuous small PRs; guardrails
   first; agent-coded, dual-lens-reviewed increments on persistent EKS staging.
+- **v2ecoli ⇄ workbench cycle broken via `pbg-ptools`** (2026-07-11, see §4.F.2) —
+  extract the PTools Omics Viewer into a new leaf distribution `pbg-ptools`
+  (`pbg-ptools → workbench`, healthy); v2ecoli keeps the TSV *producers* and drops
+  the workbench dep. Breaks the packaging cycle; does **not** remove the deeper
+  workbench→v2ecoli code coupling (three guarded `import v2ecoli` run/analysis
+  sites) — that is the §2A `RunBackend`/`EnvironmentResolver` port work.
 
 **Still open (small)**
 - **Science/environment *repo* split** (Q2 target): when, and its pbg-template
@@ -408,12 +414,92 @@ Each is scoped so it can land as its own PR series. **P#** = audit risk number
   lines; type-check passes over the client.
 
 ### F. Companion coupling (audit P3)
+
+**F.1 — pbg-superpowers**
 - **Problem:** `pbg-superpowers` imported symbol-by-symbol across 57 lib modules,
   into private `_REGISTRY`.
 - **Target:** one `lib/superpowers_api.py` adapter that all call sites import
   from; never touch `_`-prefixed symbols; pin the version (not `branch=main` for
   `investigation-contracts` request models on the API surface).
 - **Ship criterion:** a pbg-superpowers bump touches one file to absorb.
+
+**F.2 — the v2ecoli ⇄ workbench cycle (resolved 2026-07-11)**
+
+There were **two** arrows, and they formed a hard packaging cycle:
+
+- `workbench[demo]` → `v2ecoli` (optional extra, `[tool.uv.sources]` path), and
+- `v2ecoli` → `vivarium-workbench` (`[project.dependencies]` + a `[tool.uv.sources]`
+  git URL still spelled with the **old repo name** `vivarium-dashboard.git@main`).
+
+The cycle made `uv sync --extra demo` fail with *"conflicting URLs for
+vivarium-workbench: file://… (editable) vs git+…vivarium-dashboard.git@main"*.
+
+**Diagnosis — the two arrows are not symmetric:**
+
+*The v2ecoli → workbench arrow is thin and removable.* v2ecoli's core has **zero**
+code imports of the workbench. The only edge is `v2ecoli/workbench_viewers.py` — a
+contribution to the workbench's **generic, name-agnostic viewer seam**
+(`lib/analysis_viewers.py`, which discovers `<pkg>.workbench_viewers.get_viewers`
+on the workspace package + every installed `pbg-*` distribution). That file ships
+the **Pathway Tools Omics Viewer** and lazily imports two workbench helpers
+(`study_spec.study_dir`, `workspace_paths.WorkspacePaths`) with graceful fallback.
+
+*The workbench → v2ecoli arrow is deeper and is NOT packaging.* Beyond the `demo`
+extra (correctly commented *"NOT a runtime dependency"*), the workbench **core
+imports `v2ecoli` by name in three guarded sites** — this is the real coupling and
+it is the **run/analysis execution path**, not a display widget:
+
+| Site | Imports | Role |
+|---|---|---|
+| `lib/study_run_post.py` | `v2ecoli.workflow.analysis.ANALYSIS_REGISTRY` | resolve an analysis's `scale` when running a study |
+| `lib/composite_subprocess.py` | `import v2ecoli`, `.library.xarray_run`, `.library.sqlite_run` | run the multigen simulation |
+| `lib/visualization_classes.py` | `v2ecoli.workflow.analyses` + `ANALYSIS_REGISTRY` | register v2ecoli analyses as viz classes |
+
+All three are `try/except ImportError`-guarded — the workbench degrades gracefully
+(returns an error, skips the section, or falls through to a generic sqlite run) —
+so it does not *hard*-depend, but it carries **v2ecoli-specific knowledge in the
+generic core**. These three are exactly what §2A's `RunBackend` +
+analysis-discovery (`EnvironmentResolver`) ports abstract.
+
+**Decision — extract `pbg-ptools` (a new leaf distribution).** The Omics Viewer is
+generic PTools logic (glob `**/ptools/*.tsv` → build an EcoCyc Omics-Viewer URL);
+nothing in it imports v2ecoli. Move it out of v2ecoli into a **new `pbg-ptools`
+repo** (peer of `pbg-copasi`/`pbg-parsimony`), package `pbg_ptools/`, module
+`pbg_ptools/workbench_viewers.py` exposing `get_viewers(ws_root)`, with
+`dependencies = ["vivarium-workbench"]`. The workbench discovers it purely by it
+being pip-installed (the `pbg-*` distribution scan), independent of which workspace
+is served, and it **self-gates** on `ui.ptools_server_url` in `workspace.yaml` (a
+dormant built-in for non-PTools workspaces).
+
+- **Producer / viewer split (the clean seam):** v2ecoli **keeps** the *producers*
+  (`v2ecoli/workflow/analyses/ptools_*.py`, which write the TSVs — they are bound
+  to v2ecoli's sim data model). `pbg-ptools` takes the *viewer*. They already
+  communicate **only through the on-disk `**/ptools/*.tsv` contract**, never a
+  Python import — so splitting them across repos costs nothing.
+- **Arrows after:** `pbg-ptools → vivarium-workbench` (leaf → host, healthy);
+  `v2ecoli → nothing workbench-related`; workbench core stays generic. The two
+  lazy imports in the viewer become **direct** (it now legitimately depends on its
+  host). Install-path notes: add `pbg-ptools` to the workbench `demo` extra, and
+  the combined Docker image's `uv pip install --no-deps .` must install
+  `pbg-ptools` explicitly (`--no-deps` would skip it).
+- **v2ecoli cleanup:** delete `v2ecoli/workbench_viewers.py`; drop
+  `vivarium-workbench` from `[project.dependencies]` **and** `[tool.uv.sources]`
+  (the stale `vivarium-dashboard.git` URL). `publish-dashboard.yml` self-installs
+  the workbench, so it is unaffected. Remaining old-name (`vivarium-dashboard`)
+  hits are cosmetic (README/docs/generated bundles/`study.yaml` comments) — a
+  separate rename-hygiene sweep, non-blocking.
+
+**Scope boundary — what `pbg-ptools` does and does NOT achieve.** It breaks the
+**packaging cycle** and removes the one v2ecoli-side plugin, so after it the
+workbench names v2ecoli **nowhere in `pyproject.toml`**. It does **not** make the
+workbench v2ecoli-independent: the three guarded `import v2ecoli` sites above
+remain. Full independence ("switch between multiple execution environments") is the
+§2A port work (Phase 2 `RunBackend` + Phase 3 `EnvironmentResolver`), a larger
+lift. `pbg-ptools` is the clean **first step**: it breaks the cycle and turns the
+viewer seam into a real dogfooded example of the plugin story the ports generalize.
+- **Ship criterion:** `uv sync --extra demo` resolves with no URL conflict;
+  v2ecoli has zero functional references to the workbench; the PTools card renders
+  from `pbg-ptools` on a PTools-configured workspace and is absent otherwise.
 
 ### G. Config & the three planes (audit §3 of the deep-dive)
 - **Problem:** `SMS_API_BASE` unprefixed and defaulting to `localhost:8080` in
