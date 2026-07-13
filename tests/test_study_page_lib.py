@@ -139,12 +139,75 @@ class TestRenderStudyDetailHtml:
         import vivarium_workbench.lib.study_page as sp
         called = []
 
-        def fake_render(ws_root, name, spec):
-            called.append((ws_root, name))
+        def fake_render(ws_root, name, spec, *, base_path=""):
+            called.append((ws_root, name, base_path))
             return "<html>STUB</html>"
 
         monkeypatch.setattr(sp, "render_study_detail_html", fake_render)
         html, status = sp.build_study_detail_page(ws, "dnaa-01-binding")
         assert status == 200
         assert html == "<html>STUB</html>"
-        assert called == [(ws, "dnaa-01-binding")]
+        assert called == [(ws, "dnaa-01-binding", "")]
+
+    def test_builder_forwards_base_path_to_render(self, ws: Path, monkeypatch):
+        """build_study_detail_page(..., base_path=...) reaches render_study_detail_html."""
+        import vivarium_workbench.lib.study_page as sp
+        called = []
+
+        def fake_render(ws_root, name, spec, *, base_path=""):
+            called.append(base_path)
+            return "<html>STUB</html>"
+
+        monkeypatch.setattr(sp, "render_study_detail_html", fake_render)
+        html, status = sp.build_study_detail_page(ws, "dnaa-01-binding", base_path="/workbench")
+        assert status == 200
+        assert called == ["/workbench"]
+
+
+class TestRenderStudyDetailHtmlBasePath:
+    """base_path threading: subpath-hosting asset/API refs (regression coverage
+    for the /workbench k8s deployment where study-detail.html's hardcoded
+    root-absolute refs 404'd behind the ALB — see .todo/plans/1-fix-study-detail-interactivity.md)."""
+
+    def test_default_base_path_normalizes_to_assets_prefix(self, ws: Path):
+        """No base_path (root hosting): refs still resolve via /assets/<name>
+        (normalized from /style.css etc.) — /assets/<name> and /<name> resolve
+        identically via lib.static_serving.resolve_asset's strip-retry, so this
+        is a safe, non-breaking change even without a base_path."""
+        from vivarium_workbench.lib.study_page import render_study_detail_html
+        from vivarium_workbench.lib.study_spec import load_study_detail_spec
+        spec = load_study_detail_spec(ws, "dnaa-01-binding")
+        assert spec is not None
+        html = render_study_detail_html(ws, "dnaa-01-binding", spec)
+        assert 'href="/assets/style.css"' in html
+        assert 'src="/assets/data-source.js"' in html
+        assert 'src="/assets/configure-run.js"' in html
+        assert 'src="/assets/study-detail.js"' in html
+        assert 'href="/api/study-analysis-zip?study=dnaa-01-binding"' in html
+
+    def test_base_path_prefixes_asset_and_api_refs(self, ws: Path):
+        from vivarium_workbench.lib.study_page import render_study_detail_html
+        from vivarium_workbench.lib.study_spec import load_study_detail_spec
+        spec = load_study_detail_spec(ws, "dnaa-01-binding")
+        assert spec is not None
+        html = render_study_detail_html(ws, "dnaa-01-binding", spec, base_path="/workbench")
+        assert 'href="/workbench/assets/style.css"' in html
+        assert 'src="/workbench/assets/data-source.js"' in html
+        assert 'src="/workbench/assets/configure-run.js"' in html
+        assert 'src="/workbench/assets/study-detail.js"' in html
+        assert 'href="/workbench/api/study-analysis-zip?study=dnaa-01-binding"' in html
+
+    def test_base_path_injects_dash_config_and_shim(self, ws: Path):
+        from vivarium_workbench.lib.study_page import render_study_detail_html
+        from vivarium_workbench.lib.study_spec import load_study_detail_spec
+        spec = load_study_detail_spec(ws, "dnaa-01-binding")
+        assert spec is not None
+        html = render_study_detail_html(ws, "dnaa-01-binding", spec, base_path="/workbench")
+        assert 'basePath: "/workbench"' in html
+        assert "window.__BASE_PATH__" in html  # runtime fetch/XHR/EventSource shim
+
+    def test_build_study_detail_page_threads_base_path(self, ws: Path):
+        from vivarium_workbench.lib.study_page import build_study_detail_page
+        html, status = build_study_detail_page(ws, "dnaa-01-binding", base_path="/workbench")
+        assert status == 200
+        assert 'href="/workbench/assets/style.css"' in html

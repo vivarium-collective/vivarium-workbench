@@ -29,6 +29,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vivarium_workbench.lib.report import _normalize_asset_urls
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -440,39 +442,6 @@ def _export_saved_visualizations(ws_root: Path, out_dir: Path,
             if dst_meshes.exists():
                 shutil.rmtree(dst_meshes)
             shutil.copytree(str(src_meshes), str(dst_meshes))
-
-
-def _normalize_asset_urls(html: str) -> str:
-    """Rewrite ``src``/``href`` JS/CSS asset URLs to root-absolute
-    ``/assets/<basename>`` so both template conventions are normalised in the
-    bundle.
-
-    Rules:
-    - ``src="assets/foo.js"`` (relative, home template) → ``src="/assets/foo.js"``
-    - ``src="/foo.js"`` (root-relative, study-detail template) → ``src="/assets/foo.js"``
-    - External CDN URLs (``https://...``), ``/api/...``, and already-correct
-      ``/assets/...`` URLs are **left untouched**.
-    - The plotly CDN ``<script src="https://cdn.plot.ly/...">`` has an absolute
-      URL → skipped automatically.
-    """
-    def _replace(m: re.Match) -> str:
-        attr = m.group(1)   # "src" or "href"
-        url  = m.group(2)   # full URL value
-
-        # Skip externals and already-correct bundle URLs
-        if url.startswith(("https://", "http://", "/api/", "/assets/")):
-            return m.group(0)
-
-        # Strip query string to get the bare filename, then rebuild
-        url_no_qs = url.split("?", 1)[0]
-        basename  = url_no_qs.rsplit("/", 1)[-1]
-        return f'{attr}="/assets/{basename}"'
-
-    return re.sub(
-        r'\b(src|href)="([^"]+\.(?:js|css)[^"]*)"',
-        _replace,
-        html,
-    )
 
 
 def _set_snapshot_config(

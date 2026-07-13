@@ -151,13 +151,20 @@ def _jinja_fmt_duration(seconds) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def render_study_detail_html(ws_root: Path, name: str, spec: dict) -> str:
+def render_study_detail_html(ws_root: Path, name: str, spec: dict, *, base_path: str = "") -> str:
     """Render study-detail.html via Jinja2.
 
     This is the implementation extracted from ``server._render_study_detail_html``.
     ``server.py`` provides a 2-arg shim ``_render_study_detail_html(name, spec)``
     that injects the module-level WORKSPACE as ``ws_root`` so ``publish.py``
     (which calls ``_render_study_detail_html(slug, spec)``) keeps working.
+
+    ``base_path``: URL prefix for subpath hosting (e.g. ``/workbench`` behind a
+    reverse proxy/ALB). Defaults to ``""`` (root hosting, unchanged behavior).
+    The template's asset refs are normalized to ``/assets/<name>`` form and the
+    live-server base-path shim is injected via ``lib.report``'s
+    ``_normalize_asset_urls``/``_apply_live_base_path`` — the same helpers
+    ``publish.py`` already uses for the static bundle.
     """
     import yaml
     import jinja2
@@ -202,19 +209,26 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict) -> str:
             spec, known_composite_ids(ws_root)) or []
     except Exception:
         unresolved_composites = []
-    return tpl.render(study=spec, name=name,
+    html = tpl.render(study=spec, name=name,
                       display_name=spec.get("title") or _hn["title"],
                       name_chip=_hn["chip"],
                       epistemic_debts=epistemic_debts,
-                      unresolved_composites=unresolved_composites)
+                      unresolved_composites=unresolved_composites,
+                      base_path=base_path)
+    from vivarium_workbench.lib.report import _apply_live_base_path, _normalize_asset_urls
+    html = _normalize_asset_urls(html)
+    return _apply_live_base_path(html, base_path)
 
 
-def build_study_detail_page(ws_root: Path, slug: str) -> tuple[str, int]:
+def build_study_detail_page(ws_root: Path, slug: str, *, base_path: str = "") -> tuple[str, int]:
     """Full study-detail page builder: validate → load spec → render.
 
     Returns ``(html, status_code)`` where status_code is 200 on success
     or 404 for an invalid/unknown slug.  The 404 bodies are byte-identical
     to the legacy handler's ``_send_html`` responses.
+
+    ``base_path``: forwarded to ``render_study_detail_html`` for subpath
+    hosting; see its docstring.
     """
     from vivarium_workbench.lib.study_spec import load_study_detail_spec
 
@@ -226,5 +240,5 @@ def build_study_detail_page(ws_root: Path, slug: str) -> tuple[str, int]:
             f"<h1>Study not found</h1><p><code>{slug}</code> does not exist.</p>",
             404,
         )
-    html = render_study_detail_html(ws_root, slug, spec)
+    html = render_study_detail_html(ws_root, slug, spec, base_path=base_path)
     return html, 200

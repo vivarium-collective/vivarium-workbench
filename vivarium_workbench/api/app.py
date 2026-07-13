@@ -2672,7 +2672,7 @@ def create_app() -> FastAPI:
         response_class=Response,
         include_in_schema=False,
     )
-    def study_detail_page(slug: str, ws: Path = Depends(get_workspace)) -> Response:
+    def study_detail_page(slug: str, request: Request, ws: Path = Depends(get_workspace)) -> Response:
         """Render the study-detail HTML page for ``/studies/<slug>``.
 
         Validates *slug* against ``lib.study_spec.SLUG_RE``; invalid slug →
@@ -2685,9 +2685,15 @@ def create_app() -> FastAPI:
         set (``_send_html`` omits it; it is NOT the ``no-store`` of
         ``_serve_file``).
 
+        When served under a URL prefix (``serve --base-path``), the
+        proxy-strip middleware records the prefix as the request's
+        ``root_path``; pass it through so the rendered page's asset/API refs
+        carry the prefix too (mirrors ``index_shell`` above).
+
         Library-backed via ``lib.study_page.build_study_detail_page``.
         """
-        html, status = _study_page.build_study_detail_page(ws, slug)
+        base_path = request.scope.get("root_path") or ""
+        html, status = _study_page.build_study_detail_page(ws, slug, base_path=base_path)
         return Response(content=html, status_code=status, media_type="text/html")
 
     # -----------------------------------------------------------------------
