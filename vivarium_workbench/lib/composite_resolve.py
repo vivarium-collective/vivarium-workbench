@@ -44,6 +44,30 @@ def _artifact_base_dir(ws_root: "Path", spec: "CompositeSpec") -> "Path":
     return snap if snap.is_dir() else Path(ws_root)
 
 
+def _degraded_result(
+    spec_id: str, error: "BaseException", *, kind: str = "spec",
+    notice: "str | None" = None,
+) -> dict:
+    """Standard-shape 200 degrade payload for a composite that failed to resolve.
+
+    Reused wherever an in-process failure (import error, parse error, ...)
+    would otherwise propagate — the Composite Explorer already knows how to
+    render ``wiring_status:"unavailable"`` + ``notice`` gracefully; this keeps
+    that path the only one callers ever need to render, instead of a bare 500.
+    ``notice`` may be overridden with a more specific message; defaults to a
+    generic one built from ``error``.
+    """
+    return {
+        "id": spec_id, "name": spec_id.rsplit(".", 1)[-1],
+        "description": "", "parameters": {}, "state": None,
+        "schema": {}, "requires": {}, "tags": [], "analyses": [],
+        "visualizations": [], "emitters": [], "kind": kind,
+        "module": "", "default_n_steps": None, "svg": None,
+        "wiring_status": "unavailable",
+        "notice": notice if notice is not None else f"composite could not be resolved: {error}",
+    }
+
+
 def _committed_default_state(ws_root, spec_id: str) -> "dict | None":
     """Fallback default state for a generator that declares no ``default_state_ref``.
 
@@ -98,61 +122,65 @@ def resolve_composite(
         missing packages).
     """
     ws_root = Path(ws_root)
-    _ws_add_to_sys_path(ws_root)
-    _prime_registry()
-    spec = _get_spec(spec_id)                       # generator branch: "<module>.<name>"
-    if spec is None:                                # static branch: "<pkg>.composites.<stem>"
-        from vivarium_workbench.lib.composite_lookup import find_composite_path
-        ws_yaml = ws_root / "workspace.yaml"
-        ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) if ws_yaml.is_file() else {}
-        pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
-        path = find_composite_path(ws_root, pkg, spec_id)
-        if path is None:
-            return None
-        try:
-            spec = CompositeSpec.from_file(path)
-        except Exception as e:
-            return {
-                "id": spec_id, "name": spec_id.rsplit(".", 1)[-1],
-                "description": "", "parameters": {}, "state": None,
-                "schema": {}, "requires": {}, "tags": [], "analyses": [],
-                "visualizations": [], "emitters": [], "kind": "spec",
-                "module": "", "default_n_steps": None, "svg": None,
-                "wiring_status": "unavailable",
-                "notice": f"composite file could not be parsed: {e}",
-            }
     try:
-        state = spec.default_state(base_dir=_artifact_base_dir(ws_root, spec))
-    except Exception:
-        state = None
-    if state is None:
-        # Generators that declare no default_state_ref still have a committed
-        # artifact from the regen script (reports/composite-state/<id>.json) —
-        # serve it so the wiring renders instead of "not generated yet".
-        state = _committed_default_state(ws_root, spec_id)
-    wiring_status = "ready" if state is not None else "unavailable"
-    notice = None
-    if wiring_status == "unavailable":
-        if spec.kind == "generator":
-            notice = (f"default state for generator '{spec.name}' is not generated yet — "
-                      f"run it, or regenerate its default-state artifact to see the wiring.")
-        else:
-            notice = (f"static composite '{spec.name}' has no inline state to display.")
-    if state is not None:
+        _ws_add_to_sys_path(ws_root)
+        _prime_registry()
+        spec = _get_spec(spec_id)                       # generator branch: "<module>.<name>"
+        if spec is None:                                # static branch: "<pkg>.composites.<stem>"
+            from vivarium_workbench.lib.composite_lookup import find_composite_path
+            ws_yaml = ws_root / "workspace.yaml"
+            ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) if ws_yaml.is_file() else {}
+            pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+            path = find_composite_path(ws_root, pkg, spec_id)
+            if path is None:
+                return None
+            try:
+                spec = CompositeSpec.from_file(path)
+            except Exception as e:
+                return _degraded_result(
+                    spec_id, e,
+                    notice=f"composite file could not be parsed: {e}",
+                )
         try:
-            from vivarium_workbench.lib.process_docs import attach_process_docs
-            attach_process_docs(state)
+            state = spec.default_state(base_dir=_artifact_base_dir(ws_root, spec))
         except Exception:
-            pass
-    return {
-        "id": spec_id, "name": spec.name, "description": spec.description,
-        "parameters": spec.parameters, "state": state, "schema": spec.schema,
-        "requires": spec.requires, "tags": spec.tags,
-        "visualizations": spec.visualizations, "analyses": spec.analyses,
-        "emitters": spec.emitters, "kind": spec.kind, "module": spec.module,
-        "default_n_steps": spec.default_n_steps, "svg": None,
-        "wiring_status": wiring_status, "notice": notice,
-    }
+            state = None
+        if state is None:
+            # Generators that declare no default_state_ref still have a committed
+            # artifact from the regen script (reports/composite-state/<id>.json) —
+            # serve it so the wiring renders instead of "not generated yet".
+            state = _committed_default_state(ws_root, spec_id)
+        wiring_status = "ready" if state is not None else "unavailable"
+        notice = None
+        if wiring_status == "unavailable":
+            if spec.kind == "generator":
+                notice = (f"default state for generator '{spec.name}' is not generated yet — "
+                          f"run it, or regenerate its default-state artifact to see the wiring.")
+            else:
+                notice = (f"static composite '{spec.name}' has no inline state to display.")
+        if state is not None:
+            try:
+                from vivarium_workbench.lib.process_docs import attach_process_docs
+                attach_process_docs(state)
+            except Exception:
+                pass
+        return {
+            "id": spec_id, "name": spec.name, "description": spec.description,
+            "parameters": spec.parameters, "state": state, "schema": spec.schema,
+            "requires": spec.requires, "tags": spec.tags,
+            "visualizations": spec.visualizations, "analyses": spec.analyses,
+            "emitters": spec.emitters, "kind": spec.kind, "module": spec.module,
+            "default_n_steps": spec.default_n_steps, "svg": None,
+            "wiring_status": wiring_status, "notice": notice,
+        }
+    except Exception as e:
+        # In-process import/discovery failures (e.g. a generator module whose
+        # native deps — pymunk et al — are missing/broken in this interpreter)
+        # degrade to the same honest-unavailable shape instead of propagating
+        # to the app-wide 500 handler. `find_composite_path`/`from_file`/
+        # `default_state` misses above already return/degrade before this
+        # reaches here; this is the outer net for `_get_spec`/discovery itself.
+        return _degraded_result(spec_id, e)
 
 
 def resolve_composite_for_request(

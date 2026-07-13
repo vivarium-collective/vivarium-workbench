@@ -41,3 +41,47 @@ def test_is_disabled_via_env():
     assert csrf.is_disabled_via_env({"VIVARIUM_DASHBOARD_DISABLE_CSRF": "0"}) is False
     assert csrf.is_disabled_via_env({"VIVARIUM_DASHBOARD_DISABLE_CSRF": "true"}) is False
     assert csrf.is_disabled_via_env({}) is False
+
+
+# ---------------------------------------------------------------------------
+# Reverse-proxy support: an opt-in ``trust_forwarded`` lets the predicate
+# compare Origin against ``X-Forwarded-Host`` instead of the raw (possibly
+# proxy-rewritten) ``Host`` — see api/app.py's ``_csrf_mw`` and the
+# ``--trust-proxy`` CLI flag. Must never be inferred from the header's mere
+# presence: an untrusted direct request could otherwise spoof it to bypass
+# the guard.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "origin, host, forwarded_host, trust_forwarded, expected",
+    [
+        # Trusted + forwarded host matches Origin, even though raw Host (an
+        # internal pod address) does not -> allow.
+        ("https://app.example.com", "10.0.1.5:8000", "app.example.com", True, True),
+        # Same inputs, but NOT trusted (default) -> the forwarded header is
+        # ignored entirely; raw Host mismatch -> deny. This is the core
+        # security property: opting in is required.
+        ("https://app.example.com", "10.0.1.5:8000", "app.example.com", False, False),
+        # Trusted, but no forwarded host supplied -> falls back to raw Host,
+        # identical to the non-proxied behavior (no regression).
+        ("http://127.0.0.1:8080", "127.0.0.1:8080", None, True, True),
+        ("http://127.0.0.1:8080", "127.0.0.1:8080", "", True, True),
+        # Trusted, forwarded host present but does not match Origin -> deny.
+        ("https://app.example.com", "10.0.1.5:8000", "evil.example.com", True, False),
+    ],
+)
+def test_is_request_allowed_trust_forwarded(
+    origin, host, forwarded_host, trust_forwarded, expected
+):
+    assert csrf.is_request_allowed(
+        origin, host, disabled=False,
+        forwarded_host=forwarded_host, trust_forwarded=trust_forwarded,
+    ) is expected
+
+
+def test_is_trust_proxy_via_env():
+    assert csrf.is_trust_proxy_via_env({"VIVARIUM_WORKBENCH_TRUST_PROXY": "1"}) is True
+    assert csrf.is_trust_proxy_via_env({"VIVARIUM_WORKBENCH_TRUST_PROXY": "0"}) is False
+    assert csrf.is_trust_proxy_via_env({}) is False
+    # Dual-reads the deprecated pre-rename prefix.
+    assert csrf.is_trust_proxy_via_env({"VIVARIUM_DASHBOARD_TRUST_PROXY": "1"}) is True
