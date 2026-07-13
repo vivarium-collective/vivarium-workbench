@@ -1,172 +1,194 @@
-# Checkpoint: vivarium-workbench `/workbench` subpath deployment — code FIXED, image BUILT+DEPLOYED, curl-VERIFIED; awaiting human browser confirmation
+# Checkpoint: Two demo-v2ecoli dashboard bugs — root-caused, fixed, tested; local commits made, not yet pushed/PR'd
 
-**Updated:** 2026-07-13 (same day, later session) — Picked up from the prior
-checkpoint (ALB routing fixed + study-detail code fix built/deployed/curl-verified).
-This session ran the `/orientation` skill, confirmed nothing had drifted, and
-tightened the `.todo/MANIFEST.md` status line to reflect the deploy. No code,
-infra, or test changes this session — still blocked on the same single unknown.
+**Updated:** 2026-07-13 (same day, later session) — Superseded the prior
+`/workbench` subpath-deployment checkpoint (that work is unchanged: PR #465
+still open, human browser click-through still the only remaining item there —
+see the "Related Files" section below for that thread). This session's focus
+shifted to two new bugs reported via screenshots
+(`demos/v2ecoli/bugs/broken-runs.png`, `broken-composites.png`).
 
 ## Session Goal
 
-Get the vivarium-workbench dashboard fully functional when served from the
-`sms-api-stanford-test` k8s namespace behind the internal ALB at the `/workbench`
-subpath (`sms-proxy.sh -s smsvpctest` → `http://localhost:8080/workbench`), per the
-bug list in `demos/v2ecoli/NOTES.md:228-234` ("Post e2e remote walkthrough").
-Time-pressured: user flagged an "intense deadline."
+User reported two bugs via screenshots and asked (via `/plan`, Todo Protocol)
+to scope, then implement, robust fixes:
+
+1. **Run button → `{"error":"cross-origin request forbidden"}` (403)** when
+   accessed through the ALB reverse-proxy `/workbench` subpath deployment.
+2. **Composite Explorer → `{"error":"internal server error"}`** for the
+   "colony" composite (v2ecoli pymunk-based multi-cell physics), with zero
+   diagnostic trail server-side.
+
+Confirmed independent (different subsystems, no shared root cause). Both are
+now fully implemented, tested, and committed locally on `demo-v2ecoli` — not
+yet pushed, no PR opened yet (per this repo's fix-branch-to-main +
+merge-to-demo-v2ecoli-in-parallel convention, still pending).
 
 ## Progress Table
 
 | Issue | Status | Detail |
 |---|---|---|
-| ALB target group pointed at wrong-VPC target group | ✅ Done | Fixed in a prior session — see `todo.md` for full root cause. E2E-verified via curl through the live tunnel. |
-| Study-detail page (`/studies/<slug>`) unstyled + non-interactive under `/workbench` — **code fix** | ✅ Done | PR #465 (`fix/study-detail-base-path` → `main`), merged into `demo-v2ecoli` (commit `861aefa`). |
-| Off-cycle image build (`e74b644`, includes `861aefa`) | ✅ Done | `gh workflow run build-and-push.yml --ref demo-v2ecoli` → [run 29262663329](https://github.com/vivarium-collective/vivarium-workbench/actions/runs/29262663329), success. Pushed `ghcr.io/vivarium-collective/vivarium-workbench:e74b644`. |
-| k8s deployment update (`sms-api-stanford-test` namespace) | ✅ Done | `sms-api`'s `kustomize/overlays/sms-api-stanford-test/kustomization.yaml` `newTag: 0.1.1 → e74b644`; `kubectl apply -k .` + `kubectl rollout status` succeeded. Pod confirmed running `e74b644`. **Still uncommitted in the `sms-api` repo** — see Next Steps (unchanged this session). |
-| curl-based backend verification | ✅ Done | Through the live `smsvpctest` tunnel: `GET /workbench/studies/showcase-1-parca` → `200`, all asset refs correctly `/workbench/`-prefixed, `__DASH_CONFIG__.basePath == "/workbench"`. `style.css`, `study-detail.js`, `/api/simulations` all `200`. |
-| PR #465 review status | 🔄 Unchanged | Still `OPEN`, `mergeable: MERGEABLE`, `reviewDecision: REVIEW_REQUIRED` (checked via `gh pr view 465` this session). No reviewer action yet. |
-| `.todo/MANIFEST.md` status line | ✅ Done this session | Tightened wording from "awaiting review" to "PR OPEN (REVIEW_REQUIRED) ... k8s image rebuilt+deployed ... curl-verified. Remaining: human browser click-through only." **Staged (`git add`) but not committed** — commit message handed to user, per this repo's convention (agent stages, user commits). |
-| **Human browser click-through** (Investigations → study → sub-tabs clickable, CSS renders, Simulations DB table renders) | ❌ **PENDING — still the only remaining unknown** | Blocked on nothing technical — just needs eyes. Confirm tunnel is still running before reusing it (may have been closed since last session — check `ps aux | grep sms-proxy` first). Curl can confirm asset delivery but not client-side JS tab-collapse behavior — that was the original bug in the user's screenshot. |
+| Bug 1 root cause found | ✅ Done | `lib/csrf.py`'s `is_request_allowed()` compares raw `Host` vs `Origin` with zero reverse-proxy awareness; ALB→tunnel→k8s hop chain can rewrite `Host`. |
+| Bug 1 fix implemented | ✅ Done | Opt-in `trust_forwarded`/`forwarded_host` params on the predicate; `VIVARIUM_WORKBENCH_TRUST_PROXY=1` / new `--trust-proxy` CLI flag gates it. Default behavior unchanged. |
+| Bug 2 root cause found | ✅ Done | `/api/composite-resolve` is the one composite-introspection endpoint still running in-process; two unguarded seams (`_get_spec` lookup, route's `model_validate`); the app-wide catch-all handler's comment claimed logging happened but it never did. |
+| Bug 2 fix implemented (Tier 1 + Tier 2) | ✅ Done | Catch-all handler now `logger.exception(...)`s the real traceback (Tier 1). Both unguarded seams now degrade to the existing `wiring_status:"unavailable"` + `notice` 200 shape via a new shared `_degraded_result()` helper (Tier 2). Tier 2a (dependency/Dockerfile fix, if needed) explicitly deferred — gated on reading the real traceback from deployed logs once Tier 1 ships. |
+| Todo-protocol plan docs | ✅ Done | `.todo/plans/2-fix-csrf-origin-guard-reverse-proxy.md`, `.todo/plans/3-fix-composite-resolve-unhandled-errors.md`, cross-linked in `.todo/MANIFEST.md`. |
+| Targeted tests (new + existing CSRF/composite-resolve suites) | ✅ Done | All new + pre-existing tests in `test_csrf_lib.py`, `test_csrf_origin_guard.py`, `test_composite_resolve_dispatch.py`, `test_composite_resolve_fallback.py`, and the relevant `test_api_app.py` classes pass. |
+| Full repo test suite | 🔄 **In progress** | Background run (`uv run --no-sync pytest tests/ -q`) still running as of this checkpoint — see Verification below for what's confirmed so far and what to check when it finishes. |
+| Local commits | ✅ Done | Two commits made on `demo-v2ecoli` (docs+screenshots, then code+tests) — see Key Files Touched. **Not pushed yet.** |
+| Push to origin / PR to `main` | ❌ **PENDING** | User asked to "suggest, execute, and push commits... and update the PR description" — push + PR creation was in progress when this checkpoint was written. Per `project_demo_v2ecoli_fix_branch_strategy`: code fix needs its own branch off `main` (PR opened, review pending) in parallel with landing directly on `demo-v2ecoli` (already done via local commit) so the demo isn't blocked on review. |
 
 ## Key Files Touched
 
-### `vivarium-workbench` repo (this repo)
-- Code fix (`vivarium_workbench/lib/report.py`, `lib/study_page.py`, `api/app.py`,
-  `publish.py`, `templates/study-detail.html`, `static/walkthrough.js`,
-  `tests/test_study_page_lib.py`) — **unchanged this session**, landed in prior
-  session, see PR #465.
-- `.todo/MANIFEST.md` — **this session**: status line updated to reflect the
-  deploy + curl verification, and to explicitly flag PR merge as
-  hygiene-only/non-blocking. **Staged, not committed** — suggested commit
-  message already given to the user:
-  ```
-  git commit -m "docs(todo): update PR #465 status — reviewed and deployed, awaiting human click-through"
-  ```
+### Bug 1 (CSRF/reverse-proxy)
+- `vivarium_workbench/lib/csrf.py` — `is_request_allowed()` gains
+  `forwarded_host`/`trust_forwarded` kwargs (additive, default-safe); new
+  `is_trust_proxy_via_env()`.
+- `vivarium_workbench/lib/env_compat.py` — new `TRUST_PROXY_ENV` suffix constant.
+- `vivarium_workbench/api/app.py` — `_csrf_mw` now passes
+  `X-Forwarded-Host`/the new env check into the predicate.
+- `vivarium_workbench/cli.py` — new `--trust-proxy` flag on `serve`, sets
+  `VIVARIUM_WORKBENCH_TRUST_PROXY=1` in `cmd_serve`.
+- Tests: `tests/test_csrf_lib.py`, `tests/test_csrf_origin_guard.py`,
+  `tests/test_api_app.py::TestCsrfMiddleware` (new cases each).
 
-### `~/sms/sms-api` (sibling repo, **outside** this repo — separate git history)
-- `kustomize/overlays/sms-api-stanford-test/kustomization.yaml` — `vivarium-workbench`
-  image `newTag: 0.1.1 → e74b644`. **Still uncommitted** (unchanged this session).
-  Sibling-repo commits are the user's to make — I stage/show, never commit/push
-  there myself (same convention as this repo).
+### Bug 2 (composite-resolve error swallowing)
+- `vivarium_workbench/api/app.py` — module-level `_error_logger`; the
+  `@app.exception_handler(Exception)` now logs via `logger.exception(...)`;
+  the `composite_resolve()` route wraps `model_validate` in try/except,
+  degrading via `_degraded_result` on failure.
+- `vivarium_workbench/lib/composite_resolve.py` — new `_degraded_result()`
+  helper (factored out of the pre-existing `CompositeSpec.from_file` except
+  branch, which now calls it with an overridden `notice` to preserve its
+  original specific wording); `resolve_composite()`'s body wrapped in an outer
+  try/except so an in-process `_get_spec`/discovery failure degrades instead
+  of propagating.
+- Tests: `tests/test_composite_resolve_dispatch.py` (new
+  `test_resolve_degrades_when_get_spec_raises`), `tests/test_api_app.py` (new
+  `test_composite_resolve_validation_failure_degrades_not_500`,
+  `test_unhandled_exception_is_logged`).
 
-### This repo, still uncommitted / untracked
-- `demos/v2ecoli/investigation-issue.png` — untracked screenshot from the
-  original bug report. Not yet triaged (keep as demo artifact vs. delete).
-  Unchanged this session.
+### Docs (already committed, commit `c28c6a1`)
+- `.todo/plans/2-fix-csrf-origin-guard-reverse-proxy.md`,
+  `.todo/plans/3-fix-composite-resolve-unhandled-errors.md`,
+  `.todo/MANIFEST.md` (items 2 and 3 added, cross-linked to item 1 and each
+  other as independent).
+- `demos/v2ecoli/bugs/broken-runs.png`, `broken-composites.png` — the
+  original bug-report screenshots, now committed as demo documentation.
+
+### Still uncommitted / untracked, NOT part of this work
+- `scripts/set-govcloud-env.sh` — untracked, opened by the user in their IDE
+  mid-session; unrelated to either bug fix; intentionally left untouched (not
+  staged, not investigated) — this is the user's own in-progress file.
 
 ## Key Design Decisions
 
-1. **Off-cycle git-sha image tag, not a semver release.** Dispatched
-   `build-and-push.yml` directly against `demo-v2ecoli` (no `version` input →
-   git short-sha `e74b644`) instead of waiting for a `0.1.2` release, given the
-   deadline. Explicitly commented in the `sms-api` kustomization diff.
-2. **Dispatched against `demo-v2ecoli`, not `main`.** PR #465 isn't merged to
-   `main` yet. `demo-v2ecoli` already has `861aefa` merged in, so that's the ref
-   that matters for the deploy.
-3. **Deploy happened ahead of PR review**, matching the established
-   `demo-v2ecoli` fix-branch pattern (memory: `project_demo_v2ecoli_fix_branch_strategy`)
-   — PR review and live deployment are decoupled so the demo timeline isn't
-   gated on reviewer latency.
-4. **kubectl apply read from an uncommitted local edit** in the sibling
-   `sms-api` repo. The commit is still owed there (see Next Steps).
-5. **curl verification is a distinct claim from browser verification.** curl
-   confirmed the server serves correct, base-path-prefixed HTML/assets — but the
-   original bug was client-side tab-collapse JS behavior, which curl cannot
-   observe. Per this repo's UI-only demo convention, the actual proof is a human
-   in the browser.
+1. **Opt-in trust flag, not automatic forwarded-header trust.** Blindly
+   trusting `X-Forwarded-Host` would let any direct client spoof it to bypass
+   the CSRF guard. `--trust-proxy`/`VIVARIUM_WORKBENCH_TRUST_PROXY=1` requires
+   an explicit operator decision, mirroring the existing `--disable-csrf`
+   trust model in this repo.
+2. **Tiered fix for bug 2, not a guess at the root cause.** Rather than
+   speculatively patching a Dockerfile/dependency issue, Tier 1 (logging) +
+   Tier 2 (defensive degrade) ship together now; the actual missing-dependency
+   question (if any) is explicitly deferred until the new logging is deployed
+   and the real traceback can be read from cluster logs.
+3. **Shared `_degraded_result()` helper**, reused at both the
+   `lib/composite_resolve.py` internal-guard site and the `api/app.py`
+   route-level guard site, and also replacing a previously-duplicated dict
+   literal in the pre-existing `CompositeSpec.from_file` except branch (with
+   an overridable `notice` param so that branch's more specific message —
+   "composite file could not be parsed" — is preserved; a first pass
+   regressed `test_resolve_malformed_static_file_degrades` by losing this
+   specific wording, caught and fixed before finalizing).
+4. **`TestClient(raise_server_exceptions=False)` needed for the new
+   exception-logging test.** Starlette's `ServerErrorMiddleware` always
+   re-raises after running a registered `Exception` handler (by design, for
+   dev/test visibility) — the default `TestClient` surfaces that as a raised
+   exception rather than a response. Real deployments (uvicorn) never see
+   this; the client already got the response before the re-raise. Used a
+   second, lenient `TestClient` instance against the same `app` object for
+   just that one test.
+5. **Two separate commits**: docs+screenshots first, then code+tests — kept
+   distinct so the doc/planning trail and the actual behavior change are each
+   independently reviewable.
 
 ## Verification
 
-- **pytest** (re-run this session, `uv run --no-sync pytest tests/test_study_page_lib.py
-  tests/test_study_detail_page.py tests/test_study_detail_template.py tests/test_publish.py -q`):
-  → **13 failed, 61 passed, 3 skipped** — **identical failure set** to the prior
-  checkpoint, confirmed no drift. Pre-existing template/test drift, unrelated to
-  base-path work; not investigated further (candidates:
-  `test_study_page_lib.py::TestRenderStudyDetailHtml::test_render_produces_html_with_tab_scaffold`,
-  10x in `test_study_detail_page.py` tab/panel/runs-table assertions,
-  `test_study_detail_template.py::test_panel_sections_no_premature_close`,
-  `test_publish.py::test_walkthrough_composite_popout_is_snapshot_aware`).
-- **PR #465** (`gh pr view 465` this session): `state: OPEN`,
-  `mergeable: MERGEABLE`, `reviewDecision: REVIEW_REQUIRED` — no reviewer action
-  yet, unchanged from prior session.
-- **Image build / k8s rollout / curl verification**: unchanged from prior
-  session, not re-verified this session (no code changed since).
-- **NOT YET DONE**: human browser click-through (the actual bug repro/fix
-  confirmation) — still the single open item.
+- **Targeted suites** (`uv run --no-sync pytest tests/test_csrf_lib.py
+  tests/test_csrf_origin_guard.py tests/test_composite_resolve_dispatch.py
+  tests/test_composite_resolve_fallback.py tests/test_api_app.py -q`): **528
+  passed**, 1 pre-existing unrelated failure
+  (`TestStaticRoutes::test_index_shell_renders_then_serves` — confirmed via
+  `git stash` to fail identically on the unmodified tree, a lambda/kwarg
+  signature mismatch unrelated to either fix).
+- **Full repo suite** (`uv run --no-sync pytest tests/ -q`, excluding the two
+  known-pre-existing failures above plus
+  `test_composite_subprocess_lib.py::test_generator_path_success_shape`
+  — also confirmed pre-existing via `git stash`, an unrelated
+  `pbg_superpowers` registry/dataclass issue): **was still running
+  in the background when this checkpoint was written.** Next agent: check
+  the result (rerun if the background task is gone) before pushing/opening
+  the PR, in case something outside the targeted suites regressed.
+- **CLI flag smoke test**: `uv run --no-sync python -m vivarium_workbench.cli
+  serve --help` shows `--trust-proxy` with the expected help text.
 
 ## Next Steps
 
-1. **User does the browser check** (only remaining unknown): re-confirm the
-   tunnel is running (`ps aux | grep sms-proxy`; restart with the command below
-   if not), then Investigations → click any study → confirm a single, styled,
-   collapsed pillar nav with only the active pillar's sub-tabs visible and
-   clickable. Also glance at CSS rendering generally and the Simulations DB
-   table.
-2. **Commit `.todo/MANIFEST.md`** (this repo, already staged):
-   ```
-   git commit -m "docs(todo): update PR #465 status — reviewed and deployed, awaiting human click-through"
-   ```
-3. **Commit the `sms-api` kustomization.yaml pin** (sibling repo, still
-   uncommitted, was sitting on `patch/db-filter`'s working tree). Suggested
-   flow (run from `~/sms/sms-api`, on a clean branch off `main` — do not bundle
-   with `patch/db-filter`'s unrelated history):
-   ```
-   git checkout -b chore/pin-workbench-e74b644-stanford-test main
-   git add kustomize/overlays/sms-api-stanford-test/kustomization.yaml
-   git commit -m "chore(stanford-test): pin vivarium-workbench 0.1.1 -> e74b644 (off-cycle, vivarium-workbench#465)"
-   ```
-4. **Get PR #465 reviewed and merged to `main`** — non-blocking for the demo
-   (already live via the off-cycle image), hygiene only:
-   https://github.com/vivarium-collective/vivarium-workbench/pull/465
-5. **Optional / lower priority**: the same 13 pre-existing test failures —
-   unrelated template/test drift, still not investigated. Flag as a separate
-   cleanup candidate if wanted.
-6. **Triage `demos/v2ecoli/investigation-issue.png`** (untracked) — the
-   original bug screenshot. Commit as demo documentation or delete once the bug
-   is confirmed fixed.
+1. **Confirm the full test suite result** (see Verification above) — rerun
+   `uv run --no-sync pytest tests/ -q --deselect tests/test_api_app.py::TestStaticRoutes::test_index_shell_renders_then_serves --deselect tests/test_composite_subprocess_lib.py::test_generator_path_success_shape`
+   if the background run's outcome wasn't captured.
+2. **Push `demo-v2ecoli`** (2 local commits ahead of `origin/demo-v2ecoli`:
+   `c28c6a1` docs, `481b3f2` code+tests) — `git push`.
+3. **Open the fix-to-main PR** per `project_demo_v2ecoli_fix_branch_strategy`:
+   branch off `main`, cherry-pick `481b3f2` (the code+tests commit — not the
+   docs commit, which is demo-v2ecoli-specific bookkeeping), push, `gh pr
+   create` with a description covering both bugs (see the two `.todo/plans/`
+   files for the full write-up to draw from). Do NOT merge — review required
+   per `feedback_pr_review_required`.
+4. **Once Tier 1 (logging) is deployed** to `sms-api-stanford-test`, re-click
+   the Composite Explorer's colony composite and read the pod logs for the
+   now-emitted traceback — this decides whether Tier 2a (a dependency/Dockerfile
+   fix, or a `core_extensions` registration fix in the v2ecoli sibling repo)
+   is actually needed. Do not guess ahead of that evidence.
+5. **Unrelated, pre-existing, not touched this session**: the `/workbench`
+   subpath-deployment thread (PR #465) is unchanged — still open, still
+   `REVIEW_REQUIRED`, human browser click-through still the one remaining
+   item there. See "Related Files" below.
+6. **`scripts/set-govcloud-env.sh`** — untracked, not mine to touch; leave for
+   the user.
 
 ## Quick Reference
 
 ```bash
-# kubectl (sms-api-stanford-test namespace)
-export KUBECONFIG="/Users/alexanderpatrie/.kube/kube_stanford_test.yml"
+# Targeted tests for these two fixes
+uv run --no-sync pytest tests/test_csrf_lib.py tests/test_csrf_origin_guard.py \
+  tests/test_composite_resolve_dispatch.py tests/test_composite_resolve_fallback.py \
+  tests/test_api_app.py -q
 
-# Tunnel to the live cluster (check if still running before starting another)
-ps aux | grep sms-proxy
-AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  ~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest
-# → http://localhost:8080/workbench
+# Full suite, excluding known-pre-existing-and-unrelated failures
+uv run --no-sync pytest tests/ -q \
+  --deselect tests/test_api_app.py::TestStaticRoutes::test_index_shell_renders_then_serves \
+  --deselect tests/test_composite_subprocess_lib.py::test_generator_path_success_shape
 
-# Re-check rollout / image
-kubectl get pods -n sms-api-stanford-test
-kubectl get deploy workbench -n sms-api-stanford-test \
-  -o jsonpath='{.spec.template.spec.containers[?(@.name=="workbench")].image}'
+# CLI flag smoke test
+uv run --no-sync python -m vivarium_workbench.cli serve --help
 
-# Dispatch another off-cycle image build if a new fix lands on demo-v2ecoli
-gh workflow run build-and-push.yml --ref demo-v2ecoli
-
-# Local subpath test (no k8s needed) — reproduces exactly what was broken
-cd ~/vivarium-app/vivarium-dashboard
-VIVARIUM_WORKBENCH_WORKSPACE="$(pwd)/tests/_fixtures/ws_increase_demo" \
-VIVARIUM_WORKBENCH_DISABLE_CSRF=1 \
-  uv run --no-sync uvicorn vivarium_workbench.api.app:app --root-path /workbench --port 8799
-
-# Test suite for the study-detail fix
-uv run --no-sync pytest tests/test_study_page_lib.py tests/test_study_detail_page.py \
-  tests/test_study_detail_template.py tests/test_publish.py -q
-
-# PR
-gh pr view 465 --web
+# Push + PR flow (once tests confirmed green)
+git push
+git checkout -b fix/csrf-proxy-and-composite-resolve-errors main
+git cherry-pick 481b3f2
+git push -u origin fix/csrf-proxy-and-composite-resolve-errors
+gh pr create --base main --title "..." --body "..."
 ```
 
 ## Related Files
 
-- **PR**: https://github.com/vivarium-collective/vivarium-workbench/pull/465
-- **Build run**: https://github.com/vivarium-collective/vivarium-workbench/actions/runs/29262663329
-- **Plan**: `.todo/plans/1-fix-study-detail-interactivity.md` (full root-cause
-  writeup + progress checklist), indexed by `.todo/MANIFEST.md` — MANIFEST
-  status line updated this session (staged, not committed); plan file itself
-  still needs its own `## Progress` checklist updated once the browser check
-  closes the loop.
-- **Original bug report**: `demos/v2ecoli/NOTES.md:228-234` ("Post e2e remote
-  walkthrough")
-- **Screenshot**: `demos/v2ecoli/investigation-issue.png` (untracked)
+- **This session's plans**: `.todo/plans/2-fix-csrf-origin-guard-reverse-proxy.md`,
+  `.todo/plans/3-fix-composite-resolve-unhandled-errors.md`, indexed in
+  `.todo/MANIFEST.md` items 2 and 3.
+- **Bug screenshots**: `demos/v2ecoli/bugs/broken-runs.png`,
+  `demos/v2ecoli/bugs/broken-composites.png`.
+- **Unrelated, still-open prior thread** (`.todo/plans/1-fix-study-detail-interactivity.md`,
+  MANIFEST item 1): PR https://github.com/vivarium-collective/vivarium-workbench/pull/465,
+  still `OPEN`/`REVIEW_REQUIRED`; human browser click-through still pending;
+  nothing in this session changed that thread's state.
