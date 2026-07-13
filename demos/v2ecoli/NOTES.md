@@ -222,3 +222,13 @@ git checkout main
 | Remote run fails | sms-api tunnel down | Skip to pre-landed remote runs in Simulations DB; narrate from screenshots |
 | Chart shows "viz_freshness" warning | Normal — charts predate latest run | Explain: "The dashboard tracks when charts were rendered vs. last run" |
 | CSRF error on POST | Browser origin mismatch | Ensure accessing via `localhost` (not `127.0.0.1`); or set `VIVARIUM_WORKBENCH_DISABLE_CSRF=1` |
+
+---
+
+## Post e2e remote walkthrough
+
+1. the vivarium-workbench is now hosted in the k8s cluster within ~/sms/sms-api (spin up ~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest --> http://localhost:8080/workbench)
+2. the vivarium-workbench should always use the sms-api-stanford-test namespace deployment of sms-api
+3. the | 13:00 | **Investigations** | v2ecoli-baseline-showcase | Show DAG, study cards, test results | section
+    does not work as expected...the simulations tab therein and any other tab is not clickable or operational
+4. much of the css does not exist now that it is deployed

@@ -50,6 +50,7 @@ This file provides essential, high-signal guidance for AI agents working in the 
      ```
   4. Now, running `vivarium-workbench serve --workspace .` from the workspace directory will use your local, editable version of the tool.
 
+
 ## Architecture & Conventions
 
 - **Backend:** The server is a **FastAPI** application defined in `vivarium_workbench/api/app.py`. The old `server.py` is a deprecated shim; all new logic goes in `lib/` modules.
@@ -62,3 +63,6 @@ This file provides essential, high-signal guidance for AI agents working in the 
     - There is **no linter** configured.
     - **`mypy`** is used for type checking, but it is adopted incrementally. See `pyproject.toml` for the list of currently type-checked files.
 - **CSRF Protection:** Mutating `POST`/`DELETE` endpoints are guarded by an origin check. For local testing with tools like `curl`, you can disable this by setting the environment variable `VIVARIUM_WORKBENCH_DISABLE_CSRF=1`.
+- **`kubectl`**: Any time kubectl is needed for any sort of k8s operation, details on which KUBECONFIG file to use for each k8s namespace can be found in ~/.zshrc under the `stanford` function therein:
+    - `stanford`: when run (no args), KUBECONFIG is set to the correct one for the `sms-api-stanford` namespace (corresponding stack: `smscdk`)
+    - `stanford test`: when run (`test` arg), KUBECONFIG is set to the correct one for the `sms-api-stanford-test` namespace (corresponding stack: `smsvpctest`)
