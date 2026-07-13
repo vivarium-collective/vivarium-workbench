@@ -26,3 +26,5 @@ htmlcov/
 todo.md
 .superpowers/
 .perspective.md
+.claude/*
+*/node_modules/*
