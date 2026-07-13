@@ -25,12 +25,15 @@ Run it standalone and browse the auto-generated **Swagger UI**:
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Optional, Union
 
 import json
 import subprocess
+
+_error_logger = logging.getLogger("vivarium_workbench.errors")
 
 from fastapi import Body, Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -111,7 +114,7 @@ from vivarium_workbench.lib import investigation_graph_views as _ig_views
 from vivarium_workbench.lib import chain_views as _chain_views
 from vivarium_workbench.lib import study_variants as _study_variants
 from vivarium_workbench.lib import composite_runs as _composite_runs
-from vivarium_workbench.lib.composite_resolve import resolve_composite_for_request
+from vivarium_workbench.lib.composite_resolve import resolve_composite_for_request, _degraded_result
 from vivarium_workbench.lib.composites_query import composites_via_subprocess
 from vivarium_workbench.lib.models import (
     BibEntry,
@@ -474,12 +477,21 @@ def create_app() -> FastAPI:
         body is ``{"detail": ...}``).  GET and other safe methods are never
         blocked.  No ``Origin`` header (e.g. curl, local CLI, starlette's
         ``TestClient``) → allowed; ``VIVARIUM_WORKBENCH_DISABLE_CSRF=1`` → allowed.
+
+        Behind a reverse proxy (e.g. an ALB terminating a `/workbench`
+        subpath), the raw ``Host`` header this process sees may not match what
+        the browser's ``Origin`` reflects. ``VIVARIUM_WORKBENCH_TRUST_PROXY=1``
+        (``--trust-proxy``) opts into comparing Origin against
+        ``X-Forwarded-Host`` instead — only enable this behind a proxy you
+        control, since the header is otherwise attacker-controlled.
         """
         if request.method in ("POST", "DELETE"):
             if not _csrf.is_request_allowed(
                 request.headers.get("origin"),
                 request.headers.get("host"),
                 disabled=_csrf.is_disabled_via_env(os.environ),
+                forwarded_host=request.headers.get("x-forwarded-host"),
+                trust_forwarded=_csrf.is_trust_proxy_via_env(os.environ),
             ):
                 return JSONResponse(
                     {"error": "cross-origin request forbidden"}, status_code=403
@@ -514,7 +526,12 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
         # Last resort: emit the canonical envelope instead of a bare 500. The
-        # message is intentionally generic — details go to logs, not the client.
+        # client-facing message stays generic; the real exception + traceback
+        # go to logs via logger.exception.
+        _error_logger.exception(
+            "unhandled exception on %s %s", request.method, request.url.path,
+            exc_info=exc,
+        )
         return JSONResponse({"error": "internal server error"}, status_code=500)
 
     # Registered last so it wraps the CSRF middleware and sees the final status.
@@ -867,7 +884,21 @@ def create_app() -> FastAPI:
                     "ref": id,
                 },
             )
-        return CompositeResolvePayload.model_validate(result)
+        try:
+            return CompositeResolvePayload.model_validate(result)
+        except Exception as e:
+            # Defense-in-depth for the remote/SMS-API branch of
+            # resolve_composite_for_request (not covered by the local-path
+            # guard in lib.composite_resolve) and for any payload shape that
+            # otherwise fails validation — degrade instead of hitting the
+            # app-wide 500 handler.
+            _error_logger.exception(
+                "composite-resolve payload failed to validate for id=%s", id
+            )
+            kind = result.get("kind", "spec") if isinstance(result, dict) else "spec"
+            return CompositeResolvePayload.model_validate(
+                _degraded_result(id, e, kind=kind)
+            )
 
     def _composite_state_response(
         ref: str, fresh: Optional[str], ws: Path
@@ -2672,7 +2703,7 @@ def create_app() -> FastAPI:
         response_class=Response,
         include_in_schema=False,
     )
-    def study_detail_page(slug: str, ws: Path = Depends(get_workspace)) -> Response:
+    def study_detail_page(slug: str, request: Request, ws: Path = Depends(get_workspace)) -> Response:
         """Render the study-detail HTML page for ``/studies/<slug>``.
 
         Validates *slug* against ``lib.study_spec.SLUG_RE``; invalid slug →
@@ -2685,9 +2716,15 @@ def create_app() -> FastAPI:
         set (``_send_html`` omits it; it is NOT the ``no-store`` of
         ``_serve_file``).
 
+        When served under a URL prefix (``serve --base-path``), the
+        proxy-strip middleware records the prefix as the request's
+        ``root_path``; pass it through so the rendered page's asset/API refs
+        carry the prefix too (mirrors ``index_shell`` above).
+
         Library-backed via ``lib.study_page.build_study_detail_page``.
         """
-        html, status = _study_page.build_study_detail_page(ws, slug)
+        base_path = request.scope.get("root_path") or ""
+        html, status = _study_page.build_study_detail_page(ws, slug, base_path=base_path)
         return Response(content=html, status_code=status, media_type="text/html")
 
     # -----------------------------------------------------------------------

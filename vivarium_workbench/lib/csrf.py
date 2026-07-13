@@ -18,23 +18,36 @@ from urllib.parse import urlsplit
 
 
 def is_request_allowed(
-    origin: str | None, host: str | None, *, disabled: bool
+    origin: str | None, host: str | None, *, disabled: bool,
+    forwarded_host: str | None = None, trust_forwarded: bool = False,
 ) -> bool:
     """Return True if a state-mutating request may proceed (same-origin).
 
-    Byte-identical to the legacy ``server.Handler._csrf_ok`` decision:
+    Byte-identical to the legacy ``server.Handler._csrf_ok`` decision when
+    ``trust_forwarded`` is left at its default:
 
       * ``disabled`` (CSRF bypass env set) → allow.
       * ``Origin`` absent/empty            → allow.
-      * ``Origin`` netloc non-empty AND == ``Host`` → allow.
+      * ``Origin`` netloc non-empty AND == effective host → allow.
       * else → deny.
+
+    ``forwarded_host``/``trust_forwarded`` are an opt-in extension for serving
+    behind a reverse proxy (e.g. an ALB terminating a `/workbench` subpath):
+    when ``trust_forwarded`` is True and ``forwarded_host`` is non-empty, the
+    Origin is compared against ``forwarded_host`` instead of the raw ``host``
+    (which a proxy hop may have rewritten to an internal service name). This
+    must never be inferred from the header's mere presence — an untrusted
+    direct request could otherwise spoof ``X-Forwarded-Host`` to bypass the
+    guard — hence the explicit ``trust_forwarded`` flag, set only via the
+    operator-controlled ``--trust-proxy`` CLI flag / env var.
     """
     if disabled:
         return True
     if not origin:
         return True
+    effective_host = (forwarded_host if (trust_forwarded and forwarded_host) else host) or ""
     netloc = urlsplit(origin).netloc
-    return bool(netloc) and netloc == (host or "")
+    return bool(netloc) and netloc == effective_host
 
 
 def is_disabled_via_env(env: Mapping[str, str]) -> bool:
@@ -44,3 +57,14 @@ def is_disabled_via_env(env: Mapping[str, str]) -> bool:
     """
     from vivarium_workbench.lib.env_compat import get_env
     return get_env("DISABLE_CSRF", env=env) == "1"
+
+
+def is_trust_proxy_via_env(env: Mapping[str, str]) -> bool:
+    """True if the reverse-proxy trust flag is set (``VIVARIUM_WORKBENCH_TRUST_PROXY=1``).
+
+    Dual-reads the deprecated ``VIVARIUM_DASHBOARD_TRUST_PROXY`` for back-compat.
+    Enables trusting ``X-Forwarded-Host`` for the same-origin check — only set
+    this behind a reverse proxy you control (e.g. via ``--trust-proxy``).
+    """
+    from vivarium_workbench.lib.env_compat import get_env
+    return get_env("TRUST_PROXY", env=env) == "1"

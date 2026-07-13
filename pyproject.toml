@@ -56,6 +56,7 @@ dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "mypy>=1.8", 
 # fail. Install with: uv pip install -e ".[dev,test]". See CONTRIBUTING.md.
 # (zarr is needed alongside xarray for DataTree.to_zarr in the zarr tests.)
 test = ["polars", "xarray", "zarr", "pyarrow"]
+demo = ["v2ecoli", "pbg-ptools"]
 
 [project.scripts]
 # New canonical console scripts.
@@ -66,6 +67,16 @@ vivarium-workbench-publish = "vivarium_workbench.publish:main"
 vivarium-dashboard = "vivarium_workbench.cli:main"
 vdash = "vivarium_workbench.cli:main"
 vivarium-dashboard-publish = "vivarium_workbench.publish:main"
+
+# DEMO-BRANCH ONLY: the `demo` extra pulls v2ecoli, which pins Python ==3.12.12
+# exactly. The workbench package itself supports >=3.11, but a universal `uv lock`
+# must then also solve the 3.11 slice, where v2ecoli is unsatisfiable → "no
+# solution". Constrain lock resolution on this (combined-with-v2ecoli) branch to
+# 3.12.12 — the version the demo image is built on — so `uv lock` /
+# `uv sync --extra demo` resolve. This does NOT change the package's declared
+# requires-python (>=3.11 for standalone use); it only scopes the lock.
+[tool.uv]
+environments = ["python_full_version == '3.12.12'"]
 
 # Git source for the bare pbg-basic-processes dependency (not on PyPI). uv reads
 # this when vivarium-dashboard is the root project; consumers that depend on it
@@ -78,6 +89,20 @@ pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-
 # of published metadata) and is not on PyPI; supply its git URL here so `uv
 # sync`/`uv lock` can resolve it (the editable-install gap that was failing CI).
 investigation-contracts = { git = "https://github.com/vivarium-collective/investigation-contracts.git", branch = "main" }
+# v2ecoli is NOT a runtime dependency of the vivarium-workbench package — it is
+# only needed for the demos/v2ecoli/ scripts. Declare it in [tool.uv.sources]
+# so `uv sync --extra demo` resolves the local checkout. The bare `v2ecoli`
+# requirement is listed in [project.optional-dependencies] → `demo`.
+v2ecoli = { path = "../v2ecoli", editable = true }
+# pbg-ptools is the Pathway Tools Omics-Viewer plugin (extracted from v2ecoli).
+# LOCAL PATH source on purpose: pbg-ptools depends back on vivarium-workbench,
+# and with a path source its own `../vivarium-workbench` resolves to the real
+# sibling (== this root project), so uv unifies them — no "conflicting URLs".
+# (A git source here would collide with the root, which is why `main` installs
+# pbg-ptools via the Dockerfile instead.) This gives the local `--extra demo`
+# dev env the PTools viewer, matching the deployed image.
+pbg-ptools = { path = "../pbg-ptools", editable = true }
+
 
 # bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
 # backend must opt into direct references — without this, hatchling refuses the

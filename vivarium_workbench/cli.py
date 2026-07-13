@@ -48,6 +48,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from vivarium_workbench.publish import _normalize_base_path
     base_path = _normalize_base_path(getattr(args, "base_path", "") or "")
 
+    if getattr(args, "trust_proxy", False):
+        os.environ["VIVARIUM_WORKBENCH_TRUST_PROXY"] = "1"
+
     # Render the dashboard HTML once before serving.
     try:
         from vivarium_workbench.lib.report import render_dashboard
@@ -436,6 +439,13 @@ def main(argv: list[str] | None = None) -> int:
         "--base-path", default="",
         help="Serve under a URL path prefix (e.g. /workbench) for hosting behind a "
              "shared reverse proxy / ALB. Default empty = serve at root.",
+    )
+    p_serve.add_argument(
+        "--trust-proxy", action="store_true",
+        help="Trust X-Forwarded-Host for the CSRF same-origin check "
+             "(sets VIVARIUM_WORKBENCH_TRUST_PROXY=1). Only enable behind a "
+             "reverse proxy you control (e.g. an ALB/SSM tunnel) — do NOT "
+             "enable for direct/loopback serving.",
     )
     p_serve.set_defaults(func=cmd_serve)
 

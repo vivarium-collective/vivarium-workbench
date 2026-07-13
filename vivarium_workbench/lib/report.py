@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -453,6 +454,42 @@ def _apply_live_base_path(html: str, base_path: str) -> str:
         '<script>window.__DASH_CONFIG__ = { mode: "local-server", basePath: ' + bpj + ' };</script>' + shim,
     )
     return html
+
+
+def _normalize_asset_urls(html: str) -> str:
+    """Rewrite ``src``/``href`` JS/CSS asset URLs to root-absolute
+    ``/assets/<basename>`` so both template conventions are normalised.
+
+    Rules:
+    - ``src="assets/foo.js"`` (relative, home template) → ``src="/assets/foo.js"``
+    - ``src="/foo.js"`` (root-relative, study-detail template) → ``src="/assets/foo.js"``
+    - External CDN URLs (``https://...``), ``/api/...``, and already-correct
+      ``/assets/...`` URLs are **left untouched**.
+    - The plotly CDN ``<script src="https://cdn.plot.ly/...">`` has an absolute
+      URL → skipped automatically.
+
+    Shared by ``publish.py`` (static bundle export) and ``lib.study_page``
+    (live-server ``/studies/<slug>`` route) so both code paths normalize
+    asset refs identically before any base-path prefixing is applied.
+    """
+    def _replace(m: re.Match) -> str:
+        attr = m.group(1)   # "src" or "href"
+        url  = m.group(2)   # full URL value
+
+        # Skip externals and already-correct bundle URLs
+        if url.startswith(("https://", "http://", "/api/", "/assets/")):
+            return m.group(0)
+
+        # Strip query string to get the bare filename, then rebuild
+        url_no_qs = url.split("?", 1)[0]
+        basename  = url_no_qs.rsplit("/", 1)[-1]
+        return f'{attr}="/assets/{basename}"'
+
+    return re.sub(
+        r'\b(src|href)="([^"]+\.(?:js|css)[^"]*)"',
+        _replace,
+        html,
+    )
 
 
 def render_workspace_report(ws_root: Path | None = None, *, today: str | None = None, base_path: str = "") -> Path:

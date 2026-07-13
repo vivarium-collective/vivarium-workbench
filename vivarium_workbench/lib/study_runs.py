@@ -41,6 +41,7 @@ from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.study_crud_mutations import _study_name_from_body
 
 
+
 def _resolve_study_dir(ws_root, name):
     """Resolve a study's directory honoring the workspace ``layout:`` map.
 
