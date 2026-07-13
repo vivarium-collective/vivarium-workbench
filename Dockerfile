@@ -65,9 +65,24 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/v2ecoli/.venv/bin/python --no-deps \
         "pbg-ptools @ git+https://github.com/vivarium-collective/pbg-ptools.git@${PBG_PTOOLS_REF}"
 
-# Sanity: the workspace package, the workbench, and the viewer plugin all import
-# in one interpreter (the plugin's top-level imports exercise the workbench too).
-RUN python -c "import pbg_v2ecoli, vivarium_workbench, pbg_ptools.workbench_viewers; print('combined env ok')"
+# ─── overlay bigraph-loom (embedded state-tree explorer, served at /loom-explore) ─
+# `bigraph-loom` is a workbench-only dep (pyproject.toml:47) that is NOT declared in
+# v2ecoli's lock, so the `uv sync` from v2ecoli's lockfile above never installs it.
+# `lib/static_serving.resolve_loom_asset()` imports it lazily, so a missing module
+# passes the build-time sanity import and only throws ModuleNotFoundError at runtime
+# — the always-visible loom panel fires a loom-asset request for ANY composite, so
+# the Composite Explorer 500s. Install it explicitly here (pin identical to
+# pyproject.toml:47). `--no-deps` because its deps are already in the venv.
+ARG BIGRAPH_LOOM_REF=main
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/v2ecoli/.venv/bin/python --no-deps \
+        "bigraph-loom @ git+https://github.com/vivarium-collective/bigraph-loom.git@${BIGRAPH_LOOM_REF}"
+
+# Sanity: the workspace package, the workbench, the viewer plugin, and the loom
+# explorer all import in one interpreter (the plugin's top-level imports exercise
+# the workbench too). bigraph_loom is added here so a regression fails the BUILD
+# rather than shipping a silent runtime ModuleNotFoundError (see the overlay above).
+RUN python -c "import pbg_v2ecoli, vivarium_workbench, pbg_ptools.workbench_viewers, bigraph_loom; print('combined env ok')"
 
 # ─── serve ───────────────────────────────────────────────────────────────────
 # The workspace (v2ecoli's workspace.yaml + studies/investigations/.git/runs.db)

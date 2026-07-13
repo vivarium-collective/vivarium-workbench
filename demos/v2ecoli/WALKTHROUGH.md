@@ -1,162 +1,136 @@
-# vivarium-workbench Dashboard Demo — Unified Walkthrough
+# vivarium-workbench Dashboard Demo — Unified Walkthrough (Remote GovCloud)
 
-**Last verified**: 2026-07-07
+**Last verified**: 2026-07-07 *(local flow; remote-first flow pending WS-E acceptance)*
 **Branch**: `demo-v2ecoli` in `vivarium-collective/vivarium-dashboard`
+**Demo target**: the **REMOTE** `/workbench` deployment on the `sms-api-stanford-test`
+Kubernetes namespace (GovCloud `smsvpctest` stack), reached in the browser at
+**`http://localhost:8080/workbench`** through the `sms-proxy.sh` SSM tunnel.
+
+> This is the **canonical remote demo**. You do NOT clone, install, or `serve`
+> anything locally for this flow — the dashboard, the v2ecoli workspace, and the
+> sms-api service all run in-cluster; you only open an authenticated tunnel and a
+> browser. The old local-serve flow is preserved verbatim in **Appendix G — Local
+> Dev (offline)** as a fallback.
 
 ---
 
-## 0. Prerequisites
+## 0. Prerequisites (one-time setup)
 
-### 0.1 Repository & Environment
+### 0.1 AWS GovCloud Authentication
 
-```bash
-git clone git@github.com:vivarium-collective/vivarium-dashboard.git ~/vivarium-app/vivarium-dashboard
-cd ~/vivarium-app/vivarium-dashboard
-git checkout demo-v2ecoli
-
-# Also clone v2ecoli (required dependency for the demo)
-git clone git@github.com:vivarium-collective/v2ecoli.git ~/vivarium-app/v2ecoli
-```
-
-Install v2ecoli as a local editable dependency:
-```bash
-uv sync --extra demo
-```
-
-Verify:
-```bash
-python -c "import v2ecoli; import viva_munk; import pbg_ketchup; import pbg_copasi; print('OK')"
-```
-
-The v2ecoli venv must have these packages (already true for a working workspace):
-
-```
-process-bigraph, bigraph-schema, bigraph-viz, vivarium-workbench
-pbg_superpowers, pbg_ketchup, pbg_copasi, pbg_parsimony
-pbg_bioreactordesign, pbg_torch, viva_munk, pbg_emitters
-```
-
-Verify:
-```bash
-source .venv/bin/activate
-python -c "import v2ecoli; import viva_munk; import pbg_ketchup; import pbg_copasi; print('OK')"
-```
-
-Minimum hardware: macOS/Linux, 16 GB RAM, 5 GB free disk.
-
-### 0.2 AWS GovCloud Authentication
-
-This demo's Segment 6 (remote runs) requires authenticated access to the `smsvpctest` GovCloud deployment stack. The canonical auth flow uses the shell function `stanford` defined in `~/.zshrc`:
+The remote deployment lives in the `smsvpctest` GovCloud stack. Authenticate with
+the `stanford` shell function (defined in `~/.zshrc`):
 
 ```bash
 # The 'stanford' function (in ~/.zshrc) does:
-#   1. Sets AWS_PROFILE=stanford-sso
-#   2. Sets AWS_DEFAULT_REGION=us-gov-west-1
-#   3. Runs aws sso login --profile stanford-sso
+#   1. export AWS_PROFILE=stanford-sso
+#   2. export AWS_DEFAULT_REGION=us-gov-west-1
+#   3. aws sso login --profile stanford-sso
 #
-# The `stanford test` alias resolves the stanford function with the test profile.
-
+# 'stanford test' resolves the function against the test profile.
 stanford test
 ```
 
-After successful SSO login, your credentials provide read access to the `smsvpctest` CloudFormation stacks (`smsvpctest-batch`, `smsvpctest-internal-alb`, `smsvpctest-sms`) and the ability to establish SSM sessions to the batch submit node.
+After SSO login, your credentials provide read access to the `smsvpctest`
+CloudFormation stacks and the ability to establish SSM sessions to the batch
+submit node.
 
 Verify auth:
 ```bash
 AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 aws sts get-caller-identity
 ```
 
-### 0.3 SMS API Tunnel
+### 0.2 The sms-cdk clone (holds the tunnel script)
 
-The dashboard's "Run remotely" pipeline targets the sms-api service behind an internal ALB. The canonical tunnel script resolves the batch submit node ID and ALB DNS from the `smsvpctest` CloudFormation stacks, then establishes an SSM port-forwarding session that proxies `localhost:8080` → submit node → internal ALB:
-
+The tunnel script ships in the `sms-cdk` repo:
 ```bash
-# Run in a dedicated terminal (stays alive until Ctrl+C)
-AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  ~/sms/sms-cdk/scripts/ptools-proxy.sh -s smsvpctest
+git clone git@github.com:vivarium-collective/sms-cdk.git ~/sms/sms-cdk   # if not already present
 ```
 
-The script auto-checks: AWS CLI, Session Manager plugin, valid credential, port availability. Expected output:
+### 0.3 (optional) PTools Omics Viewer — Segment 7
+
+```bash
+docker run -p 1555:1555 ghcr.io/vivarium-collective/sms-ptools
+```
+Not required — gracefully skipped if unavailable.
+
+### 0.4 Remote workspace state
+
+The remote pod serves the v2ecoli workspace mounted from its private EBS PVC at
+`/workspace` — it comes **pre-seeded** (registry, composites, investigations,
+studies, and the Simulations DB). There is no local seeding step for the remote
+demo. (The local seeding scripts — `populate_demo_runs.py`, `prep_remote_*.py` —
+belong to the offline flow; see Appendix G.)
+
+---
+
+## 1. Pre-Flight (every demo session)
+
+Two steps. No local server.
+
+```bash
+# Terminal 1 — open the SSM tunnel (stays alive until Ctrl+C).
+#   sms-proxy.sh resolves the batch submit node + internal ALB DNS from the
+#   smsvpctest-* CloudFormation stacks and starts an SSM
+#   StartPortForwardingSessionToRemoteHost session: localhost:8080 → ALB:80.
+AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
+  ~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest
+```
+
+Confirm the proxy banner lists the endpoints (all on port 8080):
 
 ```
 SMS Application Proxy
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Application URL:  http://localhost:8080/
   Available endpoints:
+    • http://localhost:8080/workbench     (vivarium-workbench dashboard)
     • http://localhost:8080/              (PTools UI)
     • http://localhost:8080/sms/sms.html  (PTools SMS Simulation UI)
     • http://localhost:8080/docs          (SMS API UI)
 ```
 
-Leave this terminal open for the duration of the demo. The tunnel proxies ALL SMS services (simulator build/run/land APIs, PTools, docs).
-
-> **Note**: The `ptools-proxy.sh` uses `AWS-StartPortForwardingSessionToRemoteHost` to proxy through the submit node to the ALB — not the simple `AWS-StartPortForwardingSession` that tunnels to a single port on the instance. This provides full ALB routing (build API, run API, PTools, docs) through a single local port.
-
-Verify tunnel health:
 ```bash
-curl -s http://localhost:8080/docs | head -5
+# Terminal 2 — verify the tunnel is routing the dashboard, then open it.
+curl -s -o /dev/null -w "workbench HTTP %{http_code}\n" http://localhost:8080/workbench/
+open http://localhost:8080/workbench
 ```
 
-### 0.4 PTools Omics Viewer (optional — Segment 7)
+> **Tunnel latency**: API GETs traverse SSM → ALB → pod and can take several
+> seconds (~8s observed) on first hit; the page is fully interactive, just not
+> LAN-fast. Give each tab a moment to populate.
 
-```bash
-docker run -p 1555:1555 ghcr.io/vivarium-collective/sms-ptools
-```
+> **The ALB rewrites `Host` and omits `X-Forwarded-Host`.** The pod is deployed
+> with `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS=http://localhost:8080`, so POST/DELETE
+> (Run, Run-remotely, saves) are admitted by the CSRF allowlist. If you see
+> `cross-origin request forbidden`, that env is missing on the workbench
+> Deployment — see Appendix E.
 
-Not required — gracefully skipped if unavailable.
-
-### 0.5 Pre-Demo Remote Setup (one-time, before first demo)
-
-Once the tunnel is up, pre-build a simulator image on sms-api and pre-land a remote run so the Simulations DB has live ☁️ entries:
-
-```bash
-source .venv/bin/activate
-python demos/v2ecoli/prep_remote_build.py   # pushes branch, registers build, polls (~4 min)
-python demos/v2ecoli/prep_remote_land.py    # submits, polls, downloads, lands (~3 min)
-```
-
-These are one-time operations. Subsequent demos reuse the cached `.demo_state.json`.
-
----
-
-## 1. Pre-Flight (every demo session)
-
-Execute in order:
-
-```bash
-# Terminal 1 — SMS API tunnel
-AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  ~/sms/sms-cdk/scripts/ptools-proxy.sh -s smsvpctest
-
-# Terminal 2 — Verify + start dashboard (from vivarium-dashboard repo)
-cd ~/vivarium-app/vivarium-dashboard
-python demos/v2ecoli/verify_demo.py          # expect 39/39 pass
-vivarium-dashboard serve --workspace ~/vivarium-app/v2ecoli --port 8771
-open http://localhost:8771
-```
-
-> **CLI name**: Use `vivarium-dashboard serve` or `vivarium-workbench serve` — both point at the same code.
+> **`sms-proxy.sh` vs `ptools-proxy.sh`**: `ptools-proxy.sh` is a symlink to
+> `sms-proxy.sh` — either name works; `sms-proxy.sh` is canonical.
 
 ---
 
 ## 2. Segment 1: Introduction (2 min)
 
 ### Actions
-1. Open `http://localhost:8080` — confirm page renders with `<title>v2ecoli</title>` and workspace branding
+1. Open `http://localhost:8080/workbench` — confirm the page renders with
+   `<title>v2ecoli</title>` and workspace branding
 2. Point out the **left rail** — 9 pages: Sources, Registry, Composites, Investigations, Simulations DB, Analyses, Studies, Branch, Composite Explorer
 3. Point out the **investigation switcher** at the top of the rail
 4. Point out the **workspace name chip** in the rail header (source switching for remote builds in Segment 6)
 
 ### API
-`GET /` → Page renders with workspace branding
+`GET /workbench/` → Page renders with workspace branding
 
 ### Narration
-> "vivarium-workbench is a local web UI for process-bigraph workspaces. Three layers: the simulation engine — process-bigraph — runs the science. The tooling — this dashboard — orchestrates, renders, and commits. The data — the v2ecoli workspace — is the single source of truth. Every action you take in the dashboard is committed to git."
+> "vivarium-workbench is a web UI for process-bigraph workspaces. Three layers: the simulation engine — process-bigraph — runs the science. The tooling — this dashboard — orchestrates, renders, and commits. The data — the v2ecoli workspace — is the single source of truth. Every action you take in the dashboard is committed to git. And what you're looking at is running on AWS GovCloud — served from a Kubernetes pod, reached through an SSM tunnel."
 
 ### Talking Points
 - Generic tool — works with ANY process-bigraph workspace, not just v2ecoli
 - Git-tracked: add a dataset, create a study, run a simulation → all committed
 - Research notebook that leaves an audit trail
+- Deployed to GovCloud: the same dashboard that runs on a laptop runs in-cluster
 
 ---
 
@@ -164,7 +138,7 @@ open http://localhost:8771
 
 ### Actions
 1. Click **Registry** → **Modules** sub-tab
-2. Point to the 11 installed packages:
+2. Point to the installed packages:
    - `v2ecoli` — E. coli whole-cell model (55 processes)
    - `viva_munk` — colony physics (PymunkProcess, chemotaxis, biofilm)
    - `pbg_ketchup` — kinetic parameter estimators (IPOPT)
@@ -173,11 +147,11 @@ open http://localhost:8771
    - `pbg_torch` — neural surrogate models
    - `pbg_parsimony` — capsule cell geometry
 3. Click **Discovered registry** → **Processes** sub-tab
-4. Scroll: **173 Process classes** from 7 packages, interspersed — `viva_munk`'s `PymunkProcess` sits next to v2ecoli's `PolypeptideElongation`
+4. Scroll: **Process classes** from 7 packages, interspersed — `viva_munk`'s `PymunkProcess` sits next to v2ecoli's `PolypeptideElongation`
 
 ### API
-`GET /api/catalog` → 11 packages
-`GET /api/registry` → 173 Process classes
+`GET /workbench/api/catalog` → installed packages
+`GET /workbench/api/registry` → Process classes
 
 ### Narration
 > "Seven different simulation packages. One dashboard. One type system. Any process from any package can be composed into any composite. To onboard a new simulator, you pip install it and declare it in `workspace.yaml` — it just appears."
@@ -190,7 +164,7 @@ open http://localhost:8771
 ## 4. Segment 3: Composites — Swappability (3 min)
 
 ### Actions
-1. Click **Composites** — **28 composites** across all packages
+1. Click **Composites** — composites across all packages
 
 #### Cell-Engine Swappability
 2. Click `baseline` — "v2ecoli whole-cell model, 55 processes, tFBA metabolism"
@@ -206,7 +180,7 @@ open http://localhost:8771
 8. Click `chemotaxis` (viva_munk) — "Bacterial chemotaxis in a 2D ligand gradient. Same dashboard."
 
 ### API
-`GET /api/composites` → 28 composites: 12 v2ecoli, 3 pbg_copasi, 1 pbg_parsimony, 9 viva_munk, 3 pbg_ketchup
+`GET /workbench/api/composites` → 28 composites: 12 v2ecoli, 3 pbg_copasi, 1 pbg_parsimony, 9 viva_munk, 3 pbg_ketchup
 
 ### Narration
 > "Three different cell engines, all sharing the same reactor coupler, all managed by the same dashboard. Swappability means ONE workflow — Composite → Run → View results — for ANY simulator."
@@ -220,7 +194,7 @@ open http://localhost:8771
 
 ### Actions
 1. From Composites, click **Explore** on the `parca` composite (opens Composite Explorer)
-2. Point to the **9-step pipeline** in bigraph-loom:
+2. Point to the **9-step pipeline** in the embedded bigraph-loom explorer:
    - Step 1: Initialize (scatter flat files → sim_data)
    - Step 2: Input Adjustments (compute/merge, pure)
    - Step 3: Basal Specs (fit minimal-medium condition)
@@ -233,8 +207,13 @@ open http://localhost:8771
 3. Click through steps to show port wiring
 4. **Optional live run**: Click **Run** tab → `mode: fast, cpus: 4, debug: true` → ~15s
 
+> **Composite Explorer + loom panel** render for any composite (`parca`, `colony`,
+> `baseline`). `bigraph-loom` is baked into the combined image — an earlier build
+> that omitted it 500'd this panel. If the loom panel errors, the deployed image
+> predates the fix; see Appendix E.
+
 ### API
-`GET /api/composite-resolve?id=v2ecoli.composites.parca` → 43 state entries
+`GET /workbench/api/composite-resolve?id=v2ecoli.composites.parca` → 43 state entries
 
 ### Narration
 > "ParCa used to be a monolithic script. Now it's 9 modular Steps, each independently registered, testable, and swappable. Step 4 (TF condition fitting) could be swapped for a different algorithm — you'd only touch one file. Step 6 uses CVXPY. Swap it for a PyTorch optimizer? Replace one Step class, wire the same ports."
@@ -263,10 +242,14 @@ open http://localhost:8771
    - Rendered figures: source manifest, simdata summary, cache bundle
 7. Click **showcase-4-variant-comparison** — "5-variant perturbation sweep" with overlaid charts
 
+> **Study-detail iframe under `/workbench`**: the detail page is base-path-aware
+> and renders styled + interactive through the subpath (a prior bug served it
+> unstyled; fixed). If a study detail loads blank/unstyled, see Appendix E.
+
 ### API
-`GET /api/investigation-summaries` → 8 investigations
-`GET /api/investigation/v2ecoli-baseline-showcase` → 6 studies, showcase-1 gate: **passed**
-`GET /api/study/showcase-1-parca` → 3 behavior tests, all passed
+`GET /workbench/api/investigation-summaries` → 8 investigations
+`GET /workbench/api/investigation/v2ecoli-baseline-showcase` → 6 studies, showcase-1 gate: **passed**
+`GET /workbench/api/study/showcase-1-parca` → 3 behavior tests, all passed
 
 ### Narration
 > "Investigations are research arcs — DAGs of studies grouped under a shared question. Each study is an experiment with pass/fail criteria. The DAG enforces dependency order — a downstream study literally cannot proceed until its upstream passes."
@@ -278,41 +261,43 @@ open http://localhost:8771
 
 ## 7. Segment 6: Simulations DB & Remote Runs (3 min)
 
-This segment requires the SMS API tunnel (Section 0.3) to be running on `localhost:8080`.
+The dashboard is already remote; the "Run remotely" pipeline targets the in-cluster
+sms-api service (`SMS_API_BASE`, set by the deployment overlay). Your browser only
+needs the tunnel to reach `/workbench`.
 
 ### Actions — Part A: Simulations DB
 1. Click **Simulations DB**
 2. Show the **52-run** table: columns — Investigation, Study, Run, Location, Origin, Emitter, Time, Status
 3. Point out **Emitter type pills**: sqlite (gray), parquet (amber), xarray (teal)
 4. Point out **Origin badges**: local vs. remote (☁️ blue pill)
-5. Point out the **4 remote runs** with full provenance (simulation_id, experiment_id, backend=ray, s3_uri from sms-api)
-6. Show **status variety**: 4 failed (including `5-variant sweep ΔO2`), 1 orphaned (`BiRD reactor + Millard cell` — a stale in-progress run whose backing process died; shows as `orphaned`, not `running`)
+5. Point out the **remote runs** with full provenance (simulation_id, experiment_id, backend=ray, s3_uri from sms-api)
+6. Show **status variety**: failed / orphaned rows (an orphaned run is a stale in-progress run whose backing process died; shows as `orphaned`, not `running`)
 
 ### API
-`GET /api/simulations` → 52 runs: 4 remote ☁️, 4 failed, 1 orphaned
-Emitter distribution: sqlite=12, parquet=13, xarray=11, unknown=16
+`GET /workbench/api/simulations` → runs incl. remote ☁️, failed, orphaned
 
 ### Actions — Part B: Live Remote Run
 7. From any study page, click **"Run remotely"**
-8. The browser-driven thin-client pipeline executes:
-   - **Phase 1 (building)**: Pushes current branch to sms-api, registers a Docker build, polls for image readiness (~1–2 min for cached build)
-   - **Phase 2 (running)**: Submits the simulation run to sms-api, polls for completion (~2–4 min for short ensemble)
-   - **Phase 3 (landing)**: Downloads results from S3, records them in the study's runs.db with git provenance
+8. The browser-driven thin-client pipeline executes (the dashboard pod calls sms-api in-cluster):
+   - **Phase 1 (building)**: registers a Docker build on sms-api, polls for image readiness (~1–2 min for cached build)
+   - **Phase 2 (running)**: submits the simulation run to sms-api, polls for completion (~2–4 min for short ensemble)
+   - **Phase 3 (landing)**: downloads results from S3, records them in the study's runs.db with git provenance
 9. The newly landed run appears in Simulations DB (local origin, since it was landed from remote)
 
 ### Narration
-> "The Simulations DB shows every run, whether it happened on your laptop or on AWS GovCloud. The remote pipeline is stateless — it's driven entirely by the browser through the SSM tunnel. No server-side queue. Every run is traceable: git commit hash → exact Docker image → exact simulation results."
+> "The Simulations DB shows every run, whether it happened on a laptop or on AWS GovCloud. The remote pipeline is stateless — driven entirely by the browser through the dashboard, which calls sms-api in-cluster. No server-side queue. Every run is traceable: git commit hash → exact Docker image → exact simulation results."
 
 ### Talking Points
 - "Any simulator, any emitter backend (SQLite, Parquet, XArray), any scale — laptop → AWS GovCloud. Same table, side-by-side."
-- "The remote pipeline uses the `smsvpctest` deployment stack. The `ptools-proxy.sh` script tunnels through the batch submit node to the internal ALB, providing the full SMS API surface through `localhost:8080`."
-- "Extensibility: push a branch, click 'Run remotely', and the sms-api builds the Docker image from your exact code. Full reproducibility."
+- "The whole stack — dashboard, sms-api, PTools — is one `smsvpctest` deployment behind one internal ALB, reached through one SSM tunnel on `localhost:8080`."
+- "Extensibility: register a build, click 'Run remotely', and sms-api builds the Docker image from the exact code. Full reproducibility."
 
 ### Key Number
 > **52** runs, **3** emitter backends, local and remote side-by-side.
 
-### Fallback (tunnel down)
-Skip Part B. Show the 4 pre-landed remote ☁️ runs in Simulations DB and narrate the pipeline architecture. Mention the `ptools-proxy.sh -s smsvpctest` command to establish the tunnel when ready.
+### Fallback (remote run unavailable)
+Skip Part B. Show the pre-landed remote ☁️ runs in Simulations DB and narrate the
+pipeline architecture.
 
 ---
 
@@ -320,11 +305,11 @@ Skip Part B. Show the 4 pre-landed remote ☁️ runs in Simulations DB and narr
 
 ### Actions
 1. Click **Analyses** — visualization class gallery
-3. **PTools omics viewer**: If sms-ptools is running on `localhost:1555`, launch Pathway Tools Cellular Overview with study omics data overlaid on E. coli metabolic map
-4. **Visualization preview**: Show a `demo()` method rendering instantly against synthetic data
+2. **PTools omics viewer**: If sms-ptools is running on `localhost:1555`, launch Pathway Tools Cellular Overview with study omics data overlaid on E. coli metabolic map
+3. **Visualization preview**: Show a `demo()` method rendering instantly against synthetic data
 
 ### API
-`GET /api/visualization-classes` → 58 visualization classes
+`GET /workbench/api/visualization-classes` → 58 visualization classes
 3D viewer manifest: `workspace/studies/ecoli-3d/viz/3d/ecoli_3d.pack.json`
 
 ### Narration
@@ -344,28 +329,25 @@ Skip Part B. Show the 4 pre-landed remote ☁️ runs in Simulations DB and narr
    - **Swappable cell engines** — Composites: baseline, Millard, PDMP, all sharing reactor coupler
    - **Modular pipelines** — ParCa: 9 Steps, each independently swappable
    - **Reproducible, git-tracked runs** — Simulations DB: 52 runs with full provenance
-   - **AWS GovCloud at scale, local for development** — Segment 6: browser-driven remote pipeline through `smsvpctest`
+   - **AWS GovCloud at scale** — the entire dashboard is served in-cluster; remote runs go to sms-api on GovCloud
 
 ### Narration
-> "vivarium-workbench is a simulator-agnostic research notebook. Today we saw v2ecoli — but the same dashboard serves viva_munk colony physics, ketchup kinetic fitting, copasi ODE models, and BiRD reactor transport. All in one UI, all git-tracked. Questions?"
+> "vivarium-workbench is a simulator-agnostic research notebook — and it runs anywhere, from a laptop to a GovCloud Kubernetes cluster. Today we saw v2ecoli, but the same dashboard serves viva_munk colony physics, ketchup kinetic fitting, copasi ODE models, and BiRD reactor transport. All in one UI, all git-tracked. Questions?"
 
 ---
 
 ## 10. After the Demo
 
 ```bash
-# Terminal 1: Ctrl+C to stop the SMS API tunnel
-
-# Terminal 2: Stop dashboard + reset
-kill $(lsof -ti:8771) 2>/dev/null
-python demos/v2ecoli/populate_demo_runs.py    # reset demo runs if needed
+# Terminal 1: Ctrl+C to stop the SSM tunnel.
+# (No local server to stop — the dashboard runs in-cluster.)
 ```
 
 ---
 
 ## Appendix A: Architecture Elevator Pitch (30 seconds)
 
-> "vivarium-workbench is a local web UI for process-bigraph workspaces. Three layers: the simulation engine — process-bigraph — runs the science. The tooling — this dashboard — orchestrates, renders, and commits. The data — the workspace — is the single source of truth. Every action you take is committed to git."
+> "vivarium-workbench is a web UI for process-bigraph workspaces. Three layers: the simulation engine — process-bigraph — runs the science. The tooling — this dashboard — orchestrates, renders, and commits. The data — the workspace — is the single source of truth. Every action is committed to git. And it runs anywhere: laptop for development, GovCloud Kubernetes for the real thing."
 
 ---
 
@@ -378,19 +360,22 @@ A: No — the dashboard is simulator-agnostic. v2ecoli is the demonstration work
 A: `pip install` your pbg-* package, declare it in `workspace.yaml` imports, refresh. Processes, composites, and visualizations appear automatically. No dashboard code changes.
 
 **Q: What if my simulation takes hours?**
-A: The remote run pipeline (sms-api) offloads to AWS GovCloud. Your laptop can close while the run progresses. Results land back with full provenance.
+A: The remote run pipeline (sms-api) offloads to AWS GovCloud. Your browser can close while the run progresses. Results land back with full provenance.
 
 **Q: Is the dashboard open source?**
 A: Yes — MIT licensed. GitHub: `vivarium-collective/vivarium-workbench` (currently `vivarium-dashboard`).
 
 **Q: How do I share results with a collaborator?**
-A: Push the branch, or export a self-contained HTML report, or use `vivarium-dashboard-publish` for a static read-only bundle.
+A: Push the branch, or export a self-contained HTML report, or use `vivarium-workbench-publish` for a static read-only bundle.
 
-**Q: What's the SMS API tunnel doing under the hood?**
-A: `ptools-proxy.sh -s smsvpctest` resolves the batch submit node ID and ALB DNS from the `smsvpctest-*` CloudFormation stacks, then runs an SSM `StartPortForwardingSessionToRemoteHost` session. The submit node proxies `localhost:8080` to the internal ALB, which routes to the sms-api service (build/run/land APIs), PTools, and docs — all through a single port.
+**Q: What is the tunnel doing under the hood?**
+A: `sms-proxy.sh -s smsvpctest` resolves the batch submit node ID and internal ALB DNS from the `smsvpctest-*` CloudFormation stacks, then runs an SSM `StartPortForwardingSessionToRemoteHost` session. The submit node forwards `localhost:8080` to the internal ALB, which path-routes `/workbench` to the dashboard, `/docs` to the SMS API, and `/`, `/sms/sms.html` to PTools — all through one local port.
 
-**Q: Do I need the tunnel for the rest of the demo?**
-A: No — only Segment 6 (remote runs) requires it. Segments 1–5 and 7–8 work entirely offline against the local workspace.
+**Q: Why is the dashboard reachable at `/workbench` and not the root?**
+A: The ALB path-routes multiple services on one host. The dashboard is served under the `/workbench` base path (`--base-path /workbench`); all its links and assets are base-path-aware.
+
+**Q: Do I need the tunnel for the whole demo?**
+A: Yes — the dashboard itself is remote, so the tunnel is required for every segment (unlike the old local flow). Only the optional PTools omics viewer (Segment 7) is a separate local container.
 
 ---
 
@@ -398,11 +383,10 @@ A: No — only Segment 6 (remote runs) requires it. Segments 1–5 and 7–8 wor
 
 | Time | Segment | Page | Key Click |
 |------|---------|------|-----------|
-| 0:00 | Tunnel | Terminal | `ptools-proxy.sh -s smsvpctest` |
-| 0:15 | Start server | Terminal | `vivarium-dashboard serve --workspace . --port 8771` |
-| 0:30 | Open browser | — | `http://localhost:8771` |
+| 0:00 | Tunnel | Terminal | `sms-proxy.sh -s smsvpctest` |
+| 0:20 | Open browser | — | `http://localhost:8080/workbench` |
 | 1:00 | **1. Intro** | Home | Rail, workspace chip |
-| 3:00 | **2. Registry** | Registry → Modules | 11 packages |
+| 3:00 | **2. Registry** | Registry → Modules | packages |
 | 4:00 | **2. Registry** | Registry → Processes | **173** processes from 7 packages |
 | 6:00 | **3. Composites** | Composites | baseline → millard → pdmp |
 | 8:00 | **3. Composites** | Composites | External: ketchup, chemotaxis |
@@ -416,51 +400,123 @@ A: No — only Segment 6 (remote runs) requires it. Segments 1–5 and 7–8 wor
 | 19:00 | **8. Wrap-up** | — | Recap + Q&A |
 | 20:00 | **Q&A** | — | — |
 
+> Add a few seconds of slack per tab for tunnel latency.
+
 ---
 
 ## Appendix D: Demo Environment State
 
-All demo artifacts are under `demos/v2ecoli/`. Zero modifications to existing v2ecoli code, composites, studies, or investigations.
+The remote pod serves a pre-seeded workspace from its EBS PVC. Local demo
+artifacts under `demos/v2ecoli/` apply to the **offline** flow (Appendix G) only.
 
 | File | Purpose | Side Effects |
 |------|---------|-------------|
 | `WALKTHROUGH.md` | This file | None |
 | `PLAN.md` | Presenter + self-guided plan | None |
 | `NOTES.md` | Presenter quick reference | None |
-| `verify_demo.py` | 39-check pre-demo verification | None |
-| `populate_demo_runs.py` | Seeds 16 synthetic demo runs | Writes `.pbg/composite-runs.db` (gitignored) |
-| `prep_remote_build.py` | Pre-builds sms-api Docker image | Writes `.demo_state.json` (gitignored) |
-| `prep_remote_land.py` | Pre-lands a remote run | Writes `.pbg/composite-runs.db` (gitignored) |
+| `verify_demo.py` | Pre-demo verification (offline flow) | None |
+| `populate_demo_runs.py` | Seeds synthetic demo runs (offline flow) | Writes `.pbg/composite-runs.db` (gitignored) |
+| `prep_remote_build.py` | Pre-builds sms-api Docker image (offline flow) | Writes `.demo_state.json` (gitignored) |
+| `prep_remote_land.py` | Pre-lands a remote run (offline flow) | Writes `.pbg/composite-runs.db` (gitignored) |
 | `.gitignore` | Prevents committing generated state | None |
 
 ---
 
-## Appendix E: Troubleshooting
+## Appendix E: Troubleshooting (remote flow)
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| Page loads blank | Server not running | Check terminal for `vivarium-dashboard serve` |
-| "Connection refused" | Wrong port | Confirm `--port 8771` |
-| Composite resolves to error | Missing deps | Skip; use `baseline` or `colony` |
-| Simulations DB shows 0 runs | DB cleaned | `python demos/v2ecoli/populate_demo_runs.py` |
-| ParCa Explorer blank iframe | bigraph-loom missing | `pip install bigraph-loom` |
-| "Run remotely" fails | Tunnel down | Check `ptools-proxy.sh` terminal; verify `curl localhost:8080/docs` |
+| `http://localhost:8080/workbench` refuses / times out | Tunnel down or SSO expired | Check the `sms-proxy.sh` terminal; re-run `stanford test`, then restart the tunnel |
 | Tunnel fails: "credentials not valid" | SSO session expired | Re-run `stanford test` |
 | Tunnel fails: "Could not find submit node" | Wrong stack or region | Confirm `AWS_PROFILE=stanford-sso` and `AWS_DEFAULT_REGION=us-gov-west-1` |
-| Chart shows "viz_freshness" warning | Normal — charts predate latest run | Explain freshness tracking |
-| CSRF error on POST | Browser origin mismatch | Access via `localhost` (not `127.0.0.1`) |
-| PTools card shows error | Container not running | Mention as integration example, skip |
-| Port 8771 already in use | Prior server still running | `kill $(lsof -ti:8771)` |
+| Tab slow to populate | SSM tunnel latency (~8s/GET) | Normal — wait a beat; the page is interactive |
+| `cross-origin request forbidden` on any POST (Run, save) | Workbench pod missing `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS` | Set `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS=http://localhost:8080` on the workbench Deployment env and roll out (the ALB rewrites `Host` and omits `X-Forwarded-Host`, so same-origin/`--trust-proxy` cannot admit the origin) |
+| Composite Explorer / loom panel 500s | Deployed image predates the `bigraph-loom` overlay | Rebuild from `demo-v2ecoli` (`gh workflow run build-and-push.yml --ref demo-v2ecoli`), bump the overlay `newTag`, roll out |
+| Study detail loads blank/unstyled | Deployed image predates the base-path fix | Rebuild + redeploy as above |
+| Composite resolves to error | Missing deps for that composite | Skip; use `baseline`, `parca`, or `colony` |
+| Simulations DB shows 0 runs | Workspace PVC not mounted / empty | Confirm the workbench pod has `/workspace` mounted; check `kubectl -n sms-api-stanford-test describe pod` |
+| "Run remotely" fails | sms-api unreachable in-cluster | Check `SMS_API_BASE` on the workbench Deployment; check sms-api pod health |
+| PTools card shows error | Container not running | Mention as an integration example, skip |
+
+Cluster access for the fixes above:
+```bash
+export AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
+  KUBECONFIG=/Users/alexanderpatrie/.kube/kube_stanford_test.yml
+kubectl -n sms-api-stanford-test logs -f deploy/workbench
+kubectl -n sms-api-stanford-test rollout status deploy/workbench
+```
+(`scripts/set-govcloud-env.sh smsvpctest` sets these env vars for you.)
 
 ---
 
 ## Appendix F: Presenter Must-Know
 
-1. **CLI name**: `vivarium-dashboard serve` (venv has pre-rename package — both names point at same code)
-2. **Branch**: `demo-v2ecoli` in `vivarium-collective/vivarium-dashboard` — no v2ecoli files modified
-3. **Auth**: `stanford test` in `~/.zshrc` sets `AWS_PROFILE=stanford-sso`, `AWS_DEFAULT_REGION=us-gov-west-1`, runs `aws sso login`
-4. **Tunnel**: `~/sms/sms-cdk/scripts/ptools-proxy.sh -s smsvpctest` proxies `localhost:8080` → SMS API via batch submit node + internal ALB
-5. **Simulations DB**: 52 runs, 16 synthetic + 4 remote ☁️ + real runs; seeded by `populate_demo_runs.py`
-6. **No raw simulation data**: Showcase chart PNGs are present and render correctly. You CANNOT re-run showcase sims without rebuilding ParCa caches — which is not needed for this demo.
+1. **Everything is remote**: the dashboard is a Kubernetes pod on GovCloud, reached at `http://localhost:8080/workbench` through the SSM tunnel. There is no local server in this flow.
+2. **Tunnel**: `~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest` → `localhost:8080` → submit node → internal ALB → `/workbench` (dashboard), `/docs` (SMS API), `/` + `/sms/sms.html` (PTools).
+3. **Auth**: `stanford test` in `~/.zshrc` sets `AWS_PROFILE=stanford-sso`, `AWS_DEFAULT_REGION=us-gov-west-1`, runs `aws sso login`.
+4. **CSRF**: the pod carries `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS=http://localhost:8080` — the ALB rewrites `Host`, so this allowlist is what makes POSTs work.
+5. **Latency**: SSM-tunnel GETs can take several seconds; the page is interactive throughout.
+6. **CLI name**: `vivarium-workbench` (the `vivarium-dashboard` name still works as a deprecated alias).
 7. **ParCa live run**: Fast mode ~15s (7 TF conditions). Full mode ~2.4 min (51 conditions).
-8. **Reset**: `python demos/v2ecoli/populate_demo_runs.py` restores synthetic run entries.
+8. **Numbers** (173 processes, 28 composites, 8 investigations, 52 runs, 58 viz) reflect the seeded workspace; confirm against the live remote before quoting exact figures.
+
+---
+
+## Appendix G: Local Dev (offline)
+
+The original local-serve flow, preserved as a fallback for offline development
+(no tunnel, no GovCloud). The dashboard serves a local v2ecoli workspace on
+`localhost:8771`.
+
+### G.1 Repository & Environment
+```bash
+git clone git@github.com:vivarium-collective/vivarium-dashboard.git ~/vivarium-app/vivarium-dashboard
+cd ~/vivarium-app/vivarium-dashboard
+git checkout demo-v2ecoli
+git clone git@github.com:vivarium-collective/v2ecoli.git ~/vivarium-app/v2ecoli
+uv sync --extra demo
+```
+Verify:
+```bash
+source .venv/bin/activate
+python -c "import v2ecoli, viva_munk, pbg_ketchup, pbg_copasi; print('OK')"
+```
+Minimum hardware: macOS/Linux, 16 GB RAM, 5 GB free disk.
+
+### G.2 Pre-Demo Seeding (one-time)
+```bash
+source .venv/bin/activate
+python demos/v2ecoli/populate_demo_runs.py    # seeds synthetic demo runs
+# (optional, needs the tunnel) pre-build + pre-land remote runs:
+python demos/v2ecoli/prep_remote_build.py
+python demos/v2ecoli/prep_remote_land.py
+```
+
+### G.3 Pre-Flight (every offline session)
+```bash
+cd ~/vivarium-app/vivarium-dashboard
+python demos/v2ecoli/verify_demo.py                       # expect all checks pass
+vivarium-workbench serve --workspace ~/vivarium-app/v2ecoli --port 8771
+open http://localhost:8771
+```
+> The CLI accepts both `vivarium-workbench serve` and the deprecated
+> `vivarium-dashboard serve` — same code.
+
+For the offline flow, use `http://localhost:8771/...` in place of every
+`http://localhost:8080/workbench/...` URL in Segments 1–8. Segment 6 remote runs
+still need the tunnel (Section 1) since they call sms-api on GovCloud.
+
+### G.4 After the Demo (offline)
+```bash
+kill $(lsof -ti:8771) 2>/dev/null
+python demos/v2ecoli/populate_demo_runs.py    # reset demo runs if needed
+```
+
+### G.5 Offline Troubleshooting
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Page loads blank | Server not running | Check the `vivarium-workbench serve` terminal |
+| "Connection refused" | Wrong port | Confirm `--port 8771` |
+| ParCa Explorer blank iframe | bigraph-loom missing in the venv | `pip install bigraph-loom` (the git-main dep) |
+| CSRF error on POST | Browser origin mismatch | Access via `localhost` (not `127.0.0.1`) |
+| Port 8771 already in use | Prior server still running | `kill $(lsof -ti:8771)` |

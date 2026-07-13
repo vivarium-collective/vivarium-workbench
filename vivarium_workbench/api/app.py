@@ -483,7 +483,11 @@ def create_app() -> FastAPI:
         the browser's ``Origin`` reflects. ``VIVARIUM_WORKBENCH_TRUST_PROXY=1``
         (``--trust-proxy``) opts into comparing Origin against
         ``X-Forwarded-Host`` instead — only enable this behind a proxy you
-        control, since the header is otherwise attacker-controlled.
+        control, since the header is otherwise attacker-controlled. When the
+        proxy neither preserves ``Host`` nor emits ``X-Forwarded-Host`` (e.g. an
+        AWS ALB), declare the browser-facing origin explicitly via
+        ``VIVARIUM_WORKBENCH_ALLOWED_ORIGINS`` (``--allowed-origin``) — an exact
+        match short-circuits to allow, header-independently.
         """
         if request.method in ("POST", "DELETE"):
             if not _csrf.is_request_allowed(
@@ -492,6 +496,7 @@ def create_app() -> FastAPI:
                 disabled=_csrf.is_disabled_via_env(os.environ),
                 forwarded_host=request.headers.get("x-forwarded-host"),
                 trust_forwarded=_csrf.is_trust_proxy_via_env(os.environ),
+                allowed_origins=_csrf.allowed_origins_via_env(os.environ),
             ):
                 return JSONResponse(
                     {"error": "cross-origin request forbidden"}, status_code=403

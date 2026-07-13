@@ -85,3 +85,52 @@ def test_is_trust_proxy_via_env():
     assert csrf.is_trust_proxy_via_env({}) is False
     # Dual-reads the deprecated pre-rename prefix.
     assert csrf.is_trust_proxy_via_env({"VIVARIUM_DASHBOARD_TRUST_PROXY": "1"}) is True
+
+
+# ---------------------------------------------------------------------------
+# Allowed-origins allowlist: a production-grade escape for proxies (e.g. an AWS
+# ALB) that REWRITE Host AND omit X-Forwarded-Host, so neither the raw-Host
+# same-origin check nor ``trust_forwarded`` can ever admit the browser Origin.
+# The operator declares the exact browser-facing origin; an exact match wins.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "origin, host, allowed, expected",
+    [
+        # Origin exactly in the allowlist admits even though raw Host (the
+        # ALB-rewritten internal name) does not match -> allow. This is the
+        # exact production scenario the diagnostic confirmed.
+        ("http://localhost:8080", "internal-elb.amazonaws.com", ["http://localhost:8080"], True),
+        # Multiple allowed origins; the matching one wins.
+        ("https://demo.example.gov", "10.0.1.5:8000",
+         ["http://localhost:8080", "https://demo.example.gov"], True),
+        # Origin not in the allowlist AND host mismatch -> deny (guard intact).
+        ("http://evil.example.com", "internal-elb.amazonaws.com", ["http://localhost:8080"], False),
+        # Empty allowlist -> legacy behavior unchanged (same-origin still works).
+        ("http://127.0.0.1:8080", "127.0.0.1:8080", [], True),
+        ("http://127.0.0.1:8080", "internal-elb.amazonaws.com", [], False),
+        # None allowlist -> legacy behavior unchanged.
+        ("http://127.0.0.1:8080", "127.0.0.1:8080", None, True),
+        # Allowlist matches on the FULL origin string (scheme-sensitive): an
+        # http Origin does not match an https allowlist entry -> falls through
+        # to same-origin, which also mismatches -> deny.
+        ("http://localhost:8080", "internal-elb.amazonaws.com", ["https://localhost:8080"], False),
+    ],
+)
+def test_is_request_allowed_allowlist(origin, host, allowed, expected):
+    assert csrf.is_request_allowed(
+        origin, host, disabled=False, allowed_origins=allowed,
+    ) is expected
+
+
+def test_allowed_origins_via_env():
+    # Comma-separated, whitespace-trimmed, empties dropped.
+    assert csrf.allowed_origins_via_env(
+        {"VIVARIUM_WORKBENCH_ALLOWED_ORIGINS": "http://localhost:8080, https://a.gov ,"}
+    ) == ["http://localhost:8080", "https://a.gov"]
+    # Unset -> empty list (guard unchanged).
+    assert csrf.allowed_origins_via_env({}) == []
+    # Dual-reads the deprecated pre-rename prefix.
+    assert csrf.allowed_origins_via_env(
+        {"VIVARIUM_DASHBOARD_ALLOWED_ORIGINS": "http://localhost:8080"}
+    ) == ["http://localhost:8080"]

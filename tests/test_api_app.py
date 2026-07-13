@@ -4380,6 +4380,37 @@ class TestCsrfMiddleware:
         assert r.status_code == 403
         assert r.json() == {"error": "cross-origin request forbidden"}
 
+    def test_allowlisted_origin_passes_despite_host_mismatch(self, client, monkeypatch):
+        # The production scenario: an ALB rewrites Host (TestClient's raw Host is
+        # 'testserver') and sends NO X-Forwarded-Host, so neither same-origin nor
+        # trust-proxy can admit the browser Origin. The explicit allowlist does.
+        monkeypatch.setenv(
+            "VIVARIUM_WORKBENCH_ALLOWED_ORIGINS", "http://localhost:8080"
+        )
+        from pbg_superpowers import workspace_catalog
+        monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/nope"},
+            headers={"Origin": "http://localhost:8080"},
+        )
+        assert r.status_code != 403
+        assert r.status_code == 400
+
+    def test_non_allowlisted_origin_still_403(self, client, monkeypatch):
+        # An allowlist is configured, but a DIFFERENT cross-origin request is
+        # still rejected -> the allowlist is exact-match, not a blanket disable.
+        monkeypatch.setenv(
+            "VIVARIUM_WORKBENCH_ALLOWED_ORIGINS", "http://localhost:8080"
+        )
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/nope"},
+            headers={"Origin": "http://evil.example.com"},
+        )
+        assert r.status_code == 403
+        assert r.json() == {"error": "cross-origin request forbidden"}
+
 
 # ===========================================================================
 # C-state-3a: POST /api/source/switch (in-process workspace re-point)

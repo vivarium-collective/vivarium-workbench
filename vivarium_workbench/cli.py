@@ -51,6 +51,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if getattr(args, "trust_proxy", False):
         os.environ["VIVARIUM_WORKBENCH_TRUST_PROXY"] = "1"
 
+    allowed = getattr(args, "allowed_origin", None) or []
+    if allowed:
+        os.environ["VIVARIUM_WORKBENCH_ALLOWED_ORIGINS"] = ",".join(allowed)
+
     # Render the dashboard HTML once before serving.
     try:
         from vivarium_workbench.lib.report import render_dashboard
@@ -446,6 +450,14 @@ def main(argv: list[str] | None = None) -> int:
              "(sets VIVARIUM_WORKBENCH_TRUST_PROXY=1). Only enable behind a "
              "reverse proxy you control (e.g. an ALB/SSM tunnel) — do NOT "
              "enable for direct/loopback serving.",
+    )
+    p_serve.add_argument(
+        "--allowed-origin", action="append", metavar="ORIGIN",
+        help="Declare a browser-facing Origin (scheme + host[:port], e.g. "
+             "http://localhost:8080) that is always allowed for POST/DELETE, "
+             "even when the proxy rewrites Host and omits X-Forwarded-Host "
+             "(sets VIVARIUM_WORKBENCH_ALLOWED_ORIGINS). Repeatable. Use behind "
+             "a proxy you control — an ALB terminating a /workbench subpath.",
     )
     p_serve.set_defaults(func=cmd_serve)
 
