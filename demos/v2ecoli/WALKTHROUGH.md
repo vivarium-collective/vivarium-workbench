@@ -142,7 +142,7 @@ open http://localhost:8771
 ## 2. Segment 1: Introduction (2 min)
 
 ### Actions
-1. Open `http://localhost:8771` — confirm page renders with `<title>v2ecoli</title>` and workspace branding
+1. Open `http://localhost:8080` — confirm page renders with `<title>v2ecoli</title>` and workspace branding
 2. Point out the **left rail** — 9 pages: Sources, Registry, Composites, Investigations, Simulations DB, Analyses, Studies, Branch, Composite Explorer
 3. Point out the **investigation switcher** at the top of the rail
 4. Point out the **workspace name chip** in the rail header (source switching for remote builds in Segment 6)

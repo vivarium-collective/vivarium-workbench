@@ -6,13 +6,22 @@ Fix: composite-resolve swallows real exceptions; colony (pymunk) composite 500s 
 
 ### Status
 
-PENDING — plan only, no code written. Scoped via two Explore agents (root-cause
-trace) + a Plan agent (fix design), then verified against live source
-(`lib/composite_resolve.py`, `api/app.py`). Independent of item #2 (different
-subsystem, different files) and of item #1 (already-resolved subpath-deploy
-fix) — no ordering dependency between any of them. All three share the broader
-demo-v2ecoli e2e-walkthrough context. Tier 2's dependency-fix sub-branch (see
-below) is explicitly gated on evidence not yet available.
+TIER 1 + TIER 2 IMPLEMENTED + COMMITTED + DEPLOYED — but ❌ **composite
+still 500s in the browser**. Tier 1 (log the swallowed exception) + Tier 2
+(degrade unguarded seams via `_degraded_result()`) landed in `481b3f2` on
+`demo-v2ecoli`; targeted suites pass. **Tier 1 did its job**: the deployed
+logging surfaced a real traceback — but not from the composite-resolve seams
+Tier 2 guarded. It's `ModuleNotFoundError: No module named 'bigraph_loom'` on the
+**loom-asset route** (`api/app.py` `bigraph_loom_asset` → `lib/static_serving.py`
+→ `resolve_loom_asset()`). Because the Composite Explorer's loom panel is always
+visible (`[[project_composite_explorer_layout]]`), opening *any* composite —
+colony included — fires a loom-asset request, so a missing `bigraph_loom` renders
+as a generic "internal server error" regardless of which composite is selected.
+**This is now the leading candidate for the real Bug 3, and it IS the Tier 2a
+dependency fix that was gated on this evidence — but it has NOT been confirmed as
+the specific cause of the colony click** (the traceback came from an
+already-scrolled log tail, not a live correlated repro). See "Tier 2a — now
+unblocked" below. Independent of items #1/#2.
 
 ### Bug report
 
@@ -196,14 +205,54 @@ presence).
   `demos/v2ecoli/NOTES.md:219`) and thus not reproduce the deployed failure at
   all.
 
+### Tier 2a — now unblocked by Tier 1's deployed evidence (candidate, not yet confirmed)
+
+The gate was "deploy Tier 1, read the real traceback." Done — and it points at a
+**missing `bigraph_loom` in the deployed combined image**, not at the
+composite-resolve seams. Supporting structural evidence found in the `Dockerfile`:
+
+- The combined image builds its Python env from **v2ecoli's lockfile**
+  (`Dockerfile:43-45`, `uv sync` inside `/app/v2ecoli`), NOT from the workbench's
+  own lock. `bigraph-loom` is declared in *workbench's* `pyproject.toml:47` as a
+  direct git URL — but if it's absent from v2ecoli's `uv.lock`, the `uv sync`
+  never installs it, and the later `--no-deps` workbench overlay (`Dockerfile:55`)
+  won't pull it either.
+- The build sanity check (`Dockerfile:70`) imports `pbg_v2ecoli`,
+  `vivarium_workbench`, `pbg_ptools.workbench_viewers` — but **not**
+  `bigraph_loom`. So a missing `bigraph_loom` passes the build and only fails at
+  runtime on the first loom-asset request. Exactly the observed symptom.
+
+**Decisive local test (no cluster needed):** fetch v2ecoli's `uv.lock` and grep
+for `bigraph-loom`/`bigraph_loom`. If absent → the fix is (1) add an explicit
+`uv pip install --python /app/v2ecoli/.venv/bin/python --no-deps
+"bigraph-loom @ git+..."` overlay in the Dockerfile (mirroring the pbg-ptools
+overlay at `Dockerfile:63-66`), and (2) extend the `Dockerfile:70` sanity import
+to include `import bigraph_loom` so this can never silently ship again.
+
+**Still to confirm before/alongside the fix:** re-click "colony" in the Composite
+Explorer while tailing `kubectl -n sms-api-stanford-test logs -f deploy/workbench`
+to directly correlate the colony request with the `bigraph_loom` traceback (vs.
+a coincidental loom-asset error from another tab). Note this may be a *distinct*
+bug from the pymunk/`Viva-munk` candidate (a) originally hypothesized — the
+resolve-panel-specific pymunk failure could still exist underneath once the loom
+route is fixed.
+
 ### Progress notes
 
-- **2026-07-13**: Plan scoped and written (no code yet). Root-caused via
-  `Agent(Explore)` tracing the frontend call, backend endpoint, and the
-  error-swallowing exception handler; fix designed via `Agent(Plan)`; both
-  cross-checked by reading `lib/composite_resolve.py` and `api/app.py`
-  directly, confirming which failure paths are already guarded vs. not.
-  Awaiting user "proceed" to implement; Tier 2a (dependency fix) additionally
-  gated on deployed-log evidence from Tier 1.
+- **2026-07-13 (plan)**: Scoped and written. Root-caused via `Agent(Explore)`
+  tracing the frontend call, backend endpoint, and the error-swallowing exception
+  handler; fix designed via `Agent(Plan)`; cross-checked against
+  `lib/composite_resolve.py` and `api/app.py`.
+- **2026-07-13 (Tier 1+2 implemented)**: Landed in `481b3f2` (same commit as #2).
+  Catch-all handler now `logger.exception(...)`s; both unguarded seams degrade via
+  the new shared `_degraded_result()` helper. Targeted suites
+  (`test_composite_resolve_dispatch.py`, `test_composite_resolve_fallback.py`,
+  `test_api_app.py`) pass.
+- **2026-07-13 (deployed — Tier 1 surfaced new evidence; still 500)**: Composite
+  still 500s in browser. Tier 1 logging captured `ModuleNotFoundError: No module
+  named 'bigraph_loom'` on the loom-asset route (not the guarded resolve seams),
+  which now unblocks Tier 2a — see "Tier 2a — now unblocked" above. **This is
+  where the work stopped**; Tier 2a not yet confirmed for the colony click or
+  implemented.
 
 ---

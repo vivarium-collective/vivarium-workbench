@@ -6,12 +6,16 @@ Fix: CSRF/origin guard 403s all POST/DELETE behind ALB reverse-proxy subpath dep
 
 ### Status
 
-PENDING — plan only, no code written. Scoped via two Explore agents (root-cause
-trace) + a Plan agent (fix design), then verified against live source
-(`lib/csrf.py`, `lib/env_compat.py`, `api/app.py`, `cli.py`). Independent of
-item #3 (different subsystem) and of item #1 (already-resolved subpath-deploy
-fix) — no ordering dependency between any of them. All three share the broader
-demo-v2ecoli e2e-walkthrough context.
+IMPLEMENTED + COMMITTED + DEPLOYED — but ❌ **STILL BROKEN in the browser**.
+The fix (opt-in `trust_forwarded`/`forwarded_host` on `is_request_allowed()` +
+`--trust-proxy`/`VIVARIUM_WORKBENCH_TRUST_PROXY=1`) landed in `481b3f2` on
+`demo-v2ecoli`, targeted suites pass, and the flag is present in the running
+pod's args (verified via `kubectl get deployment ... -o jsonpath`). Despite that,
+the 2026-07-13 browser walkthrough still hit `{"error":"cross-origin request
+forbidden"}`, and `POST /workbench/api/study-run-baseline → 403` is reproduced
+server-side in the pod logs. **The code fix is correct in isolation but is not
+taking effect through the ALB→SSM-tunnel→k8s hop chain; that root cause is NOT
+yet found.** See "Post-deploy diagnosis" below. Independent of items #1/#3.
 
 ### Bug report
 
@@ -147,12 +151,44 @@ hatch must keep working.
   if `X-Forwarded-Host` isn't present, the fix needs to also read a `Forwarded:
   host=` header or the deployment needs a k8s/ingress annotation to add one.
 
+### Post-deploy diagnosis (the actual remaining gap)
+
+The designed fix shipped and deployed but did NOT resolve the browser symptom.
+Three live hypotheses for why `--trust-proxy` isn't taking effect — this is
+exactly the "Deployed-environment-only" verification caveat above coming true
+(the ALB chain may not forward `X-Forwarded-Host` at all):
+
+1. **ALB/tunnel never sets `X-Forwarded-Host`** (only `-For`/`-Proto`, or
+   nothing) — `is_request_allowed()`'s `forwarded_host` is then empty and
+   silently falls back to the mismatching raw `Host`. Most likely.
+2. **`is_trust_proxy_via_env()` reads the wrong env var** — possible
+   legacy/aliasing mismatch (old `VIVARIUM_DASHBOARD_*` prefix vs new
+   `VIVARIUM_WORKBENCH_*`, or wrong suffix constant in `lib/env_compat.py`).
+3. **Uvicorn's `ProxyHeadersMiddleware` strips `X-Forwarded-Host`** before the
+   CSRF middleware sees it (it appears in the bug-3 traceback stack), if not
+   configured with the right trusted-proxy CIDR.
+
+**Next diagnostic step**: read `lib/csrf.py` (`is_request_allowed`,
+`is_trust_proxy_via_env`) + `api/app.py`'s `_csrf_mw` side by side, and inspect
+the header values actually arriving — either `curl -v` through the live
+`sms-proxy.sh -s smsvpctest` tunnel, or a temporary debug-log redeploy. Likely
+resolves to either a manifest-level uvicorn `--proxy-headers`/trusted-host config
+change, a k8s/ingress annotation to inject `X-Forwarded-Host`, or a code fix to
+the env-var check.
+
 ### Progress notes
 
-- **2026-07-13**: Plan scoped and written (no code yet). Root-caused via
-  `Agent(Explore)` tracing `_csrf_ok`/`_csrf_mw`/reverse-proxy header handling;
-  fix designed via `Agent(Plan)`; both cross-checked by reading `lib/csrf.py`,
-  `lib/env_compat.py`, `api/app.py`, `cli.py` directly. Awaiting user "proceed"
-  to implement.
+- **2026-07-13 (plan)**: Scoped and written. Root-caused via `Agent(Explore)`
+  tracing `_csrf_ok`/`_csrf_mw`/reverse-proxy header handling; fix designed via
+  `Agent(Plan)`; cross-checked against `lib/csrf.py`, `lib/env_compat.py`,
+  `api/app.py`, `cli.py`.
+- **2026-07-13 (implemented)**: Fix landed in `481b3f2`. Targeted suites
+  (`test_csrf_lib.py`, `test_csrf_origin_guard.py`,
+  `test_api_app.py::TestCsrfMiddleware`) pass.
+- **2026-07-13 (deployed + FAILED verification)**: Image `481b3f2` deployed with
+  `--trust-proxy` in the pod args; browser walkthrough **still hit the 403**,
+  reproduced server-side in pod logs. Root cause of why the fix isn't taking
+  effect not yet found — see "Post-deploy diagnosis" above. **This is where the
+  work stopped.**
 
 ---
