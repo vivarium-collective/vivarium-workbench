@@ -5234,6 +5234,27 @@ def create_app() -> FastAPI:
         body, status = _remote_run_views.remote_run_status(params)
         return JSONResponse(status_code=status, content=body)
 
+    @app.post("/api/remote-run-pinned-build", tags=["Runs"], status_code=202,
+              summary="Pinned phase 1: resolve the latest built simulator (no push/login)")
+    def remote_run_pinned_build(
+        req: Union[dict, None] = Body(default=None),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Pinned variant of phase 1: resolve the latest built simulator for the
+        configured repo@branch. No git push, no GitHub login — enabled by the
+        ``VIVARIUM_WORKBENCH_REMOTE_PINNED`` deployment config."""
+        body, status = _remote_run_views.remote_run_pinned_build_start(ws, req or {})
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get("/api/remote-run-config", tags=["Runs"],
+             summary="Whether pinned remote runs are enabled + the resolved build")
+    def remote_run_config() -> JSONResponse:
+        """Report pinned-run config so the client can relabel the run card. When
+        pinned mode is on, eagerly resolves the build so the UI can show the
+        commit; degrades to ``pinned:true`` w/o a build rather than erroring."""
+        body, status = _remote_run_views.remote_run_config()
+        return JSONResponse(status_code=status, content=body)
+
     # -----------------------------------------------------------------------
     # Auth — GitHub OAuth Device Flow (5 thin wrappers over lib.github_auth)
     #

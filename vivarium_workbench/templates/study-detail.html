@@ -2111,6 +2111,9 @@ window._seedFollowupProposal = _seedFollowupProposal;
   if (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.mode === "snapshot") {
     var rp = document.getElementById("remote-run-panel");
     if (rp) rp.style.display = "none";
+  } else if (window._initRemoteRunPinned) {
+    // Live backend: relabel the remote-run card if pinned mode is enabled.
+    window._initRemoteRunPinned();
   }
 })();
 </script>
