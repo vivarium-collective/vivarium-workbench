@@ -1,14 +1,101 @@
 # Demo Verification Report
 
-Generated from live API calls against a running `vivarium-workbench` server at
-`http://127.0.0.1:8771` (workspace: v2ecoli). Each segment is verified
-programmatically via the dashboard's REST API and recorded below. This report
-serves as a static, tangible proof of functionality — every claim in the
-presenter script is backed by a live API response recorded here.
+This report has **two passes**:
 
-**Branch:** `demo-v2ecoli`
-**Date:** 2026-07-09
-**Workspace:** `/Users/alexanderpatrie/vivarium-app/v2ecoli`
+1. **Remote GovCloud verification + MVP feasibility (2026-07-14)** — the current,
+   authoritative pass against the **remote** `/workbench` deployment on
+   `sms-api-stanford-test` (GovCloud `smsvpctest`), reached through the SSM tunnel
+   at `http://localhost:8080/workbench`. This is where the demo actually runs now.
+   See the section immediately below.
+2. **Local-server baseline (2026-07-09)** — the original per-segment detail,
+   generated against a local `vivarium-workbench serve` at `http://127.0.0.1:8771`.
+   Retained in full further down as the granular baseline; its raw counts (e.g. a
+   local 18-run DB) are local-only and are superseded by the remote pass for
+   demo purposes.
+
+**Branch:** `demo-v2ecoli` · **Remote verify:** 2026-07-14 · **Baseline:** 2026-07-09
+
+---
+
+## Remote GovCloud Verification — MVP Feasibility (2026-07-14)
+
+**Question answered:** is the demo, as imagined (the 8-segment
+`WALKTHROUGH.md`), a demoable MVP right now — *before* the deferred PTools Omics
+Viewer fix (plan 9)?
+
+**Verdict: YES — a shippable MVP as it stands.** 7½ of 8 segments are fully
+working live; the single gap (the PTools Omics Viewer *Launch*) fails softly and
+is one sub-panel of one segment. The core value proposition — *one dashboard,
+many simulators, git-tracked, running on GovCloud with a real remote simulation
+landing live* — is proven end-to-end.
+
+### Segment-by-segment readiness (remote, through the tunnel)
+
+| Segment | State | Demoable now? |
+|---|---|---|
+| 1 Intro / Home | driven live (prior remote session) | ✅ |
+| 2 Registry (173 procs / 7 pkgs) | numbers verified live | ✅ *(cold-start risk)* |
+| 3 Composites (baseline / Millard / PDMP) | verified live (28 composites) | ✅ |
+| 4 ParCa (9 steps) | verified live | ✅ |
+| 5 Investigations (8, summaries view) | verified live | ✅ |
+| 6 Simulations DB + **remote run** | Part B **proven live** (sim 211 → Ray MNP → landed) | ✅ *(pacing)* |
+| 7 Analyses — interactive figures, 58 viz, 3D | figures serve 200 under `/workbench`, verified | ✅ |
+| 7 Analyses — **PTools Omics Launch** | does not auto-paint on `sms-ptools:0.5.9` | ⚠️ soft-fail |
+| 8 Wrap-up (recap figures) | all re-verified live | ✅ |
+
+### The one gap, in context
+
+The Omics Viewer **Launch** is the only functional shortfall, and it **fails
+softly, not loudly**: clicking Launch opens the real EcoCyc Cellular Overview
+page (HTTP 200) — the deployed `sms-ptools:0.5.9` simply ignores our
+`omics=t&url=` params (no error, no alert; `omics` isn't even a recognized
+dispatch case — 0.5.9 auto-loads only via `multiomics=t&datafile=<registered-key>`).
+The audience sees the E. coli pathway map, just not painted with the study's
+data. It's already tracked as **deferred plan 9** (register-then-launch, entirely
+on our side — Pathway Tools is proprietary and stays untouched) and does not touch
+the demo's spine.
+
+**Three clean ways to handle it in a recording today:** (a) skip the Launch button;
+(b) click it and narrate *"this opens the EcoCyc Cellular Overview — painting our
+simulation's omics onto it is the next step"*; or (c) record everything now and
+re-shoot just the ~15-second Omics beat after plan 9 lands (the WALKTHROUGH already
+calls the recording editable).
+
+### Risks worth knowing before recording (none are blockers)
+
+1. **Registry cold-start** — the Registry tab builds the v2ecoli core in a
+   workspace subprocess; the first hit timed out at 15 s cold and only returned on
+   a warm retry. *Mitigation:* pre-warm by clicking Registry once before recording.
+2. **Segment 6 Part B duration** — a live remote run is ~13 min (Ray provisioning
+   ~8 + run ~5), too long to watch in real time. *Mitigation:* pre-launch it or
+   show the already-landed run. The rewritten Segment 6 handles this.
+3. **Tunnel + SSO fragility** — the whole demo is remote; if the SSO session
+   expires mid-run the tunnel dies. *Mitigation:* fresh `aws sso login` right before.
+
+### Bottom line
+
+Plan 9 is polish on one panel, not an MVP prerequisite. Record now (Omics skipped
+or caveated) and optionally patch the Omics beat later, **or** do plan 9 first and
+record once — the difference is one editable ~15-second segment.
+
+### Remote pillar numbers (live, 2026-07-14)
+
+| Pillar | Live value | Source |
+|---|---|---|
+| Registry processes / packages | **173** / **7** sim packages | `/api/registry` (warm) |
+| Composites (baseline/Millard/PDMP present) | **28** | `/api/composites` |
+| ParCa steps | **9** (initialize → final_adjustments) | `/api/composite-resolve?id=…parca` |
+| Investigations (curated) | **8** | `/api/investigation-summaries` (raw `/api/investigations` = 41, uncurated) |
+| Visualization classes | **58** | `/api/visualization-classes` |
+| Simulations DB | **36** (35 seeded + 1 landed-live; 32 completed / 1 complete / 3 failed; origin 1 remote / 35 local) | `/api/simulations` |
+
+---
+
+## Local-server baseline (2026-07-09)
+
+*The sections below are the original granular per-segment verification against a
+local server. Counts are local-only; see the remote pass above for demo-authoritative
+numbers.*
 
 ---
 
@@ -408,23 +495,53 @@ Full investigation coverage: `v2ecoli-vecoli-comparison` (7 studies),
 
 **Result: PASS** — 1 saved viz (3D), 39 report cards, PTools configured, 12 study figures
 
+> **Remote update (2026-07-14):** on the GovCloud deployment the interactive
+> figures serve **200** under `/workbench/reports/figures/...` (the same paths at
+> the ALB root → 404, the collision the base-path prefix fixes), the study's omics
+> TSV is served at the PTools-fetched path, and there are **58** visualization
+> classes. The **PTools Omics Viewer Launch** is the one remote gap — it does not
+> auto-paint on `sms-ptools:0.5.9` (scheme mismatch; deferred → plan 9). See the
+> MVP-feasibility section at the top for the soft-fail detail.
+
 ---
 
 ## Segment 8: Wrap-up
 
-*Pending verification*
+**Verified live (remote, 2026-07-14)** — the wrap-up is a rapid recap of the
+architecture pillars, so verification means confirming every recited number is
+truthful against the live deployment (see the remote pillar table at the top):
+
+- [x] **173** processes / **7** simulator packages (registry warm-hit)
+- [x] Composites: baseline, Millard, PDMP all present (28 total)
+- [x] ParCa: **9** Steps (initialize → final_adjustments)
+- [x] Investigations: **8** (summaries view)
+- [x] Visualization classes: **58**
+- [x] Simulations DB: **36** — the recap "35 runs" was updated to 36 (35 seeded +
+  the 1 remote run landed live in Segment 6, a nice callback)
+- [x] AWS GovCloud: the entire dashboard is served in-cluster; remote runs go to
+  sms-api on GovCloud (verified throughout Segments 6–7)
+
+The in-browser rapid tab click-through recap itself is the presenter's action at
+demo time (no code/verify gap). `WALKTHROUGH.md` `Last verified` stamp extended to
+all 8 segments.
+
+**Result: PASS** — all recap figures re-verified against the live deployment
 
 ---
 
 ## Summary
 
-| Segment | Status | Key Metric |
+| Segment | Local baseline (2026-07-09) | Remote GovCloud (2026-07-14) |
 |---|---|---|
-| 1. Introduction | PASS | Server HTTP 200, 9 pages |
-| 2. Registry | PASS | 173 processes, 10 packages |
-| 3. Composites | PASS | 28 composites, 5 packages |
-| 4. ParCa | PASS | 9 steps, 83.5s fast mode |
-| 5. Investigations | PASS | 6 studies, 5 edges, gates verified |
-| 6. Simulations DB & Remote | PASS | 18 runs, 60 builds, multi-emitter |
-| 7. Analyses | PASS | 1 saved viz (3D), 39 report cards, 12 figures |
-| 8. Wrap-up | PENDING | — |
+| 1. Introduction | PASS — HTTP 200, 9 pages | ✅ driven live |
+| 2. Registry | PASS — 173 processes, 10 packages | ✅ 173 procs / 7 sim pkgs *(warm; cold-start risk)* |
+| 3. Composites | PASS — 28 composites, 5 packages | ✅ 28; baseline/Millard/PDMP present |
+| 4. ParCa | PASS — 9 steps, 83.5s fast mode | ✅ 9 steps |
+| 5. Investigations | PASS — 6 studies, 5 edges, gates | ✅ 8 (summaries view) |
+| 6. Simulations DB & Remote | PASS — 18 local runs, 60 builds | ✅ **remote run proven live** (sim 211 → Ray MNP → landed); DB = 36 |
+| 7. Analyses | PASS — 1 saved viz, 39 cards, 12 figures | ✅ figures 200 under `/workbench`, 58 viz; ⚠️ **Omics Launch deferred (0.5.9)** |
+| 8. Wrap-up | PENDING | ✅ all recap figures re-verified live |
+
+**MVP feasibility (2026-07-14): SHIPPABLE.** 7½ of 8 segments fully demoable live;
+the only gap is the PTools Omics Viewer Launch (soft-fail, deferred to plan 9). See
+the feasibility section at the top for recording options and risks.
