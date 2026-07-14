@@ -15,7 +15,45 @@ the user no rich progress signal. Independent of the Segment 7 work (#6). Source
 carries the merged+released demo work, `0.2.0`). No sms-api / v2ecoli changes
 required for iteration 1 (it consumes the polling the backend already exposes).
 
-## Status: 📋 PLANNED + REFINED + RE-TARGETED (via /plan, 2026-07-14) — awaits the literal "proceed" before code
+## Status: 🚧 IN PROGRESS (implementation started 2026-07-14 after "proceed")
+
+### Implementation progress
+- ✅ **WS-1** — `vivarium_workbench/static/progress-track.{js,css}` created. Dual-shape
+  (`stages`/`measured`) IIFE + `module.exports`; pure helpers `softFraction`
+  (clamp+cap), `measuredFraction`, `stageFraction`, `html`; `render`/`tick` browser
+  entry points (rebuild-vs-soft-update via `data-sig` to avoid aria-live churn);
+  `role="progressbar"` + `aria-value*` + `aria-live`; reduced-motion CSS. Node smoke
+  green (softFraction 0.5/0.9/0, stageFraction 0.4167→aria 42, failed class, measured
+  "step 3 of 12").
+- ✅ **WS-2** — `study-detail.js` `_renderRemoteRunProgress` rewritten as a thin
+  adapter over `ProgressTrack` (stages `resolve→submit→queued→running→done→landed`,
+  `_rrDeriveStages`), `_RR_TYPICAL_MS` soft-fill + `_rrSoftFor` stage-start tracking,
+  `setInterval(250ms)` tween (`_startRrTween`/`_stopRrTween` via `ProgressTrack.tick`),
+  legacy fallback `_renderRemoteRunProgressLegacy` when `window.ProgressTrack` absent,
+  `[.rr-track][.rr-extras]` shell so land button survives rebuilds. `phase` threaded
+  from `_pollRun` + unreachable-retry so Queued≠Running. Template: 2 includes added
+  (`progress-track.css` after `style.css`; `progress-track.js` before `study-detail.js`).
+  `node --check` green on both JS files.
+- ✅ **WS-3** — snapshot comment added at the existing hide site (component is inert:
+  zero network calls, only reachable from the hidden run button); measured-mode
+  ADOPTION NOTE for the local composite-run path added to `progress-track.js` header.
+- ✅ **WS-4** — `tests/js/test_progress_track.js` (24 assertions, `node` **green**):
+  softFraction clamp/cap/monotonic, measuredFraction, stageFraction, a11y contract
+  (`role=progressbar` + `aria-value*` + `aria-live`), failed class/no-spinner, measured
+  step text, signature stability. `test_study_detail_page.py::
+  test_study_detail_page_includes_progress_track_assets` **passes** (asset refs + load
+  order + mount point). No new suite failures (the 10 `test_study_detail_page` + 1
+  `test_remote_run_panel` fails are PRE-EXISTING — confirmed identical with edits
+  stashed). Walk-through verify **PASS**: bar advances 4→22→42→58→83→100% monotonic,
+  spinner on active, snaps to 100% at Landed, failure colors the right segment.
+- ⏳ **Remaining gate:** live-tunnel e2e (needs user AWS SSO + ~13-min real run) — the
+  final manual acceptance; component walk already proven headless.
+
+**All code complete.** Files: NEW `progress-track.{js,css}`, `tests/js/test_progress_track.js`;
+EDITED `study-detail.js` (adapter+tween), `study-detail.html` (2 includes + snapshot
+comment), `test_study_detail_page.py` (wiring test).
+
+## Status (prior): 📋 PLANNED + REFINED + RE-TARGETED (via /plan, 2026-07-14)
 
 Design refinement folded in from `~/.claude/plans/mellow-tinkering-moth.md`. Two
 design decisions were resolved with the user; feasibility was verified by a backend +

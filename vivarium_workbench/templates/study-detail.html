@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Study: {{ name }}</title>
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/progress-track.css">
 </head>
 <body>
 <main class="study-page">
@@ -2085,6 +2086,9 @@ window._seedFollowupStudy = _seedFollowupStudy;
 window._seedFollowupProposal = _seedFollowupProposal;
 </script>
 <script src="/configure-run.js"></script>
+<!-- ProgressTrack must load BEFORE study-detail.js: _renderRemoteRunProgress
+     (the pinned-build run card's progress adapter) depends on window.ProgressTrack. -->
+<script src="/progress-track.js"></script>
 <script src="/study-detail.js"></script>
 <script>
 // Re-assert the refresh-aware seed handlers AFTER study-detail.js (which
@@ -2108,6 +2112,10 @@ window._seedFollowupProposal = _seedFollowupProposal;
   ConfigureRun.mount(el, { composite: compositeRef, target: "study", study: slug });
   // Read-only bundle: there's no live backend to run on — hide the remote-run
   // launcher (the Configure & Run widget already renders a disabled preview).
+  // The ProgressTrack progress bar (progress-track.js) is inert here by
+  // construction: it makes ZERO network calls and only ever renders via
+  // _renderRemoteRunProgress, which is reachable only from the run button
+  // inside this now-hidden panel — so snapshots never invoke it.
   if (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.mode === "snapshot") {
     var rp = document.getElementById("remote-run-panel");
     if (rp) rp.style.display = "none";
