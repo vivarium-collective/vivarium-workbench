@@ -1,101 +1,107 @@
-# Checkpoint: Approved plan for todo #4 (remote GovCloud demo e2e) — ready to execute WS-A → WS-F
+# Checkpoint: Segment 6 Part B — pinned-build remote runs DEPLOYED + PROVEN LIVE; P7 doc + segments 7–8 + PRs remain
 
-**Updated:** 2026-07-13 (planning session). Supersedes the prior mid-diagnosis
-checkpoint. The two blocking demo bugs are now root-caused and folded into a
-single approved umbrella plan, **`.todo/plans/4-remote-govcloud-demo-e2e.md`**
-(full mirror at `~/.claude/plans/giggly-hatching-globe.md`). No implementation
-code was written this session — this checkpoint hands the plan to the next agent
-to begin executing.
+**Updated:** 2026-07-13 (execution session). The full-e2e demo blocker (Segment 6
+Part B "Run on remote") was root-caused to **three deployment gaps**, fixed via a
+new **pinned-build** model (Direction 1), deployed, and **proven live end-to-end**
+(sim 211 ran on a 3-node Ray cluster and landed). Ground-truth plan:
+**`.todo/plans/5-pinned-build-remote-runs.md`** (supersedes the Part-B portion of
+`.todo/plans/4-remote-govcloud-demo-e2e.md` WS-E).
 
-## Session goal
+## What happened this session
 
-Produce a comprehensive, approved plan to close every remaining gap in the
-`demo-v2ecoli` demo — fix Bug 2 (CSRF 403) + Bug 3 (Composite Explorer 500),
-rewrite `WALKTHROUGH.md` to the **remote-first** protocol, verify the full e2e
-GovCloud walkthrough is reproducible from the WALKTHROUGH alone, then merge +
-release. **The demo now targets the REMOTE `/workbench` deployment** via
-`sms-proxy.sh -s smsvpctest` → `http://localhost:8080/workbench`, NOT local serve.
+1. Restarted the tunnel; headless Pass-1 re-verified GREEN (Bug 2 CSRF→405; Bug 3
+   loom→200, parca+colony resolve→200; pod→sms-api /docs→200).
+2. Drove Segment 6. **Part A drift found** + **Part B blocked**.
+3. Root-caused Part B to 3 gaps (below). User reframed the demo to a **pinned
+   commit** (latest built `main`) → "one build, many sims". Chose **Direction 1**
+   (skip the build phase) + **config-gated** login (most production-grade/reproducible).
+4. Implemented, tested, committed, pushed. Kicked the image build.
 
-## Progress table
+## Root cause of Part B (evidence-backed on the live pod)
 
-| Item | Status | Notes |
-|---|---|---|
-| Sync docs to reality (NEXT_STEPS, .todo/*) | ✅ Done | Done earlier this session; MANIFEST + plans #2/#3 advanced to deployed+unverified. |
-| Root-cause Bug 3 | ✅ Done (CONFIRMED) | `grep -c bigraph-loom ~/vivarium-app/v2ecoli/uv.lock` = **0** → combined image never installs `bigraph_loom` → `ModuleNotFoundError` on always-visible loom panel. |
-| Root-cause Bug 2 | 🔄 NARROWED | AWS ALB omits `X-Forwarded-Host` → `--trust-proxy` is a no-op, falls back to raw `Host`. One live header capture still pending (WS-B step 1). |
-| Write approved plan as todo #4 | ✅ Done | `.todo/plans/4-remote-govcloud-demo-e2e.md` + MANIFEST entry #4. |
-| WS-A Bug 3 Dockerfile fix | ❌ PENDING | Next-session start point. |
-| WS-B Bug 2 diagnose → allowlist | ❌ PENDING | Diagnostic first, then code + manifest. |
-| WS-C WALKTHROUGH remote rewrite | 🔄 Barely started | User hand-edited line 145 (`8771`→`8080`), uncommitted. Full rewrite pending. |
-| WS-D build→deploy→verify cycle | ❌ PENDING | Per fix round. |
-| WS-E full e2e verification (acceptance gate) | ❌ PENDING | |
-| WS-F merge + release | ❌ PENDING | Only after WS-E passes. |
+Only Phase 1 (build) of the remote-run pipeline pushes git / needs login. On the pod:
 
-## Key files touched THIS session (docs only — no code)
+- **A** `VIVARIUM_WORKBENCH_GH_CLIENT_ID` unset → device-flow login disabled (`no_client_id`).
+- **B** `/workspace/.git` owned by uid **17163** ≠ app uid **0** → git "dubious ownership" → `has_origin_remote`=false, `github-repo`=null.
+- **C** workspace on protected `main` of v2ecoli → `git push -u origin main` rejected + violates no-push-to-main policy.
 
-- `.todo/plans/4-remote-govcloud-demo-e2e.md` — **NEW**, the umbrella plan. Read this first.
-- `.todo/MANIFEST.md` — added item #4; advanced #1 (✅ confirmed), #2 (❌ deployed-but-broken), #3 (❌ deployed, bigraph_loom evidence).
-- `.todo/plans/2-*.md`, `3-*.md` — statuses advanced from "PENDING/plan-only" to deployed+failed-verification, with "Post-deploy diagnosis" / "Tier 2a — now unblocked" sections + dated progress trails.
-- `NEXT_STEPS.md` — rewritten to the current 2-bugs-open reality (was about the resolved subpath fix).
-- `SAVE_SLOT.md` — this file.
-- `demos/v2ecoli/WALKTHROUGH.md` — **user hand-edit** (line 145 URL), uncommitted, NOT mine; a partial WS-C start.
+**Pinned-build model drops B & C** (no push, no local git) and **replaces A with a
+config gate** (submit/land do no GitHub write). Enabled declaratively via env.
 
-## Key design decisions (the next agent must honor these)
+## Shipped this session (committed + pushed)
 
-1. **Bug 2 fix = production-grade allowed-origins allowlist** (user chose "best production-grade feasible solution"). Add `allowed_origins` to `lib/csrf.py::is_request_allowed` (exact-match short-circuit) + `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS` env (via `lib/env_compat`) + repeatable `--allowed-origin` CLI flag + wire through `api/app.py::_csrf_mw` (~L493). Set the env to `http://localhost:8080` in the sms-api workbench Deployment. Preserves the CSRF guard; header-independent. NOT a blanket disable.
-2. **Bug 3 fix = dashboard Dockerfile**, NOT v2ecoli. `bigraph-loom` is the workbench's dep (`pyproject.toml:47`); v2ecoli is a plain pbg-template instance (per memory `[[project_v2ecoli_as_pbg_instance]]`). Add an explicit `uv pip install --no-deps "bigraph-loom @ git+…@main"` overlay + broaden the `Dockerfile:70` sanity import to `import bigraph_loom`.
-3. **Branch encapsulation** (per user): all work on `demo-v2ecoli` (./) + `patch/db-filter` (`~/sms/sms-api`) ONLY. `v2ecoli` main unchanged. Merge to `main` + version bump/release ONLY after the full e2e remote walkthrough is verified reproducible from WALKTHROUGH alone.
-4. **Diagnostic-first for Bug 2**: capture the real `Origin`/`Host`/`X-Forwarded-*` arriving at the pod (curl -v through the live tunnel, or a temp `_csrf_mw` debug log) BEFORE finalizing the fix — the allowlist is correct regardless, but this confirms whether the raw Host already matches (403 from elsewhere).
-5. **WALKTHROUGH local flow → Appendix G** (user chose "keep as fallback appendix"), remote flow becomes canonical §0/§1.
+- **vivarium-dashboard `demo-v2ecoli` `72e00b84`** — pinned-build remote runs:
+  - `lib/remote_pinned.py` (new): `pinned_config()`, `resolve_pinned_build()`
+    (picks newest **built** simulator for repo@branch from sms-api `versions`,
+    **normalizing `.git`** — the gotcha that made `latest_simulator` return an
+    unbuilt tip).
+  - `lib/remote_run_views.py`: `remote_run_pinned_build_start` (one in-cluster
+    GET → `phase:"built"`, no push/login/git), `remote_run_config`, relaxed
+    `_run_auth_ok()` gate (session OR pinned-enabled) on submit/land.
+  - `api/app.py`: `POST /api/remote-run-pinned-build`, `GET /api/remote-run-config`.
+  - `static/study-detail.js` + `templates/study-detail.html`: pinned card relabel
+    + skip-build submit path.
+  - `tests/test_remote_run_pinned.py` (14 pass). mypy clean; app builds; routes register.
+- **sms-api `patch/db-filter` `2ef52c0a`** — `kustomize/base/workbench/workbench.yaml`
+  +3 env: `VIVARIUM_WORKBENCH_REMOTE_PINNED=1`,
+  `VIVARIUM_WORKBENCH_REMOTE_REPO_URL=https://github.com/vivarium-collective/v2ecoli`,
+  `VIVARIUM_WORKBENCH_REMOTE_BRANCH=main`.
 
-## Verification
+## DONE — deployed + proven live (2026-07-13)
 
-- **Build**: no build step (pure Python + static assets).
-- **Tests**: NOT run this session (deliberately — planning only; the full suite's prior `F` failures were never triaged and re-baselining is WS-E). Per-fix suites to run during execution: `uv run pytest tests/test_csrf_lib.py tests/test_csrf_origin_guard.py tests/test_api_app.py -k csrf`.
-- **Infra confirmed live this session**: SSM tunnel is UP (`sms-proxy.sh -s smsvpctest`, PID 73960 / session-manager-plugin PID 74053 → `internal-smsvpc-…elb.amazonaws.com:80` ↔ `localhost:8080`). Routing analysis confirmed: raw SSM TCP forward, ALB path-routes `/workbench`.
+- Image **`72e00b8`** built (gh run 29292011506) + confirmed in GHCR; overlay
+  `newTag` 2c56cb8→72e00b8 applied + rolled out (pod 1/1).
+- Headless: `/api/remote-run-config` → `{pinned:true, commit 70b5ec3, simulator_id 69}`.
+- **Part B live e2e PASSED**: study card relabeled "Run against pinned build (main
+  @ 70b5ec3)"; clicked → **NO login prompt** → build reused (69) → submit (sim
+  211) → ParCa → **3-node transient Ray MNP cluster** (Batch RUNNABLE≈8 min = Ray
+  provisioning; STARTING→RUNNING≈5 min) → completed → **landed**
+  `baseline__1783986815__08c5be` in showcase-2-baseline-figures. **Simulations DB
+  now 36 runs.**
+- **KEY FINDING (feeds P7)**: landed-from-remote runs DO carry `remote_origin`
+  (`{deployment:smsvpctest, simulation_id:211, backend:ray}`), NOT local as the
+  old doc said. So remote-☁️ count = 0 until a live run lands, then +1 per landed run.
 
-## Next steps (priority order — start of next session)
+## Next steps (resume here)
 
-1. **WS-B step 1 (diagnostic, cheapest + unblocks the biggest decision)** — with the live tunnel (still up), capture headers: `curl -v -X POST -H 'Origin: http://localhost:8080' http://localhost:8080/workbench/api/<a-safe-POST>`; or add a one-line debug log in `api/app.py::_csrf_mw` (~L490) of `origin`/`host`/`x-forwarded-host`, redeploy via WS-D, re-hit. Decides whether raw Host mismatches (→ allowlist) or the 403 is elsewhere.
-2. **WS-A (Bug 3, fully local, deterministic)** — edit `Dockerfile`: add the `bigraph-loom` overlay install (mirror pbg-ptools at `Dockerfile:63-66`) + broaden the `Dockerfile:70` sanity import; run the anti-whack-a-mole lazy-import audit (grep `vivarium_workbench/` for other workbench-only deferred imports vs v2ecoli's lock).
-3. **WS-B step 2-4 (Bug 2 code + manifest)** — implement the allowlist in `lib/csrf.py`/`lib/env_compat.py`/`api/app.py`/`cli.py` (+ `uvicorn.run(..., proxy_headers=True, forwarded_allow_ips="*")` in `startup.py:120`), add tests, add the env to `~/sms/sms-api` `kustomize/base/workbench/workbench.yaml` on `patch/db-filter`.
-4. **WS-D** — `gh workflow run build-and-push.yml --ref demo-v2ecoli` → note SHA → bump workbench `newTag` in `sms-api-stanford-test/kustomization.yaml` → `kubectl apply -k` → `rollout status`.
-5. **WS-C** — rewrite WALKTHROUGH remote-first (the user already started line 145).
-6. **WS-E** then **WS-F** per the plan.
+1. ✅ **P7 — WALKTHROUGH Segment 6 rewrite DONE** (2026-07-13): pinned-build Part B
+   (card "Run against pinned build (main @ 70b5ec3)", no push/login; ParCa→Ray
+   MNP→land); Part A drift corrected (remote-☁️ 0 until live land; emitter sqlite
+   3/parquet 6/xarray 3/unrecorded 23; status 31 completed + 1 complete + 3
+   failed); "landed = local origin" → ray `remote_origin`; timing + offline numbers
+   (52→35) fixed; pinned-mode troubleshooting rows; header stamped.
+2. **Finish full 8-segment WS-E drive** (needs browser; AWAITING USER'S WORD):
+   Segments 7 (Analyses) + 8 (Wrap-up). Then extend the `Last verified` stamp to all 8.
+3. **WS-F PRs** (no auto-merge): PR #465 (demo-v2ecoli→main) + sms-api
+   patch/db-filter→main; then cut a release tag + repoint the overlay from `72e00b8`.
 
-## Deploy drift to reconcile (on `patch/db-filter`)
+## Ray/queued mechanism (confirmed from sms-api code, for the doc)
 
-- Committed workbench Deployment (`kustomize/base/workbench/workbench.yaml`) has `--base-path /workbench` but **no `--trust-proxy`** (was live-patched only). Image overlay pins **`0.1.1`**, not the live dev SHA `481b3f2`.
-- Suggest-commits protocol applies: agent stages, user commits via a shown one-liner. Do-not-commit list: CLAUDE.md, AGENTS.md, Makefile, todo.md, .pr-body-*.md. (`.todo/*`, NEXT_STEPS.md, SAVE_SLOT.md are OK to stage.)
+- v2ecoli runs on a **transient Ray cluster = AWS Batch MNP job** (`simulation_service_ray.py`):
+  node 0 = Ray head (runs workload), nodes 1: = workers; `RAY_NUM_NODES=3`, arm64,
+  queue `smsvpctest-ray-mnp`.
+- Dashboard "queued" = Batch `SUBMITTED`/`RUNNABLE`/`PENDING` (`_BATCH_STATE_MAP`).
+  `RUNNABLE` = provisioning the MNP compute (Ray spin-up); `PENDING` = waiting on
+  the **ParCa Batch dependency** (sim job gated on ParCa SUCCEEDED). Flips to
+  running at `STARTING`→`RUNNING`.
 
-## Quick reference
+## Pinned-build live facts (reuse)
 
-```bash
-# Tunnel (currently UP — verify before assuming)
-ps aux | grep sms-proxy | grep -v grep
-AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  ~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest    # → localhost:8080/workbench
+- `latest built main` = **simulator_id 69 @ 70b5ec3** (2026-07-06),
+  `simulator_status(69)`=completed. Matches the pod's checked-out commit.
+- **Gotcha**: builds registered under `.../v2ecoli` (no `.git`);
+  `latest_simulator(".../v2ecoli.git")` returns unbuilt tip `a08e20b` (no id).
+  ⇒ resolve from `versions`, normalize `.git`.
 
-# Cluster
-export AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  KUBECONFIG=/Users/alexanderpatrie/.kube/kube_stanford_test.yml
-kubectl -n sms-api-stanford-test logs -f deploy/workbench
-kubectl -n sms-api-stanford-test rollout status deploy/workbench
+## Env / gotchas
 
-# Build + deploy cycle (dev iteration)
-gh workflow run build-and-push.yml --ref demo-v2ecoli   # → git-SHA-tagged image
-#  then bump newTag in ~/sms/sms-api kustomize/overlays/sms-api-stanford-test/kustomization.yaml
-kubectl apply -k ~/sms/sms-api/kustomize/overlays/sms-api-stanford-test
-
-# Per-fix tests
-uv run pytest tests/test_csrf_lib.py tests/test_csrf_origin_guard.py tests/test_api_app.py -k csrf
-
-# Branch state: demo-v2ecoli (./ HEAD 9cf1658), patch/db-filter (~/sms/sms-api), main (~/vivarium-app/v2ecoli)
-```
+- Cluster: `export AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 KUBECONFIG=/Users/alexanderpatrie/.kube/kube_stanford_test.yml`
+- Tunnel: `~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest` → `localhost:8080/workbench`; dies with SSO expiry → `aws sso login` + restart.
+- Tests: `uv run --no-sync pytest -q` (bare `uv run` fails — missing `../pbg-ptools` path dep).
+- Commits this session are **SSH-signed and worked** (no gpgsign bypass needed).
+- Pre-existing unrelated test failure: `test_remote_run_panel.py::test_view_run_button_routes_to_visualizations_not_dead_route`.
 
 ## Related
 
-- `.todo/plans/4-remote-govcloud-demo-e2e.md` — **the plan** (read first)
-- `.todo/MANIFEST.md`, `.todo/plans/2-*.md`, `3-*.md`
-- `~/.claude/plans/giggly-hatching-globe.md` — plan mirror
-- PR #465 (workbench→main, open), sms-api PR #169 (open; its `--trust-proxy` may be superseded by the allowlist)
+- `.todo/plans/5-pinned-build-remote-runs.md` (ground truth), `.todo/plans/4-remote-govcloud-demo-e2e.md`, `.todo/MANIFEST.md`, `NEXT_STEPS.md`
+- memory `[[project_alb_rewrites_host_csrf]]`, `[[project_v2ecoli_branch_policy]]`, `[[project_ssh_commit_signing]]`

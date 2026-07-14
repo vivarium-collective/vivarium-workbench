@@ -1,6 +1,6 @@
 # vivarium-workbench Dashboard Demo — Unified Walkthrough (Remote GovCloud)
 
-**Last verified**: 2026-07-07 *(local flow; remote-first flow pending WS-E acceptance)*
+**Last verified**: 2026-07-13 *(remote — Segments 1–6 driven live incl. a live pinned-build remote run in Segment 6 Part B; Segments 7–8 pending)*
 **Branch**: `demo-v2ecoli` in `vivarium-collective/vivarium-dashboard`
 **Demo target**: the **REMOTE** `/workbench` deployment on the `sms-api-stanford-test`
 Kubernetes namespace (GovCloud `smsvpctest` stack), reached in the browser at
@@ -261,43 +261,48 @@ open http://localhost:8080/workbench
 
 ## 7. Segment 6: Simulations DB & Remote Runs (3 min)
 
-The dashboard is already remote; the "Run remotely" pipeline targets the in-cluster
-sms-api service (`SMS_API_BASE`, set by the deployment overlay). Your browser only
-needs the tunnel to reach `/workbench`.
+The dashboard is already remote. Part A tours the run ledger; Part B runs a NEW
+simulation on GovCloud **against a pinned, already-built simulator** — no git push,
+no Docker build, no GitHub login. Your browser only needs the tunnel to reach
+`/workbench`. (Pinned mode is enabled by the deployment: `VIVARIUM_WORKBENCH_REMOTE_PINNED=1`
++ `_REMOTE_REPO_URL`/`_REMOTE_BRANCH`.)
 
 ### Actions — Part A: Simulations DB
 1. Click **Simulations DB**
-2. Show the **52-run** table: columns — Investigation, Study, Run, Location, Origin, Emitter, Time, Status
-3. Point out **Emitter type pills**: sqlite (gray), parquet (amber), xarray (teal)
-4. Point out **Origin badges**: local vs. remote (☁️ blue pill)
-5. Point out the **remote runs** with full provenance (simulation_id, experiment_id, backend=ray, s3_uri from sms-api)
-6. Show **status variety**: failed / orphaned rows (an orphaned run is a stale in-progress run whose backing process died; shows as `orphaned`, not `running`)
+2. Show the run table: columns — Investigation, Study, Run, Location, Origin, Emitter, Time, Status. The seeded baseline is **35 runs**; the count grows by one each time you land a live remote run in Part B.
+3. Point out **Emitter type pills**: **xarray, parquet, sqlite** — the seed has parquet ×6, sqlite ×3, xarray ×3, and 23 runs with no recorded emitter. "Any emitter backend, same table."
+4. Point out **Origin**: the seeded runs are all **local**. A remote (**☁️**) origin appears **after** you land a live Run-on-remote in Part B — there are none pre-seeded. (Honest by design: the ☁️ pill is earned live, not staged.)
+5. Point out **status variety** across the 35 seeded runs: **31 completed, 1 "complete", 3 failed**.
 
 ### API
-`GET /workbench/api/simulations` → runs incl. remote ☁️, failed, orphaned
+`GET /workbench/api/simulations` → 35 seeded runs (31 `completed` + 1 `complete` + 3 `failed`); emitter pills xarray/parquet/sqlite + unrecorded. The count increments by one per landed remote run.
 
-### Actions — Part B: Live Remote Run
-7. From any study page, click **"Run remotely"**
-8. The browser-driven thin-client pipeline executes (the dashboard pod calls sms-api in-cluster):
-   - **Phase 1 (building)**: registers a Docker build on sms-api, polls for image readiness (~1–2 min for cached build)
-   - **Phase 2 (running)**: submits the simulation run to sms-api, polls for completion (~2–4 min for short ensemble)
-   - **Phase 3 (landing)**: downloads results from S3, records them in the study's runs.db with git provenance
-9. The newly landed run appears in Simulations DB (local origin, since it was landed from remote)
+### Actions — Part B: Live Remote Run (pinned build)
+6. Open a study (e.g. **showcase-2-baseline-figures**) and scroll to the run card. With pinned mode on, it reads **"Run against pinned build (main @ 70b5ec3)"** with *"No push or GitHub login required."*
+7. Leave Generations / Seeds at 1 / 1, keep **Run ParCa** checked, click **▶ Run on remote (pinned)**. It goes straight to *"Using pinned build… Submitting run…"* — **no login prompt** (the old blocker is gone).
+8. Watch the phases (the dashboard polls sms-api; sms-api owns the async compute):
+   - **build → ✓ instantly** — the pinned, already-built simulator (`simulator_id 69`) is reused; nothing rebuilds.
+   - **run → queued** — sms-api submits a **ParCa** job + an **N-node simulation ensemble** to **AWS Batch as a transient Ray (MNP) cluster**. "Queued" = Batch provisioning the Ray cluster (`RUNNABLE`) + the ParCa dependency gate (`PENDING`); expect a few minutes.
+   - **run → running → done** — the Ray head executes the E. coli ensemble, then completes.
+9. Click **⬇ Land results locally** — downloads the result store from S3 and records it in the study's `runs.db` with git provenance.
+10. The landed run appears in Simulations DB carrying a **remote ☁️ origin** with full provenance — `deployment: smsvpctest`, `simulation_id`, `backend: ray` (the ☁️ pill from step A4, now earned live).
 
 ### Narration
-> "The Simulations DB shows every run, whether it happened on a laptop or on AWS GovCloud. The remote pipeline is stateless — driven entirely by the browser through the dashboard, which calls sms-api in-cluster. No server-side queue. Every run is traceable: git commit hash → exact Docker image → exact simulation results."
+> "One pinned, reproducible build — an exact commit resolved to an exact Docker image, already built on GovCloud. From the dashboard we submit any number of simulation configs against that single build, each on a transient Ray cluster spun up per run. No push, no rebuild, no login: the whole thing is driven by the browser through the dashboard, which calls sms-api in-cluster. Every landed run is traceable back to that commit."
 
 ### Talking Points
 - "Any simulator, any emitter backend (SQLite, Parquet, XArray), any scale — laptop → AWS GovCloud. Same table, side-by-side."
-- "The whole stack — dashboard, sms-api, PTools — is one `smsvpctest` deployment behind one internal ALB, reached through one SSM tunnel on `localhost:8080`."
-- "Extensibility: register a build, click 'Run remotely', and sms-api builds the Docker image from the exact code. Full reproducibility."
+- "One deployment: dashboard, sms-api, PTools behind one internal ALB, one SSM tunnel on `localhost:8080`."
+- "Reproducibility: the run targets a pinned commit's prebuilt image; sms-api provisions a transient Ray MNP cluster (ParCa → N-node ensemble) and lands results with full git provenance — no per-run build or credentials."
 
 ### Key Number
-> **52** runs, **3** emitter backends, local and remote side-by-side.
+> **35** seeded runs, **3** emitter backends, **+1** remote ☁️ run you land live on a 3-node Ray cluster.
 
 ### Fallback (remote run unavailable)
-Skip Part B. Show the pre-landed remote ☁️ runs in Simulations DB and narrate the
-pipeline architecture.
+If AWS Batch can't provision the Ray cluster (capacity) or sms-api is unreachable,
+skip the live land: narrate the pinned-build architecture (pinned commit → prebuilt
+image → transient Ray MNP cluster) from Part A, and show a previously-landed ☁️ run
+if the session has one.
 
 ---
 
@@ -328,7 +333,7 @@ pipeline architecture.
    - **One dashboard, many simulators** — Registry: 173 processes from 7 packages
    - **Swappable cell engines** — Composites: baseline, Millard, PDMP, all sharing reactor coupler
    - **Modular pipelines** — ParCa: 9 Steps, each independently swappable
-   - **Reproducible, git-tracked runs** — Simulations DB: 52 runs with full provenance
+   - **Reproducible, git-tracked runs** — Simulations DB: 35 runs with full provenance
    - **AWS GovCloud at scale** — the entire dashboard is served in-cluster; remote runs go to sms-api on GovCloud
 
 ### Narration
@@ -394,8 +399,8 @@ A: Yes — the dashboard itself is remote, so the tunnel is required for every s
 | 10:00 | **4. ParCa** | Explorer → Run | Optional: fast mode (~15s) |
 | 12:00 | **5. Investigations** | Investigations | **8** investigations |
 | 13:00 | **5. Investigations** | v2ecoli-baseline-showcase | DAG, tests, charts |
-| 15:00 | **6. Simulations DB** | Simulations DB | **52** runs, emitter pills, ☁️ badges |
-| 16:00 | **6. Simulations DB** | → Run remotely | Live sms-api pipeline |
+| 15:00 | **6. Simulations DB** | Simulations DB | **35** seeded runs, emitter pills, ☁️ earned live |
+| 16:00 | **6. Simulations DB** | → Run on remote (pinned) | Pinned build → Ray MNP → land |
 | 18:00 | **7. Analyses** | Analyses | **58** viz classes, 3D, PTools |
 | 19:00 | **8. Wrap-up** | — | Recap + Q&A |
 | 20:00 | **Q&A** | — | — |
@@ -435,7 +440,11 @@ artifacts under `demos/v2ecoli/` apply to the **offline** flow (Appendix G) only
 | Study detail loads blank/unstyled | Deployed image predates the base-path fix | Rebuild + redeploy as above |
 | Composite resolves to error | Missing deps for that composite | Skip; use `baseline`, `parca`, or `colony` |
 | Simulations DB shows 0 runs | Workspace PVC not mounted / empty | Confirm the workbench pod has `/workspace` mounted; check `kubectl -n sms-api-stanford-test describe pod` |
-| "Run remotely" fails | sms-api unreachable in-cluster | Check `SMS_API_BASE` on the workbench Deployment; check sms-api pod health |
+| Run card still says "Run on remote (smsvpctest) / Requires GitHub login" | Pinned mode not enabled on the pod | Set `VIVARIUM_WORKBENCH_REMOTE_PINNED=1` + `_REMOTE_REPO_URL`/`_REMOTE_BRANCH`; verify `GET /workbench/api/remote-run-config` → `pinned:true` |
+| "Could not resolve pinned build" | No built simulator for the pinned repo@branch | Confirm a completed build exists (`GET /core/v1/simulator/versions`); register/build one if absent |
+| Run stuck in `queued` for long | AWS Batch provisioning the Ray MNP cluster (or ParCa dependency running) | Normal for a cold compute env; check the `smsvpctest-ray-mnp` queue + `describe-jobs` state (`RUNNABLE`=provisioning, `PENDING`=ParCa gate) |
+| Run submit/land fails with 401 | Pinned mode off AND no GitHub session | Enable pinned mode (above), or log in via the GitHub button |
+| "Run on remote" fails | sms-api unreachable in-cluster | Check `SMS_API_BASE` on the workbench Deployment; check sms-api pod health |
 | PTools card shows error | Container not running | Mention as an integration example, skip |
 
 Cluster access for the fixes above:
@@ -458,7 +467,7 @@ kubectl -n sms-api-stanford-test rollout status deploy/workbench
 5. **Latency**: SSM-tunnel GETs can take several seconds; the page is interactive throughout.
 6. **CLI name**: `vivarium-workbench` (the `vivarium-dashboard` name still works as a deprecated alias).
 7. **ParCa live run**: Fast mode ~15s (7 TF conditions). Full mode ~2.4 min (51 conditions).
-8. **Numbers** (173 processes, 28 composites, 8 investigations, 52 runs, 58 viz) reflect the seeded workspace; confirm against the live remote before quoting exact figures.
+8. **Numbers** (173 processes, 28 composites, 8 investigations, **35** seeded runs, 58 viz) reflect the seeded workspace; confirm against the live remote before quoting exact figures. The run count grows by one per landed remote run.
 
 ---
 

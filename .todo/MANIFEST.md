@@ -18,7 +18,11 @@ Fix: CSRF/origin guard 403s all POST/DELETE behind ALB reverse-proxy subpath dep
 
 Linked tasks: independent of #1 and #3 (different subsystem, no shared files, no ordering dependency); shares the broader demo-v2ecoli e2e-walkthrough context with both.
 
-### Status: ❌ DEPLOYED but STILL BROKEN — root cause of why the fix isn't taking effect NOT yet found
+### Status: ✅ ROOT CAUSE CONFIRMED + FIX CODED/PUSHED (deploy pending in WS-D)
+
+**2026-07-13 update:** Live probe CONFIRMED the ALB rewrites `Host` (403 even with a matching client `Host: localhost:8080`) and omits `X-Forwarded-Host`, so `--trust-proxy` is a dead end. Production-grade allowed-origins allowlist implemented + 33 tests pass, pushed as part of demo-v2ecoli `2c56cb8`; sms-api env pushed as `15c3391`. Folded into umbrella #4 (WS-B). See [[project_alb_rewrites_host_csrf]]. Prior status below (historical):
+
+### (historical) ❌ DEPLOYED but STILL BROKEN — root cause of why the fix isn't taking effect NOT yet found
 
 Fix landed in `481b3f2` (`demo-v2ecoli`, pushed; part of PR #465), deployed to sms-api-stanford-test with `--trust-proxy` in the pod args. Opt-in `trust_forwarded`/`forwarded_host` on `is_request_allowed()` + `--trust-proxy`/`VIVARIUM_WORKBENCH_TRUST_PROXY=1`; targeted suites pass. **But the 2026-07-13 browser walkthrough still hit the 403** (`POST /workbench/api/study-run-baseline → 403` reproduced server-side in pod logs). The fix is correct in isolation but isn't taking effect through the ALB→SSM-tunnel→k8s chain — likely `X-Forwarded-Host` never arrives, or the env check reads the wrong var, or uvicorn strips the header. Remaining: diagnose live headers (`curl -v` through tunnel or debug-log redeploy), then fix. See plan #2 "Post-deploy diagnosis" + `SAVE_SLOT.md`.
 
@@ -46,9 +50,27 @@ Close all gaps for a reproducible remote GovCloud dashboard demo (fix bugs #2 + 
 
 Linked tasks: **umbrella item that absorbs the remaining open work in #2 and #3** (the two blocking bugs) and depends on #1 (✅). Spans `demo-v2ecoli` (./) + `patch/db-filter` (`~/sms/sms-api`); `v2ecoli` main unchanged.
 
-### Status: PLANNED — approved plan, no code written yet
+### Status: 🔄 EXECUTING — WS-A/B/C landed+pushed; build running; WS-D deploy + WS-E/F remaining
+
+**2026-07-13 execution update:** WS-A/B/C/D all DONE + live-verified. Image `2c56cb8` built, deployed to `sms-api-stanford-test`, rolled out. Bug 2 (CSRF probe→405, was 403) + Bug 3 (`/workbench/bigraph-loom/`→200; `parca`+`colony` resolves→200) verified on the live pod. Pushed: dashboard `2c56cb8`, sms-api `15c3391`+`10159223`. Numbers reconciled to live (simulations 52→35; orphaned removed); all named elements present; Part B backbone confirmed (pod→sms-api /docs→200). REMAINING: WS-E full 8-segment browser drive (incl. live Run-remotely) + WS-F PRs. See `SAVE_SLOT.md` (ground truth).
+
+### (historical) Status: PLANNED — approved plan, no code written yet
 
 The demo is redefined to run against the REMOTE `/workbench` k8s deployment via `sms-proxy.sh -s smsvpctest` → `localhost:8080/workbench`. Bug 3 root cause CONFIRMED (v2ecoli `uv.lock` has zero `bigraph-loom`; combined image builds from that lock → `bigraph_loom` never installed → `ModuleNotFoundError` on the always-visible loom panel). Bug 2 NARROWED (AWS ALB omits `X-Forwarded-Host`, so `--trust-proxy` is a no-op; one live header capture pending) → production-grade allowed-origins allowlist chosen. Six workstreams: WS-A Bug 3 Dockerfile install + broadened sanity import; WS-B Bug 2 diagnose→allowlist (code on `demo-v2ecoli`, env on `patch/db-filter`); WS-C rewrite `WALKTHROUGH.md` remote-first (local flow → Appendix G); WS-D iterative build(gh-action)→deploy→verify on the two feature branches ONLY; WS-E full e2e walkthrough as the acceptance gate; WS-F merge + release, gated on WS-E reproducibility. Full plan: `.todo/plans/4-remote-govcloud-demo-e2e.md` (mirror at `~/.claude/plans/giggly-hatching-globe.md`).
+
+---
+
+## 5. **(.todo/plans/5-pinned-build-remote-runs.md)**:
+
+### Name
+
+Feat: pinned-build remote runs — submit sims against the latest **built** v2ecoli `main` simulator (no per-run push/build/login), unblocking the GovCloud demo's Segment 6 Part B.
+
+Linked tasks: unblocks WS-E of #4 (Segment 6 Part B was the acceptance gate). Spans `vivarium-dashboard@demo-v2ecoli` (code) + `sms-api` overlay (env). No `v2ecoli` changes.
+
+### Status: 🔄 EXECUTING — feature DEPLOYED + Part B PROVEN LIVE + P7 doc DONE; Segments 7–8 drive + WS-F PRs remain
+
+**2026-07-13:** Part B was root-caused to 3 pod deployment gaps (A: no GH client_id → login disabled; B: `/workspace/.git` uid 17163 ≠ app uid 0 → dubious ownership; C: protected-main push). Fixed via the **pinned-build** model (Direction 1): resolve the latest built simulator for the configured repo@branch from in-cluster sms-api and skip Phase 1 (push/build/login) entirely; login gate relaxed only under declarative pinned config. Shipped dashboard `demo-v2ecoli 72e00b84` (img `72e00b8`, deployed) + sms-api `patch/db-filter 2ef52c0a`. **Proven live e2e**: sim 211 → ParCa → 3-node transient Ray MNP cluster → completed → landed (Simulations DB now 36). P7 WALKTHROUGH Segment 6 rewrite DONE. REMAINING: full 8-segment drive Segments 7–8 (browser) + WS-F PRs. Ground truth `SAVE_SLOT.md`.
 
 ---
 

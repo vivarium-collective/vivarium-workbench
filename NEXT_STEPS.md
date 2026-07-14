@@ -1,75 +1,51 @@
-# Next Steps — demo-v2ecoli e2e walkthrough: 1 of 3 bugs fixed, 2 still broken post-deploy
+# Next Steps — Segment 6 Part B PROVEN LIVE; P7 doc rewrite + segments 7–8 + PRs remain
 
-**Updated:** 2026-07-13 — synced to `SAVE_SLOT.md` (the current ground truth).
-Supersedes the earlier subpath-deployment content, which is **resolved** (see
-`SAVE_SLOT.md` history + `.todo/plans/1-*.md`). The active work is now the two
-remaining demo bugs whose code fixes shipped in `481b3f2`, deployed to
-`sms-api-stanford-test`, but **failed browser verification**.
+**Updated:** 2026-07-13 (execution session). Ground truth is `SAVE_SLOT.md`. The
+demo's last blocker — Segment 6 Part B "Run on remote" — is **fixed, deployed, and
+proven end-to-end live** via the pinned-build model (plan 5). A real run (sim 211)
+resolved the pinned build, ran ParCa + a 3-node transient Ray cluster on GovCloud,
+completed, and landed into the Simulations DB (now 36 runs) — all through the UI
+with **no GitHub login**.
 
-## Ground truth from the browser walkthrough
+## State
 
-| Bug | Status | Where it stands |
-|---|---|---|
-| 1. Study-detail base-path | ✅ **CONFIRMED FIXED** (browser-verified) | No further action. |
-| 2. CSRF/origin guard 403 | ❌ **STILL BROKEN** | `--trust-proxy` fix is present in the running pod's args, yet `POST /workbench/api/study-run-baseline → 403` still reproduces server-side (pod logs). *Why the fix isn't taking effect is not yet root-caused.* |
-| 3. Composite Explorer 500 | ❌ **STILL BROKEN** | Tier-1 logging (shipped in `481b3f2`) worked and surfaced a new traceback: `ModuleNotFoundError: No module named 'bigraph_loom'` on the loom-asset route. Leading candidate for the real cause — **not yet confirmed for the colony click specifically**. |
+| Item | Status |
+|---|---|
+| Pinned-build feature (dashboard) | ✅ `demo-v2ecoli` `72e00b84`; 14 tests, mypy clean |
+| Pinned env (sms-api overlay) | ✅ `patch/db-filter` `2ef52c0a` |
+| Image build + deploy | ✅ `72e00b8` built, deployed (`newTag` 72e00b8), rolled out |
+| Headless verify | ✅ `/api/remote-run-config` → pinned:true, commit 70b5ec3, sim 69 |
+| **Part B live e2e** | ✅ **PROVEN** — sim 211 → Ray MNP → landed `baseline__1783986815__08c5be` |
+| P7 — WALKTHROUGH Segment 6 rewrite | ✅ **DONE** (pinned-build flow + drift fixes + stamp) |
+| Full 8-segment WS-E drive (Seg 7–8) | ⏳ **next — needs browser; awaiting user's word** |
+| WS-F PRs (no auto-merge) | ⏳ |
 
-## Remaining gaps (priority order)
+## Next (awaiting user's word to proceed)
 
-1. **Bug 2 — find why `--trust-proxy` isn't working.** Read `lib/csrf.py`
-   (`is_request_allowed`, `is_trust_proxy_via_env`) + `api/app.py`'s `_csrf_mw`
-   together. Three live hypotheses (see `SAVE_SLOT.md` "Key Finding — Bug 2"):
-   (a) the ALB/tunnel chain never sets `X-Forwarded-Host` (only `-For`/`-Proto`),
-   so `forwarded_host` is empty and falls back to the mismatching raw `Host`;
-   (b) `is_trust_proxy_via_env()` reads the wrong env var (old vs new prefix);
-   (c) uvicorn's `ProxyHeadersMiddleware` strips `X-Forwarded-Host` first.
-   **Blocked on**: inspecting the actual header values arriving through
-   ALB→SSM-tunnel→k8s — needs a `curl -v` through the live tunnel or a temporary
-   debug-log redeploy.
+1. **Finish the full 8-segment WS-E drive** — needs you at the browser:
+   - **Segment 7 (Analyses)** — 58 viz classes, PTools omics viewer, `demo()` previews.
+   - **Segment 8 (Wrap-up)** — rapid recap of the architecture pillars.
+   After both pass, update the `Last verified` stamp to cover all 8 segments.
+2. **WS-F PRs** (no auto-merge): PR #465 (demo-v2ecoli→main) + sms-api
+   patch/db-filter→main. Then cut a release tag + repoint the overlay from the dev
+   SHA (`72e00b8`) to it.
 
-2. **Bug 3 — confirm the missing-dependency theory (Tier 2a).** The combined
-   image builds its env from **v2ecoli's lockfile** (`Dockerfile:43-45`), not the
-   workbench's own; `bigraph-loom` is declared in *workbench's* `pyproject.toml:47`
-   but may be absent from v2ecoli's lock, so it never installs. The build sanity
-   check (`Dockerfile:70`) imports `vivarium_workbench` but **not** `bigraph_loom`,
-   so a missing module ships silently and only fails at runtime — consistent with
-   the symptom. **Cheapest decisive test (local, no cluster):** check whether
-   `bigraph-loom`/`bigraph_loom` resolves in v2ecoli's `uv.lock`. If missing:
-   add an explicit `uv pip install --no-deps bigraph-loom` overlay + extend the
-   `Dockerfile:70` sanity import to include `bigraph_loom`. Separately, re-click
-   "colony" while tailing `kubectl logs -f deploy/workbench` to correlate the
-   request with its traceback directly.
+## P7 — DONE (2026-07-13)
 
-3. **Rebuild → deploy → re-walkthrough** once both root causes are fixed
-   (`gh workflow run build-and-push.yml --ref demo-v2ecoli` → bump sms-api overlay
-   tag → `kubectl apply -k` → re-verify in browser). Only then are the PRs
-   review-ready.
+`demos/v2ecoli/WALKTHROUGH.md` Segment 6 rewritten as the pinned-build flow:
+Part A drift corrected (remote-☁️ = 0 until a live run lands; emitter sqlite 3 /
+parquet 6 / xarray 3 / unrecorded 23; status 31 completed + 1 "complete" + 3
+failed); Part B = pinned build (main @ 70b5ec3, no push/login) → ParCa → 3-node
+Ray MNP cluster → land; corrected the "landed = local origin" claim to ray
+`remote_origin`; timing table + offline numbers (52→35) fixed; pinned-mode
+troubleshooting rows added; header stamped.
 
-4. **Triage the full test suite.** `F` failures appeared ~28% into the last run;
-   never characterized as pre-existing vs. new. The run log was session-scoped
-   (likely gone) — a fresh `uv run pytest` may be needed to re-baseline.
+## Why this model (recap)
 
-5. **PRs remain open, not merged.** #465 (workbench→main) and sms-api #169 both
-   REVIEW_REQUIRED; per `SAVE_SLOT.md` both need follow-up commits (the real
-   root-cause fixes for bugs 2 & 3) before they are actually ready for review.
+Only Phase 1 (build) pushed git / needed login. Pinning to the latest **built**
+`main` simulator skips Phase 1: submit sims against the prebuilt simulator
+(resolved from in-cluster sms-api). Drops Blockers B (git ownership) & C
+(protected-main push); replaces A (login) with a declarative config gate since
+submit/land do no GitHub write. See `.todo/plans/5-pinned-build-remote-runs.md`.
 
-## Quick reference
-
-```bash
-# Tunnel (check if still alive first)
-ps aux | grep sms-proxy
-AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  ~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest   # if not — → localhost:8080/workbench
-
-# Cluster
-export AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  KUBECONFIG=/Users/alexanderpatrie/.kube/kube_stanford_test.yml
-kubectl -n sms-api-stanford-test logs -f deploy/workbench
-
-# PRs (both open, not merged)
-gh pr view 465
-gh pr view 169 -R vivarium-collective/sms-api
-```
-
-**See also:** `SAVE_SLOT.md` (full mid-diagnosis checkpoint), `.todo/MANIFEST.md`,
-`.todo/plans/2-*.md` + `3-*.md` (per-bug plans, now advanced to deployed+unverified).
+**See also:** `SAVE_SLOT.md`, `.todo/plans/5-pinned-build-remote-runs.md`, `.todo/MANIFEST.md`.
