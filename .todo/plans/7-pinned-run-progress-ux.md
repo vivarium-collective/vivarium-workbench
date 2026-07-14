@@ -46,8 +46,11 @@ required for iteration 1 (it consumes the polling the backend already exposes).
   `test_remote_run_panel` fails are PRE-EXISTING — confirmed identical with edits
   stashed). Walk-through verify **PASS**: bar advances 4→22→42→58→83→100% monotonic,
   spinner on active, snaps to 100% at Landed, failure colors the right segment.
-- ⏳ **Remaining gate:** live-tunnel e2e (needs user AWS SSO + ~13-min real run) — the
-  final manual acceptance; component walk already proven headless.
+- ✅ **Live-tunnel e2e PASSED (2026-07-14).** Local serve on this branch (`:8099`,
+  `SMS_API_BASE` default → `localhost:8080`) + `sms-proxy.sh -s smsvpctest` tunnel;
+  user clicked **Run on remote** → the new milestone bar drove a **real pinned run**
+  end-to-end against the live sms-api/Ray backend. No deploy required (Path B). All
+  acceptance criteria met.
 
 **All code complete.** Files: NEW `progress-track.{js,css}`, `tests/js/test_progress_track.js`;
 EDITED `study-detail.js` (adapter+tween), `study-detail.html` (2 includes + snapshot
