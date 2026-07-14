@@ -412,6 +412,55 @@ def test_composite_resolve_in_openapi(client):
     assert "CompositeResolvePayload" in spec["components"]["schemas"]
 
 
+def test_composite_resolve_validation_failure_degrades_not_500(client, monkeypatch):
+    """A resolver payload that fails CompositeResolvePayload validation (e.g.
+    missing required fields) degrades to the standard wiring_status:
+    "unavailable" 200 shape instead of hitting the generic 500 handler."""
+    import vivarium_workbench.api.app as _app
+
+    def _fake_resolve(ws, spec_id, overrides):
+        return {"kind": "generator"}  # missing required id/name -> ValidationError
+
+    monkeypatch.setattr(_app, "resolve_composite_for_request", _fake_resolve)
+    r = client.get("/api/composite-resolve?id=v2ecoli.composites.colony")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["wiring_status"] == "unavailable"
+    assert body["id"] == "v2ecoli.composites.colony"
+    assert "could not be resolved" in body["notice"]
+
+
+def test_unhandled_exception_is_logged(client, monkeypatch, caplog):
+    """An exception that reaches the app-wide catch-all is logged with its
+    traceback (previously nothing was logged at all — the handler's own
+    comment claiming otherwise was aspirational), while the client-facing
+    response contract stays unchanged (generic 500 envelope).
+
+    Uses a separate TestClient(raise_server_exceptions=False) against the
+    same app: Starlette's ServerErrorMiddleware always re-raises after
+    running a registered Exception handler, which the default TestClient
+    surfaces as a raised exception (for debugging) — real deployments
+    (uvicorn) never see that re-raise, the client already got the response.
+    """
+    import logging
+    from fastapi.testclient import TestClient
+    import vivarium_workbench.api.app as _app
+
+    def _raise(ws, spec_id, overrides):
+        raise RuntimeError("boom - simulated in-process failure")
+
+    monkeypatch.setattr(_app, "resolve_composite_for_request", _raise)
+    lenient_client = TestClient(client.app, raise_server_exceptions=False)
+    with caplog.at_level(logging.ERROR, logger="vivarium_workbench.errors"):
+        r = lenient_client.get("/api/composite-resolve?id=v2ecoli.composites.colony")
+    assert r.status_code == 500
+    assert r.json() == {"error": "internal server error"}
+    assert any(
+        rec.exc_info and "boom - simulated in-process failure" in str(rec.exc_info[1])
+        for rec in caplog.records
+    )
+
+
 # ---------------------------------------------------------------------------
 # /api/registry
 # ---------------------------------------------------------------------------
@@ -3074,7 +3123,7 @@ class TestStaticRoutes:
         text/html + Cache-Control: no-store."""
         import vivarium_workbench.lib.report as _report
         calls = []
-        monkeypatch.setattr(_report, "render_workspace_report", lambda ws: calls.append(ws))
+        monkeypatch.setattr(_report, "render_workspace_report", lambda ws, **kw: calls.append(ws))
         (tmp_path / "reports").mkdir()
         (tmp_path / "reports" / "index.html").write_text("<html>shell</html>")
         r = client.get("/")
@@ -3088,7 +3137,7 @@ class TestStaticRoutes:
         """A render exception never blocks the load — the on-disk file still serves."""
         import vivarium_workbench.lib.report as _report
 
-        def _boom(ws):
+        def _boom(ws, **kw):
             raise RuntimeError("render kaboom")
 
         monkeypatch.setattr(_report, "render_workspace_report", _boom)
@@ -3100,7 +3149,7 @@ class TestStaticRoutes:
 
     def test_index_shell_404_when_absent(self, client, tmp_path, monkeypatch):
         import vivarium_workbench.lib.report as _report
-        monkeypatch.setattr(_report, "render_workspace_report", lambda ws: None)
+        monkeypatch.setattr(_report, "render_workspace_report", lambda ws, **kw: None)
         r = client.get("/")
         assert r.status_code == 404
 
@@ -4297,6 +4346,70 @@ class TestCsrfMiddleware:
         r = client.get("/health", headers={"Origin": "http://evil.example.com"})
         assert r.status_code == 200
         assert r.json() == {"status": "ok"}
+
+    def test_forwarded_host_allowed_when_trust_proxy_env_set(self, client, monkeypatch):
+        # TestClient's default Host is 'testserver'; Origin matches
+        # X-Forwarded-Host instead (simulating a reverse-proxy hop that
+        # rewrote Host to an internal address). Only passes with the env set.
+        monkeypatch.setenv("VIVARIUM_WORKBENCH_TRUST_PROXY", "1")
+        from pbg_superpowers import workspace_catalog
+        monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/nope"},
+            headers={
+                "Origin": "https://app.example.com",
+                "X-Forwarded-Host": "app.example.com",
+            },
+        )
+        assert r.status_code != 403
+        assert r.status_code == 400
+
+    def test_forwarded_host_ignored_without_trust_proxy_env(self, client, monkeypatch):
+        # Same headers as above, but the trust flag is NOT set -> the
+        # forwarded header must be ignored and the raw Host ('testserver')
+        # mismatch still 403s. Regression guard for the core security property.
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/nope"},
+            headers={
+                "Origin": "https://app.example.com",
+                "X-Forwarded-Host": "app.example.com",
+            },
+        )
+        assert r.status_code == 403
+        assert r.json() == {"error": "cross-origin request forbidden"}
+
+    def test_allowlisted_origin_passes_despite_host_mismatch(self, client, monkeypatch):
+        # The production scenario: an ALB rewrites Host (TestClient's raw Host is
+        # 'testserver') and sends NO X-Forwarded-Host, so neither same-origin nor
+        # trust-proxy can admit the browser Origin. The explicit allowlist does.
+        monkeypatch.setenv(
+            "VIVARIUM_WORKBENCH_ALLOWED_ORIGINS", "http://localhost:8080"
+        )
+        from pbg_superpowers import workspace_catalog
+        monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/nope"},
+            headers={"Origin": "http://localhost:8080"},
+        )
+        assert r.status_code != 403
+        assert r.status_code == 400
+
+    def test_non_allowlisted_origin_still_403(self, client, monkeypatch):
+        # An allowlist is configured, but a DIFFERENT cross-origin request is
+        # still rejected -> the allowlist is exact-match, not a blanket disable.
+        monkeypatch.setenv(
+            "VIVARIUM_WORKBENCH_ALLOWED_ORIGINS", "http://localhost:8080"
+        )
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/nope"},
+            headers={"Origin": "http://evil.example.com"},
+        )
+        assert r.status_code == 403
+        assert r.json() == {"error": "cross-origin request forbidden"}
 
 
 # ===========================================================================

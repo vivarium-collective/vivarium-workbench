@@ -39,7 +39,10 @@ def _minimal_workspace(tmp_path: Path) -> Path:
     return ws
 
 
-def _post(base_url: str, path: str, *, origin: str | None) -> int:
+def _post(
+    base_url: str, path: str, *, origin: str | None,
+    forwarded_host: str | None = None,
+) -> int:
     """POST an empty JSON body to ``path``; return the HTTP status code.
 
     urllib sets the ``Host`` header automatically from the URL netloc, so a
@@ -48,6 +51,8 @@ def _post(base_url: str, path: str, *, origin: str | None) -> int:
     headers = {"Content-Type": "application/json"}
     if origin is not None:
         headers["Origin"] = origin
+    if forwarded_host is not None:
+        headers["X-Forwarded-Host"] = forwarded_host
     req = urllib.request.Request(
         base_url + path, data=b"{}", headers=headers, method="POST")
     try:
@@ -89,6 +94,38 @@ def test_post_no_origin_is_allowed(tmp_path, dashboard_client):
     # Passed the guard and reached routing (404 no-route or 405 method-not-allowed
     # from the FastAPI static catch-all — see test_post_same_origin_is_allowed).
     assert code in (404, 405)
+
+
+def test_post_forwarded_host_honored_with_trust_proxy_env(
+    tmp_path, dashboard_client, monkeypatch
+):
+    """Simulates a reverse-proxy hop: Origin matches X-Forwarded-Host, not the
+    raw Host the server sees. Only allowed when VIVARIUM_WORKBENCH_TRUST_PROXY=1
+    is set in the spawned server's environment (inherited via monkeypatch.setenv
+    before the dashboard_client factory copies os.environ)."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_TRUST_PROXY", "1")
+    ws = _minimal_workspace(tmp_path)
+    client = dashboard_client(ws)
+    code = _post(
+        client.base_url, _PROBE_PATH,
+        origin="https://app.example.com", forwarded_host="app.example.com",
+    )
+    assert code != 403
+    assert code in (404, 405)
+
+
+def test_post_forwarded_host_ignored_without_trust_proxy_env(
+    tmp_path, dashboard_client
+):
+    """Same mismatched-Host-vs-forwarded-Origin scenario, but without the
+    trust flag — the forwarded header must be ignored and the request 403s."""
+    ws = _minimal_workspace(tmp_path)
+    client = dashboard_client(ws)
+    code = _post(
+        client.base_url, _PROBE_PATH,
+        origin="https://app.example.com", forwarded_host="app.example.com",
+    )
+    assert code == 403
 
 
 # ---------------------------------------------------------------------------

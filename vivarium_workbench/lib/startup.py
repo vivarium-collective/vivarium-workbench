@@ -117,5 +117,14 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # Run the app object (not an import string) so it shares this process's
     # already-registered workspace root; disables reload, which is correct for
     # the served entrypoint.
-    uvicorn.run(served, host=host, port=port, log_level="info")
+    #
+    # proxy_headers/forwarded_allow_ips: honor X-Forwarded-* when present so the
+    # ASGI scope reflects the real client scheme/host behind the ALB/SSM tunnel.
+    # (Not the CSRF fix — an AWS ALB omits X-Forwarded-Host, so the allowlist is
+    # what actually admits the browser origin; this just keeps request metadata
+    # honest for logging and any forwarded-aware code.)
+    uvicorn.run(
+        served, host=host, port=port, log_level="info",
+        proxy_headers=True, forwarded_allow_ips="*",
+    )
     return 0

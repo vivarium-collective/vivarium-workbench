@@ -246,6 +246,15 @@ weakest → strongest:
   sites) — that is the §2A `RunBackend`/`EnvironmentResolver` port work.
 
 **Still open (small)**
+- **Relax the workbench Python pin after `EnvironmentResolver`.** The demo track
+  adds `[tool.uv] environments = ["python_full_version == '3.12.12'"]` to
+  `pyproject.toml` because the `demo` extra pulls v2ecoli (which pins
+  `==3.12.12`) as an in-process editable dep, while the workbench itself is
+  `>=3.11`; without the pin a universal `uv lock` can't solve the 3.11 slice.
+  Accepted short-term (pre-demo). Broaden back to `>=3.11` once the
+  `EnvironmentResolver` port (§2A) resolves the runtime env over a boundary
+  instead of importing v2ecoli in-process — at which point the workbench's lock
+  no longer inherits v2ecoli's interpreter pin.
 - **Science/environment *repo* split** (Q2 target): when, and its pbg-template
   blast radius (how `build_core()` discovery changes when env is its own repo).
 - **"Make work permanent" under an S3 record:** keep the branch + PR *review*

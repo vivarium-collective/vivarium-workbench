@@ -25,6 +25,7 @@ from pathlib import Path
 
 from vivarium_workbench.lib import git_status
 from vivarium_workbench.lib import github_auth
+from vivarium_workbench.lib import remote_pinned
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
 from vivarium_workbench.lib.remote_run_jobs import (
@@ -40,6 +41,14 @@ from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 # deletes). The thin client maps a raw sms-api status into a UI phase.
 _TERMINAL_OK = {"completed", "done", "succeeded"}
 _TERMINAL_BAD = {"failed", "cancelled", "error"}
+
+
+def _run_auth_ok() -> bool:
+    """Gate for submit/land. A GitHub session satisfies it (stock build-first
+    flow). Pinned mode ALSO satisfies it: those calls push nothing to GitHub, so
+    requiring a human token would be neither production-grade nor reproducible —
+    the operator authorizes remote runs declaratively by enabling pinned mode."""
+    return github_auth.current_session() is not None or remote_pinned.is_pinned_enabled()
 
 
 def remote_run_start(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -156,11 +165,56 @@ def remote_run_build_start(ws_root: Path, body: dict) -> tuple[dict, int]:
             "branch": branch, "commit": commit}, 202
 
 
+def remote_run_pinned_build_start(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Phase 1, pinned variant: resolve the latest **built** simulator for the
+    configured repo@branch (one in-cluster sms-api GET) and hand it back as an
+    already-``built`` phase — NO git push, NO login, NO local-repo access.
+
+    Returns ``({simulator_id, phase:"built", commit, branch, pinned:true}, 202)``
+    so the JS panel skips build-polling and goes straight to submit. Returns
+    ``409`` when pinned mode is off, ``502`` when sms-api is unreachable, ``404``
+    when no build exists for the configured repo@branch."""
+    cfg = remote_pinned.pinned_config()
+    if cfg is None:
+        return {"error": "pinned remote runs are not enabled"}, 409
+    client = SmsApiClient(_sms_api_base())
+    try:
+        resolved = remote_pinned.resolve_pinned_build(client, cfg.repo_url, cfg.branch)
+    except remote_pinned.NoPinnedBuildError as e:
+        return {"error": str(e)}, 404
+    except SmsApiError as e:
+        return {"error": f"sms-api unreachable: {e}", "reachable": False}, 502
+    return {"simulator_id": resolved["simulator_id"], "phase": "built",
+            "commit": resolved["commit"], "branch": resolved["branch"],
+            "pinned": True}, 202
+
+
+def remote_run_config() -> tuple[dict, int]:
+    """Report pinned-run config for the client to relabel the run card.
+
+    ``{"pinned": false}`` when off; ``{"pinned": true, "repo_url", "branch",
+    "commit"?, "simulator_id"?}`` when on. Resolving the build is best-effort —
+    a missing build or unreachable sms-api degrades to ``build_error`` rather
+    than failing the card."""
+    cfg = remote_pinned.pinned_config()
+    if cfg is None:
+        return {"pinned": False}, 200
+    out: dict = {"pinned": True, "repo_url": cfg.repo_url, "branch": cfg.branch}
+    try:
+        resolved = remote_pinned.resolve_pinned_build(
+            SmsApiClient(_sms_api_base()), cfg.repo_url, cfg.branch)
+        out["commit"] = resolved["commit"]
+        out["simulator_id"] = resolved["simulator_id"]
+    except (remote_pinned.NoPinnedBuildError, SmsApiError) as e:
+        out["build_error"] = str(e)
+    return out, 200
+
+
 def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Phase 2: issue the run for a COMPLETED build. Returns
     ``({simulation_id, phase:"running"}, 202)``."""
     body = body or {}
-    if github_auth.current_session() is None:
+    if not _run_auth_ok():
         return {"error": "not authenticated"}, 401
     study = (body.get("study") or "").strip()
     if not study:
@@ -188,7 +242,7 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Phase 3 (on demand): download a COMPLETED sim's store and land it as a
     study run. Returns ``({run_id}, 200)``."""
     body = body or {}
-    if github_auth.current_session() is None:
+    if not _run_auth_ok():
         return {"error": "not authenticated"}, 401
     study = (body.get("study") or "").strip()
     sim_id = body.get("simulation_id")

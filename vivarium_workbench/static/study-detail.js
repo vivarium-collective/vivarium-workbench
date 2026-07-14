@@ -1703,7 +1703,30 @@
 
   function _rrProg() { return document.getElementById('remote-run-progress'); }
   function _rrBtn() { return document.getElementById('remote-run-btn'); }
-  function _rrResetBtn() { var b = _rrBtn(); if (b) { b.disabled = false; b.textContent = '▶ Run on remote'; } }
+  function _rrResetBtn() { var b = _rrBtn(); if (b) { b.disabled = false; b.textContent = window._remoteRunPinned ? '▶ Run on remote (pinned)' : '▶ Run on remote'; } }
+
+  // Pinned mode: relabel the run card + flip _submitRemoteRun to the no-push,
+  // no-login pinned path. Called on study-detail load (live backend only).
+  function _initRemoteRunPinned() {
+    var panel = document.getElementById('remote-run-panel');
+    if (!panel) return;
+    fetch('/api/remote-run-config').then(function(r) { return r.json(); }).then(function(cfg) {
+      if (!cfg || !cfg.pinned) return;
+      window._remoteRunPinned = true;
+      var shortSha = String(cfg.commit || '').slice(0, 12);
+      var label = (cfg.branch || 'main') + (shortSha ? ' @ ' + shortSha : '');
+      var h3 = panel.querySelector('h3');
+      var p = panel.querySelector('p.muted');
+      var btn = _rrBtn();
+      if (h3) h3.textContent = 'Run against pinned build (' + label + ')';
+      if (p) p.innerHTML = 'Runs on the Ray backend against the pinned, already-built simulator '
+        + '(<code>' + escapeHtmlForTests(label) + '</code>). Results land as a run on this study. '
+        + 'No push or GitHub login required.'
+        + (cfg.build_error ? '<br><span class="inv-run-err">⚠ ' + escapeHtmlForTests(cfg.build_error) + '</span>' : '');
+      if (btn) btn.textContent = '▶ Run on remote (pinned)';
+    }).catch(function() { /* leave the stock build-first card as-is */ });
+  }
+  window._initRemoteRunPinned = _initRemoteRunPinned;
   function _rrErr(msg) { var p = _rrProg(); if (p) { p.hidden = false; p.innerHTML = '<div class="inv-run-err">' + msg + '</div>'; } _rrResetBtn(); }
 
   function _renderRemoteRunProgress(opts) {
@@ -1737,6 +1760,28 @@
         run_parca: !!form.run_parca.checked,
       },
     };
+    if (window._remoteRunPinned) {
+      // Pinned mode: no push/build/login — resolve the already-built simulator
+      // and go straight to submit (phase "built" comes back immediately).
+      if (btn) { btn.disabled = true; btn.textContent = 'Resolving pinned build…'; }
+      fetch('/api/remote-run-pinned-build', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({study: _remoteRunState.study}),
+      }).then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
+        .then(function(res) {
+          if (res.status !== 202 || !res.body.simulator_id) {
+            _rrErr('Could not resolve pinned build: ' + escapeHtmlForTests((res.body && res.body.error) || res.status)); return;
+          }
+          _remoteRunState.simulator_id = res.body.simulator_id;
+          _remoteRunState.commit = res.body.commit;
+          _renderRemoteRunProgress({build: 'done', run: 'running',
+            note: '<strong>Using pinned build.</strong> <span class="muted">'
+              + escapeHtmlForTests((res.body.branch || '') + ' @ ' + String(res.body.commit || '').slice(0, 12))
+              + '</span> Submitting run…'});
+          _submitRun();
+        }).catch(function(err) { _rrErr('Network error: ' + escapeHtmlForTests(String(err))); });
+      return false;
+    }
     if (btn) { btn.disabled = true; btn.textContent = 'Starting build…'; }
     fetch('/api/remote-run-build', {
       method: 'POST', headers: {'Content-Type': 'application/json'},

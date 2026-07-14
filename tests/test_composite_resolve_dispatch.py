@@ -92,6 +92,25 @@ def test_resolve_static_no_state_notice_not_generator(tmp_path, monkeypatch):
     assert out["kind"] == "spec"
 
 
+def test_resolve_degrades_when_get_spec_raises(tmp_path, monkeypatch):
+    """An in-process failure during generator discovery/lookup (e.g. a broken
+    native-dependency import like pymunk/viva_munk — the "colony" composite's
+    real-world failure mode) degrades to the standard wiring_status:"unavailable"
+    shape instead of propagating to the app-wide 500 handler."""
+    from vivarium_workbench.lib import composite_resolve as cr
+    monkeypatch.setattr(cr, "_prime_registry", lambda: None)
+
+    def _raise(spec_id):
+        raise ImportError("no module named viva_munk")
+
+    monkeypatch.setattr(cr, "_get_spec", _raise)
+    out = cr.resolve_composite(tmp_path, "v2ecoli.composites.colony")
+    assert out is not None
+    assert out["wiring_status"] == "unavailable"
+    assert out["id"] == "v2ecoli.composites.colony"
+    assert "viva_munk" in out["notice"]
+
+
 def test_resolve_generator_with_corrupt_artifact_degrades(tmp_path, monkeypatch):
     from process_bigraph import composite_spec as cs
     from vivarium_workbench.lib import composite_resolve as cr
