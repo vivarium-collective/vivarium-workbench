@@ -81,16 +81,22 @@ live-verify (WS-2) + Segment 8 + recording.** Ground-truth plan for Segment 7:
   our params. `pbg_ptools.workbench_viewers` emits the **0.8.2** scheme
   `?omics=t&url=<tsv>&class=&column1=`, all of which 0.5.9 ignores. **The
   `/ptools-data` filesystem fallback also fails** — both delivery modes feed the
-  same unused `url=`. Fix = (a) upgrade remote PTools to 0.8.2 (blocked: no newer
-  `sms-ptools` image on ghcr, CI builds only sms-api), or (b) adapt the launcher to
-  register the TSV then launch `?multiomics=t&datafile=<key>`. Detail in memory
-  `[[project_ptools_segment7_routing]]`.
+  same unused `url=`. Detail in memory `[[project_ptools_segment7_routing]]`.
 
 **DECISION (2026-07-14):** keep the Omics Viewer Launch IN the demo; DEFER the
-0.5.9 fix to **after Segment 8, before the recording**. Tracked as
-**`.todo/plans/9-omics-viewer-0.5.9-register-launch.md`** (register-then-launch).
-New order: **Segment 8 (WS-3) → plan 9 (Omics fix) → record (WS-4)**. Interactive
-figures + TSV delivery already PASS, so Segment 7 is otherwise demo-ready.
+0.5.9 fix to **after Segment 8 ✅, before the recording**. Tracked as
+**`.todo/plans/9-omics-viewer-0.5.9-register-launch.md`**. **Approach REFINED via
+/plan (approved):** the original "register-then-launch" was invalidated — 0.5.9 has
+NO register-and-return-key endpoint (only `/overview-multi-omics-process`, a direct
+upload that paints the open overview). **Chosen: frictionless semi-manual upload** —
+Launch opens the clean overview + the dashboard hands the presenter the study TSV
+(one-click download + "upload in the Omics dialog" prompt); one upload click paints
+it via PTools' own UI. Impl: `ui.ptools_scheme` switch (default `manual`) in
+`pbg_ptools.workbench_viewers` + a `_launchViewer` helper panel in
+`static/walkthrough.js`. Needs tunnel (WS-1/WS-4) + a local `pbg-ptools` clone
+(third coupled repo). Full plan: `~/.claude/plans/validated-roaming-catmull.md`.
+Order: **Segment 8 ✅ → plan 9 (Omics fix) → record**. Interactive figures + TSV
+delivery already PASS, so Segment 7 is otherwise demo-ready.
 
 **⛔ HARD CONSTRAINT (do not lose this):** Pathway Tools inside `sms-ptools` is
 **PROPRIETARY third-party software — we CANNOT edit/patch/adjust it in ANY way**

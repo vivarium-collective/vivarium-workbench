@@ -26,7 +26,7 @@ gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
 | **Segment 7 live-verify** — TSV HTTP delivery | ✅ **PASS** — dashboard serves omics TSV (200, ~355 KB) at the PTools-fetched path |
 | **Segment 7 live-verify** — Omics Viewer auto-load | ❌ **FAIL on `sms-ptools:0.5.9`** — 0.5.9 reads `multiomics=t&datafile=<key>`, not our `omics=t&url=`. **DEFERRED fix** → plan 9 |
 | **Segment 8 (Wrap-up)** recap figures | ✅ **VERIFIED live** (2026-07-14, headless) — 173 proc / 7 pkgs, 9 ParCa steps, 8 investigations, 58 viz, 36 runs (35 seeded + 1 landed). In-browser click-through recap = presenter's action at demo time |
-| Omics Viewer 0.5.9 register-then-launch fix | ⏳ **NEXT (deferred slot)** — plan 9; awaits "proceed" |
+| Omics Viewer 0.5.9 semi-manual upload fix | ⏳ **NEXT (deferred slot)** — plan 9 (REFINED via /plan, approved); awaits "proceed" |
 | `Last verified` stamp extended to all 8 segments | ✅ **DONE** — stamp now covers 1–8 (with Segment 7 Omics-Launch 0.5.9 caveat) |
 | Narrated screen recording (the deliverable) | ⏳ after plan 9 |
 | WS-F PRs + version-bump releases into `main` (both repos) | ⏳ post-completion |
@@ -53,9 +53,13 @@ gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
    runs). `WALKTHROUGH.md` stamp extended to all 8 segments; recap "35 runs" → 36
    (live callback). In-browser tab click-through is the presenter's action at demo
    time — no code/verify gap remains.
-4. **Omics Viewer 0.5.9 fix** — ⏳ **NEXT** (the deferred slot: after Segment 8,
+4. **Omics Viewer 0.5.9 fix** — ⏳ **NEXT** (the deferred slot: after Segment 8 ✅,
    before recording). Plan `.todo/plans/9-omics-viewer-0.5.9-register-launch.md`
-   (register-then-launch, constraint-safe). Awaits "proceed".
+   (**REFINED via /plan, approved** — frictionless semi-manual upload: Launch opens
+   clean overview + dashboard serves the TSV with a one-click download + "upload in
+   the Omics dialog" prompt; `ui.ptools_scheme` switch in `pbg_ptools.workbench_viewers`
+   + a `_launchViewer` helper. Needs tunnel + a local `pbg-ptools` clone). Awaits
+   "proceed". Full plan: `~/.claude/plans/validated-roaming-catmull.md`.
 5. **Record the narrated screen recording** (editable) — the actual deliverable,
    after plan 9.
 6. **WS-F (post-completion):** PR #465 (`demo-v2ecoli`→`main`, open/REVIEW_REQUIRED)

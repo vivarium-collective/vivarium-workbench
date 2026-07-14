@@ -92,13 +92,13 @@ Linked tasks: continues #5. The two coupled branches — dashboard `demo-v2ecoli
 
 ### Name
 
-Feat: make the PTools Omics Viewer Launch work on the deployed `sms-ptools:0.5.9` (register-then-launch), closing the ❌ half of #6 WS-2.
+Feat: make the PTools Omics Viewer Launch paint on the deployed `sms-ptools:0.5.9` via a **frictionless semi-manual upload**, closing the ❌ half of #6 WS-2.
 
-Linked tasks: closes #6 WS-2b (interactive-figures half already PASSES live). Adjacent to #8 (which should consume this launch mechanism). Spans `pbg-ptools` (`workbench_viewers`) + possibly dashboard frontend + sms-api overlay. No v2ecoli changes.
+Linked tasks: closes #6 WS-2b (interactive-figures half already PASSES live). Adjacent to #8 (which consumes this launch mechanism). Spans THREE repos: `pbg-ptools` (`workbench_viewers` — new third coupled repo) + dashboard frontend + likely-no-change sms-api. No v2ecoli changes.
 
-### Status: 📋 PLANNED — DEFERRED by decision (2026-07-14); do AFTER Segment 8, BEFORE recording; awaits "proceed"
+### Status: 📋 PLANNED + REFINED (via /plan, approved) — DEFERRED slot: AFTER Segment 8 ✅, BEFORE recording; awaits "proceed"
 
-**⛔ CONSTRAINT: Pathway Tools in `sms-ptools` is PROPRIETARY — never edit/patch/adjust it.** The fix lives entirely in OUR launcher (`pbg_ptools.workbench_viewers`) driving PTools' existing unmodified endpoints, or in infra (image/volume/env). 0.5.9's only omics auto-load path reads `datafile`/`datakeys` and fetches `/get-registered-multiomics-data?key=<key>` (server-registered-KEY flow) — there is no `url=`/`case "omics"` reader in its 915 KB `pathwayTools-overviews.js`. Fix = register the study TSV via PTools' OWN register endpoint (POST FormData), get a key, launch `?multiomics=t&datafile=<key>`; keep the 0.8.2 `url=` scheme behind a version switch. Constraint-safe fallbacks: upgrade the `sms-ptools` image to a version whose scheme fits (blocked — no newer image on ghcr) or descope. See plan for WS-1…WS-4 + memory `[[project_ptools_segment7_routing]]`.
+**⛔ CONSTRAINT: Pathway Tools in `sms-ptools` is PROPRIETARY — never edit/patch it.** All new code is OURS; we only *use* PTools' existing Omics upload dialog. **Refinement (2026-07-14):** live investigation INVALIDATED the original "register-then-launch" idea — 0.5.9 has NO register-and-return-key endpoint (only `/overview-multi-omics-process`, which paints an already-open overview from a direct upload, + `/save-omics-prefs`); the `datafile=<key>` path only reads pre-registered data nothing in the client can create. **Chosen approach = frictionless semi-manual:** Launch opens the clean overview AND the dashboard hands the presenter the study TSV (one-click download + "upload this in the Omics dialog" prompt); one upload click paints it via PTools' own UI. Implementation: `ui.ptools_scheme` switch (default `manual` for 0.5.9, `url` opt-in for 0.8.x) in `pbg_ptools.workbench_viewers` + a `_launchViewer` helper panel in `static/walkthrough.js` reusing the `available`/`tsv_url` the launcher already returns. Needs tunnel (WS-1/WS-4) + a local `pbg-ptools` clone. See plan for WS-1…WS-4 + `~/.claude/plans/validated-roaming-catmull.md` + memory `[[project_ptools_segment7_routing]]`.
 
 ---
 
