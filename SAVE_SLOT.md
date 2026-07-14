@@ -1,6 +1,52 @@
-# Checkpoint: Segment 6 Part B — pinned-build remote runs DEPLOYED + PROVEN LIVE; P7 doc + segments 7–8 + PRs remain
+# Checkpoint: Segment 7 (PTools/Omics) DEPLOYING — push ✅ / build 🔄 / rollout ⏳ — then live-verify 7–8, record
 
-**Updated:** 2026-07-13 (execution session). The full-e2e demo blocker (Segment 6
+**Updated:** 2026-07-13 (deploy-in-flight session). Segment 6 Part B is proven live
+(below). **Segment 7 (Analyses / PTools Omics Viewer) is coded + PUSHED on BOTH
+coupled branches; deploy is now in flight** (Action 1 push done; Action 2 image
+build running; Action 3 overlay repoint + rollout next). Ground-truth plan for
+Segment 7: **`.todo/plans/6-segment7-ptools-omics-deploy-verify.md`**.
+
+## Segment 7 deploy progression (iterative action protocol)
+
+- ✅ **Action 1 — push (DONE)**: dashboard `demo-v2ecoli` `b33b7ca..7a9620c`;
+  sms-api `patch/db-filter` `00d456f2..c2a337cd`. Both branches level with origin.
+- 🔄 **Action 2 — build image (IN PROGRESS)**: `gh workflow run build-and-push.yml
+  --ref demo-v2ecoli` → run **`29299423533`**. Tag defaults to git short sha →
+  expected GHCR tag **`7a9620c`** (`deploy/build-and-push.sh:18`). Prior builds
+  ~9–10 min. Watch backgrounded (task `b4ymwlp2r`). Verify in GHCR when done.
+- ⏳ **Action 3 — repoint + roll out**: overlay `newTag` `72e00b8`→`7a9620c`; roll
+  out to `sms-api-stanford-test`; confirm pod 1/1; re-seed picks up
+  `DASHBOARD_PUBLIC_BASE_URL` + cleared `ptools_data_dir`.
+
+## Segment 7 — committed this session (2026-07-13), NOT yet deployed
+
+The demo is delivered jointly by the two spiritually-coupled branches — dashboard
+`demo-v2ecoli` ↔ sms-api `patch/db-filter` (memory `[[project_demo_branch_coupling]]`);
+post-completion → PR merge + version-bump release into each `main`.
+
+- **dashboard `demo-v2ecoli` `7a9620c`** — `lib/report.py::_apply_live_base_path`
+  now base-path-prefixes `/reports/` src/href so a study's interactive Plotly
+  figures resolve to `/workbench/reports/...` (the dashboard) instead of colliding
+  with the co-tenant PTools at the ALB root (which 404s). WALKTHROUGH Segment 7
+  written (remote-first). `bugs/ptools-misroute.png` is the failure it fixes.
+- **sms-api `patch/db-filter` `c2a337cd`** — the workbench `seed-workspace`
+  initContainer now stamps `ui.dashboard_public_base_url` (the in-cluster URL the
+  ptools pod fetches the study TSV from) and CLEARS `ui.ptools_data_dir` so the
+  Omics Viewer launcher uses HTTP delivery (the ptools pod has no workspace mount).
+
+Both commits exist locally; both branches are 1 commit ahead of origin.
+**Remaining to make Segment 7 real:** push both → build a new workbench image
+(gh action) with `7a9620c` → repoint overlay `newTag` `72e00b8`→new SHA → roll out
+→ live-verify in browser. **OPEN RISK:** remote PTools is `sms-ptools:0.5.9`; the
+`celOv.shtml?…&url=` auto-load param is documented against 0.8.2. If 0.5.9 ignores
+`url=`, fall back to mounting the workspace into the ptools pod at `/ptools-data`
+and keep `ptools_data_dir`. See `[[project_ptools_segment7_routing]]`.
+
+---
+
+## (prior) Segment 6 Part B — pinned-build remote runs DEPLOYED + PROVEN LIVE
+
+The full-e2e demo blocker (Segment 6
 Part B "Run on remote") was root-caused to **three deployment gaps**, fixed via a
 new **pinned-build** model (Direction 1), deployed, and **proven live end-to-end**
 (sim 211 ran on a 3-node Ray cluster and landed). Ground-truth plan:

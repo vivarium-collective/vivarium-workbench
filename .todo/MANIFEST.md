@@ -70,7 +70,21 @@ Linked tasks: unblocks WS-E of #4 (Segment 6 Part B was the acceptance gate). Sp
 
 ### Status: 🔄 EXECUTING — feature DEPLOYED + Part B PROVEN LIVE + P7 doc DONE; Segments 7–8 drive + WS-F PRs remain
 
-**2026-07-13:** Part B was root-caused to 3 pod deployment gaps (A: no GH client_id → login disabled; B: `/workspace/.git` uid 17163 ≠ app uid 0 → dubious ownership; C: protected-main push). Fixed via the **pinned-build** model (Direction 1): resolve the latest built simulator for the configured repo@branch from in-cluster sms-api and skip Phase 1 (push/build/login) entirely; login gate relaxed only under declarative pinned config. Shipped dashboard `demo-v2ecoli 72e00b84` (img `72e00b8`, deployed) + sms-api `patch/db-filter 2ef52c0a`. **Proven live e2e**: sim 211 → ParCa → 3-node transient Ray MNP cluster → completed → landed (Simulations DB now 36). P7 WALKTHROUGH Segment 6 rewrite DONE. REMAINING: full 8-segment drive Segments 7–8 (browser) + WS-F PRs. Ground truth `SAVE_SLOT.md`.
+**2026-07-13:** Part B was root-caused to 3 pod deployment gaps (A: no GH client_id → login disabled; B: `/workspace/.git` uid 17163 ≠ app uid 0 → dubious ownership; C: protected-main push). Fixed via the **pinned-build** model (Direction 1): resolve the latest built simulator for the configured repo@branch from in-cluster sms-api and skip Phase 1 (push/build/login) entirely; login gate relaxed only under declarative pinned config. Shipped dashboard `demo-v2ecoli 72e00b84` (img `72e00b8`, deployed) + sms-api `patch/db-filter 2ef52c0a`. **Proven live e2e**: sim 211 → ParCa → 3-node transient Ray MNP cluster → completed → landed (Simulations DB now 36). P7 WALKTHROUGH Segment 6 rewrite DONE. Segment 7 now coded/committed (see #6). Ground truth `SAVE_SLOT.md`.
+
+---
+
+## 6. **(.todo/plans/6-segment7-ptools-omics-deploy-verify.md)**:
+
+### Name
+
+Feat/verify: land Segment 7 (PTools Omics Viewer + interactive figures) across the coupled pair, live-verify Segments 7–8, record the demo, then open the post-completion release PRs.
+
+Linked tasks: continues #5. The two coupled branches — dashboard `demo-v2ecoli` ↔ sms-api `patch/db-filter` — jointly deliver the whole demo (memory `[[project_demo_branch_coupling]]`); post-completion = PR merge + version-bump release into each `main`. No `v2ecoli` changes.
+
+### Status: 🔄 EXECUTING — code committed on both branches; deploy + verify + record remain
+
+**2026-07-13:** Segment 7 committed but not deployed: dashboard `demo-v2ecoli 7a9620c` (`/reports/` embed-URL base-path prefix so interactive figures resolve to the dashboard, not the co-tenant PTools at the ALB root) + sms-api `patch/db-filter c2a337cd` (seed `ui.dashboard_public_base_url` + clear `ui.ptools_data_dir` so the Omics Viewer overlay fetches study TSVs over HTTP). REMAINING: push → build image → repoint overlay `newTag` → roll out → live-verify Segment 7 (OPEN RISK: `sms-ptools:0.5.9` may ignore `celOv.shtml?…&url=`; 0.8.2 fallback = mount workspace at `/ptools-data`) + Segment 8 → stamp all 8 → record → WS-F release PRs. Ground truth `SAVE_SLOT.md`.
 
 ---
 
