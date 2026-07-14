@@ -15458,7 +15458,33 @@
           .then(function (arr) {
             var chartsByStudy = {};
             arr[2].forEach(function (c) { chartsByStudy[c.name] = c.charts; });
-            return _buildInvestigationReportHtml(iset, arr[0], arr[1], chartsByStudy, undefined, null, arr[3], undefined, undefined, arr[4]);
+            // Fetch each study's embed_visualizations HTML and inline it so the
+            // generated report carries the interactive figures (Plotly hover/
+            // zoom/legend) offline, not just the static charts. The publisher
+            // basePath-prefixes embed.url, so a plain fetch resolves in a hosted
+            // snapshot too; in local mode it hits the same-origin /workspace path.
+            var specs = arr[0];
+            var embedFetches = specs.map(function (spec) {
+              var embeds = (spec && spec.embed_visualizations) || [];
+              var perStudy = embeds.map(function (embed) {
+                if (!embed || !embed.url) return Promise.resolve(null);
+                return fetch(embed.url, {headers: {Accept: 'text/html'}})
+                  .then(function (r) { return r.ok ? r.text() : null; })
+                  .then(function (text) {
+                    return text ? {name: embed.name || '', description: embed.description || '',
+                                   url: embed.url, html: text, stale: embed.stale === true} : null;
+                  })
+                  .catch(function () { return null; });
+              });
+              return Promise.all(perStudy).then(function (results) {
+                return {name: spec && spec.name, embeds: results.filter(Boolean)};
+              });
+            });
+            return Promise.all(embedFetches).then(function (embedResults) {
+              var embedsByStudy = {};
+              embedResults.forEach(function (e) { if (e && e.name) embedsByStudy[e.name] = e.embeds; });
+              return _buildInvestigationReportHtml(iset, specs, arr[1], chartsByStudy, embedsByStudy, null, arr[3], undefined, undefined, arr[4]);
+            });
           });
       });
   }
