@@ -47,12 +47,17 @@ The tunnel script ships in the `sms-cdk` repo:
 git clone git@github.com:vivarium-collective/sms-cdk.git ~/sms/sms-cdk   # if not already present
 ```
 
-### 0.3 (optional) PTools Omics Viewer — Segment 7
+### 0.3 PTools Omics Viewer — Segment 7
 
-```bash
-docker run -p 1555:1555 ghcr.io/vivarium-collective/sms-ptools
-```
-Not required — gracefully skipped if unavailable.
+No local setup. Pathway Tools runs as the `ptools` Deployment in the
+`sms-api-stanford-test` namespace, served at the internal-ALB **root** (`/`) —
+the same ALB the dashboard co-tenants under `/workbench/`. Through the
+`sms-proxy -s smsvpctest` tunnel it's reachable at `http://localhost:8080`, so
+the Omics Viewer's **Launch** button (Segment 7) opens the live remote Cellular
+Overview in a new tab. The `seed-workspace` initContainer stamps
+`ui.ptools_server_url` (the browser target) and `ui.dashboard_public_base_url`
+(the in-cluster URL the ptools pod fetches study TSVs from) into the served
+`workspace.yaml`; nothing to run locally.
 
 ### 0.4 Remote workspace state
 
@@ -310,8 +315,9 @@ if the session has one.
 
 ### Actions
 1. Click **Analyses** — visualization class gallery
-2. **PTools omics viewer**: If sms-ptools is running on `localhost:1555`, launch Pathway Tools Cellular Overview with study omics data overlaid on E. coli metabolic map
-3. **Visualization preview**: Show a `demo()` method rendering instantly against synthetic data
+2. **PTools Omics Viewer** (remote, no local container): on the "Pathway Tools — Omics Viewer" card, click **Launch** on the `showcase-2-baseline-figures` row. A new tab opens the live remote EcoCyc **Cellular Overview** with the study's exported omics TSVs painted onto the E. coli metabolic map. (Served by the `ptools` Deployment in `sms-api-stanford-test` at the ALB root; the in-cluster ptools pod fetches the TSV from the workbench Service.)
+3. **Interactive figures**: on a study's **Visualizations** tab, the embedded Plotly figures (e.g. showcase-2's dry-mass composition) render inline — served under `/workbench/reports/figures/...` so they resolve to the dashboard, not the co-tenant PTools at the ALB root.
+4. **Visualization preview**: Show a `demo()` method rendering instantly against synthetic data
 
 ### API
 `GET /workbench/api/visualization-classes` → 58 visualization classes
@@ -380,7 +386,7 @@ A: `sms-proxy.sh -s smsvpctest` resolves the batch submit node ID and internal A
 A: The ALB path-routes multiple services on one host. The dashboard is served under the `/workbench` base path (`--base-path /workbench`); all its links and assets are base-path-aware.
 
 **Q: Do I need the tunnel for the whole demo?**
-A: Yes — the dashboard itself is remote, so the tunnel is required for every segment (unlike the old local flow). Only the optional PTools omics viewer (Segment 7) is a separate local container.
+A: Yes — the dashboard itself is remote, so the tunnel is required for every segment (unlike the old local flow). The PTools Omics Viewer (Segment 7) is remote too — it's the `ptools` Deployment in `sms-api-stanford-test` at the ALB root, reached over the same tunnel; no local container.
 
 ---
 

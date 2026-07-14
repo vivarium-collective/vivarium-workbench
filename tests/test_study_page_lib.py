@@ -211,3 +211,24 @@ class TestRenderStudyDetailHtmlBasePath:
         html, status = build_study_detail_page(ws, "dnaa-01-binding", base_path="/workbench")
         assert status == 200
         assert 'href="/workbench/assets/style.css"' in html
+
+    def test_base_path_prefixes_reports_embed_urls(self):
+        """Root-absolute ``/reports/…`` embed_visualizations URLs (iframe src +
+        'Open in new tab' href) are base-path-prefixed so they resolve to the
+        dashboard under the prefix — not the ALB root, which in the sms-api
+        co-tenant deploy is PTools (the 'Not Found' misroute)."""
+        from vivarium_workbench.lib.report import _apply_live_base_path
+        fig = "/reports/figures/showcase-2/mass_composition_interactive.html"
+        html = (
+            f'<a href="{fig}" target="_blank">Open</a>'
+            f'<iframe src="{fig}"></iframe>'
+            '<a href="/api/x">api</a>'
+            '<script src="https://cdn.plot.ly/plotly.min.js"></script>'
+        )
+        out = _apply_live_base_path(html, "/workbench")
+        assert out.count(f'/workbench{fig}') == 2          # href + iframe src
+        assert f'"{fig}"' not in out                       # no un-prefixed leak
+        assert 'href="/api/x"' in out                      # /api/ left for the runtime shim
+        assert 'src="https://cdn.plot.ly/plotly.min.js"' in out  # external untouched
+        # empty base_path (local root hosting) is a no-op
+        assert _apply_live_base_path(html, "") == html

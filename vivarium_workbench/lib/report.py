@@ -418,7 +418,10 @@ def _apply_live_base_path(html: str, base_path: str) -> str:
     ``/workbench``) behind a shared reverse proxy / ALB.
 
     - Prefixes static asset refs (relative ``assets/…`` and absolute
-      ``/assets/…`` / ``/bigraph-loom/…``).
+      ``/assets/…`` / ``/bigraph-loom/…`` / ``/reports/…``). The ``/reports/``
+      case covers a study's ``embed_visualizations`` (interactive figure
+      iframes/links) so they resolve to this service under the prefix rather
+      than the ALB root — which, in the sms-api co-tenant deploy, is PTools.
     - Injects ``basePath`` into ``__DASH_CONFIG__`` and a small runtime shim that
       prepends the prefix to root-absolute app URLs used by ``fetch`` /
       ``EventSource`` / ``XMLHttpRequest`` (the SPA builds many raw requests that
@@ -434,9 +437,9 @@ def _apply_live_base_path(html: str, base_path: str) -> str:
     import re as _re
     bp = base_path
     html = _re.sub(r'(\b(?:src|href)=")assets/', rf'\1{bp}/assets/', html)
-    html = _re.sub(r'(\b(?:src|href)=")(/(?:assets|bigraph-loom)/)', rf'\1{bp}\2', html)
+    html = _re.sub(r'(\b(?:src|href)=")(/(?:assets|bigraph-loom|reports)/)', rf'\1{bp}\2', html)
     bpj = json.dumps(bp)
-    prefixes = json.dumps(["/api/", "/bigraph-loom/", "/loom-explore", "/studies/", "/health", "/assets/"])
+    prefixes = json.dumps(["/api/", "/bigraph-loom/", "/loom-explore", "/studies/", "/health", "/assets/", "/reports/"])
     shim = (
         "<script>(function(){var BP=" + bpj + ";window.__BASE_PATH__=BP;if(!BP)return;"
         "var P=" + prefixes + ";"
