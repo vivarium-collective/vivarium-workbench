@@ -1,4 +1,30 @@
-# Checkpoint: Segments 7 & 8 VERIFIED live — figures✅ TSV✅ (Omics-Launch deferred, plan 9) / Seg-8 recap figures✅ — DEMO IS A SHIPPABLE MVP — NEXT: plan 9 (Omics fix) → record
+# Checkpoint: DEMO IS A SHIPPABLE MVP — NEXT SESSION STARTS WITH MERGE/RELEASE INTO `main` (both repos), THEN plans 7 & 9
+
+## ⭐ NEXT-SESSION SEQUENCING DECISION (2026-07-14) — MERGE/RELEASE FIRST, THEN 7 & 9
+
+The `demo-v2ecoli` branch is a **shippable MVP** for a smooth, completely-remote
+demo (7½/8 segments verify live; the sole gap is the PTools Omics-Viewer paint — a
+soft-fail that opens the overview unpainted, no error). Both remaining plans (7 =
+progress UX, 9 = Omics fix) are **safe to defer post-merge**. **We are flipping the
+old "plan 9 → record → WS-F" order.** Next session begins with **STEP 1 — the
+version bumps / merges / releases into the `main` branches of BOTH repos** (sms-api
+`patch/db-filter` + dashboard `./` via PR #465), i.e. ship the MVP:
+
+- **1a** — dashboard PR #465 (`demo-v2ecoli`→`main`) is OPEN + MERGEABLE but
+  `REVIEW_REQUIRED`: get the review approval first (NO auto-merge), then merge.
+- **1b** — open + review + merge sms-api `patch/db-filter`→`main` (the coupled pair
+  merges in tandem — the remote demo drifts if only one side lands).
+- **1c** — version-bump releases (cut release tags) into each `main`, then repoint
+  the k8s overlay `newTag` from dev SHA `7a9620c` to the release tag. Keep the
+  untracked `vivarium_workbench/environment.py` (pydantic-settings WIP) OUT of the
+  merge — provenance stays clean.
+- **Recording** may be done now with the Omics beat skipped/caveated, or re-shot
+  after plan 9. Presenter's call.
+
+**STEP 2 — ONLY AFTER the MVP ships:** tackle **plan 7** (`~/.claude/plans/mellow-tinkering-moth.md`)
+and **plan 9** (`~/.claude/plans/validated-roaming-catmull.md`) on dedicated
+post-merge branch(es)/PR(s) off the freshly-released `main`. Both refined, both
+await "proceed". See `NEXT_STEPS.md` for the full step list.
 
 ## MVP feasibility verdict (2026-07-14) — SHIPPABLE NOW, pre-plan-9
 

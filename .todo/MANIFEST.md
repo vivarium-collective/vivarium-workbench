@@ -110,9 +110,9 @@ Feat: sleek, production-grade progress feedback (progress bar + spinner) for lon
 
 Linked tasks: builds on #5 (the pinned-build run whose submit fans out to ParCa → Ray MNP → land is the process with thin progress signal today). Dashboard-only (`demo-v2ecoli`). Source: `.todo/_backlog.md` item (b).
 
-### Status: 📋 PLANNED — promoted from backlog Prompt Queue (2026-07-14); awaits "proceed" before code
+### Status: 📋 PLANNED + REFINED (via /plan, 2026-07-14) — awaits "proceed" before code
 
-Combined progress-bar + spinner treatment mapping the known backend phases (submitted → Ray provisioning → ParCa → running → landing → done), degrading gracefully in the read-only bundle, factored for reuse by the next long-running action. See plan for WS-1…WS-4.
+Feasibility verified by a backend + frontend sweep: a true continuous 0–100% bar is NOT backed by data (the poller `GET /api/remote-run-poll` forwards only a categorical `phase`/`raw_status` — no fraction, no SSE for remote runs). Two honest signals ARE available → **HYBRID model** (user-chosen): a determinate segmented **milestone bar** (Resolve → Submit → Queued → Running → Done → Landed) + an honest **time-based soft-fill** within the two long waits (Queued ≈ 8 min, Running ≈ 5 min; capped <100%, snaps on the real transition) + a **spinner** on the active stage. Reuse scope = **pinned card only** this iteration, but a **dual-shape component API** (`stages` + `measured`) with a documented adoption note for the genuinely-determinate local composite-run path (`progress_step`/`n_steps` via `/api/composite-run/{id}/status`). Wraps the existing `_renderRemoteRunProgress` as an adapter (unchanged call sites). New: `static/progress-track.{js,css}` + `tests/js/test_progress_track.js`. See plan for WS-1…WS-4.
 
 ---
 
