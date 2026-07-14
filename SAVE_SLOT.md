@@ -1,4 +1,21 @@
-# Checkpoint: Segment 7 (PTools/Omics) DEPLOYED — push ✅ / build ✅ / rollout ✅ (pod on 7a9620c, 1/1) — NEXT: browser live-verify 7–8, record
+# Checkpoint: Segments 7 & 8 VERIFIED live — figures✅ TSV✅ (Omics-Launch deferred, plan 9) / Seg-8 recap figures✅ — NEXT: plan 9 (Omics fix) → record
+
+## Segment 8 (Wrap-up) — recap figures VERIFIED against the live deployment (2026-07-14, headless)
+
+All architecture-pillar numbers re-checked through the tunnel so the recap
+narration is truthful: **173 processes / 7 packages** (registry endpoint is a
+workspace subprocess — first hit timed out at 15 s cold, warm hit returned 173),
+**9 ParCa Steps**, **8 investigations** (`/api/investigation-summaries`; the raw
+`/api/investigations`=41 is a different uncurated view — NOT a drift), **58 viz
+classes**, composites baseline/Millard/PDMP present (28 total), **Simulations DB =
+36** (35 seeded + 1 landed-live; status 32 completed / 1 complete / 3 failed;
+origin 1 remote / 35 local). Only stale figure: recap bullet "35 runs" → updated to
+36 with a live-callback note. `WALKTHROUGH.md` `Last verified` stamp extended to all
+8 segments. The in-browser rapid tab click-through recap is the presenter's action
+at demo time (no code/verify gap).
+
+---
+
 
 **Updated:** 2026-07-14 (deploy landed). Segment 6 Part B is proven live (below).
 **Segment 7 (Analyses / PTools Omics Viewer) is coded + PUSHED + DEPLOYED on BOTH

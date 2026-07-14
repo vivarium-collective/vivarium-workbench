@@ -82,7 +82,7 @@ Feat/verify: land Segment 7 (PTools Omics Viewer + interactive figures) across t
 
 Linked tasks: continues #5. The two coupled branches — dashboard `demo-v2ecoli` ↔ sms-api `patch/db-filter` — jointly deliver the whole demo (memory `[[project_demo_branch_coupling]]`); post-completion = PR merge + version-bump release into each `main`. No `v2ecoli` changes.
 
-### Status: 🔄 EXECUTING — DEPLOYED + live-verified (figures PASS, Omics FAIL on 0.5.9 → deferred to plan 9); Segment 8 + record remain
+### Status: 🔄 EXECUTING — Seg 7 (figures PASS, Omics deferred→plan 9) + Seg 8 (recap figures verified live) DONE; NEXT = plan 9 → record
 
 **2026-07-14:** Segment 7 deployed (pod 1/1 on `7a9620c`, seed env stamped) and live-verified headlessly. **Interactive figures PASS** (5/5 → 200 under `/workbench/reports/...`; root → 404). **TSV HTTP delivery PASS** (dashboard serves omics TSV 200/~355 KB at the PTools-fetched path). **Omics Viewer auto-load FAIL on `sms-ptools:0.5.9`** — root-caused: 0.5.9 auto-loads via `multiomics=t&datafile=<registered-key>` (fetches `/get-registered-multiomics-data`), NOT the launcher's `omics=t&url=<tsv>` (0.8.2 scheme); the `/ptools-data` fallback also fails since both feed the ignored `url=`. **DECISION (2026-07-14):** keep Omics Launch in the demo, DEFER the fix to plan 9 — order is **Segment 8 (WS-3) → plan 9 → record (WS-4)**. REMAINING: Segment 8 → plan 9 → stamp all 8 → record → WS-F release PRs. Ground truth `SAVE_SLOT.md` + memory `[[project_ptools_segment7_routing]]`.
 

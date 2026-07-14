@@ -25,10 +25,10 @@ gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
 | **Segment 7 live-verify** — interactive figures | ✅ **PASS** (2026-07-14, headless) — 5/5 figures 200 under `/workbench/reports/...`, root → 404 |
 | **Segment 7 live-verify** — TSV HTTP delivery | ✅ **PASS** — dashboard serves omics TSV (200, ~355 KB) at the PTools-fetched path |
 | **Segment 7 live-verify** — Omics Viewer auto-load | ❌ **FAIL on `sms-ptools:0.5.9`** — 0.5.9 reads `multiomics=t&datafile=<key>`, not our `omics=t&url=`. **DEFERRED fix** → plan 9 |
-| **Segment 8 (Wrap-up)** browser drive | ⏳ **NEXT** — needs your browser |
-| Omics Viewer 0.5.9 register-then-launch fix | ⏳ **DEFERRED** — plan 9; after Segment 8, before recording |
-| `Last verified` stamp extended to all 8 segments | ⏳ (currently covers 1–6) |
-| Narrated screen recording (the deliverable) | ⏳ after Segment 8 + plan 9 pass |
+| **Segment 8 (Wrap-up)** recap figures | ✅ **VERIFIED live** (2026-07-14, headless) — 173 proc / 7 pkgs, 9 ParCa steps, 8 investigations, 58 viz, 36 runs (35 seeded + 1 landed). In-browser click-through recap = presenter's action at demo time |
+| Omics Viewer 0.5.9 register-then-launch fix | ⏳ **NEXT (deferred slot)** — plan 9; awaits "proceed" |
+| `Last verified` stamp extended to all 8 segments | ✅ **DONE** — stamp now covers 1–8 (with Segment 7 Omics-Launch 0.5.9 caveat) |
+| Narrated screen recording (the deliverable) | ⏳ after plan 9 |
 | WS-F PRs + version-bump releases into `main` (both repos) | ⏳ post-completion |
 
 ## Next (iterative action protocol — proceed one action at a time, standby between)
@@ -48,12 +48,16 @@ gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
    scheme mismatch (0.5.9 auto-loads via `multiomics=t&datafile=<registered-key>`,
    not the launcher's `omics=t&url=<tsv>`; the `/ptools-data` fallback also fails
    since both feed the ignored `url=`). See `[[project_ptools_segment7_routing]]`.
-3. **Segment 8 (Wrap-up)** — ⏳ **NEXT (browser)** — architecture-pillars recap.
-4. **Omics Viewer 0.5.9 fix** — DEFERRED to here (after Segment 8, before recording)
-   per the 2026-07-14 decision. Plan `.todo/plans/9-omics-viewer-0.5.9-register-launch.md`
-   (register-then-launch). Then extend the `Last verified` stamp to all 8 segments.
+3. **Segment 8 (Wrap-up)** — ✅ **DONE (2026-07-14)**: all recap figures re-verified
+   live (173 proc / 7 pkgs, 9 ParCa steps, 8 investigations summaries, 58 viz, 36
+   runs). `WALKTHROUGH.md` stamp extended to all 8 segments; recap "35 runs" → 36
+   (live callback). In-browser tab click-through is the presenter's action at demo
+   time — no code/verify gap remains.
+4. **Omics Viewer 0.5.9 fix** — ⏳ **NEXT** (the deferred slot: after Segment 8,
+   before recording). Plan `.todo/plans/9-omics-viewer-0.5.9-register-launch.md`
+   (register-then-launch, constraint-safe). Awaits "proceed".
 5. **Record the narrated screen recording** (editable) — the actual deliverable,
-   after Segment 8 + plan 9 pass.
+   after plan 9.
 6. **WS-F (post-completion):** PR #465 (`demo-v2ecoli`→`main`, open/REVIEW_REQUIRED)
    + open sms-api `patch/db-filter`→`main`; review, then version-bump releases into
    each `main`; repoint the overlay from the dev SHA to the release tag. No

@@ -73,9 +73,19 @@ OUR launcher (`pbg_ptools.workbench_viewers`) driving PTools' existing unmodifie
 endpoints; if a paint requires changing PTools itself, that path is out of bounds
 (fall back to an image upgrade or descope). Full constraint in plan 9.
 
-### WS-3 — Segment 8 + acceptance stamp
-1. Drive Segment 8 (Wrap-up / architecture-pillars recap).
-2. Extend the `Last verified` stamp in `WALKTHROUGH.md` to cover all 8 segments.
+### WS-3 — Segment 8 + acceptance stamp ✅ (2026-07-14)
+1. ✅ Segment 8 (Wrap-up) recap figures re-verified against the LIVE deployment
+   (headless, through the tunnel): **173 processes / 7 packages** (registry warm),
+   **9 ParCa Steps** (initialize…final_adjustments), **8 investigations** (summaries
+   view; the raw `/api/investigations` = 41 is a different, uncurated view — not a
+   drift), **58 viz classes**, composites baseline/Millard/PDMP present (28 total),
+   **Simulations DB = 36** (35 seeded + 1 landed live; status 32 completed / 1
+   complete / 3 failed; origin 1 remote / 35 local). Only stale figure was the flat
+   "35 runs" in the recap bullet → updated to 36 with a live-callback note.
+2. ✅ `Last verified` stamp in `WALKTHROUGH.md` extended to all 8 segments (with the
+   Segment 7 Omics-Launch 0.5.9 caveat called out).
+   NOTE: numbers verified via API probes through the tunnel; the in-browser rapid
+   tab click-through recap itself is the presenter's action at demo time.
 
 ### WS-4 — Record
 Record the narrated screen recording (editable) — the deliverable. **Gated on

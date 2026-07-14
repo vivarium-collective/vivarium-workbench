@@ -1,6 +1,6 @@
 # vivarium-workbench Dashboard Demo — Unified Walkthrough (Remote GovCloud)
 
-**Last verified**: 2026-07-13 *(remote — Segments 1–6 driven live incl. a live pinned-build remote run in Segment 6 Part B; Segments 7–8 pending)*
+**Last verified**: 2026-07-14 *(remote — Segments 1–6 driven live incl. a live pinned-build remote run in Segment 6 Part B. Segment 7: interactive figures + omics-TSV HTTP delivery verified live; the PTools Omics Viewer **Launch** does NOT auto-paint on the deployed `sms-ptools:0.5.9` (scheme mismatch — deferred, see plan 9), so demo it with that caveat or skip the Launch. Segment 8: all recap figures re-verified against the live deployment — 173 processes / 7 packages, 9 ParCa Steps, 8 investigations (summaries view), 58 viz classes, Simulations DB now **36** (35 seeded + 1 landed live).)*
 **Branch**: `demo-v2ecoli` in `vivarium-collective/vivarium-dashboard`
 **Demo target**: the **REMOTE** `/workbench` deployment on the `sms-api-stanford-test`
 Kubernetes namespace (GovCloud `smsvpctest` stack), reached in the browser at
@@ -339,7 +339,7 @@ if the session has one.
    - **One dashboard, many simulators** — Registry: 173 processes from 7 packages
    - **Swappable cell engines** — Composites: baseline, Millard, PDMP, all sharing reactor coupler
    - **Modular pipelines** — ParCa: 9 Steps, each independently swappable
-   - **Reproducible, git-tracked runs** — Simulations DB: 35 runs with full provenance
+   - **Reproducible, git-tracked runs** — Simulations DB: **36 runs** with full provenance (35 seeded + the 1 remote run we just landed live in Segment 6 — a nice callback: the number ticked up in front of you)
    - **AWS GovCloud at scale** — the entire dashboard is served in-cluster; remote runs go to sms-api on GovCloud
 
 ### Narration
