@@ -11,9 +11,15 @@ Linked tasks: continues #5 (Segment 6 Part B proven live). The two coupled
 branches jointly deliver the whole demo — see memory
 `[[project_demo_branch_coupling]]`. No `v2ecoli` changes.
 
-## Status: 🔄 EXECUTING — code committed on both branches; deploy + verify + record remain
+## Status: 🔄 EXECUTING — DEPLOYED to sms-api-stanford-test (rollout in flight); live-verify + record remain
 
-**2026-07-13:** Segment 7 code is committed but not yet deployed:
+**2026-07-14:** WS-1 complete — Segment 7 code is deployed. Action 1 (push both
+branches) ✅; Action 2 (build workbench image `7a9620c`, gh run `29299423533`,
+GHCR-confirmed HTTP 200 + provenance tag `build/demo-v2ecoli/7a9620c`) ✅; Action 3
+(overlay `newTag` `72e00b8`→`7a9620c`, `kubectl apply -k` → `deployment.apps/workbench
+configured`) ✅ applied, rollout to pod 1/1 in flight. Next: WS-2 live-verify.
+
+**2026-07-13 (baseline):** Segment 7 code committed:
 - dashboard `demo-v2ecoli` `7a9620c` — `_apply_live_base_path` base-path-prefixes
   `/reports/` embed URLs so interactive figures resolve to the dashboard, not the
   co-tenant PTools at the ALB root. WALKTHROUGH Segment 7 written.
@@ -23,12 +29,15 @@ branches jointly deliver the whole demo — see memory
 
 ## Workstreams
 
-### WS-1 — Deploy the coupled pair
-1. Push `demo-v2ecoli` `7a9620c` and `patch/db-filter` `c2a337cd`.
-2. Build a new workbench image (gh action) including `7a9620c`.
-3. Repoint the overlay `newTag` `72e00b8`→new SHA; roll out to `sms-api-stanford-test`
-   (confirm pod 1/1). Re-seed picks up `DASHBOARD_PUBLIC_BASE_URL` + cleared
-   `ptools_data_dir`.
+### WS-1 — Deploy the coupled pair ✅ (rollout in flight)
+1. ✅ Push `demo-v2ecoli` `7a9620c` and `patch/db-filter` `c2a337cd`.
+2. ✅ Build a new workbench image (gh action) including `7a9620c` — gh run
+   `29299423533` success; GHCR manifest for `7a9620c` returns HTTP 200.
+3. ✅ Repoint the overlay `newTag` `72e00b8`→`7a9620c` in
+   `kustomize/overlays/sms-api-stanford-test/kustomization.yaml`; `kubectl apply -k`
+   → `deployment.apps/workbench configured`; rollout to `sms-api-stanford-test`
+   in flight (confirm pod 1/1). Re-seed picks up `DASHBOARD_PUBLIC_BASE_URL` +
+   cleared `ptools_data_dir`.
 
 ### WS-2 — Live-verify Segment 7 (browser, through the tunnel)
 1. Interactive Plotly figures (e.g. showcase-2 dry-mass composition) on a study's

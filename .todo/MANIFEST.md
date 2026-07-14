@@ -82,9 +82,37 @@ Feat/verify: land Segment 7 (PTools Omics Viewer + interactive figures) across t
 
 Linked tasks: continues #5. The two coupled branches — dashboard `demo-v2ecoli` ↔ sms-api `patch/db-filter` — jointly deliver the whole demo (memory `[[project_demo_branch_coupling]]`); post-completion = PR merge + version-bump release into each `main`. No `v2ecoli` changes.
 
-### Status: 🔄 EXECUTING — code committed on both branches; deploy + verify + record remain
+### Status: 🔄 EXECUTING — DEPLOYED to sms-api-stanford-test (rollout in flight); live-verify + record remain
 
-**2026-07-13:** Segment 7 committed but not deployed: dashboard `demo-v2ecoli 7a9620c` (`/reports/` embed-URL base-path prefix so interactive figures resolve to the dashboard, not the co-tenant PTools at the ALB root) + sms-api `patch/db-filter c2a337cd` (seed `ui.dashboard_public_base_url` + clear `ui.ptools_data_dir` so the Omics Viewer overlay fetches study TSVs over HTTP). REMAINING: push → build image → repoint overlay `newTag` → roll out → live-verify Segment 7 (OPEN RISK: `sms-ptools:0.5.9` may ignore `celOv.shtml?…&url=`; 0.8.2 fallback = mount workspace at `/ptools-data`) + Segment 8 → stamp all 8 → record → WS-F release PRs. Ground truth `SAVE_SLOT.md`.
+**2026-07-14:** Segment 7 code deployed. Push (Action 1) + image build `7a9620c` (Action 2, gh run `29299423533`, GHCR-confirmed + provenance-tagged) done; **Action 3 applied** — overlay `newTag` `72e00b8`→`7a9620c` in `kustomize/overlays/sms-api-stanford-test/kustomization.yaml`, `kubectl apply -k` accepted (`deployment.apps/workbench configured`), rollout in flight. Deployed pieces: dashboard `demo-v2ecoli 7a9620c` (`/reports/` embed-URL base-path prefix so interactive figures resolve to the dashboard, not the co-tenant PTools at the ALB root) + sms-api `patch/db-filter c2a337cd` (seed `ui.dashboard_public_base_url` + clear `ui.ptools_data_dir` so the Omics Viewer overlay fetches study TSVs over HTTP). REMAINING: confirm pod 1/1 → live-verify Segment 7 (OPEN RISK: `sms-ptools:0.5.9` may ignore `celOv.shtml?…&url=`; 0.8.2 fallback = mount workspace at `/ptools-data`) + Segment 8 → stamp all 8 → record → WS-F release PRs. Ground truth `SAVE_SLOT.md`.
+
+---
+
+## 7. **(.todo/plans/7-pinned-run-progress-ux.md)**:
+
+### Name
+
+Feat: sleek, production-grade progress feedback (progress bar + spinner) for long-running UI-triggered processes, first case = the "Run against pinned build" card in the Simulations tab.
+
+Linked tasks: builds on #5 (the pinned-build run whose submit fans out to ParCa → Ray MNP → land is the process with thin progress signal today). Dashboard-only (`demo-v2ecoli`). Source: `.todo/_backlog.md` item (b).
+
+### Status: 📋 PLANNED — promoted from backlog Prompt Queue (2026-07-14); awaits "proceed" before code
+
+Combined progress-bar + spinner treatment mapping the known backend phases (submitted → Ray provisioning → ParCa → running → landing → done), degrading gracefully in the read-only bundle, factored for reuse by the next long-running action. See plan for WS-1…WS-4.
+
+---
+
+## 8. **(.todo/plans/8-autoparam-ptools-from-exports-tsv.md)**:
+
+### Name
+
+Feat: auto-parameterize the embedded Pathway Tools Omics Viewer from a study's Exports `.tsv` on the remote smsvpctest deployment.
+
+Linked tasks: generalizes #6 (Segment 7 Omics wiring) from a single seeded study to any study whose Exports carry a compatible `.tsv`. **Gated on #6 WS-2** (HTTP `url=` vs filesystem `/ptools-data` delivery must inherit whichever mechanism #6 proves live). Spans `demo-v2ecoli` + possibly the sms-api overlay. Source: `.todo/_backlog.md` Prompt Queue.
+
+### Status: 📋 PLANNED — promoted from backlog Prompt Queue (2026-07-14); awaits "proceed" + #6 outcome
+
+Detect PTools-compatible Exports `.tsv` → build the `celOv.shtml?…&url=` (or filesystem) target → surface as an auto-parameterized Launch, no-op when absent. See plan for WS-1…WS-4.
 
 ---
 

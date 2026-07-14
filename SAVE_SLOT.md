@@ -1,24 +1,34 @@
-# Checkpoint: Segment 7 (PTools/Omics) DEPLOYING — push ✅ / build ✅ (7a9620c in GHCR) / rollout ⏳ — then live-verify 7–8, record
+# Checkpoint: Segment 7 (PTools/Omics) DEPLOYED — push ✅ / build ✅ / rollout ✅ (pod on 7a9620c, 1/1) — NEXT: browser live-verify 7–8, record
 
-**Updated:** 2026-07-13 (deploy-in-flight session). Segment 6 Part B is proven live
-(below). **Segment 7 (Analyses / PTools Omics Viewer) is coded + PUSHED on BOTH
-coupled branches; deploy is now in flight** (Action 1 push done; Action 2 image
-build running; Action 3 overlay repoint + rollout next). Ground-truth plan for
-Segment 7: **`.todo/plans/6-segment7-ptools-omics-deploy-verify.md`**.
+**Updated:** 2026-07-14 (deploy landed). Segment 6 Part B is proven live (below).
+**Segment 7 (Analyses / PTools Omics Viewer) is coded + PUSHED + DEPLOYED on BOTH
+coupled branches.** All three deploy actions done; the live pod runs `7a9620c`
+(1/1) with the seed initContainer stamping `DASHBOARD_PUBLIC_BASE_URL` +
+`PTOOLS_SERVER_URL`. Headless pre-verify GREEN. **Remaining is the browser
+live-verify (WS-2) + Segment 8 + recording.** Ground-truth plan for Segment 7:
+**`.todo/plans/6-segment7-ptools-omics-deploy-verify.md`**.
 
-## Segment 7 deploy progression (iterative action protocol)
+## Segment 7 deploy progression (iterative action protocol) — COMPLETE
 
 - ✅ **Action 1 — push (DONE)**: dashboard `demo-v2ecoli` `b33b7ca..7a9620c`;
   sms-api `patch/db-filter` `00d456f2..c2a337cd`. Both branches level with origin.
 - ✅ **Action 2 — build image (DONE)**: `gh workflow run build-and-push.yml
   --ref demo-v2ecoli` → run **`29299423533`** = **success** (2026-07-14). GHCR tag
-  **`7a9620c`** confirmed present (anonymous-bearer probe). Build-provenance git tag
-  **`build/demo-v2ecoli/7a9620c`** created on the built commit + pushed — immutable
-  image↔commit link; does NOT trigger release CI; **formal semver release stays
-  deferred to WS-F** (post-merge version-bump on each `main`).
-- ⏳ **Action 3 (NEXT) — repoint + roll out**: overlay `newTag` `72e00b8`→`7a9620c`; roll
-  out to `sms-api-stanford-test`; confirm pod 1/1; re-seed picks up
-  `DASHBOARD_PUBLIC_BASE_URL` + cleared `ptools_data_dir`.
+  **`7a9620c`** confirmed present (anonymous-bearer probe → HTTP 200). Build-provenance
+  git tag **`build/demo-v2ecoli/7a9620c`** created on the built commit + pushed —
+  immutable image↔commit link; does NOT trigger release CI; **formal semver release
+  stays deferred to WS-F** (post-merge version-bump on each `main`).
+- ✅ **Action 3 — repoint + roll out (DONE 2026-07-14)**: overlay `newTag`
+  `72e00b8`→`7a9620c` in `kustomize/overlays/sms-api-stanford-test/kustomization.yaml`;
+  `kubectl apply -k` → `deployment.apps/workbench configured`; rollout completed —
+  ReplicaSet `workbench-7484f6b7dd` **1/1 Running**, pod image
+  `ghcr.io/vivarium-collective/vivarium-workbench:7a9620c`. Seed initContainer env
+  confirmed (`DASHBOARD_PUBLIC_BASE_URL` in-cluster URL + `PTOOLS_SERVER_URL`).
+- ✅ **Headless pre-verify (2026-07-14)**: tunnel `localhost:8080/workbench/` → 200;
+  `/api/remote-run-config` → pinned `{commit 70b5ec3, simulator_id 69}`; served
+  dashboard HTML carries `basePath:"/workbench"` in `__DASH_CONFIG__` + the base-path
+  shim whose prefix list includes `/reports/`. (Per-study figure embeds + the
+  Omics Launch paint are the browser step, WS-2.)
 
 ## Segment 7 — committed this session (2026-07-13), NOT yet deployed
 
@@ -153,3 +163,18 @@ config gate** (submit/land do no GitHub write). Enabled declaratively via env.
 
 - `.todo/plans/5-pinned-build-remote-runs.md` (ground truth), `.todo/plans/4-remote-govcloud-demo-e2e.md`, `.todo/MANIFEST.md`, `NEXT_STEPS.md`
 - memory `[[project_alb_rewrites_host_csrf]]`, `[[project_v2ecoli_branch_policy]]`, `[[project_ssh_commit_signing]]`
+
+## REM Insight (2026-07-14, slumber deep cycle)
+
+The pattern connecting every change this session: **the deferred WS-F release was
+not a gap to work around — it was the organizing constraint that made every
+provenance decision unambiguous.** Because the formal semver version-bump/tag/
+release is deliberately deferred to post-merge-on-`main`, a *dev-SHA deploy* needs
+its own lightweight, immutable provenance layer, and each piece this session slots
+into exactly that layer: image tag = git short sha (`7a9620c`), a build-provenance
+git tag (`build/demo-v2ecoli/7a9620c`) that links image↔commit without consuming a
+version or triggering release CI, and per-action doc commits that timestamp the
+progression. Even the `environment.py` exclusion fits — provenance integrity means
+a commit must contain *only* the action's own work. Takeaway: "deploy before
+release" workflows should treat build-provenance tagging as a first-class, reusable
+layer distinct from semantic releases, not an afterthought.

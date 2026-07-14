@@ -21,21 +21,23 @@ gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
 | WALKTHROUGH Segment 7 text | ✅ written |
 | **Segment 7 deploy** — Action 1 (push) | ✅ **DONE** — both branches level with origin |
 | **Segment 7 deploy** — Action 2 (build image `7a9620c`) | ✅ **DONE** — gh run `29299423533` success; GHCR tag `7a9620c` confirmed; build-provenance tag `build/demo-v2ecoli/7a9620c` pushed |
-| **Segment 7 deploy** — Action 3 (repoint overlay `newTag` `72e00b8`→`7a9620c` + roll out) | ⏳ **NEXT** |
-| **Segment 7 live-verify** (browser, through tunnel) | ⏳ WS-2 |
+| **Segment 7 deploy** — Action 3 (repoint overlay `newTag` `72e00b8`→`7a9620c` + roll out) | ✅ **DONE** (2026-07-14) — pod 1/1 on `7a9620c`; seed env stamped; headless pre-verify GREEN |
+| **Segment 7 live-verify** (browser, through tunnel) | ⏳ **NEXT** — WS-2 (needs your browser) |
 | Segments 7–8 full browser drive + stamp | ⏳ (`Last verified` currently covers 1–6 only) |
 | Narrated screen recording (the deliverable) | ⏳ after all 8 segments pass |
 | WS-F PRs + version-bump releases into `main` (both repos) | ⏳ post-completion |
 
 ## Next (iterative action protocol — proceed one action at a time, standby between)
 
-1. **Deploy Segment 7 across the coupled pair** — IN PROGRESS:
+1. **Deploy Segment 7 across the coupled pair** — ✅ **DONE (2026-07-14)**:
    - ✅ **Action 1** — pushed `demo-v2ecoli` `7a9620c` + `patch/db-filter` `c2a337cd`.
    - ✅ **Action 2** — built workbench image `7a9620c` (gh run `29299423533`,
      success); GHCR tag `7a9620c` confirmed present; build-provenance tag
      `build/demo-v2ecoli/7a9620c` created + pushed (WS-F semver release still deferred).
-   - ⏳ **Action 3 (NEXT)** — repoint the overlay `newTag` `72e00b8`→`7a9620c`; roll out
-     (pod 1/1). Re-seed picks up `DASHBOARD_PUBLIC_BASE_URL` + cleared `ptools_data_dir`.
+   - ✅ **Action 3** — repointed the overlay `newTag` `72e00b8`→`7a9620c`; `kubectl
+     apply -k` → `workbench configured`; rollout done (pod 1/1 on `7a9620c`). Seed
+     picked up `DASHBOARD_PUBLIC_BASE_URL` + cleared `ptools_data_dir`. Headless
+     pre-verify GREEN (basePath + `/reports/` shim serving; pinned-config OK).
 2. **Live-verify Segment 7 in the browser** (through the tunnel):
    - Interactive Plotly figures on a study's Visualizations tab resolve under
      `/workbench/reports/figures/...` (not the co-tenant PTools 404 at the root).
@@ -54,10 +56,14 @@ gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
 
 ## Parked backlog (not blocking the recording)
 
-`.todo/_backlog.md`: (a) pydantic-settings for all env-var definitions; (b) sleek
-progress-bar/spinner UX for the pinned-build run card; plus a queued request to
-create two new `.todo/` items (progress-bar UX; auto-parameterize embedded PTools
-from Exports `.tsv` — the latter is adjacent to the Segment 7 Omics wiring).
+`.todo/_backlog.md`: (a) pydantic-settings for all env-var definitions — impl lands
+in `vivarium_workbench/environment.py` (untracked WIP), mirroring
+`~/sms/sms-api/sms_api/config.py`. The two queued requests are now **promoted to
+tracked plans** (Prompt Queue drained 2026-07-14): (b) progress-bar/spinner UX for
+the pinned-build run card → `.todo/plans/7-pinned-run-progress-ux.md`;
+auto-parameterize embedded PTools from a study's Exports `.tsv` →
+`.todo/plans/8-autoparam-ptools-from-exports-tsv.md` (gated on #6 WS-2 delivery
+mechanism). Both await "proceed" before code.
 
 **See also:** `SAVE_SLOT.md`, `.todo/plans/6-segment7-ptools-omics-deploy-verify.md`,
 `.todo/plans/5-pinned-build-remote-runs.md`, `.todo/MANIFEST.md`.
