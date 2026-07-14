@@ -82,9 +82,23 @@ Feat/verify: land Segment 7 (PTools Omics Viewer + interactive figures) across t
 
 Linked tasks: continues #5. The two coupled branches — dashboard `demo-v2ecoli` ↔ sms-api `patch/db-filter` — jointly deliver the whole demo (memory `[[project_demo_branch_coupling]]`); post-completion = PR merge + version-bump release into each `main`. No `v2ecoli` changes.
 
-### Status: 🔄 EXECUTING — DEPLOYED to sms-api-stanford-test (rollout in flight); live-verify + record remain
+### Status: 🔄 EXECUTING — DEPLOYED + live-verified (figures PASS, Omics FAIL on 0.5.9 → deferred to plan 9); Segment 8 + record remain
 
-**2026-07-14:** Segment 7 code deployed. Push (Action 1) + image build `7a9620c` (Action 2, gh run `29299423533`, GHCR-confirmed + provenance-tagged) done; **Action 3 applied** — overlay `newTag` `72e00b8`→`7a9620c` in `kustomize/overlays/sms-api-stanford-test/kustomization.yaml`, `kubectl apply -k` accepted (`deployment.apps/workbench configured`), rollout in flight. Deployed pieces: dashboard `demo-v2ecoli 7a9620c` (`/reports/` embed-URL base-path prefix so interactive figures resolve to the dashboard, not the co-tenant PTools at the ALB root) + sms-api `patch/db-filter c2a337cd` (seed `ui.dashboard_public_base_url` + clear `ui.ptools_data_dir` so the Omics Viewer overlay fetches study TSVs over HTTP). REMAINING: confirm pod 1/1 → live-verify Segment 7 (OPEN RISK: `sms-ptools:0.5.9` may ignore `celOv.shtml?…&url=`; 0.8.2 fallback = mount workspace at `/ptools-data`) + Segment 8 → stamp all 8 → record → WS-F release PRs. Ground truth `SAVE_SLOT.md`.
+**2026-07-14:** Segment 7 deployed (pod 1/1 on `7a9620c`, seed env stamped) and live-verified headlessly. **Interactive figures PASS** (5/5 → 200 under `/workbench/reports/...`; root → 404). **TSV HTTP delivery PASS** (dashboard serves omics TSV 200/~355 KB at the PTools-fetched path). **Omics Viewer auto-load FAIL on `sms-ptools:0.5.9`** — root-caused: 0.5.9 auto-loads via `multiomics=t&datafile=<registered-key>` (fetches `/get-registered-multiomics-data`), NOT the launcher's `omics=t&url=<tsv>` (0.8.2 scheme); the `/ptools-data` fallback also fails since both feed the ignored `url=`. **DECISION (2026-07-14):** keep Omics Launch in the demo, DEFER the fix to plan 9 — order is **Segment 8 (WS-3) → plan 9 → record (WS-4)**. REMAINING: Segment 8 → plan 9 → stamp all 8 → record → WS-F release PRs. Ground truth `SAVE_SLOT.md` + memory `[[project_ptools_segment7_routing]]`.
+
+---
+
+## 9. **(.todo/plans/9-omics-viewer-0.5.9-register-launch.md)**:
+
+### Name
+
+Feat: make the PTools Omics Viewer Launch work on the deployed `sms-ptools:0.5.9` (register-then-launch), closing the ❌ half of #6 WS-2.
+
+Linked tasks: closes #6 WS-2b (interactive-figures half already PASSES live). Adjacent to #8 (which should consume this launch mechanism). Spans `pbg-ptools` (`workbench_viewers`) + possibly dashboard frontend + sms-api overlay. No v2ecoli changes.
+
+### Status: 📋 PLANNED — DEFERRED by decision (2026-07-14); do AFTER Segment 8, BEFORE recording; awaits "proceed"
+
+**⛔ CONSTRAINT: Pathway Tools in `sms-ptools` is PROPRIETARY — never edit/patch/adjust it.** The fix lives entirely in OUR launcher (`pbg_ptools.workbench_viewers`) driving PTools' existing unmodified endpoints, or in infra (image/volume/env). 0.5.9's only omics auto-load path reads `datafile`/`datakeys` and fetches `/get-registered-multiomics-data?key=<key>` (server-registered-KEY flow) — there is no `url=`/`case "omics"` reader in its 915 KB `pathwayTools-overviews.js`. Fix = register the study TSV via PTools' OWN register endpoint (POST FormData), get a key, launch `?multiomics=t&datafile=<key>`; keep the 0.8.2 `url=` scheme behind a version switch. Constraint-safe fallbacks: upgrade the `sms-ptools` image to a version whose scheme fits (blocked — no newer image on ghcr) or descope. See plan for WS-1…WS-4 + memory `[[project_ptools_segment7_routing]]`.
 
 ---
 

@@ -39,24 +39,48 @@ configured`) ✅ applied, rollout to pod 1/1 in flight. Next: WS-2 live-verify.
    in flight (confirm pod 1/1). Re-seed picks up `DASHBOARD_PUBLIC_BASE_URL` +
    cleared `ptools_data_dir`.
 
-### WS-2 — Live-verify Segment 7 (browser, through the tunnel)
-1. Interactive Plotly figures (e.g. showcase-2 dry-mass composition) on a study's
-   Visualizations tab render inline under `/workbench/reports/figures/...` — no
-   PTools 404 at the root.
-2. PTools Omics Viewer **Launch** on `showcase-2-baseline-figures` paints the study's
-   exported omics TSV onto the EcoCyc Cellular Overview.
-   - **OPEN RISK:** remote PTools is `sms-ptools:0.5.9`; `celOv.shtml?…&url=` auto-load
-     is documented against 0.8.2. If 0.5.9 ignores `url=`: mount the workspace into
-     the ptools pod at `/ptools-data` and keep `ptools_data_dir` (filesystem
-     delivery). See `[[project_ptools_segment7_routing]]`.
-3. `demo()` previews on viz classes render.
+### WS-2 — Live-verify Segment 7 (headless through the tunnel, 2026-07-14)
+1. ✅ **Interactive figures PASS** — all 5 `showcase-2-baseline-figures` figures
+   200 under `/workbench/reports/figures/...`; identical path at the ALB root →
+   404 (the exact collision the base-path prefix fixes). Renders inline in-browser.
+2. ✅ **TSV HTTP delivery PASS** — dashboard serves the omics TSV (200, ~355 KB) at
+   `.../workbench/workspace/studies/<slug>/ptools/ptools_proteins.tsv`, the path
+   the PTools pod fetches server-side.
+2b. ❌ **OMICS AUTO-LOAD FAIL ON 0.5.9 — open risk resolved NEGATIVELY.** The
+   launcher emits the 0.8.2 scheme `celOv.shtml?omics=t&url=<tsv>&class=&column1=`,
+   but 0.5.9's `pathwayTools-overviews.js` has NO `url=`/`case "omics"` reader —
+   its only omics auto-load path is `case "multiomics":` → reads
+   `datafile`/`datakeys` and fetches `/get-registered-multiomics-data?key=<datafile>`
+   (server-registered-KEY flow). celOv HTML is byte-identical with/without our
+   params. **The `/ptools-data` filesystem fallback does NOT help** — both delivery
+   modes feed the same ignored `url=`. Fix: (a) upgrade remote PTools to 0.8.2
+   (blocked — no newer `sms-ptools` image on ghcr); or (b) adapt
+   `pbg_ptools.workbench_viewers` to register the TSV then launch
+   `?multiomics=t&datafile=<key>`. See `[[project_ptools_segment7_routing]]`.
+3. `demo()` previews on viz classes render (browser, not yet exercised).
+
+**DECISION (2026-07-14):** keep the Omics Viewer Launch IN the demo, but DEFER the
+0.5.9 fix — do it **after Segment 8 (WS-3) is complete and before the recording
+(WS-4)**. Tracked as **`.todo/plans/9-omics-viewer-0.5.9-register-launch.md`**
+(register-then-launch: POST the TSV to PTools' **own** register endpoint, get a
+key, launch `?multiomics=t&datafile=<key>`). #6 WS-2b stays open until plan 9's
+WS-4 passes. New Segment-7 execution order: **WS-3 (Segment 8) → plan 9 (Omics
+fix) → WS-4 (record)**.
+
+**⛔ CONSTRAINT:** Pathway Tools inside `sms-ptools` is **proprietary third-party
+software — we MUST NOT edit/patch/adjust it in any way**. The entire fix lives in
+OUR launcher (`pbg_ptools.workbench_viewers`) driving PTools' existing unmodified
+endpoints; if a paint requires changing PTools itself, that path is out of bounds
+(fall back to an image upgrade or descope). Full constraint in plan 9.
 
 ### WS-3 — Segment 8 + acceptance stamp
 1. Drive Segment 8 (Wrap-up / architecture-pillars recap).
 2. Extend the `Last verified` stamp in `WALKTHROUGH.md` to cover all 8 segments.
 
 ### WS-4 — Record
-Record the narrated screen recording (editable) — the deliverable.
+Record the narrated screen recording (editable) — the deliverable. **Gated on
+plan 9 (Omics fix) passing**, per the 2026-07-14 decision: order is WS-3 →
+plan 9 → WS-4.
 
 ### WS-5 — Post-completion release (no auto-merge)
 PR #465 (`demo-v2ecoli`→`main`, open/REVIEW_REQUIRED) + open sms-api

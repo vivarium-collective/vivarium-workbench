@@ -65,7 +65,12 @@ is exactly the data PTools' Cellular Overview wants. Nothing today detects that
 
 ## Notes / references
 
-- Depends on the mechanism proven in #6 WS-2 — do not pick HTTP vs filesystem
-  delivery here until that is settled live.
+- **⛔ CONSTRAINT:** Pathway Tools inside `sms-ptools` is **proprietary third-party
+  software — never edit/patch/adjust it**. "Auto-parameterize" means building the
+  launch URL / driving PTools' **existing** endpoints from OUR code, never
+  modifying PTools. Inherits the launch mechanism from plan #9 (see its constraint
+  banner).
+- Depends on the mechanism proven in #9 (register-then-launch on 0.5.9) — do not
+  pick a delivery scheme here until that is settled live.
 - memory `[[project_ptools_segment7_routing]]`, `[[project_demo_branch_coupling]]`.
 - `.todo/plans/6-segment7-ptools-omics-deploy-verify.md` is the parent context.

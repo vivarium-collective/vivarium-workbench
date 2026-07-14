@@ -22,9 +22,13 @@ gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
 | **Segment 7 deploy** — Action 1 (push) | ✅ **DONE** — both branches level with origin |
 | **Segment 7 deploy** — Action 2 (build image `7a9620c`) | ✅ **DONE** — gh run `29299423533` success; GHCR tag `7a9620c` confirmed; build-provenance tag `build/demo-v2ecoli/7a9620c` pushed |
 | **Segment 7 deploy** — Action 3 (repoint overlay `newTag` `72e00b8`→`7a9620c` + roll out) | ✅ **DONE** (2026-07-14) — pod 1/1 on `7a9620c`; seed env stamped; headless pre-verify GREEN |
-| **Segment 7 live-verify** (browser, through tunnel) | ⏳ **NEXT** — WS-2 (needs your browser) |
-| Segments 7–8 full browser drive + stamp | ⏳ (`Last verified` currently covers 1–6 only) |
-| Narrated screen recording (the deliverable) | ⏳ after all 8 segments pass |
+| **Segment 7 live-verify** — interactive figures | ✅ **PASS** (2026-07-14, headless) — 5/5 figures 200 under `/workbench/reports/...`, root → 404 |
+| **Segment 7 live-verify** — TSV HTTP delivery | ✅ **PASS** — dashboard serves omics TSV (200, ~355 KB) at the PTools-fetched path |
+| **Segment 7 live-verify** — Omics Viewer auto-load | ❌ **FAIL on `sms-ptools:0.5.9`** — 0.5.9 reads `multiomics=t&datafile=<key>`, not our `omics=t&url=`. **DEFERRED fix** → plan 9 |
+| **Segment 8 (Wrap-up)** browser drive | ⏳ **NEXT** — needs your browser |
+| Omics Viewer 0.5.9 register-then-launch fix | ⏳ **DEFERRED** — plan 9; after Segment 8, before recording |
+| `Last verified` stamp extended to all 8 segments | ⏳ (currently covers 1–6) |
+| Narrated screen recording (the deliverable) | ⏳ after Segment 8 + plan 9 pass |
 | WS-F PRs + version-bump releases into `main` (both repos) | ⏳ post-completion |
 
 ## Next (iterative action protocol — proceed one action at a time, standby between)
@@ -38,18 +42,19 @@ gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
      apply -k` → `workbench configured`; rollout done (pod 1/1 on `7a9620c`). Seed
      picked up `DASHBOARD_PUBLIC_BASE_URL` + cleared `ptools_data_dir`. Headless
      pre-verify GREEN (basePath + `/reports/` shim serving; pinned-config OK).
-2. **Live-verify Segment 7 in the browser** (through the tunnel):
-   - Interactive Plotly figures on a study's Visualizations tab resolve under
-     `/workbench/reports/figures/...` (not the co-tenant PTools 404 at the root).
-   - **PTools Omics Viewer "Launch"** paints the study's exported omics TSV onto the
-     EcoCyc Cellular Overview. **OPEN RISK:** remote PTools is `sms-ptools:0.5.9`
-     but the `celOv.shtml?…&url=` auto-load is documented against 0.8.2. If 0.5.9
-     ignores `url=`, fall back to mounting the workspace into the ptools pod at
-     `/ptools-data` and keep `ptools_data_dir` (see `[[project_ptools_segment7_routing]]`).
-3. **Segment 8 (Wrap-up)** — architecture-pillars recap; then extend the
-   `Last verified` stamp in `WALKTHROUGH.md` to cover all 8 segments.
-4. **Record the narrated screen recording** (editable) — the actual deliverable.
-5. **WS-F (post-completion):** PR #465 (`demo-v2ecoli`→`main`, open/REVIEW_REQUIRED)
+2. **Segment 7 live-verify — DONE headless (2026-07-14):** interactive figures
+   PASS (5/5 → 200 under `/workbench/reports/...`, root → 404); TSV HTTP delivery
+   PASS. Omics Viewer auto-load **FAIL on `sms-ptools:0.5.9`** — root-caused to a
+   scheme mismatch (0.5.9 auto-loads via `multiomics=t&datafile=<registered-key>`,
+   not the launcher's `omics=t&url=<tsv>`; the `/ptools-data` fallback also fails
+   since both feed the ignored `url=`). See `[[project_ptools_segment7_routing]]`.
+3. **Segment 8 (Wrap-up)** — ⏳ **NEXT (browser)** — architecture-pillars recap.
+4. **Omics Viewer 0.5.9 fix** — DEFERRED to here (after Segment 8, before recording)
+   per the 2026-07-14 decision. Plan `.todo/plans/9-omics-viewer-0.5.9-register-launch.md`
+   (register-then-launch). Then extend the `Last verified` stamp to all 8 segments.
+5. **Record the narrated screen recording** (editable) — the actual deliverable,
+   after Segment 8 + plan 9 pass.
+6. **WS-F (post-completion):** PR #465 (`demo-v2ecoli`→`main`, open/REVIEW_REQUIRED)
    + open sms-api `patch/db-filter`→`main`; review, then version-bump releases into
    each `main`; repoint the overlay from the dev SHA to the release tag. No
    auto-merge (`[[feedback_pr_review_required]]`).
