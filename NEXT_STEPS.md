@@ -6,7 +6,8 @@
 `[[project_demo_branch_coupling]]`). Segment 6 Part B ("Run on remote") is
 **proven live**. Segment 7 (Analyses / PTools Omics Viewer) is **coded + pushed on
 both branches**; deploy Action 1 (push) ✅ done, Action 2 (build image `7a9620c`,
-gh run `29299423533`) 🔄 in progress, Action 3 (overlay repoint + roll out) ⏳ next.
+gh run `29299423533`) ✅ done + GHCR-confirmed + provenance-tagged, Action 3
+(overlay repoint `72e00b8`→`7a9620c` + roll out) ⏳ next.
 
 ## State
 
@@ -19,8 +20,8 @@ gh run `29299423533`) 🔄 in progress, Action 3 (overlay repoint + roll out) �
 | Segment 7 — Omics Viewer overlay seed (sms-api) | ✅ committed + **pushed** `patch/db-filter` `c2a337cd` (`00d456f2..c2a337cd`) |
 | WALKTHROUGH Segment 7 text | ✅ written |
 | **Segment 7 deploy** — Action 1 (push) | ✅ **DONE** — both branches level with origin |
-| **Segment 7 deploy** — Action 2 (build image `7a9620c`) | 🔄 **IN PROGRESS** — gh run `29299423533` on `demo-v2ecoli`; expected GHCR tag `7a9620c` (default = git short sha) |
-| **Segment 7 deploy** — Action 3 (repoint overlay `newTag` `72e00b8`→`7a9620c` + roll out) | ⏳ next after build GHCR-confirmed |
+| **Segment 7 deploy** — Action 2 (build image `7a9620c`) | ✅ **DONE** — gh run `29299423533` success; GHCR tag `7a9620c` confirmed; build-provenance tag `build/demo-v2ecoli/7a9620c` pushed |
+| **Segment 7 deploy** — Action 3 (repoint overlay `newTag` `72e00b8`→`7a9620c` + roll out) | ⏳ **NEXT** |
 | **Segment 7 live-verify** (browser, through tunnel) | ⏳ WS-2 |
 | Segments 7–8 full browser drive + stamp | ⏳ (`Last verified` currently covers 1–6 only) |
 | Narrated screen recording (the deliverable) | ⏳ after all 8 segments pass |
@@ -30,9 +31,10 @@ gh run `29299423533`) 🔄 in progress, Action 3 (overlay repoint + roll out) �
 
 1. **Deploy Segment 7 across the coupled pair** — IN PROGRESS:
    - ✅ **Action 1** — pushed `demo-v2ecoli` `7a9620c` + `patch/db-filter` `c2a337cd`.
-   - 🔄 **Action 2** — building workbench image `7a9620c` (gh run `29299423533`);
-     awaiting completion + GHCR confirmation.
-   - ⏳ **Action 3** — repoint the overlay `newTag` `72e00b8`→`7a9620c`; roll out
+   - ✅ **Action 2** — built workbench image `7a9620c` (gh run `29299423533`,
+     success); GHCR tag `7a9620c` confirmed present; build-provenance tag
+     `build/demo-v2ecoli/7a9620c` created + pushed (WS-F semver release still deferred).
+   - ⏳ **Action 3 (NEXT)** — repoint the overlay `newTag` `72e00b8`→`7a9620c`; roll out
      (pod 1/1). Re-seed picks up `DASHBOARD_PUBLIC_BASE_URL` + cleared `ptools_data_dir`.
 2. **Live-verify Segment 7 in the browser** (through the tunnel):
    - Interactive Plotly figures on a study's Visualizations tab resolve under

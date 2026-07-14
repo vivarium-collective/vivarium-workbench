@@ -1,4 +1,4 @@
-# Checkpoint: Segment 7 (PTools/Omics) DEPLOYING — push ✅ / build 🔄 / rollout ⏳ — then live-verify 7–8, record
+# Checkpoint: Segment 7 (PTools/Omics) DEPLOYING — push ✅ / build ✅ (7a9620c in GHCR) / rollout ⏳ — then live-verify 7–8, record
 
 **Updated:** 2026-07-13 (deploy-in-flight session). Segment 6 Part B is proven live
 (below). **Segment 7 (Analyses / PTools Omics Viewer) is coded + PUSHED on BOTH
@@ -10,11 +10,13 @@ Segment 7: **`.todo/plans/6-segment7-ptools-omics-deploy-verify.md`**.
 
 - ✅ **Action 1 — push (DONE)**: dashboard `demo-v2ecoli` `b33b7ca..7a9620c`;
   sms-api `patch/db-filter` `00d456f2..c2a337cd`. Both branches level with origin.
-- 🔄 **Action 2 — build image (IN PROGRESS)**: `gh workflow run build-and-push.yml
-  --ref demo-v2ecoli` → run **`29299423533`**. Tag defaults to git short sha →
-  expected GHCR tag **`7a9620c`** (`deploy/build-and-push.sh:18`). Prior builds
-  ~9–10 min. Watch backgrounded (task `b4ymwlp2r`). Verify in GHCR when done.
-- ⏳ **Action 3 — repoint + roll out**: overlay `newTag` `72e00b8`→`7a9620c`; roll
+- ✅ **Action 2 — build image (DONE)**: `gh workflow run build-and-push.yml
+  --ref demo-v2ecoli` → run **`29299423533`** = **success** (2026-07-14). GHCR tag
+  **`7a9620c`** confirmed present (anonymous-bearer probe). Build-provenance git tag
+  **`build/demo-v2ecoli/7a9620c`** created on the built commit + pushed — immutable
+  image↔commit link; does NOT trigger release CI; **formal semver release stays
+  deferred to WS-F** (post-merge version-bump on each `main`).
+- ⏳ **Action 3 (NEXT) — repoint + roll out**: overlay `newTag` `72e00b8`→`7a9620c`; roll
   out to `sms-api-stanford-test`; confirm pod 1/1; re-seed picks up
   `DASHBOARD_PUBLIC_BASE_URL` + cleared `ptools_data_dir`.
 
