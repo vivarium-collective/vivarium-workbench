@@ -1,4 +1,19 @@
-# Checkpoint: Segments 7 & 8 VERIFIED live — figures✅ TSV✅ (Omics-Launch deferred, plan 9) / Seg-8 recap figures✅ — NEXT: plan 9 (Omics fix) → record
+# Checkpoint: Segments 7 & 8 VERIFIED live — figures✅ TSV✅ (Omics-Launch deferred, plan 9) / Seg-8 recap figures✅ — DEMO IS A SHIPPABLE MVP — NEXT: plan 9 (Omics fix) → record
+
+## MVP feasibility verdict (2026-07-14) — SHIPPABLE NOW, pre-plan-9
+
+The remote GovCloud demo (8-segment `WALKTHROUGH.md`) is a **demoable MVP as it
+stands**: 7½ of 8 segments verify live; the only gap is the PTools Omics Viewer
+**Launch** (soft-fail on `sms-ptools:0.5.9` — opens the EcoCyc overview unpainted,
+no error; deferred → plan 9). Recording options: (a) skip Launch, (b) click +
+caveat, (c) record now and re-shoot the ~15 s Omics beat after plan 9. Two paths
+open: **record now** (Omics skipped/caveated) or **plan 9 first, then record once**
+— user to decide. Full assessment written to
+`demos/v2ecoli/VERIFICATION_REPORT.md` (top "Remote GovCloud Verification — MVP
+Feasibility" section) + PR #465 "Demo readiness" section. PR #465 OPEN /
+REVIEW_REQUIRED (not merged). All 6 demo commits this session pushed
+(`03fa445..f2874b6`); coupled sms-api `patch/db-filter` overlay repoint pushed
+(`c2a337cd..6924aa8e`). Live pod on `7a9620c`, 1/1.
 
 ## Segment 8 (Wrap-up) — recap figures VERIFIED against the live deployment (2026-07-14, headless)
 
@@ -235,3 +250,21 @@ progression. Even the `environment.py` exclusion fits — provenance integrity m
 a commit must contain *only* the action's own work. Takeaway: "deploy before
 release" workflows should treat build-provenance tagging as a first-class, reusable
 layer distinct from semantic releases, not an afterthought.
+
+## REM Insight (2026-07-14, slumber deep cycle — verification session)
+
+The pattern connecting every change this session: **the work was epistemic, not
+constructive — it converted "deployed/assumed" into "verified/bounded," and the
+value came from the boundaries drawn, not features added.** No new product code
+shipped; instead the rollout became a *confirmed* pod on `7a9620c`, the figures
+became a *proven* 200-vs-404 contrast, the Omics gap became a *definitively
+root-caused* negative (0.5.9 reads `multiomics=t&datafile=`, never `url=` — so even
+the documented `/ptools-data` fallback was ruled out), and the recap numbers became
+*re-checked* live facts. Two boundaries did the heavy lifting: the **soft-fail
+boundary** (Launch opens the overview unpainted, no error) is exactly what lets the
+MVP verdict be "shippable" rather than "blocked"; and the **proprietary boundary**
+(Pathway Tools is untouchable) is what turned plan 9 from a vague "fix PTools" into
+a precise "drive its existing endpoints from our launcher." Takeaway: a verdict is
+only as trustworthy as the gaps it names — the honest framing of the one soft-fail
+is what makes "MVP" credible, and naming what you cannot touch is what makes the
+remaining work well-defined.
