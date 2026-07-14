@@ -6223,9 +6223,13 @@
           .then(function(j) { return j.entries || []; })
           .catch(function() { return []; });
         var chartFetches = (iset.studies || []).map(function(s) {
-          return fetch('/api/study-charts/' + encodeURIComponent(s.name))
-            .then(function(r) { return r.ok ? r.json() : {charts: []}; })
-            .then(function(j) { return {name: s.name, charts: j.charts || []}; })
+          // Via DataSource so snapshot mode reads api/study-charts/<slug>.json at
+          // the bundle basePath; raw fetch would 404 on a hosted read-only site.
+          return ((window.DataSource && window.DataSource.loadStudyCharts)
+            ? window.DataSource.loadStudyCharts(s.name)
+            : fetch('/api/study-charts/' + encodeURIComponent(s.name))
+                .then(function(r) { return r.ok ? r.json() : {charts: []}; }))
+            .then(function(j) { return {name: s.name, charts: (j && j.charts) || []}; })
             .catch(function() { return {name: s.name, charts: []}; });
         });
         // Current coordinated generation — stamps the report's provenance
@@ -15432,9 +15436,13 @@
           .then(function (j) { return j.entries || []; })
           .catch(function () { return []; });
         var chartFetches = (iset.studies || []).map(function (s) {
-          return fetch('/api/study-charts/' + encodeURIComponent(s.name))
-            .then(function (r) { return r.ok ? r.json() : {charts: []}; })
-            .then(function (j) { return {name: s.name, charts: j.charts || []}; })
+          // Via DataSource so snapshot mode reads api/study-charts/<slug>.json at
+          // the bundle basePath; raw fetch would 404 on a hosted read-only site.
+          return ((window.DataSource && window.DataSource.loadStudyCharts)
+            ? window.DataSource.loadStudyCharts(s.name)
+            : fetch('/api/study-charts/' + encodeURIComponent(s.name))
+                .then(function (r) { return r.ok ? r.json() : {charts: []}; }))
+            .then(function (j) { return {name: s.name, charts: (j && j.charts) || []}; })
             .catch(function () { return {name: s.name, charts: []}; });
         });
         var ghRepoFetch = fetch('/api/github-repo')
