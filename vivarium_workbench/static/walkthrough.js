@@ -10152,6 +10152,38 @@
         ? '<p class="reproduce-line muted small">Reproduce: ' + _runChip(_reproBase) + '</p>'
         : '';
 
+      // FRAMEWORK FIX: the v4 narrative-spine renderer had no charts/embeds
+      // section, so any study that did not trip isV3 (a schema_version 3/4
+      // study authored with findings/tests/baseline but none of
+      // purpose|simulation_set|behavior_tests|pipeline_gate|readouts|
+      // implementation_requirements) silently dropped its figures even though
+      // /api/study-charts returned them. Render both here too, mirroring
+      // v3StudySection, so charts/visualizations are never lost by the routing.
+      var v4Charts = (chartsByStudy && chartsByStudy[s.name]) || [];
+      var v4ChartsHtml = v4Charts.length
+        ? '<div id="study-' + slug + '-charts"><h3>Visualisations from the latest run</h3>'
+          + _renderChartCardsHtml(v4Charts, slug) + '</div>'
+        : '';
+      var v4Embeds = (embedsByStudy && embedsByStudy[s.name]) || [];
+      var v4EmbedsHtml = v4Embeds.length
+        ? '<div class="study-embeds" id="study-' + slug + '-embeds"><h3>Interactive visualizations</h3>'
+          + v4Embeds.map(function(emb) {
+              var escaped = String((emb && emb.html) || '')
+                .replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+              var frame = escaped
+                ? '<iframe srcdoc="' + escaped + '" loading="lazy" scrolling="no" '
+                  + 'style="width:100%;border:0;min-height:420px" '
+                  + 'title="' + _h((emb && emb.name) || 'visualization') + '"></iframe>'
+                : (emb && emb.url
+                    ? '<p><a href="' + _h(emb.url) + '">' + _h(emb.name || emb.url) + '</a></p>'
+                    : '');
+              return '<div class="study-embed">'
+                + ((emb && emb.title) ? '<div class="chart-title" style="font-weight:600;margin-bottom:4px">' + _h(emb.title) + '</div>' : '')
+                + frame + '</div>';
+            }).join('')
+          + '</div>'
+        : '';
+
       return ''
         + '<details class="study-fold" id="study-fold-' + slug + '">'
         + foldSummary
@@ -10171,6 +10203,9 @@
                     + '<p class="muted small">Each row is a precise, testable prediction. Status indicates whether the supporting code is in place today (implemented) or gated on upstream work (gated / stub).</p>'
                     + '<table class="eb"><thead><tr><th>Name</th><th>Prediction</th><th>Status</th><th>Citations</th></tr></thead>'
                     + '<tbody>' + ebRows + '</tbody></table></div>' : '')
+
+        +   v4EmbedsHtml       // Interactive visualizations (embed_visualizations)
+        +   v4ChartsHtml       // Charts / figures from the latest run (framework fix)
 
         +   (variants ? '<div id="' + sidVa + '"><h3>Variants (perturbations to be tested)</h3>' + variants + '</div>' : '')
 
