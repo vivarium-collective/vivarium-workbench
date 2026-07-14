@@ -12,14 +12,23 @@ on:
 jobs:
   types:
     runs-on: ubuntu-latest
+    # Pin the interpreter to 3.12.12: the demo track adds
+    # `[tool.uv] environments = "python_full_version == '3.12.12'"` (the demo
+    # extra pulls v2ecoli, which is pinned ==3.12.12), so the lock resolves for
+    # that one environment. uv fetches this managed CPython automatically.
+    env:
+      UV_PYTHON: "3.12.12"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --extra dev
+        # --frozen: install straight from uv.lock without re-resolving, so the
+        # `demo` extra's editable path sources (../v2ecoli, ../pbg-ptools) — not
+        # checked out in CI — are never touched. This gate only needs `dev`.
+        run: uv sync --frozen --extra dev
       - name: mypy (typed modules)
-        run: uv run mypy
+        run: uv run --frozen mypy
       - name: Payload-model + generated-TS + API + lib tests
-        run: uv run pytest tests/test_payload_models.py tests/test_generate_ts.py tests/test_api_app.py tests/test_investigation_status.py -q
+        run: uv run --frozen pytest tests/test_payload_models.py tests/test_generate_ts.py tests/test_api_app.py tests/test_investigation_status.py -q

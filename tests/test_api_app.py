@@ -3123,7 +3123,7 @@ class TestStaticRoutes:
         text/html + Cache-Control: no-store."""
         import vivarium_workbench.lib.report as _report
         calls = []
-        monkeypatch.setattr(_report, "render_workspace_report", lambda ws: calls.append(ws))
+        monkeypatch.setattr(_report, "render_workspace_report", lambda ws, **kw: calls.append(ws))
         (tmp_path / "reports").mkdir()
         (tmp_path / "reports" / "index.html").write_text("<html>shell</html>")
         r = client.get("/")
@@ -3137,7 +3137,7 @@ class TestStaticRoutes:
         """A render exception never blocks the load — the on-disk file still serves."""
         import vivarium_workbench.lib.report as _report
 
-        def _boom(ws):
+        def _boom(ws, **kw):
             raise RuntimeError("render kaboom")
 
         monkeypatch.setattr(_report, "render_workspace_report", _boom)
@@ -3149,7 +3149,7 @@ class TestStaticRoutes:
 
     def test_index_shell_404_when_absent(self, client, tmp_path, monkeypatch):
         import vivarium_workbench.lib.report as _report
-        monkeypatch.setattr(_report, "render_workspace_report", lambda ws: None)
+        monkeypatch.setattr(_report, "render_workspace_report", lambda ws, **kw: None)
         r = client.get("/")
         assert r.status_code == 404
 
