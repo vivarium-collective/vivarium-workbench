@@ -28,7 +28,7 @@ Kubernetes namespace (GovCloud `smscdk` stack; formerly the `sms-api-stanford-te
 
 ### 0.1 AWS GovCloud Authentication
 
-The remote deployment lives in the `smsvpctest` GovCloud stack. Authenticate with
+The remote deployment lives in the `smscdk` GovCloud stack. Authenticate with
 the `stanford` shell function (defined in `~/.zshrc`):
 
 ```bash
@@ -37,11 +37,14 @@ the `stanford` shell function (defined in `~/.zshrc`):
 #   2. export AWS_DEFAULT_REGION=us-gov-west-1
 #   3. aws sso login --profile stanford-sso
 #
-# 'stanford test' resolves the function against the test profile.
-stanford test
+# IMPORTANT — the argument selects the stack:
+#   `stanford`        → smscdk stack · namespace sms-api-stanford      · ~/.kube/kube_stanford.yml
+#   `stanford test`   → smsvpctest stack · namespace sms-api-stanford-test · ~/.kube/kube_stanford_test.yml
+# This demo targets smscdk, so use the UNPARAMETERIZED form:
+stanford
 ```
 
-After SSO login, your credentials provide read access to the `smsvpctest`
+After SSO login, your credentials provide read access to the `smscdk`
 CloudFormation stacks and the ability to establish SSM sessions to the batch
 submit node.
 
@@ -60,9 +63,9 @@ git clone git@github.com:vivarium-collective/sms-cdk.git ~/sms/sms-cdk   # if no
 ### 0.3 PTools Omics Viewer — Segment 7
 
 No local setup. Pathway Tools runs as the `ptools` Deployment in the
-`sms-api-stanford-test` namespace, served at the internal-ALB **root** (`/`) —
+`sms-api-stanford` namespace, served at the internal-ALB **root** (`/`) —
 the same ALB the dashboard co-tenants under `/workbench/`. Through the
-`sms-proxy -s smsvpctest` tunnel it's reachable at `http://localhost:8080`, so
+`sms-proxy -s smscdk` tunnel it's reachable at `http://localhost:8080`, so
 the Omics Viewer's **Launch** button (Segment 7) opens the live remote Cellular
 Overview in a new tab. The `seed-workspace` initContainer stamps
 `ui.ptools_server_url` (the browser target) and `ui.dashboard_public_base_url`
@@ -86,10 +89,10 @@ Two steps. No local server.
 ```bash
 # Terminal 1 — open the SSM tunnel (stays alive until Ctrl+C).
 #   sms-proxy.sh resolves the batch submit node + internal ALB DNS from the
-#   smsvpctest-* CloudFormation stacks and starts an SSM
+#   smscdk-* CloudFormation stacks and starts an SSM
 #   StartPortForwardingSessionToRemoteHost session: localhost:8080 → ALB:80.
 AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  ~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest
+  ~/sms/sms-cdk/scripts/sms-proxy.sh -s smscdk
 ```
 
 Confirm the proxy banner lists the endpoints (all on port 8080):
@@ -335,7 +338,7 @@ no Docker build, no GitHub login. Your browser only needs the tunnel to reach
    - **run → queued** — sms-api submits a **ParCa** job + an **N-node simulation ensemble** to **AWS Batch as a transient Ray (MNP) cluster**. "Queued" = Batch provisioning the Ray cluster (`RUNNABLE`) + the ParCa dependency gate (`PENDING`); expect a few minutes.
    - **run → running → done** — the Ray head executes the E. coli ensemble, then completes.
 9. Click **⬇ Land results locally** — downloads the result store from S3 and records it in the study's `runs.db` with git provenance.
-10. The landed run appears in Simulations DB carrying a **remote ☁️ origin** with full provenance — `deployment: smsvpctest`, `simulation_id`, `backend: ray` (the ☁️ pill from step A4, now earned live).
+10. The landed run appears in Simulations DB carrying a **remote ☁️ origin** with full provenance — `deployment: smscdk`, `simulation_id`, `backend: ray` (the ☁️ pill from step A4, now earned live).
 
 ### Narration
 > "One pinned, reproducible build — an exact commit resolved to an exact Docker image, already built on GovCloud. From the dashboard we submit any number of simulation configs against that single build, each on a transient Ray cluster spun up per run. No push, no rebuild, no login: the whole thing is driven by the browser through the dashboard, which calls sms-api in-cluster. Every landed run is traceable back to that commit."
@@ -360,7 +363,7 @@ if the session has one.
 
 ### Actions
 1. Click **Analyses** — visualization class gallery
-2. **PTools Omics Viewer** (remote, no local container): on the "Pathway Tools — Omics Viewer" card, click **Launch** on the `showcase-2-baseline-figures` row. A new tab opens the live remote EcoCyc **Cellular Overview** with the study's exported omics TSVs painted onto the E. coli metabolic map. (Served by the `ptools` Deployment in `sms-api-stanford-test` at the ALB root; the in-cluster ptools pod fetches the TSV from the workbench Service.)
+2. **PTools Omics Viewer** (remote, no local container): on the "Pathway Tools — Omics Viewer" card, click **Launch** on the `showcase-2-baseline-figures` row. A new tab opens the live remote EcoCyc **Cellular Overview** with the study's exported omics TSVs painted onto the E. coli metabolic map. (Served by the `ptools` Deployment in `sms-api-stanford` at the ALB root; the in-cluster ptools pod fetches the TSV from the workbench Service.)
 3. **Interactive figures**: on a study's **Visualizations** tab, the embedded Plotly figures (e.g. showcase-2's dry-mass composition) render inline — served under `/workbench/reports/figures/...` so they resolve to the dashboard, not the co-tenant PTools at the ALB root.
 4. **Visualization preview**: Show a `demo()` method rendering instantly against synthetic data
 
@@ -425,13 +428,13 @@ A: Yes — MIT licensed. GitHub: `vivarium-collective/vivarium-workbench` (curre
 A: Push the branch, or export a self-contained HTML report, or use `vivarium-workbench-publish` for a static read-only bundle.
 
 **Q: What is the tunnel doing under the hood?**
-A: `sms-proxy.sh -s smsvpctest` resolves the batch submit node ID and internal ALB DNS from the `smsvpctest-*` CloudFormation stacks, then runs an SSM `StartPortForwardingSessionToRemoteHost` session. The submit node forwards `localhost:8080` to the internal ALB, which path-routes `/workbench` to the dashboard, `/docs` to the SMS API, and `/`, `/sms/sms.html` to PTools — all through one local port.
+A: `sms-proxy.sh -s smscdk` resolves the batch submit node ID and internal ALB DNS from the `smscdk-*` CloudFormation stacks, then runs an SSM `StartPortForwardingSessionToRemoteHost` session. The submit node forwards `localhost:8080` to the internal ALB, which path-routes `/workbench` to the dashboard, `/docs` to the SMS API, and `/`, `/sms/sms.html` to PTools — all through one local port.
 
 **Q: Why is the dashboard reachable at `/workbench` and not the root?**
 A: The ALB path-routes multiple services on one host. The dashboard is served under the `/workbench` base path (`--base-path /workbench`); all its links and assets are base-path-aware.
 
 **Q: Do I need the tunnel for the whole demo?**
-A: Yes — the dashboard itself is remote, so the tunnel is required for every segment (unlike the old local flow). The PTools Omics Viewer (Segment 7) is remote too — it's the `ptools` Deployment in `sms-api-stanford-test` at the ALB root, reached over the same tunnel; no local container.
+A: Yes — the dashboard itself is remote, so the tunnel is required for every segment (unlike the old local flow). The PTools Omics Viewer (Segment 7) is remote too — it's the `ptools` Deployment in `sms-api-stanford` at the ALB root, reached over the same tunnel; no local container.
 
 ---
 
@@ -439,7 +442,7 @@ A: Yes — the dashboard itself is remote, so the tunnel is required for every s
 
 | Time | Segment | Page | Key Click |
 |------|---------|------|-----------|
-| 0:00 | Tunnel | Terminal | `sms-proxy.sh -s smsvpctest` |
+| 0:00 | Tunnel | Terminal | `sms-proxy.sh -s smscdk` |
 | 0:20 | Open browser | — | `http://localhost:8080/workbench` |
 | 1:00 | **1. Intro** | Home | Rail, workspace chip |
 | 3:00 | **2. Registry** | Registry → Modules | packages |
@@ -479,18 +482,18 @@ artifacts under `demos/v2ecoli/` apply to the **offline** flow (Appendix G) only
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `http://localhost:8080/workbench` refuses / times out | Tunnel down or SSO expired | Check the `sms-proxy.sh` terminal; re-run `stanford test`, then restart the tunnel |
-| Tunnel fails: "credentials not valid" | SSO session expired | Re-run `stanford test` |
+| `http://localhost:8080/workbench` refuses / times out | Tunnel down or SSO expired | Check the `sms-proxy.sh` terminal; re-run `stanford`, then restart the tunnel |
+| Tunnel fails: "credentials not valid" | SSO session expired | Re-run `stanford` |
 | Tunnel fails: "Could not find submit node" | Wrong stack or region | Confirm `AWS_PROFILE=stanford-sso` and `AWS_DEFAULT_REGION=us-gov-west-1` |
 | Tab slow to populate | SSM tunnel latency (~8s/GET) | Normal — wait a beat; the page is interactive |
 | `cross-origin request forbidden` on any POST (Run, save) | Workbench pod missing `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS` | Set `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS=http://localhost:8080` on the workbench Deployment env and roll out (the ALB rewrites `Host` and omits `X-Forwarded-Host`, so same-origin/`--trust-proxy` cannot admit the origin) |
 | Composite Explorer / loom panel 500s | Deployed image predates the `bigraph-loom` overlay | Rebuild from `demo-v2ecoli` (`gh workflow run build-and-push.yml --ref demo-v2ecoli`), bump the overlay `newTag`, roll out |
 | Study detail loads blank/unstyled | Deployed image predates the base-path fix | Rebuild + redeploy as above |
 | Composite resolves to error | Missing deps for that composite | Skip; use `baseline`, `parca`, or `colony` |
-| Simulations DB shows 0 runs | Workspace PVC not mounted / empty | Confirm the workbench pod has `/workspace` mounted; check `kubectl -n sms-api-stanford-test describe pod` |
-| Run card still says "Run on remote (smsvpctest) / Requires GitHub login" | Pinned mode not enabled on the pod | Set `VIVARIUM_WORKBENCH_REMOTE_PINNED=1` + `_REMOTE_REPO_URL`/`_REMOTE_BRANCH`; verify `GET /workbench/api/remote-run-config` → `pinned:true` |
+| Simulations DB shows 0 runs | Workspace PVC not mounted / empty | Confirm the workbench pod has `/workspace` mounted; check `kubectl -n sms-api-stanford describe pod` |
+| Run card still says "Run on remote (smscdk) / Requires GitHub login" | Pinned mode not enabled on the pod | Set `VIVARIUM_WORKBENCH_REMOTE_PINNED=1` + `_REMOTE_REPO_URL`/`_REMOTE_BRANCH`; verify `GET /workbench/api/remote-run-config` → `pinned:true` |
 | "Could not resolve pinned build" | No built simulator for the pinned repo@branch | Confirm a completed build exists (`GET /core/v1/simulator/versions`); register/build one if absent |
-| Run stuck in `queued` for long | AWS Batch provisioning the Ray MNP cluster (or ParCa dependency running) | Normal for a cold compute env; check the `smsvpctest-ray-mnp` queue + `describe-jobs` state (`RUNNABLE`=provisioning, `PENDING`=ParCa gate) |
+| Run stuck in `queued` for long | AWS Batch provisioning the Ray MNP cluster (or ParCa dependency running) | Normal for a cold compute env; check the `smscdk-ray-mnp` queue + `describe-jobs` state (`RUNNABLE`=provisioning, `PENDING`=ParCa gate) |
 | Run submit/land fails with 401 | Pinned mode off AND no GitHub session | Enable pinned mode (above), or log in via the GitHub button |
 | "Run on remote" fails | sms-api unreachable in-cluster | Check `SMS_API_BASE` on the workbench Deployment; check sms-api pod health |
 | PTools card shows error | Container not running | Mention as an integration example, skip |
@@ -498,19 +501,19 @@ artifacts under `demos/v2ecoli/` apply to the **offline** flow (Appendix G) only
 Cluster access for the fixes above:
 ```bash
 export AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
-  KUBECONFIG=/Users/alexanderpatrie/.kube/kube_stanford_test.yml
-kubectl -n sms-api-stanford-test logs -f deploy/workbench
-kubectl -n sms-api-stanford-test rollout status deploy/workbench
+  KUBECONFIG=/Users/alexanderpatrie/.kube/kube_stanford.yml
+kubectl -n sms-api-stanford logs -f deploy/workbench
+kubectl -n sms-api-stanford rollout status deploy/workbench
 ```
-(`scripts/set-govcloud-env.sh smsvpctest` sets these env vars for you.)
+(`scripts/set-govcloud-env.sh smscdk` sets these env vars for you.)
 
 ---
 
 ## Appendix F: Presenter Must-Know
 
 1. **Everything is remote**: the dashboard is a Kubernetes pod on GovCloud, reached at `http://localhost:8080/workbench` through the SSM tunnel. There is no local server in this flow.
-2. **Tunnel**: `~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest` → `localhost:8080` → submit node → internal ALB → `/workbench` (dashboard), `/docs` (SMS API), `/` + `/sms/sms.html` (PTools).
-3. **Auth**: `stanford test` in `~/.zshrc` sets `AWS_PROFILE=stanford-sso`, `AWS_DEFAULT_REGION=us-gov-west-1`, runs `aws sso login`.
+2. **Tunnel**: `~/sms/sms-cdk/scripts/sms-proxy.sh -s smscdk` → `localhost:8080` → submit node → internal ALB → `/workbench` (dashboard), `/docs` (SMS API), `/` + `/sms/sms.html` (PTools).
+3. **Auth**: `stanford` (no arg) in `~/.zshrc` sets `AWS_PROFILE=stanford-sso`, `AWS_DEFAULT_REGION=us-gov-west-1`, runs `aws sso login` for the smscdk stack (`stanford test` selects smsvpctest instead).
 4. **CSRF**: the pod carries `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS=http://localhost:8080` — the ALB rewrites `Host`, so this allowlist is what makes POSTs work.
 5. **Latency**: SSM-tunnel GETs can take several seconds; the page is interactive throughout.
 6. **CLI name**: `vivarium-workbench` (the `vivarium-dashboard` name still works as a deprecated alias).
