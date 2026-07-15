@@ -205,3 +205,7 @@ allow-direct-references = true
 # Ship the renamed package AND the thin vivarium_dashboard/ back-compat shim
 # (deprecated; removed in Phase 3) so old imports keep resolving in wheels too.
 packages = ["vivarium_workbench", "vivarium_dashboard"]
+
+[tool.pytest.ini_options]
+timeout = 120
+timeout_method = "signal"
