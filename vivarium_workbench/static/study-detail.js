@@ -1727,9 +1727,85 @@
     }).catch(function() { /* leave the stock build-first card as-is */ });
   }
   window._initRemoteRunPinned = _initRemoteRunPinned;
-  function _rrErr(msg) { var p = _rrProg(); if (p) { p.hidden = false; p.innerHTML = '<div class="inv-run-err">' + msg + '</div>'; } _rrResetBtn(); }
+  function _rrErr(msg) { _stopRrTween(); var p = _rrProg(); if (p) { p.hidden = false; p.innerHTML = '<div class="inv-run-err">' + msg + '</div>'; } _rrResetBtn(); }
 
-  function _renderRemoteRunProgress(opts) {
+  // ---- Progress-track adapter (Plan 7 / WS-2) ----------------------------
+  // _renderRemoteRunProgress keeps its existing {build, run, note, landBtn,
+  // landed, runDetail, phase} opts contract (so its ~11 call sites are
+  // unchanged) but now drives the reusable ProgressTrack milestone bar instead
+  // of the two-row text stepper. The one new opt threaded by the pollers is
+  // `phase` (the raw sms-api phase) so we can tell Queued from Running — the
+  // dashboard collapses both to run:'running' otherwise.
+  var _RR_STAGE_KEYS = ['resolve', 'submit', 'queued', 'running', 'done', 'landed'];
+  // Typical wall-clock per long stage (SAVE_SLOT "Pinned-build live facts":
+  // Ray-provision+ParCa ≈ 8 min queued, compute ≈ 5 min running). Drives the
+  // honest time-based soft-fill only; the bar snaps to the milestone on the
+  // real transition.
+  var _RR_TYPICAL_MS = { resolve: 120000, submit: 15000, queued: 480000, running: 300000 };
+
+  function _rrSoftFor(key) {
+    var t = _RR_TYPICAL_MS[key];
+    if (!t) return null;
+    _remoteRunState._stageStarts = _remoteRunState._stageStarts || {};
+    if (!_remoteRunState._stageStarts[key]) _remoteRunState._stageStarts[key] = Date.now();
+    return { startedAt: _remoteRunState._stageStarts[key], typicalMs: t };
+  }
+
+  // Translate the build/run/phase opts into a ProgressTrack `stages` model.
+  function _rrDeriveStages(opts) {
+    var pinned = !!window._remoteRunPinned;
+    var stages = [
+      { key: 'resolve', label: pinned ? 'Resolve' : 'Build' },
+      { key: 'submit', label: 'Submit' },
+      { key: 'queued', label: 'Queued' },
+      { key: 'running', label: 'Running' },
+      { key: 'done', label: 'Done' },
+      { key: 'landed', label: 'Landed' },
+    ];
+    var m = { mode: 'stages', stages: stages, done: [], active: null, failed: null, soft: null };
+    if (opts.landed) { m.done = _RR_STAGE_KEYS.slice(); return m; }        // fully landed
+    if (opts.build === 'failed') { m.failed = 'resolve'; return m; }
+    if (opts.build !== 'done') { m.active = 'resolve'; m.soft = _rrSoftFor('resolve'); return m; }
+    m.done.push('resolve');
+    if (opts.run === 'failed') {
+      m.done.push('submit');
+      m.failed = (opts.phase === 'queued') ? 'queued' : 'running';
+      if (m.failed === 'running') m.done.push('queued');
+      return m;
+    }
+    if (opts.landBtn || opts.run === 'done') {                            // run complete; landing is the outstanding manual step
+      m.done.push('submit', 'queued', 'running', 'done');
+      return m;
+    }
+    if (opts.run === 'running') {
+      m.done.push('submit');
+      if (opts.phase === 'queued') { m.active = 'queued'; m.soft = _rrSoftFor('queued'); }
+      else { m.done.push('queued'); m.active = 'running'; m.soft = _rrSoftFor('running'); }
+      return m;
+    }
+    m.active = 'submit'; m.soft = _rrSoftFor('submit');                    // build done, run pending → submitting
+    return m;
+  }
+
+  // Soft-fill tween: repaints only the active segment ~4×/s while a soft stage
+  // is running (ProgressTrack.tick is a no-op DOM-diff otherwise). Cancels on
+  // terminal/failed/reset or if the mount leaves the DOM.
+  var _rrTween = null;
+  function _stopRrTween() { if (_rrTween) { clearInterval(_rrTween); _rrTween = null; } }
+  function _startRrTween() {
+    if (_rrTween) return;
+    _rrTween = setInterval(function () {
+      var mount = _remoteRunState._ptMount, m = _remoteRunState._ptModel;
+      if (!mount || !document.body.contains(mount) || !m || !window.ProgressTrack || !(m.active && m.soft)) {
+        _stopRrTween(); return;
+      }
+      window.ProgressTrack.tick(mount, m);
+    }, 250);
+  }
+
+  // Legacy two-row stepper — retained as a graceful fallback if ProgressTrack
+  // failed to load (e.g. a stale cached page missing the new <script>).
+  function _renderRemoteRunProgressLegacy(opts) {
     var p = _rrProg(); if (!p) return;
     p.hidden = false;
     var icon = {pending: '⋯', running: '▶', queued: '⋯', built: '✓', done: '✓', failed: '✗', unreachable: '⚠'};
@@ -1746,6 +1822,33 @@
     p.innerHTML = (opts.note ? '<div class="inv-run-progress-banner">' + opts.note + '</div>' : '')
       + '<div class="inv-run-list">' + row('build', opts.build, opts.buildDetail) + row('run', opts.run, opts.runDetail) + '</div>'
       + land + landed;
+  }
+
+  function _renderRemoteRunProgress(opts) {
+    var p = _rrProg(); if (!p) return;
+    p.hidden = false;
+    if (!window.ProgressTrack) { _renderRemoteRunProgressLegacy(opts); return; }
+    // Shell: [.rr-track][.rr-extras] — ProgressTrack owns only the track
+    // subtree, so the land button / landed banner survive its rebuild-on-change.
+    var track = p.querySelector('.rr-track');
+    var extras = p.querySelector('.rr-extras');
+    if (!track || !extras) {
+      p.innerHTML = '<div class="rr-track"></div><div class="rr-extras"></div>';
+      track = p.querySelector('.rr-track');
+      extras = p.querySelector('.rr-extras');
+    }
+    var model = _rrDeriveStages(opts);
+    model.note = opts.note || '';
+    model.detail = opts.runDetail || opts.buildDetail || '';
+    _remoteRunState._ptModel = model;
+    _remoteRunState._ptMount = track;
+    window.ProgressTrack.render(track, model);
+    var land = opts.landBtn
+      ? '<button type="button" class="btn-mini" id="remote-run-land-btn" onclick="_landRemoteRun()">⬇ Land results locally</button>' : '';
+    var landed = opts.landed
+      ? '<div class="inv-run-progress-banner"><strong>✓ Landed</strong> <code>' + escapeHtmlForTests(opts.landed) + '</code> — refresh to see it.</div>' : '';
+    extras.innerHTML = land + landed;
+    if (model.active && model.soft) _startRrTween(); else _stopRrTween();
   }
 
   function _submitRemoteRun(ev) {
@@ -1810,7 +1913,7 @@
         .then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
         .then(function(res) {
           if (res.status === 502 || (res.body && res.body.reachable === false)) {
-            _renderRemoteRunProgress({build: _remoteRunState._buildPhase || 'running', run: _remoteRunState._runPhase || 'pending',
+            _renderRemoteRunProgress({build: _remoteRunState._buildPhase || 'running', run: _remoteRunState._runPhase || 'pending', phase: _remoteRunState._runPhase,
               note: '<strong class="inv-run-err">⚠ ' + escapeHtmlForTests((res.body && res.body.reason) || 'sms-api unreachable') + '</strong> <span class="muted">retrying…</span>'});
             _remoteRunTimer = setTimeout(tick, 4000); return;
           }
@@ -1879,7 +1982,7 @@
         _rrResetBtn(); return;
       }
       var label = body.phase === 'queued' ? 'Queued on AWS Batch…' : 'Running…';
-      _renderRemoteRunProgress({build: 'done', run: 'running', runDetail: body.raw_status,
+      _renderRemoteRunProgress({build: 'done', run: 'running', runDetail: body.raw_status, phase: body.phase,
         note: '<strong>' + label + '</strong> <span class="muted">(' + simRef + ')</span>'});
       again();
     });
