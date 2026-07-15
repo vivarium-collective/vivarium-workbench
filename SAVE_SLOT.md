@@ -1,80 +1,121 @@
-# Checkpoint: PLAN 7 SHIPPED TO PR #467 (in review) + LIVE-VERIFIED — next session = record the demo
+# Checkpoint — 2026-07-14 (late session): demo pinned-build hardening on `feat/improved-visual-feedback`
 
-## ⭐ RESUME HERE (2026-07-14, post plan-7 implementation)
+## ⭐ RESUME HERE
 
-**Plan 7 (production-grade progress bar for the pinned-build run card) is DONE.**
-Implemented WS-1…WS-4, committed, pushed, and opened as **PR #467**
-(`feat/improved-visual-feedback` → `main`), then **live-verified end-to-end**: with the
-`sms-proxy.sh -s smsvpctest` tunnel up and a local serve on this branch, clicking **Run
-on remote** drove the new milestone bar through a **real pinned run** on the live
-sms-api/Ray backend (Path B, no deploy). PR #467 is OPEN + MERGEABLE + `REVIEW_REQUIRED`.
+**Branch policy (user, explicit):** ALL of this session's work stays on
+**`feat/improved-visual-feedback`** and ships in **its PR (#467)** — **NOT** the
+`demo-v2ecoli` branch. This branch will soon be **merged + released** the same way
+`demo-v2ecoli` was (PR review → merge to `main` → version bump/release → overlay
+repoint). Do not move these changes onto the demo branch.
 
-**NEXT SESSION FOCUS:** execute the **narrated screen recording / demo** per
-`demos/v2ecoli/WALKTHROUGH.md` (8-segment remote GovCloud walkthrough, all segments
-verified live 2026-07-14). See `NEXT_STEPS.md` for the pre-flight + caveat.
+**Primary goal is unchanged:** record the 8-segment remote GovCloud v2ecoli demo
+(`demos/v2ecoli/WALKTHROUGH.md`). This session removed two blockers and locked in a
+new non-negotiable constraint.
 
-## What shipped this session
+## Session goal
 
-Branch `feat/improved-visual-feedback`, 5 commits ahead of `main`:
-- `18ccf8d` **feat(progress)** — the plan-7 implementation (7 files, +616/−5).
-- `075bbb9` **docs(plan7)** — live-e2e-passed note.
+Unblock the demo on the newly-chosen `smscdk` stack and enforce that the pinned
+remote-run build is ALWAYS the latest `vivarium-collective/v2ecoli` main.
 
-### Files (plan 7)
-- **NEW** `vivarium_workbench/static/progress-track.js` — dependency-free `ProgressTrack`
-  IIFE + `module.exports`. Dual-shape model: `stages` (milestone bar + honest time-based
-  soft-fill `min(elapsed/typical,0.9)` + spinner) and `measured` (`value/max`). Pure
-  helpers `softFraction`/`measuredFraction`/`stageFraction`/`html`. a11y
-  (`role=progressbar` + `aria-*` + `aria-live`) + reduced-motion. `render`/`tick` diff on
-  a `data-sig` that excludes soft progress (tween repaints only the active fill).
-- **NEW** `vivarium_workbench/static/progress-track.css` — namespaced `.ptrack-*`,
-  palette matches `.inv-run-*`.
-- **NEW** `tests/js/test_progress_track.js` — 24 assertions, `node` green.
-- **EDITED** `vivarium_workbench/static/study-detail.js` — `_renderRemoteRunProgress` is
-  now a thin adapter (`_rrDeriveStages`, stages `resolve→submit→queued→running→done→landed`),
-  `setInterval(250ms)` soft-fill tween (`_startRrTween`/`_stopRrTween`), `_RR_TYPICAL_MS`
-  (queued 480s, running 300s), `_rrSoftFor` stage-start tracking, legacy fallback
-  `_renderRemoteRunProgressLegacy`, `[.rr-track][.rr-extras]` shell. `phase` threaded from
-  `_pollRun` + unreachable-retry so Queued≠Running.
-- **EDITED** `vivarium_workbench/templates/study-detail.html` — 2 asset includes
-  (`progress-track.css` after `style.css` line 6; `progress-track.js` before
-  `study-detail.js`) + snapshot-safety comment at the hide site.
-- **EDITED** `tests/test_study_detail_page.py` — `test_study_detail_page_includes_progress_track_assets`.
+## Progress table
 
-## Verification (all done)
+| Item | Status |
+|---|---|
+| **Demo target switched to `smscdk` (sms-api-stanford)** — recorded as WALKTHROUGH top DECISION note | ✅ Done |
+| **`smscdk` seeded** with `v2ecoli@main` simulator — `simulator_id 40`, build **completed** | ✅ Done |
+| **Constraint: pinned build == latest v2ecoli main** — enforced + verified | ✅ Done (id 40 == live tip `a08e20b`) |
+| **NEW helper** `demos/v2ecoli/scripts/ensure_latest_main_build.sh` — remote check→reseed→poll gate | ✅ Done (moved into `scripts/` by user reorg) |
+| **WALKTHROUGH §1.1 "Pinned-build gate"** pre-flight step added | ✅ Done |
+| **`/etc/hosts` truncation fixed** (Cisco Secure Client, 181s timer) via `chflags uchg` lock | ✅ Done (lock held past 2 cycles) |
+| Plan-7 progress UX (PR #467) | ✅ CODE-COMPLETE + live-verified; PR OPEN, `REVIEW_REQUIRED` |
+| **Concurrent demo-dir reorg (user, in-flight, UNCOMMITTED)** — old scripts staged-deleted, new `scripts/` dir | 🔄 In progress (user-driven) |
+| Stale Appendix-G refs to deleted `prep_remote_build.py` (WALKTHROUGH lines ~475, ~551) | ❌ PENDING (decide: update or drop) |
+| PR #467 review → merge → release | ❌ PENDING |
+| Demo recording | ❌ PENDING (next focus once pre-flight passes on smscdk) |
 
-- `node tests/js/test_progress_track.js` → **ok** (softFraction clamp/cap/monotonic,
-  measuredFraction, stageFraction, a11y, failed class/no-spinner, measured step text, sig stability).
-- `uv run --no-sync pytest -q tests/test_study_detail_page.py::test_study_detail_page_includes_progress_track_assets` → **pass**.
-- Headless walk → bar **4→22→42→58→83→100%** monotonic, spinner on active, snap-to-100 at Landed.
-- **Live e2e → PASS** (Path B: local serve `:8099` + tunnel; real pinned run driven).
-- **Pre-existing failures (NOT regressions, confirmed via stash):** 10 `test_study_detail_page`
-  (legacy fixture lacks baseline/variants/runs.db) + 1 `test_remote_run_panel::test_view_run_button_routes…`
-  + broken `tests/js/test_chain_block.js` (requires the pre-rename `vivarium_dashboard/static/` path).
+## Key files touched (this session)
 
-## Deployment status — UNCHANGED (important)
+- **NEW** `demos/v2ecoli/scripts/ensure_latest_main_build.sh` — fully-remote,
+  idempotent gate. Resolves `git ls-remote …/v2ecoli main`, compares to the
+  sms-api's newest built `v2ecoli@main` commit; if stale, POSTs the live tip to
+  `/core/v1/simulator/upload` and polls `/core/v1/simulator/status` to `completed`.
+  Exit 0 only when built == latest main. No push / no login / no venv (v2ecoli is
+  public; `SmsApiClient` sends no auth token). Honors `SMS_API_BASE` (default
+  `localhost:8080`). Syntax-checked + live-run PASS.
+- **EDITED** `demos/v2ecoli/WALKTHROUGH.md` — (a) top-of-file **DECISION** note:
+  demo now targets `sms-api-stanford` / `smscdk` (not `smsvpctest`); (b) new
+  **§1.1 Pinned-build gate** pre-flight; (c) fixed the gate path to `scripts/…`
+  and removed the (now-deleted) `prep_remote_build.py` comparison in that note.
 
-Nothing was deployed. PR #467 is source-only; the `smsvpctest` pod still serves the
-prior image (old text stepper). Plan-7 bar is visible only via Path B (proven) OR after a
-deliberate merge→build→overlay-repoint→roll (NOT done — a coworker may be mid-deployment;
-do not deploy without explicit go-ahead).
+## Key design decisions / gotchas
+
+- **Per-stack registries.** Each sms-api (`smscdk`, `smsvpctest`) has its OWN
+  simulator registry. The v2ecoli build (`id 69`) existed only on `smsvpctest`;
+  switching the demo to `smscdk` surfaced "no built simulator for …v2ecoli@main"
+  — NOT a code/merge/deploy issue. Fixed by seeding `smscdk` (`id 40`).
+- **Newest-BUILT ≠ live tip.** The pinned resolver picks the newest *built* entry,
+  so it goes stale on any v2ecoli merge → the gate script exists to close that.
+- **The deployed dashboard CANNOT build** (runs `REMOTE_PINNED=1`, resolve-only;
+  and even non-pinned hits 3 gaps: no `GH_CLIENT_ID`, dubious `.git` ownership,
+  protected `main`). Seed via the remote sms-api call, never the deployed UI.
+- **`vivarium-dashboard` merges are IRRELEVANT** to the simulator build — different
+  repo. Simulator = `vivarium-collective/v2ecoli` (the model).
+- **`/etc/hosts` workaround is a `uchg` lock**, reversible with
+  `sudo chflags nouchg /etc/hosts`; may not survive a reboot → re-run restore+lock
+  as demo pre-flight. Cisco emptying it is a real bug → file an IT ticket. `sudo`
+  only works in a real Terminal, not the Claude `!` prefix.
+- **Concurrent reorg:** the user is moving demo scripts into `demos/v2ecoli/scripts/`
+  and deleting the old offline-flow scripts (`prep_remote_build.py`,
+  `populate_demo_runs.py`, `prep_remote_land.py`, `verify_demo.py`, plus
+  `NOTES.md`/`PLAN.md`). These deletions are **staged but uncommitted**. Two
+  pre-existing WALKTHROUGH references to `prep_remote_build.py` (Appendix G, ~L475
+  + ~L551) are now stale — left for the user to resolve as part of the reorg.
+
+## Verification
+
+- `bash -n scripts/ensure_latest_main_build.sh` → **syntax OK**; live run →
+  **MATCH ✓** (smscdk `id 40` == live main `a08e20b`), exit 0.
+- `node tests/js/test_progress_track.js` → **ok** (plan-7 unchanged, still green).
+- `tests/test_study_detail_page.py::…progress_track_assets` → **passed** (run
+  earlier this session).
+- Full `pytest` NOT re-run — no Python source changed this session (docs + shell +
+  remote data only). Pre-existing non-regression failures still stand (see prior
+  checkpoint: 10 legacy `test_study_detail_page`, 1 remote-run-panel, broken
+  `test_chain_block.js`).
+- Remote: `smscdk` `/core/v1/simulator/status?simulator_id=40` = `completed`,
+  `error_message: null`.
 
 ## Next steps (priority order)
 
-1. **NEXT SESSION: record the demo** per `demos/v2ecoli/WALKTHROUGH.md` (pre-flight in
-   `NEXT_STEPS.md`; Segment 7 Omics-Launch caveat = `[[project_ptools_segment7_routing]]`).
-2. **Get PR #467 reviewed → merge** (no auto-merge). Only gate left for plan 7.
-3. After merge: plans 8 + 9 branch off a fresh `main` (both refined, await "proceed").
+1. **Finish the demo-dir reorg + resolve stale refs:** commit the staged deletions
+   and the new `scripts/` dir; update or drop the two Appendix-G
+   `prep_remote_build.py` mentions (WALKTHROUGH ~L475, ~L551).
+2. **Stage this session's work for PR #467** (per branch policy). Do NOT `git add`
+   CLAUDE.md/AGENTS.md/Makefile/todo.md/.pr-body-*.md. Agent stages; user commits
+   via a shown one-liner (`[[feedback_suggest_commits]]`).
+3. **Demo pre-flight on `smscdk`:** `stanford test` → `sms-proxy.sh -s smscdk` →
+   restore+`uchg` `/etc/hosts` if needed → `./demos/v2ecoli/scripts/ensure_latest_main_build.sh`
+   (must exit 0) → open `localhost:8080/workbench`.
+4. **Record the demo** (Segment-7 Omics-Launch caveat unknown on `smscdk` — verify
+   PTools version there; `[[project_ptools_segment7_routing]]`).
+5. **PR #467 review → merge → release** (no auto-merge; `[[feedback_pr_review_required]]`),
+   then overlay `newTag` repoint like the 0.2.0 / demo-branch flow.
 
 ## Quick reference
 
-- Branch `feat/improved-visual-feedback` (off `main`@0.2.0); 5 ahead of `origin/main`.
+- Branch `feat/improved-visual-feedback`, **7 ahead of `origin/main`**; uncommitted:
+  1 modified (WALKTHROUGH.md) + staged deletions + untracked `scripts/`, `bugs/no-main-build.png`.
 - Tests: `uv run --no-sync pytest -q` (bare `uv run` fails — `../pbg-ptools` path dep) +
   `node tests/js/test_progress_track.js`.
-- Cluster env: `export AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 KUBECONFIG=/Users/alexanderpatrie/.kube/kube_stanford_test.yml`.
-- Tunnel: `~/sms/sms-cdk/scripts/sms-proxy.sh -s smsvpctest` → `localhost:8080`.
-- Commits are SSH-signed; if locked → ask user to `ssh-add` via `!` (`[[project_ssh_commit_signing]]`).
+- Seed/verify pinned build (fully remote): `SMS_API_BASE=http://localhost:8080 ./demos/v2ecoli/scripts/ensure_latest_main_build.sh`.
+- Manual pinned check: `git ls-remote https://github.com/vivarium-collective/v2ecoli main` vs
+  `curl -s localhost:8080/core/v1/simulator/versions`.
+- Cluster env: `AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 KUBECONFIG=…kube_stanford_test.yml`.
+- Tunnel: `~/sms/sms-cdk/scripts/sms-proxy.sh -s smscdk` → `localhost:8080`.
+- `/etc/hosts` guard (real Terminal, sudo): restore + `sudo chflags uchg /etc/hosts`; undo `nouchg`.
 
-## Related
-- `NEXT_STEPS.md`, `demos/v2ecoli/WALKTHROUGH.md`, `.todo/plans/7-pinned-run-progress-ux.md`,
-  PR #467. memory `[[project_plan7_progress_ux_pr467]]`, `[[project_pinned_build_remote_runs]]`,
-  `[[project_index_html_render_pipeline]]`, `[[feedback_pr_review_required]]`.
+## Related memory
+`[[project_demo_latest_v2ecoli_main_constraint]]`, `[[project_pinned_build_remote_runs]]`,
+`[[project_cisco_empties_etc_hosts]]`, `[[project_plan7_progress_ux_pr467]]`,
+`[[feedback_suggest_commits]]`, `[[feedback_pr_review_required]]`,
+`[[feedback_do_not_commit]]`, `[[project_ptools_segment7_routing]]`.

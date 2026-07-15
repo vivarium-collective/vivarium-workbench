@@ -1,133 +1,130 @@
-# Dashboard Demo — README
+# vivarium-workbench — v2ecoli GovCloud Demo
 
-A comprehensive demonstration of **vivarium-workbench** (a.k.a. vivarium-dashboard) — the local web UI for [process-bigraph](https://github.com/vivarium-collective/process-bigraph) workspaces — using the **v2ecoli** whole-cell model workspace.
+A guided demonstration of **vivarium-workbench** (the web UI for
+[process-bigraph](https://github.com/vivarium-collective/process-bigraph)
+workspaces) driving the **v2ecoli** whole-cell *E. coli* model. The dashboard, the
+v2ecoli workspace, and the sms-api simulation backend all run **in-cluster on AWS
+GovCloud**; you connect with an authenticated SSM tunnel and a browser. Nothing is
+built, cloned, or served locally.
 
-**Branch**: `demo-v2ecoli` (in the vivarium-dashboard repo)
-**Duration**: ~20 min (live) / ~45 min (self-guided)
-**Prerequisites**: checkout of `vivarium-collective/v2ecoli` at `~/vivarium-app/v2ecoli`, plus `uv`
+- **Demo target:** the `/workbench` deployment on the **`sms-api-stanford`**
+  Kubernetes namespace — the **`smscdk`** GovCloud stack.
+- **Reached at:** `http://localhost:8080/workbench` through the `sms-proxy.sh` tunnel.
+- **Full presenter script:** [`WALKTHROUGH.md`](WALKTHROUGH.md) (8 segments, ~20 min).
+
+---
+
+## Prerequisites
+
+1. **AWS GovCloud access** to the Stanford stacks (SSO profile `stanford-sso`,
+   region `us-gov-west-1`) with permission to open SSM sessions to the batch
+   submit node.
+2. **AWS CLI v2** + the **Session Manager plugin** installed.
+3. A clone of **`sms-cdk`** (ships the tunnel script) at `$SMS_CDK_DIR`
+   (e.g. `~/sms/sms-cdk`):
+   ```bash
+   git clone git@github.com:vivarium-collective/sms-cdk.git ~/sms/sms-cdk
+   ```
+
+No local Python, workspace, or dashboard install is required for the remote demo.
+(An offline local-serve fallback is documented in [`WALKTHROUGH.md`](WALKTHROUGH.md)
+Appendix G.)
 
 ---
 
 ## Quick Start
 
 ```bash
+# 1. Authenticate to GovCloud (the `stanford` ~/.zshrc function sets
+#    AWS_PROFILE=stanford-sso, AWS_DEFAULT_REGION=us-gov-west-1, then `aws sso login`).
+stanford test
+
+# 2. Open the SSM tunnel (Terminal 1 — stays alive until Ctrl+C).
+cd $SMS_CDK_DIR/scripts && ./sms-proxy.sh -s smscdk
+#   → localhost:8080 → internal ALB:80
+
+# 3. Ensure the pinned remote-run build tracks the LATEST v2ecoli main (Terminal 2).
+#    Non-negotiable demo constraint; builds on the remote sms-api only if stale (~13 min).
 cd ~/vivarium-app/vivarium-dashboard
-uv sync --extra demo
+./demos/v2ecoli/scripts/ensure_latest_main_build.sh      # must print MATCH ✓ / BUILT ✓
 
-# Verify everything is ready (39 checks)
-python demos/v2ecoli/verify_demo.py
-
-# Seed demo runs for the Simulations DB tab
-python demos/v2ecoli/populate_demo_runs.py
-
-# Start the dashboard (pointing at the v2ecoli workspace)
-vivarium-dashboard serve --workspace ~/vivarium-app/v2ecoli --port 8771
-# Open http://localhost:8771
+# 4. Open the dashboard.
+open http://localhost:8080/workbench
 ```
 
----
-
-## What This Demo Covers
-
-| Tab / Feature | What you'll see | Key talking point |
-|---|---|---|
-| **Registry** | 174 Process classes from 7 simulator packages co-existing in one type system | "The dashboard is simulator-agnostic. Install a new package and its types appear automatically." |
-| **Composites — swappability** | 3 cell engines (WCM, Millard ODE, PDMP) sharing the same BiRD reactor coupler | "The cell-side interface contract makes engines drop-in replaceable. Same workflow, any engine." |
-| **Composites — multi-simulator** | v2ecoli + ketchup kinetic fitting + viva_munk colony physics + copasi ODE — all launchable | "One dashboard, any simulator. Composite → Run → View results." |
-| **Composite Explorer — ParCa** | 9-step modular pipeline rendered as a connected graph in bigraph-loom | "ParCa used to be monolithic. Now 9 independent Steps, each testable and swappable." |
-| **Investigations** | 6-study showcase DAG with pass/fail gates between studies | "Investigations encode the scientific method: hypothesize, test, gate, proceed." |
-| **Simulations DB** | 52 runs — local + remote, 3 emitter types (SQLite, Parquet, XArray), status variety | "Every run is git-traceable. Local laptop and AWS GovCloud runs appear side-by-side." |
-| **Simulations DB — remote** | 3 sms-api runs with ☁️ origin pills, full provenance (simulation_id, S3 URI, backend) | "Extensibility: any simulator, any backend, any scale. Unified by git provenance." |
-| **Analyses** | 58 registered visualization classes + 3D parsimony viewer + PTools omics integration (optional) | "Every visualization is a registered class with demo() + render() — preview before you run." |
-| **Branch** | Git status with push state, branch tracking, PR integration | "Every dashboard action is committed to git. Full audit trail." |
+The proxy banner lists every endpoint on port 8080: `/workbench` (dashboard),
+`/` (PTools UI), `/docs` (sms-api Swagger).
 
 ---
 
-## File Layout
+## What the demo covers (8 segments)
+
+| # | Segment | Page / Tab | The point |
+|---|---------|-----------|-----------|
+| 1 | Introduction | Home / rail | One UI over any process-bigraph workspace; every action is git-committed. |
+| 2 | Simulator agnosticism | **Registry** | Process classes from 7 packages co-exist in one type system. |
+| 3 | Engine swappability | **Composites** | Multiple cell engines share one reactor-coupler contract — drop-in replaceable. |
+| 4 | ParCa modularization | **Composite Explorer** → parca | A monolithic fit step, now an inspectable multi-step graph in bigraph-loom. |
+| 5 | Investigation DAG | **Investigations** | Studies with pass/fail gates encode the scientific method. |
+| 6 | Simulations DB + remote run | **Simulations DB** | Local + GovCloud runs side-by-side; a live pinned run on the Ray backend (Part B). |
+| 7 | Visualizations + PTools omics | **Analyses** | Registered viz classes; optional Pathway Tools omics viewer. |
+| 8 | Wrap-up & Q&A | — | Extensibility recap: any simulator, any backend, unified by git provenance. |
+
+Exact figures (process/composite/investigation/viz counts, Simulations DB size)
+reflect the seeded workspace — confirm against the live deployment before quoting;
+`WALKTHROUGH.md` carries the last-verified numbers.
+
+---
+
+## The pinned-build constraint
+
+Segment 6 Part B runs the simulation on the remote Ray backend against a
+**pre-built, pinned** v2ecoli simulator. The demo's hard rule is that this build is
+**always the latest `vivarium-collective/v2ecoli` main commit**.
+
+The pinned resolver picks the *newest built* simulator for `v2ecoli@main` on the
+target sms-api — **not** the live GitHub tip — and each stack has its **own**
+registry. So the build goes stale whenever v2ecoli main advances, and a build on
+one stack does not exist on another. `scripts/ensure_latest_main_build.sh` closes
+that gap: it compares the live main tip against the sms-api's newest built commit
+and, if stale, registers + builds the current tip (fully remote — no push, no
+login, no local workspace; v2ecoli is public and the sms-api endpoint takes no auth
+token through the tunnel). **Run it before every recording and after any v2ecoli
+main merge.** The deployed dashboard is resolve-only (`REMOTE_PINNED=1`) and cannot
+build — always seed via this script, never the dashboard UI.
+
+---
+
+## File layout
 
 ```
 demos/v2ecoli/
-├── README.md               ← This file
-├── PLAN.md                 ← Full demo plan (presenter script + self-guided guide, 596 lines)
-├── NOTES.md                ← Presenter quick reference (walkthrough table, key numbers, Q&A, troubleshooting)
-├── verify_demo.py          ← Pre-demo verification (39 checks, read-only)
-├── populate_demo_runs.py   ← Seeds 16 synthetic runs into Simulations DB (idempotent)
-├── prep_remote_build.py    ← Pre-builds v2ecoli simulator image on sms-api
-├── prep_remote_land.py     ← Pre-lands an sms-api remote run for Simulations DB
-└── .gitignore              ← Keeps `.demo_state.json`, `demo-runs/`, `downloads/` out of git
+├── README.md                        ← this file
+├── WALKTHROUGH.md                   ← 8-segment presenter script (remote-first; Appendix G = offline)
+├── VERIFICATION_REPORT.md           ← last live-verification record
+├── scripts/
+│   └── ensure_latest_main_build.sh  ← pinned-build gate (ensure latest v2ecoli main is built)
+├── speaker/                         ← speaker aids
+└── .gitignore                       ← keeps generated state out of git
 ```
 
 ---
 
-## Demo Flow (8 Segments)
+## Troubleshooting
 
-| # | Segment | Page / Tab | Duration |
-|---|---------|-----------|----------|
-| 1 | Introduction | Home page, rail overview | 2 min |
-| 2 | Simulator agnosticism | **Registry** → Modules + Processes | 3 min |
-| 3 | Engine swappability | **Composites** grid | 3 min |
-| 4 | ParCa modularization | **Composite Explorer** → parca | 2 min |
-| 5 | Investigation DAG | **Investigations** → v2ecoli-baseline-showcase | 3 min |
-| 6 | Simulations DB + remote | **Simulations DB** + live sms-api run | 3 min |
-| 7 | Visualizations | **Analyses** | 2 min |
-| 8 | Wrap-up & Q&A | — | 2 min |
-
-For the detailed presenter script with narration, actions, and talking points, see [PLAN.md](PLAN.md) Section 4.
-For a quick-reference table with expected API results and key numbers, see [NOTES.md](NOTES.md) Section 1.
-
----
-
-## Decoupling Principle
-
-**The demo assets never modify existing v2ecoli files.** All new artifacts live under `demos/v2ecoli/`. Existing composites, studies, investigations, and the workspace configuration are consumed read-only.
-
-| What the demo creates | Where | Git status |
+| Symptom | Cause | Fix |
 |---|---|---|
-| Plans, scripts, notes | `demos/v2ecoli/` | Tracked (committed to `demo-v2ecoli` branch) |
-| Synthetic run entries | `.pbg/composite-runs.db` | Gitignored (already in `.gitignore`) |
-| Remote build state | `demos/v2ecoli/.demo_state.json` | Gitignored (demo `.gitignore`) |
-| Downloaded remote results | `demos/v2ecoli/demo-runs/` | Gitignored (demo `.gitignore`) |
+| `/workbench` refuses / times out | Tunnel down or SSO expired | Re-run `stanford test`, then restart `sms-proxy.sh -s smscdk` |
+| Tunnel hangs on `Starting session…`, then `listen tcp: lookup localhost: no such host` on Ctrl+C | `/etc/hosts` empty → `localhost` unresolvable (some corporate security agents truncate it) | Restore `/etc/hosts` (`127.0.0.1 localhost` / `::1 localhost`) in a real terminal; `sudo chflags uchg /etc/hosts` to keep it |
+| "no built simulator for …v2ecoli@main" in the run card | This stack's registry isn't seeded | Run `scripts/ensure_latest_main_build.sh` (Quick Start step 3) |
+| `cross-origin request forbidden` on POST | ALB rewrites `Host`; allowlist missing | Deployment needs `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS=http://localhost:8080` (see WALKTHROUGH Appendix E) |
+| Segment 7 PTools Omics **Launch** doesn't paint | Known `sms-ptools` scheme mismatch | Demo the interactive figures + omics-TSV delivery; skip the Launch (deferred fix) |
 
 ---
 
-## Scripts Reference
+## Decoupling principle
 
-### `verify_demo.py`
-Pre-demo verification. **Always run this before a demo.**
-```bash
-python demos/v2ecoli/verify_demo.py
-```
-39 checks across: package imports, composite resolution, study directories, ParCa cache, git state, dashboard CLI, Simulations DB demo data, cell-side contract. Passes = ready. Warnings for sms-api and PTools are expected unless services are running.
-
-### `populate_demo_runs.py`
-Seeds the Simulations DB with 16 synthetic run entries. Idempotent — deletes and recreates.
-```bash
-python demos/v2ecoli/populate_demo_runs.py
-```
-Creates entries with: 3 emitter types (SQLite/Parquet/XArray), 3 remote ☁️ runs, 1 running, 1 failed, varied timestamps. Labeled clearly as demo data.
-
-### `prep_remote_build.py` and `prep_remote_land.py`
-One-time setup for the live sms-api remote demo. Requires an SSM tunnel to AWS GovCloud (`localhost:8080`). See [PLAN.md](PLAN.md) Appendices A–B for tunnel setup and fallback plan.
-
----
-
-## Environment Notes
-
-- **CLI entry point**: `vivarium-dashboard serve` (or `vivarium-workbench serve` — same code)
-- **Current branch**: `demo-v2ecoli` in the vivarium-dashboard repo. This is NOT a branch of v2ecoli.
-- **v2ecoli dependency**: The demo requires v2ecoli installed as a local editable package. `uv sync --extra demo` resolves it from `../v2ecoli`.
-- **Demo runs**: Synthetic (clearly labeled). Real simulation output lives on a different machine; static charts are committed and render fine
-- **sms-api**: Optional. Simulations DB already has pre-seeded remote entries showing ☁️ pills. Live remote demo needs SSM tunnel
-- **PTools**: Optional. TSV data exists at `workspace/studies/showcase-2-baseline-figures/ptools/`. Needs sms-ptools Docker container on `:1555`
-
----
-
-## Customization
-
-To adapt this demo for a different workspace:
-1. Update `PACKAGES` and `SELECTED_COMPOSITES` in `verify_demo.py` to match the target workspace's imports
-2. Update the study slugs and composite IDs in `populate_demo_runs.py` to reference the target workspace's studies
-3. Replace the 8-segment narrative in `PLAN.md` Section 4 with the target workspace's story
-4. Update the key numbers and Q&A in `NOTES.md`
-
-The dashboard itself is workspace-agnostic — no dashboard code changes needed.
+The demo assets never modify existing v2ecoli files — all artifacts live under
+`demos/v2ecoli/`, and the workspace's composites, studies, and investigations are
+consumed read-only. The dashboard itself is workspace-agnostic; no dashboard code
+changes are needed to demo a different workspace.
