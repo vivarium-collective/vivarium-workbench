@@ -125,6 +125,8 @@ files = [
     "vivarium_workbench/lib/download_views.py",
     "vivarium_workbench/lib/study_spec.py",
     "vivarium_workbench/lib/staging.py",
+    "vivarium_workbench/lib/ports/scientific_content.py",
+    "vivarium_workbench/lib/adapters/scientific_content.py",
     "vivarium_workbench/lib/study_enrichment.py",
     "vivarium_workbench/lib/rigor_views.py",
     "vivarium_workbench/lib/observables_views.py",

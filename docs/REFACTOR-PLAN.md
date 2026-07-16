@@ -612,10 +612,28 @@ A read-only discovery over the write/read surfaces sharpened three things:
 - **First step landed:** `lib/staging.py` — one layout-driven policy with owned
   `science_paths()` + `environment_paths()` lists — routed through
   `work_state.active_branch_action`, fixing the layout-blind allow-list bug while
-  the science+env union preserves the legacy `_STAGE_PATHS` set. Follow-ups: route
-  `git_commit_views.dirty_commit_all` / `git_status.remote_commit_and_push`
-  through the policy (they do unscoped `git add -A` today — can sweep the ParCa
-  cache); then the `ScientificContent` protocol + adapter + import-linter gate.
+  the science+env union preserves the legacy `_STAGE_PATHS` set.
+- **Port established (read surface):** `lib/ports/scientific_content.py`
+  (`ScientificContent` Protocol) + `lib/adapters/scientific_content.py`
+  (`LocalGitScientificContent` + a composition-root `for_workspace()` factory).
+  The `/api/git-status`, `/api/work-status`, `/api/dirty-status` routes now read
+  through the port (behavior-preserving). Scoped to **reads** — `status`,
+  `work_status`, `dirty_status`, `head_version` (opaque version id).
+- **Deferred to a decision — the write/commit core.** The FastAPI app *defers*
+  commits (mutations write uncommitted; versioning is a user-initiated commit-all
+  / push), so `active_branch_action`'s scoped-commit is a **live-server-only**
+  pattern. The write core therefore turns on a **commit-model fork**:
+  **(a)** deferred + commit-all (today's reality; the science/env boundary is not
+  enforced at commit time) vs **(b)** scoped-per-mutation commits (what §2A.4
+  assumes; a real UX change). `snapshot`/write verbs are intentionally absent from
+  the port until (a)/(b) is chosen.
+- **Not worth doing** (superseded): routing `dirty_commit_all` /
+  `remote_commit_and_push` through the *allow-list* — they are genuine commit-all
+  escape hatches (a deny-list belongs there), and the ParCa-cache sweep they
+  risked is already mitigated by `.gitignore` (`out/`). Left as intentional
+  deny-list paths.
+- **Next:** the import-linter gate (only adapters import git-for-commit); then the
+  write core once the commit-model fork is settled.
 
 ---
 
