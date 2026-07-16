@@ -11,6 +11,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vivarium_workbench.lib import git_status
 from vivarium_workbench.lib.ports.scientific_content import ScientificContent
@@ -46,3 +47,10 @@ def for_workspace(ws_root: Path | str) -> ScientificContent:
     adapter is introduced by changing only this function.
     """
     return LocalGitScientificContent(Path(ws_root))
+
+
+if TYPE_CHECKING:
+    # Static conformance guard: mypy verifies the adapter satisfies the port here,
+    # independent of any call site's annotations (so the check can't be lost if
+    # `for_workspace`'s return type is ever changed). Never executed.
+    _conformance: ScientificContent = LocalGitScientificContent(Path())
