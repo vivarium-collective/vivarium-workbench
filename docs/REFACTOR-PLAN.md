@@ -595,6 +595,28 @@ environment paths.
 import-linter rule is green; the allow-list is layout-driven; all existing tests
 pass with no behavior change.
 
+**Refinement (2026-07-16, from a code-level dependency map — see issue #471).**
+A read-only discovery over the write/read surfaces sharpened three things:
+- **Naming:** `AuthoredRecord` is the *write/versioning core* of a broader
+  **`ScientificContent`** port (read + write + versioning over the record); reads
+  fold onto the same interface incrementally after the write core.
+- **Three categories, not two.** The staging boundary decomposes into
+  **science** (`studies/`, `investigations/`, `references/`, decisions),
+  **compute-environment** (`pyproject.toml`, `models/`, `scripts/`, package code,
+  lockfile — the deferred `ComputeEnvironment` domain), and **deployment /
+  integration bindings** (`ui.ptools_server_url` et al. — URLs to hosted external
+  singletons; belong to a deployment-config layer, *neither* port). That third
+  bucket is #471's "env portability" concern (`stanford` vs `stanford-vpc-test`);
+  `workspace.yaml` is a three-way straddler and eventually wants `ui.*` lifted
+  out.
+- **First step landed:** `lib/staging.py` — one layout-driven policy with owned
+  `science_paths()` + `environment_paths()` lists — routed through
+  `work_state.active_branch_action`, fixing the layout-blind allow-list bug while
+  the science+env union preserves the legacy `_STAGE_PATHS` set. Follow-ups: route
+  `git_commit_views.dirty_commit_all` / `git_status.remote_commit_and_push`
+  through the policy (they do unscoped `git add -A` today — can sweep the ParCa
+  cache); then the `ScientificContent` protocol + adapter + import-linter gate.
+
 ---
 
 ## 5B. Deferred phases — rough roadmap (how each realizes the ports)
