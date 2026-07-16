@@ -632,8 +632,14 @@ A read-only discovery over the write/read surfaces sharpened three things:
   escape hatches (a deny-list belongs there), and the ParCa-cache sweep they
   risked is already mitigated by `.gitignore` (`out/`). Left as intentional
   deny-list paths.
-- **Next:** the import-linter gate (only adapters import git-for-commit); then the
-  write core once the commit-model fork is settled.
+- **Layering gate landed:** `import-linter` in CI (`[tool.importlinter]`) with a
+  `forbidden` contract keeping `lib.ports` a pure interface layer (no adapter /
+  no git-impl imports) — so mypy verifies adapter↔port *conformance* (structurally,
+  at the `for_workspace() -> ScientificContent` boundary, plus a `TYPE_CHECKING`
+  conformance guard in the adapter) while import-linter verifies the *direction*
+  (nothing reaches around the port).
+- **Next:** the write core once the commit-model fork is settled; as more ports
+  land, extend the contract to "domain must not import `lib.adapters`."
 
 ---
 

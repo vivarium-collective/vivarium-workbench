@@ -30,5 +30,7 @@ jobs:
         run: uv sync --frozen --extra dev
       - name: mypy (typed modules)
         run: uv run --frozen mypy
+      - name: import-linter (ports & adapters layering)
+        run: uv run --frozen lint-imports
       - name: Payload-model + generated-TS + API + lib tests
         run: uv run --frozen pytest tests/test_payload_models.py tests/test_generate_ts.py tests/test_api_app.py tests/test_investigation_status.py -q
