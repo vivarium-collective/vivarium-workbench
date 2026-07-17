@@ -128,6 +128,8 @@ def active_branch_action(ws_root: Path, commit_message: str, action_fn) -> tuple
     seam + CLI do this at startup).
     """
     from vivarium_workbench.lib.git_status import dirty_workspace
+    from vivarium_workbench.lib import staging
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     ws_root = Path(ws_root)
     ws = str(ws_root)
@@ -154,16 +156,16 @@ def active_branch_action(ws_root: Path, commit_message: str, action_fn) -> tuple
 
     try:
         action_fn()
-        # Stage only the content the dashboard authors. A blanket `git add -A`
-        # can sweep large untracked artifact dirs (out/, the ~175 MB ParCa
-        # cache) into the commit; scoping the pathspec makes that impossible.
-        # reports/ is intentionally excluded — it is generated, not authored.
-        _STAGE_PATHS = [
-            "studies/", "investigations/", "models/", "scripts/",
-            "workspace.yaml", "pyproject.toml", ".gitmodules", ".gitignore",
-            "external/",
-        ]
-        present = [p for p in _STAGE_PATHS if (ws_root / p).exists()]
+        # Stage only the content the dashboard authors, via the single staging
+        # policy (lib.staging): the science record + local compute-environment
+        # lists, resolved through the workspace `layout:` so a relocated
+        # workspace stages correctly (the old hardcoded literals did not). A
+        # blanket `git add -A` can sweep large untracked artifact dirs (out/, the
+        # ~175 MB ParCa cache) into the commit; scoping the pathspec makes that
+        # impossible. reports/ is intentionally excluded — generated, not authored.
+        present = staging.existing(
+            ws_root, staging.commit_pathspec(WorkspacePaths.load(ws_root))
+        )
         if present:
             subprocess.run(
                 ["git", "add", "-A", "--", *present],

@@ -595,6 +595,52 @@ environment paths.
 import-linter rule is green; the allow-list is layout-driven; all existing tests
 pass with no behavior change.
 
+**Refinement (2026-07-16, from a code-level dependency map — see issue #471).**
+A read-only discovery over the write/read surfaces sharpened three things:
+- **Naming:** `AuthoredRecord` is the *write/versioning core* of a broader
+  **`ScientificContent`** port (read + write + versioning over the record); reads
+  fold onto the same interface incrementally after the write core.
+- **Three categories, not two.** The staging boundary decomposes into
+  **science** (`studies/`, `investigations/`, `references/`, decisions),
+  **compute-environment** (`pyproject.toml`, `models/`, `scripts/`, package code,
+  lockfile — the deferred `ComputeEnvironment` domain), and **deployment /
+  integration bindings** (`ui.ptools_server_url` et al. — URLs to hosted external
+  singletons; belong to a deployment-config layer, *neither* port). That third
+  bucket is #471's "env portability" concern (`stanford` vs `stanford-vpc-test`);
+  `workspace.yaml` is a three-way straddler and eventually wants `ui.*` lifted
+  out.
+- **First step landed:** `lib/staging.py` — one layout-driven policy with owned
+  `science_paths()` + `environment_paths()` lists — routed through
+  `work_state.active_branch_action`, fixing the layout-blind allow-list bug while
+  the science+env union preserves the legacy `_STAGE_PATHS` set.
+- **Port established (read surface):** `lib/ports/scientific_content.py`
+  (`ScientificContent` Protocol) + `lib/adapters/scientific_content.py`
+  (`LocalGitScientificContent` + a composition-root `for_workspace()` factory).
+  The `/api/git-status`, `/api/work-status`, `/api/dirty-status` routes now read
+  through the port (behavior-preserving). Scoped to **reads** — `status`,
+  `work_status`, `dirty_status`, `head_version` (opaque version id).
+- **Deferred to a decision — the write/commit core.** The FastAPI app *defers*
+  commits (mutations write uncommitted; versioning is a user-initiated commit-all
+  / push), so `active_branch_action`'s scoped-commit is a **live-server-only**
+  pattern. The write core therefore turns on a **commit-model fork**:
+  **(a)** deferred + commit-all (today's reality; the science/env boundary is not
+  enforced at commit time) vs **(b)** scoped-per-mutation commits (what §2A.4
+  assumes; a real UX change). `snapshot`/write verbs are intentionally absent from
+  the port until (a)/(b) is chosen.
+- **Not worth doing** (superseded): routing `dirty_commit_all` /
+  `remote_commit_and_push` through the *allow-list* — they are genuine commit-all
+  escape hatches (a deny-list belongs there), and the ParCa-cache sweep they
+  risked is already mitigated by `.gitignore` (`out/`). Left as intentional
+  deny-list paths.
+- **Layering gate landed:** `import-linter` in CI (`[tool.importlinter]`) with a
+  `forbidden` contract keeping `lib.ports` a pure interface layer (no adapter /
+  no git-impl imports) — so mypy verifies adapter↔port *conformance* (structurally,
+  at the `for_workspace() -> ScientificContent` boundary, plus a `TYPE_CHECKING`
+  conformance guard in the adapter) while import-linter verifies the *direction*
+  (nothing reaches around the port).
+- **Next:** the write core once the commit-model fork is settled; as more ports
+  land, extend the contract to "domain must not import `lib.adapters`."
+
 ---
 
 ## 5B. Deferred phases — rough roadmap (how each realizes the ports)

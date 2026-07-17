@@ -50,7 +50,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["matplotlib", "imageio", "numpy"]
-dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "mypy>=1.8", "httpx>=0.27"]
+dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "mypy>=1.8", "httpx>=0.27", "import-linter>=2.0"]
 # Optional readers used only by parts of the test suite (parquet/zarr run
 # stores). Without them those tests skip (via pytest.importorskip) rather than
 # fail. Install with: uv pip install -e ".[dev,test]". See CONTRIBUTING.md.
@@ -107,6 +107,26 @@ pbg-ptools = { path = "../pbg-ptools", editable = true }
 # bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
 # backend must opt into direct references — without this, hatchling refuses the
 # build on stricter uv/hatchling versions.
+
+# ─── import-linter — the ports & adapters layering gate (REFACTOR-PLAN §2A.1) ──
+# Keeps `lib.ports` a PURE interface layer: a port may never import a concrete
+# adapter or the git/impl modules an adapter wraps. So the domain can depend on
+# the interface without dragging in an implementation, and a cloud adapter swaps
+# in without the port changing. Enforced in CI (`lint-imports`).
+[tool.importlinter]
+root_package = "vivarium_workbench"
+
+[[tool.importlinter.contracts]]
+name = "ports are pure interfaces (no adapter / no git-impl imports)"
+type = "forbidden"
+source_modules = ["vivarium_workbench.lib.ports"]
+forbidden_modules = [
+    "vivarium_workbench.lib.adapters",
+    "vivarium_workbench.lib.git_status",
+    "vivarium_workbench.lib.work_state",
+    "vivarium_workbench.lib.git_commit_views",
+]
+
 [tool.mypy]
 python_version = "3.11"
 # Incremental adoption: type-check only the new, fully-typed modules for now.
@@ -124,6 +144,9 @@ files = [
     "vivarium_workbench/lib/investigation_views.py",
     "vivarium_workbench/lib/download_views.py",
     "vivarium_workbench/lib/study_spec.py",
+    "vivarium_workbench/lib/staging.py",
+    "vivarium_workbench/lib/ports/scientific_content.py",
+    "vivarium_workbench/lib/adapters/scientific_content.py",
     "vivarium_workbench/lib/study_enrichment.py",
     "vivarium_workbench/lib/rigor_views.py",
     "vivarium_workbench/lib/observables_views.py",
