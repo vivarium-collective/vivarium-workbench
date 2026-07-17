@@ -1,6 +1,19 @@
-# Next Steps — Plan 7 shipped to PR #467 (in review); NEXT SESSION = record the v2ecoli demo
+# Next Steps — Plan 7 merged + released as v0.3.0; NEXT SESSION = record the v2ecoli demo
 
-**Updated:** 2026-07-14 (post plan-7 implementation + live e2e). Ground truth is `SAVE_SLOT.md`.
+**Updated:** 2026-07-17. PR #467 merged (`1c51df2`, 2026-07-15) and released as
+`v0.3.0` (tag + GitHub Release published 2026-07-15T16:30:15Z); `pyproject.toml`
+on `main` reads `0.3.0`. Plan 10 WS-2…WS-8 (repo-side) are done — see
+`.todo/plans/10-release-improved-visual-feedback-smscdk.md`. **Unconfirmed
+from this repo:** whether the sms-api overlay pin (`newTag: 0.3.0` on
+`sms-api-stanford`/`-test`) and final live cutover (Plan 10 WS-8 steps 2–3)
+have landed — check `~/sms/sms-api` before assuming so. Ground truth for the
+pre-release history below is still `SAVE_SLOT.md`; note it predates the merge.
+
+There are also five new untracked files under `demos/v2ecoli/` on the current
+branch (`WALKTHROUGH-local-remote-compute.md`, `scripts/remote_commit_run.py`,
+`speaker/NARRATION.md`, `speaker/three_layers.png`) not yet reflected in
+`.todo/MANIFEST.md` — apparent unlogged demo-prep work; confirm scope/owning
+plan before the next session's recording pass.
 
 ## ⭐ NEXT SESSION — record the screen-recording / execute the demo
 
@@ -50,10 +63,10 @@ matches yesterday's pattern.
 
 | Item | Status |
 |---|---|
-| **Plan 7 — pinned-run progress UX** | ✅ **CODE-COMPLETE + LIVE-VERIFIED**; PR #467 OPEN, MERGEABLE, `REVIEW_REQUIRED` |
+| **Plan 7 — pinned-run progress UX** | ✅ **DONE + RELEASED**; PR #467 MERGED (`1c51df2`, 2026-07-15), shipped in `v0.3.0` |
 | Plan 7 — JS unit + pytest wiring | ✅ green (`node tests/js/test_progress_track.js`, `test_study_detail_page.py`) |
 | Plan 7 — headless walk + live e2e | ✅ bar drove a REAL pinned run via Path B (local serve + tunnel, no deploy) |
-| **PR #467 review → merge** | ⏳ **only gate left for plan 7**; no auto-merge (`[[feedback_pr_review_required]]`) |
+| **PR #467 review → merge** | ✅ merged 2026-07-15; `v0.3.0` tagged + released same day |
 | Demo recording (`demos/v2ecoli/WALKTHROUGH.md`) | ⏳ **NEXT SESSION** — all 8 segments verified live |
 | Plan 9 — Omics Viewer 0.5.9 fix | ⏳ REFINED, awaits "proceed"; 3 repos + tunnel + local `pbg-ptools` clone |
 | Plan 8 — auto-param PTools from Exports `.tsv` | ⏳ gated on plan #6 WS-2 delivery mechanism |

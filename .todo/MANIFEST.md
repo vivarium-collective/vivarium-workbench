@@ -110,7 +110,7 @@ Feat: sleek, production-grade progress feedback (progress bar + spinner) for lon
 
 Linked tasks: builds on #5 (the pinned-build run whose submit fans out to ParCa → Ray MNP → land is the process with thin progress signal today). Dashboard-only, on `feat/improved-visual-feedback` (cut from `main`, which now carries the merged+released demo work, `0.2.0`). Source: `.todo/_backlog.md` item (b).
 
-### Status: 📋 PLANNED + REFINED + RE-TARGETED (via /plan, 2026-07-14) — awaits "proceed" before code
+### Status: ✅ DONE + RELEASED (v0.3.0, 2026-07-15) — PR #467 merged (`1c51df2`), tag + GitHub Release `v0.3.0` published
 
 **Re-target 2026-07-14** (`~/.claude/plans/purrfect-wandering-narwhal.md`, approved): `demo-v2ecoli` merged into `main` + released (`0.2.0`); the `vivarium_workbench` rename moved the frontend under the package. Branch `demo-v2ecoli` → **`feat/improved-visual-feedback`**; all frontend paths → `vivarium_workbench/static/…` + `vivarium_workbench/templates/…` (tests stay repo-root). sms-api confirmed on `main` (PR #163) — **no sms-api change iter 1**; future substage work → new branch off sms-api `main`. Design unchanged; all code anchors re-verified present (line #s hold). Feasibility verified by a backend + frontend sweep: a true continuous 0–100% bar is NOT backed by data (the poller `GET /api/remote-run-poll` forwards only a categorical `phase`/`raw_status` — no fraction, no SSE for remote runs). Two honest signals ARE available → **HYBRID model** (user-chosen): a determinate segmented **milestone bar** (Resolve → Submit → Queued → Running → Done → Landed) + an honest **time-based soft-fill** within the two long waits (Queued ≈ 8 min, Running ≈ 5 min; capped <100%, snaps on the real transition) + a **spinner** on the active stage. Reuse scope = **pinned card only** this iteration, but a **dual-shape component API** (`stages` + `measured`) with a documented adoption note for the genuinely-determinate local composite-run path (`progress_step`/`n_steps` via `/api/composite-run/{id}/status`). Wraps the existing `_renderRemoteRunProgress` as an adapter (unchanged call sites). New: `vivarium_workbench/static/progress-track.{js,css}` + `tests/js/test_progress_track.js`. See plan for WS-1…WS-4.
 
@@ -127,6 +127,40 @@ Linked tasks: generalizes #6 (Segment 7 Omics wiring) from a single seeded study
 ### Status: 📋 PLANNED — promoted from backlog Prompt Queue (2026-07-14); awaits "proceed" + #6 outcome
 
 Detect PTools-compatible Exports `.tsv` → build the `celOv.shtml?…&url=` (or filesystem) target → surface as an auto-parameterized Launch, no-op when absent. See plan for WS-1…WS-4.
+
+---
+
+## 11. **(.todo/plans/11-demo-recording-prep-local-remote-compute.md)**:
+
+### Name
+
+Docs/tooling: log and land the demo-prep artifacts authored ahead of the v2ecoli GovCloud demo recording — a new "local dashboard, remote compute" companion walkthrough, a generalized register→build→run script, a full word-for-word narration script, and a supporting image asset.
+
+Linked tasks: prep work for the recording session in `NEXT_STEPS.md`; companion to `demos/v2ecoli/WALKTHROUGH.md` and Plans 5/6/7. Dashboard-repo-only, no v2ecoli changes.
+
+### Status: ✅ Artifacts authored (were untracked, no owning plan) — WS-1/WS-2 (log + commit) executing now; WS-3 (actual recording) deferred to next session per `NEXT_STEPS.md`.
+
+Discovered via `/orientation` (2026-07-17): 5 untracked files
+(`demos/v2ecoli/WALKTHROUGH-local-remote-compute.md`,
+`demos/v2ecoli/scripts/remote_commit_run.py`,
+`demos/v2ecoli/speaker/NARRATION.md`,
+`demos/v2ecoli/speaker/three_layers.png`) — read in full, confirmed
+coherent finished prep work, not orphaned WIP. See plan for full inventory
+and WS-1…WS-3.
+
+---
+
+## 10. **(.todo/plans/10-release-improved-visual-feedback-smscdk.md)**:
+
+### Name
+
+Ops: close remaining doc/PR gaps on `feat/improved-visual-feedback` (PR #467), container-verify it against `sms-api-stanford` (smscdk) without a durable change to the shared namespace, merge, then cut a real release and deploy it there for good.
+
+Linked tasks: closes out #7 (Plan 7's code is done; this is the "deploy-verified → merged → released" tail). Spans THREE repos: `vivarium-workbench` (gap fixes, tag, release), `sms-api` (kustomize overlay pin only, no code changes), and the `sms-api-stanford` k8s namespace itself. No v2ecoli changes.
+
+### Status: 📋 PLANNED + REFINED (via /plan, approved 2026-07-15) — awaits "proceed" before execution
+
+Plan approved via `/plan` (`~/.claude/plans/quirky-snuggling-crystal.md`, 2026-07-15). Two judgment calls resolved with the user: WS-4's smscdk verification deploy is **smoke-and-revert** (no durable sms-api commit), and WS-8's durable sms-api overlay pin goes through a **small PR** (not a direct commit, despite sms-api's own precedent for the latter). See plan for WS-1…WS-8.
 
 ---
 
