@@ -10,7 +10,7 @@ built, cloned, or served locally.
 - **Demo target:** the `/workbench` deployment on the **`sms-api-stanford`**
   Kubernetes namespace — the **`smscdk`** GovCloud stack.
 - **Reached at:** `http://localhost:8080/workbench` through the `sms-proxy.sh` tunnel.
-- **Full presenter script:** [`WALKTHROUGH.md`](WALKTHROUGH.md) (8 segments, ~20 min).
+- **Full presenter script:** [`WALKTHROUGH.md`](WALKTHROUGH.md) (9 segments, ~22 min).
 
 ---
 
@@ -57,18 +57,19 @@ The proxy banner lists every endpoint on port 8080: `/workbench` (dashboard),
 
 ---
 
-## What the demo covers (8 segments)
+## What the demo covers (9 segments)
 
 | # | Segment | Page / Tab | The point |
 |---|---------|-----------|-----------|
 | 1 | Introduction | Home / rail | One UI over any process-bigraph workspace; every action is git-committed. |
-| 2 | Simulator agnosticism | **Registry** | Process classes from 7 packages co-exist in one type system. |
-| 3 | Engine swappability | **Composites** | Multiple cell engines share one reactor-coupler contract — drop-in replaceable. |
-| 4 | ParCa modularization | **Composite Explorer** → parca | A monolithic fit step, now an inspectable multi-step graph in bigraph-loom. |
-| 5 | Investigation DAG | **Investigations** | Studies with pass/fail gates encode the scientific method. |
-| 6 | Simulations DB + remote run | **Simulations DB** | Local + GovCloud runs side-by-side; a live pinned run on the Ray backend (Part B). |
-| 7 | Visualizations + PTools omics | **Analyses** | Registered viz classes; optional Pathway Tools omics viewer. |
-| 8 | Wrap-up & Q&A | — | Extensibility recap: any simulator, any backend, unified by git provenance. |
+| 2 | Sources — the scientific foundation | **Sources** | 135 real experimental data roles behind the model (live-verified), formally extensible with new datasets. |
+| 3 | Simulator agnosticism | **Registry** | Process classes from 7 packages co-exist in one type system. |
+| 4 | Engine swappability | **Composites** | Multiple cell engines share one reactor-coupler contract — drop-in replaceable. |
+| 5 | ParCa modularization | **Composite Explorer** → parca | A monolithic fit step, now an inspectable multi-step graph in bigraph-loom; turns Sources' raw data into a calibrated model. |
+| 6 | Investigation DAG | **Investigations** | Studies with pass/fail gates encode the scientific method. |
+| 7 | Simulations DB + remote run | **Simulations DB** | Local + GovCloud runs side-by-side; a live pinned run on the Ray backend (Part B). |
+| 8 | Visualizations + PTools omics | **Analyses** | Registered viz classes; optional Pathway Tools omics viewer. |
+| 9 | Wrap-up & Q&A | — | Full pipeline recap: data → calibration → mechanism → hypothesis → reproducible execution → interpretation, unified by git provenance. |
 
 Exact figures (process/composite/investigation/viz counts, Simulations DB size)
 reflect the seeded workspace — confirm against the live deployment before quoting;
@@ -78,7 +79,7 @@ reflect the seeded workspace — confirm against the live deployment before quot
 
 ## The pinned-build constraint
 
-Segment 6 Part B runs the simulation on the remote Ray backend against a
+Segment 7 Part B runs the simulation on the remote Ray backend against a
 **pre-built, pinned** v2ecoli simulator. The demo's hard rule is that this build is
 **always the latest `vivarium-collective/v2ecoli` main commit**.
 
@@ -100,7 +101,7 @@ build — always seed via this script, never the dashboard UI.
 ```
 demos/v2ecoli/
 ├── README.md                        ← this file
-├── WALKTHROUGH.md                   ← 8-segment presenter script (remote-first; Appendix G = offline)
+├── WALKTHROUGH.md                   ← 9-segment presenter script (remote-first; Appendix G = offline)
 ├── VERIFICATION_REPORT.md           ← last live-verification record
 ├── scripts/
 │   └── ensure_latest_main_build.sh  ← pinned-build gate (ensure latest v2ecoli main is built)
@@ -118,7 +119,7 @@ demos/v2ecoli/
 | Tunnel hangs on `Starting session…`, then `listen tcp: lookup localhost: no such host` on Ctrl+C | `/etc/hosts` empty → `localhost` unresolvable (some corporate security agents truncate it) | Restore `/etc/hosts` (`127.0.0.1 localhost` / `::1 localhost`) in a real terminal; `sudo chflags uchg /etc/hosts` to keep it |
 | "no built simulator for …v2ecoli@main" in the run card | This stack's registry isn't seeded | Run `scripts/ensure_latest_main_build.sh` (Quick Start step 3) |
 | `cross-origin request forbidden` on POST | ALB rewrites `Host`; allowlist missing | Deployment needs `VIVARIUM_WORKBENCH_ALLOWED_ORIGINS=http://localhost:8080` (see WALKTHROUGH Appendix E) |
-| Segment 7 PTools Omics **Launch** doesn't paint | Known `sms-ptools` scheme mismatch | Demo the interactive figures + omics-TSV delivery; skip the Launch (deferred fix) |
+| Segment 8 PTools Omics **Launch** doesn't paint | Known `sms-ptools` scheme mismatch | Demo the interactive figures + omics-TSV delivery; skip the Launch (deferred fix) |
 
 ---
 

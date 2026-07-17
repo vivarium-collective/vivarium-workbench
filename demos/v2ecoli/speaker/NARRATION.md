@@ -8,15 +8,21 @@ improvise a sentence or guess at a save if something misbehaves. Read
 WALKTHROUGH.md once beforehand for the "why"; use this file live for the
 "what to say."
 
-**Target runtime**: ~20 min + Q&A (~25 min total).
+**Target runtime**: ~22 min + Q&A (~27 min total) — padded ~2 min over the
+original target to fit the new Sources segment (added 2026-07-17).
 **Demo target**: remote `/workbench` on the `smscdk` GovCloud stack, reached at
 `http://localhost:8080/workbench` via `sms-proxy.sh -s smscdk`.
 **Numbers used below** (173 processes / 7 packages, 28 composites, 8
-investigations, 35 seeded runs → 36 after Segment 6 Part B, 58 visualization
-classes) are WALKTHROUGH's/VERIFICATION_REPORT's last-verified (2026-07-14)
-figures. **Re-confirm each against the live deployment before recording** —
-if any has drifted, swap the number in the relevant line below; the sentences
-around it don't need to change.
+investigations, 35 seeded runs → 36 after Segment 7 Part B, 58 visualization
+classes, 135 Sources entries / 4 overrides) were **re-confirmed live 2026-07-17**
+against the `smscdk` deployment through the tunnel — no drift since
+WALKTHROUGH's/VERIFICATION_REPORT's 2026-07-14 pass, and the new Segment 2
+(Sources) numbers are now live-confirmed too (previously an estimate from
+source). The pinned build was also refreshed since 2026-07-14 — it's now
+`a08e20b`, matching the current `v2ecoli` GitHub main tip exactly; every
+`70b5ec3` reference below has been updated. Re-confirm again close to the
+actual recording session regardless — the Simulations DB count in particular
+ticks up with every landed run.
 
 ---
 
@@ -28,8 +34,8 @@ Do this before the audience arrives. Nothing below is spoken.
 - [ ] Terminal 1: `AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 ~/sms/sms-cdk/scripts/sms-proxy.sh -s smscdk` — confirm the banner lists `/workbench`, `/`, `/sms/sms.html`, `/docs` on port 8080
 - [ ] Terminal 2: `./demos/v2ecoli/scripts/ensure_latest_main_build.sh` — must print `MATCH ✓` or `BUILT ✓` (allow ~13 min lead time if it has to build)
 - [ ] Browser: `open http://localhost:8080/workbench` — confirm `<title>v2ecoli</title>` renders
-- [ ] **Pre-warm the Registry tab**: click Registry once now and let it fully load. The first hit builds the v2ecoli core in a workspace subprocess and can take up to ~15s cold; a warm retry is instant. Doing this now means Segment 2 is snappy live.
-- [ ] Optional: pre-launch the Segment 6 Part B remote run now (see Segment 6 notes) if you'd rather show a completed run than watch the full ~13 min live
+- [ ] **Pre-warm the Registry tab**: click Registry once now and let it fully load. The first hit builds the v2ecoli core in a workspace subprocess and can take up to ~15s cold; a warm retry is instant. Doing this now means Segment 3 is snappy live.
+- [ ] Optional: pre-launch the Segment 7 Part B remote run now (see Segment 7 notes) if you'd rather show a completed run than watch the full ~13 min live
 - [ ] Close extra tabs, hide the bookmarks bar, bump font size for projection
 
 ---
@@ -64,11 +70,41 @@ Do this before the audience arrives. Nothing below is spoken.
 >
 > "One dashboard, one type system, one git-tracked source of truth, deployed anywhere from a laptop to a GovCloud cluster."
 
-**Transition**: "Let me show you what's under the hood — starting with the Registry."
+**Transition**: "But before we get into any of the software, I want to show you something people usually skip past — where the actual science comes from."
 
 ---
 
-## 2. Segment 2 — Registry: Simulator Agnosticism (3 min)
+## 2. Segment 2 — Sources: The Scientific Foundation (2 min)
+
+> **Show**: click **Sources** in the left rail.
+
+**Narration**:
+
+> "This page is easy to walk past, but it's actually the most important one in the whole demo, because it's where the real science lives.
+>
+> v2ecoli descends from the Covert lab's whole-cell E. coli model — the paper is Macklin, Ahn-Horst, and colleagues, 'Simultaneous cross-evaluation of heterogeneous E. coli datasets via mechanistic simulation,' published in Science in 2020. That paper's whole contribution was pulling together decades of heterogeneous experimental measurements — from many different labs, many different assay types — into one mechanistic simulation that could cross-validate all of them at once.
+>
+> Every entry you see on this page is one of those experimental data roles. Media compositions. Transcription-unit annotations. Reaction rates. Condition specifications. 135 of them, exactly — I checked this against the live deployment before we started. This isn't a synthetic model — every one of these traces back to a real published measurement."
+
+> **Click through one inherited entry** — its link resolves to a pinned commit of the shared `ecoli-sources` GitHub repository.
+
+> "See that link? That's not decoration — it's a pinned commit hash. That file is byte-identical to what's in the shared reference bundle every whole-cell modeler in this lineage draws from."
+
+> **Click through one override entry** (e.g. `equilibrium_reactions`).
+
+> "And this one's tagged 'override' — it links into v2ecoli's own repo instead. This is where v2ecoli's biology has genuinely diverged from the shared default — DnaA-ATP hydrolysis kinetics, in this case. There are four of these override entries live right now: `dna_sites`, `equilibrium_reaction_rates` and `equilibrium_reactions` for that DnaA kinetics work, and `metabolic_reactions_added` for locally-added metabolic reactions.
+>
+> Here's the part that actually matters for anyone doing new science with this model: that override mechanism isn't a one-off hack. It's a formal, schema-validated resolver. Any one of these 135 experimental-data roles can be swapped for a new or updated dataset by adding a single row to a small override file. It gets validated against a shared schema at load time, and it carries a permanent link back to exactly where the new data came from. You don't touch the reconstruction code. You don't touch the simulation engine. You add one row, and the next ParCa run picks it up.
+>
+> That's the actual novelty here — not just 'here's a citation,' but 'here's a formal, auditable path for bringing new experimental science into this model.'"
+
+**Key Number**: "**135** canonical experimental-data roles, **4** currently overridden with v2ecoli-specific biology." *(Live-confirmed 2026-07-17 via `GET /workbench/api/data-sources` against `smscdk` — 131 inherited + 4 override; category breakdown: root 72, new_gene_data 15, condition 12, adjustments/trna_data 7 each, mass_fractions/rrna_options 6 each, rna_seq_data 5, base_codes 4, cell_wall 1.)*
+
+**Transition**: "Keep that in mind, because in a couple of segments you'll watch this exact data get turned into a calibrated model. First, let's look at the software that runs it — starting with the Registry."
+
+---
+
+## 3. Segment 3 — Registry: Simulator Agnosticism (3 min)
 
 > **Show**: click **Registry** → **Modules** sub-tab.
 
@@ -90,11 +126,13 @@ Do this before the audience arrives. Nothing below is spoken.
 
 **Key Number**: "**173** Process classes from **7** different simulation packages, all in one type system."
 
+> "And it's worth connecting this back to Sources for a second: these packages are mechanistically unrelated to each other — a whole-cell model, a rigid-body physics engine, a kinetic-parameter estimator, an ODE solver. One type system means they can be composed across formalisms without custom glue code for every pairing."
+
 **Transition**: "So they're all registered — what can you actually build with them? Let's look at Composites."
 
 ---
 
-## 3. Segment 3 — Composites: Swappability (3 min)
+## 4. Segment 4 — Composites: Swappability (3 min)
 
 > **Show**: click **Composites**.
 
@@ -138,13 +176,15 @@ Do this before the audience arrives. Nothing below is spoken.
 
 **Key Number**: "**28** runnable models — whole-cell engines, colony physics, kinetic fitting, ODE solving, all in the same catalog."
 
+> "The reason this matters scientifically, not just as engineering: swapping cell engines lets you check whether a result — a growth-rate trend, a metabolic behavior — holds up regardless of which mathematical formalism produced it. If it holds across tFBA, kinetic ODEs, and the PDMP reformulation, that's real evidence it's not an artifact of one modeling choice."
+
 **Fallback line**, if a composite fails to resolve: "That one needs a dependency this session doesn't have loaded — let me switch to `baseline`, which we know is solid," then click `baseline` or `parca`.
 
 **Transition**: "Three different cell engines, all sharing the same reactor coupler, all managed by the same dashboard. But before any of these can run, the cell needs its parameters calculated. Let me show you how that got modularized."
 
 ---
 
-## 4. Segment 4 — ParCa: Modularization (2 min)
+## 5. Segment 5 — ParCa: Modularization (2 min)
 
 > **Show**: from Composites, click **Explore** on the `parca` composite — opens the Composite Explorer with the embedded bigraph-loom panel.
 
@@ -162,6 +202,8 @@ Do this before the audience arrives. Nothing below is spoken.
 
 **Key Number**: "**43** state entries flowing across **9** modular Steps — each one independently testable and swappable."
 
+> "And this is the payoff of Segment 2: everything you saw on the Sources page — media compositions, transcription-unit tables, reaction rates — flows into these nine steps and comes out the other end as a calibrated, simulation-ready model. Swap a Sources override for new experimental data, and this pipeline is what re-derives the model from it. Nobody hand-edits a parameter file."
+
 **Fallback line**, if the loom/Explorer panel errors or is blank: "This panel needs a rendering library baked into the deployed image — if it's not showing, I'll narrate the nine steps from here instead," then continue verbally from the step list above without the visual.
 
 **Explorer sub-tabs**, mention in passing: "Structure shows the pipeline graph, Run lets you launch with parameter overrides, History shows past runs — the same three sub-tabs on every composite in this workspace."
@@ -170,7 +212,7 @@ Do this before the audience arrives. Nothing below is spoken.
 
 ---
 
-## 5. Segment 5 — Investigations & Studies (3 min)
+## 6. Segment 6 — Investigations & Studies (3 min)
 
 > **Show**: click **Investigations**.
 
@@ -197,13 +239,15 @@ Do this before the audience arrives. Nothing below is spoken.
 
 **Key Number**: "**8** research arcs, each with dependency gates — a hypothesis genuinely cannot proceed until its upstream passes."
 
+> "Step back for a second — this DAG isn't a metaphor for the scientific method, it's an executable version of it. Hypothesis, experiment, pass/fail gate, next hypothesis — that's literally what's being enforced here, and because every study and every gate outcome is git-committed, you can reconstruct exactly which result licensed which next question."
+
 **Fallback line**, if a study-detail iframe loads blank or unstyled: "That's a base-path rendering issue on an older deployed build — let me open a different study," then click `showcase-1-parca` or `showcase-4-variant-comparison` instead.
 
 **Transition**: "Studies produce simulation runs. Let's go see where every one of those lives."
 
 ---
 
-## 6. Segment 6 — Simulations DB & Remote Runs (3 min)
+## 7. Segment 7 — Simulations DB & Remote Runs (3 min)
 
 This segment has two parts. Part A tours the run ledger — this always works,
 no live compute involved. Part B runs a brand-new simulation on GovCloud
@@ -240,7 +284,7 @@ whether you'll run Part B live or show a pre-landed run — see the note below.
 
 **Narration**:
 
-> "With pinned mode enabled on this deployment, the run card reads 'Run against pinned build — main at commit 70b5ec3' — and right underneath it: 'No push or GitHub login required.' That's new; the old flow used to stop here and ask you to authenticate.
+> "With pinned mode enabled on this deployment, the run card reads 'Run against pinned build — main at commit a08e20b' — and right underneath it: 'No push or GitHub login required.' That's new; the old flow used to stop here and ask you to authenticate.
 >
 > I'll leave Generations and Seeds at 1 and 1, keep Run ParCa checked, and click Run on remote, pinned."
 
@@ -256,7 +300,7 @@ whether you'll run Part B live or show a pre-landed run — see the note below.
 >
 > Once the Ray head comes up, it executes the actual E. coli ensemble, and the state moves to running, then done."
 
-> **Fallback line**, if the run stays queued for an unusually long time or AWS Batch can't provision capacity: "This is provisioning a compute cluster on demand, so it's occasionally slower than usual — while we wait, let me show you a run that landed in an earlier session," then scroll to a previously-landed ☁️ run in the Simulations DB table and narrate from there using the Segment 6 architecture language above.
+> **Fallback line**, if the run stays queued for an unusually long time or AWS Batch can't provision capacity: "This is provisioning a compute cluster on demand, so it's occasionally slower than usual — while we wait, let me show you a run that landed in an earlier session," then scroll to a previously-landed ☁️ run in the Simulations DB table and narrate from there using the Segment 7 architecture language above.
 
 > Once done — **click ⬇ Land results locally.**
 
@@ -268,7 +312,9 @@ whether you'll run Part B live or show a pre-landed run — see the note below.
 
 **Narration** (architecture summary, use if Part B is skipped or still running at wrap-up):
 
-> "One pinned, reproducible build — an exact git commit resolved to an exact Docker image, already built on GovCloud. From the dashboard we can submit any number of simulation configs against that single build, each one spinning up its own transient Ray cluster. No push, no rebuild, no login — the entire thing is driven from the browser, which talks to sms-api in-cluster. Every landed run traces back to that exact commit."
+> "One pinned, reproducible build — an exact git commit resolved to an exact Docker image, already built on GovCloud. From the dashboard we can submit any number of simulation configs against that single build, each one spinning up its own transient Ray cluster. No push, no rebuild, no login — the entire thing is driven from the browser, which talks to sms-api in-cluster. Every landed run traces back to that exact commit.
+>
+> This is what solves a real, named problem in computational biology — results nobody can reproduce because nobody can pin down exactly which code, which data, which parameters produced them. Here that chain is unbroken, laptop or GovCloud Ray cluster, no exceptions."
 
 **Talking Points** (full sentences):
 
@@ -284,7 +330,7 @@ whether you'll run Part B live or show a pre-landed run — see the note below.
 
 ---
 
-## 7. Segment 7 — Analyses (2 min)
+## 8. Segment 8 — Analyses (2 min)
 
 > **Show**: click **Analyses**.
 
@@ -298,7 +344,9 @@ whether you'll run Part B live or show a pre-landed run — see the note below.
 
 **Narration**:
 
-> "This opens the real, live EcoCyc Cellular Overview — the full E. coli metabolic map, served by Pathway Tools running remotely in the same cluster. Painting our study's omics data directly onto this map is the next step in this integration — right now the Launch button gets you to the live map itself, which is already the harder half of the problem: reaching a proprietary external tool from inside our dashboard, live, over the same tunnel."
+> "This opens the real, live EcoCyc Cellular Overview — the full E. coli metabolic map, served by Pathway Tools running remotely in the same cluster. Painting our study's omics data directly onto this map is the next step in this integration — right now the Launch button gets you to the live map itself, which is already the harder half of the problem: reaching a proprietary external tool from inside our dashboard, live, over the same tunnel.
+>
+> Zoom out for a second: this is the interpretation step of the whole pipeline. We're not just plotting simulation output on some chart only this tool understands — we're projecting it onto EcoCyc, a curated, community-vetted map biologists already read fluently."
 
 > Use this exact framing regardless of whether the map visibly paints with data — it is accurate either way, and it means you never have to react live to whether the overlay renders.
 
@@ -324,31 +372,37 @@ whether you'll run Part B live or show a pre-landed run — see the note below.
 
 ---
 
-## 8. Segment 8 — Wrap-up (2 min)
+## 9. Segment 9 — Wrap-up (2 min)
 
 > **Show**: rapid click-through of all left-rail tabs as a visual recap.
 
 **Narration**:
 
-> "Let me tie this back to five architecture pillars.
+> "Let me tie this back to the full pipeline, start to finish — not a feature list, an arc.
 >
-> One dashboard, many simulators — the Registry showed us 173 processes from 7 packages, all in one type system.
+> Real experimental grounding — Sources showed us 135 data roles inherited from the Covert lab's whole-cell-model lineage, formally overridable with new datasets.
 >
-> Swappable cell engines — Composites showed baseline, Millard, and PDMP metabolism, all sharing the exact same reactor coupler.
+> Calibration — ParCa's 9 modular Steps turn that raw data into a simulation-ready parameter set.
 >
-> Modular pipelines — ParCa is 9 independently swappable Steps, not a monolithic script anymore.
+> One dashboard, many simulators — the Registry showed us 173 processes from 7 packages, all in one type system, composable across mechanistic formalisms.
+>
+> Swappable cell engines — Composites showed baseline, Millard, and PDMP metabolism, all sharing the exact same reactor coupler — a way to test whether a result is real or an artifact of one formalism.
+>
+> Hypothesis, experiment, gate — Investigations operationalize the scientific method itself, executable and git-audited.
 >
 > Reproducible, git-tracked runs — Simulations DB now shows 36 runs with full provenance: 35 seeded, plus the one remote run we just landed live, in front of you, during this demo. That number ticking up in real time is the whole point.
 >
+> Interpretation — Analyses projects simulation output back onto EcoCyc, established biological knowledge, not a bespoke chart.
+>
 > And AWS GovCloud at scale — this entire dashboard is served in-cluster, and remote runs go straight to sms-api on GovCloud, with no local build or push required.
 >
-> vivarium-workbench is a simulator-agnostic research notebook, and it runs anywhere — from a laptop to a GovCloud Kubernetes cluster. Today we saw v2ecoli, but the exact same dashboard serves viva_munk colony physics, ketchup kinetic fitting, copasi ODE models, and BiRD reactor transport. All in one UI, all git-tracked.
+> vivarium-workbench is a simulator-agnostic research notebook, and it runs anywhere — from a laptop to a GovCloud Kubernetes cluster. Today we saw v2ecoli, but the exact same dashboard serves viva_munk colony physics, ketchup kinetic fitting, copasi ODE models, and BiRD reactor transport. All in one UI, all git-tracked, and all of it — from raw experimental data to a painted pathway map — is one continuous, auditable pipeline.
 >
 > Questions?"
 
 ---
 
-## 9. Q&A
+## 10. Q&A
 
 Full spoken answers — not just the table from WALKTHROUGH Appendix B.
 
@@ -374,46 +428,50 @@ Full spoken answers — not just the table from WALKTHROUGH Appendix B.
 > "Because that same ALB is path-routing multiple services on one host. The dashboard is served with a base path of slash workbench, and every link and asset it generates is aware of that base path."
 
 **Q: Do I need the tunnel for the whole demo?**
-> "Yes, for this flow — the dashboard itself is remote from the first click, so the tunnel has to stay up for every segment. That's different from the old local-serve flow. The PTools Omics Viewer in Segment 7 is remote too, for the same reason."
+> "Yes, for this flow — the dashboard itself is remote from the first click, so the tunnel has to stay up for every segment. That's different from the old local-serve flow. The PTools Omics Viewer in Segment 8 is remote too, for the same reason."
+
+**Q: What's the Sources segment, and why does it come so early?**
+> "It's the dashboard's Sources tab — the 135 experimental data references v2ecoli's model is actually built on (I checked the live count before this session), inherited from the Covert lab whole-cell-model lineage. It comes right after the intro, before any of the software architecture, because everything else in this demo is downstream of that data — I wanted to establish that grounding before showing you the tooling built on top of it."
 
 **Cold-open elevator pitch** (use if someone walks in late, or asks "what is this" before you've set context):
 > "vivarium-workbench is a web UI for process-bigraph workspaces. Three layers: the simulation engine — process-bigraph — runs the science. The tooling — this dashboard — orchestrates, renders, and commits. The data — the workspace — is the single source of truth. Every action is committed to git. And it runs anywhere: a laptop for development, a GovCloud Kubernetes cluster for the real thing."
 
 ---
 
-## 10. After the Demo
+## 11. After the Demo
 
 No narration — Ctrl+C the SSM tunnel in Terminal 1. There's no local server to stop; the dashboard runs entirely in-cluster.
 
 ---
 
-## 11. Quick-Reference Timing Card
+## 12. Quick-Reference Timing Card
 
 | Time | Segment | Key Click | Narration Hook |
 |------|---------|-----------|----------------|
 | 0:00 | Tunnel (pre-session) | `sms-proxy.sh -s smscdk` | (silent) |
 | 0:20 | Open browser | `http://localhost:8080/workbench` | (silent) |
 | 1:00 | **1. Intro** | Home / rail | "Three layers…" |
-| 3:00 | **2. Registry** | Registry → Modules | "Seven packages…" |
-| 4:00 | **2. Registry** | Registry → Processes | "173 processes from 7 packages…" |
-| 6:00 | **3. Composites** | baseline → millard → pdmp | "Three cell engines…" |
-| 8:00 | **3. Composites** | reactor coupler → ketchup → chemotaxis | "Same reactor, different cell…" |
-| 9:00 | **4. ParCa** | Composites → Explore on parca | "Nine modular Steps…" |
-| 10:00 | **4. ParCa** | Explorer → Run (optional) | "Fast mode, ~15 seconds…" |
-| 12:00 | **5. Investigations** | Investigations list | "Eight research arcs…" |
-| 13:00 | **5. Investigations** | v2ecoli-baseline-showcase | "DAG with dependency gates…" |
-| 15:00 | **6. Simulations DB** | Simulations DB (Part A) | "35 seeded runs…" |
-| 16:00 | **6. Simulations DB** | Run on remote, pinned (Part B) | "Pinned build, no login…" |
-| 18:00 | **7. Analyses** | Analyses gallery + PTools Launch | "58 visualization classes…" |
-| 19:00 | **8. Wrap-up** | Rapid tab recap | "Five architecture pillars…" |
-| 20:00 | **9. Q&A** | — | "Questions?" |
-| 25:00 | — | Ctrl+C tunnel | (post-demo) |
+| 3:00 | **2. Sources** | Sources tab | "This is where the real science lives…" |
+| 5:00 | **3. Registry** | Registry → Modules | "Seven packages…" |
+| 6:00 | **3. Registry** | Registry → Processes | "173 processes from 7 packages…" |
+| 8:00 | **4. Composites** | baseline → millard → pdmp | "Three cell engines…" |
+| 10:00 | **4. Composites** | reactor coupler → ketchup → chemotaxis | "Same reactor, different cell…" |
+| 11:00 | **5. ParCa** | Composites → Explore on parca | "Nine modular Steps…" |
+| 12:00 | **5. ParCa** | Explorer → Run (optional) | "Fast mode, ~15 seconds…" |
+| 14:00 | **6. Investigations** | Investigations list | "Eight research arcs…" |
+| 15:00 | **6. Investigations** | v2ecoli-baseline-showcase | "DAG with dependency gates…" |
+| 17:00 | **7. Simulations DB** | Simulations DB (Part A) | "35 seeded runs…" |
+| 18:00 | **7. Simulations DB** | Run on remote, pinned (Part B) | "Pinned build, no login…" |
+| 20:00 | **8. Analyses** | Analyses gallery + PTools Launch | "58 visualization classes…" |
+| 21:00 | **9. Wrap-up** | Rapid tab recap | "The full pipeline, start to finish…" |
+| 22:00 | **10. Q&A** | — | "Questions?" |
+| 27:00 | — | Ctrl+C tunnel | (post-demo) |
 
 Add a few seconds of slack per tab for SSM tunnel latency (~8s observed on first hit per tab).
 
 ---
 
-## 12. Presenter Must-Know
+## 13. Presenter Must-Know
 
 Carried forward from WALKTHROUGH.md Appendix F — reference facts, not narration:
 
@@ -424,7 +482,7 @@ Carried forward from WALKTHROUGH.md Appendix F — reference facts, not narratio
 5. **Latency**: SSM-tunnel GETs can take several seconds; the page stays interactive throughout — don't panic-refresh.
 6. **CLI name**: `vivarium-workbench` (the `vivarium-dashboard` name still works as a deprecated alias, in case it comes up).
 7. **ParCa live run timing**: fast mode ~15s (7 TF conditions). Full mode ~2.4 min (51 conditions).
-8. **Numbers** (173 processes, 28 composites, 8 investigations, 35 seeded runs, 58 viz classes) reflect the seeded workspace as of the last verification pass — confirm against the live deployment before quoting exact figures on recording day. The Simulations DB run count grows by one for every landed remote run.
+8. **Numbers** (173 processes, 28 composites, 8 investigations, 35 seeded runs, 58 viz classes, 135 Sources data roles / 4 overrides) were **re-confirmed live 2026-07-17** against `smscdk` through the tunnel — no drift, all matching. Re-check the Simulations DB count right before recording anyway — it grows by one for every landed remote run.
 
 ---
 
@@ -434,11 +492,12 @@ Sourced from `WALKTHROUGH.md` Appendix E and `demos/v2ecoli/bugs/` screenshots. 
 
 | Segment | Risk | Where the fallback line lives above |
 |---|---|---|
-| 2. Registry | Cold-start timeout on first hit | Segment 2, inline fallback line (mitigated by pre-warming in the checklist) |
-| 3. Composites | A composite fails to resolve (missing deps) | Segment 3, inline fallback line |
-| 4. ParCa | Loom/Explorer panel 500s on an older image | Segment 4, inline fallback line |
-| 5. Investigations | Study-detail iframe loads blank/unstyled | Segment 5, inline fallback line |
-| 6. Simulations DB | AWS Batch can't provision / run stuck queued | Segment 6 Part B, inline fallback line + pre-launch decision point |
-| 7. Analyses | PTools Omics Launch doesn't paint the overlay | Segment 7, scripted as the primary framing (not a fallback — always say this) |
+| 2. Sources | None currently — live-confirmed 2026-07-17 (135 entries / 4 overrides) | n/a; re-check `/api/data-sources` again if a long gap passes before recording |
+| 3. Registry | Cold-start timeout on first hit | Segment 3, inline fallback line (mitigated by pre-warming in the checklist) |
+| 4. Composites | A composite fails to resolve (missing deps) | Segment 4, inline fallback line |
+| 5. ParCa | Loom/Explorer panel 500s on an older image | Segment 5, inline fallback line |
+| 6. Investigations | Study-detail iframe loads blank/unstyled | Segment 6, inline fallback line |
+| 7. Simulations DB | AWS Batch can't provision / run stuck queued | Segment 7 Part B, inline fallback line + pre-launch decision point |
+| 8. Analyses | PTools Omics Launch doesn't paint the overlay | Segment 8, scripted as the primary framing (not a fallback — always say this) |
 
 For infra-level fixes to any of the above (rebuilding the image, checking `kubectl` logs, resetting the tunnel), see `WALKTHROUGH.md` Appendix E in full.
