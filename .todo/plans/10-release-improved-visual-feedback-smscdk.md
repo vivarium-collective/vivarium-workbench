@@ -15,7 +15,7 @@ that pin `vivarium-workbench`'s image tag — no code changes, config-pin only),
 and the `sms-api-stanford` k8s namespace itself (smscdk stack, live
 deployment). No v2ecoli changes.
 
-## Status: ✅ WS-2…WS-7 DONE — PR #467 merged (`1c51df2`, 2026-07-15T16:30:00Z); WS-8 tag `v0.3.0` + GitHub Release published (2026-07-15T16:30:15Z), `pyproject.toml` on `main` reads `0.3.0`. **WS-8 steps 2–3 (sms-api overlay pin to `0.3.0` on `sms-api-stanford`/`-test`, final live cutover) are in the separate `sms-api` repo/cluster — unconfirmed from this repo alone; check `~/sms/sms-api` before assuming done.**
+## Status: ✅ WS-2…WS-7 + WS-8 step 1 DONE — PR #467 merged (`1c51df2`, 2026-07-15T16:30:00Z); WS-8 tag `v0.3.0` + GitHub Release published (2026-07-15T16:30:15Z), `pyproject.toml` on `main` reads `0.3.0`, `:0.3.0` image built. 🔄 **WS-8 steps 2–3 IN FLIGHT (verified in `~/sms/sms-api`, 2026-07-20):** the durable overlay pin exists but is **NOT yet merged** — branch `deploy/workbench-0.3.0` (2 ahead of `origin/main`) bumps `vivarium-workbench 0.2.0→0.3.0` on both `sms-api-stanford` + `sms-api-stanford-test` overlays (commit `e9862a10`) + cuts integration release `0.9.22` (`2de193fe`), open as **PR #176**. Stanford-prod parity landed separately via merged PR #175. **Remaining: merge PR #176 → final smscdk cutover (step 3) → close the loop (WS-8 step 4).** Not demo-blocking — smscdk already verified live on `0.3.0` this cycle.
 
 Plan approved via `/plan` (`~/.claude/plans/quirky-snuggling-crystal.md`,
 2026-07-15). Two open judgment calls were resolved with the user before

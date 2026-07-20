@@ -158,9 +158,27 @@ Ops: close remaining doc/PR gaps on `feat/improved-visual-feedback` (PR #467), c
 
 Linked tasks: closes out #7 (Plan 7's code is done; this is the "deploy-verified → merged → released" tail). Spans THREE repos: `vivarium-workbench` (gap fixes, tag, release), `sms-api` (kustomize overlay pin only, no code changes), and the `sms-api-stanford` k8s namespace itself. No v2ecoli changes.
 
-### Status: 📋 PLANNED + REFINED (via /plan, approved 2026-07-15) — awaits "proceed" before execution
+### Status: ✅ WS-1…WS-8(step 1) DONE — PR #467 MERGED (`1c51df2`), `v0.3.0` tagged + GitHub Release published, image built. 🔄 WS-8 steps 2–3 IN FLIGHT in `sms-api` — overlay pin `0.2.0`→`0.3.0` cut, **PR #176 still OPEN** (not merged).
 
 Plan approved via `/plan` (`~/.claude/plans/quirky-snuggling-crystal.md`, 2026-07-15). Two judgment calls resolved with the user: WS-4's smscdk verification deploy is **smoke-and-revert** (no durable sms-api commit), and WS-8's durable sms-api overlay pin goes through a **small PR** (not a direct commit, despite sms-api's own precedent for the latter). See plan for WS-1…WS-8.
+
+**Update (2026-07-20, verified from both repos):** the workbench side is fully done — PR #467 merged (`1c51df2`), `pyproject.toml` on `main` reads `0.3.0`, tag `v0.3.0` + GitHub Release published, `:0.3.0` image built. **WS-8 steps 2–3 (durable sms-api overlay pin) are NOT yet merged:** in `~/sms/sms-api`, branch `deploy/workbench-0.3.0` (2 ahead of `origin/main`) carries the overlay bump `vivarium-workbench 0.2.0→0.3.0` on both `sms-api-stanford` + `sms-api-stanford-test` (commit `e9862a10`) and integration release `0.9.22` (`2de193fe`), surfaced as **PR #176 (OPEN)**. Stanford-prod parity landed separately via merged PR #175. **Remaining tail: merge sms-api PR #176 + final smscdk cutover.** Not demo-blocking — the live smscdk stack already verified running `0.3.0` this cycle.
+
+---
+
+## 12. **(.todo/plans/12-durable-remote-run-persistence.md)**:
+
+### Name
+
+Fix/Feat: remotely dispatched sms-api runs never appear in the Simulations DB tab and do not survive a session — give them the same durable-record-first `runs_meta` lifecycle that local composite runs already have, plus a remote reconciler that auto-lands completed sims on boot.
+
+Linked tasks: surfaced while executing the fully-remote variant of the demo protocol in `demos/v2ecoli/WALKTHROUGH-local-remote-compute.md` (#11's artifact). Builds on the pinned-build remote-run model from #5 and the remote-run progress UX from #7 — both drive the same `remote_run_views` submit→poll→land flow this plan makes durable. Dashboard-repo only; **no sms-api and no v2ecoli changes** (sms-api already exposes `simulation_status` + `download_data`).
+
+### Status: 📋 PLANNED (via `/plan`, 2026-07-20) — awaits explicit "proceed"
+
+Root cause identified and confirmed by direct inspection: the local run path is **durable-record-first** (a `runs_meta` row with `status='running'` is written *before* work starts, a pid is recorded, and `reconcile_stale_runs` repairs crash-orphans on boot at `lib/startup.py:84`), but the remote path **inverts** that contract — its row is created only after a *manual* "Land results" click and is written already-terminal (`lib/remote_run_landing.py:81-90`). Between dispatch and landing there is **no server-side record of any kind**: `remote_run_submit` (`lib/remote_run_views.py:213`) writes nothing, and the `simulator_id`/`simulation_id` live solely in the browser's `_remoteRunState` (`static/study-detail.js:1702`) with no `localStorage`. So an in-flight remote run is invisible to the index's five on-disk sources *and* unrecoverable after a reload.
+
+Three design forks resolved with the user: (1) **record home** — the user rejected the either/or framing ("any simulation run associated with a study IS in fact a composite run; thus it should be in sync"), resolved as one row / one home (`studies/<slug>/runs.db`) on the *identical* `runs_meta` contract, with sync satisfied structurally by `_discover_dbs` (which already unions the central + per-study DBs) rather than by duplicating rows; (2) **auto-land = yes** — reconcile flips status *and* downloads/lands, so a prior-session run materializes with zero clicks; (3) **scope** = persistence + the three index bugs that also hide already-completed work (7 unenumerated `.pbg/parquet-runs` hives; `study.yaml` runs keyed on `simulation_id` silently dropped; `_append_remote_simulations` gated on `.viv-build.json`). Lane A (`RemoteRunManager`) deletion and Lane C are explicitly out of scope. Five workstreams WS-1…WS-5. Full plan: `.todo/plans/12-durable-remote-run-persistence.md` (mirror at `~/.claude/plans/ancient-nibbling-kahan.md`).
 
 ---
 
