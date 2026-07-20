@@ -107,6 +107,14 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     import uvicorn
     from vivarium_workbench.api.app import app
 
+    # Record the CONFIGURED prefix on the app so routes reached *unprefixed* can
+    # still resolve it. The middleware only sets a per-request ``root_path`` when
+    # it actually strips the prefix — but the ALB routes ``/bigraph-loom/*`` to
+    # this service unprefixed, so that path has no ``root_path``. The loom asset
+    # route needs the prefix there to inject its base-path shim (its bundle calls
+    # a root-absolute ``/api/...`` that would otherwise be routed to sms-api).
+    app.state.base_path = base_path
+
     # Under a base path the ALB forwards the FULL /workbench/... path (no strip),
     # so wrap the app to strip the prefix for route matching AND record it as the
     # per-request root_path (which index_shell reads to base-path the render).
