@@ -413,6 +413,51 @@ def _detect_github_repo(ws_root: Path) -> str | None:
     return None
 
 
+def _base_path_shim(base_path: str) -> str:
+    """The runtime ``<script>`` that prefixes root-absolute app URLs with *base_path*.
+
+    Patches ``fetch`` / ``EventSource`` / ``XMLHttpRequest`` so raw requests the
+    SPA (or a third-party bundle) builds as ``/api/…`` resolve under the prefix.
+    Idempotent: a URL already starting with the prefix is left alone.
+    """
+    bpj = json.dumps(base_path)
+    prefixes = json.dumps(["/api/", "/bigraph-loom/", "/loom-explore", "/studies/", "/health", "/assets/", "/reports/"])
+    return (
+        "<script>(function(){var BP=" + bpj + ";window.__BASE_PATH__=BP;if(!BP)return;"
+        "var P=" + prefixes + ";"
+        "function fix(u){if(typeof u!=='string')return u;"
+        "if(u.charAt(0)!=='/'||u.charAt(1)==='/')return u;"
+        "if(u.indexOf(BP+'/')===0||u===BP)return u;"
+        "for(var i=0;i<P.length;i++){if(u.indexOf(P[i])===0)return BP+u;}return u;}"
+        "var of=window.fetch;if(of)window.fetch=function(x,o){return of.call(this,typeof x==='string'?fix(x):x,o);};"
+        "var OE=window.EventSource;if(OE){var NE=function(u,c){return new OE(fix(u),c);};NE.prototype=OE.prototype;window.EventSource=NE;}"
+        "var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){var a=[].slice.call(arguments);a[1]=fix(u);return xo.apply(this,a);};"
+        "})();</script>"
+    )
+
+
+def inject_base_path_shim(html: str, base_path: str) -> str:
+    """Insert the base-path URL shim EARLY into an HTML document's ``<head>``.
+
+    For bundles the workbench *serves but does not render* — notably the
+    **bigraph-loom** viewer, a third-party build whose JS issues root-absolute
+    ``/api/composite-test-run``. Those requests escape the prefix, and in the
+    co-tenant ALB deployment ``/api/*`` routes to **sms-api**, which 404s. The
+    workbench's own pages get the shim via :func:`_apply_live_base_path`; the loom's
+    static ``index.html`` never passed through it.
+
+    Injected immediately after ``<head>`` so ``fetch``/``XHR`` are patched *before*
+    the bundle's module scripts run. No-op when *base_path* is empty (local dev).
+    """
+    if not base_path or not html:
+        return html
+    shim = _base_path_shim(base_path)
+    m = re.search(r"<head[^>]*>", html, re.IGNORECASE)
+    if m:
+        return html[: m.end()] + shim + html[m.end():]
+    return shim + html
+
+
 def _apply_live_base_path(html: str, base_path: str) -> str:
     """Rewrite the rendered dashboard HTML to be served under *base_path* (e.g.
     ``/workbench``) behind a shared reverse proxy / ALB.
@@ -439,19 +484,7 @@ def _apply_live_base_path(html: str, base_path: str) -> str:
     html = _re.sub(r'(\b(?:src|href)=")assets/', rf'\1{bp}/assets/', html)
     html = _re.sub(r'(\b(?:src|href)=")(/(?:assets|bigraph-loom|reports)/)', rf'\1{bp}\2', html)
     bpj = json.dumps(bp)
-    prefixes = json.dumps(["/api/", "/bigraph-loom/", "/loom-explore", "/studies/", "/health", "/assets/", "/reports/"])
-    shim = (
-        "<script>(function(){var BP=" + bpj + ";window.__BASE_PATH__=BP;if(!BP)return;"
-        "var P=" + prefixes + ";"
-        "function fix(u){if(typeof u!=='string')return u;"
-        "if(u.charAt(0)!=='/'||u.charAt(1)==='/')return u;"
-        "if(u.indexOf(BP+'/')===0||u===BP)return u;"
-        "for(var i=0;i<P.length;i++){if(u.indexOf(P[i])===0)return BP+u;}return u;}"
-        "var of=window.fetch;if(of)window.fetch=function(x,o){return of.call(this,typeof x==='string'?fix(x):x,o);};"
-        "var OE=window.EventSource;if(OE){var NE=function(u,c){return new OE(fix(u),c);};NE.prototype=OE.prototype;window.EventSource=NE;}"
-        "var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){var a=[].slice.call(arguments);a[1]=fix(u);return xo.apply(this,a);};"
-        "})();</script>"
-    )
+    shim = _base_path_shim(bp)
     html = html.replace(
         '<script>window.__DASH_CONFIG__ = { mode: "local-server" };</script>',
         '<script>window.__DASH_CONFIG__ = { mode: "local-server", basePath: ' + bpj + ' };</script>' + shim,
