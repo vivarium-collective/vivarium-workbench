@@ -2654,7 +2654,7 @@ def create_app() -> FastAPI:
         response_class=Response,
         include_in_schema=False,
     )
-    def bigraph_loom_asset(rel: str = "") -> Response:
+    def bigraph_loom_asset(request: Request, rel: str = "") -> Response:
         """Serve a ``bigraph-loom`` viewer asset from ``bigraph_loom.asset_dir()``.
 
         ``rel`` empty → ``index.html``.  HTTP 403 (empty body) on a ``..`` path
@@ -2662,13 +2662,42 @@ def create_app() -> FastAPI:
         guessed bare mime + ``Cache-Control: no-store``.  Mirrors the legacy
         ``/bigraph-loom`` branch.
 
+        **Base-path shim on the HTML entry.** The loom is a third-party bundle we
+        serve but do NOT render, and its JS issues a root-absolute
+        ``/api/composite-test-run``. Under ``serve --base-path`` that escapes the
+        prefix, and in the co-tenant ALB deployment ``/api/*`` routes to sms-api →
+        404 (the wiring-explorer "test run" silently breaks). The workbench's own
+        pages get the URL shim from ``lib.report._apply_live_base_path``; the loom's
+        static HTML never did — so inject it here, before the bundle's scripts run.
+        No-op without a base path (local dev serves at root).
+
         Library-backed via ``lib.static_serving.resolve_loom_asset``.
         """
         try:
             target = _static_serving.resolve_loom_asset(rel)
         except _static_serving.AssetTraversal:
             return Response(status_code=403)
-        return _serve_static_file(target, rel or "index.html")
+        name = rel or "index.html"
+        # root_path is set only when the middleware STRIPPED the prefix. The ALB
+        # also routes /bigraph-loom/* here UNPREFIXED (no root_path), so fall back
+        # to the prefix the server was configured with.
+        base_path = (
+            request.scope.get("root_path")
+            or getattr(request.app.state, "base_path", "")
+            or ""
+        )
+        if base_path and name.endswith(".html") and target.is_file():
+            from vivarium_workbench.lib.report import inject_base_path_shim
+            return Response(
+                content=inject_base_path_shim(
+                    target.read_text(encoding="utf-8"), base_path
+                ),
+                headers={
+                    "Content-Type": _static_serving.guess_mime(name),
+                    "Cache-Control": "no-store",
+                },
+            )
+        return _serve_static_file(target, name)
 
     @app.get(
         "/parsimony-viewer/{rel:path}",
