@@ -486,6 +486,55 @@ def test_set_snapshot_config_no_url_omits_interactive_url():
     assert "interactiveUrl" not in result
 
 
+def test_set_snapshot_config_injects_inputs_download_base():
+    """_set_snapshot_config injects inputsDownloadBase when provided (published
+    input downloads link to the GitHub source repo, not a bundle path)."""
+    from vivarium_workbench.publish import _set_snapshot_config
+    html = 'window.__DASH_CONFIG__ = { mode: "local-server" };'
+    base = "https://github.com/o/r/raw/main/workspace"
+    result = _set_snapshot_config(html, inputs_download_base=base)
+    assert 'mode: "snapshot"' in result
+    assert "inputsDownloadBase" in result
+    assert base in result
+    # omitted when empty
+    assert "inputsDownloadBase" not in _set_snapshot_config(html)
+
+
+def test_inputs_download_base_builds_github_raw_url(tmp_path, monkeypatch):
+    """_inputs_download_base -> https://github.com/<repo>/raw/<branch>/<prefix>;
+    empty when there is no GitHub origin remote."""
+    import vivarium_workbench.publish as pub
+
+    ws = tmp_path / "repo" / "workspace"
+    ws.mkdir(parents=True)
+    monkeypatch.setattr(
+        "vivarium_workbench.lib.report._detect_github_repo",
+        lambda _r: "vivarium-collective/pbg-chaste",
+    )
+
+    # Published from branch "main"; workspace is the repo's ``workspace/`` subdir.
+    def _fake_run(args, **kw):
+        class R:
+            returncode = 0
+            stdout = ""
+        r = R()
+        if "--abbrev-ref" in args and "HEAD" in args:
+            r.stdout = "main\n"
+        elif "--show-toplevel" in args:
+            r.stdout = str(tmp_path / "repo") + "\n"
+        return r
+    monkeypatch.setattr(pub.subprocess, "run", _fake_run)
+
+    base = pub._inputs_download_base(ws)
+    # links to the branch the bundle is published from, under the workspace prefix
+    assert base == "https://github.com/vivarium-collective/pbg-chaste/raw/main/workspace"
+
+    # no GitHub remote -> empty (frontend falls back to '/' + path)
+    monkeypatch.setattr(
+        "vivarium_workbench.lib.report._detect_github_repo", lambda _r: None)
+    assert pub._inputs_download_base(ws) == ""
+
+
 # ---------------------------------------------------------------------------
 # Task 5 (full-surface): repo switcher → static repo label
 # ---------------------------------------------------------------------------
