@@ -29,7 +29,13 @@ import pytest
 from bigraph_schema import allocate_core
 from process_bigraph.composite import Process
 
-from vivarium_workbench.lib import emitters, run_log, run_runner
+from vivarium_workbench.lib import (
+    composite_runs as cr,
+    emitters,
+    run_log,
+    run_runner,
+    simulations_index,
+)
 
 
 # --------------------------------------------------------------------------
@@ -174,3 +180,62 @@ def test_record_run_emitter_folds_into_run(tmp_path):
     run_runner._record_run_emitter(tmp_path, run_id="r-rec", name="parquet")
     folded = run_log.fold_runs_jsonl(tmp_path)
     assert folded["r-rec"]["emitter"] == "parquet"
+
+
+# --------------------------------------------------------------------------
+# R4 — terminal JSONL event (Task 5b regression: complete_metadata must be
+# called with workspace= so a finished Explorer run actually folds to a
+# terminal status instead of sticking on the earlier "started"/running event).
+# --------------------------------------------------------------------------
+def test_complete_metadata_without_workspace_writes_no_terminal_event(tmp_path):
+    """Sanity check for the bug itself: omitting workspace= (the pre-fix
+    call shape) updates sqlite but leaves the JSONL log silent, so a fold
+    over the workspace has nothing to promote past 'started'."""
+    db_file = tmp_path / "runs.db"
+    conn = cr.connect(str(db_file))
+    cr.save_metadata(
+        conn, spec_id="spec.x", run_id="r-nofold", params={}, label="r-nofold",
+        started_at=100.0, n_steps=10, workspace=tmp_path, emitter="parquet",
+    )
+    cr.complete_metadata(conn, run_id="r-nofold", n_steps=10, status="completed")
+    conn.close()
+
+    folded = run_log.fold_runs_jsonl(tmp_path)
+    # No terminal event was appended, so the fold is stuck on "running".
+    assert folded["r-nofold"]["status"] == "running"
+
+
+def test_explorer_run_lifecycle_folds_to_completed_status(tmp_path):
+    """This is the Task 5b bug in its real shape: an Explorer run's three
+    JSONL events (started, emitter recorded, completed) — written the way
+    run_runner.execute() now writes them, WITH workspace= threaded into
+    complete_metadata() — must fold to a terminal 'completed' status, both
+    directly via run_log.fold_runs_jsonl and through the Sims DB's
+    simulations_index.build_simulations_data, which treats JSONL as
+    authoritative over the sqlite row. Before the fix, complete_metadata()
+    never appended the terminal event and this run stayed 'running' forever."""
+    db_file = tmp_path / "runs.db"
+    conn = cr.connect(str(db_file))
+    run_id = "v2ecoli.composites.baseline__1__abc"
+
+    # started (mirrors run_runner.execute's cr.save_metadata call site)
+    cr.save_metadata(
+        conn, spec_id="v2ecoli.composites.baseline", run_id=run_id, params={},
+        label=run_id, started_at=100.0, n_steps=10, workspace=tmp_path,
+        emitter="parquet",
+    )
+    # emitter kind recorded (mirrors run_runner._record_run_emitter)
+    run_runner._record_run_emitter(tmp_path, run_id=run_id, name="parquet")
+    # completed — the call shape fixed in run_runner.execute's success path
+    cr.complete_metadata(
+        conn, run_id=run_id, n_steps=10, status="completed", workspace=tmp_path,
+    )
+    conn.close()
+
+    folded = run_log.fold_runs_jsonl(tmp_path)
+    assert folded[run_id]["status"] == "completed"
+
+    (tmp_path / "studies").mkdir(parents=True, exist_ok=True)
+    data = simulations_index.build_simulations_data(tmp_path)
+    rows = {r["run_id"]: r for r in data["simulations"]}
+    assert rows[run_id]["status"] == "completed"

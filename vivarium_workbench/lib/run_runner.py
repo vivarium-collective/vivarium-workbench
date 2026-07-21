@@ -479,7 +479,7 @@ def execute(request_path: Path) -> int:
             print(msg, flush=True)
             _write_log(req, msg)
             cr.complete_metadata(conn, run_id=req.run_id, n_steps=0,
-                                 status="failed")
+                                 status="failed", workspace=req.workspace)
             return 1
 
         # build_core lives in the workspace's own package (e.g.
@@ -527,7 +527,7 @@ def execute(request_path: Path) -> int:
             print(msg, flush=True)
             _write_log(req, msg)
             cr.complete_metadata(conn, run_id=req.run_id, n_steps=step,
-                                 status="failed")
+                                 status="failed", workspace=req.workspace)
             return 1
 
         composite = prov.get("composite")
@@ -552,14 +552,15 @@ def execute(request_path: Path) -> int:
         except Exception:
             traceback.print_exc()   # flush must never fail the run
         cr.complete_metadata(conn, run_id=req.run_id, n_steps=req.steps,
-                             status="completed")
+                             status="completed", workspace=req.workspace)
         print(f"run {req.run_id} completed: {req.steps} steps", flush=True)
         return 0
     except Exception:
         tb = traceback.format_exc()
         print(tb, flush=True)
         _write_log(req, tb)
-        cr.complete_metadata(conn, run_id=req.run_id, n_steps=0, status="failed")
+        cr.complete_metadata(conn, run_id=req.run_id, n_steps=0, status="failed",
+                             workspace=req.workspace)
         return 1
     finally:
         conn.close()
