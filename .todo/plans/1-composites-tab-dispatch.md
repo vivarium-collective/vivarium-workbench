@@ -147,6 +147,59 @@ focused pass, ideally after PR-B deploys so they're e2e-verifiable. Remaining (b
     convergence, reconciliation state §3.13) NOT done** — large + interrelated (all converge on G1),
     best as a focused pass once PR-B is deployed for e2e. See "What's next".
 
+- **2026-07-21 — DEMO BLOCKER B + item C cap DONE on `fix/composites-tab-dispatch`.** Closed the
+  "prod Run spawns a LOCAL subprocess" blocker + the missing step-cap (handoff §3 items B & C; items A
+  and the steps→compose_submit plumbing were already landed in Phase 2). Two surgical, ecosystem-native
+  changes — reuse existing config, no new concept:
+  - **Item B (target routing):** `composite_test_run_views.composite_test_run` now passes
+    `target="deployment"` to `invoke_run` when `remote_pinned.is_pinned_enabled()` (the EXISTING
+    `VIVARIUM_WORKBENCH_REMOTE_PINNED` gate the prod pod already sets — `workbench.yaml:155`), else
+    `None`. Scoped to this ONE call site: `run_target_for` is untouched, so `composite_resolve` (which
+    needs a `.viv-build.json` `simulator_id`) is unaffected. Prod (pinned on, no `.viv-build.json`) →
+    remote compose dispatch; local dev (env unset) → `run_target_for` → `local`, unchanged. Chosen over
+    stamping `.viv-build.json` (handoff's non-preferred option — routes ALL runs, incl. resolve, remote).
+  - **Item C (step cap):** `remote_run.run_remote` clamps `n_steps` to `[0, 1000]` right before
+    `compose_submit` — the boundary that owns sms-api's `interval_time` 0..1000 contract
+    (`compose.py:121-122` 400s outside it). Placed there (not at the call site) so both the detached-runner
+    and CLI `run-remote` paths are protected; local runs never hit this path, so their step counts stay
+    unbounded.
+  - **Tests (6 new, all green; 78 in the run/remote suite pass):** `test_composite_test_run_views_lib.py`
+    — `test_pinned_mode_routes_to_deployment_target`, `test_pinned_mode_off_stays_local`;
+    `test_C2_roundtrip.py` — `test_run_remote_clamps_steps` (parametrized 5000/2700/20/-3 →
+    1000/1000/20/0).
+  - **Still NOT e2e-verified** — no live `/compose/v1` until PR-B deploys. Deploy serialized AFTER
+    sms-api is on prod; ping Jim before bumping the workbench `newTag`. Alex's demo work now CODE-COMPLETE.
+
+- **2026-07-21 — 🔴 CONFIRMED DEMO BLOCKER (N3): the committed fix will FAIL on the prod pod.**
+  Verified live against `workbench-67f7cbbf68-mglcf` (`sms-api-stanford`/smscdk, image 0.3.1):
+  `/workspace` is a **DIRTY** git checkout — `git status --porcelain` returns
+  `M reports/index.html` + `M workspace.yaml` (the workbench re-renders `reports/index.html`
+  at serve time and touches `workspace.yaml` via dashboard actions — it writes its own served
+  workspace **by design**, per vivarium-workbench CLAUDE.md). HEAD is on `origin/main` (pushed ✓),
+  remote is `github.com/vivarium-collective/v2ecoli.git`.
+  **Impact:** our fix routes Composites-tab Run → `invoke_run(target="deployment")` →
+  `run_runner.execute` (`:538`) → `_execute_remote` (`:489`) → `remote_run.run_remote` (`:505`) →
+  `git_pip_url` (`remote_run.py:129`, **unconditional**), which **raises `RuntimeError` on a dirty
+  tree** (`remote_run.py:47-54`). So the Run fails BEFORE reaching sms-api — a full-red demo path.
+  **Root cause:** `git_pip_url`'s clean-tree gate is incompatible with a *running* workbench pod,
+  which dirties its served workspace continuously. The dirty files are **render artifacts, NOT part
+  of the pip-installable package** — the installed code is fully pinned by `git+origin@<HEAD>` and
+  HEAD is pushed, so the clean gate rejects a state that is actually reproducible.
+  **This is also a gap in the handoff:** §3-A directed wiring to `run_remote`, and §3-B directed
+  forcing `target="deployment"`; together they produce a Run that fails at `git_pip_url` on the real
+  pinned pod — the handoff didn't account for the dirty-by-design workspace.
+  **Fix options (decision pending — Jim):**
+  - **(C, recommended)** Pinned/deployment mode derives the pip URL from `remote_pinned`'s
+    sms-api-resolved built commit (`git+<REMOTE_REPO_URL>@<resolved_commit>`) — **no local git at
+    all**. Honors why pinned mode exists (`workbench.yaml:152-153`: sidestep the unwritable/protected
+    `/workspace`), and pins to the exact commit sms-api already BUILT + has a ParCa cache for (B1/B2
+    converge on `a08e20bd8`). Most native; slightly more code.
+  - **(B, minimal)** Add a pinned-aware code path that keeps the **pushed** check but drops the
+    **clean** check, producing `git+origin@<HEAD>` from the pod's pushed HEAD. Smallest diff.
+  - **(A, rejected)** Relax `git_pip_url` to ignore specific server-generated paths — fragile,
+    workspace-specific.
+  Until this lands, the demo Run cannot dispatch remotely on prod. NOT yet fixed.
+
 ## 0. Design principles (Alex)
 - **The composite is the modular, self-describing unit.** The **Composites tab characterizes** it (params, outputs/observables, wiring, measured wall-time) so you know how to use it in an existing/new study or investigation. It is not a production-sim launcher.
 - **Composability is native to process-bigraph.** Studies compose composites; composites compose composites. Dependencies like `parca → baseline` are **native composition**, not workbench orchestration or a DSL.
@@ -283,7 +336,7 @@ Make Explore answer "what does this composite need, emit, and cost" so you can r
 - **No version pinning for `process-bigraph`/`bigraph-schema`/`pbg-emitters` in the shared image today** (verified, `container_def.py:44` — unpinned `pip install`); §3.12 threads the workspace's own lockfile-pinned versions through the existing `extra_pip_deps` mechanism.
 - Push precondition (N3): unpushed/dirty in-pod edits error by design.
 - Cross-repo coordination; CSRF allowlist covers the run POST origin.
-- **Adjacent, not in scope — don't conflate:** SP1 (sms-api `GET /simulator/<id>/workspace.tar.gz` export), spec'd 2026-06-23 as an SP3 dependency, doesn't appear to exist in current `sms_api/api/routers/*` — worth an independent check before assuming SP3's remote-build switch is fully backed; not on this plan's critical path. Separately, `/api/source/switch` (SP2, local workspace re-pointing) is a known **half-switch** — re-points `WORKSPACE`/caches but leaves CWD/`sys.path`/`sys.modules` stale (`ARCHITECTURE-DEEP-DIVE.md:223,272`) — a workspace-*switch* bug, distinct from this plan's transport 404 (§1) and SP-D2 execution gap (§2).
+- **Adjacent, not in scope — don't conflate:** SP1 (sms-api workspace export), spec'd 2026-06-23 as an SP3 dependency, **EXISTS and is wired end-to-end (verified 2026-07-21)** — `sms_api/api/routers/sms.py:137 export_simulator_workspace` streams `GET /api/v1/simulations/workspace` as `workspace-sim{id}-{commit}.tar.gz`, consumed by the workbench's `remote_build_source.materialize_build` → `client.download_workspace` → extract → `active_workspace.switch_workspace` (the Scope=Remote → `switch-build` flow). So SP3's remote-build switch **is** backed; the earlier "doesn't appear to exist" note was stale. Not on this plan's critical path, but a green light for the Phase-6 grand design. Separately, `/api/source/switch` (SP2, local workspace re-pointing) is a known **half-switch** — re-points `WORKSPACE`/caches but leaves CWD/`sys.path`/`sys.modules` stale (`ARCHITECTURE-DEEP-DIVE.md:223,272`) — a workspace-*switch* bug, distinct from this plan's transport 404 (§1) and SP-D2 execution gap (§2).
 
 ## 9. Definition of done (MVP acceptance)
 
