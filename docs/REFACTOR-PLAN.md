@@ -872,6 +872,9 @@ gets its own import-linter rule.** Phase 0 (§5A) built `AuthoredRecord`; the re
   is reconciled), a concurrency cap, and scratch cleanup.
 - **Exit:** a study run survives a server restart; runs execute on Batch; no run
   blocks an HTTP request.
+- **Spec:** the port, the run-as-binding `RunSpec`, the job's internal shape
+  (simulate → emit → analyze → render), both adapters, reconciliation, and the
+  path-retirement migration are in [`docs/run-backend.md`](run-backend.md).
 
 ### Phase 3 — Cloud storage + the science/environment repo split *(completes `AuthoredRecord` cloud adapter, `EnvironmentResolver`, `RunStore`; executes Q2)*
 - **Where it goes:** the instance becomes cattle (destroy/recreate, no data loss),
