@@ -45,13 +45,15 @@ jobs:
         run: uv run --frozen bash scripts/pytest_gate.sh
 
   quarantined:
-    name: quarantined tests (non-blocking)
+    name: quarantine watch
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Informational only: these are known-failing. The point is to notice when
-    # one starts PASSING so it can be removed from tests/known_failures.txt —
-    # otherwise the quarantine list only ever grows.
-    continue-on-error: true
+    # Reports on the known-failing set. Deliberately GREEN when they all still
+    # fail, because a check that is red on every PR by design teaches everyone
+    # to ignore red — which would defeat the gate above. It surfaces the
+    # actionable case instead: a quarantined test that starts PASSING, and can
+    # therefore be deleted from tests/known_failures.txt. Details land in the
+    # job summary.
     env:
       UV_PYTHON: "3.12.12"
     steps:
