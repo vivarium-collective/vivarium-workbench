@@ -1,9 +1,15 @@
 from pathlib import Path
 
+import pytest
+
 from vivarium_workbench.lib import composite_subprocess as cs
 
 
 def test_injects_both_ram_and_declared_parquet(tmp_path: Path):
+    # Asserting on the *declared* emitter requires the v2ecoli generator to be
+    # registered; v2ecoli is a workspace repo, not a workbench dependency, so
+    # without it the declared branch no-ops and this fails rather than skips.
+    pytest.importorskip("v2ecoli.composites.baseline")
     state = {"global_time": 0.0, "bulk": {}, "listeners": {}}
     out = cs.inject_run_emitters(
         state, spec_id="v2ecoli.composites.baseline",

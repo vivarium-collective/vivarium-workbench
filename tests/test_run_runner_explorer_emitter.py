@@ -81,6 +81,12 @@ def test_select_emitter_name_generator_baseline_is_parquet(tmp_path):
     """The v2ecoli baseline generator declares a ParquetEmitter → parquet,
     even though spec is None (generator) and the workspace default is xarray."""
     pytest.importorskip("pbg_superpowers")
+    # pbg_superpowers alone isn't enough: the assertion depends on the v2ecoli
+    # *generator* being in _REGISTRY, which only happens once v2ecoli is
+    # importable. Without this the registry is empty, selection falls back to
+    # the workspace default, and the test fails with xarray != parquet in CI
+    # and in any checkout without the v2ecoli workspace alongside.
+    pytest.importorskip("v2ecoli.composites.baseline")
     db = str(tmp_path / "runs.db")
     name = run_runner._select_emitter_name(
         spec=None, spec_id="v2ecoli.composites.baseline", db_file=db)
