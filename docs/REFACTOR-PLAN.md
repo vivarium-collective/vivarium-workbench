@@ -153,6 +153,13 @@ The entire surface that differs between deployments is ~5 ports:
 | **RunBackend** — submit / poll / land a run | detached subprocess | sms-api → Ray → Batch | Engine A + Engine B + 3 remote impls |
 | **RunStore** — read run outputs | SQLite/zarr on disk | zarr/parquet on S3 | `simulations_index`, `run_store`, emitters |
 | **Principal** — who is acting | anonymous / local | OIDC principal | (none; GitHub device-flow is separate) |
+| **WorkspaceStore** — lifecycle of working areas (`materialize(source)→handle`, `list`, `discard`, `persist→artifact`) | out-of-repo staging folder + git worktrees off a bare mirror | sms-api PVC + artifact store | `_root` global + manual `../other-repo` checkout |
+| **WorkspaceContext** — per-request binding of a session → its workspace + ports | in-proc `SessionRegistry` | same (behind ALB) | `_WS_ROOT` global + global `invalidate()` |
+
+*(Naming: **AuthoredRecord** is the write/versioning **core** of the broader
+**`ScientificContent`** port — read + write + versioning over the record; see the
+§5A refinement. **WorkspaceStore** + **WorkspaceContext** were added 2026-07-21 —
+see §2A.6.)*
 
 **Success test:** a human or an AI can list everything that differs between local
 and cloud on one screen (these ports). Today they cannot.
@@ -244,6 +251,15 @@ weakest → strongest:
   the workbench dep. Breaks the packaging cycle; does **not** remove the deeper
   workbench→v2ecoli code coupling (three guarded `import v2ecoli` run/analysis
   sites) — that is the §2A `RunBackend`/`EnvironmentResolver` port work.
+- **Session-multiplexed workspaces** (2026-07-21) — the backend serves many
+  concurrent sessions, each routed to its own workspace (the user sees one at a
+  time). Split into a **`WorkspaceStore`** (working-area lifecycle: materialize an
+  immutable `(repo, ref)` source → a mutable staging area; `persist` → artifact)
+  and a per-request **`WorkspaceContext`** resolved from a session key. Kills
+  process-global `_root`/`os.chdir` and makes caches workspace-keyed — a **Phase-1
+  prerequisite**, one that lands *before/independent of* auth (session key ≠
+  `Principal`). Isolation is *across* workspaces only; concurrent access to the
+  *same* workspace is a non-goal for now. See §2A.6.
 
 **Still open (small)**
 - **Relax the workbench Python pin after `EnvironmentResolver`.** The demo track
@@ -259,6 +275,94 @@ weakest → strongest:
   blast radius (how `build_core()` discovery changes when env is its own repo).
 - **"Make work permanent" under an S3 record:** keep the branch + PR *review*
   workflow (a separable collaboration policy) or commit straight to the record?
+
+### 2A.6 Session-multiplexed workspaces — the `WorkspaceStore` + `WorkspaceContext` seam
+
+**Requirement (2026-07-21).** The backend serves **many concurrent sessions** —
+different frontend clients, each bound to its own workspace; the server routes
+every request to that session's workspace and keeps them consistent. **A user
+sees one workspace at a time**, but the *process* holds many bindings at once.
+This is session-multiplexing, not one-user-many-views.
+
+**Non-goal (for now).** Isolation is *across* workspaces (session A can never
+disturb session B). Two sessions writing the *same* staging area concurrently is
+out of scope — no intra-workspace locking / merge. In practice each session gets
+its own materialized staging area, so this doesn't arise.
+
+**Consequence — the process-global root must die, and this is the Phase-1 gate.**
+Today `lib/_root._WS_ROOT` is a single global `Path`; "switching"
+(`active_workspace.switch_workspace`) mutates it and fires a *global*
+`invalidate()` that clears every cache, and the run path `os.chdir`s. Under
+multi-session this is a correctness bug, not merely a >1-worker one: two requests
+for different workspaces racing on one global root (and one CWD) corrupt each
+other **even in a single worker**. So this requirement makes killing the global
+root a hard prerequisite — and, crucially, one that is **independent of auth**
+(below).
+
+**Two ports, cleanly split.** A workspace decomposes into *where the working area
+lives + how it came to be* (lifecycle) and *the science content within it*
+(record). Keep them separate rather than overloading `ScientificContent`:
+
+- **`WorkspaceStore`** — the lifecycle of working areas: `materialize(source) →
+  WorkspaceHandle`, `list()`, `discard(handle)`, and later `persist(handle) →
+  artifact_version`. A `source` is an immutable coordinate `(repo, ref)`; a
+  `WorkspaceHandle` is `{ staging_path, source_version, … }`. **Local adapter:** an
+  out-of-repo staging folder (e.g. `~/.vivarium-workbench/workspaces/<id>`),
+  materialized as a **git worktree off a bare mirror** — cheap per-version
+  checkouts, not full clones, which matters at v2ecoli scale. **Cloud adapter:**
+  the **sms-api persistent volume**, materialized into a pod-mounted folder,
+  `persist` backed by sms-api's artifact store. This is the concrete form of the
+  `WorkspaceContext` port §2A.1 named, shaped by the deployment reality — and it
+  collapses today's "hand-check-out `../other-repo` and point at it" into "the
+  tool materializes a workspace from a source."
+- **`ScientificContent`** (existing; `AuthoredRecord` is its write core) operates
+  *within* a handle's staging area. `for_workspace(handle)` binds it to
+  `handle.staging_path` — nearly today's `for_workspace(ws_root)`, just fed by the
+  store instead of a hand-checked-out path. It never learns how the area was
+  materialized; the *provenance* (`derived-from source_version`) is recorded by the
+  **store** at materialize time.
+
+**`WorkspaceContext` resolved per request from a session.** A `SessionRegistry`
+maps an opaque **session key** — a token the frontend carries, *not* a `Principal`
+— to the session's `WorkspaceHandle`. Middleware resolves the session key →
+`WorkspaceContext { handle, ports }` and threads it exactly as `ws_root` is
+threaded today (95 modules ready; ~13 still read the global). Caches become
+**workspace-keyed**; `switch` rebinds *this session's* handle (materializing a new
+source if needed) and invalidates *only that workspace's* cache slice — never the
+global sweep, which would trample other live sessions. `/api/source/switch`
+becomes "rebind this session," and `active_workspace.invalidate()`'s all-caches
+semantics retire.
+
+**Session-routing decouples from auth.** Phase 1 originally bundled per-request
+`WorkspaceContext` with the `Principal`/OIDC front door. This requirement
+separates them: **which** workspace a request targets (session key → handle) is
+orthogonal to **who** is acting (`Principal`). Session-multiplexing is needed
+regardless of auth and can land *before* the auth front door; auth (§2B.4) stays
+deferred, and the session key is a routing token, not an identity claim.
+
+**Staging model + the boundary reframing.** The staging area is a *mutable
+materialization of an immutable source version*. Edits accumulate uncommitted —
+this is exactly commit-model **(a)** (§2A.5, the §5A refinement) — and the
+**`persist` step** (staging → durable artifact) becomes the natural home for the
+§2A.4 science/environment boundary: snapshot the science paths into a new artifact
+whose parent is `source_version`, enforcing the boundary *at persist*, not
+per-mutation. So "(a)-until-Phase-3" is not a compromise — staging gives it a
+clean persist seam, and a run's reproducibility triple (§2A.2) reads directly off
+the handle: `(source_version + staging edits) + env coordinate + params`.
+
+**New state the server owns, and its risks.** The `SessionRegistry` and the
+store's **materialization manifest** (which handles exist on the volume, each
+`derived-from` which source) are real persistent state — a restart must re-find
+them, and abandoned staging areas need **GC**. Provenance must be recorded at
+materialize time to stay trustworthy (staging is freely editable). None is exotic,
+but none emerges for free.
+
+**Sequencing — this re-sequences, it is not additive to Phase 0.**
+`WorkspaceStore` + session-routed `WorkspaceContext` (killing the global root,
+workspace-keyed caches, per-session switch) becomes the **spine of Phase 1**, and
+the `ScientificContent` write core lands *on top of* a handle rather than a raw
+path. Phase 1's exit criterion gains: *N concurrent sessions on distinct
+workspaces, no cross-talk; `switch` rebinds one session only.*
 
 ---
 
@@ -662,6 +766,16 @@ gets its own import-linter rule.** Phase 0 (§5A) built `AuthoredRecord`; the re
   the half-done `/api/source/switch`.
 - **Exit:** two workers, no cross-talk; `os.chdir` gone; mutations require an
   authenticated principal; `READONLY` is genuinely read-only.
+- **Refinement (2026-07-21, see §2A.6):** the per-request-context work is now
+  shaped as a **`WorkspaceStore`** (materialize an immutable source → a mutable
+  staging area; `persist` → artifact) plus a **`WorkspaceContext`** resolved from
+  a **session key**, since the backend session-multiplexes many clients each on
+  its own workspace. Two consequences for this phase: (1) session-routing is
+  **decoupled from auth** — the workspace-binding half can land *before* the OIDC
+  front door (session key ≠ `Principal`); (2) `switch` + cache invalidation become
+  **per-session**, retiring the global `active_workspace.invalidate()`. Exit
+  criterion gains: *N concurrent sessions on distinct workspaces, no cross-talk;
+  `switch` rebinds one session only.*
 
 ### Phase 2 — Durable run execution *(introduces `RunBackend`)*
 - **Where it goes:** runs survive a restart and can scale out; the two-engines
