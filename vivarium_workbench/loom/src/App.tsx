@@ -15,7 +15,7 @@ import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
 } from './layoutStore';
-import { stateToReactFlow, topLevelStorePaths, defaultCollapsedIds } from './convert';
+import { stateToReactFlow, defaultCollapsedIds, initialEmitSet } from './convert';
 import { isHiddenByAncestor, retargetEdgesToVisible, hiddenNodeIds } from './panels/filterHidden';
 import ViewsMenu from './panels/ViewsMenu';
 import { getDefaultView, decodeView, fetchView, type View } from './viewStore';
@@ -75,9 +75,10 @@ export default function App() {
   const hiddenRef = useRef(hidden);
   hiddenRef.current = hidden;
   // Explicit-emit store paths (joined by '/'). Descendants inherit emission.
-  // Seeded with every top-level store so all states emit by default.
+  // Seeded from the composite's declared emit-all paths when it declares an
+  // emitter step, else every top-level store (see `initialEmitSet`).
   const [emitSet, setEmitSet] = useState<Set<string>>(
-    () => new Set(topLevelStorePaths(decodeUrlComposite())),
+    () => initialEmitSet(decodeUrlComposite()),
   );
   const [tab, setTab] = useState<TabId>('setup');
   const [compositeId, setCompositeId] = useState<string | null>(() => {
@@ -129,9 +130,10 @@ export default function App() {
       setState(msg.state);
       setCollapsed(defaultCollapsedIds(msg.state));  // light overview by default
       setHidden(new Set());     // reset show/hide selections too
-      // All states emit by default: seed with every top-level store and
-      // broadcast so the dashboard's run-emit selection stays in sync.
-      const seeded = new Set(topLevelStorePaths(msg.state));
+      // Seed from the composite's declared emit-all paths when present, else
+      // every top-level store, and broadcast so the dashboard's run-emit
+      // selection stays in sync.
+      const seeded = initialEmitSet(msg.state);
       setEmitSet(seeded);
       postEmitChanged([...seeded].sort());
       if (msg.metadata?.id) setCompositeId(msg.metadata.id);
@@ -178,7 +180,7 @@ export default function App() {
         const st = (data && typeof data === 'object' && 'state' in data) ? data.state : data;
         if (st && !state) {
           setState(st);
-          setEmitSet(new Set(topLevelStorePaths(st)));
+          setEmitSet(initialEmitSet(st));
           setCollapsed(defaultCollapsedIds(st));
           // The published composite-state JSON is the full resolve dict — it also
           // carries the configure-form inputs. Seed them so Setup & Run renders

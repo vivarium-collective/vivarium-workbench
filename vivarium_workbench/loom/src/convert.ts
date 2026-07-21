@@ -98,6 +98,47 @@ export function topLevelStorePaths(state: any): string[] {
     .map(([k]) => k);
 }
 
+/**
+ * Declared emit-all paths, when the composite's own state embeds an emitter
+ * step (the backend's `install_default_emitters` convention: a top-level
+ * `step` node — keyed `emitter` / `emitter_<i>` — whose `config.emit` lists
+ * the columns it emits and whose `inputs` map each column to its absolute
+ * path segments). Paths are returned dot/slash-joined (`'/'`), matching
+ * `emitSet`'s convention. `global_time` is excluded — it's always emitted
+ * for the trajectory's time axis, not a real observable toggle. Returns []
+ * when the composite declares no emitter (nothing to seed from), so callers
+ * fall back to `topLevelStorePaths`.
+ */
+export function declaredEmitPaths(state: any): string[] {
+  const root = state?.state ?? state ?? {};
+  if (!root || typeof root !== 'object') return [];
+  const out: string[] = [];
+  for (const node of Object.values(root)) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+    const n = node as { _type?: string; config?: { emit?: unknown }; inputs?: Record<string, unknown> };
+    if (n._type !== 'step' && n._type !== 'process') continue;
+    if (!n.config?.emit || typeof n.config.emit !== 'object') continue;
+    for (const [key, target] of Object.entries(n.inputs ?? {})) {
+      if (key === 'global_time') continue;
+      const parts = Array.isArray(target) ? (target as unknown[]).map(String) : [String(target)];
+      if (parts.length) out.push(parts.join('/'));
+    }
+  }
+  return out;
+}
+
+/**
+ * Initial `emitSet` seed for a composite: its declared emit-all paths when
+ * present (see `declaredEmitPaths`), else every top-level store (the prior
+ * default — `topLevelStorePaths`). Used at every emitSet seed site so the
+ * Composite Explorer's live Results view captures what the composite itself
+ * declares, not just an arbitrary top-level-store guess.
+ */
+export function initialEmitSet(state: any): Set<string> {
+  const declared = declaredEmitPaths(state);
+  return new Set(declared.length ? declared : topLevelStorePaths(state));
+}
+
 export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[] } {
   const nodes: RFNode[] = [];
   const edges: RFEdge[] = [];
