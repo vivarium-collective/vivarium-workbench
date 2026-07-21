@@ -124,9 +124,26 @@ def run_remote(
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
 
-    # Get git pip URL (validates clean + pushed state), plus any workspace-pinned
-    # framework versions (§3.12) so the shared runner image doesn't float to latest PyPI.
-    pip_url = git_pip_url(ws_root)
+    # Resolve the pip URL for the workspace code, plus any workspace-pinned framework
+    # versions (§3.12) so the shared runner image doesn't float to latest PyPI.
+    #
+    # N3 / option C: on a pinned deployment (VIVARIUM_WORKBENCH_REMOTE_PINNED) the prod
+    # pod's /workspace is dirty-by-design — the workbench re-renders reports/ and touches
+    # workspace.yaml at runtime — so git_pip_url's clean-tree check can never hold there.
+    # Instead derive the commit from sms-api's already-resolved *built* simulator (the same
+    # resolver the pinned "Run on remote" study card uses) and ship git+<repo>@<commit>: no
+    # local git, pinned by construction to the commit sms-api built + keyed its ParCa cache
+    # by. Local dev (unpinned) keeps the clean+pushed git_pip_url path.
+    from vivarium_workbench.lib import remote_pinned
+    cfg = remote_pinned.pinned_config()
+    if cfg is not None:
+        resolved = remote_pinned.resolve_pinned_build(client, cfg.repo_url, cfg.branch)
+        repo = cfg.repo_url.strip().rstrip("/")
+        if repo.endswith(".git"):
+            repo = repo[: -len(".git")]
+        pip_url = f"git+{repo}.git@{resolved['commit']}"
+    else:
+        pip_url = git_pip_url(ws_root)
     extra_pip_deps = [pip_url, *workspace_pinned_deps(ws_root)]
 
     # Export composite to a temporary .pbg file
