@@ -49,7 +49,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["matplotlib", "imageio", "numpy"]
-dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "mypy>=1.8", "httpx>=0.27", "import-linter>=2.0"]
+dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "pytest-xdist>=3.5", "mypy>=1.8", "httpx>=0.27", "import-linter>=2.0"]
 # Optional readers used only by parts of the test suite (parquet/zarr run
 # stores). Without them those tests skip (via pytest.importorskip) rather than
 # fail. Install with: uv pip install -e ".[dev,test]". See CONTRIBUTING.md.

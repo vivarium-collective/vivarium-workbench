@@ -42,6 +42,11 @@ jobs:
         # readers are missing entirely.
         run: uv sync --frozen --extra dev --extra test
       - name: pytest (full suite, quarantine deselected)
+        # Runs on pytest-xdist `-n auto` (see scripts/pytest_gate.sh). Serial
+        # was ~14 min here, which is too much friction per PR. Locally the same
+        # gate goes 8m33s serial -> 2m52s at -n 4 -> 1m31s at -n 16, with
+        # identical results (3236 passed) at every level; runners have 4 cores,
+        # so expect roughly a third of the serial time.
         run: uv run --frozen bash scripts/pytest_gate.sh
 
   quarantined:

@@ -58,5 +58,20 @@ fi
 
 args=()
 for id in "${ids[@]}"; do args+=(--deselect "$id"); done
-echo "running full suite, excluding ${#ids[@]} quarantined test(s)"
-exec python -m pytest -q "${args[@]}"
+
+# Run in parallel (pytest-xdist). The suite is process-parallel-safe: each
+# worker is its own process, so module-level state — notably process-bigraph's
+# global composite-spec registry — is per-worker rather than shared, and the
+# `dashboard_client` fixture already picks a free port per server it spawns.
+#
+# Measured on the full gate: 8m33s serial -> 2m52s at -n 4, identical results
+# (3236 passed both ways). Set PYTEST_WORKERS=0 to force serial when debugging;
+# xdist interleaves output and hides `-x` ordering, which makes a single failure
+# harder to read.
+workers="${PYTEST_WORKERS:-auto}"
+if [[ "$workers" == "0" || "$workers" == "1" ]]; then
+  echo "running full suite SERIALLY, excluding ${#ids[@]} quarantined test(s)"
+  exec python -m pytest -q "${args[@]}"
+fi
+echo "running full suite on ${workers} workers, excluding ${#ids[@]} quarantined test(s)"
+exec python -m pytest -q -n "$workers" "${args[@]}"
