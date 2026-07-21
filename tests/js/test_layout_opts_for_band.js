@@ -7,9 +7,11 @@ const far = _layoutOptsForBand(0), mid = _layoutOptsForBand(1), near = _layoutOp
 assert.strictEqual(far.cls, 'aig-zoom-far');
 assert.strictEqual(far.asks, false); assert.strictEqual(far.finds, false);
 assert.strictEqual(far.chain, false); assert.strictEqual(far.followups, false);
-// mid: + asks + finds, no chain
+// mid: + asks + finds, no chain, no follow-ups (follow-ups are a near-only detail)
 assert.strictEqual(mid.cls, 'aig-zoom-mid');
 assert.ok(mid.asks && mid.finds); assert.strictEqual(mid.chain, false);
+assert.strictEqual(mid.followups, false);
+assert.strictEqual(near.followups, true);
 // near: everything
 assert.strictEqual(near.cls, 'aig-zoom-near');
 assert.ok(near.asks && near.finds && near.chain && near.followups);

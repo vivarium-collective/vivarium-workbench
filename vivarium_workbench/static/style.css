@@ -2415,6 +2415,5 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .aig-status-badge { border-radius: 3px; padding: 0 2px; }
 .aig-status-badge:hover { background: rgba(0,0,0,0.06); }
 .aig-status-badge:focus-visible { outline: 2px solid #6366f1; outline-offset: 1px; }
-#aig-zoom-slider { vertical-align: middle; cursor: pointer; }
 /* Far (overview) band: tighter cards so the whole DAG reads at a glance. */
 #investigation-dag-shell.aig-zoom-far .iset-dag-node { padding: 6px 8px; }
