@@ -340,14 +340,29 @@ def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> d
 
     from process_bigraph import Composite
 
+    all_obs = _numeric_observables(gathered_filtered)
     out: dict = {}
     for viz_spec in canonical:
         if not isinstance(viz_spec, dict):
             continue
         name = viz_spec.get("name") \
             or viz_spec.get("address", "?").rsplit(":", 1)[-1]
+        # Inject the per-run db path (TimeSeriesFromObservables reads runs.db
+        # directly, self-contained) and resolve observables for time-series
+        # specs: an empty list means "all numeric observables"; an
+        # `observable_match` substring selects a subset (e.g. every mass field).
+        spec = dict(viz_spec)
+        cfg = dict(spec.get("config") or {})
+        cfg.setdefault("runs_db_path", db_file)
+        if spec.get("address", "").endswith("TimeSeriesFromObservables"):
+            match = cfg.pop("observable_match", None)
+            if not cfg.get("observables"):
+                cfg["observables"] = (
+                    [o for o in all_obs if match in o] if match else list(all_obs)
+                )
+        spec["config"] = cfg
         try:
-            doc = build_viz_composite(viz_spec, gathered_filtered, registry)
+            doc = build_viz_composite(spec, gathered_filtered, registry)
             viz_composite = Composite({"state": doc}, core=core)
             viz_composite.run(1)
             state = viz_composite.state
