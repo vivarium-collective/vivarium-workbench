@@ -102,12 +102,21 @@ Keeping the contract at the message layer is the whole point — it's what makes
 ## 4. Worker code provenance — shipped by the workbench, run by the venv
 
 The worker **program** (the IPC server + method handlers) is part of
-**vivarium-workbench**, not the workspace. The workbench launches it *on the
-workspace's interpreter* and injects its own code onto the path:
+**vivarium-workbench**, not the workspace. It ships as a **single self-contained
+file** (a `.py`, or a `.pyz` zipapp if it grows past one module) so the workbench
+can run it *on the workspace's interpreter* by **path** — nothing is written into
+the workspace, the venv, or the science record:
 
 ```
-<venv>/bin/python  <workbench>/env_worker/__main__.py  --socket-fd <n>  --workspace <staging_path>
+<venv>/bin/python  <workbench>/env_worker.pyz  --socket-fd <n>  --workspace <staging_path>
 ```
+
+This is the one place the science-only-write rule could have needed an
+exception — "the workbench must write the RPC server somewhere" — and it does
+**not**: path-injection means the worker is workbench code the venv interpreter
+merely *executes*, never a file the workbench persists into the workspace.
+(For the **cloud** adapter the worker is baked into the `(repo, commit)` image at
+build time — again not written into the science record.)
 
 The worker module imports **only** the standard library plus what is already
 present in the workspace venv (`process_bigraph`, `pbg_superpowers`, the
@@ -117,7 +126,7 @@ workspace `pbg_<project>` package, `v2ecoli`). It never imports
 - The workspace venv carries **no** workbench dependency — `uv sync` of the
   workspace repo is untouched.
 - Worker code is versioned **with the workbench**, so for the local adapter the
-  protocol version is always in lockstep (§13 still matters for the cloud
+  protocol version is always in lockstep (§14 still matters for the cloud
   adapter, whose worker may be a different build).
 - Anything the worker needs from the workbench's own helpers (e.g. JSON
   sanitization, §10) must be **self-contained / stdlib-only** in the worker
@@ -232,21 +241,34 @@ best-effort and often impossible**:
 ## 11. Method catalog (v1 core)
 
 Derived from the ~16 in-process sites the map found. Small and stable; new
-methods are additive under a minor protocol bump (§13). All results are
+methods are additive under a minor protocol bump (§14). All results are
 finite-safe JSON (§below).
+
+**Composite params are `{ ref }` OR `{ document }`.** A composite reaches the
+worker two ways, and this is the crux of the freshness model (§13): a
+**generator** is named by `ref` (it lives in the worker's environment registry);
+a **static spec** is passed **inline as `document`** — the workbench owns the
+science record and hands the worker the just-read (or just-saved) YAML doc, so
+the worker reads no science files and caches no science. Methods below taking a
+composite accept either.
 
 | method | params | result | replaces (in-process site) |
 |---|---|---|---|
 | `initialize` | — | `{ protocol_version, workspace_id, source_version, python, packages, capabilities[] }` | startup binds |
 | `ping` | — | `{ ok: true, uptime_s }` | (new; health) |
 | `registry_catalog` | — | `{ processes[], types[] }` (source-tagged) | `registry.py` |
-| `list_composites` | — | `[{ id, kind, module, … }]` | `composite_lookup.py` |
-| `resolve_composite_state` | `{ ref, overrides? }` | `{ state, module }` | `composite_state_views.py`, `study_run_state.py` |
-| `composite_document` | `{ ref, overrides? }` | `{ document }` | `pbg_export.py`, report resolution |
-| `observables` | `{ ref }` | `{ paths[] }` | `observables_views.py` |
-| `declared_emit_paths` | `{ ref }` | `{ paths[] }` | `composite_resolve.py` |
+| `list_generators` | — | `[{ id, module, … }]` — **generators only** | `composite_lookup.py` (registry half) |
+| `resolve_composite_state` | `{ ref \| document, overrides? }` | `{ state, module }` | `composite_state_views.py`, `study_run_state.py` |
+| `composite_document` | `{ ref, overrides? }` | `{ document }` — generators only (static specs the workbench already holds) | `pbg_export.py`, report resolution |
+| `observables` | `{ ref \| document }` | `{ paths[] }` | `observables_views.py` |
+| `declared_emit_paths` | `{ ref \| document }` | `{ paths[] }` | `composite_resolve.py` |
 | `viz_classes` | — | `[{ name, address, … }]` | `visualization_classes.py` |
 | `shutdown` | — | `{ ok: true }` | (new; lifecycle) |
+
+`list_generators` returns **generators only** — the static-spec half of the old
+`composite_lookup` union stays on the workbench, which lists `.composite.yaml`
+files straight from the science record (fresh on every save; §13). The full
+"known composites" set the UI shows is the workbench's static-spec listing ∪ this.
 
 `resolve_composite_state` is the ~1–3 s call; the rest are cheap. Heavy viz
 *render* is deliberately **absent** — light preview may be added later as a
@@ -270,7 +292,59 @@ long-lived and serial; a job is one-shot, detached, and may be remote. Keeping
 heavy compute out of the worker is what keeps queries bounded (§10) and the pod
 free of heavy analysis (§2A.7).
 
-## 13. Versioning
+## 13. Freshness — the worker holds no science, so a save never invalidates it
+
+The obvious worry — "an authoring **save** edits a composite; is the worker's
+`_REGISTRY` / `build_core()` now stale, and how do we invalidate it?" —
+**dissolves** once the science/environment boundary (§2A.2, §2A.4) is drawn at
+the worker. It does not need a `reload` method or a save hook. Two facts, both
+verified in the code, make this true:
+
+1. **The workbench writes only *science*** (studies, investigations, decisions,
+   references, and `.composite.yaml` **specs** — all YAML). It never writes
+   *environment* code (`@composite_generator` functions, `build_core`, the
+   `pbg_<project>` package, the lockfile). The one thing that could have been an
+   exception — the RPC server itself — is path-injected, not written (§4).
+2. **The worker's registry and `build_core` depend only on the environment.**
+   `_REGISTRY` is populated by importing `@composite_generator`-decorated Python;
+   `build_core()` builds the type core from registered *processes/types*. Neither
+   depends on any `.composite.yaml` **spec** (a spec is a *document resolved
+   against* the core, not part of it).
+
+Therefore **no science save can stale the worker's registry or core.** The split
+follows:
+
+- **Generators (environment).** In the worker's registry. Changed only when the
+  *environment* changes — i.e. a new `source_version` (a new commit / re-sync),
+  which is a **new worker** via `WorkspaceStore` re-materialization (the `switch`
+  path, §7), not an in-place reload. A save never touches them.
+- **Static `.composite.yaml` specs (science).** Owned by the workbench / the
+  science record. On save the workbench's own listing is fresh immediately (it
+  re-reads the file). When it needs the *environment* to build state from a spec,
+  it passes the doc **inline** (`resolve_composite_state{ document }`, §11) — the
+  worker computes against its core and returns; it caches no spec, so there is
+  nothing to invalidate.
+- **`build_core` / the type core (environment).** Unaffected by any spec edit;
+  re-materialized only on an environment change, same as generators.
+
+So the worker is **pure environment**: it takes science (a spec doc, a generator
+ref, overrides) as *input* and returns computed results, holding no science of
+its own. A save changes science, which the workbench owns and re-reads; the next
+worker query carries the fresh science as a parameter. **The mooted `reload`
+method is dropped**; the only worker invalidation is environment re-materialization
+(a new `source_version`), which is a worker restart, reusing §7's switch/§9's
+crash-recovery path.
+
+**Residual edge — an *environment* change made through the workbench.** If a
+future authoring flow ever writes environment code (e.g. an AI skill that emits a
+`@composite_generator`), that *is* an environment change and must go through
+`source_version` re-materialization (new worker), never an in-place mutation of a
+live worker's registry. Keeping such writes on the environment side of the
+boundary (a distinct commit/version), not folded into a science save, is what
+preserves this whole property. Today no such flow exists (fact 1); if one is
+added, it re-materializes, it does not "reload."
+
+## 14. Versioning
 
 `initialize` returns `protocol_version` (semver). The workbench refuses a worker
 whose **major** it doesn't speak. For the local adapter worker code ships with
@@ -278,7 +352,7 @@ the workbench, so this is always compatible; it earns its keep for the **cloud**
 adapter, where sms-api's worker may be a different build. New methods / optional
 params are **minor** bumps; a removed/changed method is **major**.
 
-## 14. Security
+## 15. Security
 
 Local: `socketpair` is same-process-tree, no network surface. The worker
 executes the user's own workspace code (`build_core`, generators) — no new trust
@@ -287,7 +361,7 @@ already sandboxes workspace code for runs; the query worker in the pod/container
 must inherit the **same** sandbox (it runs the same arbitrary workspace Python).
 Flag for the sms-api boundary owners when the cloud adapter lands.
 
-## 15. A worked exchange
+## 16. A worked exchange
 
 ```
 workbench                                   worker (<venv>/bin/python)
@@ -305,15 +379,15 @@ workbench                                   worker (<venv>/bin/python)
    │  → shutdown ──────────────────────────▶│  flush; exit 0
 ```
 
-## 16. Open questions (deferred to implementation)
+## 17. Open questions (deferred to implementation)
 
 - **Idle eviction:** does a session's warm worker persist for the session's
   lifetime, or evict after an idle TTL and re-warm on next query? (Memory vs.
   cold-start trade; a warm-pool cap across many sessions.)
-- **Registry-affecting mutations:** an authoring action that changes a generator
-  (edit + save) must invalidate the worker's in-process registry. Restart the
-  worker, or add an explicit `reload` method? (Restart is simplest and reuses the
-  crash-recovery path; `reload` avoids re-`build_core`.)
+- ~~**Registry-affecting mutations / invalidation on save**~~ — **resolved (§13):**
+  the workbench writes only science, the worker holds only environment, so a save
+  never stales the worker; there is no `reload` and no save hook. The only worker
+  invalidation is `source_version` re-materialization (a new worker).
 - **Transport test coverage on both host OSes.** macOS and Linux are both
   supported backend hosts (§2), and the transport (socketpair, `pass_fds`
   inheritance, SIGKILL-to-restart) is the OS-touching part — it wants a test lane
