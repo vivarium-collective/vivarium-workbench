@@ -51,6 +51,22 @@ interpreter via `subprocess`** (exec, not `fork`) sidesteps macOS's
 fork-after-threads hazards (`OBJC_DISABLE_INITIALIZE_FORK_SAFETY` and friends) —
 the worker never inherits a forked, half-initialized runtime.
 
+**Windows — future, not immediate.** Local dev/usage on Windows is a wanted
+target eventually, not now. It costs nothing to keep the door open because the
+**message layer (§§6–11) is platform-independent** — Windows is a *transport
+adapter*, not a redesign. The POSIX-specific pieces of the local transport that a
+Windows adapter would swap: `socketpair` + `pass_fds` fd inheritance → a
+**named pipe** or a connect-back **localhost TCP** socket (Python's `pass_fds`
+is POSIX-only; Windows passes handles differently); and `SIGKILL`-to-restart
+(§10) → `TerminateProcess` (`Popen.kill()`). The serial/main-thread model (§8) is
+unchanged — Windows has even narrower signal support, but the protocol relies on
+the socket + process-kill, not signals. Not designed now; just don't bake a
+socketpair/`pass_fds`/`SIGKILL` assumption into the *message* layer (only into the
+local-transport adapter), and Windows stays a later adapter. Note this only makes
+the *protocol* Windows-ready; whether a given workspace's compute env
+(`build_core`, `v2ecoli`, …) installs and runs on Windows is a separate, larger
+question owned by those packages.
+
 **Non-goals (v1)**
 - Concurrent heavy queries within one worker (the worker is single-threaded on
   its main thread — §8).
