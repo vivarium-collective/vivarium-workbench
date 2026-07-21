@@ -1,0 +1,65 @@
+name: pytest
+
+# The full test suite as a PR gate.
+#
+# Until now CI ran `types.yml` only: mypy, import-linter, and FOUR named test
+# files out of 285. The other ~98% of the suite never ran on a PR, so it rotted
+# silently — switching it on surfaced 77 failures that predated any single
+# change, including a companion-library API drift that had been broken for
+# weeks and a feature that was inert in production.
+#
+# This gate runs everything except the tests listed in tests/known_failures.txt
+# (see that file: the list is documented, justified, and meant to shrink). A
+# second, non-blocking job runs exactly the quarantined set so that a test which
+# starts passing becomes visible instead of sitting on the list forever.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  suite:
+    name: full suite (minus quarantine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Same interpreter pin as types.yml: the demo extra pulls v2ecoli, which is
+    # pinned ==3.12.12, so the lock resolves for that one environment.
+    env:
+      UV_PYTHON: "3.12.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (locked)
+        # --frozen: install straight from uv.lock without re-resolving, so the
+        # `demo` extra's editable path sources (../v2ecoli, ../pbg-ptools) — not
+        # checked out in CI — are never touched.
+        #
+        # `test` (polars/pyarrow/zarr) is REQUIRED here, unlike in types.yml:
+        # without it 11 tests fail rather than skip, because the parquet/zarr
+        # readers are missing entirely.
+        run: uv sync --frozen --extra dev --extra test
+      - name: pytest (full suite, quarantine deselected)
+        run: uv run --frozen bash scripts/pytest_gate.sh
+
+  quarantined:
+    name: quarantined tests (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Informational only: these are known-failing. The point is to notice when
+    # one starts PASSING so it can be removed from tests/known_failures.txt —
+    # otherwise the quarantine list only ever grows.
+    continue-on-error: true
+    env:
+      UV_PYTHON: "3.12.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (locked)
+        run: uv sync --frozen --extra dev --extra test
+      - name: pytest (quarantined only)
+        run: uv run --frozen bash scripts/pytest_gate.sh --only-known

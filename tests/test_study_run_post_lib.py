@@ -319,8 +319,9 @@ def _quiet_discover(monkeypatch):
     import pbg_superpowers.composite_generator as cg
     monkeypatch.setattr(cg, "discover_generators", lambda: None)
     # keep registry truthy + ensure the test spec_id is absent (entry None).
-    monkeypatch.setitem(cg._REGISTRY, "_dummy_keep_truthy",
-                        types.SimpleNamespace(name="_dummy", visualizations=[]))
+    from conftest import register_generator
+    register_generator("_dummy_keep_truthy",
+                       types.SimpleNamespace(name="_dummy", visualizations=[]))
 
 
 def test_render_study_visualizations_no_viz_is_noop(tmp_path, monkeypatch):

@@ -1,0 +1,65 @@
+# Quarantined tests — excluded from the blocking CI suite.
+#
+# WHY THIS FILE EXISTS
+# CI ran 4 of 285 test files for a long time, so the suite rotted unnoticed:
+# switching the full suite on surfaced 77 failures that predate any single
+# change. Rather than leave the suite ungated until every one is fixed (which is
+# how it got this way), the full suite gates PRs NOW and the known-bad tests are
+# listed here explicitly.
+#
+# This list is meant to SHRINK. A second, non-blocking CI job runs exactly these
+# tests, so when one starts passing it shows up and the line can be deleted.
+# Do not add a line without a reason comment.
+#
+# Every id below was observed failing on a clean checkout; none of them are
+# caused by the change that introduced this file.
+#
+# Format: one pytest node id per line. `#` comments and blank lines ignored.
+
+# ── Viz / endpoints / misc ────────────────────────────────────────────────────
+tests/test_composites_kind_module.py::test_get_composite_doc_handles_generator_entry
+tests/test_investigation_run_e2e.py::test_detail_after_run
+tests/test_registry_source_tagging.py::test_registry_environment_packages_not_in_workspace
+tests/test_remote_run_panel.py::test_view_run_button_routes_to_visualizations_not_dead_route
+tests/test_sp1_investigation_hook.py::test_study_sync_endpoint_rolls_up_investigation_acceptance
+tests/test_study_page_lib.py::TestRenderStudyDetailHtml::test_render_produces_html_with_tab_scaffold
+tests/test_study_run_post_lib.py::test_run_study_analyses_happy_collects_and_reports_errors
+tests/test_study_run_variant_ensemble.py::test_ensemble_records_one_run
+tests/test_visualization_endpoints.py::test_get_catalog_marks_out_of_sync_when_import_fails
+tests/test_visualization_endpoints.py::test_post_composite_test_run_accepts_generator_id
+tests/test_visualization_endpoints.py::test_post_create_from_composite_creates_v2_spec
+
+# ── Snapshot/publish + loom serving ───────────────────────────────────────────
+tests/test_data_endpoints.py::test_snapshot_css_hides_studies_rail_section
+tests/test_data_endpoints.py::test_snapshot_css_hides_switcher_and_shows_label
+tests/test_loom_explore_serve.py::test_loom_explore_index_served
+tests/test_loom_explore_serve.py::test_loom_explore_root_redirects_to_index
+tests/test_loom_explore_serve.py::test_ui_config_default_is_loom_explore
+tests/test_publish.py::test_walkthrough_composite_popout_is_snapshot_aware
+tests/test_refresh_viz_mirror.py::test_vendored_refresh_viz_matches_canonical
+
+# ── Emitter/store selection — asserts sqlite where the default is now xarray/zarr 
+tests/test_emitters_run_with_emitter.py::test_run_with_emitter_short_run_does_not_silently_empty
+tests/test_emitters_run_with_emitter.py::test_run_with_emitter_zarr_fallback_uses_fresh_state
+tests/test_study_charts_parquet.py::test_extract_paths_from_parquet_array_column_index
+tests/test_study_charts_parquet.py::test_extract_paths_from_parquet_scalar_column
+tests/test_study_charts_parquet.py::test_extract_paths_from_parquet_subsamples_long_runs
+
+# ── Template drift (page/tab markup changed; assertions never updated) ────────
+tests/test_investigation_page_declutter.py::test_header_export_cluster_and_icon_refresh
+tests/test_spine_present_c_summary.py::test_study_detail_js_renders_spine_summary
+tests/test_spine_present_c_unbury.py::test_discovery_implications_elevated_above_conclusion_text
+tests/test_spine_present_c_unbury.py::test_purpose_is_not_collapsed_by_default
+tests/test_spine_present_c_unbury.py::test_secondary_content_stays_collapsible
+tests/test_study_detail_page.py::test_full_study_renders_all_tabs
+tests/test_study_detail_page.py::test_runs_tab_does_not_render_charts_panel
+tests/test_study_detail_page.py::test_runs_tab_has_richer_columns
+tests/test_study_detail_page.py::test_runs_table_renders_param_overrides
+tests/test_study_detail_page.py::test_runs_table_renders_started_and_duration_from_runs_db
+tests/test_study_detail_page.py::test_runs_table_tolerates_missing_runs_db
+tests/test_study_detail_page.py::test_runs_table_tolerates_orphan_runs
+tests/test_study_detail_page.py::test_study_detail_has_skeptic_toggle
+tests/test_study_detail_page.py::test_study_detail_page_has_eight_tabs
+tests/test_study_detail_page.py::test_visualizations_panel_present
+tests/test_study_detail_template.py::test_panel_sections_no_premature_close
+tests/test_study_tabs_structure.py::test_panels_unchanged_all_eleven_present
