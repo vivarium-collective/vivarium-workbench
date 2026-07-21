@@ -207,8 +207,10 @@ multiple outstanding `id`s, but the workbench-side `EnvironmentResolver`
 
 This is adequate: a session is one user on one workspace — naturally low
 concurrency — and the warm worker amortizes the ~1–3 s `build_core` across all a
-session's queries. A per-session worker **pool** is a later option if a single
-serial worker becomes a bottleneck; v1 is one worker per session.
+session's queries. v1 is **one worker per session**; a per-session worker *pool*
+(multiple workers for one session) is a later option only if a single serial
+worker becomes a bottleneck. How many workers live **across** sessions, and when
+they are evicted, is the pool policy in §17.
 
 ## 9. Error model & crash recovery
 
@@ -379,11 +381,55 @@ workbench                                   worker (<venv>/bin/python)
    │  → shutdown ──────────────────────────▶│  flush; exit 0
 ```
 
-## 17. Open questions (deferred to implementation)
+## 17. Worker pool & eviction policy
 
-- **Idle eviction:** does a session's warm worker persist for the session's
-  lifetime, or evict after an idle TTL and re-warm on next query? (Memory vs.
-  cold-start trade; a warm-pool cap across many sessions.)
+How long a session's worker stays warm, and how many live at once. Two costs to
+balance: a warm worker holds a **whole workspace environment in memory**
+(`build_core` + the package + `_REGISTRY` + `v2ecoli` — for v2ecoli-scale, not
+cheap), while a cold start pays interpreter launch + `build_core` (~1–3 s, §7).
+
+- **Lazy spawn, never eager.** A worker starts on a session's **first env query**,
+  not on session open. Most of the ~16 relocated sites are Explorer / composite /
+  viz paths; a session doing only science authoring (studies, decisions) touches
+  none of them and **pays for no worker at all**.
+- **Warm while active; idle-TTL eviction.** The worker stays warm as the session
+  queries it. After `T_idle` with no query it is **evicted** (SIGTERM→SIGKILL,
+  §7); the next query re-warms — a cold start surfaced as a brief "preparing
+  environment…" state. This reclaims memory from abandoned/idle sessions (a closed
+  tab never sends an end signal) without touching active ones. Default `T_idle`
+  ~15 min.
+- **Global warm-pool cap `K`.** Independent of session count, at most `K` workers
+  are live at once — the real backstop on a shared pod, because memory is bounded
+  by `K × per-worker footprint`, **not** by how many sessions connect. `K` is
+  sized from the memory budget, not the user count.
+- **Eviction is LRU-idle; never kill a mid-query worker to admit another.** To
+  admit worker `K+1`, evict the least-recently-used **idle** worker. If all `K`
+  are mid-query (rare — queries are ~seconds and bursty), the new spawn **waits**
+  (bounded) for one to finish rather than interrupting another session's in-flight
+  work; on wait-timeout, surface a retryable "environment busy." Killing an
+  in-flight query to make room would lose another user's result and force their
+  re-warm — the pathology to avoid.
+- **Eviction frees the process, not the venv.** Evicting a worker reclaims process
+  memory but leaves the materialized venv on disk, so **re-warm is a re-spawn
+  (~seconds), not a re-`uv sync` (minutes)**. The venv's own lifecycle — GC of
+  abandoned per-workspace venvs on a much longer horizon — belongs to
+  `WorkspaceStore` (§2A.6), not this pool. The two evictors are layered: this one
+  is memory-pressure/idle on *processes*; that one is disk/staleness on *venvs*.
+- **`switch` and session-end are immediate, not idle.** A `switch` tears the old
+  worker down at once and lazily spawns for the new source (§7); an explicit
+  session end does the same. Idle-TTL exists precisely for the sessions that
+  *don't* signal end.
+
+`T_idle` and `K` are typed **runtime config** (plan §G / pydantic-settings), not
+constants: local single-user dev needs no meaningful cap (`K` effectively
+unbounded, one worker persists); a shared pod sets `K` from its memory budget and
+`T_idle` shorter if churn is high.
+
+## 18. Open questions (deferred to implementation)
+
+- ~~**Idle eviction / warm-pool policy**~~ — **resolved (§17):** lazy spawn,
+  idle-TTL eviction, a global LRU-idle pool cap `K`, eviction frees the process
+  (not the venv), `switch`/end are immediate. `T_idle`/`K` are runtime config.
 - ~~**Registry-affecting mutations / invalidation on save**~~ — **resolved (§13):**
   the workbench writes only science, the worker holds only environment, so a save
   never stales the worker; there is no `reload` and no save hook. The only worker
