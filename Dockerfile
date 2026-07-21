@@ -19,9 +19,13 @@ FROM python:3.12-bookworm
 # uv (pinned binary) for fast, lock-faithful installs — same as v2ecoli.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Build toolchain for v2ecoli's vendored Cython extensions + git for the git-main deps.
+# Build toolchain for v2ecoli's vendored Cython extensions + git for the git-main
+# deps + Node/npm to build the vendored bigraph-loom bundle (Task 8; see the
+# "vendored bigraph-loom" step below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential git ca-certificates \
+        build-essential git ca-certificates curl \
+ && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
 
 # Self-contained venv (real wheel copies, not links into the BuildKit cache mount).
@@ -65,24 +69,30 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/v2ecoli/.venv/bin/python --no-deps \
         "pbg-ptools @ git+https://github.com/vivarium-collective/pbg-ptools.git@${PBG_PTOOLS_REF}"
 
-# ─── overlay bigraph-loom (embedded state-tree explorer, served at /loom-explore) ─
-# `bigraph-loom` is a workbench-only dep (pyproject.toml:47) that is NOT declared in
-# v2ecoli's lock, so the `uv sync` from v2ecoli's lockfile above never installs it.
-# `lib/static_serving.resolve_loom_asset()` imports it lazily, so a missing module
-# passes the build-time sanity import and only throws ModuleNotFoundError at runtime
-# — the always-visible loom panel fires a loom-asset request for ANY composite, so
-# the Composite Explorer 500s. Install it explicitly here (pin identical to
-# pyproject.toml:47). `--no-deps` because its deps are already in the venv.
-ARG BIGRAPH_LOOM_REF=main
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/v2ecoli/.venv/bin/python --no-deps \
-        "bigraph-loom @ git+https://github.com/vivarium-collective/bigraph-loom.git@${BIGRAPH_LOOM_REF}"
+# ─── build the vendored bigraph-loom bundle (embedded state-tree explorer, served
+#     at /loom-explore) ──────────────────────────────────────────────────────
+# Task 8 vendored bigraph-loom's source into vivarium_workbench/loom/ and
+# dropped the external `bigraph-loom @ git+...` dependency (it used to be
+# installed as a separate package here because v2ecoli's lock never declared
+# it). `_dist` (the Vite build output) is gitignored — a generated artifact —
+# so it must be built now, from the source copied in by `COPY . .` above.
+# `lib/static_serving.resolve_loom_asset()` / `publish.py` resolve it via
+# `vivarium_workbench.loom_assets.asset_dir()`; a missing `_dist` would pass
+# the build-time sanity import below and only 500 at runtime (the
+# always-visible loom panel fires a loom-asset request for ANY composite).
+RUN bash scripts/build_loom.sh
 
 # Sanity: the workspace package, the workbench, the viewer plugin, and the loom
 # explorer all import in one interpreter (the plugin's top-level imports exercise
-# the workbench too). bigraph_loom is added here so a regression fails the BUILD
-# rather than shipping a silent runtime ModuleNotFoundError (see the overlay above).
-RUN python -c "import pbg_v2ecoli, vivarium_workbench, pbg_ptools.workbench_viewers, bigraph_loom; print('combined env ok')"
+# the workbench too). loom_assets is added here so a regression fails the BUILD
+# rather than shipping a silent runtime ModuleNotFoundError (see the loom build
+# above), and confirm the built bundle actually landed on disk.
+RUN python -c "\
+import pbg_v2ecoli, vivarium_workbench, pbg_ptools.workbench_viewers; \
+from vivarium_workbench.loom_assets import asset_dir; \
+d = asset_dir(); \
+assert (d / 'index.html').is_file(), f'loom bundle missing: {d}'; \
+print('combined env ok')"
 
 # ─── serve ───────────────────────────────────────────────────────────────────
 # The workspace (v2ecoli's workspace.yaml + studies/investigations/.git/runs.db)

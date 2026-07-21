@@ -44,7 +44,6 @@ dependencies = [
     # from pbg-superpowers → "conflicting URLs" failures in any project that
     # depends on vivarium-dashboard transitively.
     "pbg-basic-processes",
-    "bigraph-loom @ git+https://github.com/vivarium-collective/bigraph-loom.git@main",
     "investigation-contracts",
 ]
 
@@ -104,9 +103,12 @@ v2ecoli = { path = "../v2ecoli", editable = true }
 pbg-ptools = { path = "../pbg-ptools", editable = true }
 
 
-# bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
-# backend must opt into direct references — without this, hatchling refuses the
-# build on stricter uv/hatchling versions.
+# bigraph-loom was previously a PEP 508 direct git URL (not on PyPI), which
+# required [tool.hatch.metadata] allow-direct-references below. Task 8 vendored
+# its source into vivarium_workbench/loom/ (built via `npm run build`, resolved
+# at runtime through vivarium_workbench.loom_assets.asset_dir()), dropping the
+# git dependency entirely. allow-direct-references is left enabled below since
+# other direct-reference deps may be reintroduced; it is currently unused.
 
 # ─── import-linter — the ports & adapters layering gate (REFACTOR-PLAN §2A.1) ──
 # Keeps `lib.ports` a PURE interface layer: a port may never import a concrete
@@ -228,6 +230,15 @@ allow-direct-references = true
 # Ship the renamed package AND the thin vivarium_dashboard/ back-compat shim
 # (deprecated; removed in Phase 3) so old imports keep resolving in wheels too.
 packages = ["vivarium_workbench", "vivarium_dashboard"]
+# vivarium_workbench/loom/_dist (the Vite build output of the vendored
+# bigraph-loom, produced by `scripts/build_loom.sh` / `npm run build`) is
+# gitignored — it's a generated artifact, not source. hatchling's default
+# file selection excludes gitignored paths from `packages`, so it would be
+# silently dropped from the wheel; `artifacts` opts it back in so
+# vivarium_workbench.loom_assets.asset_dir() resolves in installed wheels too
+# (mirrors how upstream bigraph-loom shipped bigraph_loom/_dist via `packages`
+# — there it was git-tracked, so no artifacts entry was needed).
+artifacts = ["vivarium_workbench/loom/_dist/**"]
 
 [tool.pytest.ini_options]
 timeout = 120

@@ -29,3 +29,7 @@ todo.md
 .claude/*
 */node_modules/*
 .todo/_backlog.md
+
+# Vendored bigraph-loom (Task 8): build outputs, not source.
+vivarium_workbench/loom/node_modules/
+vivarium_workbench/loom/_dist/

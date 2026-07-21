@@ -1,0 +1,10 @@
+# Keep the build context small and force a clean rebuild of the bundle.
+.git
+.gitignore
+node_modules
+bigraph_loom/_dist
+dist
+.venv
+__pycache__
+*.log
+*.egg-info

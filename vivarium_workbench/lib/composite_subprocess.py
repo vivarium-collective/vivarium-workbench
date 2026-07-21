@@ -65,6 +65,39 @@ def strip_process_instances(state):
     return state
 
 
+def inject_run_emitters(state: dict, *, spec_id: str, run_id: str,
+                        emit_paths: list[str] | None, workspace, db_file) -> dict:
+    """Inject the live RAM emitter (from the UI's explicit-path selection)
+    AND, when the composite declares one, its default Parquet emitter for
+    persistence.
+
+    The RAM ``user_emitter`` always goes in — it feeds the Composite
+    Explorer's live Results view regardless of how the run is persisted.
+    The declared emitter (Task 4's ``inject_declared_emitter``) is
+    ADDITIVE: when a composite declares one (e.g. the v2ecoli baseline's
+    Parquet emitter), it is injected alongside the RAM emitter and its
+    kind (``"parquet"``) is what gets recorded for the run. When nothing
+    is declared, falls back to the legacy ``inject_sqlite_emitter`` path
+    so undeclared composites keep working exactly as before.
+
+    Returns ``{"state": <mutated state>, "emitter": <kind str>}``.
+    """
+    from vivarium_workbench.lib import composite_runs as cr
+
+    state = cr.inject_emitter_for_paths(state, list(emit_paths or []))
+    out_dir = Path(workspace) / ".pbg" / "parquet-runs"
+    state, declared_kind = cr.inject_declared_emitter(
+        state, spec_id=spec_id, run_id=run_id, out_dir=out_dir)
+    if declared_kind is None:
+        # Legacy path: no declared emitter — persist via SQLite as before,
+        # using the caller's db_file (e.g. <study_dir>/runs.db), NOT a
+        # fresh workspace-scratchpad path — the Study Runs tab reads
+        # history back out of the caller's db_file.
+        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+        return {"state": state, "emitter": "sqlite"}
+    return {"state": state, "emitter": declared_kind}
+
+
 def invoke_v2ecoli_workflow(cfg_path, out_dir, ws_root, timeout_s):
     """Run ``v2ecoli-workflow`` once for a delegated ensemble (SP2a).
 
@@ -116,6 +149,14 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
     ``"steps"``.
     """
     from vivarium_workbench.lib import composite_runs as cr
+
+    # Emitter kind actually persisted for this run — recorded on runs_meta /
+    # the JSONL run log below. Only the legacy (non-generator) path resolves
+    # this synchronously here (Task 5); the generator path's emitter choice
+    # is resolved inside the child script (default_emitter / xarray / sqlite)
+    # and isn't known back in the parent process, so it stays unrecorded for
+    # now.
+    run_emitter_kind = None
 
     # Are we running a registered @composite_generator? If so, the child can
     # rebuild the composite in its own process from (spec_id, overrides) —
@@ -385,9 +426,15 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
         # Legacy path: serialize the pre-built state into a tempfile.
         # v2ecoli friction #14: parent-side injection works here because
         # the serialized state IS what the subprocess reconstructs.
-        if emit_paths:
-            state = cr.inject_emitter_for_paths(state, list(emit_paths))
-        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+        # Task 5: inject BOTH the live RAM emitter (for the Explorer's
+        # Results view) and, when the composite declares one, its default
+        # Parquet emitter for persistence — falling back to SQLite only
+        # when nothing is declared.
+        _res = inject_run_emitters(state, spec_id=spec_id, run_id=run_id,
+                                   emit_paths=emit_paths, workspace=ws_root,
+                                   db_file=db_file)
+        state = _res["state"]
+        run_emitter_kind = _res["emitter"]
         state = strip_process_instances(state)
         _state_fd, _state_path = _tempfile.mkstemp(suffix=".state.json", prefix="vivarium-run-")
         try:
@@ -459,7 +506,8 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
             cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
                              params=overrides, label=label,
                              started_at=time.time(), n_steps=steps,
-                             generation_id=_generation_id)
+                             generation_id=_generation_id,
+                             workspace=ws_root, emitter=run_emitter_kind)
             if sim_name is not None:
                 conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?",
                              (sim_name, run_id))
@@ -498,7 +546,8 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                         exc.process.communicate(timeout=2)
                 except Exception:
                     pass
-                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed",
+                                     workspace=ws_root)
                 return ({"simulation_id": run_id, "error": "run timed out"}, 504)
         finally:
             if _state_path is not None:
@@ -507,7 +556,8 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
 
         out = result.stdout
         if "@@@ERROR@@@" in out:
-            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed",
+                                 workspace=ws_root)
             tb = out.split("@@@ERROR@@@", 1)[1].strip()
             return ({"simulation_id": run_id, "error": "run failed",
                      "traceback": tb}, 502)
@@ -519,7 +569,8 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                 object_hook=bigraph_json_hook,
             )
         except (IndexError, json.JSONDecodeError):
-            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed",
+                                 workspace=ws_root)
             return ({"simulation_id": run_id,
                      "error": "could not parse run output",
                      "stdout": out, "stderr": result.stderr}, 502)
@@ -533,7 +584,8 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
             results = payload
             viz_html = {}
 
-        cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
+        cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed",
+                             workspace=ws_root)
         return ({"simulation_id": run_id, "results": results,
                  "viz_html": viz_html, "steps": steps}, 200)
     finally:

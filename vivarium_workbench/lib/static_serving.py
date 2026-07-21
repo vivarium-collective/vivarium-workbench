@@ -15,7 +15,7 @@ Resolution contract (mirrors the legacy ``do_GET`` static branch EXACTLY):
   ``assets/`` prefix-strip retry against ``STATIC_DIR`` → the workspace tree →
   the rendered ``reports/`` dir (served unconditionally, so the caller 404s when
   the returned path is not a file).
-* :func:`resolve_loom_asset` — ``bigraph_loom.asset_dir()/rel``, raising
+* :func:`resolve_loom_asset` — ``vivarium_workbench.loom_assets.asset_dir()/rel``, raising
   :class:`AssetTraversal` on a ``..`` segment (the route maps it to 403).
 * :func:`resolve_parsimony_asset` — the optional ``pbg_parsimony`` viewer dir
   (``None`` when the package is absent → the route 404s).
@@ -121,7 +121,7 @@ def resolve_loom_asset(rel: str) -> Path:
     rel = rel or "index.html"
     if ".." in rel.split("/"):
         raise AssetTraversal(rel)
-    from bigraph_loom import asset_dir
+    from vivarium_workbench.loom_assets import asset_dir
     return asset_dir() / rel
 
 

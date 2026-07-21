@@ -27,3 +27,9 @@ tests/_fixtures
 *.egg-info
 dist
 build
+
+# Vendored bigraph-loom (Task 8) build outputs — rebuilt in-image by
+# scripts/build_loom.sh; a host-built copy would bloat the context and could
+# be stale/platform-mismatched.
+vivarium_workbench/loom/node_modules
+vivarium_workbench/loom/_dist

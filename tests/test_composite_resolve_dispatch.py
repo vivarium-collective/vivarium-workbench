@@ -56,6 +56,59 @@ def test_resolve_static_via_find_path(tmp_path, monkeypatch):
     assert out["schema"] == {"v": "float"} and out["kind"] == "spec"
 
 
+def test_resolve_static_embeds_declared_emit_paths(tmp_path, monkeypatch):
+    """A composite that declares ``emitters: [{paths: [...]}]`` gets those
+    paths embedded INSIDE its served ``state`` as ``_declared_emit_paths`` —
+    the fix for the Task 6 review finding: ``install_default_emitters`` only
+    runs on the run-EXECUTION path, so the browse/view state a real
+    workspace serves (e.g. v2ecoli's ``baseline``, declaring
+    ``emitters=[{"paths": ["global_time", "bulk", "listeners"]}]``) never
+    carried an emitter node — loom's declared-paths helper silently fell
+    back to every top-level store. Embedding the paths directly in `state`
+    (not as a sibling of it) is required because every hop that forwards a
+    composite doc to loom forwards only the `state` sub-object."""
+    from vivarium_workbench.lib import composite_resolve as cr
+    from process_bigraph import composite_spec as cs
+    cs.clear_registry()
+    (tmp_path / "workspace.yaml").write_text("name: demo-ws\npackage_path: pbg_demo\n", encoding="utf-8")
+    comp = tmp_path / "pbg_demo" / "composites"
+    comp.mkdir(parents=True)
+    (comp / "baseline.composite.yaml").write_text(
+        "name: baseline\n"
+        "state:\n"
+        "  global_time: 0\n"
+        "  bulk: {}\n"
+        "  listeners: {}\n"
+        "emitters:\n"
+        "  - address: local:ParquetEmitter\n"
+        "    config: {}\n"
+        "    paths: [global_time, bulk, listeners]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cr, "_prime_registry", lambda: None)
+    out = cr.resolve_composite(tmp_path, "pbg_demo.composites.baseline")
+    assert out is not None and out["wiring_status"] == "ready"
+    assert out["state"]["_declared_emit_paths"] == ["global_time", "bulk", "listeners"]
+
+
+def test_declared_emit_paths_helper():
+    from vivarium_workbench.lib.composite_resolve import declared_emit_paths
+    assert declared_emit_paths(None) == []
+    assert declared_emit_paths([]) == []
+    assert declared_emit_paths([{"paths": ["global_time", "bulk", "listeners"]}]) == [
+        "global_time", "bulk", "listeners",
+    ]
+    # dotted paths normalize to '/'-joined, matching the client's emitSet convention.
+    assert declared_emit_paths([{"paths": ["listeners.mass"]}]) == ["listeners/mass"]
+    # dedup across multiple decls, order preserved.
+    assert declared_emit_paths([
+        {"paths": ["bulk", "global_time"]},
+        {"paths": ["global_time", "listeners"]},
+    ]) == ["bulk", "global_time", "listeners"]
+    # malformed entries are tolerated, not raised.
+    assert declared_emit_paths([{"paths": None}, "not-a-dict", {}]) == []
+
+
 def test_resolve_unregistered_returns_none(tmp_path, monkeypatch):
     from process_bigraph import composite_spec as cs
     from vivarium_workbench.lib import composite_resolve as cr

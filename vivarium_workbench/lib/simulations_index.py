@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import emitters
+from vivarium_workbench.lib import run_log
 from vivarium_workbench.lib import run_store
 from vivarium_workbench.lib.models import SimRow
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
@@ -963,15 +964,76 @@ def build_simulations_data(ws_root: Path) -> dict:
         sims = list_simulations(ws_root)
     except Exception:
         return {"simulations": [], "current": None}
+
+    # Shared emitter-kind -> display-label map, used by both the JSONL merge
+    # below and the sqlite/db_path fallback pass that follows it. Defined
+    # once here (rather than duplicated per-block) so there's a single place
+    # to add a kind's label -- e.g. "ram", needed by the JSONL branch.
+    _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
+                       "ram": "RAM", "none": "—"}  # no step emitter (summary-only run)
+
+    # Fold the workspace's append-only JSONL run log (Task 1/2) and merge it
+    # with the sqlite-gathered `sims` rows above. JSONL is the source of
+    # truth for a run_id's fields when present (it's written on every
+    # save/complete, including emitter-less/in-progress runs the sqlite
+    # gather can miss); legacy-sqlite-only rows pass through untouched.
+    try:
+        folded = run_log.fold_runs_jsonl(Path(ws_root))
+        by_id = {s.get("run_id"): s for s in sims}
+        for rid, rec in folded.items():
+            row = by_id.get(rid)
+            is_new_row = row is None
+            if is_new_row:
+                row = {"run_id": rid}
+                sims.append(row)
+                by_id[rid] = row
+            # JSONL is the source of truth for these fields when present.
+            for k in ("spec_id", "label", "status", "n_steps", "started_at",
+                      "completed_at", "study_slug", "investigation_slug"):
+                if rec.get(k) is not None:
+                    row[k] = rec[k]
+            if rec.get("emitter"):
+                row["emitter"] = rec["emitter"]
+                row["emitter_type"] = _emitter_label.get(rec["emitter"], rec["emitter"])
+            elif is_new_row:
+                # JSONL-only row with no emitter recorded -- don't let it
+                # fall through to the SQLite-classification pass below,
+                # which would default an unknown/empty emitter to "SQLite"
+                # via emitter_type_of(None).
+                row["emitter_type"] = "—"
+            # `origin` in the JSONL is a *kind* string ("local" for every run
+            # save_metadata logs). `remote_origin` is a RemoteOrigin mapping
+            # ({deployment, simulation_id, ...}) -- assigning the string here
+            # fails SimRow validation and 500s /api/simulations, and because
+            # the log is append-only a single run would brick the page for
+            # good. Only propagate a genuine remote mapping.
+            origin = rec.get("origin")
+            if isinstance(origin, dict) and origin:
+                row["remote_origin"] = origin
+    except Exception:
+        pass
+
     try:
         from vivarium_workbench.lib.runs_index import emitter_type_of
-        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
-                          "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
+            if s.get("emitter_type"):
+                continue  # already labeled by the JSONL merge above
             s["emitter_type"] = _emitter_label.get(
                 _emitter_tag(s.get("emitter"))) or emitter_type_of(s.get("db_path"))
     except Exception:
         pass
+
+    # Re-sort newest-first: the JSONL merge above appends any JSONL-only
+    # run_ids (e.g. a fresh Composite-Explorer parquet run recorded only in
+    # the run log) onto the END of `sims`, so without this they'd sink to
+    # the bottom of the newest-first table instead of surfacing at the top.
+    # Prefers completed_at over started_at (a completed run's "newest"
+    # instant is its completion), matching the existing sqlite-path sort key
+    # used by the frontend/backend elsewhere; missing timestamps sort last
+    # rather than raising.
+    sims.sort(key=lambda r: (r.get("completed_at") or r.get("started_at") or 0),
+              reverse=True)
+
     sims = _append_remote_simulations(sims, ws_root)
     from vivarium_workbench.lib.investigation_status import current_branch_slug
     return {"simulations": sims, "current": current_branch_slug(ws_root)}
