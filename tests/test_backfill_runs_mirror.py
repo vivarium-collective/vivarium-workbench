@@ -9,6 +9,7 @@ Uses the file-read approach (pbg_superpowers is not installed in the dashboard
 venv), extracting the function's source by scanning for `def <name>` blocks.
 """
 import re
+import pytest
 from pathlib import Path
 
 CANONICAL = Path(__file__).parent.parent.parent / "pbg-superpowers" / "pbg_superpowers" / "backfill_runs.py"
@@ -33,7 +34,11 @@ def _extract_functions(source: str) -> dict[str, str]:
 
 
 def test_vendored_backfill_runs_matches_canonical():
-    assert CANONICAL.is_file(), f"Canonical not found: {CANONICAL}"
+    if not CANONICAL.is_file():
+        pytest.skip(
+            f"canonical pbg-superpowers checkout not present at {CANONICAL} — "
+            "this drift guard only runs when the sibling repo is checked out "
+            "alongside (it is not, in CI)")
     assert VENDORED.is_file(), f"Vendored not found: {VENDORED}"
 
     canon_funcs = _extract_functions(CANONICAL.read_text(encoding="utf-8"))

@@ -1,0 +1,102 @@
+name: pytest
+
+# The full test suite as a PR gate.
+#
+# Until now CI ran `types.yml` only: mypy, import-linter, and FOUR named test
+# files out of 285. The other ~98% of the suite never ran on a PR, so it rotted
+# silently — switching it on surfaced 77 failures that predated any single
+# change, including a companion-library API drift that had been broken for
+# weeks and a feature that was inert in production.
+#
+# This gate runs everything except the tests listed in tests/known_failures.txt
+# (see that file: the list is documented, justified, and meant to shrink). A
+# second, non-blocking job runs exactly the quarantined set so that a test which
+# starts passing becomes visible instead of sitting on the list forever.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  suite:
+    # 4 shards x 4 cores each = ~16-way parallelism. Two levels, because each
+    # alone leaves time on the table: a single job caps at the runner's 4 cores
+    # (~6 min), while sharding without xdist wastes 3 of every 4 cores. Shards
+    # are duration-balanced via .test_durations — see scripts/pytest_gate.sh.
+    name: suite ${{ matrix.group }}/4
+    runs-on: ubuntu-latest
+    strategy:
+      # Run every shard even when one fails: a single red shard should still
+      # tell you about failures in the other three, or you fix them one round
+      # trip at a time.
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    timeout-minutes: 20
+    # Same interpreter pin as types.yml: the demo extra pulls v2ecoli, which is
+    # pinned ==3.12.12, so the lock resolves for that one environment.
+    env:
+      UV_PYTHON: "3.12.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (locked)
+        # --frozen: install straight from uv.lock without re-resolving, so the
+        # `demo` extra's editable path sources (../v2ecoli, ../pbg-ptools) — not
+        # checked out in CI — are never touched.
+        #
+        # `test` (polars/pyarrow/zarr) is REQUIRED here, unlike in types.yml:
+        # without it 11 tests fail rather than skip, because the parquet/zarr
+        # readers are missing entirely.
+        run: uv sync --frozen --extra dev --extra test
+      - name: pytest (shard ${{ matrix.group }}/4, quarantine deselected)
+        # Serial single-job was ~14 min, xdist-only ~6 min. Sharding divides the
+        # remaining test time by 4; the ~45s of checkout+sync is paid per shard
+        # but runs concurrently, so it does not add to wall time.
+        env:
+          PYTEST_SPLITS: "4"
+          PYTEST_GROUP: ${{ matrix.group }}
+        run: uv run --frozen bash scripts/pytest_gate.sh
+
+  suite-result:
+    # Single stable check for branch protection to require. Without this you'd
+    # have to require each `suite N/4` by name, and changing the shard count
+    # would silently un-require the ones that no longer exist — the gate would
+    # look configured while enforcing nothing.
+    name: suite
+    needs: suite
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check shard results
+        run: |
+          if [[ "${{ needs.suite.result }}" != "success" ]]; then
+            echo "::error::one or more test shards failed (${{ needs.suite.result }})"
+            exit 1
+          fi
+          echo "all shards passed"
+
+  quarantined:
+    name: quarantine watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Reports on the known-failing set. Deliberately GREEN when they all still
+    # fail, because a check that is red on every PR by design teaches everyone
+    # to ignore red — which would defeat the gate above. It surfaces the
+    # actionable case instead: a quarantined test that starts PASSING, and can
+    # therefore be deleted from tests/known_failures.txt. Details land in the
+    # job summary.
+    env:
+      UV_PYTHON: "3.12.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (locked)
+        run: uv sync --frozen --extra dev --extra test
+      - name: pytest (quarantined only)
+        run: uv run --frozen bash scripts/pytest_gate.sh --only-known

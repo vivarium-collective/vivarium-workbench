@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import register_generator
+
 from vivarium_workbench.lib import composite_subprocess as cs
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import _root
@@ -87,7 +89,7 @@ def _make_ws(tmp_path, runtime=None):
 def _gen_spec(monkeypatch, spec_id="gen-spec"):
     """Force the generator path: spec_id present in the registry."""
     monkeypatch.setattr(cg, "discover_generators", lambda: None)
-    monkeypatch.setitem(cg._REGISTRY, spec_id, object())
+    register_generator(spec_id)
     return spec_id
 
 
@@ -95,7 +97,7 @@ def _nongen_spec(monkeypatch, spec_id="nongen-spec-xyz"):
     """Force the legacy state-serialization path: spec_id absent, registry
     non-empty so ``discover_generators`` is not invoked."""
     monkeypatch.setattr(cg, "discover_generators", lambda: None)
-    monkeypatch.setitem(cg._REGISTRY, "_dummy_keep_registry_truthy", object())
+    register_generator("_dummy_keep_registry_truthy")
     assert spec_id not in cg._REGISTRY
     return spec_id
 
