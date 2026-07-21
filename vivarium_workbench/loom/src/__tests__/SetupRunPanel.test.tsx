@@ -99,24 +99,37 @@ describe('SetupRunPanel', () => {
   });
 });
 
-// Map/dict/object params are edited as JSON text and MUST cast back to an
-// object — a bare string reaches generators like baseline's
-// `config_overrides.items()` and crashes with "'str' object has no attribute
-// 'items'". These lock the fix.
-describe('map/object param casting', () => {
-  const mapDef = { type: 'map' as const, default: {}, description: '' };
+// Composites emit type names ('integer','boolean','list','map') that differ
+// from the code's older spellings ('int','bool','list[string]'). A mismatch
+// sends the raw String() of the field to the backend — seed="0" crashed
+// RandomState, config_overrides="[object Object]" crashed .items(). These lock
+// the type-name normalization + the map JSON round-trip.
+describe('param casting (type-name normalization + crash fix)', () => {
+  const mk = (type: string, def: unknown) => ({ type, default: def, description: '' } as any);
 
-  it('_initialValue serializes an object to JSON, never "[object Object]"', () => {
-    expect(_initialValue({ type: 'map' as const, default: { a: 1 }, description: '' }, undefined))
-      .toBe('{"a":1}');
-    expect(_initialValue(mapDef, undefined)).toBe('{}');   // empty map default
-    expect(String(_initialValue(mapDef, { b: 2 }))).not.toContain('[object Object]');
+  it('integer / boolean / list cast correctly under the composite type names', () => {
+    expect(_castFormValue(mk('integer', 0), '0')).toBe(0);         // was crashing as "0"
+    expect(_castFormValue(mk('integer', 0), '42')).toBe(42);
+    expect(_castFormValue(mk('boolean', false), 'false')).toBe(false);
+    expect(_castFormValue(mk('boolean', false), 'true')).toBe(true);
+    expect(_castFormValue(mk('boolean', false), false)).toBe(false);
+    expect(_castFormValue(mk('list', []), 'a\nb')).toEqual(['a', 'b']);
   });
 
-  it('_castFormValue turns map text back into an object (never a bare string)', () => {
-    expect(_castFormValue(mapDef, '')).toEqual({});                 // empty → {}
-    expect(_castFormValue(mapDef, '[object Object]')).toEqual({});  // legacy coercion → {}
+  it('_initialValue seeds fields for the composite type names', () => {
+    expect(_initialValue(mk('integer', 0), undefined)).toBe('0');
+    expect(_initialValue(mk('boolean', false), undefined)).toBe(false);
+    expect(_initialValue(mk('list', ['x', 'y']), undefined)).toBe('x\ny');
+  });
+
+  it('map params serialize/parse as JSON, never "[object Object]"', () => {
+    const mapDef = mk('map', {});
+    expect(_initialValue(mk('map', { a: 1 }), undefined)).toBe('{"a":1}');
+    expect(_initialValue(mapDef, undefined)).toBe('{}');
+    expect(String(_initialValue(mapDef, { b: 2 }))).not.toContain('[object Object]');
+    expect(_castFormValue(mapDef, '')).toEqual({});
+    expect(_castFormValue(mapDef, '[object Object]')).toEqual({});
     expect(_castFormValue(mapDef, '{"x":[1,2]}')).toEqual({ x: [1, 2] });
-    expect(_castFormValue(mapDef, 'not json')).toEqual({});         // lenient fallback
+    expect(_castFormValue(mapDef, 'not json')).toEqual({});
   });
 });

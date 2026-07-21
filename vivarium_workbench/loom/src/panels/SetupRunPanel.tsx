@@ -25,51 +25,68 @@ import { parseListString, formatListString } from '../parsers';
 
 type FormValue = string | number | boolean;
 
-// Map/dict/object params are edited as JSON text in the form. They must
-// round-trip through the field as JSON (not the "[object Object]" that
-// String(obj) yields) and cast back to an object — otherwise a generator that
-// iterates them (e.g. baseline's `config_overrides.items()`) receives a string
-// and crashes.
-const _OBJECT_TYPES = new Set(['map', 'dict', 'object', 'json']);
-function _isObjectType(t: string): boolean { return _OBJECT_TYPES.has(t); }
+// Parameter declarations from different sources spell the same type several
+// ways: composites emit 'integer' / 'boolean' / 'list' / 'map', while some
+// tooling uses 'int' / 'bool' / 'list[string]'. Normalize to a canonical kind
+// so casting, seeding, and rendering all agree — a mismatch here sends the raw
+// String() of the field to the backend (e.g. seed="0" → RandomState crash,
+// config_overrides="[object Object]" → .items() crash).
+type ParamKind = 'int' | 'float' | 'bool' | 'list' | 'map' | 'string';
+function _normType(t: string): ParamKind {
+  switch (t) {
+    case 'int': case 'integer': return 'int';
+    case 'float': case 'number': case 'double': return 'float';
+    case 'bool': case 'boolean': return 'bool';
+    case 'list': case 'list[string]': case 'array': return 'list';
+    case 'map': case 'dict': case 'object': case 'json': return 'map';
+    default: return 'string';
+  }
+}
 
 function _initialValue(pdef: ParameterDecl, override: unknown): FormValue {
   const seed = override !== undefined ? override : pdef.default;
-  if (pdef.type === 'list[string]') {
-    return formatListString(Array.isArray(seed) ? (seed as string[]) : []);
+  switch (_normType(pdef.type)) {
+    case 'list':
+      return formatListString(Array.isArray(seed) ? (seed as string[]) : []);
+    case 'bool':
+      return Boolean(seed);
+    case 'int':
+    case 'float':
+      return seed == null ? '' : String(seed);
+    case 'map':
+      // JSON text, not "[object Object]".
+      if (seed == null || seed === '') return '';
+      if (typeof seed === 'string') return seed;    // already-serialized override
+      try { return JSON.stringify(seed); } catch { return ''; }
+    default:
+      return seed == null ? '' : String(seed);
   }
-  if (pdef.type === 'bool') return Boolean(seed);
-  if (pdef.type === 'int' || pdef.type === 'float') {
-    return seed == null ? '' : String(seed);
-  }
-  if (_isObjectType(pdef.type)) {
-    if (seed == null || seed === '') return '';
-    if (typeof seed === 'string') return seed;      // already-serialized override
-    try { return JSON.stringify(seed); } catch { return ''; }
-  }
-  return seed == null ? '' : String(seed);
 }
 
 function _castFormValue(pdef: ParameterDecl, raw: FormValue): unknown {
-  if (pdef.type === 'list[string]') return parseListString(String(raw));
-  if (pdef.type === 'bool') return Boolean(raw);
-  if (pdef.type === 'int') {
-    const n = parseInt(String(raw), 10);
-    return Number.isNaN(n) ? null : n;
+  switch (_normType(pdef.type)) {
+    case 'list':
+      return parseListString(String(raw));
+    case 'bool':
+      return typeof raw === 'boolean' ? raw : String(raw) === 'true';
+    case 'int': {
+      const n = parseInt(String(raw), 10);
+      return Number.isNaN(n) ? null : n;
+    }
+    case 'float': {
+      const n = parseFloat(String(raw));
+      return Number.isNaN(n) ? null : n;
+    }
+    case 'map': {
+      // Empty or the legacy "[object Object]" coercion → empty map so iterating
+      // generators don't crash; non-empty text is parsed as JSON (lenient).
+      const s = String(raw).trim();
+      if (s === '' || s === '[object Object]') return {};
+      try { return JSON.parse(s); } catch { return {}; }
+    }
+    default:
+      return String(raw);
   }
-  if (pdef.type === 'float') {
-    const n = parseFloat(String(raw));
-    return Number.isNaN(n) ? null : n;
-  }
-  if (_isObjectType(pdef.type)) {
-    // Empty or the legacy "[object Object]" coercion → empty map, so iterating
-    // generators don't crash. Non-empty text is parsed as JSON (lenient: an
-    // unparseable value falls back to {} rather than failing the run).
-    const s = String(raw).trim();
-    if (s === '' || s === '[object Object]') return {};
-    try { return JSON.parse(s); } catch { return {}; }
-  }
-  return String(raw);
 }
 
 // Export helpers so tests can import them independently.
@@ -327,7 +344,7 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
-                  ) : pdef.type === 'list[string]' ? (
+                  ) : _normType(pdef.type) === 'list' ? (
                     <textarea
                       id={id}
                       rows={Math.max(3, String(val).split('\n').length + 1)}
@@ -336,7 +353,7 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                       className="sr-input"
                       placeholder="one item per line"
                     />
-                  ) : pdef.type === 'bool' ? (
+                  ) : _normType(pdef.type) === 'bool' ? (
                     <select
                       id={id}
                       value={String(val)}
@@ -349,8 +366,8 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                   ) : (
                     <input
                       id={id}
-                      type={pdef.type === 'int' || pdef.type === 'float' ? 'number' : 'text'}
-                      step={pdef.type === 'float' ? 'any' : pdef.type === 'int' ? '1' : undefined}
+                      type={_normType(pdef.type) === 'int' || _normType(pdef.type) === 'float' ? 'number' : 'text'}
+                      step={_normType(pdef.type) === 'float' ? 'any' : _normType(pdef.type) === 'int' ? '1' : undefined}
                       value={String(val)}
                       onChange={(e) => onChange(e.target.value)}
                       className="sr-input"
