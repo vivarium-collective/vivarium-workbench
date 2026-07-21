@@ -28,4 +28,4 @@ todo.md
 .perspective.md
 .claude/*
 */node_modules/*
-.todo/
+.todo/plans/_prompts.md
