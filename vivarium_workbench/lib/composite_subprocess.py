@@ -66,7 +66,7 @@ def strip_process_instances(state):
 
 
 def inject_run_emitters(state: dict, *, spec_id: str, run_id: str,
-                        emit_paths: list[str] | None, workspace) -> dict:
+                        emit_paths: list[str] | None, workspace, db_file) -> dict:
     """Inject the live RAM emitter (from the UI's explicit-path selection)
     AND, when the composite declares one, its default Parquet emitter for
     persistence.
@@ -89,9 +89,11 @@ def inject_run_emitters(state: dict, *, spec_id: str, run_id: str,
     state, declared_kind = cr.inject_declared_emitter(
         state, spec_id=spec_id, run_id=run_id, out_dir=out_dir)
     if declared_kind is None:
-        # Legacy path: no declared emitter — persist via SQLite as before.
-        db = Path(workspace) / ".pbg" / "composite-runs.db"
-        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db)
+        # Legacy path: no declared emitter — persist via SQLite as before,
+        # using the caller's db_file (e.g. <study_dir>/runs.db), NOT a
+        # fresh workspace-scratchpad path — the Study Runs tab reads
+        # history back out of the caller's db_file.
+        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
         return {"state": state, "emitter": "sqlite"}
     return {"state": state, "emitter": declared_kind}
 
@@ -429,7 +431,8 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
         # Parquet emitter for persistence — falling back to SQLite only
         # when nothing is declared.
         _res = inject_run_emitters(state, spec_id=spec_id, run_id=run_id,
-                                   emit_paths=emit_paths, workspace=ws_root)
+                                   emit_paths=emit_paths, workspace=ws_root,
+                                   db_file=db_file)
         state = _res["state"]
         run_emitter_kind = _res["emitter"]
         state = strip_process_instances(state)
