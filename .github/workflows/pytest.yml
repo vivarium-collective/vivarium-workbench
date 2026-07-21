@@ -20,9 +20,20 @@ on:
 
 jobs:
   suite:
-    name: full suite (minus quarantine)
+    # 4 shards x 4 cores each = ~16-way parallelism. Two levels, because each
+    # alone leaves time on the table: a single job caps at the runner's 4 cores
+    # (~6 min), while sharding without xdist wastes 3 of every 4 cores. Shards
+    # are duration-balanced via .test_durations — see scripts/pytest_gate.sh.
+    name: suite ${{ matrix.group }}/4
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    strategy:
+      # Run every shard even when one fails: a single red shard should still
+      # tell you about failures in the other three, or you fix them one round
+      # trip at a time.
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    timeout-minutes: 20
     # Same interpreter pin as types.yml: the demo extra pulls v2ecoli, which is
     # pinned ==3.12.12, so the lock resolves for that one environment.
     env:
@@ -41,13 +52,32 @@ jobs:
         # without it 11 tests fail rather than skip, because the parquet/zarr
         # readers are missing entirely.
         run: uv sync --frozen --extra dev --extra test
-      - name: pytest (full suite, quarantine deselected)
-        # Runs on pytest-xdist `-n auto` (see scripts/pytest_gate.sh). Serial
-        # was ~14 min here, which is too much friction per PR. Locally the same
-        # gate goes 8m33s serial -> 2m52s at -n 4 -> 1m31s at -n 16, with
-        # identical results (3236 passed) at every level; runners have 4 cores,
-        # so expect roughly a third of the serial time.
+      - name: pytest (shard ${{ matrix.group }}/4, quarantine deselected)
+        # Serial single-job was ~14 min, xdist-only ~6 min. Sharding divides the
+        # remaining test time by 4; the ~45s of checkout+sync is paid per shard
+        # but runs concurrently, so it does not add to wall time.
+        env:
+          PYTEST_SPLITS: "4"
+          PYTEST_GROUP: ${{ matrix.group }}
         run: uv run --frozen bash scripts/pytest_gate.sh
+
+  suite-result:
+    # Single stable check for branch protection to require. Without this you'd
+    # have to require each `suite N/4` by name, and changing the shard count
+    # would silently un-require the ones that no longer exist — the gate would
+    # look configured while enforcing nothing.
+    name: suite
+    needs: suite
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check shard results
+        run: |
+          if [[ "${{ needs.suite.result }}" != "success" ]]; then
+            echo "::error::one or more test shards failed (${{ needs.suite.result }})"
+            exit 1
+          fi
+          echo "all shards passed"
 
   quarantined:
     name: quarantine watch

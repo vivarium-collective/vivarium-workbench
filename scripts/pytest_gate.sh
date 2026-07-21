@@ -68,10 +68,37 @@ for id in "${ids[@]}"; do args+=(--deselect "$id"); done
 # (3236 passed both ways). Set PYTEST_WORKERS=0 to force serial when debugging;
 # xdist interleaves output and hides `-x` ordering, which makes a single failure
 # harder to read.
+# Optional SHARDING across CI jobs (pytest-split), on top of the per-job core
+# parallelism above. PYTEST_SPLITS=4 PYTEST_GROUP=2 runs the 2nd quarter.
+#
+# Splitting is DURATION-BALANCED off .test_durations, not test-count-balanced:
+# with count-based splitting one shard can inherit most of the slow tests and
+# set the wall time on its own, which wastes the other three runners. Tests
+# missing from .test_durations are assigned the average, so the file going
+# slightly stale degrades balance rather than correctness.
+splits="${PYTEST_SPLITS:-}"
+group="${PYTEST_GROUP:-}"
+if [[ -n "$splits" && -n "$group" ]]; then
+  args+=(--splits "$splits" --group "$group")
+  if [[ -f "${repo_root}/.test_durations" ]]; then
+    args+=(--durations-path "${repo_root}/.test_durations" --splitting-algorithm least_duration)
+  else
+    echo "WARNING: no .test_durations — shards will be balanced by test COUNT," >&2
+    echo "         which can leave one shard much slower than the others." >&2
+    echo "         Regenerate with: scripts/pytest_gate.sh --store-durations" >&2
+  fi
+  echo "shard ${group}/${splits}"
+fi
+
+if [[ "${1:-}" == "--store-durations" ]]; then
+  echo "recording per-test durations -> .test_durations (serial, for accuracy)"
+  exec python -m pytest -q --store-durations --clean-durations "${args[@]}"
+fi
+
 workers="${PYTEST_WORKERS:-auto}"
 if [[ "$workers" == "0" || "$workers" == "1" ]]; then
   echo "running full suite SERIALLY, excluding ${#ids[@]} quarantined test(s)"
   exec python -m pytest -q "${args[@]}"
 fi
-echo "running full suite on ${workers} workers, excluding ${#ids[@]} quarantined test(s)"
+echo "running on ${workers} workers, excluding ${#ids[@]} quarantined test(s)"
 exec python -m pytest -q -n "$workers" "${args[@]}"
