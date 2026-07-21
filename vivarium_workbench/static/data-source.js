@@ -33,6 +33,19 @@
     return cfg().basePath || "";
   }
 
+  // Prefix a root-absolute app path (e.g. "/api/composite-test-run") with the
+  // configured base path in BOTH live and snapshot mode. Under the co-tenant ALB
+  // the workbench is served at /workbench, so an un-prefixed "/api/…" misroutes to
+  // sms-api → 404. Composite-explore run/resolve calls route through this so they
+  // reach the workbench. Composes safely with the global _base_path_shim (which
+  // skips a URL already starting with the base path), so no double-prefix.
+  function apiUrl(path) {
+    var bp = _base();
+    if (!bp || typeof path !== "string" || path.charAt(0) !== "/") return path;
+    if (path.indexOf(bp + "/") === 0 || path === bp) return path;
+    return bp + path;
+  }
+
   async function _get(url) {
     // GitHub Pages / Fastly returns 429 (occasionally 503) under per-IP rate
     // limiting when the hosted snapshot fires its burst of parallel /api/*.json
@@ -168,6 +181,9 @@
 
     /** Return the configured base path ("" in local mode). */
     basePath: _base,
+
+    /** Prefix a root-absolute "/api/…" path with the base path (live + snapshot). */
+    apiUrl: apiUrl,
 
     /**
      * Return the URL for the saved-visualizations payload (Analyses gallery).

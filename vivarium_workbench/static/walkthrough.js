@@ -2,6 +2,14 @@
 (function () {
   "use strict";
 
+  // Prefix a root-absolute /api path with the dashboard base path (e.g. /workbench)
+  // so composite-explore run/resolve/status calls reach the workbench under the
+  // co-tenant ALB instead of misrouting to sms-api → 404. No-op at root; composes
+  // safely with the global _base_path_shim (which skips already-prefixed URLs).
+  function _api(p) {
+    return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p;
+  }
+
   // Module-level so EVERY render function can call it. It was previously only
   // defined nested inside the investigation-report builder, but called from
   // sibling scopes (tick / study-card / v4 renderers) — which threw
@@ -3930,7 +3938,7 @@
     if (window._ceHistoryFetching) return;
     window._ceHistoryFetching = true;
     var id = window._ceCurrent.id;
-    fetch('/api/composite-runs?spec_id=' + encodeURIComponent(id))
+    fetch(_api('/api/composite-runs?spec_id=' + encodeURIComponent(id)))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         var runs = data.runs || [];
@@ -4017,7 +4025,7 @@
     var body = document.getElementById('ce-compare-body');
     body.innerHTML = '<p class="empty-state">Loading&hellip;</p>';
     Promise.all(ids.map(function(id) {
-      return fetch('/api/composite-run/' + encodeURIComponent(id))
+      return fetch(_api('/api/composite-run/' + encodeURIComponent(id)))
         .then(function(r) { return r.json(); });
     })).then(function(results) {
       var runs = ids.map(function(id, i) {
@@ -4104,7 +4112,7 @@
       _ceShowState(run_id, step, cached);
       return;
     }
-    fetch('/api/composite-run/' + encodeURIComponent(run_id))
+    fetch(_api('/api/composite-run/' + encodeURIComponent(run_id)))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         var trajectory = data.trajectory || [];
@@ -4252,8 +4260,8 @@
       p = window.DataSource.loadCompositeResolve(id);
     } else {
       // Live mode: fetch resolve endpoint with overrides.
-      var url = '/api/composite-resolve?id=' + encodeURIComponent(id) +
-        '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
+      var url = _api('/api/composite-resolve?id=' + encodeURIComponent(id) +
+        '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides)));
       // Parse defensively: an unguarded r.json() on a non-2xx / non-JSON
       // response throws "SyntaxError: The string did not match the expected
       // pattern" (Safari) → a useless "Network error". Unregistered refs 404;
@@ -4343,6 +4351,9 @@
         );
         // Render parameter editor
         _ceRenderParameters(data.parameters);
+        // Characterization: fold in emitted observables + measured wall-time so
+        // the Composites tab tells you what this composite emits and costs.
+        if (typeof _ceLoadCharacterization === 'function') _ceLoadCharacterization(data.id);
         // Render state JSON (Document tab now lives inside the iframe — this
         // outer #ce-state-json element was removed when the outer tab strip
         // was retired. Null-guard for resilience if it's ever reintroduced.)
@@ -4358,11 +4369,96 @@
       });
   }
 
+  // Characterization surfacing (Phase 3): fold a composite's emitted observables
+  // (GET /api/observables) + measured wall-time (last completed run's runs_meta
+  // timing, keyed by current param-signature) into the Composites-tab view. Both
+  // reuse existing endpoints — no new backend. Degrades quietly in snapshot mode.
+  function _ceLoadCharacterization(id) {
+    var outEl = document.getElementById('ce-outputs');
+    var wtEl = document.getElementById('ce-walltime');
+    if (document.body.classList.contains('snapshot')) {
+      if (outEl) outEl.textContent = 'Available on a live dashboard.';
+      if (wtEl) wtEl.textContent = 'unavailable in read-only view';
+      return;
+    }
+    // --- Outputs / observables ---
+    if (outEl) {
+      outEl.textContent = 'Loading…';
+      fetch(_api('/api/observables?ref=' + encodeURIComponent(id)))
+        .then(function(r) { return r.text().then(function(t) {
+          var d = null; try { d = t ? JSON.parse(t) : null; } catch (e) { d = null; }
+          return { ok: r.ok, status: r.status, d: d };
+        }); })
+        .then(function(res) {
+          if (!res.ok || !res.d) {
+            outEl.textContent = (res.d && res.d.error) ? res.d.error : 'No observables reported.';
+            return;
+          }
+          var leaves = res.d.leaves || [];
+          var catalogs = res.d.catalogs || {};
+          var catKeys = Object.keys(catalogs);
+          if (!leaves.length && !catKeys.length) {
+            outEl.textContent = 'This composite emits no observables.';
+            return;
+          }
+          var html = '';
+          if (leaves.length) {
+            html += '<div><em>' + leaves.length + ' leaf observable' +
+              (leaves.length === 1 ? '' : 's') + '</em>: ' +
+              leaves.slice(0, 40).map(function(x) { return '<code>' + _esc(x) + '</code>'; }).join(', ') +
+              (leaves.length > 40 ? ' …' : '') + '</div>';
+          }
+          if (catKeys.length) {
+            html += '<div style="margin-top:4px"><em>' + catKeys.length + ' catalog' +
+              (catKeys.length === 1 ? '' : 's') + '</em>: ' +
+              catKeys.slice(0, 20).map(function(k) {
+                var n = (catalogs[k] || []).length;
+                return '<code>' + _esc(k) + '</code> (' + n + ')';
+              }).join(', ') + '</div>';
+          }
+          outEl.innerHTML = html;
+        })
+        .catch(function() { outEl.textContent = 'Could not load observables.'; });
+    }
+    // --- Measured wall-time (last completed run matching current params) ---
+    if (wtEl) {
+      var curParams = JSON.stringify((window._ceCurrent && window._ceCurrent.overrides) || {});
+      fetch(_api('/api/composite-runs?spec_id=' + encodeURIComponent(id)))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var runs = (data && data.runs) || [];
+          var match = null;
+          for (var i = 0; i < runs.length; i++) {
+            var rr = runs[i];
+            if (rr.status !== 'completed' || rr.completed_at == null || rr.started_at == null) continue;
+            // Prefer a param-signature match; fall back to the most recent completed run.
+            if (JSON.stringify(rr.params || {}) === curParams) { match = rr; break; }
+            if (!match) match = rr;
+          }
+          if (!match) { wtEl.textContent = 'unknown (no completed run yet)'; return; }
+          var secs = Math.max(0, match.completed_at - match.started_at);
+          var exact = JSON.stringify(match.params || {}) === curParams;
+          wtEl.textContent = _ceFmtDuration(secs) +
+            ' (' + (match.n_steps != null ? match.n_steps + ' steps' : 'last run') +
+            (exact ? ', these params' : ', other params') + ')';
+        })
+        .catch(function() { wtEl.textContent = 'unknown'; });
+    }
+  }
+  window._ceLoadCharacterization = _ceLoadCharacterization;
+
+  function _ceFmtDuration(secs) {
+    if (secs < 1) return (secs * 1000).toFixed(0) + ' ms';
+    if (secs < 60) return secs.toFixed(1) + ' s';
+    var m = Math.floor(secs / 60), s = Math.round(secs % 60);
+    return m + ' min ' + s + ' s';
+  }
+
   function _legacyLoadCompositeSvg(ref) {
     var el = document.getElementById('composite-explore-svg-legacy');
     if (!el) return;
     el.innerHTML = '<p style="color:#888">Loading SVG…</p>';
-    fetch('/api/composite-resolve?id=' + encodeURIComponent(ref))
+    fetch(_api('/api/composite-resolve?id=' + encodeURIComponent(ref)))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.svg) {
@@ -4530,7 +4626,7 @@
     var overrides = _ceCollectOverrides();
     var resultsEl = document.getElementById('ce-test-results');
     resultsEl.innerHTML = '<p class="empty-state">Starting run&hellip;</p>';
-    fetch('/api/composite-test-run', {
+    fetch(_api('/api/composite-test-run'), {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -15091,12 +15187,12 @@
 
     function tick() {
       Promise.all([
-        fetch('/api/composite-run/' + encodeURIComponent(run_id) + '/status')
+        fetch(_api('/api/composite-run/' + encodeURIComponent(run_id) + '/status'))
           .then(function(r) {
             if (r.status === 404) return { _gone: true };
             return r.json();
           }),
-        fetch('/api/composite-run/' + encodeURIComponent(run_id))
+        fetch(_api('/api/composite-run/' + encodeURIComponent(run_id)))
           .then(function(r) { return r.ok ? r.json() : { trajectory: [] }; })
           .catch(function() { return { trajectory: [] }; }),
       ]).then(function(parts) {
