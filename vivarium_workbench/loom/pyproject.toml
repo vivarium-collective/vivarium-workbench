@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bigraph-loom"
+version = "0.1.0"
+description = "Read-only React Flow viewer for process-bigraph composites, packaged as a static bundle for host apps to serve."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Vivarium Collective" }]
+keywords = ["process-bigraph", "bigraph", "visualization", "react-flow"]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/vivarium-collective/bigraph-loom"
+
+[tool.hatch.build.targets.wheel]
+# The importable Python package. Its `_dist/` subdir (the Vite build output)
+# is shipped as package data so `asset_dir()` resolves at runtime.
+packages = ["bigraph_loom"]
+# Note: `bigraph_loom/_dist` (the Vite build output) is committed to git and lives
+# inside the package dir, so `packages` already ships it. A force-include here would
+# add every file a second time and hatchling errors on the duplicate wheel entry.
+
+[tool.hatch.build.targets.sdist]
+# Source distributions ship the JS source too, so the bundle can be rebuilt.
+include = [
+    "bigraph_loom",
+    "src",
+    "index.html",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
+    "tsconfig.node.json",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "README.md",
+]

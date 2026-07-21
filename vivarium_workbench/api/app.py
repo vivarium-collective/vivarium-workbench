@@ -2655,7 +2655,7 @@ def create_app() -> FastAPI:
         include_in_schema=False,
     )
     def bigraph_loom_asset(request: Request, rel: str = "") -> Response:
-        """Serve a ``bigraph-loom`` viewer asset from ``bigraph_loom.asset_dir()``.
+        """Serve a ``bigraph-loom`` viewer asset from ``vivarium_workbench.loom_assets.asset_dir()``.
 
         ``rel`` empty → ``index.html``.  HTTP 403 (empty body) on a ``..`` path
         segment (traversal guard); 404 when the file is absent.  Served with the

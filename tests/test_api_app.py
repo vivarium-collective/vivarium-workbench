@@ -3201,7 +3201,7 @@ class TestStaticRoutes:
         loom_dir = tmp_path / "loom"
         loom_dir.mkdir()
         (loom_dir / "index.html").write_text("<loom/>")
-        monkeypatch.setattr("bigraph_loom.asset_dir", lambda: loom_dir, raising=False)
+        monkeypatch.setattr("vivarium_workbench.loom_assets.asset_dir", lambda: loom_dir, raising=False)
         r = client.get("/bigraph-loom/")
         assert r.status_code == 200
         assert r.headers["content-type"] == "text/html"

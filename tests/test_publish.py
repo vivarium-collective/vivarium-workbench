@@ -185,7 +185,7 @@ def test_bundle_shell_asset_urls_resolve(tmp_workspace, tmp_path):
 
 def test_bundle_exports_composite_state_and_loom(tmp_workspace, tmp_path):
     """build_bundle writes api/composite-state/<id>.json for each composite and
-    copies bigraph-loom dist to bundle/bigraph-loom/ (when bigraph_loom installed)."""
+    copies bigraph-loom dist to bundle/bigraph-loom/ (when the vendored bundle is built)."""
     from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
@@ -197,13 +197,11 @@ def test_bundle_exports_composite_state_and_loom(tmp_workspace, tmp_path):
         assert (out / "api" / "composite-state" / f"{cid}.json").is_file(), \
             f"api/composite-state/{cid}.json missing"
 
-    # bigraph-loom dist is optional — skipped when bigraph_loom is not installed
-    try:
-        import bigraph_loom  # noqa: F401
+    # bigraph-loom dist is optional — skipped when the vendored bundle isn't built
+    from vivarium_workbench.loom_assets import asset_dir as _loom_asset_dir
+    if _loom_asset_dir().is_dir():
         assert (out / "bigraph-loom" / "index.html").is_file(), \
             "bundle/bigraph-loom/index.html missing"
-    except ImportError:
-        pass  # package not installed in this venv; loom dist skip is expected
 
 
 def test_bundle_survives_nonfinite_composite_state(tmp_workspace, tmp_path, monkeypatch):
