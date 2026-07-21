@@ -14760,6 +14760,49 @@
     );
   }
 
+  // Client-side column sort for the Simulations DB table. Purely a rendering
+  // concern on top of the server-ordered (newest-first) _simRows — clicking a
+  // sortable <th> toggles asc/desc and re-runs _applySimFilter, which applies
+  // _sortSimRows to the filtered rows before rendering.
+  let _simSortState = { key: null, dir: 'desc' };
+
+  function _simSortValue(row, key) {
+    if (key === 'time') return row.completed_at || row.started_at || 0;
+    if (key === 'emitter_type') return (row.emitter_type || '').toLowerCase();
+    if (key === 'origin') return (row.remote_origin || 'local').toLowerCase();
+    if (key === 'study') return (row.study_slug || '').toLowerCase();
+    if (key === 'investigation') return (row.investigation_slug || '').toLowerCase();
+    if (key === 'run') return (row.label || row.run_id || '').toLowerCase();
+    if (key === 'status') return (row.status || '').toLowerCase();
+    return '';
+  }
+
+  function _sortSimRows(rows, key, dir) {
+    if (!key) return rows;
+    const s = rows.slice().sort(function (a, b) {
+      var va = _simSortValue(a, key), vb = _simSortValue(b, key);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return dir === 'desc' ? s.reverse() : s;
+  }
+
+  function _onSimHeaderClick(th) {
+    var key = th.getAttribute('data-sort-key');
+    if (!key) return;
+    if (_simSortState.key === key) {
+      _simSortState.dir = _simSortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      _simSortState = { key: key, dir: 'asc' };
+    }
+    document.querySelectorAll('#page-simulations th[data-sort-key]')
+      .forEach(function (h) { h.removeAttribute('data-sort-dir'); });
+    th.setAttribute('data-sort-dir', _simSortState.dir);   // CSS ::after renders ▲/▼
+    _applySimFilter();
+  }
+  window._onSimHeaderClick = _onSimHeaderClick;
+
   // Populate the Study + Emitter dropdowns from the data (preserving any
   // current selection), then render rows through the active filters.
   function _applySimFilter() {
@@ -14778,6 +14821,8 @@
       if (emitterVal && (r.emitter_type || 'SQLite') !== emitterVal) return false;
       return true;
     });
+
+    visible = _sortSimRows(visible, _simSortState.key, _simSortState.dir);
 
     var tbody = document.getElementById('sim-tbody');
     var table = document.getElementById('sim-table');

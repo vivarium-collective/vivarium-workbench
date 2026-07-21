@@ -85,13 +85,13 @@ def test_resolve_asset_reports_fallback(tmp_path, monkeypatch):
 
 def test_resolve_loom_asset_default_index(monkeypatch):
     fake_dir = Path("/tmp/loom-assets")
-    monkeypatch.setattr("bigraph_loom.asset_dir", lambda: fake_dir, raising=False)
+    monkeypatch.setattr("vivarium_workbench.loom_assets.asset_dir", lambda: fake_dir, raising=False)
     assert ss.resolve_loom_asset("") == fake_dir / "index.html"
     assert ss.resolve_loom_asset("sub/app.js") == fake_dir / "sub/app.js"
 
 
 def test_resolve_loom_asset_traversal_rejected(monkeypatch):
-    monkeypatch.setattr("bigraph_loom.asset_dir", lambda: Path("/tmp/x"), raising=False)
+    monkeypatch.setattr("vivarium_workbench.loom_assets.asset_dir", lambda: Path("/tmp/x"), raising=False)
     with pytest.raises(ss.AssetTraversal):
         ss.resolve_loom_asset("../secret")
 

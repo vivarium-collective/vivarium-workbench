@@ -14,6 +14,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from vivarium_workbench.lib import run_log
+
 
 _SCHEMA_RUNS_META = """
 CREATE TABLE IF NOT EXISTS runs_meta (
@@ -115,19 +117,12 @@ def generate_run_id(spec_id: str, params: dict | None = None,
     return f"{spec_id}__{ts}__{short}"
 
 
-def save_metadata(conn: sqlite3.Connection, *, spec_id: str, run_id: str,
-                  params: dict | None, label: str, started_at: float,
-                  n_steps: int, log_path: str | None = None,
-                  generation_id: str | None = None) -> None:
-    """Insert a new run row with status='running'.
-
-    ``n_steps`` is the *requested* step total — stored up front so the UI
-    progress bar always has a denominator. ``complete_metadata`` may later
-    overwrite it with the actual count.
-
-    ``generation_id`` stamps the run with the workspace's current coordinated
-    generation (expert-feedback A.2) so stale panels can be flagged.
-    """
+def save_metadata(conn, *, spec_id, run_id, params, label, started_at,
+                  n_steps, log_path=None, generation_id=None,
+                  workspace=None, emitter=None, study_slug=None,
+                  investigation_slug=None, origin="local"):
+    """Insert a run row (status='running') and, if ``workspace`` is given,
+    append a 'started' event to the JSONL run log (durable metadata)."""
     conn.execute(
         "INSERT INTO runs_meta "
         "(run_id, spec_id, label, params_json, started_at, status, "
@@ -137,17 +132,30 @@ def save_metadata(conn: sqlite3.Connection, *, spec_id: str, run_id: str,
          started_at, "running", n_steps, log_path, generation_id),
     )
     conn.commit()
+    if workspace is not None:
+        run_log.append_run_event(workspace, {
+            "run_id": run_id, "event": "started", "spec_id": spec_id,
+            "label": label, "started_at": started_at, "status": "running",
+            "n_steps": n_steps, "emitter": emitter, "origin": origin,
+            "study_slug": study_slug, "investigation_slug": investigation_slug,
+        })
 
 
-def complete_metadata(conn: sqlite3.Connection, *, run_id: str,
-                      n_steps: int, status: str) -> None:
-    """Mark an existing run as completed (or failed)."""
+def complete_metadata(conn, *, run_id, n_steps, status, workspace=None):
+    """Mark a run completed/failed; mirror the terminal event to the JSONL log."""
+    completed_at = time.time()
     conn.execute(
         "UPDATE runs_meta "
         "SET completed_at=?, n_steps=?, status=? WHERE run_id=?",
-        (time.time(), n_steps, status, run_id),
+        (completed_at, n_steps, status, run_id),
     )
     conn.commit()
+    if workspace is not None:
+        run_log.append_run_event(workspace, {
+            "run_id": run_id,
+            "event": "completed" if status == "completed" else "failed",
+            "completed_at": completed_at, "n_steps": n_steps, "status": status,
+        })
 
 
 def delete_run(conn: sqlite3.Connection, *, run_id: str) -> bool:
@@ -210,13 +218,27 @@ def query_all_runs(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
-def mark_orphaned(conn: sqlite3.Connection, *, run_id: str) -> None:
-    """Mark a run whose process died without writing a terminal status."""
+def mark_orphaned(conn: sqlite3.Connection, *, run_id: str,
+                  workspace=None) -> None:
+    """Mark a run whose process died without writing a terminal status.
+
+    Mirrors the terminal state to the JSONL log when ``workspace`` is given.
+    Without that mirror the fold keeps the run's last logged status
+    (``running``) and — since the JSONL wins over sqlite in
+    ``simulations_index`` — a killed run reads "running" forever, surviving
+    every restart because reconciliation only ever touched sqlite.
+    """
+    completed_at = time.time()
     conn.execute(
         "UPDATE runs_meta SET status='orphaned', completed_at=? WHERE run_id=?",
-        (time.time(), run_id),
+        (completed_at, run_id),
     )
     conn.commit()
+    if workspace is not None:
+        run_log.append_run_event(workspace, {
+            "run_id": run_id, "event": "orphaned",
+            "completed_at": completed_at, "status": "orphaned",
+        })
 
 
 PRUNE_KEEP = 20
@@ -429,6 +451,55 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
         "inputs": inputs,
     }
     return new_state
+
+
+def inject_declared_emitter(state: dict, *, spec_id: str, run_id: str,
+                            out_dir: str | Path) -> tuple[dict, str | None]:
+    """If the composite for ``spec_id`` declares a default emitter, append it
+    to ``state`` as a ``declared_emitter`` step. Returns ``(new_state, kind)``
+    where ``kind`` is e.g. ``"parquet"``, or ``(state, None)`` unchanged when
+    nothing is declared (pure — never mutates the input ``state``).
+
+    Resolution goes through ``pbg_superpowers.composite_generator`` — the
+    same module every other ``spec_id`` lookup in this codebase uses
+    (``_REGISTRY.get(spec_id)`` for the generator entry; see
+    ``run_runner.py``, ``composite_flush.py``, ``observables_views.py``).
+    The declared ``emitters=[...]`` come from ``emitter_defaults(entry)``;
+    node construction (emit-schema from ``paths``, parquet ``out_dir`` /
+    ``partitioning_keys``/``metadata`` wiring) is delegated to
+    ``install_default_emitters`` — the convention's own installer, already
+    used for parquet by ``vivarium_workbench.lib.emitters.run_with_emitter``
+    — so this stays in lockstep with the rest of the codebase instead of
+    re-deriving that logic. Only the first declared emitter is honored
+    (matches the single ``declared_emitter`` node this function produces);
+    a composite declaring more than one default emitter would need a richer
+    interface than this task's tuple return.
+    """
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, discover_generators, install_default_emitters)
+    except Exception:
+        return state, None
+    if not _REGISTRY:
+        discover_generators()
+    entry = _REGISTRY.get(spec_id)
+    if entry is None:
+        return state, None
+    # install_default_emitters returns state unchanged (no "emitter" key)
+    # when nothing is declared, so the node==None check below covers that
+    # case without a separate emitter_defaults(entry) truthiness call.
+    installed = install_default_emitters({}, entry, run_id=run_id, out_dir=out_dir)
+    node = installed.get("emitter")
+    if node is None:
+        return state, None
+    new_state = dict(state)
+    new_state["declared_emitter"] = node
+    address = node.get("address", "")
+    if address.lower().endswith("parquetemitter"):
+        kind = "parquet"
+    else:
+        kind = address.split(":")[-1].lower().replace("emitter", "") or "custom"
+    return new_state, kind
 
 
 def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:

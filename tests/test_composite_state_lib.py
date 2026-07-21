@@ -134,6 +134,77 @@ def test_generator_success_and_cache(tmp_path, monkeypatch):
     assert status3 == 404  # subprocess now returns __not_registered__
 
 
+def test_generator_success_embeds_declared_emit_paths(tmp_path, monkeypatch):
+    """Task 6 review-finding fix: the subprocess script now also resolves the
+    registered entry's declared ``emitters=[...]`` decl(s) (see the embedded
+    script in ``composite_state_via_subprocess``) and returns them alongside
+    ``state``/``module`` as ``emitters``. ``build_composite_state`` must embed
+    the flattened paths INSIDE ``state`` (as ``_declared_emit_paths``) — a
+    sibling field on the payload would be silently dropped by every client
+    hop that only forwards ``payload.state`` onward to loom."""
+    csv.clear_cache()
+    ws = _make_ws(tmp_path)
+    _patch_subprocess(monkeypatch, {
+        "state": {"global_time": 0, "bulk": {}, "listeners": {}},
+        "module": "v2ecoli.composites",
+        "emitters": [{"address": "local:ParquetEmitter", "config": {},
+                       "paths": ["global_time", "bulk", "listeners"]}],
+    })
+    body, status = csv.build_composite_state(ws, "v2ecoli.composites.baseline")
+    assert status == 200
+    assert body["kind"] == "generator"
+    assert body["state"]["_declared_emit_paths"] == ["global_time", "bulk", "listeners"]
+    # The original store keys are untouched.
+    assert body["state"]["bulk"] == {}
+
+
+def test_generator_success_no_emitters_declared_is_noop(tmp_path, monkeypatch):
+    csv.clear_cache()
+    ws = _make_ws(tmp_path)
+    _patch_subprocess(monkeypatch, {"state": {"s": 1}, "module": "pkg.mod", "emitters": []})
+    body, status = csv.build_composite_state(ws, "gen.ref")
+    assert status == 200
+    assert "_declared_emit_paths" not in body["state"]
+
+
+def test_build_error_static_fallback_embeds_declared_emit_paths(tmp_path, monkeypatch):
+    """The static-fallback branch reuses the subprocess's already-resolved
+    ``emitters`` (available even though the live build failed — entry lookup
+    happens before ``build_generator`` is called) rather than trusting a
+    possibly-stale static artifact's own (absent, in this fixture) declaration."""
+    csv.clear_cache()
+    ws = _make_ws(tmp_path)
+    static_dir = ws / "reports" / "composite-state"
+    static_dir.mkdir(parents=True)
+    (static_dir / "gen.json").write_text(json.dumps({"state": {"y": 2}}), encoding="utf-8")
+    _patch_subprocess(monkeypatch, {
+        "__build_error__": "boom",
+        "emitters": [{"paths": ["y"]}],
+    })
+    body, status = csv.build_composite_state(ws, "gen")
+    assert status == 200
+    assert body["kind"] == "static-fallback"
+    assert body["state"]["_declared_emit_paths"] == ["y"]
+    assert body["state"]["y"] == 2
+
+
+def test_static_spec_file_embeds_declared_emit_paths(tmp_path, monkeypatch):
+    """The spec/path-resolution branch (a raw ``.composite.yaml``-shaped file
+    with top-level ``state:``/``emitters:`` keys) also embeds the declared
+    paths into the nested ``state`` dict."""
+    csv.clear_cache()
+    ws = _make_ws(tmp_path)
+    (ws / "comp.yaml").write_text(yaml.safe_dump({
+        "state": {"bulk": {}, "listeners": {}},
+        "emitters": [{"paths": ["bulk", "listeners"]}],
+    }), encoding="utf-8")
+    _patch_subprocess(monkeypatch, {"__not_registered__": True})
+    body, status = csv.build_composite_state(ws, "comp.yaml")
+    assert status == 200
+    assert body["kind"] == "spec"
+    assert body["state"]["state"]["_declared_emit_paths"] == ["bulk", "listeners"]
+
+
 def test_parse_failure_500(tmp_path, monkeypatch):
     csv.clear_cache()
     ws = _make_ws(tmp_path)

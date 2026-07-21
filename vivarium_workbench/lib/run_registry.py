@@ -116,12 +116,16 @@ def spawn_detached(request_path: Path, *, workspace: Path,
     return proc.pid
 
 
-def reconcile_stale_runs(db_file: str | Path) -> int:
+def reconcile_stale_runs(db_file: str | Path, workspace=None) -> int:
     """Mark every 'running' row whose process is gone as 'orphaned'.
 
     Called on server startup. A row with a NULL pid (spawn never recorded
     one) or a dead pid is orphaned; a live pid is left alone — that run
     genuinely survived the restart. Returns the count reconciled.
+
+    ``workspace`` is threaded through to ``mark_orphaned`` so the terminal
+    state also lands in the JSONL run log; the Simulations DB treats JSONL as
+    authoritative, so a sqlite-only reconcile leaves the row reading "running".
     """
     db_file = Path(db_file)
     if not db_file.is_file():
@@ -135,7 +139,7 @@ def reconcile_stale_runs(db_file: str | Path) -> int:
         for row in rows:
             pid = row["pid"]
             if pid is None or not _pid_alive(int(pid)):
-                cr.mark_orphaned(conn, run_id=row["run_id"])
+                cr.mark_orphaned(conn, run_id=row["run_id"], workspace=workspace)
                 reconciled += 1
         return reconciled
     finally:

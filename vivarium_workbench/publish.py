@@ -895,16 +895,22 @@ def _do_build(
             shutil.copy2(src, assets_dir / src.name)
 
     # Copy bigraph-loom dist → bundle/bigraph-loom/ (read-only loom ?static=1 mode).
-    # Skipped gracefully when bigraph_loom is not installed in this environment.
+    # Skipped gracefully when the vendored bundle hasn't been built in this environment.
     try:
-        import bigraph_loom as _bl
-        loom_src = Path(_bl.asset_dir())
+        from vivarium_workbench.loom_assets import asset_dir as _loom_asset_dir
+        loom_src = Path(_loom_asset_dir())
         loom_dst = out_dir / "bigraph-loom"
+        # Check the source *before* clearing the destination: re-publishing
+        # into an existing bundle when _dist is missing would otherwise delete
+        # a previously-published (working) loom dir and then fall into the
+        # warning branch, silently stripping the Explorer from that bundle.
+        if not loom_src.is_dir():
+            raise FileNotFoundError(loom_src)
         if loom_dst.exists():
             shutil.rmtree(loom_dst)
         shutil.copytree(str(loom_src), str(loom_dst))
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"  warn: loom _dist not found — did you run scripts/build_loom.sh? ({exc})")
 
     # ------------------------------------------------------------------
     # 4. Render home SPA shell → bundle/index.html

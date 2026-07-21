@@ -1179,17 +1179,23 @@ window.addEventListener('pageshow', function (e) {
     No simulation runs found.
   </div>
 
+  <style>
+    #sim-table th[data-sort-key]:hover { background:#e5e7eb; }
+    #sim-table th[data-sort-dir="asc"]::after { content:" \25B2"; }
+    #sim-table th[data-sort-dir="desc"]::after { content:" \25BC"; }
+  </style>
+
   <table id="sim-table" style="width:100%; table-layout:fixed; border-collapse: collapse; font-size: 13px; display: none;">
     <thead>
       <tr style="background:#f3f4f6;">
-        <th style="text-align:left; padding:6px 8px; width:130px;">Investigation</th>
-        <th style="text-align:left; padding:6px 8px; width:130px;">Study</th>
-        <th style="text-align:left; padding:6px 8px;">Run</th>
+        <th data-sort-key="investigation" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:130px; cursor:pointer;">Investigation</th>
+        <th data-sort-key="study" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:130px; cursor:pointer;">Study</th>
+        <th data-sort-key="run" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; cursor:pointer;">Run</th>
         <th style="text-align:left; padding:6px 8px; width:150px;">Location</th>
-        <th style="text-align:left; padding:6px 8px; width:90px;">Origin</th>
-        <th style="text-align:left; padding:6px 8px; width:80px;">Emitter</th>
-        <th style="text-align:left; padding:6px 8px; width:104px;">Time</th>
-        <th style="text-align:left; padding:6px 8px; width:84px;">Status</th>
+        <th data-sort-key="origin" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:90px; cursor:pointer;">Origin</th>
+        <th data-sort-key="emitter_type" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:80px; cursor:pointer;">Emitter</th>
+        <th data-sort-key="time" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:104px; cursor:pointer;">Time</th>
+        <th data-sort-key="status" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:84px; cursor:pointer;">Status</th>
         <th style="text-align:center; padding:6px 8px; width:158px;">Actions</th>
       </tr>
     </thead>

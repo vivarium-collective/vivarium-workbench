@@ -602,7 +602,8 @@ def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
 
 def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
                      db_file=None, progress_cb=None, spec=None,
-                     emitter_config=None, store_path=None) -> dict:
+                     emitter_config=None, store_path=None,
+                     also_sqlite_history=False) -> dict:
     """Inject the named emitter as a Step, build a Composite, run ``steps`` ticks
     (calling ``progress_cb(step)`` each tick), flush/close, and return provenance.
 
@@ -612,6 +613,11 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
       ``store_path`` is ``db_file``.
     - ``parquet`` → ``install_default_emitters`` (the composite's declared sink)
       then ``_flush_step_emitters``; ``store_path`` is ``<out_dir>/parquet``.
+      When ``also_sqlite_history=True`` (the Composite Explorer run), a RAM
+      ``user_emitter`` + a ``SQLiteEmitter`` (to ``db_file``) are ALSO injected
+      so the Results tab's sqlite ``history`` renders live — the parquet store
+      still lands in ONE place. The flag defaults ``False``; every other
+      caller (study/xarray runs) is byte-identical to before.
     - ``ram``     → process-bigraph RAMEmitter convention (in-memory; no store).
     - ``xarray``  → XArrayEmitter as a flat Step (``out_uri`` under ``out_dir``,
       ``emit_root=()``, a view auto-derived from ``emit_paths``). A colony
@@ -693,6 +699,22 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
         parquet_dir = str(Path(out_dir) / "parquet") if out_dir else None
         st = install_default_emitters(
             state, spec, run_id=run_id, out_dir=parquet_dir, core=core)
+        # R2 (Explorer only, gated by `also_sqlite_history`): ALSO inject the RAM
+        # `user_emitter` + `SQLiteEmitter` so the Results tab's sqlite `history`
+        # table is populated alongside the parquet persistence sink. These are
+        # distinct node keys (`user_emitter`/`sqlite_emitter`) from the parquet
+        # step, so both sinks coexist and the parquet store stays in ONE place.
+        # Default off → every other caller (study/xarray runs) is byte-identical.
+        if also_sqlite_history:
+            from vivarium_workbench.lib import composite_runs as cr
+            if emit_paths:
+                st = cr.inject_emitter_for_paths(st, list(emit_paths))
+            st = cr.inject_sqlite_emitter(st, run_id=run_id, db_file=db_file)
+            try:
+                from pbg_emitters.sqlite_emitter import SQLiteEmitter
+            except ImportError:  # process-bigraph < 1.4.17 (legacy location)
+                from process_bigraph.emitter import SQLiteEmitter
+            core.register_link("SQLiteEmitter", SQLiteEmitter)
         composite = Composite({"state": st}, core=core)
         _drive(composite, steps, progress_cb)
         _flush_step_emitters(composite)  # parquet flush; close errors are non-fatal

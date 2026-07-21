@@ -422,11 +422,6 @@ wheels = [
 ]
 
 [[package]]
-name = "bigraph-loom"
-version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/bigraph-loom.git?rev=main#41b556c7f93bc9b65f2ea593ccb82bf15ba386a4" }
-
-[[package]]
 name = "bigraph-schema"
 version = "1.4.2"
 source = { git = "https://github.com/vivarium-collective/bigraph-schema.git?branch=main#87e6b7cdf5b410064e5245f22cd7138b62f64017" }
@@ -7347,10 +7342,9 @@ sdist = { url = "https://files.pythonhosted.org/packages/3e/87/794e0b4c5dccbca30
 
 [[package]]
 name = "vivarium-workbench"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "." }
 dependencies = [
-    { name = "bigraph-loom", marker = "python_full_version == '3.12.12'" },
     { name = "bigraph-schema", marker = "python_full_version == '3.12.12'" },
     { name = "fastapi", marker = "python_full_version == '3.12.12'" },
     { name = "investigation-contracts", marker = "python_full_version == '3.12.12'" },
@@ -7396,7 +7390,6 @@ viz = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bigraph-loom", git = "https://github.com/vivarium-collective/bigraph-loom.git?rev=main" },
     { name = "bigraph-schema", specifier = ">=1.4.1" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },

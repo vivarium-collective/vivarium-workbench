@@ -81,7 +81,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # Repair runs left 'running' by a previous crash/restart — never block boot.
     try:
         from vivarium_workbench.lib.run_registry import reconcile_stale_runs
-        n = reconcile_stale_runs(pbg / "composite-runs.db")
+        n = reconcile_stale_runs(pbg / "composite-runs.db", workspace=workspace)
         if n:
             print(f"reconciled {n} stale composite run(s) on startup")
     except Exception as e:  # noqa: BLE001

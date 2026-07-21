@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.DS_Store
+*.tsbuildinfo
+.vite/
+test-results/
+playwright-report/
+
+# Compiled config artifacts emitted by `tsc -b` (composite project). The .ts
+# files are authoritative; the emitted .js/.d.ts are regenerated on each build
+# and must NOT be committed (a committed vite.config.js would shadow the .ts).
+vite.config.js
+vite.config.d.ts
+vitest.config.js
+vitest.config.d.ts
+
+# Python build/install artifacts
+__pycache__/
+*.egg-info/
+build/
+*.egg
+.venv/

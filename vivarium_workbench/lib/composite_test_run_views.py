@@ -123,14 +123,14 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
                          params=overrides, label=label,
                          started_at=time.time(), n_steps=steps,
-                         log_path=log_rel)
+                         log_path=log_rel, workspace=ws_root)
         try:
             pid = run_registry.spawn_detached(
                 request_path, workspace=ws_root,
                 log_path=run_dir / "run.log")
         except Exception as e:  # noqa: BLE001 — surface the spawn failure
             cr.complete_metadata(conn, run_id=run_id, n_steps=0,
-                                 status="failed")
+                                 status="failed", workspace=ws_root)
             return {"error": f"spawn failed: {e}", "run_id": run_id}, 500
         cr.set_pid(conn, run_id=run_id, pid=pid)
     finally:

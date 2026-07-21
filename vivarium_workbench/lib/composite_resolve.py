@@ -37,6 +37,34 @@ def _prime_registry() -> None:
         pass
 
 
+def declared_emit_paths(decls: "list[dict] | None") -> list:
+    """Flatten a composite's declared ``emitters=[...]`` decl(s) into the
+    ordered, deduped list of paths they emit (e.g. ``["global_time", "bulk",
+    "listeners"]`` for v2ecoli's ``baseline``, matching ``spec.emitters`` /
+    ``pbg_superpowers.composite_generator.emitter_defaults``'s shape).
+
+    Each decl's ``paths`` entries are '.'-or-'/'-joined; segments are
+    re-joined with ``/`` to match the client's ``emitSet`` path convention
+    (mirrors ``_emitter_node_from_decl``'s own path-splitting in
+    ``pbg_superpowers.composite_generator``, and loom's
+    ``convert.ts: declaredEmitPaths``). Returns ``[]`` when nothing is
+    declared or ``decls`` is falsy/malformed, so callers can embed the
+    result unconditionally.
+    """
+    out: list = []
+    for decl in decls or []:
+        if not isinstance(decl, dict):
+            continue
+        for p in decl.get("paths") or []:
+            segs = [seg for seg in str(p).replace(".", "/").split("/") if seg]
+            if not segs:
+                continue
+            norm = "/".join(segs)
+            if norm not in out:
+                out.append(norm)
+    return out
+
+
 def _artifact_base_dir(ws_root: "Path", spec: "CompositeSpec") -> "Path":
     """Where a generator's default-state artifact lives. Reuses the dashboard's
     existing snapshot dir if present, else the workspace root."""
@@ -164,6 +192,19 @@ def resolve_composite(
                 attach_process_docs(state)
             except Exception:
                 pass
+            # Embed the declared emit-all paths INSIDE `state` (not as a
+            # sibling of it): the dashboard glue (walkthrough.js) and loom's
+            # popup/static hydration paths all forward only `payload.state`
+            # to the client (composite:load's `msg.state`, ?stateUrl='s
+            # `data.state` unwrap) — a sibling key here would be silently
+            # dropped before it ever reaches loom's `declaredEmitPaths`.
+            if isinstance(state, dict):
+                try:
+                    declared = declared_emit_paths(spec.emitters)
+                    if declared:
+                        state["_declared_emit_paths"] = declared
+                except Exception:
+                    pass
         return {
             "id": spec_id, "name": spec.name, "description": spec.description,
             "parameters": spec.parameters, "state": state, "schema": spec.schema,
