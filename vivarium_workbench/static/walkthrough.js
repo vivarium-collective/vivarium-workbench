@@ -14552,10 +14552,18 @@
       'title="emitter / persistence format">' + _escSim(t) + '</span>';
   }
 
+  // Single source for the Origin column's text — used by BOTH the pill and the
+  // sort key so they can't diverge. `remote_origin` is an OBJECT
+  // ({deployment, simulation_id, …}) or null; it is never a bare string.
+  function _simOriginLabel(row) {
+    var o = row && row.remote_origin;
+    return o ? String(o.deployment || 'remote') : 'local';
+  }
+
   function _simOriginPill(row) {
     var o = row && row.remote_origin;
     if (!o) return '<span class="origin-pill origin-local" title="local run">local</span>';
-    var dep = o.deployment || 'remote';
+    var dep = _simOriginLabel(row);
     var tip = 'Remote run on ' + dep + ' (AWS GovCloud)'
       + (o.simulation_id != null ? ' — sim ' + o.simulation_id : '')
       + (o.experiment_id ? '\nexperiment: ' + o.experiment_id : '')
@@ -14672,12 +14680,16 @@
 
   function _simSortValue(row, key) {
     if (key === 'time') return row.completed_at || row.started_at || 0;
-    if (key === 'emitter_type') return (row.emitter_type || '').toLowerCase();
-    if (key === 'origin') return (row.remote_origin || 'local').toLowerCase();
-    if (key === 'study') return (row.study_slug || '').toLowerCase();
-    if (key === 'investigation') return (row.investigation_slug || '').toLowerCase();
-    if (key === 'run') return (row.label || row.run_id || '').toLowerCase();
-    if (key === 'status') return (row.status || '').toLowerCase();
+    if (key === 'emitter_type') return String(row.emitter_type || '').toLowerCase();
+    // remote_origin is an OBJECT — read the same label the pill renders. A bare
+    // `.toLowerCase()` on it threw and aborted the whole re-sort (Origin looked
+    // like it "didn't sort"). String() on every branch keeps a stray non-string
+    // value from ever breaking the comparator again.
+    if (key === 'origin') return _simOriginLabel(row).toLowerCase();
+    if (key === 'study') return String(_simStudy(row) || '').toLowerCase();
+    if (key === 'investigation') return String(_simInvestigation(row) || '').toLowerCase();
+    if (key === 'run') return String(row.sim_name || row.label || row.run_id || '').toLowerCase();
+    if (key === 'status') return String(row.status || '').toLowerCase();
     return '';
   }
 
