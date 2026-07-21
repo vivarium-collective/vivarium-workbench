@@ -632,7 +632,6 @@ window.addEventListener('pageshow', function (e) {
   <!-- Available Composites (workspace-local discovery) -->
   <div class="panel">
     <h3>Available Composites <span id="composite-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Discoverable composite documents from <code>pbg_&lt;slug&gt;/composites/*.composite.{yaml,json}</code>. Each one packages a runnable simulation state with parameters you can configure. Click <strong>Explore</strong> to open it in Composite Explorer.</p>
     <div class="card-browse-toolbar" id="composite-toolbar">
       <input type="search" class="card-browse-search" id="composite-search" placeholder="Filter composites…">
       <div class="card-browse-chips" id="composite-tag-chips"></div>
@@ -715,7 +714,6 @@ window.addEventListener('pageshow', function (e) {
 
   <!-- Subtab: Modules (catalog grid; workspace + installed entries pinned at top) -->
   <section class="panel registry-subtab-panel active" data-subtab="modules">
-    <p class="panel-lead">Modules active in this workspace appear at the top (the workspace's own first-party package is pinned first, then installed catalog modules). Click Install on any card below to add it. Each installed card shows its install source + path.</p>
     <div class="card-browse-toolbar" id="catalog-toolbar">
       <input type="search" class="card-browse-search" id="catalog-search" placeholder="Filter modules…">
       <div class="card-browse-chips" id="catalog-tag-chips"></div>
@@ -744,7 +742,6 @@ window.addEventListener('pageshow', function (e) {
 
   <!-- Subtab: Discovered registry (live build_core() introspection) -->
   <section class="panel registry-subtab-panel" data-subtab="discovered">
-    <p class="panel-lead">Live snapshot of <code>build_core()</code> — every Process, Step, Emitter, Visualization, and Type registered via auto-discovery. Classes from this workspace's own package and declared <code>imports</code> are shown first. Classes discovered from the Python environment but <em>not</em> declared in <code>workspace.yaml</code> appear collapsed under <em>Also available in environment</em>.</p>
 
     <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
     <div id="registry-status" class="muted" style="margin:8px 0"></div>
