@@ -463,14 +463,17 @@ def inject_declared_emitter(state: dict, *, spec_id: str, run_id: str,
     """
     try:
         from pbg_superpowers.composite_generator import (
-            _REGISTRY, emitter_defaults, install_default_emitters)
+            _REGISTRY, discover_generators, install_default_emitters)
     except Exception:
         return state, None
+    if not _REGISTRY:
+        discover_generators()
     entry = _REGISTRY.get(spec_id)
     if entry is None:
         return state, None
-    if not emitter_defaults(entry):
-        return state, None
+    # install_default_emitters returns state unchanged (no "emitter" key)
+    # when nothing is declared, so the node==None check below covers that
+    # case without a separate emitter_defaults(entry) truthiness call.
     installed = install_default_emitters({}, entry, run_id=run_id, out_dir=out_dir)
     node = installed.get("emitter")
     if node is None:
