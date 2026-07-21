@@ -825,3 +825,9 @@ git commit -m "test(loom): lock auto-advance to Results tab on run completion"
 **Placeholder scan:** New modules carry full code; edits show the current→new code with exact file:line targets. Two spots depend on names the implementer confirms by grep at implementation time and are flagged explicitly: `pbg_superpowers.composite_generator` resolver name (Task 4) and the exact `_applySimFilter` filtered-rows variable (Task 7). These are verification steps, not missing content.
 
 **Type consistency:** `append_run_event`/`fold_runs_jsonl` (Task 1) used verbatim in Tasks 2–3. `inject_declared_emitter(state, *, spec_id, run_id, out_dir) -> (state, kind)` (Task 4) consumed by `inject_run_emitters` (Task 5). `_sortSimRows`/`_simSortState`/`_onSimHeaderClick` consistent across Task 7 template + JS. `asset_dir()` (Task 8) consumed by Task 9.
+
+---
+
+## Task 5b (added mid-execution): Composite Explorer honors declared Parquet + live Results + records emitter
+
+Corrective task — the Explorer runs `run_runner.execute` (not `composite_subprocess.py`, which is the study-run engine Task 5 fixed). Deliver Feature 2 for the Explorer in `run_runner.py`/`emitters.py`: (R1) honor a generator's declared Parquet as the sink (fix the `spec is None` gap at run_runner.py:440 so `declared` is computed from the generator entry); (R2) always inject RAM+sqlite for the Explorer run so the Results tab (reads sqlite `history`) renders live, gated so other `run_with_emitter` callers are unchanged; (R3) record the emitter kind to the Sims DB via a `run_log.append_run_event`. Full brief: `.superpowers/sdd/task-5b-brief.md`.
