@@ -33,8 +33,29 @@ def append_run_event(workspace: Path, event: dict) -> None:
         os.close(fd)
 
 
+def append_deleted_event(workspace: Path, run_id: str) -> None:
+    """Tombstone a run so the fold stops resurrecting it.
+
+    ``delete_simulation`` clears the sqlite rows, history, run dir and study
+    refs — but the log is append-only, so without a tombstone the very next
+    fold re-synthesises the run from its surviving ``started`` event and the
+    row reappears in the Simulations DB. That made a deleted run undeletable
+    through the UI, permanently.
+
+    A tombstone (rather than rewriting the file) keeps the log append-only,
+    which is what makes concurrent writes from detached run processes safe.
+    """
+    append_run_event(workspace, {"run_id": run_id, "event": "deleted"})
+
+
 def fold_runs_jsonl(workspace: Path) -> dict[str, dict]:
-    """Fold the log to the latest record per run_id (later events merge over earlier)."""
+    """Fold the log to the latest record per run_id (later events merge over earlier).
+
+    A ``deleted`` event tombstones its run_id: the run is dropped from the
+    result entirely, and — because the fold is ordered — a later ``started``
+    for the SAME run_id (a re-run reusing the id) revives it, so deletion
+    doesn't poison the id forever.
+    """
     path = _log_path(workspace)
     if not path.exists():
         return {}
@@ -50,6 +71,9 @@ def fold_runs_jsonl(workspace: Path) -> dict[str, dict]:
                 continue  # tolerate a torn final line
             rid = ev.get("run_id")
             if not rid:
+                continue
+            if ev.get("event") == "deleted":
+                folded.pop(rid, None)
                 continue
             folded.setdefault(rid, {}).update(ev)
     return folded

@@ -240,6 +240,14 @@ packages = ["vivarium_workbench", "vivarium_dashboard"]
 # — there it was git-tracked, so no artifacts entry was needed).
 artifacts = ["vivarium_workbench/loom/_dist/**"]
 
+# `artifacts` only opts _dist back IN to the wheel; nothing here ever BUILT it,
+# so a wheel from a clean clone shipped the loom TS source and no bundle, and
+# served a blank 404 Explorer. hatch_build.py runs scripts/build_loom.sh as part
+# of the build: required for wheels (hard error), best-effort for editable
+# installs so contributors without Node aren't blocked. See hatch_build.py.
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
 [tool.pytest.ini_options]
 timeout = 120
 timeout_method = "signal"
