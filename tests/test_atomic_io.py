@@ -18,10 +18,19 @@ def test_writes_utf8_under_ascii_locale(tmp_path):
     read-side regression in test_workspace_paths.
     """
     target = tmp_path / "doc.yaml"
+    # The em dash is written as a \u escape so that argv itself stays pure
+    # ASCII. Passing the literal character crashes the CHILD before
+    # atomic_write_text is even reached: under LC_ALL=C, Linux encodes argv with
+    # ASCII+surrogateescape, and parsing it raises "surrogates not allowed". The
+    # child decodes the escape at runtime, so this still exercises exactly what
+    # the test is about — writing non-ASCII under an ASCII locale — without the
+    # harness itself depending on the platform's argv encoding. (macOS defaults
+    # argv to UTF-8, which is why the literal form passed there and only ever
+    # failed on Linux/CI.)
     code = (
         "from pathlib import Path;"
         "from vivarium_workbench.lib.atomic_io import atomic_write_text;"
-        f"atomic_write_text(Path(r'{target}'), 'title: Colony — HPC readiness\\n')"
+        f"atomic_write_text(Path(r'{target}'), 'title: Colony \\u2014 HPC readiness\\n')"
     )
     env = {
         **os.environ,
