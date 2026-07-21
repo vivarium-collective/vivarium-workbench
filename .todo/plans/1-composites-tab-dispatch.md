@@ -1,17 +1,37 @@
 # Plan — Composition-native simulation for any pbg-template workspace
 
-Status: **EXECUTING — Phase 0 verified; Phase 1 (PR-B, sms-api) code-complete (not deployed); Phases 2-3 (PR-A, workbench) code-complete; Phase 4 (one run surface + persistence) is NEXT**
-Branch: `fix/composites-tab-dispatch` (PR-A, workbench); `fix/compose-batch-driver-swap` (PR-B, sms-api — SHARED with a coworker)
-Owner: Alex
+Status: **RESCOPED for the 2026-07-22 demo (handoff below). Phase 0 verified; Phase 1 (PR-B, sms-api) committed but has live blockers B1-B5 (not deployed); Phases 2-3 (PR-A, workbench) code-complete + PUSHED (no PR yet); Phase 4 study work is CUT for the demo — 3 small demo items are NEXT**
+Branch: `fix/composites-tab-dispatch` (PR-A, workbench — pushed to origin); `fix/compose-batch-driver-swap` (PR-B, sms-api — owned by Jim)
+Owner: Alex (vivarium-workbench). Jim owns sms-api.
 Repos: `vivarium-workbench` (PR-A), `sms-api` (PR-B + overlays), `pbg-template`/`sms-cdk` as needed
-Deploy target: **`sms-api-stanford` / smscdk (PRODUCTION)** — direct, not stanford-test-first (Alex 2026-07-21).
+Deploy target: **`sms-api-stanford` / smscdk (PRODUCTION)** — direct, not stanford-test-first (Alex 2026-07-21). Deploy SERIALIZED: sms-api to prod first, then workbench; ping Jim before bumping the workbench `newTag`.
 
-## What's next (start here on resume)
+## ⚠️ DEMO HANDOFF supersedes the plan below (2026-07-21)
+Authoritative for the demo: `sms-api/docs/HANDOFF-ALEX-WORKBENCH.md` (+ `PRE-DEMO-MASTER-PLAN.md`).
+Demo 2026-07-22: v2ecoli `baseline` runs on smscdk **from the workbench UI**, prod `sms-api-stanford`.
+
+**Alex's 3 demo items (~2.5h, this branch):**
+1. **A** — wire the SP-D stub: `lib/run_core.py:35-44` `invoke_run` raises `RunTargetUnavailable` for
+   `target=="deployment"`; replace the raise with delegation to `remote_run.run_remote` (already built).
+2. **B (NEW critical blocker)** — prod pod has no `.viv-build.json`, and `composite_test_run_views.py:94`
+   calls `invoke_run` with no `target=` → `run_target_for` resolves to `local`, so Run spawns a LOCAL
+   subprocess in the workbench pod. Fix: pass `target="deployment"` explicitly (preferred over stamping
+   `.viv-build.json`, which routes ALL runs remote).
+3. **C** — thread `steps` through: `composite_test_run_views.py:95` hardcodes `n_steps=0`; pass the real
+   `steps` (`:73`) → `invoke_run(n_steps=…)` → `compose_submit(interval_time=N)`. TRAP: `interval_time`
+   IS the steps channel and is hard-capped 0..1000 (2700 would 400). Demo uses small step counts (5-20).
+
+**CUT for the demo (do NOT start — post-demo, branch `fix/composites-tab-dispatch-phase4-runforms`):**
+the full Phase 4 study work below (run-form unification, persistence/rehydration, G1/drop `run_parca`,
+reconciliation §3.13) + gates 1/3/4/5. Highest-regression-risk, zero demo value (handoff §5).
+Note: the PR-A transport `apiUrl()` work (§3.3) is likely REDUNDANT with 0.3.1's `_base_path_shim`.
+
+## What's next POST-DEMO (Phase 4 study work — deferred)
 
 **→ Phase 4 is PARTIALLY done** — config-derived Origin landed (see log); the remaining 3 items are large,
 interrelated, and all touch the study Simulations remote-run path (they converge on G1). Best done as a
 focused pass, ideally after PR-B deploys so they're e2e-verifiable. Remaining (branch
-`fix/composites-tab-dispatch`, see Phase 4 in §5):
+`fix/composites-tab-dispatch-phase4-runforms`, see Phase 4 in §5):
 1. Unify the study Simulations sub-tab's TWO run forms (local `btn-run-baseline`/`btn-variant-run`,
    remote `#remote-run-form`; `study-detail.html:924,966,1269`) into ONE origin selector
    (Local / Remote:<deployment>), reading origins from `/api/remote-run-config` (now carries `deployment`).
