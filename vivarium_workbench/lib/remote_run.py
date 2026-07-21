@@ -144,8 +144,13 @@ def run_remote(
 
     # Submit. sms-api's `interval_time` query param IS the step count — it sets
     # `end_time_point`, which the runner passes as `run_pbg.py -n <steps>` (§3.5).
-    print(f"Submitting composite '{composite_id}' to sms-api…")
-    sim_id = client.compose_submit(pbg_bytes, extra_pip_deps=extra_pip_deps, interval_time=float(n_steps))
+    # sms-api hard-rejects `interval_time` outside 0..1000 with a 400
+    # (compose.py:121-122), so clamp here at the boundary that owns the contract
+    # rather than trusting every caller. Local runs never reach this path, so
+    # their step counts stay unbounded.
+    steps = max(0, min(int(n_steps), 1000))
+    print(f"Submitting composite '{composite_id}' to sms-api ({steps} steps)…")
+    sim_id = client.compose_submit(pbg_bytes, extra_pip_deps=extra_pip_deps, interval_time=float(steps))
     print(f"Submitted. Simulation id: {sim_id}")
 
     # Poll until terminal state

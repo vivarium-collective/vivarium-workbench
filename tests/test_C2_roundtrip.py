@@ -136,3 +136,54 @@ def _scan_all(node: object, found: list[str]) -> None:
         elif isinstance(v, list):
             for item in v:
                 _scan_all(item, found)
+
+
+# ---------------------------------------------------------------------------
+# Item C: run_remote clamps n_steps to the sms-api compose contract (0..1000).
+# sms-api rejects interval_time outside 0..1000 with a 400 (compose.py:121-122);
+# interval_time IS the step channel, so run_remote must clamp before submitting.
+# ---------------------------------------------------------------------------
+
+class _CaptureClient:
+    """Fake SmsApiClient capturing the interval_time (== step count) it's given."""
+
+    def __init__(self):
+        self.interval_time = None
+
+    def compose_submit(self, pbg_bytes, *, extra_pip_deps=None, interval_time=None):
+        self.interval_time = interval_time
+        return 123
+
+    def compose_status(self, sim_id):
+        return {"status": "completed"}
+
+    def download_compose_results(self, sim_id, dest):
+        p = Path(dest) / "results.zip"
+        p.write_bytes(b"")
+        return p
+
+
+def _stub_remote_boundaries(monkeypatch):
+    """Mock the git/export boundaries so run_remote's clamp is unit-testable."""
+    from vivarium_workbench.lib import remote_run
+    monkeypatch.setattr(remote_run, "git_pip_url", lambda ws: "git+file:///x@abc1234")
+    monkeypatch.setattr(remote_run, "workspace_pinned_deps", lambda ws: [])
+    monkeypatch.setattr(
+        remote_run, "export_composite_pbg",
+        lambda ws, cid, path: Path(path).write_bytes(b"{}"))
+
+
+@pytest.mark.parametrize("n_steps,expected", [
+    (5000, 1000.0),   # over the ceiling → clamped to 1000
+    (2700, 1000.0),   # the default_n_steps that would 400 → clamped
+    (20, 20.0),       # valid → passed through unchanged
+    (-3, 0.0),        # below the floor → clamped to 0
+])
+def test_run_remote_clamps_steps(tmp_path, monkeypatch, n_steps, expected):
+    from vivarium_workbench.lib import remote_run
+    _stub_remote_boundaries(monkeypatch)
+    client = _CaptureClient()
+    remote_run.run_remote(
+        tmp_path, "some.composite", client=client,
+        poll_interval=0, dest=tmp_path, n_steps=n_steps)
+    assert client.interval_time == expected
