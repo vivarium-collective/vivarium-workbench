@@ -19,6 +19,8 @@ import pbg_superpowers.composite_generator as cg
 import pbg_superpowers.composite_discovery as cd
 from vivarium_workbench.lib import study_run_state as srs
 
+from conftest import register_generator
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,7 +33,7 @@ def _entry(name="foo", parameters=None):
 def _register(monkeypatch, spec_id, entry, *, build=None):
     """Put a generator entry in the registry and stub build_generator."""
     monkeypatch.setattr(cg, "discover_generators", lambda: None)
-    monkeypatch.setitem(cg._REGISTRY, spec_id, entry)
+    register_generator(spec_id, entry)
     if build is not None:
         monkeypatch.setattr(cg, "build_generator", build)
 
@@ -40,7 +42,7 @@ def _empty_registry(monkeypatch):
     """Force a non-empty registry that does NOT contain the test spec_id, so
     discover_generators is not invoked and disk-discovery returns nothing."""
     monkeypatch.setattr(cg, "discover_generators", lambda: None)
-    monkeypatch.setitem(cg._REGISTRY, "_dummy_keep_registry_truthy", _entry())
+    register_generator("_dummy_keep_registry_truthy", _entry())
     monkeypatch.setattr(cd, "discover_composites", lambda: {})
 
 

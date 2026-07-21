@@ -233,3 +233,76 @@ def fixture_study_with_recorded_run(fixture_study_ws):
         conn.close()
 
     return ws, slug, run_id
+
+
+# ---------------------------------------------------------------------------
+# pbg-superpowers generator registry
+# ---------------------------------------------------------------------------
+# `pbg_superpowers.composite_generator._REGISTRY` used to be a plain dict. As of
+# pbg-superpowers #168 ("shim composite front-ends onto process-bigraph
+# CompositeSpec") it is a *view* over process-bigraph's global registry:
+#
+#   * assignment CONVERTS the value into a CompositeSpec, reading .name,
+#     .description, .parameters, … — so a bare `object()` or a partial
+#     SimpleNamespace no longer works as a dummy entry; and
+#   * there is no `__delitem__`, so `monkeypatch.setitem(cg._REGISTRY, ...)`
+#     raises AttributeError during teardown.
+#
+# Registration is also process-global now, so a test that registers a fake
+# generator leaks it into every later test unless the backing registry is
+# restored. `register_generator` handles the conversion; the autouse fixture
+# below handles the restore.
+
+def register_generator(spec_id, entry=None, **fields):
+    """Register a generator under ``spec_id``, filling in required fields.
+
+    Accepts a partial stand-in (anything with some of the GeneratorEntry
+    attributes, including a bare ``object()``) so existing tests can keep
+    expressing "just put *something* in the registry" without knowing the
+    current CompositeSpec shape.
+    """
+    from pbg_superpowers.composite_generator import GeneratorEntry, _REGISTRY
+
+    # CompositeSpec requires exactly one of `state` or `builder`, so `func`
+    # must be callable even for a pure placeholder entry. Tests that care about
+    # what building produces stub `build_generator` anyway.
+    base = dict(id=spec_id, name=spec_id, description="", parameters={},
+                func=lambda **kwargs: {}, module="", default_n_steps=None,
+                visualizations=[], emitters=[], core_extensions=[])
+    if entry is not None:
+        for key in list(base):
+            value = getattr(entry, key, None)
+            if value is not None:
+                base[key] = value
+    base.update(fields)
+    base["id"] = spec_id
+    if not base.get("name"):
+        base["name"] = spec_id          # CompositeSpec rejects an empty name
+    _REGISTRY[spec_id] = GeneratorEntry(**base)
+    return spec_id
+
+
+@pytest.fixture(autouse=True)
+def _restore_composite_spec_registry():
+    """Snapshot/restore process-bigraph's global composite-spec registry.
+
+    Autouse because registration is process-global: without this a single test
+    that registers a fake generator changes what every subsequent test sees,
+    and the resulting failures are order-dependent and miserable to trace.
+
+    Restores only when the registry actually changed, so the common case costs
+    one dict copy and a comparison.
+    """
+    try:
+        from process_bigraph import composite_spec as cs
+    except ImportError:
+        yield
+        return
+    before = dict(cs.all_specs())
+    yield
+    after = cs.all_specs()
+    if (after.keys() != before.keys()
+            or any(after.get(k) is not v for k, v in before.items())):
+        cs.clear_registry()
+        for spec in before.values():
+            cs.register(spec)

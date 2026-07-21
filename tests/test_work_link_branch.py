@@ -1,8 +1,33 @@
 """Tests for /api/work-link-branch."""
 import json
+import shutil
 import subprocess
 from pathlib import Path
 import pytest
+
+
+def _gh_authenticated() -> bool:
+    """True when the `gh` CLI is installed AND logged in.
+
+    /api/work-link-branch shells out to `gh`; without auth it short-circuits to
+    {"error": "gh not authenticated..."} and every assertion here fails on that
+    instead of on the behavior under test. CI runners have no gh credentials, so
+    skip rather than fail — these are integration tests against a real gh.
+    """
+    if shutil.which("gh") is None:
+        return False
+    try:
+        return subprocess.run(["gh", "auth", "status"],
+                              capture_output=True, timeout=15).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _gh_authenticated(),
+    reason="gh CLI not installed or not authenticated — /api/work-link-branch "
+           "requires a real authenticated gh (not available on CI runners)",
+)
 
 
 def _init_workspace(tmp_path: Path) -> Path:
