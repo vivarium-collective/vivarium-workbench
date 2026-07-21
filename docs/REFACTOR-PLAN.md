@@ -159,7 +159,9 @@ The entire surface that differs between deployments is ~5 ports:
 *(Naming: **AuthoredRecord** is the write/versioning **core** of the broader
 **`ScientificContent`** port — read + write + versioning over the record; see the
 §5A refinement. **WorkspaceStore** + **WorkspaceContext** were added 2026-07-21 —
-see §2A.6.)*
+see §2A.6. **EnvironmentResolver** is realized as a per-session warm **env
+worker** (a workspace-venv subprocess; the HTTP process imports no workspace
+Python) — see §2A.7.)*
 
 **Success test:** a human or an AI can list everything that differs between local
 and cloud on one screen (these ports). Today they cannot.
@@ -260,6 +262,19 @@ weakest → strongest:
   prerequisite**, one that lands *before/independent of* auth (session key ≠
   `Principal`). Isolation is *across* workspaces only; concurrent access to the
   *same* workspace is a non-goal for now. See §2A.6.
+- **Compute-environment isolation** (2026-07-21) — a code map found **~16
+  in-process request-path sites** importing workspace Python
+  (`build_core`/`_REGISTRY`/`v2ecoli`); the `sys.modules` one-version-per-process
+  rule makes one HTTP process unable to host two workspace envs, so **process
+  isolation is forced**. Resolved: a **warm, session-owned env worker** (a
+  workspace-venv subprocess) answers *interactive* env queries
+  (`list_generators` / `resolve_composite_state` / …) while the HTTP process
+  imports no workspace Python — the `EnvironmentResolver` port made concrete.
+  **Local-first adapter** = clone + `uv sync` → venv (cloud = sms-api
+  `(repo, commit)` image behind the same surface, later). **Heavy analysis (and
+  eventually heavy viz) is a job output** (AWS Batch cloud / detached local),
+  never in the pod — retiring the synchronous in-process study-run
+  post-processing. Drops `v2ecoli` / `3.12.12` from the workbench lock. See §2A.7.
 
 **Still open (small)**
 - **Relax the workbench Python pin after `EnvironmentResolver`.** The demo track
@@ -363,6 +378,67 @@ workspace-keyed caches, per-session switch) becomes the **spine of Phase 1**, an
 the `ScientificContent` write core lands *on top of* a handle rather than a raw
 path. Phase 1's exit criterion gains: *N concurrent sessions on distinct
 workspaces, no cross-talk; `switch` rebinds one session only.*
+
+### 2A.7 Compute-environment isolation — `EnvironmentResolver` as a per-session env worker
+
+**The coupling (code-level map, 2026-07-21).** The workbench HTTP process imports
+workspace-specific Python — `build_core()`, the process-global generator
+`_REGISTRY`, and `import v2ecoli` — in **~16 in-process request-path sites**
+(`/api/registry` catalog and composite-state render are the *only* two that
+already shell out; study runs are worse — **synchronous**, blocking the HTTP
+worker up to 1800s while v2ecoli analyses + viz render in-process). This is not
+cleanupable in place: `sys.modules` holds **one version of
+`v2ecoli`/`process_bigraph`/`pbg_<project>` per interpreter**, and the generator
+registry is a single process-global (`process_bigraph.composite_spec._REGISTRY`,
+last-writer-wins across every installed workspace). So **one HTTP process
+physically cannot host two workspace environments** — process isolation is
+*forced*, not chosen, and it is exactly what makes per-workspace dependency /
+Python-pin differences satisfiable, which one shared interpreter never can.
+
+**Decision — a warm, session-owned env worker.** Each session (its §2A.6
+`WorkspaceContext`) owns a **long-lived subprocess** — the *env worker* — running
+the workspace's own interpreter and holding that workspace's `build_core()` /
+`_REGISTRY` / imports **in its own process**. The HTTP process becomes pure
+orchestration + UI: it imports **no** workspace Python, holds **no** `_REGISTRY`,
+and serves request paths by **querying the session's worker** (JSON over stdio /
+a local socket). This is the concrete form of the `EnvironmentResolver` port
+(§2A.1). **Warm** (vs. spawn-per-query) because `build_core()` costs ~1–3s — a
+per-session worker pays it once; the `SessionRegistry` entry becomes
+`{ workspace_handle, env_worker }`, and a `switch` tears down and re-materializes
+the worker for the new source. The bulk of the compute-env decoupling is
+relocating those ~16 in-process sites behind this worker's query surface.
+
+**Query surface — interactive only; heavy compute is a job.** The env worker
+answers *authoring / rendering* queries: `list_generators`,
+`resolve_composite_state(ref)` (the Explorer), light viz / observable
+introspection. It is **not** where simulations or heavy analyses run — those are
+**jobs** (`RunBackend`, Phase 2): simulate + analyze + (eventually) render →
+durable artifacts read back via `RunStore`. **Heavy analysis never runs in the
+pod / HTTP worker.** For AWS runs the job is **AWS Batch** (analysis is part of
+the job); locally the job is the detached run subprocess. This retires today's
+synchronous study-run post-processing (`study_runs.run_study_*` running v2ecoli
+analyses + viz in-process — a coupling *and* a durability liability): analyses
+move into the job. **Viz straddles** — light preview may stay an env-worker
+query, heavy post-run rendering moves into the job; split it *as it comes*, don't
+pre-design.
+
+**Decision — local-first adapter.** `EnvironmentResolver` resolves an opaque
+`(repo, ref)` env coordinate → a runnable environment. **Local adapter first:**
+clone + `uv sync` → a per-workspace venv (materialized alongside the §2A.6
+`WorkspaceStore` staging area); the env worker runs `<venv>/bin/python`. **Cloud
+adapter later:** the sms-api-built **image for `(repo, commit)`** as the
+environment's source of truth, queried behind the *same* surface (RPC to sms-api,
+or the image itself run as the worker). Local-first keeps local integration
+simple and shrinks the cloud step to one adapter swap. Bonus: the workbench
+process stops importing the workspace env entirely, so **`v2ecoli` and the
+`==3.12.12` pin leave the workbench's own lock** — resolving the §2A.5 "relax the
+Python pin" item.
+
+**Sequencing.** Spans **Phase 1** (the env worker + interactive queries; its
+lifecycle owned by the `WorkspaceContext`, §2A.6) → **Phase 2** (the job owns
+simulate + analyze, retiring the synchronous engine — shared work with
+`RunBackend`), and *completes* the `EnvironmentResolver` port. The cloud
+`(repo, commit)`-image adapter behind the same surface is **Phase 3**.
 
 ---
 
