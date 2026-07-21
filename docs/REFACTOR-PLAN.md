@@ -320,7 +320,10 @@ lives + how it came to be* (lifecycle) and *the science content within it*
 
 - **`WorkspaceStore`** — the lifecycle of working areas: `materialize(source) →
   WorkspaceHandle`, `list()`, `discard(handle)`, and later `persist(handle) →
-  artifact_version`. A `source` is an immutable coordinate `(repo, ref)`; a
+  artifact_version` (interface, bare-mirror/worktree mechanics, manifest, GC, and
+  the in-place-vs-managed local split specified in
+  [`docs/workspace-store.md`](workspace-store.md)). A `source` is an immutable
+  coordinate `(repo, ref)`; a
   `WorkspaceHandle` is `{ staging_path, source_version, … }`. **Local adapter:** an
   out-of-repo staging folder (e.g. `~/.vivarium-workbench/workspaces/<id>`),
   materialized as a **git worktree off a bare mirror** — cheap per-version
