@@ -5826,7 +5826,7 @@
           if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
         };
         _badge.addEventListener('click', _openReason);
-        _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') _openReason(ev); });
+        _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _openReason(ev); } });
       }
       if (chainsBySlug && window._groupClaims && window._openInvestigationDrawer) {
         (function (study, chain) {
@@ -5961,12 +5961,11 @@
 
   function _setAigBand(b) {
     var nb = Math.max(0, Math.min(2, b | 0));
-    if (nb === aigBand && document.getElementById('investigation-dag-shell').classList.contains('aig-zoom-' + ['far','mid','near'][nb])) {
-      // still sync the slider (wheel and slider share state)
-    }
-    aigBand = nb;
     var sl = document.getElementById('aig-zoom-slider');
     if (sl && String(sl.value) !== String(nb)) sl.value = String(nb);
+    // No band change → keep the slider synced (above) but skip the re-render.
+    if (nb === aigBand) return;
+    aigBand = nb;
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1]);
   }
   window._setAigBand = _setAigBand;
