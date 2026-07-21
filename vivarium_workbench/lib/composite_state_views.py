@@ -58,8 +58,13 @@ def composite_state_via_subprocess(ws_root: Path, ref: str) -> "dict | None":
     raised "signal only works in main thread of the main interpreter". Running
     the whole generator path (discover + lookup + build + summarize) in a
     subprocess avoids that. Returns one of:
-      {"state": <doc>, "module": <str>}   on success (already summarized + docs)
-      {"__build_error__": <str>}          generator found but build raised
+      {"state": <doc>, "module": <str>, "emitters": [...]}  on success (already
+                                          summarized + docs; "emitters" is the
+                                          registered entry's declared
+                                          ``emitters=[...]`` decl list, or [])
+      {"__build_error__": <str>, "emitters": [...]}  generator found but build
+                                          raised (emitters still resolved —
+                                          entry lookup happens before the build)
       {"__not_registered__": true}        ref is not a registered generator
       None                                the subprocess itself failed
 
@@ -75,19 +80,24 @@ def composite_state_via_subprocess(ws_root: Path, ref: str) -> "dict | None":
         "ref = sys.argv[2]\n"
         "out = {'__not_registered__': True}\n"
         "try:\n"
-        "    from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators\n"
+        "    from pbg_superpowers.composite_generator import (\n"
+        "        _REGISTRY, build_generator, discover_generators, emitter_defaults)\n"
         "    if not _REGISTRY:\n"
         "        discover_generators()\n"
         "    entry = _REGISTRY.get(ref)\n"
         "    if entry is not None:\n"
         "        try:\n"
+        "            declared_emitters = emitter_defaults(entry)\n"
+        "        except Exception:\n"
+        "            declared_emitters = []\n"
+        "        try:\n"
         "            doc = build_generator(entry)\n"
         "            from vivarium_workbench.lib.process_docs import attach_process_docs, summarize_large_values\n"
         "            doc = summarize_large_values(doc)\n"
         "            attach_process_docs(doc)\n"
-        "            out = {'state': doc, 'module': getattr(entry, 'module', None)}\n"
+        "            out = {'state': doc, 'module': getattr(entry, 'module', None), 'emitters': declared_emitters}\n"
         "        except Exception as _e:\n"
-        "            out = {'__build_error__': str(_e)}\n"
+        "            out = {'__build_error__': str(_e), 'emitters': declared_emitters}\n"
         "except Exception as _e:\n"
         "    out = {'__build_error__': str(_e)}\n"
         "sys.stdout.write('@@@S_START@@@' + json.dumps(out, default=str) + '@@@S_END@@@')\n"
@@ -152,7 +162,9 @@ def build_composite_state(
     # Generator-kind branch: build in a SUBPROCESS (its own main thread).
     res = composite_state_via_subprocess(ws_root, ref)
     if res is not None and "state" in res:
-        payload = {"state": res["state"], "kind": "generator", "module": res.get("module")}
+        state_doc = res["state"]
+        _embed_declared_emit_paths(state_doc, res.get("emitters"))
+        payload = {"state": state_doc, "kind": "generator", "module": res.get("module")}
         cache[ref] = (time.time(), payload)
         if len(cache) > 16:  # cap memory; drop the oldest entry
             cache.pop(next(iter(cache)))
@@ -169,6 +181,10 @@ def build_composite_state(
                 _inner = _doc.get("state", _doc) if isinstance(_doc, dict) else _doc
                 from vivarium_workbench.lib.process_docs import attach_process_docs as _apd
                 _apd(_inner)
+                # The subprocess resolved `entry` before the build failed, so
+                # its declared emitters are still authoritative here (more
+                # accurate than trusting a possibly-stale static artifact).
+                _embed_declared_emit_paths(_inner, res.get("emitters"))
                 _payload = {"state": _inner, "kind": "static-fallback",
                             "note": f"served pre-generated state (live build failed: {e})"}
                 cache[ref] = (time.time(), _payload)
@@ -222,7 +238,39 @@ def build_composite_state(
 
     from vivarium_workbench.lib.process_docs import attach_process_docs
     attach_process_docs(doc)  # per-process docstrings for the inspector
+    # This branch's `doc` is either a raw composite-spec file (top-level
+    # `state:`/`emitters:` keys, e.g. a `.composite.yaml`) or an already
+    # resolve()-shaped static snapshot (top-level `state:` nested one level,
+    # same as `reports/composite-state/<id>.json`) — either way the emit
+    # declarations live at `doc["emitters"]` and the tree to embed into is
+    # `doc["state"]`.
+    if isinstance(doc, dict) and isinstance(doc.get("state"), dict):
+        _embed_declared_emit_paths(doc["state"], doc.get("emitters"))
     return {"state": doc, "kind": "spec"}, 200
+
+
+def _embed_declared_emit_paths(state_doc: Any, decls: "list | None") -> None:
+    """Embed the composite's declared emit-all paths INSIDE ``state_doc``.
+
+    Mutates ``state_doc`` in place, adding a top-level ``_declared_emit_paths``
+    key when ``decls`` (an ``emitters=[...]`` decl list, e.g. from
+    ``emitter_defaults``/``spec.emitters``) yields a non-empty path set.
+    No-op when ``state_doc`` isn't a dict or nothing is declared.
+
+    Nested INSIDE the state tree (not a sibling field on the response
+    payload) on purpose: every client hop that carries this document onward
+    — the dashboard's ``composite:load`` postMessage (``msg.state``), the
+    ``?stateUrl=`` static-snapshot fetch, and the ``?composite=`` URL param —
+    forwards only the ``state`` sub-object, dropping payload-level siblings
+    like ``kind``/``module``/``emitters``. Loom's ``convert.ts:
+    declaredEmitPaths`` reads this same key back out.
+    """
+    if not isinstance(state_doc, dict):
+        return
+    from vivarium_workbench.lib.composite_resolve import declared_emit_paths
+    declared = declared_emit_paths(decls)
+    if declared:
+        state_doc["_declared_emit_paths"] = declared
 
 
 # Register this module's cache-clear with the active-workspace registry so a

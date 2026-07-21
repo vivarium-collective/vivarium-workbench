@@ -69,6 +69,19 @@ function resolveWirePath(parentPath: string[], target: unknown): string[] {
  * below), leaving the top levels + processes visible. Users expand by
  * double-clicking or via the Nodes tab.
  */
+/**
+ * Metadata key the backend embeds INSIDE a served composite `state` tree to
+ * carry its declared emit-all paths (see `composite_state_views.
+ * _embed_declared_emit_paths` / `composite_resolve.declared_emit_paths`).
+ * Nested inside `state` — not a sibling field on the outer payload — because
+ * every hop that forwards a composite doc to loom (the dashboard's
+ * `composite:load` postMessage, the `?stateUrl=` static fetch, the
+ * `?composite=` URL param) forwards only the `state` sub-object and drops
+ * payload-level siblings. Excluded from every state-tree walker below (it's
+ * metadata, not a store).
+ */
+export const DECLARED_EMIT_PATHS_KEY = '_declared_emit_paths';
+
 export function defaultCollapsedIds(state: any, minDepth = 3): Set<string> {
   const root = state?.state ?? state ?? {};
   const out = new Set<string>();
@@ -79,7 +92,10 @@ export function defaultCollapsedIds(state: any, minDepth = 3): Set<string> {
     if (path.length >= minDepth && Object.keys(node).length > 0) {
       out.add(path.join('.'));
     }
-    for (const [k, v] of Object.entries(node)) walk(v, [...path, k]);
+    for (const [k, v] of Object.entries(node)) {
+      if (k === DECLARED_EMIT_PATHS_KEY) continue;
+      walk(v, [...path, k]);
+    }
   }
   walk(root, []);
   return out;
@@ -88,7 +104,8 @@ export function defaultCollapsedIds(state: any, minDepth = 3): Set<string> {
 export function topLevelStorePaths(state: any): string[] {
   const root = state?.state ?? state ?? {};
   return Object.entries(root)
-    .filter(([, v]) => {
+    .filter(([k, v]) => {
+      if (k === DECLARED_EMIT_PATHS_KEY) return false;
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         const t = (v as { _type?: string })._type;
         return t !== 'process' && t !== 'step';
@@ -99,27 +116,49 @@ export function topLevelStorePaths(state: any): string[] {
 }
 
 /**
- * Declared emit-all paths, when the composite's own state embeds an emitter
- * step (the backend's `install_default_emitters` convention: a top-level
- * `step` node — keyed `emitter` / `emitter_<i>` — whose `config.emit` lists
- * the columns it emits and whose `inputs` map each column to its absolute
- * path segments). Paths are returned dot/slash-joined (`'/'`), matching
- * `emitSet`'s convention. `global_time` is excluded — it's always emitted
- * for the trajectory's time axis, not a real observable toggle. Returns []
- * when the composite declares no emitter (nothing to seed from), so callers
- * fall back to `topLevelStorePaths`.
+ * Declared emit-all paths for a composite. Two sources, preferred in order:
+ *
+ * 1. The served `state`'s own `_declared_emit_paths` metadata (see
+ *    `DECLARED_EMIT_PATHS_KEY`) — the backend resolves this from the
+ *    composite's `emitters=[...]` declaration (decorator or spec `emitters:`
+ *    key) at serve time, independent of whether the composite has ever
+ *    actually been run. This is the REAL shape the Explorer/loom receives
+ *    for a browsed-not-yet-run composite.
+ * 2. A legacy fallback: scan the state tree for an INSTALLED emitter step
+ *    node (the `install_default_emitters` convention — a top-level `step`
+ *    node keyed `emitter`/`emitter_<i>` whose `config.emit` lists the
+ *    columns it emits and whose `inputs` map each to absolute path
+ *    segments). Only present in a state that was built through the
+ *    run-execution path (`install_default_emitters` is not called on the
+ *    browse/view path), but kept as a fallback for that case and for any
+ *    already-run/exported state that still carries the node.
+ *
+ * Paths are returned dot/slash-joined (`'/'`), matching `emitSet`'s
+ * convention. `global_time` is excluded from both sources — it's always
+ * emitted for the trajectory's time axis, not a real observable toggle.
+ * Returns `[]` when the composite declares no emitter (nothing to seed
+ * from), so callers fall back to `topLevelStorePaths`.
  */
 export function declaredEmitPaths(state: any): string[] {
   const root = state?.state ?? state ?? {};
   if (!root || typeof root !== 'object') return [];
+
+  const metadata = (root as Record<string, unknown>)[DECLARED_EMIT_PATHS_KEY];
+  if (Array.isArray(metadata) && metadata.length) {
+    return metadata.filter(
+      (p): p is string => typeof p === 'string' && p.length > 0 && p !== 'global_time'
+    );
+  }
+
   const out: string[] = [];
-  for (const node of Object.values(root)) {
+  for (const [key, node] of Object.entries(root)) {
+    if (key === DECLARED_EMIT_PATHS_KEY) continue;
     if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
     const n = node as { _type?: string; config?: { emit?: unknown }; inputs?: Record<string, unknown> };
     if (n._type !== 'step' && n._type !== 'process') continue;
     if (!n.config?.emit || typeof n.config.emit !== 'object') continue;
-    for (const [key, target] of Object.entries(n.inputs ?? {})) {
-      if (key === 'global_time') continue;
+    for (const [inputKey, target] of Object.entries(n.inputs ?? {})) {
+      if (inputKey === 'global_time') continue;
       const parts = Array.isArray(target) ? (target as unknown[]).map(String) : [String(target)];
       if (parts.length) out.push(parts.join('/'));
     }
@@ -279,12 +318,14 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
     }
 
     for (const [key, child] of Object.entries(node)) {
+      if (key === DECLARED_EMIT_PATHS_KEY) continue;  // metadata, not a store
       walk(child, [...path, key]);
     }
 
     // Add place edges from parent to each immediate child store
     if (path.length > 0) {
       for (const key of Object.keys(node)) {
+        if (key === DECLARED_EMIT_PATHS_KEY) continue;
         const childId = pathKey([...path, key]);
         edges.push({
           id: `place--${id}--${childId}`,
