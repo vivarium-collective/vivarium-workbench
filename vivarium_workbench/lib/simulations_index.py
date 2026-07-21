@@ -1001,8 +1001,15 @@ def build_simulations_data(ws_root: Path) -> dict:
                 # which would default an unknown/empty emitter to "SQLite"
                 # via emitter_type_of(None).
                 row["emitter_type"] = "—"
-            if rec.get("origin"):
-                row["remote_origin"] = rec["origin"]
+            # `origin` in the JSONL is a *kind* string ("local" for every run
+            # save_metadata logs). `remote_origin` is a RemoteOrigin mapping
+            # ({deployment, simulation_id, ...}) -- assigning the string here
+            # fails SimRow validation and 500s /api/simulations, and because
+            # the log is append-only a single run would brick the page for
+            # good. Only propagate a genuine remote mapping.
+            origin = rec.get("origin")
+            if isinstance(origin, dict) and origin:
+                row["remote_origin"] = origin
     except Exception:
         pass
 

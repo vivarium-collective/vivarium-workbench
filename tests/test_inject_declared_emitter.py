@@ -1,9 +1,14 @@
-import v2ecoli.composites.baseline  # noqa: F401  # self-registers the generator
+import pytest
 
 from vivarium_workbench.lib import composite_runs
 
 
 def test_baseline_declares_parquet(tmp_path):
+    # v2ecoli is a *workspace* repo, not a dependency of the workbench -- it is
+    # absent in CI and in a clean checkout. Import it inside the one test that
+    # needs it (it self-registers the generator) so its absence skips this test
+    # rather than erroring collection of the entire suite.
+    pytest.importorskip("v2ecoli.composites.baseline")
     state, kind = composite_runs.inject_declared_emitter(
         {}, spec_id="v2ecoli.composites.baseline",
         run_id="v2ecoli.composites.baseline__1__aa",

@@ -900,6 +900,12 @@ def _do_build(
         from vivarium_workbench.loom_assets import asset_dir as _loom_asset_dir
         loom_src = Path(_loom_asset_dir())
         loom_dst = out_dir / "bigraph-loom"
+        # Check the source *before* clearing the destination: re-publishing
+        # into an existing bundle when _dist is missing would otherwise delete
+        # a previously-published (working) loom dir and then fall into the
+        # warning branch, silently stripping the Explorer from that bundle.
+        if not loom_src.is_dir():
+            raise FileNotFoundError(loom_src)
         if loom_dst.exists():
             shutil.rmtree(loom_dst)
         shutil.copytree(str(loom_src), str(loom_dst))

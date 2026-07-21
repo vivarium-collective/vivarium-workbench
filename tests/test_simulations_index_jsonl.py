@@ -1,5 +1,6 @@
 from pathlib import Path
 from vivarium_workbench.lib import run_log, simulations_index
+from vivarium_workbench.lib.models import SimRow
 
 
 def test_jsonl_run_appears_with_emitter_and_time(tmp_path: Path):
@@ -53,3 +54,41 @@ def test_jsonl_only_new_run_sorts_before_older_legacy_run(tmp_path: Path):
     run_ids = [r["run_id"] for r in data["simulations"]]
     assert "old-run" in run_ids and "new-jsonl-run" in run_ids
     assert run_ids.index("new-jsonl-run") < run_ids.index("old-run")
+
+
+def test_jsonl_local_origin_still_validates_as_a_simrow(tmp_path: Path):
+    """`save_metadata` stamps origin="local" on every started event. That is an
+    origin *kind* string, not a RemoteOrigin mapping -- merging it straight into
+    `remote_origin` fails SimRow validation, which 500s /api/simulations. The
+    log is append-only, so one such run would brick the page permanently.
+
+    The other tests here call build_simulations_data directly and omit `origin`
+    entirely, so they never cross the pydantic gate the endpoint applies.
+    """
+    ws = tmp_path
+    (ws / "studies").mkdir(parents=True, exist_ok=True)
+    run_log.append_run_event(ws, {
+        "run_id": "local-run", "event": "started", "spec_id": "s",
+        "started_at": 100.0, "status": "running", "origin": "local",
+    })
+
+    data = simulations_index.build_simulations_data(ws)
+    row = {r["run_id"]: r for r in data["simulations"]}["local-run"]
+    assert row.get("remote_origin") is None
+    SimRow.model_validate(row)   # what api/app.py does; must not raise
+
+
+def test_jsonl_genuine_remote_origin_is_preserved(tmp_path: Path):
+    """The local-origin guard must not drop a real remote mapping."""
+    ws = tmp_path
+    (ws / "studies").mkdir(parents=True, exist_ok=True)
+    origin = {"deployment": "eks-prod", "simulation_id": 123}
+    run_log.append_run_event(ws, {
+        "run_id": "remote-run", "event": "started", "spec_id": "s",
+        "started_at": 100.0, "status": "running", "origin": origin,
+    })
+
+    data = simulations_index.build_simulations_data(ws)
+    row = {r["run_id"]: r for r in data["simulations"]}["remote-run"]
+    assert row["remote_origin"] == origin
+    SimRow.model_validate(row)
