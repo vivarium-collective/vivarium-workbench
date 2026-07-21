@@ -25,6 +25,14 @@ import { parseListString, formatListString } from '../parsers';
 
 type FormValue = string | number | boolean;
 
+// Map/dict/object params are edited as JSON text in the form. They must
+// round-trip through the field as JSON (not the "[object Object]" that
+// String(obj) yields) and cast back to an object — otherwise a generator that
+// iterates them (e.g. baseline's `config_overrides.items()`) receives a string
+// and crashes.
+const _OBJECT_TYPES = new Set(['map', 'dict', 'object', 'json']);
+function _isObjectType(t: string): boolean { return _OBJECT_TYPES.has(t); }
+
 function _initialValue(pdef: ParameterDecl, override: unknown): FormValue {
   const seed = override !== undefined ? override : pdef.default;
   if (pdef.type === 'list[string]') {
@@ -33,6 +41,11 @@ function _initialValue(pdef: ParameterDecl, override: unknown): FormValue {
   if (pdef.type === 'bool') return Boolean(seed);
   if (pdef.type === 'int' || pdef.type === 'float') {
     return seed == null ? '' : String(seed);
+  }
+  if (_isObjectType(pdef.type)) {
+    if (seed == null || seed === '') return '';
+    if (typeof seed === 'string') return seed;      // already-serialized override
+    try { return JSON.stringify(seed); } catch { return ''; }
   }
   return seed == null ? '' : String(seed);
 }
@@ -47,6 +60,14 @@ function _castFormValue(pdef: ParameterDecl, raw: FormValue): unknown {
   if (pdef.type === 'float') {
     const n = parseFloat(String(raw));
     return Number.isNaN(n) ? null : n;
+  }
+  if (_isObjectType(pdef.type)) {
+    // Empty or the legacy "[object Object]" coercion → empty map, so iterating
+    // generators don't crash. Non-empty text is parsed as JSON (lenient: an
+    // unparseable value falls back to {} rather than failing the run).
+    const s = String(raw).trim();
+    if (s === '' || s === '[object Object]') return {};
+    try { return JSON.parse(s); } catch { return {}; }
   }
   return String(raw);
 }
@@ -100,9 +121,6 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
       ])
     )
   );
-  const [previewBusy, setPreviewBusy] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
   // Reset form whenever the composite changes (new parameters or overrides).
   useEffect(() => {
     setValues(Object.fromEntries(
@@ -110,7 +128,6 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
         k, _initialValue(pdef, props.overrides[k]),
       ])
     ));
-    setPreviewError(null);
   }, [props.parameters, props.overrides]);
 
   // ---- Run lifecycle state (from RunPanel) ---------------------------------
@@ -207,35 +224,6 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
   }, [props.compositeId]);
 
   // ---- Handlers -----------------------------------------------------------
-
-  /** Preview wiring: re-resolve the composite with the current parameter values
-   *  so the Wiring tab refreshes. Does NOT start a run. */
-  async function handlePreviewWiring() {
-    if (!props.compositeId) {
-      setPreviewError('No composite id — cannot preview.');
-      return;
-    }
-    const newOverrides: Record<string, unknown> = {};
-    for (const [k, pdef] of Object.entries(props.parameters)) {
-      newOverrides[k] = _castFormValue(pdef, values[k]);
-    }
-    setPreviewBusy(true);
-    setPreviewError(null);
-    try {
-      const url = `/api/composite-resolve?id=${encodeURIComponent(props.compositeId)}`
-        + `&overrides=${encodeURIComponent(JSON.stringify(newOverrides))}`;
-      const r = await fetch(url);
-      const body = await r.json();
-      if (!r.ok || body.error) {
-        throw new Error(body.error || `HTTP ${r.status}`);
-      }
-      props.onApplied(newOverrides, body.state);
-    } catch (e) {
-      setPreviewError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setPreviewBusy(false);
-    }
-  }
 
   /** Run: cast current form values to overrides and start the run directly.
    *  No separate Apply step is required — Run applies the parameters. */
@@ -372,24 +360,6 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                 </div>
               );
             })}
-          </div>
-          {/* Preview wiring — optional pre-flight resolve without starting a run */}
-          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              onClick={handlePreviewWiring}
-              disabled={previewBusy || !props.compositeId || !!props.readOnly}
-              style={{
-                padding: '6px 14px', fontSize: 13,
-                background: '#fff', color: '#374151',
-                border: '1px solid #d1d5db', borderRadius: 4,
-                cursor: previewBusy ? 'wait' : 'pointer',
-              }}
-            >
-              {previewBusy ? 'Previewing…' : 'Preview wiring'}
-            </button>
-            {previewError && (
-              <span style={{ color: '#b91c1c', fontSize: 13 }}>Error: {previewError}</span>
-            )}
           </div>
         </section>
       )}
