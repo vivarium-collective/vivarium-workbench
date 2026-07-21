@@ -1,6 +1,11 @@
 # Plan — Composition-native simulation for any pbg-template workspace
 
-Status: **RESCOPED for the 2026-07-22 demo (handoff below). Phase 0 verified; Phase 1 (PR-B, sms-api) committed but has live blockers B1-B5 (not deployed); Phases 2-3 (PR-A, workbench) code-complete + PUSHED (no PR yet); Phase 4 study work is CUT for the demo — 3 small demo items are NEXT**
+Status: **RESCOPED for the 2026-07-22 demo. Demo items A/B/C LANDED + committed (`37b35b5`); the
+SP-D2 `study_runs` 409 regression found + fixed (`742e9ee`); branch is CI-GREEN under Jim's #482
+full-suite gate. N3 (dirty `/workspace` → `git_pip_url`) CONFIRMED on the prod pod and RESOLVED-BY-
+DESIGN → dispatch item D = option C (LOCKED, impl pending — see Decision record). Aligned with Jim's
+newest doc `sms-api/docs/DESIGN-workspace-decoupling.md`. Phase 1 (PR-B, sms-api, blockers B1-B5)
+owned by Jim, not deployed; deploy SERIALIZED (sms-api first). Phase 4 study work CUT (post-demo).**
 Branch: `fix/composites-tab-dispatch` (PR-A, workbench — pushed to origin); `fix/compose-batch-driver-swap` (PR-B, sms-api — owned by Jim)
 Owner: Alex (vivarium-workbench). Jim owns sms-api.
 Repos: `vivarium-workbench` (PR-A), `sms-api` (PR-B + overlays), `pbg-template`/`sms-cdk` as needed
@@ -10,21 +15,77 @@ Deploy target: **`sms-api-stanford` / smscdk (PRODUCTION)** — direct, not stan
 Authoritative for the demo: `sms-api/docs/HANDOFF-ALEX-WORKBENCH.md` (+ `PRE-DEMO-MASTER-PLAN.md`).
 Demo 2026-07-22: v2ecoli `baseline` runs on smscdk **from the workbench UI**, prod `sms-api-stanford`.
 
-**Alex's 3 demo items (~2.5h, this branch):**
-1. **A** — wire the SP-D stub: `lib/run_core.py:35-44` `invoke_run` raises `RunTargetUnavailable` for
-   `target=="deployment"`; replace the raise with delegation to `remote_run.run_remote` (already built).
-2. **B (NEW critical blocker)** — prod pod has no `.viv-build.json`, and `composite_test_run_views.py:94`
-   calls `invoke_run` with no `target=` → `run_target_for` resolves to `local`, so Run spawns a LOCAL
-   subprocess in the workbench pod. Fix: pass `target="deployment"` explicitly (preferred over stamping
-   `.viv-build.json`, which routes ALL runs remote).
-3. **C** — thread `steps` through: `composite_test_run_views.py:95` hardcodes `n_steps=0`; pass the real
-   `steps` (`:73`) → `invoke_run(n_steps=…)` → `compose_submit(interval_time=N)`. TRAP: `interval_time`
-   IS the steps channel and is hard-capped 0..1000 (2700 would 400). Demo uses small step counts (5-20).
+**Alex's demo items (this branch) — A/B/C LANDED (`37b35b5`); D = the N3 fix (option C, impl pending):**
+1. **A ✅** — SP-D stub killed: `run_core.invoke_run` returns `RunPlan(target="deployment")` (no raise);
+   `run_runner._execute_remote` delegates to `remote_run.run_remote`.
+2. **B ✅** — `composite_test_run_views` passes `target="deployment"` when `is_pinned_enabled()`
+   (prod `REMOTE_PINNED=1`), else `None` → local dev unchanged. (Chosen over stamping `.viv-build.json`.)
+3. **C ✅** — `steps` threaded → `compose_submit(interval_time=N)`, clamped `0..1000` in `run_remote`
+   (sms-api hard-caps `interval_time`, which IS the steps channel; 2700 would 400).
+4. **D ⏳ (N3 fix, LOCKED = option C)** — `run_remote` must NOT call `git_pip_url` on the pinned prod
+   pod (`/workspace` is dirty-by-design → raises). Derive the pip URL from `resolve_pinned_build`
+   instead. Last demo-path code gap on the workbench side. **See Decision record below.**
 
 **CUT for the demo (do NOT start — post-demo, branch `fix/composites-tab-dispatch-phase4-runforms`):**
 the full Phase 4 study work below (run-form unification, persistence/rehydration, G1/drop `run_parca`,
 reconciliation §3.13) + gates 1/3/4/5. Highest-regression-risk, zero demo value (handoff §5).
 Note: the PR-A transport `apiUrl()` work (§3.3) is likely REDUNDANT with 0.3.1's `_base_path_shim`.
+
+## ✅ Decision record — dispatch mechanism (2026-07-21, LOCKED)
+
+**Context.** Items A/B/C landed, but a live check of the prod pod (`workbench-67f7cbbf68-mglcf`,
+`sms-api-stanford`/smscdk) found `/workspace` **DIRTY** (`M reports/index.html`, `M workspace.yaml`
+— the workbench writes its own served workspace at runtime, by design; HEAD is pushed to
+`origin/main` at `a08e20bd`). Our dispatch chain `invoke_run(target="deployment")` →
+`run_runner.execute` (`:538`) → `_execute_remote` (`:489`) → `remote_run.run_remote` (`:505`) →
+`git_pip_url` (`remote_run.py:129`, **unconditional**) RAISES on a dirty tree (`:47-54`) → the demo
+Run fails BEFORE reaching sms-api (blocker **N3**). Jim's newest doc `DESIGN-workspace-decoupling.md`
+§3 independently confirms *"git in the pod is broken for our purposes"* — which SUPERSEDES his 12:02
+handoff §3-A (*"wire to run_remote/git_pip_url"*). So the fix follows his newer decoupling intent.
+
+**D1 — N3 fix = OPTION C (LOCKED).** In `remote_run.run_remote`, when `remote_pinned.pinned_config()`
+is set, derive the pip URL from sms-api's already-resolved **built** commit instead of local git:
+- reuse `remote_pinned.resolve_pinned_build(client, cfg.repo_url, cfg.branch)` — the SAME resolver the
+  pinned "Run on remote" study card already uses (`remote_run_views.py:177-207`) → `{commit, …}`;
+- `pip_url = git+<repo_url>.git@<commit>`; unpinned (local dev) → `git_pip_url(ws_root)` as today;
+- `.pbg` export still reads the local on-disk workspace (a read — no git-clean needed).
+Rationale: no pod-git dependency (Jim's decoupling thesis); pins **by construction** to the commit
+sms-api built + keyed its ParCa cache by (`a08e20bd`, image==code); reuses an existing resolver (no
+new primitive); `run_remote` stays the single dispatch path; `NoPinnedBuildError` is a clean failure.
+Doc-vs-code can diverge only if a composite is edited on the pod without commit/rebuild — that IS
+"pinned" semantics (run the built code), fine for the demo (unedited baseline). **Rejected:** A
+(fragile path-allowlist); B (keep pushed-check / drop clean-check — still touches broken pod-git);
+D (ensemble `/api/v1/simulations` — vEcoli-hardwired, can't run a `.pbg`); F (server-side resolve —
+crosses Jim's frozen sms-api contract).
+
+**D2 — the gate = `is_pinned_enabled()` (LOCKED).** Option C REQUIRES `pinned_config()` to resolve,
+so the gate is **structurally necessary**, not a semantic stretch: pinned-on (prod, `REMOTE_PINNED=1`)
+→ C dispatches remote; pinned-off (local dev) → `git_pip_url`/local. Matches Jim's §3-B "seed of the
+origin selector" (a choice, not a hard flip). Already implemented in `composite_test_run_views`.
+
+**D3 — reconcile endpoints (Jim's decoupling-doc open decision D3 — Alex is a NAMED decider,
+"Needs Alex/Eran").** Answer: reconcile composite runs against the **compose** endpoints
+(`compose_status`) — they're absent from `/api/v1/simulations` (ensemble-only). Join on
+`simulation_database_id`; one-way sms-api→local; never delete local-only runs (Jim's D4). POST-DEMO;
+matches §3.13. Action = drop this into Jim's decision table when convenient (non-blocking).
+
+**North star (F′, infinite-time ideal — NOT this plan; logged for direction).** The mature end-state
+references a **built simulator by ID** and runs the composite INSIDE its image with **no runtime code
+install at all** (image==code, cache keyed by the same id) — extending the ensemble `simulator_id`
+pattern to `/compose/v1`. Two legitimate regimes the ideal serves BOTH of: (i) pinned/reproducible →
+build-ID reference (F′); (ii) general/live (uncommitted or cross-workspace composite) → runtime code
+delivery with **server-side** resolution (F, beats client-side C on DRY-across-clients + races +
+single-source-of-truth). F/F′ need an sms-api contract change (Jim's side), so out of scope here;
+**C is F′'s constrained projection onto "workbench-only, frozen contract, this week,"** and folds
+naturally into Jim's decoupling plan ("the build is the reproducible unit").
+
+**CI-gate + alignment status.** Branch already contains #482 (merge `5e06a3b`); full gate
+(`scripts/pytest_gate.sh`, run with `PYTHONUTF8=1` + xdist) = **3259 passed, 2 failed**,
+`known_failures.txt` UNTOUCHED (Jim's rule: only remove). The 2 failures are LOCAL-ENV-ONLY
+parquet-emitter-default drift (`test_registry_default_emitter`, `test_run_runner_explorer_emitter` —
+no emitter/registry code in our branch; CI baseline 3236-clean → green on CI). Our 8 new test files
+all pass. Scope seams with Jim's decoupling doc are clean (it's POST-DEMO Phase-6 infra, claims the
+SP2 half-switch §4.5, consumes our compose substrate via D3).
 
 ## What's next POST-DEMO (Phase 4 study work — deferred)
 
@@ -289,7 +350,7 @@ Make Explore answer "what does this composite need, emit, and cost" so you can r
 - **Implement `invoke_run` deployment target** = the template-standard native path: export composite → `.pbg` (recursive, nesting-safe) + `extra_pip_deps=[git+<origin>@<sha>]` → **`/compose/v1`** → `run_pbg.py`. Replaces the SP-D stub. Works for ANY composite/workspace by construction.
 - **compose-on-Batch (sms-api):** `ComposeSimulationServiceRay` (§3.2/§6 — the name `ComposeSimulationServiceBatch` was considered and scrapped; this rides the existing Ray-on-Batch MNP queue, not a new Batch construct) running the generic `run_pbg.py` in a **shared runner image** (`pip install git+origin@sha`, version-pinned per §3.12) on the existing Ray/Batch queue; Batch-keyed status; **S3 results reusing the observables/charts plumbing** via the `pbg-emitters` fix (§3.9). No v2ecoli assumptions in the routing (those live only in the legacy `/api/v1/simulations` Ray path, left untouched) — but execution IS gated by the allowlist (§3.11); "generalized routing" and "unguarded execution" are not the same thing (§0).
 - **Durable native artifacts — reuse the existing S3 cache pattern.** The ParCa cache is stored content-addressed at `RayLayout.parca_cache_uri(commit)` (existing `FileService` plumbing) — computed once, reproducible, durable, reused across runs/sessions. The Batch runner stages it to a local dir and points `cache_dir` at it (the legacy Ray path's exact hand-off). **No pre-seeding, no bespoke cache, no `default_state_ref` adoption, no v2ecoli change.** If a future artifact's identity ever depends on more than the commit, extend the key to `…/<commit>/<param_hash>/` — a one-line change to the existing helper, not a new primitive.
-- **Code delivery (N3):** run the workspace's own **pushed `origin@HEAD`**; precondition = pushed + clean, else a clear error. No in-pod push, no per-workspace image, no `REMOTE_REPO_URL` hardcoding. "Pinned" retires into the shared runner image + native `default_state_ref` caching.
+- **Code delivery (N3):** run the workspace's own **pushed `origin@HEAD`**; precondition = pushed + clean, else a clear error. No in-pod push, no per-workspace image, no `REMOTE_REPO_URL` hardcoding. "Pinned" retires into the shared runner image + native `default_state_ref` caching. **⚠️ REVISED 2026-07-21 (option C — see Decision record):** the pinned prod pod's `/workspace` is dirty-by-design, so the "clean" precondition cannot hold there. In **pinned mode** the commit is obtained from `remote_pinned.resolve_pinned_build` (sms-api's built commit) and shipped as `git+origin@<that commit>` — same `git+origin@<sha>` delivery, commit sourced from the build registry, no local-git clean/pushed check; the resolved repo == the pinned pod's own origin, so they coincide. **Local dev (unpinned)** keeps the `git_pip_url` clean+pushed path. The repo-agnostic "any workspace" generality the original N3 wanted is the general-regime (F) north-star (Decision record), deferred to Phase 6.
 - **Transport correctness, unified form, durable-at-submit persistence + truthful Origin, steps/duration transport** — as in §3.3, 3.5, 3.6.
 
 ## 5. Phases
@@ -313,7 +374,7 @@ Make Explore answer "what does this composite need, emit, and cost" so you can r
 - Wire `run_core.invoke_run` (`run_core.py:35-44`) to the **already-built** `remote_run.run_remote` (`remote_run.py:84-164`: clean+pushed → `export_composite_pbg` → `compose_submit` → poll → download) — kill the SP-D stub; converge the legacy dashboard remote path (`remote_run_jobs.py` `run_simulation(…, run_parca, …)`) onto it (G1).
 - Base-path transport correctness by **extending the existing `_base()` helper** (`data-source.js:32-34`) to live mode (`apiUrl()`) and routing the composite-explore `/api/` calls (`walkthrough.js:3933,4020,4365,4533`; `configure-run.js:68`) through it; regression test: no un-prefixed `/api/` escapes under `/workbench`.
 - Transport steps/duration by plumbing `n_steps` through `compose_submit` → the existing `run_pbg.py -n` arg.
-- De-hardcode pinned → dispatch the workspace's own `origin@HEAD` via the existing `git_pip_url` clean+pushed check (`remote_run.py:28-81`) (N3).
+- Dispatch code delivery as `git+origin@<commit>` (N3). **⚠️ REVISED 2026-07-21 (option C):** pinned mode sources `<commit>` from `remote_pinned.resolve_pinned_build` (no local git — the pinned pod's `/workspace` is dirty-by-design); unpinned/local dev keeps the `git_pip_url` clean+pushed check (`remote_run.py:28-81`). See Decision record.
 
 **Phase 3 (vivarium-workbench / PR-A) — characterization surfacing**:
 - Fold outputs into the Composites-tab view by calling the **existing** `GET /api/observables` (`app.py:1774`; `build_observables` already shares the composite-resolve build path) from `#page-composite-explore` — frontend wiring, no new backend.
@@ -333,7 +394,7 @@ Make Explore answer "what does this composite need, emit, and cost" so you can r
 **Sequencing:** PR-B → deploy → PR-A (Phases 2-4 + native study composition) → PR-C. No hotfix (D5).
 
 ## 6. Decisions
-**LOCKED:** D5 (no hotfix, one converged change); GENERALIZED requirement; G1 **(refined) — the universal runner and `/api/v1/simulations` ride the SAME Batch executor and registry-selection pattern, with a different job command.** Verified: `/compose/v1/*` today is wired to exactly one `ComposeSimulationServiceHpc` instance (no registry at all, `dependencies.py:384-411`) — the ensemble path's `_init_simulation_service` registry (`dependencies.py:203-252`) is what gets extended to compose, not something already shared between the two. Generic `run_pbg.py` is the driver for any composite; the vEcoli ensemble driver is the specialization. We do NOT converge on the `/api/v1/simulations` *endpoint* (it's vEcoli-hardwired — `simulator_id`/`config_filename`/`num_generations`/`run_parca`, `sms.py:185-301`; its `composite` param is a 2-value engine enum, not a composite document), but we DO reuse the Batch *machinery* beneath it. Implementation shape for `ComposeSimulationServiceRay` (extract `SimulationServiceRay`'s image-build/job-def/submit/results/status seams into shared helpers vs. one class satisfying both ABCs) is an implementation-time call, not re-litigated here — either way, zero sms-cdk change, same underlying Batch executor. N2 (S3 + observables results); N3 (dispatch pushed `origin@HEAD` — **routing** is unrestricted by repo identity; **execution** is gated by the allowlist in §3.11, a distinct axis — no pinned workaround). **SCRAPPED:** N1 pre-stage DSL (ParCa is a native composite; cache-write/stage inherited from the Batch executor); a **separate** `ComposeSimulationServiceBatch` + new Batch job-def/queue (superseded by the driver-swap reuse above); converging on the `/api/v1/simulations` endpoint itself.
+**LOCKED:** D5 (no hotfix, one converged change); GENERALIZED requirement; G1 **(refined) — the universal runner and `/api/v1/simulations` ride the SAME Batch executor and registry-selection pattern, with a different job command.** Verified: `/compose/v1/*` today is wired to exactly one `ComposeSimulationServiceHpc` instance (no registry at all, `dependencies.py:384-411`) — the ensemble path's `_init_simulation_service` registry (`dependencies.py:203-252`) is what gets extended to compose, not something already shared between the two. Generic `run_pbg.py` is the driver for any composite; the vEcoli ensemble driver is the specialization. We do NOT converge on the `/api/v1/simulations` *endpoint* (it's vEcoli-hardwired — `simulator_id`/`config_filename`/`num_generations`/`run_parca`, `sms.py:185-301`; its `composite` param is a 2-value engine enum, not a composite document), but we DO reuse the Batch *machinery* beneath it. Implementation shape for `ComposeSimulationServiceRay` (extract `SimulationServiceRay`'s image-build/job-def/submit/results/status seams into shared helpers vs. one class satisfying both ABCs) is an implementation-time call, not re-litigated here — either way, zero sms-cdk change, same underlying Batch executor. N2 (S3 + observables results); N3 (dispatch `git+origin@<commit>` — **routing** is unrestricted by repo identity; **execution** is gated by the allowlist in §3.11, a distinct axis. **REVISED — option C:** in pinned mode the commit is sourced from `resolve_pinned_build`, not the local git clean+pushed check — the pinned pod is dirty-by-design; the repo-agnostic general regime is the F north-star, deferred. See Decision record). **SCRAPPED:** N1 pre-stage DSL (ParCa is a native composite; cache-write/stage inherited from the Batch executor); a **separate** `ComposeSimulationServiceBatch` + new Batch job-def/queue (superseded by the driver-swap reuse above); converging on the `/api/v1/simulations` endpoint itself.
 
 **RESOLVED — production-grade native (Alex rejected cut-corner options):**
 - **P1 → Composition is native; the workbench stays thin.** No MVP/roadmap split, no composition engine. A study references a (possibly composed) composite; composition lives in composite documents; `run_parca` + the execution-less study-DAG are dropped for native composition. Included in PR-A.
