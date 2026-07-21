@@ -406,7 +406,10 @@ a local socket). This is the concrete form of the `EnvironmentResolver` port
 per-session worker pays it once; the `SessionRegistry` entry becomes
 `{ workspace_handle, env_worker }`, and a `switch` tears down and re-materializes
 the worker for the new source. The bulk of the compute-env decoupling is
-relocating those ~16 in-process sites behind this worker's query surface.
+relocating those ~16 in-process sites behind this worker's query surface. The
+**wire contract** — transport-independent JSON-RPC messages, framing, lifecycle,
+error/cancellation model, and the v1 method catalog — is specified in
+[`docs/env-worker-protocol.md`](env-worker-protocol.md).
 
 **Query surface — interactive only; heavy compute is a job.** The env worker
 answers *authoring / rendering* queries: `list_generators`,
