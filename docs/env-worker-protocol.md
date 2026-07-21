@@ -40,6 +40,17 @@ local), never worker calls — see §12.
   **handled, surfaced error**, never a hung or crashed HTTP worker.
 - The workspace venv needs **no** `vivarium-workbench` dependency (§4).
 
+**Backend host OS — macOS (dev/demo) and Linux (deploy), day one.** The worker is
+always a **local subprocess co-located with the backend** — same host, same OS;
+there is no cross-OS client/server split to support. "macOS support" means the
+backend *and its workers* run on macOS for dev/demo, and on Linux in deployment.
+Both must work from the start, not "Linux now, macOS later." The same-host design
+is POSIX-clean on both, and two choices make it so: a `socketpair` (not a named
+UDS) sidesteps macOS's shorter `sun_path` limit, and spawning a **fresh
+interpreter via `subprocess`** (exec, not `fork`) sidesteps macOS's
+fork-after-threads hazards (`OBJC_DISABLE_INITIALIZE_FORK_SAFETY` and friends) —
+the worker never inherits a forked, half-initialized runtime.
+
 **Non-goals (v1)**
 - Concurrent heavy queries within one worker (the worker is single-threaded on
   its main thread — §8).
@@ -79,7 +90,7 @@ The worker **program** (the IPC server + method handlers) is part of
 workspace's interpreter* and injects its own code onto the path:
 
 ```
-<venv>/bin/python  <workbench>/env_worker/__main__.py  --socket-fd 3  --workspace <staging_path>
+<venv>/bin/python  <workbench>/env_worker/__main__.py  --socket-fd <n>  --workspace <staging_path>
 ```
 
 The worker module imports **only** the standard library plus what is already
@@ -98,8 +109,13 @@ workspace `pbg_<project>` package, `v2ecoli`). It never imports
 
 ## 5. Transport & framing (local adapter)
 
-- **Channel:** one `AF_UNIX` `socketpair()`. The parent keeps one end; the child
-  inherits the other as fd **3** (`--socket-fd 3`). Full-duplex byte stream.
+- **Channel:** one `AF_UNIX` `socketpair()`. The parent keeps one end and passes
+  the other to the child via `subprocess(..., pass_fds=[fd])` after
+  `os.set_inheritable(fd, True)`; the child is told its number with
+  `--socket-fd <n>` and reads that fd from argv (not a hardcoded `3` —
+  `pass_fds` preserves the fd number, it does not renumber to 3). Full-duplex
+  byte stream. Identical on macOS and Linux; `pass_fds` +
+  `os.set_inheritable` are the portable POSIX path.
 - **stdout/stderr are NOT the protocol.** `build_core()` and workspace imports
   `print()` and log freely; that noise flows to the worker's stdout/stderr,
   which the workbench redirects to a **per-worker log file**. The protocol
@@ -282,8 +298,11 @@ workbench                                   worker (<venv>/bin/python)
   (edit + save) must invalidate the worker's in-process registry. Restart the
   worker, or add an explicit `reload` method? (Restart is simplest and reuses the
   crash-recovery path; `reload` avoids re-`build_core`.)
-- **`socketpair` fd-inheritance portability** across the spawn path (`close_fds`
-  handling) — verify on Linux (the deploy target) and macOS (local dev).
+- **Transport test coverage on both host OSes.** macOS and Linux are both
+  supported backend hosts (§2), and the transport (socketpair, `pass_fds`
+  inheritance, SIGKILL-to-restart) is the OS-touching part — it wants a test lane
+  on each, not just the Ubuntu CI runner. Given macOS is a day-one demo host, a
+  macOS transport smoke test belongs in the harness from the start.
 - **Cloud transport specifics** (Phase 3): the sms-api endpoint shape, auth, and
   whether the container is one-per-session (warm) or request-routed — parked
   until the cloud adapter.
