@@ -354,6 +354,7 @@ def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> d
         spec = dict(viz_spec)
         cfg = dict(spec.get("config") or {})
         cfg.setdefault("runs_db_path", db_file)
+        cfg.setdefault("run_id", run_id)  # scope the figure to THIS run
         if spec.get("address", "").endswith("TimeSeriesFromObservables"):
             match = cfg.pop("observable_match", None)
             if not cfg.get("observables"):
@@ -484,6 +485,7 @@ def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
             "title": "Observables over time",
             "observables": obs_names,
             "runs_db_path": db_file,
+            "run_id": run_id,
         },
     }
     try:

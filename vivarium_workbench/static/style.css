@@ -1026,6 +1026,9 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
 .viv-content{
   flex:1 1 auto;
   overflow-y:auto; overflow-x:hidden;
+  /* Always reserve the scrollbar gutter so switching between a short tab and a
+     long one (e.g. Registry Modules -> Discovered) doesn't shift the content. */
+  scrollbar-gutter: stable;
   padding:24px;
   background:var(--bg);
 }
@@ -1935,7 +1938,10 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   color: var(--accent-blue, #2563eb);
   border-bottom-color: var(--accent-blue, #2563eb);
 }
-.registry-subtab-panel { display: none; }
+/* Flush, uniform sub-tab panels (override the .panel card chrome) so switching
+   Modules <-> Discovered doesn't shift the layout or change margins. */
+.registry-subtab-panel { display: none; padding: 0; margin: 0; border: none;
+  background: none; border-radius: 0; box-shadow: none; }
 .registry-subtab-panel.active { display: block; }
 
 /* ───────────────────────────────────────────────────────────────────
