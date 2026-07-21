@@ -1711,7 +1711,16 @@
     var panel = document.getElementById('remote-run-panel');
     if (!panel) return;
     fetch('/api/remote-run-config').then(function(r) { return r.json(); }).then(function(cfg) {
-      if (!cfg || !cfg.pinned) return;
+      if (!cfg) return;
+      // Truthful Origin: label the card with the config-derived deployment name
+      // (VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT) instead of a hardcoded "smsvpctest".
+      // Applies in BOTH pinned and stock modes.
+      if (cfg.deployment) {
+        var h3d = panel.querySelector('h3');
+        if (h3d && !cfg.pinned) h3d.textContent = 'Run on remote (' + escapeHtmlForTests(cfg.deployment) + ')';
+        window._remoteRunDeployment = cfg.deployment;
+      }
+      if (!cfg.pinned) return;
       window._remoteRunPinned = true;
       var shortSha = String(cfg.commit || '').slice(0, 12);
       var label = (cfg.branch || 'main') + (shortSha ? ' @ ' + shortSha : '');
