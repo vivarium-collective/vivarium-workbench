@@ -69,19 +69,45 @@ def run_post_run_scripts(spec: dict, ws_root: Path) -> tuple[list[str], list[dic
     Scripts run with cwd=ws_root using the same Python interpreter as the
     dashboard. Stdout/stderr are captured but discarded unless the script
     fails (script's own viz writes go straight to disk). Returns
-    ``(written_files, errors)`` — written_files lists newly-mtime'd HTML
-    files under studies/<slug>/viz/ (for response surfacing).
+    ``(written_files, errors)`` — written_files lists the HTML files under
+    studies/<slug>/viz/ that were created or changed by this batch (for
+    response surfacing), sorted for determinism.
     """
     entries = spec.get("post_run_scripts") or []
     if not entries:
         return [], []
     import sys as _sys
     import subprocess as _subprocess
-    import time as _time
 
     written: list[str] = []
     errors: list[dict] = []
-    t_start = _time.time()
+
+    def _viz_html_snapshot() -> dict:
+        """Map of study-viz HTML path -> (mtime, size), for before/after diffing."""
+        snap: dict = {}
+        studies = ws_root / "studies"
+        if not studies.is_dir():
+            return snap
+        for study_dir in studies.iterdir():
+            viz_dir = study_dir / "viz"
+            if not viz_dir.is_dir():
+                continue
+            for html in viz_dir.glob("*.html"):
+                try:
+                    st = html.stat()
+                    snap[html] = (st.st_mtime, st.st_size)
+                except OSError:
+                    continue
+        return snap
+
+    # Diff a before/after snapshot rather than comparing st_mtime against a
+    # wall-clock reading. The old approach (`st_mtime >= time.time()` captured
+    # at start) compares two different clocks: filesystem mtime granularity can
+    # be coarser than time.time(), so a file written AFTER t_start can carry an
+    # mtime BELOW it and be silently missed. That made this a race — it happened
+    # to pass serially on CI and fail under parallel scheduling — and in
+    # production it means post-run viz files sometimes never get surfaced.
+    before = _viz_html_snapshot()
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -112,14 +138,11 @@ def run_post_run_scripts(spec: dict, ws_root: Path) -> tuple[list[str], list[dic
             errors.append({"script": rel_path, "error": f"timed out after {timeout_s}s"})
         except Exception as e:  # noqa: BLE001 — keep other scripts running
             errors.append({"script": rel_path, "error": f"{type(e).__name__}: {e}"})
-    # collect HTML files written during this batch (mtime newer than start)
-    for study_dir in (ws_root / "studies").iterdir() if (ws_root / "studies").is_dir() else []:
-        viz_dir = study_dir / "viz"
-        if not viz_dir.is_dir():
-            continue
-        for html in viz_dir.glob("*.html"):
-            if html.stat().st_mtime >= t_start:
-                written.append(str(html.relative_to(ws_root)))
+    # Files created, or whose (mtime, size) changed, during this batch.
+    for html, stamp in _viz_html_snapshot().items():
+        if before.get(html) != stamp:
+            written.append(str(html.relative_to(ws_root)))
+    written.sort()          # deterministic order (iterdir/glob are not)
     return written, errors
 
 

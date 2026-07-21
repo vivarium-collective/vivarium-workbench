@@ -18,6 +18,7 @@ the lib functions.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import subprocess
 import sys
@@ -368,3 +369,63 @@ def test_render_study_visualizations_happy_writes_and_reads_ws_root(tmp_path, mo
     assert captured["name"] == "study-x"
     # ws_root was added to sys.path.
     assert str(ws) in sys.path
+
+
+def test_run_post_run_scripts_detects_write_with_stale_mtime(tmp_path, monkeypatch):
+    """REGRESSION: detection must not compare st_mtime against a wall clock.
+
+    The old implementation captured `t_start = time.time()` and reported files
+    whose `st_mtime >= t_start`. Those are two different clocks: when the
+    filesystem's mtime granularity is coarser than time.time() (common on CI
+    filesystems, which truncate to the second), a file written AFTER t_start
+    carries an mtime BELOW it and was silently dropped — so post-run viz never
+    surfaced. It passed serially on CI and failed under parallel scheduling,
+    i.e. it was luck either way.
+
+    Here the "script" writes its HTML and then backdates the mtime, which is the
+    coarse-granularity case in its most explicit form.
+    """
+    ws = tmp_path / "ws"
+    (ws / "scripts").mkdir(parents=True)
+    script = ws / "scripts" / "render.py"
+    script.write_text("print('hi')", encoding="utf-8")
+    viz_dir = ws / "studies" / "s1" / "viz"
+    viz_dir.mkdir(parents=True)
+
+    def fake_run(cmd, **kw):
+        out = viz_dir / "rendered.html"
+        out.write_text("<html>", encoding="utf-8")
+        # Backdate well below any plausible t_start.
+        os.utime(out, (1_000_000, 1_000_000))
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    written, errors = srp.run_post_run_scripts(
+        {"post_run_scripts": [{"path": "scripts/render.py"}]}, ws)
+
+    assert errors == []
+    assert "studies/s1/viz/rendered.html" in written
+
+
+def test_run_post_run_scripts_ignores_untouched_files(tmp_path, monkeypatch):
+    """Pre-existing viz that this batch did not touch must NOT be reported."""
+    ws = tmp_path / "ws"
+    (ws / "scripts").mkdir(parents=True)
+    (ws / "scripts" / "render.py").write_text("print('hi')", encoding="utf-8")
+    viz_dir = ws / "studies" / "s1" / "viz"
+    viz_dir.mkdir(parents=True)
+    stale = viz_dir / "old.html"
+    stale.write_text("<html>old", encoding="utf-8")
+
+    def fake_run(cmd, **kw):
+        (viz_dir / "new.html").write_text("<html>new", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    written, errors = srp.run_post_run_scripts(
+        {"post_run_scripts": [{"path": "scripts/render.py"}]}, ws)
+
+    assert written == ["studies/s1/viz/new.html"]
+    assert "studies/s1/viz/old.html" not in written
