@@ -16,7 +16,17 @@ def test_invoke_run_local_returns_plan_with_run_id(tmp_path):
     assert plan.run_id.startswith("pkg.composites.x__")
     assert plan.target == "local" and plan.config == {"k": 2} and plan.label == "L"
 
-def test_invoke_run_deployment_raises(tmp_path):
+def test_invoke_run_deployment_returns_plan(tmp_path):
+    # SP-D2: deployment execution is now BUILT — invoke_run returns a plan with
+    # target="deployment" (the detached runner dispatches to sms-api) instead of
+    # raising RunTargetUnavailable.
     (tmp_path / ".viv-build.json").write_text("{}")
-    with pytest.raises(RunTargetUnavailable):
-        run_core.invoke_run(tmp_path, spec_id="x", config={}, db_path=tmp_path / "r.db")
+    plan = run_core.invoke_run(tmp_path, spec_id="x", config={}, db_path=tmp_path / "r.db", n_steps=3)
+    assert plan.target == "deployment"
+    assert plan.run_id.startswith("x__")
+    assert plan.n_steps == 3
+
+
+def test_run_target_unavailable_still_importable():
+    # Retained for callers that reject a target explicitly; invoke_run no longer raises it.
+    assert issubclass(RunTargetUnavailable, RuntimeError)

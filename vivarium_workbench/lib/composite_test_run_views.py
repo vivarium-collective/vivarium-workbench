@@ -92,7 +92,7 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     from vivarium_workbench.lib import run_core
     try:
         plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=overrides,
-                                   db_path=db_file, label=label, n_steps=0)
+                                   db_path=db_file, label=label, n_steps=steps)
     except run_core.RunTargetUnavailable as e:
         return {"error": str(e)}, 409
     run_id = plan.run_id
@@ -110,6 +110,10 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         "emit_paths": emit_paths,
         "db_file": db_file,
         "log_path": log_rel,
+        # SP-D2: which target the detached runner dispatches to (local subprocess
+        # vs. sms-api /compose/v1). `run_target_for` stamps 'deployment' for a
+        # materialized remote build (.viv-build.json), 'local' otherwise.
+        "target": plan.target,
     }), encoding="utf-8")
 
     conn = cr.connect(db_file)

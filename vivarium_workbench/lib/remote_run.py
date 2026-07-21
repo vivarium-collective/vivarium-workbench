@@ -87,6 +87,7 @@ def run_remote(
     client: "SmsApiClient | None" = None,
     poll_interval: float = _DEFAULT_POLL_INTERVAL,
     dest: "Path | None" = None,
+    n_steps: int = 1,
 ) -> Path:
     """Export a composite, submit to sms-api, poll, and land results.zip.
 
@@ -123,8 +124,10 @@ def run_remote(
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
 
-    # Get git pip URL (validates clean + pushed state)
+    # Get git pip URL (validates clean + pushed state), plus any workspace-pinned
+    # framework versions (§3.12) so the shared runner image doesn't float to latest PyPI.
     pip_url = git_pip_url(ws_root)
+    extra_pip_deps = [pip_url, *workspace_pinned_deps(ws_root)]
 
     # Export composite to a temporary .pbg file
     with tempfile.NamedTemporaryFile(suffix=".pbg", delete=False) as tmp:
@@ -139,9 +142,10 @@ def run_remote(
         except OSError:
             pass
 
-    # Submit
+    # Submit. sms-api's `interval_time` query param IS the step count — it sets
+    # `end_time_point`, which the runner passes as `run_pbg.py -n <steps>` (§3.5).
     print(f"Submitting composite '{composite_id}' to sms-api…")
-    sim_id = client.compose_submit(pbg_bytes, extra_pip_deps=[pip_url])
+    sim_id = client.compose_submit(pbg_bytes, extra_pip_deps=extra_pip_deps, interval_time=float(n_steps))
     print(f"Submitted. Simulation id: {sim_id}")
 
     # Poll until terminal state
@@ -162,6 +166,49 @@ def run_remote(
     results_path = client.download_compose_results(sim_id, dest)
     print(f"Results landed at: {results_path}")
     return results_path
+
+
+# The process-bigraph framework packages a workspace pins in its own uv.lock. We
+# forward these pins to the remote runner image (§3.12) so it doesn't float to the
+# latest PyPI release at container-build time and silently mismatch the workspace.
+_PINNED_FRAMEWORK_PKGS = ("process-bigraph", "bigraph-schema", "pbg-emitters", "pbg-superpowers")
+
+
+def workspace_pinned_deps(ws_root: "Path | str") -> list[str]:
+    """Pip specs for the workspace's own framework pins, read from its ``uv.lock``.
+
+    Best-effort + defensive: returns ``[]`` if the lockfile is absent/unparseable
+    or a package isn't pinned (the runner image then floats, as it does today).
+    A git-sourced pin becomes ``name @ git+<url>@<sha>``; a PyPI pin becomes
+    ``name==version``. Threaded into ``extra_pip_deps`` via the existing mechanism —
+    no new pinning concept, no sms-api change.
+    """
+    try:
+        import tomllib
+
+        lock_path = Path(ws_root) / "uv.lock"
+        if not lock_path.is_file():
+            return []
+        data = tomllib.loads(lock_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    deps: list[str] = []
+    for pkg in data.get("package", []):
+        name = pkg.get("name")
+        if name not in _PINNED_FRAMEWORK_PKGS:
+            continue
+        source = pkg.get("source") or {}
+        git = source.get("git")
+        if git:
+            # uv encodes the resolved commit as a ``#<sha>`` fragment on the git URL.
+            url, _, frag = str(git).partition("#")
+            sha = frag or ""
+            url = url.split("?")[0]  # strip ?branch=… — the sha is authoritative
+            deps.append(f"{name} @ git+{url}@{sha}" if sha else f"{name} @ git+{url}")
+        elif pkg.get("version"):
+            deps.append(f"{name}=={pkg['version']}")
+    return deps
 
 
 # ---------------------------------------------------------------------------

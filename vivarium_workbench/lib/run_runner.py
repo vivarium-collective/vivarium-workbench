@@ -33,6 +33,7 @@ class RunRequest:
     emit_paths: list
     db_file: str
     log_path: str
+    target: str = "local"
 
     @classmethod
     def from_file(cls, path: Path) -> "RunRequest":
@@ -47,6 +48,7 @@ class RunRequest:
             emit_paths=data.get("emit_paths") or [],
             db_file=data["db_file"],
             log_path=data["log_path"],
+            target=data.get("target") or "local",
         )
 
 
@@ -395,6 +397,39 @@ def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
         return {}
 
 
+def _execute_remote(req: RunRequest, run_dir: Path) -> int:
+    """Dispatch a 'deployment'-target run to sms-api and land results. Returns 0/1.
+
+    SP-D2: delegates to the already-built ``remote_run.run_remote`` (export .pbg →
+    ``/compose/v1`` submit → poll → download results.zip), writing the SAME
+    ``composite-runs.db`` status rows the local path does so the browser's existing
+    ``/api/composite-run/<id>/status`` polling works unchanged. The landed
+    ``results.zip`` sits in ``run_dir``; unpacking it into a viewable emitter store
+    (viz/chart rendering) is a follow-on — this establishes the run lifecycle end
+    to end (running → completed/failed) on the deployment target.
+    """
+    from vivarium_workbench.lib import remote_run
+
+    conn = cr.connect(req.db_file)
+    try:
+        try:
+            remote_run.run_remote(
+                req.workspace, req.spec_id, dest=run_dir, n_steps=req.steps
+            )
+        except Exception:
+            tb = traceback.format_exc()
+            print(tb, flush=True)
+            _write_log(req, tb)
+            cr.complete_metadata(conn, run_id=req.run_id, n_steps=0, status="failed")
+            return 1
+        cr.complete_metadata(conn, run_id=req.run_id, n_steps=req.steps,
+                             status="completed")
+        print(f"remote run {req.run_id} completed: {req.steps} steps", flush=True)
+        return 0
+    finally:
+        conn.close()
+
+
 def execute(request_path: Path) -> int:
     """Run one composite to completion. Returns 0 on success, 1 on failure.
 
@@ -407,6 +442,12 @@ def execute(request_path: Path) -> int:
 
     if str(req.workspace) not in sys.path:
         sys.path.insert(0, str(req.workspace))
+
+    # SP-D2: a 'deployment'-target run dispatches to sms-api /compose/v1 instead of
+    # running the composite in this local subprocess. Same detached-runner model,
+    # same composite-runs.db persistence + browser polling — only the compute moves.
+    if req.target == "deployment":
+        return _execute_remote(req, run_dir)
 
     conn = cr.connect(req.db_file)
     try:
