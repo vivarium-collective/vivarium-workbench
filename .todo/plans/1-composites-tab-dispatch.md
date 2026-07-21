@@ -200,6 +200,35 @@ focused pass, ideally after PR-B deploys so they're e2e-verifiable. Remaining (b
     workspace-specific.
   Until this lands, the demo Run cannot dispatch remotely on prod. NOT yet fixed.
 
+- **2026-07-21 — ALIGNMENT with Jim's latest ecosystem work + CI-gate status.**
+  Fresh-eyes cross-check against Jim's most recent contributions:
+  - **Jim's newest doc `sms-api/docs/DESIGN-workspace-decoupling.md` (14:13, AFTER the 12:02
+    handoff) independently corroborates N3:** §3 states *"git in the pod is currently broken for
+    our purposes — `git -C /workspace` fails … diff/push-back impossible until `safe.directory` is
+    configured."* Our N3 (dirty `/workspace` → `git_pip_url` raises) is the same root truth from the
+    run-dispatch side. PVC confirmed a git checkout of v2ecoli@`a08e20bd`; prod runs-db still SQLite.
+  - **The two docs conflict, and the newer wins:** handoff §3-A ("wire deployment target →
+    `run_remote`", which uses `git_pip_url`) depends on pod-local git that his §3 (newer) calls
+    broken. So aligning "with Jim overall" ⇒ follow the newer decoupling intent. **This is the
+    decisive argument for N3 fix option C** (pinned-mode pip URL from sms-api's resolved built
+    commit, no local git) over B — C is the demo-path expression of his decoupling thesis, and pins
+    to the commit he already built + cached ParCa for.
+  - **Scope seams match:** the decoupling doc is POST-DEMO, dev-only (`smsvpctest`), explicitly "the
+    infra half of Phase 6" — exactly what this plan §0/§5 defers; it claims the SP2 half-switch fix
+    (§4.5) that this plan §8 leaves adjacent. Its open decision **D3** ("which sms-api endpoint(s) to
+    reconcile against — compose endpoints likely; needs Alex/Eran") consumes THIS plan's compose
+    substrate (compose-runs.db + `compose_status` + §3.13). No collision; we build his prerequisite.
+  - **CI gate (Jim's PR #482, `ci/full-test-suite-gate`) — branch is GREEN.** Branch already contains
+    #482 (via merge `5e06a3b`). Full gate run (`scripts/pytest_gate.sh`, UTF-8 mode, xdist):
+    **3259 passed, 2 failed**, `known_failures.txt` UNTOUCHED (Jim's rule: only remove). The 2
+    failures are LOCAL-ENV-ONLY parquet-emitter-default drift (`test_registry_default_emitter`,
+    `test_run_runner_explorer_emitter`) — our branch touches no emitter/registry code and CI's
+    baseline is 3236-clean, so they pass in CI. **One real regression was found + fixed:**
+    `test_study_run_baseline_on_remote_build_409` — SP-D2 removed `invoke_run`'s `RunTargetUnavailable`
+    raise, which `study_runs.py` (baseline + 2 variant paths, un-converged G1) relied on for its 409;
+    restored an explicit `plan.target == "deployment"` guard (commit `742e9ee`). Our 8 new test files
+    all pass.
+
 ## 0. Design principles (Alex)
 - **The composite is the modular, self-describing unit.** The **Composites tab characterizes** it (params, outputs/observables, wiring, measured wall-time) so you know how to use it in an existing/new study or investigation. It is not a production-sim launcher.
 - **Composability is native to process-bigraph.** Studies compose composites; composites compose composites. Dependencies like `parca → baseline` are **native composition**, not workbench orchestration or a DSL.
