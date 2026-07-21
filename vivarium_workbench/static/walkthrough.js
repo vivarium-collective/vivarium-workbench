@@ -5792,7 +5792,9 @@
         '<div style="display:flex;align-items:flex-start;gap:6px">' +
           '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1.1;flex:none">' + ss.icon + '</span>' +
           '<strong style="font-size:0.85em;line-height:1.25;color:#1e293b;flex:1">' + _esc(prettyTitle) + '</strong>' +
-          '<span style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px">' + _esc(confidence) + '</span>' +
+          '<span class="aig-status-badge" role="button" tabindex="0" title="Why: open this study\'s finding & evidence" ' +
+            'style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px;cursor:pointer;text-decoration:underline dotted">' +
+            _esc(confidence) + '</span>' +
         '</div>' +
         (_opts.asks && asks
           ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
@@ -5810,6 +5812,22 @@
           ? window._chainBlockHtml(chainsBySlug[s.name]) : '');
       node._followUps = followUps;
       nodesHost.appendChild(node);
+      var _badge = node.querySelector('.aig-status-badge');
+      if (_badge) {
+        var _openReason = function (ev) {
+          ev.stopPropagation();
+          // Prefer the quick-look drawer opened to the finding/evidence; fall
+          // back to opening the full study. _openInvestigationDrawer renders the
+          // study's findings/evidence in the drawer body.
+          if (window._openInvestigationDrawer) window._openInvestigationDrawer('study', s);
+          else _openStudyInsideInvestigation(s.name);
+          var body = document.getElementById('investigation-detail-drawer-body');
+          var target = body && (body.querySelector('[data-section="findings"]') || body.querySelector('.aig-claim-row'));
+          if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
+        };
+        _badge.addEventListener('click', _openReason);
+        _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') _openReason(ev); });
+      }
       if (chainsBySlug && window._groupClaims && window._openInvestigationDrawer) {
         (function (study, chain) {
           var claims = window._groupClaims(chain);
