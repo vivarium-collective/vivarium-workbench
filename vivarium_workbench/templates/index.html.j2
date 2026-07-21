@@ -917,6 +917,12 @@ window.addEventListener('pageshow', function (e) {
       <strong>Investigation graph</strong>
       <span class="viv-info-chip" data-tooltip="Each study is a knowledge-producing operation that builds understanding of the mechanism. Each node shows the question it asks and the evidence it produced; edges show what a result leads to.">?</span>
       — nodes are studies; edges show what each result leads to.
+      <span class="aig-zoom-ctl" style="float:right;display:inline-flex;align-items:center;gap:6px;font-size:0.9em;color:#64748b">
+        <span title="Zoom out — overview">🔍−</span>
+        <input id="aig-zoom-slider" type="range" min="0" max="2" step="1" value="1"
+               oninput="window._setAigBand(parseInt(this.value,10))" style="width:110px" aria-label="Graph zoom / detail level">
+        <span title="Zoom in — full detail">🔍+</span>
+      </span>
     </div>
     <div id="investigation-dag-shell"
          style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;

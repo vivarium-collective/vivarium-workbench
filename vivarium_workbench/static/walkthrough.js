@@ -5941,6 +5941,35 @@
   }
   window._renderInvestigationDag = _renderInvestigationDag;
 
+  function _setAigBand(b) {
+    var nb = Math.max(0, Math.min(2, b | 0));
+    if (nb === aigBand && document.getElementById('investigation-dag-shell').classList.contains('aig-zoom-' + ['far','mid','near'][nb])) {
+      // still sync the slider (wheel and slider share state)
+    }
+    aigBand = nb;
+    var sl = document.getElementById('aig-zoom-slider');
+    if (sl && String(sl.value) !== String(nb)) sl.value = String(nb);
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1]);
+  }
+  window._setAigBand = _setAigBand;
+
+  // Wheel over the graph shell zooms bands (one notch per gesture, threshold +
+  // cooldown so a single scroll doesn't skip bands). preventDefault so the page
+  // doesn't scroll while zooming the graph.
+  (function _wireAigWheel() {
+    var lastWheel = 0;
+    document.addEventListener('wheel', function (ev) {
+      var shell = document.getElementById('investigation-dag-shell');
+      if (!shell || !shell.contains(ev.target)) return;   // only over the graph
+      ev.preventDefault();
+      var now = Date.now();
+      if (now - lastWheel < 220) return;                  // cooldown between steps
+      if (Math.abs(ev.deltaY) < 4) return;
+      lastWheel = now;
+      _setAigBand(aigBand + (ev.deltaY > 0 ? -1 : 1));    // scroll down = zoom out
+    }, { passive: false });
+  })();
+
   // ── DAG follow-ups popover ───────────────────────────────────────────────
   // Surfaced when phase=Decide. Lists each follow_up_studies entry with a
   // "Seed →" button that POSTs to /api/study-seed-followup (existing

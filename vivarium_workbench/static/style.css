@@ -2384,3 +2384,29 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .cfg-run-btn { padding: 8px 18px; font-size: 0.95em; }
 .cfg-status { margin-top: 12px; font-size: 0.9em; }
 .cfg-loading { color: #6b7280; padding: 8px 0; }
+
+/* ── Investigation DAG semantic zoom slider ────────────────────────────────── */
+#aig-zoom-slider {
+  cursor: pointer;
+  vertical-align: middle;
+  accent-color: #2563eb;
+}
+#aig-zoom-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2563eb;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+#aig-zoom-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2563eb;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
