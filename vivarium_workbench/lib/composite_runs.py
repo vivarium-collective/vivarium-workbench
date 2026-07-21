@@ -439,6 +439,52 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
     return new_state
 
 
+def inject_declared_emitter(state: dict, *, spec_id: str, run_id: str,
+                            out_dir: str | Path) -> tuple[dict, str | None]:
+    """If the composite for ``spec_id`` declares a default emitter, append it
+    to ``state`` as a ``declared_emitter`` step. Returns ``(new_state, kind)``
+    where ``kind`` is e.g. ``"parquet"``, or ``(state, None)`` unchanged when
+    nothing is declared (pure — never mutates the input ``state``).
+
+    Resolution goes through ``pbg_superpowers.composite_generator`` — the
+    same module every other ``spec_id`` lookup in this codebase uses
+    (``_REGISTRY.get(spec_id)`` for the generator entry; see
+    ``run_runner.py``, ``composite_flush.py``, ``observables_views.py``).
+    The declared ``emitters=[...]`` come from ``emitter_defaults(entry)``;
+    node construction (emit-schema from ``paths``, parquet ``out_dir`` /
+    ``partitioning_keys``/``metadata`` wiring) is delegated to
+    ``install_default_emitters`` — the convention's own installer, already
+    used for parquet by ``vivarium_workbench.lib.emitters.run_with_emitter``
+    — so this stays in lockstep with the rest of the codebase instead of
+    re-deriving that logic. Only the first declared emitter is honored
+    (matches the single ``declared_emitter`` node this function produces);
+    a composite declaring more than one default emitter would need a richer
+    interface than this task's tuple return.
+    """
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, emitter_defaults, install_default_emitters)
+    except Exception:
+        return state, None
+    entry = _REGISTRY.get(spec_id)
+    if entry is None:
+        return state, None
+    if not emitter_defaults(entry):
+        return state, None
+    installed = install_default_emitters({}, entry, run_id=run_id, out_dir=out_dir)
+    node = installed.get("emitter")
+    if node is None:
+        return state, None
+    new_state = dict(state)
+    new_state["declared_emitter"] = node
+    address = node.get("address", "")
+    if address.lower().endswith("parquetemitter"):
+        kind = "parquet"
+    else:
+        kind = address.split(":")[-1].lower().replace("emitter", "") or "custom"
+    return new_state, kind
+
+
 def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
     """Inject a RAMEmitter step that captures the user-selected store paths.
 
