@@ -911,6 +911,15 @@ def delete_simulation(workspace: Path, run_id: str) -> dict:
             except (yaml.YAMLError, OSError) as e:
                 errors.append(f"{sdir.name}: {type(e).__name__}: {e}")
 
+    # Tombstone the run in the append-only JSONL log. Without this the next
+    # fold re-synthesises the row from its surviving `started` event and the
+    # run reappears — undeletable through the UI. Best-effort: a log failure
+    # must not turn an otherwise-successful delete into a 500.
+    try:
+        run_log.append_deleted_event(workspace, run_id)
+    except OSError as e:
+        errors.append(f"run log tombstone: {type(e).__name__}: {e}")
+
     return {
         "deleted_rows": deleted_rows,
         "deleted_history": deleted_history,

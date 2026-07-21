@@ -218,13 +218,27 @@ def query_all_runs(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
-def mark_orphaned(conn: sqlite3.Connection, *, run_id: str) -> None:
-    """Mark a run whose process died without writing a terminal status."""
+def mark_orphaned(conn: sqlite3.Connection, *, run_id: str,
+                  workspace=None) -> None:
+    """Mark a run whose process died without writing a terminal status.
+
+    Mirrors the terminal state to the JSONL log when ``workspace`` is given.
+    Without that mirror the fold keeps the run's last logged status
+    (``running``) and — since the JSONL wins over sqlite in
+    ``simulations_index`` — a killed run reads "running" forever, surviving
+    every restart because reconciliation only ever touched sqlite.
+    """
+    completed_at = time.time()
     conn.execute(
         "UPDATE runs_meta SET status='orphaned', completed_at=? WHERE run_id=?",
-        (time.time(), run_id),
+        (completed_at, run_id),
     )
     conn.commit()
+    if workspace is not None:
+        run_log.append_run_event(workspace, {
+            "run_id": run_id, "event": "orphaned",
+            "completed_at": completed_at, "status": "orphaned",
+        })
 
 
 PRUNE_KEEP = 20
