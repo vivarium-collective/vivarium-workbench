@@ -1,9 +1,50 @@
 # Plan — Composition-native simulation for any pbg-template workspace
 
-Status: **EXECUTING — Phase 0 verified + Phase 1 (PR-B) landed on branch `fix/compose-batch-driver-swap`; Phases 2-5 pending**
-Branch: `fix/composites-tab-dispatch` (PR-A, workbench); `fix/compose-batch-driver-swap` (PR-B, sms-api)
+Status: **EXECUTING — Phase 0 verified; Phase 1 (PR-B, sms-api) code-complete (not deployed); Phases 2-3 (PR-A, workbench) code-complete; Phase 4 (one run surface + persistence) is NEXT**
+Branch: `fix/composites-tab-dispatch` (PR-A, workbench); `fix/compose-batch-driver-swap` (PR-B, sms-api — SHARED with a coworker)
 Owner: Alex
 Repos: `vivarium-workbench` (PR-A), `sms-api` (PR-B + overlays), `pbg-template`/`sms-cdk` as needed
+Deploy target: **`sms-api-stanford` / smscdk (PRODUCTION)** — direct, not stanford-test-first (Alex 2026-07-21).
+
+## What's next (start here on resume)
+
+**→ Phase 4 is PARTIALLY done** — config-derived Origin landed (see log); the remaining 3 items are large,
+interrelated, and all touch the study Simulations remote-run path (they converge on G1). Best done as a
+focused pass, ideally after PR-B deploys so they're e2e-verifiable. Remaining (branch
+`fix/composites-tab-dispatch`, see Phase 4 in §5):
+1. Unify the study Simulations sub-tab's TWO run forms (local `btn-run-baseline`/`btn-variant-run`,
+   remote `#remote-run-form`; `study-detail.html:924,966,1269`) into ONE origin selector
+   (Local / Remote:<deployment>), reading origins from `/api/remote-run-config` (now carries `deployment`).
+2. Reuse `save_metadata(status='running')` to write the durable `runs_meta` row at submit for REMOTE
+   runs too; rehydrate in-flight remote runs on load by polling `client.compose_status`.
+   [Origin part — DONE, see log.]
+3. **G1 convergence** (deferred from Phase 2): converge the legacy `remote_run_jobs.py`
+   `run_simulation(…, run_parca, …)` study path onto `run_remote`; drop `run_parca`.
+4. Reconciliation state (§3.13): treat a persistent 404 from `compose_status` on a believed-`running`
+   row as a distinct "submission may have failed" state, not infinite "running".
+
+**Deferred within Phase 2 (do in Phase 4, where the run-form unification lives):**
+- **G1 convergence** — converge the legacy `remote_run_jobs.py` `run_simulation(…, run_parca, …)` study
+  path onto `run_remote`. Left for Phase 4 (§5) because it's coupled to unifying the study's two run
+  forms + dropping `run_parca`; doing it now would touch the study surface prematurely.
+- **Viz-landing of remote results** — `_execute_remote` currently lands `results.zip` into the run dir
+  and marks the run completed, but does NOT yet unpack it into a viewable emitter store (zarr/parquet →
+  charts). Marked as a follow-on in the function docstring; needs the results-contract to be verified
+  against a live PR-B deploy first anyway.
+
+**sms-api (PR-B) remaining before it's deploy-ready — LIKELY OWNED BY COWORKER (Alex 2026-07-21):**
+- (a) Reconcile/commit the `job_backend` default fix (done in working tree, see log; not pushed).
+- (b) Version bump (release protocol: `version.py` + `pyproject.toml` + overlays).
+- (c) Deploy to `sms-api-stanford`/smscdk + run the §9 gate-1 generality test (never run against real
+  Batch yet). (d) Verify the Ray-on-Batch entrypoint runs a generic 1-node `RAY_JOB_CMD` + syncs
+  `RAY_OUT_DIR→RAY_OUT_S3` (assumed, unverified). (e) DB-integration tests (Docker was down locally).
+
+**sms-api (PR-B) remaining before it's deploy-ready — LIKELY OWNED BY COWORKER (Alex 2026-07-21):**
+- (a) Reconcile/commit the `job_backend` default fix (done in working tree, see log; not pushed).
+- (b) Version bump (release protocol: `version.py` + `pyproject.toml` + overlays).
+- (c) Deploy to `sms-api-stanford`/smscdk + run the §9 gate-1 generality test (never run against real
+  Batch yet). (d) Verify the Ray-on-Batch entrypoint runs a generic 1-node `RAY_JOB_CMD` + syncs
+  `RAY_OUT_DIR→RAY_OUT_S3` (assumed, unverified). (e) DB-integration tests (Docker was down locally).
 
 ## Progress log
 
@@ -14,16 +55,77 @@ Repos: `vivarium-workbench` (PR-A), `sms-api` (PR-B + overlays), `pbg-template`/
   `data-source.js:32-34` `_base()`/`DataSource.basePath()` exists, proven at
   `walkthrough.js:1473`, but NOT applied to composite-explore run paths). Branch
   `fix/composites-tab-dispatch` pre-exists but is effectively empty (2 unrelated files).
-- **2026-07-21 — Phase 1 (sms-api / PR-B) COMPLETE on `fix/compose-batch-driver-swap`.**
-  `make check` green; 108 non-container tests pass (5 new). See "Phase 1" below for the
-  per-item landing notes. **Correction to the plan's framing:** §3.2's "shared runner image"
-  is NOT needed — the prebuilt workspace image (v2ecoli's own `v2ecoli:<commit>`, which
-  already bundles process-bigraph + pbg-emitters) is reused as-is; the generic `run_pbg.py`
-  source is embedded into the Batch job command via a heredoc (same trick
-  `container_def.build_pbg_def` already uses for SLURM). Zero new ECR repo / sms-cdk change.
-  The one genuinely-new schema need (SLURM int job-id vs. Batch UUID) was met by mirroring
-  the EXISTING `ORMHpcRun.job_id_ext`/`job_backend` pattern onto `ORMComposeHpcRun`, not a
-  new primitive.
+- **2026-07-21 — Phase 1 (sms-api / PR-B) CODE-COMPLETE on `fix/compose-batch-driver-swap`.**
+  `make check` green; 108 non-container tests pass (5 new). **NOT deployed or verified against real
+  Batch/Postgres** — see "What's next" (a)-(e). See "Phase 1" below for per-item landing notes.
+  **Correction to the plan's framing:** §3.2's "shared runner image" is NOT needed — the prebuilt
+  workspace image (v2ecoli's own `v2ecoli:<commit>`, which already bundles process-bigraph +
+  pbg-emitters) is reused as-is; the generic `run_pbg.py` source is embedded into the Batch job
+  command via a heredoc (same trick `container_def.build_pbg_def` already uses for SLURM). Zero new
+  ECR repo / sms-cdk change. The one genuinely-new schema need (SLURM int job-id vs. Batch UUID) was
+  met by mirroring the EXISTING `ORMHpcRun.job_id_ext`/`job_backend` pattern onto `ORMComposeHpcRun`,
+  not a new primitive.
+- **2026-07-21 — `job_backend` default reconciled (branch working tree, uncommitted).** A coworker
+  is editing sms-api concurrently and committed onto this same branch (`b031b48f`, `b9c766e4`),
+  aligning ORM `server_default` + migration ongoing-default to `'ray'`. The remaining correctness bug
+  — the migration was backfilling EXISTING legacy-SLURM rows with `'ray'`/`'batch'` (would make the
+  monitor poll Batch for a SLURM int id) — was fixed in `alembic/.../e5a7c9d10f21_*.py` by splitting
+  the one-time backfill (existing rows → `'slurm'`) from the ongoing default (`'ray'`, matching the
+  ORM). Migration-file-only edit to avoid clobbering the coworker's in-flight ORM/deps edits. `make
+  check` still green. **Not pushed** — coordinate with coworker first (shared branch).
+- **2026-07-21 — Handoff note (Alex):** the coworker will *most likely* own the rest of the sms-api
+  repo work (deploy, version bump, gate-1 verification). Claude to hold on sms-api and proceed to
+  Phase 2 (workbench) next.
+- **2026-07-21 — Phase 2 (vivarium-workbench / PR-A) CODE-COMPLETE on `fix/composites-tab-dispatch`.**
+  138 relevant tests pass (7 new); 2 failures are PRE-EXISTING on the branch (confirmed by stashing —
+  `test_remote_run_panel::…routes_to_visualizations`, `test_visualization_endpoints::…generator_id`),
+  unrelated to this work. Landed:
+  - **Item 1 (SP-D stub killed):** `run_core.invoke_run` no longer raises `RunTargetUnavailable` for the
+    `deployment` target — returns a `RunPlan(target="deployment")`. The run-request now carries
+    `"target"`, and `run_runner.execute` branches on it: `_execute_remote` delegates to the already-built
+    `remote_run.run_remote` (export .pbg → `/compose/v1` → poll → download), writing the SAME
+    `composite-runs.db` status rows so the browser's existing `/api/composite-run/<id>/status` polling
+    works unchanged. **One launch path, one persistence path, one poll path** — only compute moves.
+  - **Item 2 (transport):** confirmed the workbench IS served `--base-path /workbench`
+    (`kustomize/base/workbench/workbench.yaml:127`), so the global `_base_path_shim` (monkeypatches
+    `window.fetch`) already prefixes fetch-based `/api/` calls — but added explicit belt-and-suspenders:
+    new `DataSource.apiUrl()` helper + routed every composite-explore run/resolve/status call in
+    `walkthrough.js` + `configure-run.js` through it (composes safely with the shim — no double-prefix).
+    Regression test `test_composite_explore_base_path.py`. `node --check` clean on all 3 JS files.
+  - **Item 3 (n_steps):** `run_remote(…, n_steps=)` → `compose_submit(interval_time=n_steps)` (sms-api's
+    `interval_time` IS the step count → `run_pbg.py -n`).
+  - **Item 4 (origin@HEAD):** already satisfied — `run_remote` uses `git_pip_url(ws_root)` (clean+pushed
+    → `git+<origin>@<sha>`); no hardcoded pin remains on the compose path.
+  - **Item 5 (§3.12 version-pin):** new `remote_run.workspace_pinned_deps()` reads the workspace `uv.lock`
+    for framework packages (git-sourced → `name @ git+url@sha`, PyPI → `name==ver`) and appends them to
+    `extra_pip_deps`; defensive (`[]` on missing/malformed lock).
+  - **NOT e2e-verifiable** until PR-B is deployed (no live `/compose/v1` to hit) — unit-level correctness
+    only. G1 convergence + remote-results viz-landing deferred (see "What's next").
+- **2026-07-21 — Phase 3 (characterization surfacing) CODE-COMPLETE on `fix/composites-tab-dispatch`.**
+  Both items are pure frontend wiring against EXISTING endpoints — no new backend:
+  - **Outputs:** the composite-explore view now folds in emitted observables via `GET /api/observables?ref=`
+    (`_ceLoadCharacterization` in `walkthrough.js`, called from `_ceFetch`'s resolve-success path; renders
+    `leaves` + `catalogs` into a new `#ce-outputs` panel in `index.html.j2`).
+  - **Wall-time:** surfaced from the last COMPLETED run's `runs_meta` timing (`completed_at - started_at`)
+    via the existing `GET /api/composite-runs?spec_id=`, keyed by the current param-signature (exact-match
+    preferred, else most-recent-completed, else "unknown (no completed run yet)"). Reuses the existing
+    `started_at`/`completed_at`/`n_steps` columns — no `timing_summary()` capture needed, since those
+    columns already record the wall-clock the plan wanted. Rendered into `#ce-walltime`.
+  - New tests: `test_composite_characterization.py` (template containers + endpoint wiring). `node --check`
+    clean. Degrades quietly in snapshot mode. The 35 failures in the full workbench suite are PRE-EXISTING
+    on the branch (confirmed by stashing — all `test_study_*` rendering, unrelated to this work).
+- **2026-07-21 — Phase 4 PARTIAL: config-derived Origin DONE on `fix/composites-tab-dispatch`.**
+  De-hardcoded `"smsvpctest"` → the config-derived deployment name (the plan's "truthful config-derived
+  Origin"), end-to-end:
+  - `remote_pinned.remote_deployment_name()` reads `VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT` (same env pattern
+    as `pinned_config`), default `"smsvpctest"` (upgrade-safe fallback).
+  - `remote_run_landing.py` records `provenance["source"]` + the run label from it (was hardcoded).
+  - `GET /api/remote-run-config` now carries `deployment` in both pinned + stock modes.
+  - `study-detail.js` `_initRemoteRunPinned` labels the run card "Run on remote (<deployment>)" truthfully.
+  - Tests updated/added in `test_remote_run_pinned.py` (40 pass). `node --check` clean.
+  - **Remaining Phase 4 (form unification, durable-at-submit remote persistence + rehydration, G1
+    convergence, reconciliation state §3.13) NOT done** — large + interrelated (all converge on G1),
+    best as a focused pass once PR-B is deployed for e2e. See "What's next".
 
 ## 0. Design principles (Alex)
 - **The composite is the modular, self-describing unit.** The **Composites tab characterizes** it (params, outputs/observables, wiring, measured wall-time) so you know how to use it in an existing/new study or investigation. It is not a production-sim launcher.
@@ -92,6 +194,8 @@ Make Explore answer "what does this composite need, emit, and cost" so you can r
 
 **Phase 0 — repro & confirm** (blocking, no code): tunnel repro; confirm the SP-D stub + base-path escape; confirm the served workspace's pushed state.
 
+> **Deploy target (Alex 2026-07-21): `sms-api-stanford` / smscdk stack (PRODUCTION) directly** — the stanford-test-first step in the original §5/§7/§9 phrasing is superseded; those references below are stale and should be read as "stanford / smscdk". A coworker is editing sms-api concurrently (shares this branch) — coordinate before push/deploy.
+
 **Phase 1 (sms-api / PR-B) — generic composite as a driver-swap on the existing Batch executor** [critical path] — **✅ LANDED on `fix/compose-batch-driver-swap`** (make check green, 108 non-container tests pass):
 - **✅ `ComposeSimulationServiceRay` (§3.2):** DONE — `sms_api/compose/simulation_service_ray.py`. Implements the `ComposeSimulationService` ABC, wrapping an instance of `SimulationServiceRay` and reusing its `_ensure_mnp_job_def`/`_submit_mnp`/Batch client verbatim. `_compose_command()` = `aws s3 cp <doc>` → heredoc-embed `run_pbg.py` → `python run_pbg.py <doc> -o $RAY_OUT_DIR -n <steps>`. **Deviation from plan (better):** does NOT build a new image — targets the prebuilt workspace image `<ray_ecr_repository>:<compose_ray_image_tag>` (new setting `compose_ray_image_tag`, default `latest`), which already carries process-bigraph + pbg-emitters. `requires_container_build=False` so the dispatch skips the singularity build+wait; `get_job_status()` maps Batch `describe_jobs` → `ComposeJobStatus`. Uploaded doc staged to S3 via the existing `FileService`.
 - **✅ Registry:** DONE — `_init_compose_subsystem` (`dependencies.py`) now builds `dict[ComputeBackend, ComposeSimulationService]` exactly like `_init_simulation_service`: Ray registered when `ray_mnp_queue` set, SLURM as the default-backend entry, default resolved via `get_job_backend()`. `ComposeJobMonitor` gained a `sim_registry` arg and backend-splits polling: SLURM via squeue/SSH, Ray/Batch via each service's `get_job_status` (`describe_jobs`) — no SSH needed. **This is the actual Stanford silent-500 fix.**
@@ -101,7 +205,7 @@ Make Explore answer "what does this composite need, emit, and cost" so you can r
 - **✅ Submit/status reconciliation (§3.13):** DONE — `run_compose_simulation` inserts the `ComposeHpcRun` status row synchronously before returning 200 (was in the background task); `_dispatch_compose_job` updates that same row (`update_hpcrun_dispatch`) instead of a second insert; a `perform_job` throw flips it to FAILED (`mark_hpcrun_failed`). No more 404-forever.
 - **✅ Deployment advertising:** DONE — `/health` now returns `deployment_namespace` + `compute_backend` alongside `docs`/`version`.
 - **✅ Schema (job-id generalization, newly-scoped during exec):** SLURM job ids are ints, Batch/Ray ids are UUID strings. Added `job_id_ext: str | None` + `job_backend: str` to `ORMComposeHpcRun`/`ComposeHpcRun`, mirroring the EXISTING `ORMHpcRun` pattern (not a new primitive). Idempotent Alembic migration `e5a7c9d10f21` (`ADD COLUMN IF NOT EXISTS`, chained off `d3f9a1c72b84`) + the required `db_reconcile` fingerprint marker (6th) + updated `test_db_reconcile.py` vectors. Also added `bigraph_schema`/`pbg_emitters` to the mypy `ignore_missing_imports` override (they're container-only deps, `run_pbg.py` never executes in the sms-api process — only its source is read + embedded).
-- **⏳ Namespace targeting:** PENDING — land on `sms-api-stanford-test`/`smsvpctest` first, then promote (the standard Stanford-Test Deploy Loop). Not yet deployed; code only.
+- **⏳ Namespace targeting (UPDATED per Alex 2026-07-21):** deploy target is **`sms-api-stanford` / smscdk stack (PRODUCTION)** directly — NOT stanford-test first. Not yet deployed; code only. **Concurrency note:** a coworker is editing `sms-api` in parallel and has committed onto this same branch (`b031b48f`, `b9c766e4` — the `job_backend` default alignment); coordinate before pushing further / deploying.
 
 **Phase 2 (vivarium-workbench / PR-A) — native remote execution + transport**:
 - Wire `run_core.invoke_run` (`run_core.py:35-44`) to the **already-built** `remote_run.run_remote` (`remote_run.py:84-164`: clean+pushed → `export_composite_pbg` → `compose_submit` → poll → download) — kill the SP-D stub; converge the legacy dashboard remote path (`remote_run_jobs.py` `run_simulation(…, run_parca, …)`) onto it (G1).
@@ -144,7 +248,7 @@ Make Explore answer "what does this composite need, emit, and cost" so you can r
 - **Allowlist enforcement (§3.11):** a compose submit whose `extra_pip_deps`/origin is NOT in `compose_allow_list` is rejected before any `pip install`/container run — negative test, not just the happy path.
 - **Output shape (§3.9):** a compose run's results are readable by `observable_reader.py` unchanged (zarr/parquet via `pbg-emitters`), on both the SLURM and Ray/Batch backends.
 - **Reconciliation (§3.13):** simulate a background-task dispatch failure (fake a `build_container`/`submit_simulation_job` throw) and confirm the status row still exists (sms-api side) and the dashboard surfaces a distinguishable "submission failed" state rather than polling `running` forever.
-- Manual: tunnel repro on `sms-api-stanford-test`/`smsvpctest` first (namespace targeting, §5), promoted to `sms-api-stanford` after.
+- Manual: tunnel repro on `sms-api-stanford`/smscdk (PRODUCTION — per Alex 2026-07-21, deploying straight to prod, not stanford-test first).
 
 ## 8. Risks
 - **PR-B is a new `ComposeSimulationServiceRay` + registry-extension on the existing Batch executor, not new backend work** — reuses image-build/job-def/S3-sync/status/ParCa-hand-off from `SimulationServiceRay`; the critical path is `_compose_command()` + the registry extension (§3.2) + the output-emitter fix (§3.9) + the allowlist wiring (§3.11). The 404/silent-500 stays until PR-B ships+deploys (accepted, D5).
@@ -166,7 +270,7 @@ Make Explore answer "what does this composite need, emit, and cost" so you can r
 MVP scope = **the remote-compute slice for the currently-active workspace** (local checkout or locally-materialized remote build). Multi-workspace hosting/creation/switching is Phase 6, explicitly out (§0, §5).
 
 Ship gates, in order:
-1. **Generality gate (proves the platform):** the §7 non-v2ecoli fixture composite runs end-to-end via compose-on-Batch on smscdk (via `sms-api-stanford-test`/`smsvpctest` first) — submit → Batch-keyed status → **S3 results** read back through `observable_reader.py`. Exercises §3.1/§3.2/§3.9, *not* the ParCa glue.
+1. **Generality gate (proves the platform):** the §7 non-v2ecoli fixture composite runs end-to-end via compose-on-Batch on smscdk (on `sms-api-stanford` / PRODUCTION — per Alex 2026-07-21) — submit → Batch-keyed status → **S3 results** read back through `observable_reader.py`. Exercises §3.1/§3.2/§3.9, *not* the ParCa glue.
 2. **Transport gate:** Composites-tab Explore → parameterize → Run reaches the workbench under `/workbench` (no un-prefixed `/api/` escape); the original 404 is gone.
 3. **Characterization gate:** the composite view surfaces `available_observables` outputs + a measured `timing_summary` wall-time (cold = "unknown", warm = cached by param-signature).
 4. **Persistence gate:** an `Origin=smscdk` run shows a durable `runs_meta` row **at submit**, and an in-flight remote run rehydrates across reload/nav/server-restart (live merged over durable); a background-task dispatch failure surfaces as a distinguishable reconciliation state (§3.13), not an infinite "running" poll.
