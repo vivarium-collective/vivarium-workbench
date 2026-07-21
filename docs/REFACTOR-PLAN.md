@@ -346,7 +346,9 @@ threaded today (95 modules ready; ~13 still read the global). Caches become
 source if needed) and invalidates *only that workspace's* cache slice — never the
 global sweep, which would trample other live sessions. `/api/source/switch`
 becomes "rebind this session," and `active_workspace.invalidate()`'s all-caches
-semantics retire.
+semantics retire. The session model, key, lifecycle, per-request resolution, and
+restart/GC layering are specified in
+[`docs/session-registry.md`](session-registry.md).
 
 **Session-routing decouples from auth.** Phase 1 originally bundled per-request
 `WorkspaceContext` with the `Principal`/OIDC front door. This requirement
