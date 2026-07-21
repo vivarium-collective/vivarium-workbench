@@ -87,7 +87,13 @@ pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-
 # investigation-contracts is declared bare in [project.dependencies] (kept out
 # of published metadata) and is not on PyPI; supply its git URL here so `uv
 # sync`/`uv lock` can resolve it (the editable-install gap that was failing CI).
-investigation-contracts = { git = "https://github.com/vivarium-collective/investigation-contracts.git", branch = "main" }
+# Pinned to a REV, not `branch = "main"`: a branch reference lets `uv lock`
+# silently re-resolve to whatever main points at, so a breaking change upstream
+# lands here with no commit in this repo (the exact failure mode that hid the
+# pbg-superpowers _REGISTRY break for ~3 weeks — see issue #483). Bump this rev
+# deliberately when adopting upstream changes. Equals the currently-locked rev,
+# so this is a no-op resolve.
+investigation-contracts = { git = "https://github.com/vivarium-collective/investigation-contracts.git", rev = "65c793fd231d952e49a9cfe4244797dadde1bedc" }
 # v2ecoli is NOT a runtime dependency of the vivarium-workbench package — it is
 # only needed for the demos/v2ecoli/ scripts. Declare it in [tool.uv.sources]
 # so `uv sync --extra demo` resolves the local checkout. The bare `v2ecoli`

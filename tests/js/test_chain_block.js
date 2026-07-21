@@ -1,6 +1,6 @@
 // tests/js/test_chain_block.js — run with: node tests/js/test_chain_block.js
 const assert = require('assert');
-const { _chainBlockHtml, _groupClaims } = require('../../vivarium_dashboard/static/aig-graph.js');
+const { _chainBlockHtml, _groupClaims } = require('../../vivarium_workbench/static/aig-graph.js');
 
 // graceful: no chain -> '' (card identical to today)
 assert.strictEqual(_chainBlockHtml(undefined), '', 'undefined chain -> empty');
