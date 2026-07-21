@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import emitters
+from vivarium_workbench.lib import run_log
 from vivarium_workbench.lib import run_store
 from vivarium_workbench.lib.models import SimRow
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
@@ -963,11 +964,43 @@ def build_simulations_data(ws_root: Path) -> dict:
         sims = list_simulations(ws_root)
     except Exception:
         return {"simulations": [], "current": None}
+
+    # Fold the workspace's append-only JSONL run log (Task 1/2) and merge it
+    # with the sqlite-gathered `sims` rows above. JSONL is the source of
+    # truth for a run_id's fields when present (it's written on every
+    # save/complete, including emitter-less/in-progress runs the sqlite
+    # gather can miss); legacy-sqlite-only rows pass through untouched.
+    try:
+        folded = run_log.fold_runs_jsonl(Path(ws_root))
+        by_id = {s.get("run_id"): s for s in sims}
+        _EMITTER_LABEL = {"sqlite": "SQLite", "parquet": "Parquet",
+                          "xarray": "XArray", "ram": "RAM", "none": "—"}
+        for rid, rec in folded.items():
+            row = by_id.get(rid)
+            if row is None:
+                row = {"run_id": rid}
+                sims.append(row)
+                by_id[rid] = row
+            # JSONL is the source of truth for these fields when present.
+            for k in ("spec_id", "label", "status", "n_steps", "started_at",
+                      "completed_at", "study_slug", "investigation_slug"):
+                if rec.get(k) is not None:
+                    row[k] = rec[k]
+            if rec.get("emitter"):
+                row["emitter"] = rec["emitter"]
+                row["emitter_type"] = _EMITTER_LABEL.get(rec["emitter"], rec["emitter"])
+            if rec.get("origin"):
+                row["remote_origin"] = rec["origin"]
+    except Exception:
+        pass
+
     try:
         from vivarium_workbench.lib.runs_index import emitter_type_of
         _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
                           "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
+            if s.get("emitter_type"):
+                continue  # already labeled by the JSONL merge above
             s["emitter_type"] = _emitter_label.get(
                 _emitter_tag(s.get("emitter"))) or emitter_type_of(s.get("db_path"))
     except Exception:
