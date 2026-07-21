@@ -468,7 +468,7 @@ def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
         "config": {
             "title": "Observables over time",
             "observables": obs_names,
-            "_runs_db_path": db_file,
+            "runs_db_path": db_file,
         },
     }
     try:
