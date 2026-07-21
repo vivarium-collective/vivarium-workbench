@@ -17,6 +17,12 @@
   }
 
   // -------------------------------------------------------------------------
+  // Investigation DAG band state
+  // -------------------------------------------------------------------------
+  var aigBand = 1;                 // 0=far, 1=mid, 2=near (default = current detail)
+  var _lastDagArgs = null;         // [studies, chainsBySlug] for re-render on band change
+
+  // -------------------------------------------------------------------------
   // Generic modal helpers
   // -------------------------------------------------------------------------
 
@@ -5641,6 +5647,11 @@
   // VERTICAL flow: y = topological depth (top = roots), x = within-depth slot.
   // Cards as absolute-positioned <div>s; edges as SVG cubic-Bezier paths.
   function _renderInvestigationDag(studies, chainsBySlug) {
+    _lastDagArgs = [studies, chainsBySlug];
+    var _opts = window._layoutOptsForBand(aigBand);
+    var shellEl = document.getElementById('investigation-dag-shell');
+    if (shellEl) { shellEl.classList.remove('aig-zoom-far','aig-zoom-mid','aig-zoom-near'); shellEl.classList.add(_opts.cls); }
+
     var nodesHost = document.getElementById('investigation-dag-nodes');
     var edgesSvg  = document.getElementById('investigation-dag-edges');
     nodesHost.innerHTML = '';
@@ -5694,8 +5705,8 @@
     // each card grows to fit its full text. We render once, measure each card,
     // then stack + center the columns by the measured heights (two passes) so
     // nothing is clipped.
-    var CARD_W = 210;
-    var X_GAP = 64, Y_GAP = 22;
+    var CARD_W = _opts.cardW;
+    var X_GAP = _opts.xGap, Y_GAP = 22;
     var PAD_X = 24, PAD_Y = 16;
     var svgNS = 'http://www.w3.org/2000/svg';
     var pos = {};
@@ -5783,17 +5794,19 @@
           '<strong style="font-size:0.85em;line-height:1.25;color:#1e293b;flex:1">' + _esc(prettyTitle) + '</strong>' +
           '<span style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px">' + _esc(confidence) + '</span>' +
         '</div>' +
-        (asks
+        (_opts.asks && asks
           ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
               '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
           : '') +
-        '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
-          '<span style="font-weight:600;color:#475569">Finds:</span> ' +
-          (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
-        '</div>' +
-        (moreN ? '<div style="font-size:0.72em;margin-top:2px;color:#94a3b8">+' + moreN + ' more</div>' : '') +
-        followUpsChip +
-        ((chainsBySlug && typeof window._chainBlockHtml === 'function')
+        (_opts.finds
+          ? '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
+              '<span style="font-weight:600;color:#475569">Finds:</span> ' +
+              (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
+            '</div>'
+          : '') +
+        (_opts.finds && moreN ? '<div style="font-size:0.72em;margin-top:2px;color:#94a3b8">+' + moreN + ' more</div>' : '') +
+        (_opts.followups ? followUpsChip : '') +
+        (_opts.chain && chainsBySlug && typeof window._chainBlockHtml === 'function'
           ? window._chainBlockHtml(chainsBySlug[s.name]) : '');
       node._followUps = followUps;
       nodesHost.appendChild(node);
