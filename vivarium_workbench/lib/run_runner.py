@@ -95,28 +95,57 @@ def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
     return state, spec
 
 
-def _generator_emitter_defaults(spec_id: str) -> list:
-    """Declared default emitter(s) for a GENERATOR composite, or ``[]``.
+def _generator_entry(spec_id: str):
+    """The registered GeneratorEntry for ``spec_id``, or ``None``.
 
     Mirrors the generator resolution every other ``spec_id`` lookup uses
-    (``_REGISTRY.get(spec_id)`` after ``discover_generators()``), then reads
-    the decorator's ``emitters=[...]`` via ``emitter_defaults(entry)``. Returns
-    ``[]`` (never raises) when pbg_superpowers is unavailable or the spec_id is
-    not a registered generator, so callers can treat it like the static-spec
-    ``emitter_defaults(spec)`` path.
+    (``_REGISTRY.get(spec_id)`` after ``discover_generators()``). Never raises
+    when pbg_superpowers is unavailable or the spec_id isn't a registered
+    generator.
     """
     try:
         from pbg_superpowers.composite_generator import (
-            _REGISTRY, discover_generators, emitter_defaults,
+            _REGISTRY, discover_generators,
         )
     except ImportError:
-        return []
+        return None
     if not _REGISTRY:
         discover_generators()
-    entry = _REGISTRY.get(spec_id)
+    return _REGISTRY.get(spec_id)
+
+
+def _generator_emitter_defaults(spec_id: str) -> list:
+    """Declared default emitter(s) for a GENERATOR composite, or ``[]``.
+
+    Reads the decorator's ``emitters=[...]`` via ``emitter_defaults(entry)``.
+    Returns ``[]`` (never raises) when pbg_superpowers is unavailable or the
+    spec_id is not a registered generator, so callers can treat it like the
+    static-spec ``emitter_defaults(spec)`` path.
+    """
+    entry = _generator_entry(spec_id)
     if entry is None:
         return []
+    from pbg_superpowers.composite_generator import emitter_defaults
     return emitter_defaults(entry)
+
+
+def _emitter_decl_source(spec: dict | None, spec_id: str):
+    """The object carrying the composite's emitter declaration.
+
+    ``emitter_defaults`` and ``install_default_emitters`` both accept EITHER a
+    static-spec dict or a ``GeneratorEntry``. ``_resolve_state`` returns
+    ``spec=None`` for a generator, so passing ``spec`` straight through to
+    ``install_default_emitters`` makes it a no-op for exactly the composites
+    whose declaration we just honored in ``_select_emitter_name`` — the
+    selection reads the registry entry while the injection reads ``spec``.
+    That mismatch means no ParquetEmitter is installed AND, because the run no
+    longer takes the xarray branch, the ``.zarr`` store that used to be written
+    is gone too: a silent regression to no durable output at all, still
+    reported as ``output_kind="parquet"``.
+
+    Resolving the declaration source once, here, keeps the two in lockstep.
+    """
+    return spec if spec is not None else _generator_entry(spec_id)
 
 
 def _select_emitter_name(*, spec: dict | None, spec_id: str, db_file: str) -> str:
@@ -498,6 +527,10 @@ def execute(request_path: Path) -> int:
         from vivarium_workbench.lib import emitters
         name = _select_emitter_name(
             spec=spec, spec_id=req.spec_id, db_file=req.db_file)
+        # For a generator `spec` is None; hand the parquet branch the registry
+        # entry instead so install_default_emitters sees the same declaration
+        # _select_emitter_name just routed on (see _emitter_decl_source).
+        decl_source = _emitter_decl_source(spec, req.spec_id)
         # R3: record the resolved emitter kind so the Sims DB Emitter column
         # reflects the sink that actually persisted this run.
         _record_run_emitter(req.workspace, req.run_id, name)
@@ -518,7 +551,7 @@ def execute(request_path: Path) -> int:
             prov = emitters.run_with_emitter(
                 name=name, state=state, run_id=req.run_id, emit_paths=emit_paths,
                 out_dir=str(run_dir), core=core, steps=req.steps,
-                db_file=req.db_file, progress_cb=_progress, spec=spec,
+                db_file=req.db_file, progress_cb=_progress, spec=decl_source,
                 also_sqlite_history=True)
         except _RunTimeout as exc:
             step = exc.args[0] if exc.args else req.steps

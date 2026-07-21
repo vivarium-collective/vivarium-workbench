@@ -245,3 +245,71 @@ def test_explorer_run_lifecycle_folds_to_completed_status(tmp_path):
     data = simulations_index.build_simulations_data(tmp_path)
     rows = {r["run_id"]: r for r in data["simulations"]}
     assert rows[run_id]["status"] == "completed"
+
+
+# --------------------------------------------------------------------------
+# R1b — the DECLARATION SOURCE reaches the parquet branch (generator path)
+# --------------------------------------------------------------------------
+def _fake_registry(monkeypatch, spec_id, entry):
+    """Install a fake pbg_superpowers.composite_generator registry.
+
+    Mirrors the technique in test_inject_declared_emitter.py so this runs
+    without the v2ecoli workspace checked out alongside.
+    """
+    import sys
+    import types
+    from pbg_superpowers import composite_generator as real
+    fake = types.ModuleType("pbg_superpowers.composite_generator")
+    for attr in dir(real):
+        if not attr.startswith("__"):
+            setattr(fake, attr, getattr(real, attr))
+    fake._REGISTRY = {spec_id: entry}
+    fake.discover_generators = lambda *a, **k: dict(fake._REGISTRY)
+    monkeypatch.setitem(sys.modules, "pbg_superpowers.composite_generator", fake)
+    return fake
+
+
+def test_generator_declaration_source_reaches_install_default_emitters(monkeypatch):
+    """REGRESSION: `_resolve_state` returns spec=None for a generator, so
+    passing `spec` straight to `run_with_emitter` made the parquet branch's
+    `install_default_emitters(state, None, ...)` a NO-OP — for exactly the
+    composites whose declaration `_select_emitter_name` had just routed on.
+
+    The run then wrote neither parquet NOR the `.zarr` it used to write (it no
+    longer takes the xarray branch), while still reporting output_kind=parquet.
+
+    `_emitter_decl_source` must hand the parquet branch the GeneratorEntry.
+    """
+    import types
+    spec_id = "fake.composites.declares_parquet"
+    entry = types.SimpleNamespace(
+        name="declares_parquet",
+        emitters=[{"address": "local:vivarium_workbench.lib.emitters.ParquetEmitter",
+                   "paths": ["global_time", "bulk"]}],
+    )
+    _fake_registry(monkeypatch, spec_id, entry)
+
+    # The selection routes to parquet on the strength of the declaration...
+    assert run_runner._select_emitter_name(
+        spec=None, spec_id=spec_id, db_file="/tmp/x.db") == "parquet"
+
+    # ...and the INJECTION must see that same declaration, not None.
+    src = run_runner._emitter_decl_source(None, spec_id)
+    assert src is entry, "generator declaration must reach install_default_emitters"
+
+    # Guard the property that made this silent: None really is a no-op, so a
+    # regression here reverts to writing no durable output at all.
+    from pbg_superpowers.composite_generator import install_default_emitters
+    assert install_default_emitters({"a": 1}, None, run_id="r", out_dir="/tmp/p") == {"a": 1}
+
+
+def test_static_spec_declaration_source_is_unchanged(monkeypatch):
+    """A static spec must still pass through as itself (no behavior change)."""
+    spec = {"emitters": [{"address": "local:Whatever"}], "state": {}}
+    assert run_runner._emitter_decl_source(spec, "irrelevant.spec_id") is spec
+
+
+def test_unregistered_generator_declaration_source_is_none(monkeypatch):
+    """An unknown spec_id yields None — the default_emitter fallback path."""
+    _fake_registry(monkeypatch, "some.other.generator", object())
+    assert run_runner._emitter_decl_source(None, "not.registered") is None
