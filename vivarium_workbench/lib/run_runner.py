@@ -95,6 +95,66 @@ def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
     return state, spec
 
 
+def _generator_emitter_defaults(spec_id: str) -> list:
+    """Declared default emitter(s) for a GENERATOR composite, or ``[]``.
+
+    Mirrors the generator resolution every other ``spec_id`` lookup uses
+    (``_REGISTRY.get(spec_id)`` after ``discover_generators()``), then reads
+    the decorator's ``emitters=[...]`` via ``emitter_defaults(entry)``. Returns
+    ``[]`` (never raises) when pbg_superpowers is unavailable or the spec_id is
+    not a registered generator, so callers can treat it like the static-spec
+    ``emitter_defaults(spec)`` path.
+    """
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, discover_generators, emitter_defaults,
+        )
+    except ImportError:
+        return []
+    if not _REGISTRY:
+        discover_generators()
+    entry = _REGISTRY.get(spec_id)
+    if entry is None:
+        return []
+    return emitter_defaults(entry)
+
+
+def _select_emitter_name(*, spec: dict | None, spec_id: str, db_file: str) -> str:
+    """Pick the emitter NAME for a run, honoring the composite's DECLARED sink.
+
+    R1: honor the declared emitter for BOTH static specs and generators. For a
+    static spec (``spec is not None``) the declaration comes from the spec's
+    ``emitters:`` key; for a generator (``spec is None``) it comes from the
+    registered entry's ``emitters=[...]`` decorator. Any declaration routes to
+    ``"parquet"`` (the composite carries its own ParquetEmitter step — the
+    parquet branch persists it in one place). When nothing is declared, fall
+    back to the workspace ``default_emitter`` — unchanged from before.
+
+    Pure and side-effect-free so R1 is unit-testable without a full ``execute``.
+    """
+    from vivarium_workbench.lib import emitters
+    from pbg_superpowers.composite_generator import emitter_defaults
+    declared = (emitter_defaults(spec) if spec is not None
+                else _generator_emitter_defaults(spec_id))
+    if declared:
+        return "parquet"
+    return emitters.default_emitter(spec, Path(db_file))
+
+
+def _record_run_emitter(workspace, run_id: str, name: str) -> None:
+    """Append a JSONL run event recording the resolved emitter kind (R3).
+
+    Folds (by ``run_id``) into the run's Sims-DB record so the Emitter column
+    shows the sink that actually persisted the run. Best-effort — a logging
+    failure must never fail the run.
+    """
+    try:
+        from vivarium_workbench.lib import run_log
+        run_log.append_run_event(workspace, {"run_id": run_id, "emitter": name})
+    except Exception:
+        traceback.print_exc()
+
+
 class _RunTimeout(Exception):
     """Raised by the progress callback when a run exceeds ``MAX_RUNTIME_SEC``.
 
@@ -436,10 +496,11 @@ def execute(request_path: Path) -> int:
         # inject_emitter_for_paths + inject_sqlite_emitter + per-tick run(1)
         # loop this function used inline, so default runs are byte-identical.
         from vivarium_workbench.lib import emitters
-        from pbg_superpowers.composite_generator import emitter_defaults
-        declared = emitter_defaults(spec) if spec is not None else []
-        name = "parquet" if declared else emitters.default_emitter(
-            spec, Path(req.db_file))
+        name = _select_emitter_name(
+            spec=spec, spec_id=req.spec_id, db_file=req.db_file)
+        # R3: record the resolved emitter kind so the Sims DB Emitter column
+        # reflects the sink that actually persisted this run.
+        _record_run_emitter(req.workspace, req.run_id, name)
         emit_paths = _emit_paths_for(req, state)
 
         # The progress callback both heartbeats and enforces the max-runtime
@@ -457,7 +518,8 @@ def execute(request_path: Path) -> int:
             prov = emitters.run_with_emitter(
                 name=name, state=state, run_id=req.run_id, emit_paths=emit_paths,
                 out_dir=str(run_dir), core=core, steps=req.steps,
-                db_file=req.db_file, progress_cb=_progress, spec=spec)
+                db_file=req.db_file, progress_cb=_progress, spec=spec,
+                also_sqlite_history=True)
         except _RunTimeout as exc:
             step = exc.args[0] if exc.args else req.steps
             msg = (f"run exceeded max runtime ({MAX_RUNTIME_SEC}s) — "
