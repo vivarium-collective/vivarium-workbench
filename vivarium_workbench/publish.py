@@ -903,8 +903,8 @@ def _do_build(
         if loom_dst.exists():
             shutil.rmtree(loom_dst)
         shutil.copytree(str(loom_src), str(loom_dst))
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"  warn: loom _dist not found — did you run scripts/build_loom.sh? ({exc})")
 
     # ------------------------------------------------------------------
     # 4. Render home SPA shell → bundle/index.html
