@@ -118,11 +118,24 @@ def build_workspaces(ws_root: Path) -> dict:
             "added_at": None,
         }] + list(catalog)
 
+    # `_git_branch_commit` shells out to git twice per workspace; done serially
+    # across the whole pbg ecosystem (~40 repos) that dominated the endpoint
+    # (~13s). The calls are independent and I/O-bound, so resolve them in a
+    # thread pool up front — cuts the wall time to roughly the slowest one.
+    _dir_paths = [e.get("path", "") for e in catalog
+                  if e.get("path") and Path(e["path"]).is_dir()]
+    _bc: dict = {}
+    if _dir_paths:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(16, len(_dir_paths))) as _ex:
+            for _p, _res in zip(_dir_paths, _ex.map(_git_branch_commit, _dir_paths)):
+                _bc[_p] = _res
+
     for entry in catalog:
         path = entry.get("path", "")
         name = entry.get("name") or Path(path).name
         row: dict = {"name": name, "path": path}
-        branch, commit = _git_branch_commit(path) if Path(path).is_dir() else ("", "")
+        branch, commit = _bc.get(path, ("", ""))
         row["repo"] = name
         row["branch"] = branch
         row["commit"] = commit
