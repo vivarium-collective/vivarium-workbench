@@ -64,6 +64,25 @@
     _afterSwitch(r);
   }
 
+  // Session-per-tab (pinned-for-life): a tab is one source for its life, so a
+  // selection OPENS A NEW TAB bound to it rather than re-pointing this one.
+  //   local workspace → /?workspace=<catalog-name>   (session.js binds by name)
+  //   sms-api build    → /?build=<simulator_id>        (…→ switch-build, materialize)
+  // session.js's bootstrap force-mints a fresh per-tab session in the new tab and
+  // performs the bind; session-status.js shows the ⏳ favicon while a build
+  // materializes. A local entry with no catalog name falls back to the in-place
+  // switch (can't spawn by name).
+  function _openEntry(entry) {
+    if (!entry) return;
+    if (entry.simulator_id != null) {
+      window.open("/?build=" + encodeURIComponent(entry.simulator_id), "_blank");
+    } else if (entry.name) {
+      window.open("/?workspace=" + encodeURIComponent(entry.name), "_blank");
+    } else if (entry.path) {
+      _switchLocal(entry.path);   // name-less catalog entry → in-place fallback
+    }
+  }
+
   async function _switchRemote(simulatorId, btn) {
     if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
     // First materialization downloads the build's workspace (~hundreds of MB,
@@ -128,7 +147,8 @@
       state._wsData = null;  // consume it, so an explicit reload refetches
       state.entries = (d.workspaces || []).map(function (w) {
         return { repo: w.repo || w.name, branch: w.branch || "", commit: w.commit || "",
-                 label: w.label || w.name, path: w.path, current: w.status === "current" };
+                 label: w.label || w.name, path: w.path, name: w.name,
+                 current: w.status === "current" };
       });
     } else {
       var rb = await fetch("/api/source/builds").catch(function () { return null; });
@@ -229,15 +249,15 @@
 
     // Actions
     var actions = _el("div", "viv-bs-actions");
-    var switchBtn = _el("button", "viv-bs-action", "Switch"); switchBtn.id = "viv-bs-switch";
+    var switchBtn = _el("button", "viv-bs-action", "Open"); switchBtn.id = "viv-bs-switch";
+    switchBtn.title = "Open this source in a new tab";
     switchBtn.addEventListener("click", function () {
       var s = state.selected || {};
-      // Prefer an on-disk path (workspace-catalog entry, in-process re-point);
-      // fall back to an sms-api build (simulator_id). Path-first so a misread
-      // scope can never leave the button doing nothing.
-      if (s.path) _switchLocal(s.path);
-      else if (s.simulator_id != null) _switchRemote(s.simulator_id, switchBtn);
-      else alert("Nothing to switch to — pick a repo/branch with a build or workspace.");
+      // Pinned-for-life: open the selection in a new tab (build → /?build=,
+      // workspace → /?workspace=). Path-first fallback so a misread scope can
+      // never leave the button doing nothing.
+      if (s.path || s.name || s.simulator_id != null) _openEntry(s);
+      else alert("Nothing to open — pick a repo/branch with a build or workspace.");
     });
     actions.appendChild(switchBtn);
 
@@ -362,11 +382,8 @@
         var li = _el("li", "viv-bs-list-row" + (m.current ? " current" : ""));
         var lbl = _el("span", "viv-bs-list-label", _entryText(m));
         lbl.style.cursor = "pointer";
-        lbl.title = "Switch to this source";
-        lbl.addEventListener("click", function () {
-          if (m.simulator_id != null) _switchRemote(m.simulator_id);
-          else if (m.path) _switchLocal(m.path);
-        });
+        lbl.title = "Open this source in a new tab";
+        lbl.addEventListener("click", function () { _openEntry(m); });
         li.appendChild(lbl);
         if (state.scope === "local" && !m.current && m.path) {
           var x = _el("button", "viv-bs-forget", "✕"); x.title = "Forget";
