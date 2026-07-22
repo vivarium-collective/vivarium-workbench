@@ -20,9 +20,9 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench.lib import composite_lookup
-from vivarium_workbench.lib import core_builder
 from vivarium_workbench.lib import investigations
 from vivarium_workbench.lib import investigation_run_views as views
+from vivarium_workbench.lib import viz_render
 
 
 def _make_ws(tmp_path: Path, *, name: str = "demo-ws") -> Path:
@@ -32,15 +32,14 @@ def _make_ws(tmp_path: Path, *, name: str = "demo-ws") -> Path:
 
 @pytest.fixture
 def fake_registry(monkeypatch):
-    """Stub out the in-process core build → ``(core, registry)``."""
-    core = types.SimpleNamespace(link_registry={"X": object})
-    registry = {"X": object, "TimeSeriesPlot": object}
+    """Stub the worker viz-render hooks → ``(inputs_by_class, build_and_run)``."""
+    inputs_by_class = {"X": {}, "TimeSeriesPlot": {}}
 
-    def _fake_build(ws_root, pkg):
-        return core, registry
+    def _fake_hooks(ws_root):
+        return inputs_by_class, (lambda doc, _r=None: "<html>")
 
-    monkeypatch.setattr(core_builder, "build_viz_registry", _fake_build)
-    return core, registry
+    monkeypatch.setattr(viz_render, "viz_render_hooks", _fake_hooks)
+    return inputs_by_class
 
 
 # ---------------------------------------------------------------------------
@@ -54,29 +53,17 @@ def test_missing_name_400(tmp_path):
     assert body == {"error": "name is required"}
 
 
-def test_core_build_failure_500(tmp_path, monkeypatch):
+def test_happy_200_passes_callables_and_inputs(tmp_path, monkeypatch, fake_registry):
     ws = _make_ws(tmp_path)
-
-    def _boom(ws_root, pkg):
-        raise RuntimeError("no core")
-
-    monkeypatch.setattr(core_builder, "build_viz_registry", _boom)
-    body, status = views.investigation_run(ws, {"name": "inv-x"})
-    assert status == 500
-    assert body == {"error": "failed to build core: no core"}
-
-
-def test_happy_200_passes_callables_and_registry(tmp_path, monkeypatch, fake_registry):
-    ws = _make_ws(tmp_path)
-    _core, registry = fake_registry
+    inputs_by_class = fake_registry
     captured = {}
 
     def _fake_run_investigation(ws_root, name, *, run_one_composite,
-                                core_registry, build_and_run):
+                                inputs_by_class, build_and_run):
         captured["ws_root"] = ws_root
         captured["name"] = name
         captured["run_one_composite"] = run_one_composite
-        captured["core_registry"] = core_registry
+        captured["inputs_by_class"] = inputs_by_class
         captured["build_and_run"] = build_and_run
         return {"ran": 3, "rendered": 2}
 
@@ -88,7 +75,7 @@ def test_happy_200_passes_callables_and_registry(tmp_path, monkeypatch, fake_reg
     assert captured["ws_root"] == ws
     assert callable(captured["run_one_composite"])
     assert callable(captured["build_and_run"])
-    assert captured["core_registry"] is registry
+    assert captured["inputs_by_class"] is inputs_by_class
 
 
 def test_spec_error_400(tmp_path, monkeypatch, fake_registry):
@@ -152,7 +139,7 @@ def _capture_run_one_composite(ws, monkeypatch, fake_registry):
     holder = {}
 
     def _fake_run_investigation(ws_root, name, *, run_one_composite,
-                                core_registry, build_and_run):
+                                inputs_by_class, build_and_run):
         holder["fn"] = run_one_composite
         return {"ok": True}
 

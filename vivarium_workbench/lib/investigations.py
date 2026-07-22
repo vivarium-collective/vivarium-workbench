@@ -1585,7 +1585,8 @@ def _apply_parameter_overrides(doc: dict, params: dict) -> dict:
 
 def run_investigation(ws_root: Path, name: str, *,
                       run_one_composite: callable,
-                      core_registry: dict,
+                      core_registry: "dict | None" = None,
+                      inputs_by_class: "dict | None" = None,
                       build_and_run=None) -> dict:
     """Top-level orchestrator. Returns a summary dict.
 
@@ -1749,6 +1750,7 @@ def run_investigation(ws_root: Path, name: str, *,
         # spec has no visualizations (backward-compat with tests that omit both).
         viz_paths = render_visualizations(spec, inv_dir, name,
                                           core_registry=core_registry,
+                                          inputs_by_class=inputs_by_class,
                                           build_and_run=build_and_run)
 
         # 'ran' = runs finished without error; user explicitly sets 'complete'

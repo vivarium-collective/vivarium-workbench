@@ -148,44 +148,15 @@ def render_viz(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
     except InvestigationSpecError as e:
         return {"error": f"spec error: {e}"}, 400
 
-    # Discover workspace package + build core (mirror _post_investigation_run)
-    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
-    pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-    sys.path.insert(0, str(ws_root))
-    try:
-        core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
-        core = core_module.build_core()
-        registry = dict(core.link_registry)
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"failed to build core: {e}"}, 500
-
-    try:
-        from pbg_superpowers.visualizations import (
-            TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
-        )
-        registry["TimeSeriesPlot"] = TimeSeriesPlot
-        registry["ParamVsObservable"] = ParamVsObservable
-        registry["Distribution"] = Distribution
-        registry["PhaseSpace"] = PhaseSpace
-        registry["Heatmap"] = Heatmap
-    except ImportError:
-        pass
-
-    from process_bigraph import Composite
-
-    def build_and_run(viz_doc, registry_arg):
-        composite = Composite({'state': viz_doc}, core=core)
-        composite.run(1)
-        state = composite.state
-        html = state.get('output_store')
-        if isinstance(html, dict):
-            html = html.get('value') or html.get('_value') or ''
-        return html if isinstance(html, str) else ''
+    # The viz-class lookup + per-viz Composite.run happen in the env worker
+    # (live viz classes + core, kept out of the HTTP process).
+    from vivarium_workbench.lib.viz_render import viz_render_hooks
+    inputs_by_class, build_and_run = viz_render_hooks(ws_root)
 
     try:
         viz_paths = render_visualizations(
             spec, inv_dir, name,
-            core_registry=registry, build_and_run=build_and_run,
+            inputs_by_class=inputs_by_class, build_and_run=build_and_run,
         )
     except Exception as e:  # noqa: BLE001
         return {"error": f"render failed: {type(e).__name__}: {e}"}, 500
