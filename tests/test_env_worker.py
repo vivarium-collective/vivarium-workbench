@@ -499,3 +499,21 @@ def test_viz_accept_hard_fails_when_worker_unavailable(tmp_path, monkeypatch):
     body, status = viz_accept_views.visualization_accept(ws, {"name": "v"})
     assert status == 500
     assert "environment worker unavailable" in body["error"]
+
+
+# ---------------------------------------------------------------------------
+# run_study_analyses — v2ecoli analyses in the worker (study_run_post).
+# ---------------------------------------------------------------------------
+def test_run_study_analyses_no_entries_is_noop(tmp_path):
+    with EnvWorker(tmp_path) as w:
+        assert w.call("run_study_analyses", {"entries": []}) == {"written": [], "errors": []}
+
+
+def test_run_study_analyses_reports_missing_v2ecoli(tmp_path):
+    """The worker (on a venv without v2ecoli) surfaces a structured error rather
+    than crashing — the workbench passes it through as a non-fatal analysis error."""
+    with EnvWorker(tmp_path) as w:
+        r = w.call("run_study_analyses",
+                   {"entries": [{"name": "x"}], "sweep_dir": str(tmp_path)})
+    assert r["written"] == []
+    assert "v2ecoli" in r["errors"][0]["error"]

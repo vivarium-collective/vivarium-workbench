@@ -87,7 +87,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites",
-                 "validate_generated_visualization", "shutdown"]
+                 "validate_generated_visualization", "run_study_analyses", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -782,6 +782,83 @@ def _validate_generated_visualization(params: dict) -> dict:
     return {"ok": True}
 
 
+def _run_study_analyses(params: dict) -> dict:
+    """Run a study's ``spec.analyses`` over its parquet output, in the workspace
+    env (v2ecoli ``ANALYSIS_REGISTRY`` scale lookup + ``run_analyses``). Returns
+    ``{"written": [paths], "errors": [dicts]}`` — never raises. Faithful port of
+    ``study_run_post.build_analysis_options`` + the v2ecoli half of
+    ``run_study_analyses``; the workbench keeps the parquet/sim_data path
+    resolution."""
+    import time
+    import traceback
+    from pathlib import Path
+
+    p = params or {}
+    entries = list(p.get("entries") or [])
+    sweep_dir = p.get("sweep_dir")
+    sim_data_path = p.get("sim_data_path")
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    _import_workspace_package(_workspace)
+    if not entries:
+        return {"written": [], "errors": []}
+
+    # 1. build_analysis_options: map entries → {scale: {name: params}} via the registry.
+    try:
+        from v2ecoli.workflow.analysis import ANALYSIS_REGISTRY
+    except ImportError:
+        return {"written": [], "errors": [
+            {"error": "v2ecoli not installed; cannot resolve analysis scales"}]}
+    analysis_options: dict = {}
+    build_errors: list = []
+    for entry in entries:
+        name = entry.get("name")
+        if not name:
+            continue
+        step_cls = ANALYSIS_REGISTRY.get(name)
+        if step_cls is None:
+            build_errors.append({"analysis": name,
+                                 "error": f"unknown analysis {name!r} (not in ANALYSIS_REGISTRY)"})
+            continue
+        scale = getattr(step_cls, "scale", None)
+        if not scale:
+            build_errors.append({"analysis": name,
+                                 "error": f"analysis {name!r} has no scale attribute"})
+            continue
+        analysis_options.setdefault(scale, {})[name] = entry.get("params") or {}
+    if not analysis_options:
+        return {"written": [], "errors": build_errors}
+
+    # 2. Run the analyses + collect written files (mtime newer than call start).
+    try:
+        import v2ecoli.workflow.analyses  # noqa: F401 — register analysis ports
+        from v2ecoli.workflow.analysis_runner import run_analyses
+        t_start = time.time()
+        results = run_analyses(str(sweep_dir), analysis_options, sim_data_path=sim_data_path)
+        written: list = []
+        sd = Path(sweep_dir)
+        for sub in ("ptools", "viz"):
+            sub_dir = sd / sub
+            if sub_dir.is_dir():
+                for f in sub_dir.iterdir():
+                    if f.is_file() and f.stat().st_mtime >= t_start:
+                        written.append(str(f))
+        analysis_json = sd / "analysis.json"
+        if analysis_json.is_file() and analysis_json.stat().st_mtime >= t_start:
+            written.append(str(analysis_json))
+        errors = list(build_errors)
+        for scale_results in results.values():
+            for aname, groups in (scale_results or {}).items():
+                for gstr, val in (groups or {}).items():
+                    if isinstance(val, dict) and "error" in val:
+                        errors.append({"analysis": aname, "group": gstr, "error": val["error"]})
+        return {"written": written, "errors": errors}
+    except Exception as exc:  # noqa: BLE001 — never crash the run
+        return {"written": [], "errors": [
+            {"error": f"_run_study_analyses failed: {type(exc).__name__}: {exc}",
+             "traceback": traceback.format_exc()}]}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -861,6 +938,8 @@ def _handle(method: str, params: dict) -> dict:
         return _discover_composites()
     if method == "validate_generated_visualization":
         return _validate_generated_visualization(params)
+    if method == "run_study_analyses":
+        return _run_study_analyses(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

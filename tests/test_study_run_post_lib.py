@@ -234,54 +234,59 @@ def test_run_study_analyses_no_entries_is_noop(tmp_path):
     assert srp.run_study_analyses(tmp_path, {}, "r1", tmp_path) == ([], [])
 
 
-def test_run_study_analyses_no_analysis_options_returns_build_errors(tmp_path, monkeypatch):
-    # build_analysis_options yields empty options + an error -> short-circuit.
-    monkeypatch.setattr(
-        srp, "build_analysis_options",
-        lambda entries: ({}, [{"error": "v2ecoli not installed"}]))
+def _mock_pool(monkeypatch, result):
+    """Make the env-worker pool's ``call`` return ``result`` (or raise it)."""
+    from vivarium_workbench.lib import env_worker_pool
+
+    class _Pool:
+        def call(self, ws, method, params):
+            assert method == "run_study_analyses"
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+    monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Pool())
+
+
+def test_run_study_analyses_passes_worker_errors_through(tmp_path, monkeypatch):
+    """The v2ecoli scale-lookup/build-options now happens in the worker; the
+    workbench passes its errors straight through."""
+    import vivarium_workbench.lib.study_charts as sc
+    study_dir = tmp_path / "study"
+    (study_dir / "exp" / "history").mkdir(parents=True)
+    monkeypatch.setattr(sc, "_latest_parquet_for_study", lambda sd: study_dir / "exp" / "history")
+    _mock_pool(monkeypatch, {"written": [], "errors": [{"error": "v2ecoli not installed"}]})
     written, errors = srp.run_study_analyses(
-        tmp_path, {"analyses": [{"name": "x"}]}, "r1", tmp_path)
+        study_dir, {"analyses": [{"name": "x"}]}, "r1", tmp_path)
     assert written == []
     assert errors == [{"error": "v2ecoli not installed"}]
 
 
-def test_run_study_analyses_happy_collects_and_reports_errors(tmp_path, monkeypatch):
-    import time
-    ws = tmp_path / "ws"
-    study_dir = tmp_path / "study"
-    sweep = study_dir / "exp"
-    (sweep / "history").mkdir(parents=True)
-    ws.mkdir()
-
-    # build_analysis_options -> a non-empty mapping.
-    monkeypatch.setattr(
-        srp, "build_analysis_options",
-        lambda entries: ({"single": {"ptools_rna": {}}}, []))
-
-    # _latest_parquet_for_study -> the history hive root (parent = sweep_dir).
+def test_run_study_analyses_soft_degrades_when_worker_unavailable(tmp_path, monkeypatch):
     import vivarium_workbench.lib.study_charts as sc
-    monkeypatch.setattr(sc, "_latest_parquet_for_study", lambda sd: sweep / "history")
-
-    # Fake v2ecoli analysis runner: writes outputs + returns a results dict
-    # carrying a per-group error to exercise the error-collection branch.
-    runner_mod = types.ModuleType("v2ecoli.workflow.analysis_runner")
-    analyses_mod = types.ModuleType("v2ecoli.workflow.analyses")
-
-    def fake_run_analyses(sweep_str, options, sim_data_path=None):
-        (sweep / "ptools").mkdir(exist_ok=True)
-        (sweep / "viz").mkdir(exist_ok=True)
-        (sweep / "ptools" / "rna.tsv").write_text("a", encoding="utf-8")
-        (sweep / "viz" / "plot.html").write_text("b", encoding="utf-8")
-        (sweep / "analysis.json").write_text("{}", encoding="utf-8")
-        return {"single": {"ptools_rna": {"all": {"error": "boom"}}}}
-
-    runner_mod.run_analyses = fake_run_analyses  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "v2ecoli.workflow.analysis_runner", runner_mod)
-    monkeypatch.setitem(sys.modules, "v2ecoli.workflow.analyses", analyses_mod)
-
+    from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+    study_dir = tmp_path / "study"
+    (study_dir / "exp" / "history").mkdir(parents=True)
+    monkeypatch.setattr(sc, "_latest_parquet_for_study", lambda sd: study_dir / "exp" / "history")
+    _mock_pool(monkeypatch, EnvWorkerUnavailable("down"))
     written, errors = srp.run_study_analyses(
-        study_dir, {"analyses": [{"name": "ptools_rna"}]}, "r1", ws)
+        study_dir, {"analyses": [{"name": "x"}]}, "r1", tmp_path)
+    assert written == []
+    assert "environment worker unavailable" in errors[0]["error"]
 
+
+def test_run_study_analyses_passes_worker_written_and_errors(tmp_path, monkeypatch):
+    """The workbench resolves the sweep dir and passes the worker's written files
+    + per-group errors straight through (the run happens worker-side)."""
+    import vivarium_workbench.lib.study_charts as sc
+    study_dir = tmp_path / "study"
+    (study_dir / "exp" / "history").mkdir(parents=True)
+    monkeypatch.setattr(sc, "_latest_parquet_for_study", lambda sd: study_dir / "exp" / "history")
+    _mock_pool(monkeypatch, {
+        "written": ["/x/ptools/rna.tsv", "/x/viz/plot.html", "/x/analysis.json"],
+        "errors": [{"analysis": "ptools_rna", "group": "all", "error": "boom"}]})
+    written, errors = srp.run_study_analyses(
+        study_dir, {"analyses": [{"name": "ptools_rna"}]}, "r1", tmp_path)
     names = {Path(p).name for p in written}
     assert {"rna.tsv", "plot.html", "analysis.json"} <= names
     assert any(e.get("analysis") == "ptools_rna" and e.get("error") == "boom"

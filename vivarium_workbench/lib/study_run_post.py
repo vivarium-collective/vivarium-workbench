@@ -200,12 +200,7 @@ def run_study_analyses(study_dir: Path, spec: dict, run_id: str,
         if not entries:
             return [], []
 
-        # 1. Build analysis_options from spec.analyses entries.
-        analysis_options, build_errors = build_analysis_options(entries)
-        if not analysis_options:
-            return [], build_errors
-
-        # 2. Locate the most-recent parquet sweep dir.
+        # 1. Locate the most-recent parquet sweep dir (workbench-side FS).
         from vivarium_workbench.lib.study_charts import _latest_parquet_for_study
         hive_root = _latest_parquet_for_study(study_dir)
         if hive_root is None:
@@ -214,7 +209,7 @@ def run_study_analyses(study_dir: Path, spec: dict, run_id: str,
         # <exp>/history so its parent <exp> is the sweep_dir.
         sweep_dir = hive_root.parent
 
-        # 3. Resolve workspace sim_data (optional — analyses that don't need it still run).
+        # 2. Resolve workspace sim_data (optional — analyses that don't need it still run).
         sim_data_path: str | None = None
         for pat in ("out/**/simData*.cPickle", "out/**/sim_data*.cPickle",
                     "simData*.cPickle", "sim_data*.cPickle",
@@ -225,34 +220,19 @@ def run_study_analyses(study_dir: Path, spec: dict, run_id: str,
                 sim_data_path = hits[0]
                 break
 
-        # 4. Run analyses.
-        from v2ecoli.workflow.analysis_runner import run_analyses  # type: ignore[import]
-        import v2ecoli.workflow.analyses  # noqa: F401 — register analysis ports  # type: ignore[import]
-
-        t_start = __import__("time").time()
-        results = run_analyses(str(sweep_dir), analysis_options, sim_data_path=sim_data_path)
-
-        # 5. Collect written files (mtime newer than call start).
-        written: list[str] = []
-        for sub in ("ptools", "viz"):
-            sub_dir = sweep_dir / sub
-            if not sub_dir.is_dir():
-                continue
-            for f in sub_dir.iterdir():
-                if f.is_file() and f.stat().st_mtime >= t_start:
-                    written.append(str(f))
-        analysis_json = sweep_dir / "analysis.json"
-        if analysis_json.is_file() and analysis_json.stat().st_mtime >= t_start:
-            written.append(str(analysis_json))
-
-        # 6. Collect per-group errors from the results dict.
-        errors: list[dict] = list(build_errors)
-        for scale_results in results.values():
-            for name, groups in (scale_results or {}).items():
-                for gstr, val in (groups or {}).items():
-                    if isinstance(val, dict) and "error" in val:
-                        errors.append({"analysis": name, "group": gstr, "error": val["error"]})
-        return written, errors
+        # 3. The v2ecoli scale lookup (ANALYSIS_REGISTRY) + run_analyses run in the
+        # env worker (importing/executing v2ecoli is workspace Python, kept out of
+        # the HTTP process). Soft-degrade: a post-run analysis pass that can't run
+        # returns an error note, never crashes the run handler.
+        from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        try:
+            res = get_pool().call(ws_root, "run_study_analyses", {
+                "entries": entries, "sweep_dir": str(sweep_dir),
+                "sim_data_path": sim_data_path})
+        except EnvWorkerUnavailable:
+            return [], [{"error": "environment worker unavailable; analyses not run"}]
+        return list(res.get("written") or []), list(res.get("errors") or [])
 
     except Exception as exc:  # noqa: BLE001 — never crash the run handler
         import traceback
