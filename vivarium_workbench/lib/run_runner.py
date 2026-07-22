@@ -245,6 +245,7 @@ def _render_viz(composite, run_dir: Path, *,
         try:
             canonical = _render_canonical_viz(
                 spec_id=spec_id, db_file=db_file, run_id=run_id, core=core,
+                run_dir=run_dir,
             )
             for name, html in canonical.items():
                 viz_html.setdefault(name, html)
@@ -266,7 +267,28 @@ def _render_viz(composite, run_dir: Path, *,
         traceback.print_exc()
 
 
-def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> dict:
+def _resolve_sim_data_path(run_dir) -> str:
+    """Locate a ParCa ``parca_state.pkl.gz`` in the run's workspace for the
+    native-analysis views to hydrate sim_data from. ``run_dir`` is
+    ``<ws>/.pbg/runs/<run_id>``; returns "" when none is found (the view then
+    renders analyses that don't need sim_data and notes the rest)."""
+    if run_dir is None:
+        return ""
+    try:
+        ws = Path(run_dir).parents[2]
+    except IndexError:
+        return ""
+    for rel in ("out/sim_data_full/parca_state.pkl.gz",
+                "out/sim_data-showcase/parca_state.pkl.gz",
+                "models/parca/parca_state.pkl.gz"):
+        cand = ws / rel
+        if cand.is_file():
+            return str(cand)
+    return ""
+
+
+def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core,
+                          run_dir=None) -> dict:
     """Render @composite_generator(visualizations=...) entries for this run.
 
     Returns ``{viz_name: html_string}``. Per-viz errors surface as an
@@ -355,6 +377,13 @@ def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> d
         cfg = dict(spec.get("config") or {})
         cfg.setdefault("runs_db_path", db_file)
         cfg.setdefault("run_id", run_id)  # scope the figure to THIS run
+        if spec.get("address", "").endswith("ParquetAnalysisView"):
+            # Point the native-analysis adapter at THIS run's on-disk parquet
+            # sweep + a ParCa sim_data pickle so the analysis can hydrate.
+            if run_dir is not None:
+                cfg.setdefault("sweep_dir",
+                               str(Path(run_dir) / "parquet" / run_id))
+            cfg.setdefault("sim_data_path", _resolve_sim_data_path(run_dir))
         if spec.get("address", "").endswith("TimeSeriesFromObservables"):
             match = cfg.pop("observable_match", None)
             if not cfg.get("observables"):

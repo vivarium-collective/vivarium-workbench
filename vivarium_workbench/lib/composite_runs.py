@@ -546,6 +546,70 @@ def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
     return new_state
 
 
+def inject_analysis_parquet_emitters(
+    state: dict, *, run_id: str, out_dir: str,
+    roots: tuple[str, ...] = ("bulk", "listeners"),
+) -> dict:
+    """Install one hive-partitioned ParquetEmitter PER AGENT for native-analysis
+    consumption.
+
+    The v2ecoli native analyses (``v2ecoli/workflow/analyses/``) read a DuckDB
+    ``read_parquet(hive)`` history whose columns are agent-relative and
+    ``__``-flattened (``listeners__mass__dry_mass``, ``bulk__count``) and whose
+    hive layout carries the ``variant / lineage_seed / generation / agent_id``
+    partition columns that ``analysis_runner.build_cell_records`` selects.
+
+    The composite's *declared* top-level emit paths cannot produce that shape for
+    a multi-agent composite (baseline nests every store under ``agents/<id>/``),
+    so the declared ParquetEmitter captures only ``global_time``.  This installs
+    a ParquetEmitter per agent, **rooted at that agent** (emit key ``listeners``
+    wired to ``agents/<id>/listeners`` → column root ``listeners``, which the
+    emitter flattens with ``__``), with the partition metadata synthesized.
+
+    Single-run scoped: only agents present at run start get an emitter, and a
+    one-off Composite Explorer run is ``variant=0 / lineage_seed=0 /
+    generation=1``.  Replaces any prior ``analysis_parquet_*`` nodes so a re-call
+    is idempotent.
+    """
+    agents = state.get("agents") or {}
+    if not isinstance(agents, dict) or not agents:
+        return state
+    new_state = {
+        k: v for k, v in state.items()
+        if not (isinstance(k, str) and k.startswith("analysis_parquet_"))
+    }
+    for i, (agent_id, agent_state) in enumerate(agents.items()):
+        if not isinstance(agent_state, dict):
+            continue
+        emit_schema: dict = {"global_time": "node"}
+        inputs: dict = {"global_time": ["global_time"]}
+        for r in roots:
+            if r in agent_state:
+                emit_schema[r] = "node"
+                inputs[r] = ["agents", str(agent_id), r]
+        new_state[f"analysis_parquet_{i}"] = {
+            "_type": "step",
+            "address": "local:ParquetEmitter",
+            "config": {
+                "out_dir": str(out_dir),
+                "emit": emit_schema,
+                "partitioning_keys": [
+                    "experiment_id", "variant", "lineage_seed",
+                    "generation", "agent_id",
+                ],
+                "metadata": {
+                    "experiment_id": run_id,
+                    "variant": 0,
+                    "lineage_seed": 0,
+                    "generation": 1,
+                    "agent_id": str(agent_id),
+                },
+            },
+            "inputs": inputs,
+        }
+    return new_state
+
+
 def _readout_observables(rr) -> list[str]:
     """Underlying observable path(s) a resolved readout needs emitted.
 
