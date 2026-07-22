@@ -8,9 +8,16 @@ concern that ties together `WorkspaceStore` (the staging area), `EnvironmentReso
 Context: `docs/workspace-store.md`, `docs/env-worker-protocol.md`,
 `docs/session-registry.md`, `docs/REFACTOR-PLAN.md` §2A.6/§2A.7.
 
-Status: **proposed** (spike). Not yet implemented — and it is the piece that must
-land *before* the venv/`uv sync` step is built, because getting it wrong makes the
-first real workspace hang.
+Status: **in progress.** §9(b) — the synchronous primitive — is implemented in
+`lib/materialization.py`: a coordinate-keyed venv store (`VIVARIUM_WORKBENCH_VENV_STORE`)
++ `materialize(source)` that reuses a cached venv or runs a single `uv sync` (long
+timeout, provisioning the required interpreter per §2b), with `MaterializationError`
+carrying the `uv` tail (§6). `env_resolver.resolve_interpreter` now consults the
+managed cache (behavior-preserving — the store is empty until the managed path
+populates it). Still to come (§9 c/d): async + the `MATERIALIZING` session state +
+progress polling (§3/§4), cross-session dedup (§5), restart reconcile + GC (§7),
+and the `RepoSource` clone seam / S3 cache (§2/§5a). The in-place local path (§2a)
+is unchanged and does not route through `materialize`.
 
 ---
 

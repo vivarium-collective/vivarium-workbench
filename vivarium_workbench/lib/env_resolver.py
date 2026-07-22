@@ -34,4 +34,12 @@ def resolve_interpreter(workspace: Path | str) -> str:
         cand = ws / rel
         if cand.is_file():
             return str(cand)
+    # A managed venv provisioned for this workspace's environment coordinate
+    # (materialization-lifecycle §5), if one exists. Behavior-preserving today —
+    # nothing populates the store until the managed path runs `uv sync` — so a
+    # workspace without a `.venv` still falls through to the running interpreter.
+    from vivarium_workbench.lib import materialization
+    managed = materialization.cached_interpreter_for(ws)
+    if managed is not None:
+        return managed
     return sys.executable
