@@ -90,6 +90,44 @@ through the same `RepoSource`/venv seams (§5a), a future "pull a not-checked-ou
 repo on demand *locally* too" is an adapter choice, not a redesign — but the
 **default local experience is find + use, never re-clone**.
 
+## 2b. The interpreter — the workspace's required Python, not the workbench's
+
+Phase 2 isn't only *packages* — it's the **Python interpreter version**, and this is
+where today's `sys.executable` shortcut actually bites. The worker currently spawns
+on the **workbench's** interpreter (env-worker-client `interpreter or sys.executable`).
+That works **only** because the demo/prod image is built on 3.12.12 with the
+workbench and v2ecoli **co-installed, sharing one interpreter** — which is exactly
+the coupling this refactor removes:
+
+- The **workbench** is `requires-python = ">=3.11"` (flexible).
+- **v2ecoli pins `== 3.12.12`** exactly (`[tool.uv] environments =
+  "python_full_version == '3.12.12'"`).
+
+So if the workbench ran any other Python (its own 3.11, a 3.13), `build_core` for a
+v2ecoli workspace would fail — a version the workbench's interpreter can't satisfy.
+The env worker's job is precisely to run on the **workspace's** interpreter, not the
+workbench's:
+
+- **Managed (phase 2):** `uv sync` **provisions the interpreter the workspace
+  requires** — uv manages Python versions from the project's `requires-python` /
+  `.python-version`, downloading the right managed CPython (**exactly what CI
+  already does** via `UV_PYTHON: 3.12.12` — "uv fetches this managed CPython
+  automatically"). The worker then runs `<venv>/bin/python`, which **is** v2ecoli's
+  3.12.12 regardless of what Python the workbench runs.
+- **In-place (§2a):** the checkout's own `.venv` was built by the developer with the
+  right interpreter, so using `.venv/bin/python` (not `sys.executable`) gives the
+  correct version for free.
+- **Cloud:** the `(repo, commit)` image is built with the right Python — same
+  principle, image instead of venv, which is why the containerized path never had
+  this problem.
+
+**This is what finally decouples the workbench's own Python pin** (the §2A.5
+"relax the Python pin after `EnvironmentResolver`" item): once each workspace's
+worker runs on its own uv-provisioned interpreter, the workbench no longer has to
+*be* 3.12.12 to serve a v2ecoli workspace, and its lock can broaden back to
+`>=3.11`. The current `sys.executable` default is the temporary bridge until the
+per-workspace venv (with its provisioned interpreter) lands.
+
 ## 3. Asynchronous and out-of-band — the HTTP worker never blocks
 
 Materialization runs as a **detached job**, not inside the HTTP request — the same
