@@ -144,9 +144,10 @@ def test_submit_gate_401_when_no_session_and_not_pinned(monkeypatch, tmp_path):
 
 def test_remote_run_config_off(monkeypatch):
     monkeypatch.setattr(rrv.remote_pinned, "pinned_config", lambda: None)
+    monkeypatch.setattr(rrv.remote_pinned, "remote_deployment_name", lambda: "smscdk")
     body, status = rrv.remote_run_config()
     assert status == 200
-    assert body == {"pinned": False}
+    assert body == {"pinned": False, "deployment": "smscdk"}
 
 
 def test_remote_run_config_on_resolves_commit(monkeypatch):
@@ -170,3 +171,15 @@ def test_remote_run_config_on_degrades_on_missing_build(monkeypatch):
     assert status == 200
     assert body["pinned"] is True
     assert "build_error" in body
+
+
+def test_remote_deployment_name_default(monkeypatch):
+    import vivarium_workbench.lib.remote_pinned as rp_mod
+    monkeypatch.setattr(rp_mod, "get_env", lambda k, d="": d)
+    assert rp_mod.remote_deployment_name() == "smsvpctest"
+
+
+def test_remote_deployment_name_from_env(monkeypatch):
+    import vivarium_workbench.lib.remote_pinned as rp_mod
+    monkeypatch.setattr(rp_mod, "get_env", lambda k, d="": "smscdk" if k == "REMOTE_DEPLOYMENT" else d)
+    assert rp_mod.remote_deployment_name() == "smscdk"

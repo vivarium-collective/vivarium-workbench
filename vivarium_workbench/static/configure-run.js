@@ -65,7 +65,7 @@
       || !!(window.__DASH_CONFIG__ && window.__DASH_CONFIG__.mode === "snapshot");
     var p = (isSnapshot && window.DataSource && window.DataSource.loadCompositeResolve)
       ? window.DataSource.loadCompositeResolve(id)
-      : fetch("/api/composite-resolve?id=" + encodeURIComponent(id) + "&overrides=%7B%7D")
+      : fetch(_api("/api/composite-resolve?id=" + encodeURIComponent(id) + "&overrides=%7B%7D"))
           .then(function (r) { return r.text().then(function (t) { try { return JSON.parse(t); } catch (e) { return { error: "HTTP " + r.status }; } }); });
     p.then(function (d) {
         var box = el.querySelector(".cfg-run");
@@ -100,6 +100,13 @@
     mount: mount, _buildConfigForm: _buildConfigForm, _collectOverrides: _collectOverrides,
     _ctx: function () { return ctxState; },
   };
+
+  // Prefix a root-absolute /api path with the dashboard base path (e.g. /workbench)
+  // so composite-explore run/resolve/status calls reach the workbench under the
+  // co-tenant ALB instead of misrouting to sms-api → 404. No-op at root.
+  function _api(p) {
+    return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p;
+  }
 
   function _post(url, body) {
     return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -157,10 +164,10 @@
 
   function _runAdhoc(el, id, overrides, steps) {
     function _reenableBtn() { var b = el.querySelector(".cfg-run-btn"); if (b) b.disabled = false; }
-    _post("/api/composite-test-run", { id: id, overrides: overrides, steps: steps }).then(function (res) {
+    _post(_api("/api/composite-test-run"), { id: id, overrides: overrides, steps: steps }).then(function (res) {
       if (res.status !== 202 || !res.body.run_id) { _status(el, '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>'); _reenableBtn(); return; }
       el._lastRunId = res.body.run_id;
-      _poll(el, "/api/composite-run/" + encodeURIComponent(res.body.run_id) + "/status");
+      _poll(el, _api("/api/composite-run/" + encodeURIComponent(res.body.run_id) + "/status"));
     }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); _reenableBtn(); });
   }
 

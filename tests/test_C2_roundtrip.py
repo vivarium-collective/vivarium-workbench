@@ -136,3 +136,156 @@ def _scan_all(node: object, found: list[str]) -> None:
         elif isinstance(v, list):
             for item in v:
                 _scan_all(item, found)
+
+
+# ---------------------------------------------------------------------------
+# Item C: run_remote clamps n_steps to the sms-api compose contract (0..1000).
+# sms-api rejects interval_time outside 0..1000 with a 400 (compose.py:121-122);
+# interval_time IS the step channel, so run_remote must clamp before submitting.
+# ---------------------------------------------------------------------------
+
+class _CaptureClient:
+    """Fake SmsApiClient capturing the interval_time (== step count) and the
+    extra_pip_deps it's given."""
+
+    def __init__(self):
+        self.interval_time = None
+        self.extra_pip_deps = None
+
+    def compose_submit(self, pbg_bytes, *, extra_pip_deps=None, interval_time=None):
+        self.interval_time = interval_time
+        self.extra_pip_deps = extra_pip_deps
+        return 123
+
+    def compose_status(self, sim_id):
+        return {"status": "completed"}
+
+    def download_compose_results(self, sim_id, dest):
+        p = Path(dest) / "results.zip"
+        p.write_bytes(b"")
+        return p
+
+
+def _stub_remote_boundaries(monkeypatch):
+    """Mock the git/export boundaries so run_remote's clamp is unit-testable."""
+    from vivarium_workbench.lib import remote_run
+    monkeypatch.setattr(remote_run, "git_pip_url", lambda ws: "git+file:///x@abc1234")
+    monkeypatch.setattr(remote_run, "workspace_pinned_deps", lambda ws: [])
+    monkeypatch.setattr(
+        remote_run, "export_composite_pbg",
+        lambda ws, cid, path: Path(path).write_bytes(b"{}"))
+
+
+@pytest.mark.parametrize("n_steps,expected", [
+    (5000, 1000.0),   # over the ceiling → clamped to 1000
+    (2700, 1000.0),   # the default_n_steps that would 400 → clamped
+    (20, 20.0),       # valid → passed through unchanged
+    (-3, 0.0),        # below the floor → clamped to 0
+])
+def test_run_remote_clamps_steps(tmp_path, monkeypatch, n_steps, expected):
+    from vivarium_workbench.lib import remote_run
+    _stub_remote_boundaries(monkeypatch)
+    client = _CaptureClient()
+    remote_run.run_remote(
+        tmp_path, "some.composite", client=client,
+        poll_interval=0, dest=tmp_path, n_steps=n_steps)
+    assert client.interval_time == expected
+
+
+# ---------------------------------------------------------------------------
+# N3 / option C: run_remote's pip-URL derivation.
+# On a pinned deployment the prod pod's /workspace is dirty-by-design, so run_remote
+# must NOT call git_pip_url (it raises on a dirty tree). Instead it derives the commit
+# from sms-api's resolved *built* simulator and ships git+<repo>@<commit>.
+# ---------------------------------------------------------------------------
+
+def _stub_export_deps_only(monkeypatch):
+    """Stub the export + framework-deps boundaries but NOT git_pip_url, so a pinned
+    test can assert git_pip_url is never reached."""
+    from vivarium_workbench.lib import remote_run
+    monkeypatch.setattr(remote_run, "workspace_pinned_deps", lambda ws: [])
+    monkeypatch.setattr(
+        remote_run, "export_composite_pbg",
+        lambda ws, cid, path: Path(path).write_bytes(b"{}"))
+
+
+def _forbid_git_pip_url(monkeypatch):
+    from vivarium_workbench.lib import remote_run
+
+    def _boom(ws):
+        raise AssertionError("git_pip_url must not be called in pinned mode")
+
+    monkeypatch.setattr(remote_run, "git_pip_url", _boom)
+
+
+def test_run_remote_pinned_derives_pip_url_from_built_commit(tmp_path, monkeypatch):
+    """Pinned mode: the pip URL is git+<repo>.git@<resolved commit> and git_pip_url
+    (which would raise on the dirty prod /workspace) is never called."""
+    from vivarium_workbench.lib import remote_run, remote_pinned
+    _stub_export_deps_only(monkeypatch)
+    _forbid_git_pip_url(monkeypatch)
+    monkeypatch.setattr(
+        remote_pinned, "pinned_config",
+        lambda: remote_pinned.PinnedConfig(
+            repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"))
+    monkeypatch.setattr(
+        remote_pinned, "resolve_pinned_build",
+        lambda client, repo, branch: {
+            "simulator_id": 7, "commit": "abcdef123456", "branch": branch, "repo_url": repo})
+    client = _CaptureClient()
+    remote_run.run_remote(tmp_path, "some.composite", client=client,
+                          poll_interval=0, dest=tmp_path, n_steps=5)
+    assert client.extra_pip_deps == [
+        "git+https://github.com/vivarium-collective/v2ecoli.git@abcdef123456"]
+
+
+def test_run_remote_pinned_normalizes_dotgit_repo_url(tmp_path, monkeypatch):
+    """A repo_url that already ends in .git yields a single .git suffix (no dupe)."""
+    from vivarium_workbench.lib import remote_run, remote_pinned
+    _stub_export_deps_only(monkeypatch)
+    _forbid_git_pip_url(monkeypatch)
+    monkeypatch.setattr(
+        remote_pinned, "pinned_config",
+        lambda: remote_pinned.PinnedConfig(
+            repo_url="https://github.com/vivarium-collective/v2ecoli.git", branch="main"))
+    monkeypatch.setattr(
+        remote_pinned, "resolve_pinned_build",
+        lambda client, repo, branch: {"commit": "deadbeef", "repo_url": repo})
+    client = _CaptureClient()
+    remote_run.run_remote(tmp_path, "some.composite", client=client,
+                          poll_interval=0, dest=tmp_path, n_steps=5)
+    assert client.extra_pip_deps == [
+        "git+https://github.com/vivarium-collective/v2ecoli.git@deadbeef"]
+
+
+def test_run_remote_unpinned_falls_back_to_git_pip_url(tmp_path, monkeypatch):
+    """Local dev (no pinned config): keeps the clean+pushed git_pip_url path."""
+    from vivarium_workbench.lib import remote_run, remote_pinned
+    _stub_remote_boundaries(monkeypatch)  # stubs git_pip_url → git+file:///x@abc1234
+    monkeypatch.setattr(remote_pinned, "pinned_config", lambda: None)
+    client = _CaptureClient()
+    remote_run.run_remote(tmp_path, "some.composite", client=client,
+                          poll_interval=0, dest=tmp_path, n_steps=5)
+    assert client.extra_pip_deps == ["git+file:///x@abc1234"]
+
+
+def test_run_remote_pinned_no_build_raises(tmp_path, monkeypatch):
+    """Pinned mode with no built simulator surfaces NoPinnedBuildError, so the
+    detached runner (_execute_remote) marks the run failed rather than submitting
+    garbage. compose_submit is never reached."""
+    from vivarium_workbench.lib import remote_run, remote_pinned
+    _stub_export_deps_only(monkeypatch)
+    _forbid_git_pip_url(monkeypatch)
+    monkeypatch.setattr(
+        remote_pinned, "pinned_config",
+        lambda: remote_pinned.PinnedConfig(repo_url="https://github.com/x/y", branch="main"))
+
+    def _no_build(client, repo, branch):
+        raise remote_pinned.NoPinnedBuildError("no built simulator")
+
+    monkeypatch.setattr(remote_pinned, "resolve_pinned_build", _no_build)
+    client = _CaptureClient()
+    with pytest.raises(remote_pinned.NoPinnedBuildError):
+        remote_run.run_remote(tmp_path, "some.composite", client=client,
+                              poll_interval=0, dest=tmp_path, n_steps=5)
+    assert client.extra_pip_deps is None  # never submitted

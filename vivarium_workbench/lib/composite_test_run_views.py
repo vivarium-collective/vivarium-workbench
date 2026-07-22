@@ -90,9 +90,21 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         )
 
     from vivarium_workbench.lib import run_core
+    from vivarium_workbench.lib.remote_pinned import is_pinned_enabled
+    # B (demo blocker): when this workbench is configured for remote runs
+    # (VIVARIUM_WORKBENCH_REMOTE_PINNED — the operator's declaration that it
+    # dispatches to an sms-api deployment), route the Composites-tab Run to the
+    # 'deployment' target (compose-on-Batch via remote_run.run_remote) instead of
+    # spawning the full model in this lightweight pod. The prod workspace has no
+    # `.viv-build.json`, so run_target_for would otherwise resolve to 'local'.
+    # Scoped to THIS call site — run_target_for (and thus composite_resolve, which
+    # needs a .viv-build.json simulator_id) is left untouched. Local dev (env
+    # unset) passes target=None and falls through to run_target_for → 'local'.
+    target = "deployment" if is_pinned_enabled() else None
     try:
         plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=overrides,
-                                   db_path=db_file, label=label, n_steps=0)
+                                   db_path=db_file, label=label, n_steps=steps,
+                                   target=target)
     except run_core.RunTargetUnavailable as e:
         return {"error": str(e)}, 409
     run_id = plan.run_id
@@ -110,6 +122,10 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         "emit_paths": emit_paths,
         "db_file": db_file,
         "log_path": log_rel,
+        # SP-D2: which target the detached runner dispatches to (local subprocess
+        # vs. sms-api /compose/v1). `run_target_for` stamps 'deployment' for a
+        # materialized remote build (.viv-build.json), 'local' otherwise.
+        "target": plan.target,
     }), encoding="utf-8")
 
     conn = cr.connect(db_file)

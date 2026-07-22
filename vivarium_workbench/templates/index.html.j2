@@ -1315,6 +1315,20 @@ window.addEventListener('pageshow', function (e) {
       <p><strong>Module:</strong> <code id="ce-module"></code> <span id="ce-kind" class="kind-badge"></span></p>
     </div>
 
+    <!-- Characterization: what this composite EMITS + what it COSTS. The Composites
+         tab characterizes a composite so you know how to use it in a study — it is
+         not a production launcher. Outputs come from GET /api/observables; the
+         measured wall-time comes from the last completed run's runs_meta timing
+         (started_at/completed_at), keyed by the current param-signature. -->
+    <div class="panel" id="ce-characterization">
+      <h4 style="margin-top:0">Characterization</h4>
+      <p style="margin:2px 0"><strong>Est. wall-time:</strong> <span id="ce-walltime" class="muted">unknown (no run yet)</span></p>
+      <div style="margin-top:8px">
+        <strong>Outputs / observables</strong>
+        <div id="ce-outputs" class="muted" style="margin-top:4px">Loading…</div>
+      </div>
+    </div>
+
     <!-- Loom explorer: bigraph-loom iframe (Setup & Run tab lives inside) -->
     <div class="panel">
       <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">

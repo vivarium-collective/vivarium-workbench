@@ -58,6 +58,23 @@ def is_pinned_enabled() -> bool:
     return pinned_config() is not None
 
 
+# Default when VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT is unset — the historical
+# hardcoded value, kept only as the fallback so existing deployments don't change
+# behavior on upgrade. New deployments set the env explicitly (e.g. "smscdk").
+_DEFAULT_REMOTE_DEPLOYMENT = "smsvpctest"
+
+
+def remote_deployment_name() -> str:
+    """The deployment namespace a remote run targets (the run's truthful Origin).
+
+    Config-derived via ``VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT`` (same env-driven
+    pattern as :func:`pinned_config`), replacing the hardcoded ``"smsvpctest"`` so
+    a run's recorded Origin reflects the deployment it actually ran on.
+    """
+    return (get_env("REMOTE_DEPLOYMENT", _DEFAULT_REMOTE_DEPLOYMENT) or _DEFAULT_REMOTE_DEPLOYMENT).strip() \
+        or _DEFAULT_REMOTE_DEPLOYMENT
+
+
 def _normalize_repo(url: str) -> str:
     """Canonical repo key for matching: lower-case, no trailing slash, no ``.git``."""
     u = (url or "").strip().rstrip("/")

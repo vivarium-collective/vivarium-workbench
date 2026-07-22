@@ -50,12 +50,15 @@ def land_remote_run(
     study_dir = Path(study_dir)
     study_dir.mkdir(parents=True, exist_ok=True)
 
+    from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+    deployment = remote_deployment_name()
+
     provenance = {
         "simulation_id": simulation_id,
         "experiment_id": experiment_id,
         "commit": commit,
         "backend": "ray",
-        "source": "smsvpctest",
+        "source": deployment,
         "s3_uri": s3_uri,
     }
     run_id = cr.generate_run_id(spec_id, params=provenance)
@@ -83,7 +86,7 @@ def land_remote_run(
             spec_id=spec_id,
             run_id=run_id,
             params=provenance,
-            label=label or "Remote run (smsvpctest)",
+            label=label or f"Remote run ({deployment})",
             started_at=started,
             n_steps=0,
         )

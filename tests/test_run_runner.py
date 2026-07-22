@@ -84,6 +84,57 @@ def test_execute_completes_and_persists_trajectory(tmp_path):
 
 
 @pytest.mark.skipif(not FIXTURE_WS.is_dir(), reason="fixture workspace absent")
+def test_execute_deployment_target_dispatches_remote(tmp_path, monkeypatch):
+    """SP-D2: a 'deployment'-target request routes to remote_run.run_remote and
+    lands 'completed' in composite-runs.db without running locally."""
+    ws, request_path, run_id = _write_request(tmp_path, steps=4)
+    # Flip the request to the deployment target.
+    req = json.loads(request_path.read_text())
+    req["target"] = "deployment"
+    request_path.write_text(json.dumps(req))
+
+    calls = {}
+
+    def _fake_run_remote(ws_root, spec_id, *, dest, n_steps):
+        calls["ws_root"] = Path(ws_root)
+        calls["spec_id"] = spec_id
+        calls["n_steps"] = n_steps
+        return dest / "results.zip"
+
+    from vivarium_workbench.lib import remote_run
+    monkeypatch.setattr(remote_run, "run_remote", _fake_run_remote)
+
+    rc = execute(request_path)
+    assert rc == 0
+    assert calls["spec_id"] == req["spec_id"]
+    assert calls["n_steps"] == 4
+    conn = connect(ws / ".pbg" / "composite-runs.db")
+    meta = query_run_meta(conn, run_id=run_id)
+    assert meta["status"] == "completed"
+    conn.close()
+
+
+@pytest.mark.skipif(not FIXTURE_WS.is_dir(), reason="fixture workspace absent")
+def test_execute_deployment_target_marks_failed_on_error(tmp_path, monkeypatch):
+    ws, request_path, run_id = _write_request(tmp_path, steps=2)
+    req = json.loads(request_path.read_text())
+    req["target"] = "deployment"
+    request_path.write_text(json.dumps(req))
+
+    def _boom(*a, **k):
+        raise RuntimeError("sms-api unreachable")
+
+    from vivarium_workbench.lib import remote_run
+    monkeypatch.setattr(remote_run, "run_remote", _boom)
+
+    rc = execute(request_path)
+    assert rc == 1
+    conn = connect(ws / ".pbg" / "composite-runs.db")
+    assert query_run_meta(conn, run_id=run_id)["status"] == "failed"
+    conn.close()
+
+
+@pytest.mark.skipif(not FIXTURE_WS.is_dir(), reason="fixture workspace absent")
 def test_execute_marks_failed_on_bad_spec(tmp_path):
     ws, request_path, run_id = _write_request(
         tmp_path, steps=2, spec_id="pbg_ws_increase_demo.composites.does-not-exist")

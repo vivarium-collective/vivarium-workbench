@@ -34,11 +34,16 @@ class RunPlan:
 
 def invoke_run(workspace, *, spec_id, config, db_path,
                label=None, n_steps=None, target=None) -> RunPlan:
+    """Resolve the run id + execution target for a composite run.
+
+    SP-D2: the ``deployment`` target is now BUILT — it dispatches to
+    ``remote_run.run_remote`` (export .pbg → sms-api ``/compose/v1`` → poll →
+    land) through the same detached-runner model the local target uses. The
+    caller writes a run-request carrying ``plan.target``; ``run_runner.execute``
+    branches on it. (``RunTargetUnavailable`` is retained for callers that still
+    want to reject a target explicitly, but ``invoke_run`` no longer raises it.)
+    """
     target = target or run_target_for(Path(workspace))
-    if target == "deployment":
-        raise RunTargetUnavailable(
-            "this composite's source is a remote build — deployment-side "
-            "execution is not available yet (SP-D). Run from a local workspace.")
     run_id = composite_runs.generate_run_id(spec_id, config)
     return RunPlan(run_id=run_id, spec_id=spec_id, db_path=Path(db_path),
                    config=dict(config or {}), label=label, n_steps=n_steps, target=target)

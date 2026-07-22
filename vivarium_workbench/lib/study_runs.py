@@ -127,6 +127,15 @@ def run_study_baseline(ws_root, body):
                                    db_path=db_file, label=label, n_steps=params_n_steps)
     except run_core.RunTargetUnavailable as e:
         return {"error": str(e)}, 409
+    # Remote-build guard. This 409 was previously produced by invoke_run raising
+    # RunTargetUnavailable; SP-D2 made the deployment target BUILT for the composite
+    # path, so invoke_run no longer raises and callers reject explicitly. The legacy
+    # study-baseline path is not yet converged onto remote_run (G1, Phase 4), so a
+    # remote-build workspace (.viv-build.json → target "deployment") still refuses
+    # here rather than falling through to a local subprocess.
+    if plan.target == "deployment":
+        return {"error": "Study baseline runs on a remote build are not available "
+                         "on this path yet (SP-D/G1)."}, 409
     run_id = plan.run_id
 
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
@@ -385,6 +394,11 @@ def run_study_variant(ws_root, body):
                                        n_steps=params_n_steps)
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
+        # Remote-build guard — same as the baseline path above (SP-D2/G1): a
+        # remote-build workspace must not fall through to a local subprocess.
+        if plan.target == "deployment":
+            return {"error": "Study variant runs on a remote build are not available "
+                             "on this path yet (SP-D/G1)."}, 409
         run_id = plan.run_id
         runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
         timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
@@ -407,6 +421,10 @@ def run_study_variant(ws_root, body):
                                        db_path=db_file, label=variant_name, n_steps=params_n_steps)
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
+        # Remote-build guard — same as the baseline path above (SP-D2/G1).
+        if plan.target == "deployment":
+            return {"error": "Study variant runs on a remote build are not available "
+                             "on this path yet (SP-D/G1)."}, 409
         run_id = plan.run_id
 
         state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)

@@ -193,13 +193,16 @@ def remote_run_config() -> tuple[dict, int]:
     """Report pinned-run config for the client to relabel the run card.
 
     ``{"pinned": false}`` when off; ``{"pinned": true, "repo_url", "branch",
-    "commit"?, "simulator_id"?}`` when on. Resolving the build is best-effort —
-    a missing build or unreachable sms-api degrades to ``build_error`` rather
-    than failing the card."""
+    "commit"?, "simulator_id"?}`` when on. Both carry ``deployment`` — the
+    config-derived Origin name (``VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT``) so the
+    run form's origin selector labels "Remote:<deployment>" truthfully instead of
+    a hardcoded "smsvpctest". Resolving the build is best-effort — a missing build
+    or unreachable sms-api degrades to ``build_error`` rather than failing the card."""
+    deployment = remote_pinned.remote_deployment_name()
     cfg = remote_pinned.pinned_config()
     if cfg is None:
-        return {"pinned": False}, 200
-    out: dict = {"pinned": True, "repo_url": cfg.repo_url, "branch": cfg.branch}
+        return {"pinned": False, "deployment": deployment}, 200
+    out: dict = {"pinned": True, "repo_url": cfg.repo_url, "branch": cfg.branch, "deployment": deployment}
     try:
         resolved = remote_pinned.resolve_pinned_build(
             SmsApiClient(_sms_api_base()), cfg.repo_url, cfg.branch)
