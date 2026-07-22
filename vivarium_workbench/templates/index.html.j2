@@ -1639,6 +1639,9 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      for CLI tooling. -->
 <script src="assets/investigation-switcher.js"></script>
 <script src="assets/branch-source.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<!-- Encode this tab's workspace materialization state in the favicon + title
+     (session-per-tab): ready / ⏳ preparing / ⚠️ failed. -->
+<script src="assets/session-status.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
 document.addEventListener("DOMContentLoaded", function() {
