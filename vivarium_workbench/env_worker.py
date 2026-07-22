@@ -85,7 +85,8 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 
 
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
-                 "viz_classes", "resolve_composite_state", "shutdown"]
+                 "viz_classes", "resolve_composite_state", "observables",
+                 "study_readout_check", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -490,6 +491,164 @@ def _resolve_composite_state(params: dict) -> dict:
     return out
 
 
+# --- observables (spec §11): build + available_observables + validate, all
+#     in-worker (available_observables/validate_readouts need the live core +
+#     polars, which live here). The workbench owns spec-file resolution and hands
+#     us either a generator `ref` or an inline resolved `{state, schema}`. --------
+_OBS_LINEAGE_AGENT_RE = None  # compiled lazily (re import kept local to workers)
+
+
+def _obs_resolve_registry_ref(ref: str, keys):
+    """Resolve a short composite ``ref`` to a canonical registry key by matching
+    the trailing ``.composites.<slug>`` segment (else the last dotted segment),
+    preferring the shortest match. Port of
+    observables_views._resolve_registry_ref."""
+    keys = list(keys)
+    if ref in keys:
+        return ref
+    def tail(k):
+        return k.rsplit(".composites.", 1)[-1] if ".composites." in k else k.rsplit(".", 1)[-1]
+    rt = tail(ref)
+    matches = [k for k in keys if tail(k) == rt]
+    return min(matches, key=len) if matches else None
+
+
+def _obs_augment_lineage_aliases(available: dict) -> dict:
+    """Strip a leading ``agents.<n>.`` from every leaf/catalog key and add the
+    remainder as an alias (whole-cell composites nest the cell under
+    ``agents.<n>.`` but studies author bare single-cell paths). Only a leading
+    ``agents.<n>.`` is stripped, never an arbitrary suffix, so a genuinely-absent
+    observable still fails to match. Port of
+    observables_views.augment_lineage_aliases (the agent-structure convention
+    lives in the dashboard worker, not the general validator)."""
+    import re
+    global _OBS_LINEAGE_AGENT_RE
+    if _OBS_LINEAGE_AGENT_RE is None:
+        _OBS_LINEAGE_AGENT_RE = re.compile(r"^agents\.\d+\.(.+)$")
+    leaves = list(available.get("leaves", []) or [])
+    catalogs = dict(available.get("catalogs", {}) or {})
+    seen = set(leaves)
+    extra = []
+    for leaf in leaves:
+        m = _OBS_LINEAGE_AGENT_RE.match(leaf)
+        if m and m.group(1) not in seen:
+            extra.append(m.group(1))
+            seen.add(m.group(1))
+    for key, val in list(catalogs.items()):
+        m = _OBS_LINEAGE_AGENT_RE.match(key)
+        if m:
+            catalogs.setdefault(m.group(1), val)
+    return {"leaves": leaves + extra, "catalogs": catalogs}
+
+
+def _obs_build_core():
+    """Best-effort workspace ``build_core()`` for LabeledArray catalog resolution
+    — tolerated if it fails (None; only static catalogs degrade)."""
+    try:
+        package_name, _pkgs, _ws = _workspace_meta(_workspace)
+        mod = __import__(f"{package_name}.core", fromlist=["build_core"])
+        return mod.build_core()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _obs_available(params: dict) -> dict:
+    """Compute ``available_observables`` for a composite named by ``ref`` (a
+    registered generator) OR given inline as ``{state, schema}`` (a resolved spec
+    doc the workbench parsed). Returns ``{leaves, catalogs}`` on success, else a
+    sentinel: ``{__no_validator__}`` / ``{__not_registered__}`` / ``{__build_error__}``
+    / ``{__introspect_error__}``. Faithful to
+    observables_views.build_composite_state_for_observables + available_observables."""
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    _import_workspace_package(_workspace)
+    try:
+        from pbg_superpowers.readout_validation import available_observables
+    except Exception as e:  # noqa: BLE001
+        return {"__no_validator__": str(e)}
+
+    core = _obs_build_core()
+    ref = (params or {}).get("ref")
+    if ref is not None:
+        # Generator branch: resolve via the live registry (+ short-ref alias).
+        entry = None
+        apply_core_extensions = None
+        build_generator = None
+        try:
+            from pbg_superpowers.composite_generator import (
+                _REGISTRY,
+                apply_core_extensions as _ace,
+                build_generator as _bg,
+                discover_generators,
+            )
+            apply_core_extensions, build_generator = _ace, _bg
+            if not _REGISTRY:
+                try:
+                    discover_generators()
+                except Exception:  # noqa: BLE001
+                    pass
+            entry = _REGISTRY.get(ref)
+            if entry is None:
+                canon = _obs_resolve_registry_ref(ref, _REGISTRY.keys())
+                if canon is not None:
+                    entry = _REGISTRY.get(canon)
+        except ImportError:
+            entry = None
+        if entry is None:
+            return {"__not_registered__": True}
+        if core is not None and apply_core_extensions is not None:
+            try:
+                core = apply_core_extensions(entry, core)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            doc = build_generator(entry, core=core)
+        except Exception as e:  # noqa: BLE001
+            return {"__build_error__": f"generator build failed: {e}"}
+        if isinstance(doc, dict) and isinstance(doc.get("state"), dict):
+            state, schema = doc["state"], doc.get("schema")
+        else:
+            state, schema = doc, None
+    else:
+        # Static branch: the workbench already resolved the spec file.
+        state = (params or {}).get("state")
+        schema = (params or {}).get("schema")
+
+    try:
+        available = available_observables(core, state, schema)
+    except Exception as e:  # noqa: BLE001
+        return {"__introspect_error__": f"observable introspection failed: {e}"}
+    return {"leaves": available.get("leaves", []) or [],
+            "catalogs": available.get("catalogs", {}) or {}}
+
+
+def _observables(params: dict) -> dict:
+    """``{ref}`` or ``{state, schema}`` → ``{leaves, catalogs}`` (or a sentinel)."""
+    return _obs_available(params)
+
+
+def _study_readout_check(params: dict) -> dict:
+    """Validate a study's readouts against its composite's real structure
+    (never-fabricate guard). Params carry the study ``spec`` inline plus the
+    composite as ``ref`` or ``{state, schema}``. Returns ``{readouts}`` on
+    success, else a sentinel (``__not_registered__`` / ``__build_error__`` /
+    ``__no_validator__`` / ``__validate_error__``)."""
+    spec = (params or {}).get("spec") or {}
+    avail = _obs_available(params)
+    if any(k.startswith("__") for k in avail):
+        return avail  # not_registered / build_error / no_validator / introspect_error
+    try:
+        from pbg_superpowers.readout_validation import validate_readouts
+    except Exception as e:  # noqa: BLE001
+        return {"__no_validator__": str(e)}
+    try:
+        augmented = _obs_augment_lineage_aliases(avail)
+        results = validate_readouts(spec, available=augmented)
+    except Exception as e:  # noqa: BLE001
+        return {"__validate_error__": f"readout validation failed: {e}"}
+    return {"readouts": results}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -559,6 +718,10 @@ def _handle(method: str, params: dict) -> dict:
         return _list_visualizations()
     if method == "resolve_composite_state":
         return _resolve_composite_state(params)
+    if method == "observables":
+        return _observables(params)
+    if method == "study_readout_check":
+        return _study_readout_check(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

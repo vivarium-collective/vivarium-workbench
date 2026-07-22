@@ -253,6 +253,68 @@ def test_build_composite_state_routes_generator_branch_through_worker():
 
 
 # ---------------------------------------------------------------------------
+# Slice: observables + study_readout_check — build + available_observables +
+# validate_readouts, all in-worker (needs the live core + polars).
+# ---------------------------------------------------------------------------
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_observables_generator_ref_returns_leaves_and_catalogs():
+    pytest.importorskip("pbg_superpowers")
+    pytest.importorskip("polars")  # available_observables needs it (the `test` extra)
+    ref = "pbg_ws_increase_demo.composites.hint_test"
+    with EnvWorker(_FIXTURE.resolve()) as w:
+        r = w.call("observables", {"ref": ref})
+    assert set(r) == {"leaves", "catalogs"}, r
+    assert isinstance(r["leaves"], list) and isinstance(r["catalogs"], dict)
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_observables_unknown_ref_is_not_registered():
+    with EnvWorker(_FIXTURE.resolve()) as w:
+        r = w.call("observables", {"ref": "no.such.composite"})
+    assert r == {"__not_registered__": True}
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_study_readout_check_validates_against_real_structure():
+    """A selector pointing at a path the composite does not expose is flagged
+    (never-fabricate), proving validate_readouts ran on the worker-built core."""
+    pytest.importorskip("pbg_superpowers")
+    pytest.importorskip("polars")
+    ref = "pbg_ws_increase_demo.composites.hint_test"
+    spec = {"baseline": [{"composite": ref}],
+            "readouts": [{"name": "phantom", "selector": "totally.fabricated.path"}]}
+    with EnvWorker(_FIXTURE.resolve()) as w:
+        r = w.call("study_readout_check", {"ref": ref, "spec": spec})
+    assert "readouts" in r, r
+    assert {x["name"] for x in r["readouts"]} == {"phantom"}
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_build_observables_routes_through_worker_with_parity():
+    """The lib entry point routes through the worker and matches the old
+    in-process build_composite_state_for_observables + available_observables."""
+    pytest.importorskip("pbg_superpowers")
+    pytest.importorskip("polars")
+    from pbg_superpowers.readout_validation import available_observables
+
+    from vivarium_workbench.lib import observables_views as ov
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+
+    ref = "pbg_ws_increase_demo.composites.hint_test"
+    ws = _FIXTURE.resolve()
+    core, state, schema = ov.build_composite_state_for_observables(ws, ref)  # in-process
+    expected = available_observables(core, state, schema)
+    ov.clear_cache()
+    try:
+        body, status = ov.build_observables(ws, ref)  # worker-backed
+    finally:
+        get_pool().close_all()
+    assert status == 200, body
+    assert body["leaves"] == (expected.get("leaves") or [])
+    assert body["catalogs"] == (expected.get("catalogs") or {})
+
+
+# ---------------------------------------------------------------------------
 # Opt-in real-workspace check: run the worker against a real v2ecoli checkout
 # on ITS OWN venv interpreter. Skips unless ../v2ecoli/.venv exists (build it
 # with `cd ../v2ecoli && uv sync`). This is the e2e that the minimal fixture
