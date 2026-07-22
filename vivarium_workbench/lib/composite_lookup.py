@@ -131,6 +131,20 @@ def _derive_module_from_spec_id(spec_id: str) -> str:
     return spec_id
 
 
+def _discover_generators_via_worker(ws_root: Path) -> dict:
+    """``{gid: entry}`` generator composites from the workspace's env worker
+    (so the HTTP process never imports ``@composite_generator`` modules). Soft-
+    degrades to ``{}`` when the worker is unavailable — the same spec-only fallback
+    as when pbg-superpowers isn't importable."""
+    from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+    try:
+        r = get_pool().call(ws_root, "discover_composites")
+        return r.get("generators", {}) if isinstance(r, dict) else {}
+    except EnvWorkerUnavailable:
+        return {}
+
+
 def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]:
     """Discover composites from the workspace + every installed pbg-* package.
 
@@ -157,31 +171,10 @@ def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]
         if not rec.get("module"):
             rec["module"] = _derive_module_from_spec_id(spec_id)
 
-    # Merge generator entries from pbg-superpowers, if available.
-    try:
-        from pbg_superpowers.composite_discovery import discover_all as _ps_discover_all
-    except ImportError as e:
-        import warnings
-        warnings.warn(
-            f"composite_lookup: pbg-superpowers not importable, "
-            f"generator discovery disabled ({e})",
-            stacklevel=2,
-        )
-        return out
-
-    try:
-        merged = _ps_discover_all()
-    except Exception as e:  # noqa: BLE001 — be defensive; never break catalog
-        import warnings
-        warnings.warn(
-            f"composite_lookup: discover_all raised {type(e).__name__}: {e}",
-            stacklevel=2,
-        )
-        return out
-
-    for gid, entry in merged.items():
-        if entry.get("kind") != "generator":
-            continue
+    # Merge @composite_generator entries — discovered in the env worker (importing
+    # generator modules is workspace Python, kept out of the HTTP process). The
+    # workbench keeps the pure FS/YAML spec scan above + the shaping below.
+    for gid, entry in _discover_generators_via_worker(ws_root).items():
         if gid in out:
             continue
         rec: dict = {
@@ -262,16 +255,10 @@ def known_composite_ids(ws_root: Path, package_path: str | None = None) -> set[s
             package_path = ""
     ids: set[str] = set()
     try:
+        # discover_all_composites now includes the generator registry (via the
+        # env worker's discover_composites, belt-and-suspenders over discover_all),
+        # so no separate in-process _REGISTRY union is needed here.
         ids.update(discover_all_composites(ws_root, package_path or "").keys())
-    except Exception:  # noqa: BLE001
-        pass
-    # Generator registry (also merged by discover_all_composites, but prime it
-    # directly in case discovery short-circuited before generators were loaded).
-    try:
-        from pbg_superpowers.composite_generator import _REGISTRY, discover_generators
-        if not _REGISTRY:
-            discover_generators()
-        ids.update(_REGISTRY.keys())
     except Exception:  # noqa: BLE001
         pass
     return ids

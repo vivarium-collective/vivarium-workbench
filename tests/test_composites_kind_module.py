@@ -166,24 +166,13 @@ def test_discover_all_composites_propagates_default_n_steps(tmp_path, monkeypatc
         def builder(core=None):
             return {}
 
-        # Stub: pretend pbg-superpowers discovery returned just our entry
-        import pbg_superpowers.composite_discovery as cd
-
-        def fake_discover_all():
-            entry_id = f"{builder.__module__}.hint"
-            return {
-                entry_id: {
-                    "kind": "generator",
-                    "id": entry_id,
-                    "name": "hint",
-                    "description": "",
-                    "module": builder.__module__,
-                    "parameters": {},
-                    "default_n_steps": 123,
-                }
-            }
-
-        monkeypatch.setattr(cd, "discover_all", fake_discover_all)
+        # The @composite_generator half is now discovered in the env worker; stub
+        # that seam (returns the raw {gid: entry} generator dict the worker sends).
+        from vivarium_workbench.lib import composite_lookup as _cl
+        entry_id = f"{builder.__module__}.hint"
+        monkeypatch.setattr(_cl, "_discover_generators_via_worker", lambda ws_root: {
+            entry_id: {"name": "hint", "description": "", "module": builder.__module__,
+                       "parameters": {}, "default_n_steps": 123, "visualizations": []}})
 
         out = discover_all_composites(tmp_path, "pkg")
         entry_id = f"{builder.__module__}.hint"
@@ -206,23 +195,11 @@ def test_discover_all_composites_propagates_none_default_n_steps(tmp_path, monke
         def builder(core=None):
             return {}
 
-        import pbg_superpowers.composite_discovery as cd
-
-        def fake_discover_all():
-            entry_id = f"{builder.__module__}.no_hint"
-            return {
-                entry_id: {
-                    "kind": "generator",
-                    "id": entry_id,
-                    "name": "no_hint",
-                    "description": "",
-                    "module": builder.__module__,
-                    "parameters": {},
-                    "default_n_steps": None,
-                }
-            }
-
-        monkeypatch.setattr(cd, "discover_all", fake_discover_all)
+        from vivarium_workbench.lib import composite_lookup as _cl
+        entry_id = f"{builder.__module__}.no_hint"
+        monkeypatch.setattr(_cl, "_discover_generators_via_worker", lambda ws_root: {
+            entry_id: {"name": "no_hint", "description": "", "module": builder.__module__,
+                       "parameters": {}, "default_n_steps": None, "visualizations": []}})
 
         out = discover_all_composites(tmp_path, "pkg")
         entry_id = f"{builder.__module__}.no_hint"
