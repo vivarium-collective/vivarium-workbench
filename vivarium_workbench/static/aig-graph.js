@@ -88,9 +88,20 @@
       rows + viol + '</div>';
   }
 
+  function _layoutOptsForBand(band) {
+    var b = Math.max(0, Math.min(2, band | 0));
+    var BANDS = [
+      { band: 0, cls: 'aig-zoom-far',  cardW: 150, xGap: 40, asks: false, finds: false, chain: false, followups: false },
+      { band: 1, cls: 'aig-zoom-mid',  cardW: 210, xGap: 64, asks: true,  finds: true,  chain: false, followups: false },
+      { band: 2, cls: 'aig-zoom-near', cardW: 320, xGap: 72, asks: true,  finds: true,  chain: true,  followups: true  },
+    ];
+    return BANDS[b];
+  }
+
   global._chainBlockHtml = _chainBlockHtml;
   global._groupClaims = _groupClaims;
+  global._layoutOptsForBand = _layoutOptsForBand;
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { _chainBlockHtml: _chainBlockHtml, _groupClaims: _groupClaims };
+    module.exports = { _chainBlockHtml: _chainBlockHtml, _groupClaims: _groupClaims, _layoutOptsForBand: _layoutOptsForBand };
   }
 })(typeof window !== 'undefined' ? window : globalThis);

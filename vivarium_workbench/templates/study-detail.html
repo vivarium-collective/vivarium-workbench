@@ -143,6 +143,7 @@
     <button class="study-pillar"        data-pillar="compose"    onclick="_setStudyPillar('compose')">Model</button>
     <button class="study-pillar"        data-pillar="simulate"   onclick="_setStudyPillar('simulate')">Simulations</button>
     <button class="study-pillar"        data-pillar="visualize"  onclick="_setStudyPillar('visualize')">Results</button>
+    <button class="study-pillar"        data-pillar="report-cards" onclick="_setStudyPillar('report-cards')">Report Cards</button>
     <button class="study-pillar"        data-pillar="data"       onclick="_setStudyPillar('data')">Exports</button>
   </div>
   <div class="study-subnav" id="study-subnav">
@@ -152,6 +153,7 @@
     <button class="study-tab" data-kind="compose" data-pillar="compose" onclick="_setStudyTab('compose')">Model</button>
     <button class="study-tab" data-kind="simulate" data-pillar="simulate" onclick="_setStudyTab('simulate')">Simulations</button>
     <button class="study-tab" data-kind="visualize" data-pillar="visualize" onclick="_setStudyTab('visualize')">Results</button>
+    <button class="study-tab" data-kind="report-cards" data-pillar="report-cards" onclick="_setStudyTab('report-cards')">Report Cards</button>
     <button class="study-tab" data-kind="data" data-pillar="data" onclick="_setStudyTab('data')">Exports</button>
   </div>
 </nav>
@@ -1407,6 +1409,21 @@
 
   <div class="viz-section">
 
+    {# ─── Baseline native-analysis gallery: the same live figures the Composite
+         Explorer renders (mass fractions, cell mass, replication, ribosome
+         usage, …), pulled from the study's most recent completed run's
+         viz.json via /api/study-native-gallery/<slug>. Each panel is a
+         self-contained Altair/Plotly doc, so it renders in its own srcdoc
+         iframe (the charts embed CDN vega/plotly and need script execution). #}
+    <div class="native-gallery-section" style="margin-bottom:26px">
+      <h3 class="section-title">Baseline analysis gallery</h3>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+        Native v2ecoli analyses rendered from this study's most recent completed
+        run — the same gallery the Composite Explorer shows.
+      </p>
+      <div id="native-gallery-panel"><p class="empty-message">Loading baseline figures…</p></div>
+    </div>
+
     {# ─── Embedded HTML visualizations (e.g. pre-execution preview pages
          produced by a runner script). study.embed_visualizations is a list of
          {name, url, description} entries; each renders as an inline iframe at
@@ -1445,6 +1462,19 @@
       They are also embedded into the downloadable investigation HTML report.
     </p>
     <div id="viz-charts-panel" class="charts-panel"></div>
+  </div>
+</section>
+
+<section class="study-tab-panel" data-kind="report-cards" id="panel-report-cards" hidden>
+  <div class="report-cards-section">
+    <h3 class="section-title">Report cards</h3>
+    <p class="muted" style="margin:0 0 10px 0;font-size:0.9em">
+      Graded comparison scorecards for this study (v2ecoli vs vEcoli / literature).
+      Each card's verdict summarises whether the compared observables fall within
+      tolerance. Cards are produced during the post-sim flush from the study's
+      <code>report_cards:</code> declaration into <code>viz/report_card/</code>.
+    </p>
+    <div id="report-cards-panel"><p class="empty-message">Loading report cards…</p></div>
   </div>
 </section>
 

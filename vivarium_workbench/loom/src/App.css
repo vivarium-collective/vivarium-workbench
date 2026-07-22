@@ -936,7 +936,7 @@ body {
 .sr-panel {
   padding: 16px;
   font-family: system-ui, sans-serif;
-  max-width: 720px;
+  max-width: 1100px;
   padding-bottom: 72px; /* keep content clear of sticky action bar */
 }
 

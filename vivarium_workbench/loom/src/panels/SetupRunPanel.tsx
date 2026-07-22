@@ -25,30 +25,68 @@ import { parseListString, formatListString } from '../parsers';
 
 type FormValue = string | number | boolean;
 
+// Parameter declarations from different sources spell the same type several
+// ways: composites emit 'integer' / 'boolean' / 'list' / 'map', while some
+// tooling uses 'int' / 'bool' / 'list[string]'. Normalize to a canonical kind
+// so casting, seeding, and rendering all agree — a mismatch here sends the raw
+// String() of the field to the backend (e.g. seed="0" → RandomState crash,
+// config_overrides="[object Object]" → .items() crash).
+type ParamKind = 'int' | 'float' | 'bool' | 'list' | 'map' | 'string';
+function _normType(t: string): ParamKind {
+  switch (t) {
+    case 'int': case 'integer': return 'int';
+    case 'float': case 'number': case 'double': return 'float';
+    case 'bool': case 'boolean': return 'bool';
+    case 'list': case 'list[string]': case 'array': return 'list';
+    case 'map': case 'dict': case 'object': case 'json': return 'map';
+    default: return 'string';
+  }
+}
+
 function _initialValue(pdef: ParameterDecl, override: unknown): FormValue {
   const seed = override !== undefined ? override : pdef.default;
-  if (pdef.type === 'list[string]') {
-    return formatListString(Array.isArray(seed) ? (seed as string[]) : []);
+  switch (_normType(pdef.type)) {
+    case 'list':
+      return formatListString(Array.isArray(seed) ? (seed as string[]) : []);
+    case 'bool':
+      return Boolean(seed);
+    case 'int':
+    case 'float':
+      return seed == null ? '' : String(seed);
+    case 'map':
+      // JSON text, not "[object Object]".
+      if (seed == null || seed === '') return '';
+      if (typeof seed === 'string') return seed;    // already-serialized override
+      try { return JSON.stringify(seed); } catch { return ''; }
+    default:
+      return seed == null ? '' : String(seed);
   }
-  if (pdef.type === 'bool') return Boolean(seed);
-  if (pdef.type === 'int' || pdef.type === 'float') {
-    return seed == null ? '' : String(seed);
-  }
-  return seed == null ? '' : String(seed);
 }
 
 function _castFormValue(pdef: ParameterDecl, raw: FormValue): unknown {
-  if (pdef.type === 'list[string]') return parseListString(String(raw));
-  if (pdef.type === 'bool') return Boolean(raw);
-  if (pdef.type === 'int') {
-    const n = parseInt(String(raw), 10);
-    return Number.isNaN(n) ? null : n;
+  switch (_normType(pdef.type)) {
+    case 'list':
+      return parseListString(String(raw));
+    case 'bool':
+      return typeof raw === 'boolean' ? raw : String(raw) === 'true';
+    case 'int': {
+      const n = parseInt(String(raw), 10);
+      return Number.isNaN(n) ? null : n;
+    }
+    case 'float': {
+      const n = parseFloat(String(raw));
+      return Number.isNaN(n) ? null : n;
+    }
+    case 'map': {
+      // Empty or the legacy "[object Object]" coercion → empty map so iterating
+      // generators don't crash; non-empty text is parsed as JSON (lenient).
+      const s = String(raw).trim();
+      if (s === '' || s === '[object Object]') return {};
+      try { return JSON.parse(s); } catch { return {}; }
+    }
+    default:
+      return String(raw);
   }
-  if (pdef.type === 'float') {
-    const n = parseFloat(String(raw));
-    return Number.isNaN(n) ? null : n;
-  }
-  return String(raw);
 }
 
 // Export helpers so tests can import them independently.
@@ -100,9 +138,6 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
       ])
     )
   );
-  const [previewBusy, setPreviewBusy] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
   // Reset form whenever the composite changes (new parameters or overrides).
   useEffect(() => {
     setValues(Object.fromEntries(
@@ -110,7 +145,6 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
         k, _initialValue(pdef, props.overrides[k]),
       ])
     ));
-    setPreviewError(null);
   }, [props.parameters, props.overrides]);
 
   // ---- Run lifecycle state (from RunPanel) ---------------------------------
@@ -207,35 +241,6 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
   }, [props.compositeId]);
 
   // ---- Handlers -----------------------------------------------------------
-
-  /** Preview wiring: re-resolve the composite with the current parameter values
-   *  so the Wiring tab refreshes. Does NOT start a run. */
-  async function handlePreviewWiring() {
-    if (!props.compositeId) {
-      setPreviewError('No composite id — cannot preview.');
-      return;
-    }
-    const newOverrides: Record<string, unknown> = {};
-    for (const [k, pdef] of Object.entries(props.parameters)) {
-      newOverrides[k] = _castFormValue(pdef, values[k]);
-    }
-    setPreviewBusy(true);
-    setPreviewError(null);
-    try {
-      const url = `/api/composite-resolve?id=${encodeURIComponent(props.compositeId)}`
-        + `&overrides=${encodeURIComponent(JSON.stringify(newOverrides))}`;
-      const r = await fetch(url);
-      const body = await r.json();
-      if (!r.ok || body.error) {
-        throw new Error(body.error || `HTTP ${r.status}`);
-      }
-      props.onApplied(newOverrides, body.state);
-    } catch (e) {
-      setPreviewError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setPreviewBusy(false);
-    }
-  }
 
   /** Run: cast current form values to overrides and start the run directly.
    *  No separate Apply step is required — Run applies the parameters. */
@@ -339,7 +344,7 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
-                  ) : pdef.type === 'list[string]' ? (
+                  ) : _normType(pdef.type) === 'list' ? (
                     <textarea
                       id={id}
                       rows={Math.max(3, String(val).split('\n').length + 1)}
@@ -348,7 +353,7 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                       className="sr-input"
                       placeholder="one item per line"
                     />
-                  ) : pdef.type === 'bool' ? (
+                  ) : _normType(pdef.type) === 'bool' ? (
                     <select
                       id={id}
                       value={String(val)}
@@ -361,8 +366,8 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                   ) : (
                     <input
                       id={id}
-                      type={pdef.type === 'int' || pdef.type === 'float' ? 'number' : 'text'}
-                      step={pdef.type === 'float' ? 'any' : pdef.type === 'int' ? '1' : undefined}
+                      type={_normType(pdef.type) === 'int' || _normType(pdef.type) === 'float' ? 'number' : 'text'}
+                      step={_normType(pdef.type) === 'float' ? 'any' : _normType(pdef.type) === 'int' ? '1' : undefined}
                       value={String(val)}
                       onChange={(e) => onChange(e.target.value)}
                       className="sr-input"
@@ -372,24 +377,6 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                 </div>
               );
             })}
-          </div>
-          {/* Preview wiring — optional pre-flight resolve without starting a run */}
-          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              onClick={handlePreviewWiring}
-              disabled={previewBusy || !props.compositeId || !!props.readOnly}
-              style={{
-                padding: '6px 14px', fontSize: 13,
-                background: '#fff', color: '#374151',
-                border: '1px solid #d1d5db', borderRadius: 4,
-                cursor: previewBusy ? 'wait' : 'pointer',
-              }}
-            >
-              {previewBusy ? 'Previewing…' : 'Preview wiring'}
-            </button>
-            {previewError && (
-              <span style={{ color: '#b91c1c', fontSize: 13 }}>Error: {previewError}</span>
-            )}
           </div>
         </section>
       )}

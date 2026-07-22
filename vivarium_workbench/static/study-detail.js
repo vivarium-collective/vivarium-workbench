@@ -46,7 +46,8 @@
       p.classList.toggle('active', p.dataset.kind === kind);
     });
     if (kind === 'tests') { loadTestsTab(window._study); }
-    if (kind === 'visualize') { _loadReadouts(); _loadCharts('viz-charts-panel'); }
+    if (kind === 'visualize') { _loadReadouts(); _loadCharts('viz-charts-panel'); _loadNativeGallery(); }
+    if (kind === 'report-cards') { _fillReportCardsTab(window._study); }
     if (kind === 'data') { _loadAnalysisOutputs(); }
     if (kind === 'simulate') { _renderReproduceCard(); }
   }
@@ -227,6 +228,44 @@
     return '<div class="chart-card">' + title + media +
            '<div class="chart-caption">' + (c.caption || '') + '</div></div>';
   }
+  // Baseline native-analysis gallery — the study's latest completed run's
+  // viz.json panels (mass fractions, cell mass, replication, …). Each panel is
+  // a self-contained Altair/Plotly doc, so it renders in its own srcdoc iframe
+  // (innerHTML would not execute the embedded vega/plotly <script> tags).
+  var _nativeGalleryLoaded = false;
+  function _loadNativeGallery() {
+    var host = document.getElementById('native-gallery-panel');
+    if (!host || _nativeGalleryLoaded) return;
+    _nativeGalleryLoaded = true;
+    var slug = studyName();
+    fetch('/api/study-native-gallery/' + encodeURIComponent(slug))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var panels = (d && d.panels) || {};
+        var names = Object.keys(panels);
+        if (!names.length) {
+          host.innerHTML = '<p class="muted" style="padding:8px">No baseline '
+            + 'figures yet — run this study to generate its analysis gallery '
+            + '(the run renders them into <code>viz.json</code>).</p>';
+          _nativeGalleryLoaded = false;  // allow a retry after a run completes
+          return;
+        }
+        function attr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); }
+        host.innerHTML = names.map(function (n) {
+          return '<div class="native-fig" style="margin-bottom:18px">'
+            + '<div style="font-weight:600;font-size:0.92em;margin:0 0 5px 2px;color:#334155">'
+            + escapeHtmlForTests(n) + '</div>'
+            + '<iframe srcdoc="' + attr(panels[n]) + '" loading="lazy" '
+            + 'style="width:100%;height:480px;border:1px solid #e2e8f0;border-radius:8px;background:#fff"></iframe>'
+            + '</div>';
+        }).join('');
+      })
+      .catch(function () {
+        host.innerHTML = '<p class="muted" style="padding:8px">Failed to load baseline figures.</p>';
+        _nativeGalleryLoaded = false;
+      });
+  }
+
   function _loadCharts(panelId) {
     if (_chartsLoadedFor[panelId]) return;
     var panel = document.getElementById(panelId);
@@ -852,6 +891,144 @@
       if (pill) { pill.style.background = p[0]; pill.style.color = p[1]; pill.textContent = p[2]; }
       mount.dataset.filled = '1';
     });
+  }
+
+  // Render EVERY generated report card for this study as its own labelled,
+  // verdict-pilled iframe — independent of whether the study declared a
+  // `kind: report_card` test entry (the Tests-tab path only shows test-linked
+  // cards, so cards on studies without those entries were otherwise invisible).
+  function _fillReportCardsTab(spec) {
+    var host = document.getElementById('report-cards-panel');
+    if (!host) return;
+    var urls = (spec && spec.report_card_urls) || {};
+    var cards = Object.keys(urls).sort();
+    if (!cards.length) {
+      host.innerHTML = '<p class="muted" style="padding:8px">No report cards '
+        + 'generated for this study yet. They are produced during the post-sim '
+        + 'flush from the study\'s <code>report_cards:</code> declaration into '
+        + '<code>viz/report_card/</code>.</p>';
+      return;
+    }
+    // Study-level interactive comparison (plotly, v2ecoli vs vEcoli) shown once
+    // above the per-card scorecards when the study has one.
+    var plotly = '';
+    var pUrl = spec && spec.comparison_plotly_url;
+    if (pUrl) {
+      plotly = '<details open style="margin:0 0 22px 0">'
+        + '<summary style="cursor:pointer;font-weight:700;color:#111827;font-size:1.02em">'
+        + 'Interactive comparison — v2ecoli vs vEcoli (plotly)</summary>'
+        + '<iframe class="viz-embed" src="' + escapeHtmlForTests(pUrl) + '" loading="lazy" '
+        + 'style="width:100%;height:900px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;margin-top:8px"></iframe>'
+        + '</details>';
+    }
+    host.innerHTML = plotly + cards.map(_renderRichReportCard).join('');
+  }
+
+  // Verdict vocab: colour + glyph (matches the grade_card / render_html palette).
+  var _RC_GL = {
+    within_tol: ['#16a34a', '✓', 'within tol'],
+    drift:      ['#d97706', '≈', 'drift'],
+    mismatch:   ['#dc2626', '✗', 'mismatch'],
+    ungraded:   ['#64748b', '−', 'ungraded']
+  };
+
+  function _rcPill(verdict) {
+    var p = _RC_GL[verdict || 'ungraded'] || _RC_GL.ungraded;
+    return '<span style="font-size:0.72em;font-family:monospace;padding:2px 10px;'
+      + 'border-radius:9999px;background:' + p[0] + ';color:#fff">' + p[1] + ' ' + p[2] + '</span>';
+  }
+
+  function _rcCounts(groups) {
+    var c = { within_tol: 0, drift: 0, mismatch: 0, ungraded: 0 };
+    Object.keys(groups || {}).forEach(function (gn) {
+      ((groups[gn] || {}).axes || []).forEach(function (a) {
+        var v = a.verdict || 'ungraded';
+        if (c[v] == null) c.ungraded++; else c[v]++;
+      });
+    });
+    return c;
+  }
+
+  // Inline "1✓ 0≈ 3✗ 0−" tally used inside the dark header pill and group chips.
+  function _rcTally(c) {
+    return ['within_tol', 'drift', 'mismatch', 'ungraded'].map(function (v) {
+      return '<span style="margin-left:8px;opacity:0.95">' + c[v] + _RC_GL[v][1] + '</span>';
+    }).join('');
+  }
+
+  function _rcGroupChip(v, n) {
+    var p = _RC_GL[v];
+    return '<span style="display:inline-block;padding:2px 9px;border-radius:9999px;background:'
+      + p[0] + ';color:#fff;font-size:0.72em;margin-left:5px">' + p[1] + ' ' + n + ' ' + p[2] + '</span>';
+  }
+
+  // The graded-scorecard look (dark header + overall pill w/ tally + per-group
+  // count chips + per-axis tables) rendered from the study's verdict.json, PLUS
+  // the rendered comparison trajectories (and an interactive plotly overlay when
+  // one is available) in a drill-down.
+  function _renderRichReportCard(card) {
+    var e = escapeHtmlForTests;
+    var rc = (window._study && window._study.report_card_urls || {})[card] || {};
+    var groups = rc.groups || {};
+    var counts = _rcCounts(groups);
+    var overall = rc.verdict || 'ungraded';
+    var op = _RC_GL[overall] || _RC_GL.ungraded;
+
+    var header =
+      '<div style="background:linear-gradient(135deg,#1f2937,#0b1220);color:#fff;'
+      + 'padding:14px 18px;border-radius:10px 10px 0 0">'
+      + '<div style="font-weight:700;font-size:1.02em;letter-spacing:0.01em">'
+      + e(card) + ' — report card</div>'
+      + '<div style="margin-top:9px"><span style="display:inline-block;padding:3px 12px;'
+      + 'border-radius:9999px;background:' + op[0] + ';color:#fff;font-weight:700;'
+      + 'font-size:0.82em;letter-spacing:0.04em">'
+      + String(overall).toUpperCase().replace(/_/g, ' ') + _rcTally(counts) + '</span></div></div>';
+
+    var sections = Object.keys(groups).map(function (gname) {
+      var g = groups[gname] || {};
+      var axes = g.axes || [];
+      var gc = { within_tol: 0, drift: 0, mismatch: 0, ungraded: 0 };
+      axes.forEach(function (a) { var v = a.verdict || 'ungraded'; if (gc[v] == null) gc.ungraded++; else gc[v]++; });
+      var rows = axes.map(function (a) {
+        var meter = a.meter || (a.value != null ? String(a.value) : '');
+        var val = (a.value != null && typeof a.value === 'number') ? a.value.toPrecision(4) : '';
+        return '<tr class="rc-row-' + (a.verdict || 'ungraded') + '">'
+          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;border-left:3px solid ' + (_RC_GL[a.verdict] || _RC_GL.ungraded)[0] + '">'
+          + '<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:#1f2937">'
+          + e(String(a.label || a.id || '')) + '</span>' + _rcPill(a.verdict) + '</div></td>'
+          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;font-variant-numeric:tabular-nums;color:#334155">' + e(val) + '</td>'
+          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;color:#475569;font-size:0.9em">' + e(String(meter)) + '</td>'
+          + '</tr>';
+      }).join('');
+      return '<section style="background:#fff;border:1px solid #e5e7eb;border-top:0;padding:12px 14px">'
+        + '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">'
+        + '<h4 style="margin:0;font-size:0.98em;color:#111827">' + e(gname.replace(/_/g, ' ')) + '</h4>'
+        + _rcGroupChip('within_tol', gc.within_tol) + _rcGroupChip('drift', gc.drift)
+        + _rcGroupChip('mismatch', gc.mismatch) + _rcGroupChip('ungraded', gc.ungraded) + '</div>'
+        + (axes.length
+          ? '<table style="width:100%;border-collapse:collapse;font-size:0.9em">'
+            + '<thead><tr style="text-align:left;color:#94a3b8;font-size:0.78em">'
+            + '<th style="padding:4px 10px">Axis</th><th style="padding:4px 10px">Value</th>'
+            + '<th style="padding:4px 10px">Summary</th></tr></thead><tbody>' + rows + '</tbody></table>'
+          : '<div class="muted" style="padding:4px 10px">no axes recorded</div>')
+        + '</section>';
+    }).join('');
+
+    // Comparison trajectories drill-down: the rendered trace-overlay card.
+    var viz = '';
+    if (rc.url && !rc.html_stub) {
+      viz += '<details style="margin-top:10px">'
+        + '<summary style="cursor:pointer;font-weight:600;color:#334155">Comparison trajectories (rendered)</summary>'
+        + '<iframe class="viz-embed" src="' + e(rc.url) + '" loading="lazy" '
+        + 'style="width:100%;height:720px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;margin-top:8px"></iframe>'
+        + '</details>';
+    } else if (!Object.keys(groups).length) {
+      viz = '<div class="muted" style="padding:8px">Verdict recorded, but the card body '
+        + 'has not been rendered yet — run the comparison to generate it.</div>';
+    }
+
+    return '<div class="report-card-block" style="margin-bottom:28px;border-radius:10px;'
+      + 'box-shadow:0 1px 3px rgba(0,0,0,0.06)">' + header + sections + '</div>' + viz;
   }
 
   function loadTestsTab(spec) {

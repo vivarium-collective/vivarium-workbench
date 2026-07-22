@@ -697,16 +697,26 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
     if kind == "parquet":
         from pbg_superpowers.composite_generator import install_default_emitters
         parquet_dir = str(Path(out_dir) / "parquet") if out_dir else None
-        st = install_default_emitters(
-            state, spec, run_id=run_id, out_dir=parquet_dir, core=core)
-        # R2 (Explorer only, gated by `also_sqlite_history`): ALSO inject the RAM
-        # `user_emitter` + `SQLiteEmitter` so the Results tab's sqlite `history`
-        # table is populated alongside the parquet persistence sink. These are
-        # distinct node keys (`user_emitter`/`sqlite_emitter`) from the parquet
-        # step, so both sinks coexist and the parquet store stays in ONE place.
-        # Default off → every other caller (study/xarray runs) is byte-identical.
         if also_sqlite_history:
+            # Composite Explorer (gated by `also_sqlite_history`): the composite's
+            # DECLARED top-level emit paths (`bulk`, `listeners`) collapse to just
+            # `global_time` for a multi-agent composite whose stores live under
+            # `agents/<id>/` — yielding a 2-column parquet the native v2ecoli
+            # analyses can't read. Install a per-agent, agent-ROOTED ParquetEmitter
+            # instead, producing the analysis hive schema (`listeners__mass__…` +
+            # variant/lineage_seed/generation/agent_id partitions). ALSO inject the
+            # RAM `user_emitter` + `SQLiteEmitter` so the Results tab's sqlite
+            # `history` table is populated alongside the parquet sink.
             from vivarium_workbench.lib import composite_runs as cr
+            st = state
+            if parquet_dir:
+                st = cr.inject_analysis_parquet_emitters(
+                    st, run_id=run_id, out_dir=parquet_dir)
+                try:
+                    from pbg_emitters.parquet_emitter import ParquetEmitter
+                    core.register_link("ParquetEmitter", ParquetEmitter)
+                except ImportError:
+                    pass
             if emit_paths:
                 st = cr.inject_emitter_for_paths(st, list(emit_paths))
             st = cr.inject_sqlite_emitter(st, run_id=run_id, db_file=db_file)
@@ -715,6 +725,11 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
             except ImportError:  # process-bigraph < 1.4.17 (legacy location)
                 from process_bigraph.emitter import SQLiteEmitter
             core.register_link("SQLiteEmitter", SQLiteEmitter)
+        else:
+            # Study / non-Explorer parquet runs keep the declared-sink install
+            # (byte-identical to before).
+            st = install_default_emitters(
+                state, spec, run_id=run_id, out_dir=parquet_dir, core=core)
         composite = Composite({"state": st}, core=core)
         _drive(composite, steps, progress_cb)
         _flush_step_emitters(composite)  # parquet flush; close errors are non-fatal
