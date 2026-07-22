@@ -1020,3 +1020,11 @@ textarea.sr-input {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* Collapsible inspector sections (Description / schemas / Wiring). The caret
+   rotates on open; the native disclosure triangle is hidden in its favor. */
+.inspector-section > summary { list-style: none; }
+.inspector-section > summary::-webkit-details-marker { display: none; }
+.inspector-section > summary::marker { content: ""; }
+.inspector-section .inspector-caret { display: inline-block; transition: transform 0.12s ease; }
+.inspector-section[open] > summary .inspector-caret { transform: rotate(90deg); }
