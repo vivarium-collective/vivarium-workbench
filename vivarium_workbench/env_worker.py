@@ -86,7 +86,8 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
-                 "study_readout_check", "attach_process_docs", "shutdown"]
+                 "study_readout_check", "attach_process_docs", "discover_composites",
+                 "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -660,6 +661,54 @@ def _study_readout_check(params: dict) -> dict:
     return {"readouts": results}
 
 
+def _discover_composites() -> dict:
+    """Generator composite entries for this environment (spec §11).
+
+    Imports the workspace package + runs pbg_superpowers generator discovery in
+    THIS process, returning the raw ``{gid: entry}`` **generator** half as JSON
+    (the workbench keeps its pure FS/YAML spec scan + dedup and merges these in).
+    So the HTTP process no longer imports/executes ``@composite_generator``
+    modules to build `discover_all_composites` / `known_composite_ids`."""
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    _import_workspace_package(_workspace)
+
+    reg_keys: list = []
+    try:
+        from pbg_superpowers.composite_generator import _REGISTRY, discover_generators
+        if not _REGISTRY:
+            try:
+                discover_generators()
+            except Exception:  # noqa: BLE001
+                pass
+        reg_keys = list(_REGISTRY.keys())
+    except Exception:  # noqa: BLE001
+        pass
+
+    out: dict = {}
+    try:
+        from pbg_superpowers.composite_discovery import discover_all
+        merged = discover_all() or {}
+    except Exception:  # noqa: BLE001 — no generator discovery available → spec-only
+        merged = {}
+    for gid, entry in merged.items():
+        if isinstance(entry, dict) and entry.get("kind") == "generator":
+            out[gid] = {
+                "name": entry.get("name"),
+                "description": entry.get("description", ""),
+                "parameters": entry.get("parameters") or {},
+                "module": entry.get("module"),
+                "default_n_steps": entry.get("default_n_steps"),
+                "visualizations": list(entry.get("visualizations") or []),
+            }
+    # Belt-and-suspenders: any registry key discover_all missed (mirrors the old
+    # known_composite_ids direct-registry union).
+    for gid in reg_keys:
+        out.setdefault(gid, {"name": None, "description": "", "parameters": {},
+                             "module": None, "default_n_steps": None, "visualizations": []})
+    return {"generators": out}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -735,6 +784,8 @@ def _handle(method: str, params: dict) -> dict:
         return _study_readout_check(params)
     if method == "attach_process_docs":
         return _attach_process_docs_method(params)
+    if method == "discover_composites":
+        return _discover_composites()
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

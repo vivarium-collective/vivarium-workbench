@@ -404,3 +404,46 @@ def test_attach_process_docs_via_worker_soft_degrades(monkeypatch):
     monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Down())
     doc = {"processes": {"p": {"_type": "process", "address": "x.Y"}}}
     assert process_docs.attach_process_docs_via_worker("/ws", doc) is doc
+
+
+# ---------------------------------------------------------------------------
+# discover_composites — @composite_generator discovery in the worker (composite
+# _lookup: known_composite_ids / discover_all_composites / report-lint paths).
+# ---------------------------------------------------------------------------
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_discover_composites_returns_generator_entries():
+    pytest.importorskip("pbg_superpowers")
+    with EnvWorker(_FIXTURE.resolve()) as w:
+        gens = w.call("discover_composites")["generators"]
+    key = next((g for g in gens if g.endswith("composites.hint_test")), None)
+    assert key is not None, gens
+    entry = gens[key]
+    assert "default_n_steps" in entry and "visualizations" in entry
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_discover_all_composites_merges_specs_and_worker_generators():
+    pytest.importorskip("pbg_superpowers")
+    from vivarium_workbench.lib import composite_lookup as cl
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+    try:
+        allc = cl.discover_all_composites(_FIXTURE.resolve(), "pbg_ws_increase_demo")
+        kinds = {v.get("kind") for v in allc.values()}
+        assert "generator" in kinds            # from the worker
+        assert any(k.endswith("hint_test") for k in allc)
+        assert any(k.endswith("hint_test") for k in
+                   cl.known_composite_ids(_FIXTURE.resolve(), "pbg_ws_increase_demo"))
+    finally:
+        get_pool().close_all()
+
+
+def test_discover_generators_via_worker_soft_degrades(monkeypatch):
+    from vivarium_workbench.lib import composite_lookup as cl, env_worker_pool
+
+    class _Down:
+        def call(self, *a, **k):
+            from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+            raise EnvWorkerUnavailable("down")
+
+    monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Down())
+    assert cl._discover_generators_via_worker("/ws") == {}   # spec-only fallback
