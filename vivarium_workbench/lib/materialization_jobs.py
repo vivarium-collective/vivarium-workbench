@@ -33,11 +33,18 @@ from vivarium_workbench.lib.materialization import (
 
 # Status values (session-registry §5 maps these onto MATERIALIZING/READY/FAILED).
 QUEUED = "queued"
+CLONING = "cloning"
 SYNCING = "syncing"
 READY = "ready"
 FAILED = "failed"
 
-_ACTIVE = (QUEUED, SYNCING)
+_ACTIVE = (QUEUED, CLONING, SYNCING)
+
+
+def _managed_key(repo: str, ref: str) -> str:
+    """Stable dedup key for a managed ``(repo, ref)`` job."""
+    import hashlib
+    return hashlib.sha256(f"{repo}\0{ref}".encode("utf-8")).hexdigest()[:16]
 
 
 class MaterializationJob:
@@ -46,7 +53,8 @@ class MaterializationJob:
     single-assignment transition is observed atomically, and transitions are
     monotonic (queued → syncing → ready/failed)."""
 
-    __slots__ = ("coordinate", "status", "interpreter", "error", "tail", "started_at")
+    __slots__ = ("coordinate", "status", "interpreter", "error", "tail",
+                 "started_at", "path", "commit")
 
     def __init__(self, coordinate: str):
         self.coordinate = coordinate
@@ -55,6 +63,8 @@ class MaterializationJob:
         self.error: "str | None" = None
         self.tail: "str | None" = None
         self.started_at = time.monotonic()
+        self.path: "str | None" = None      # staged checkout (managed jobs)
+        self.commit: "str | None" = None     # resolved source_version (managed jobs)
 
     def snapshot(self) -> dict:
         """A poll-friendly view. ``phase`` mirrors ``status`` (coarse, per §4)."""
@@ -64,6 +74,9 @@ class MaterializationJob:
             "phase": self.status,
             "elapsed_s": round(time.monotonic() - self.started_at, 3),
         }
+        if self.path is not None:
+            d["path"] = self.path
+            d["commit"] = self.commit
         if self.status == READY:
             d["interpreter"] = self.interpreter
         if self.status == FAILED:
@@ -110,6 +123,26 @@ class MaterializationRegistry:
         t.start()
         return job
 
+    def start_managed(self, repo: str, ref: str, *,
+                      timeout: "float | None" = None) -> MaterializationJob:
+        """Begin (or attach to) materialization of a managed ``(repo, ref)``: an
+        async **clone → sync** job (``cloning → syncing → ready|failed``). Keyed by
+        ``(repo, ref)`` and deduped like `start`. The venv inside is still
+        coordinate-keyed by the staged lock, so two `(repo, ref)` resolving to the
+        same lock share one venv."""
+        key = "repo:" + _managed_key(repo, ref)
+        with self._lock:
+            existing = self._jobs.get(key)
+            if existing is not None and existing.status in (*_ACTIVE, READY):
+                return existing
+            job = MaterializationJob(key)
+            self._jobs[key] = job
+        t = threading.Thread(
+            target=self._run_managed, args=(job, repo, ref, timeout),
+            name=f"materialize-{key}", daemon=True)
+        t.start()
+        return job
+
     def status(self, coordinate: str) -> "dict | None":
         job = self._jobs.get(coordinate)
         return job.snapshot() if job is not None else None
@@ -133,6 +166,38 @@ class MaterializationRegistry:
             job.tail = e.tail
             job.status = FAILED
         except Exception as e:  # noqa: BLE001 — any failure is a handled terminal state (§6)
+            job.error = str(e)
+            job.status = FAILED
+
+    def _run_managed(self, job: MaterializationJob, repo: str, ref: str,
+                     timeout: "float | None") -> None:
+        from vivarium_workbench.lib import repo_source
+        try:
+            job.status = CLONING
+            staged = (repo_source.stage(repo, ref) if timeout is None
+                      else repo_source.stage(repo, ref, timeout=timeout))
+            job.path = str(staged.path)
+            job.commit = staged.commit
+        except repo_source.RepoStagingError as e:
+            job.error = str(e)
+            job.tail = e.tail
+            job.status = FAILED
+            return
+        except Exception as e:  # noqa: BLE001
+            job.error = str(e)
+            job.status = FAILED
+            return
+        try:
+            job.status = SYNCING
+            interp = (materialize(staged.path) if timeout is None
+                      else materialize(staged.path, timeout=timeout))
+            job.interpreter = interp
+            job.status = READY
+        except MaterializationError as e:
+            job.error = str(e)
+            job.tail = e.tail
+            job.status = FAILED
+        except Exception as e:  # noqa: BLE001
             job.error = str(e)
             job.status = FAILED
 

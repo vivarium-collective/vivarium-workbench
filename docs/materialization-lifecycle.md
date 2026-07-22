@@ -312,3 +312,41 @@ for a single local workspace; (c) make it async + the `MATERIALIZING` session st
   workbench and sms-api don't each clone the same commit. Deferred (cross-service,
   needs sms-api coordination); phase 1 should still expose a `RepoSource` seam now
   so GitHub→S3 is later a swap, not a rewrite.
+
+## 11. Implementation decisions log
+
+A running record of the choices made while building this (for later review — some
+resolve §10 open questions, some are pragmatic scoping calls). Newest first.
+
+- **2026-07-22 — Managed materialization does not auto-switch the active
+  workspace (this slice).** `POST /api/source/materialize-repo {repo, ref}` runs
+  the async clone+sync job and reports status, provisioning + caching the venv,
+  but it does **not** rebind the session's active workspace to the staged
+  checkout. **Why:** the binding/routing lifecycle — what requests observe during
+  `MATERIALIZING` (§4: keep the prior workspace? serve science-only reads off the
+  staged tree after phase 1?), and flip-on-ready vs. keep-prior — is a routing/UX
+  decision that touches the request hot path and the env-worker interpreter
+  choice, and is better shaped with the team than guessed. The materialization
+  capability itself is fully proven end-to-end without it. **Next:** decide + wire
+  the managed session-binding lifecycle.
+- **2026-07-22 — Managed job runs clone → sync as one async job, two phases**
+  (`cloning → syncing → ready|failed`), keyed by `(repo, ref)` and deduped; the
+  venv inside is still coordinate-keyed by the staged lock (so two `(repo, ref)`
+  resolving to the same lock share one venv). Both phases can be minutes (§1/§2),
+  so both are out-of-band.
+- **2026-07-22 — Coordinate key = `hash(resolved source path + uv.lock)`,
+  source-scoped** (resolves §10 "lockfile-hash vs source_version" for now):
+  correct over pure lock-hash (no false venv sharing between checkouts whose lock
+  pins editable path-deps to different locations), at the cost of not yet
+  deduplicating a venv across two sources with an identical lock. Pure-lock dedup
+  waits for canonical managed staging.
+- **2026-07-22 — Eager-on-switch materialize** (resolves §10 "eager vs lazy"):
+  an explicit `/api/source/switch` prepares the env eagerly; in-place is `ready`
+  at once, managed starts a job. (Chosen by Jim from the wiring options.)
+- **2026-07-22 — In-place local is never `uv sync`-ed** (§2a): a dev checkout
+  uses its own `.venv` / the running interpreter; only managed sources materialize
+  into the coordinate-keyed store (outside any checkout).
+- **2026-07-22 — Ported logic into the env worker** (registry introspection,
+  process-doc decoration, observable/readout build) rather than importing
+  `vivarium_workbench`: the worker is stdlib-only + workspace-venv deps by
+  contract, so faithful ports are the accepted cost (same as the registry port).

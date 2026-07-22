@@ -105,3 +105,31 @@ def test_status_reflects_prepared_in_place(tmp_path):
     ws.mkdir()
     se.prepare("k", ws)
     assert se.status("k")["status"] == se.READY
+
+
+# -- managed (repo, ref) preparation -----------------------------------------
+class _Staged:
+    def __init__(self, path, commit):
+        self.path = path
+        self.commit = commit
+
+
+def test_prepare_managed_records_repo_ref_and_polls_to_ready(tmp_path, monkeypatch):
+    from vivarium_workbench.lib import repo_source
+    reg = mj.MaterializationRegistry()
+    monkeypatch.setattr(mj, "get_registry", lambda: reg)
+    go = threading.Event()
+    monkeypatch.setattr(repo_source, "stage",
+                        lambda repo, ref, **k: (go.wait(3), _Staged(str(tmp_path / "s"), "e" * 40))[1])
+    monkeypatch.setattr(mj, "materialize", lambda s, **k: "/built/bin/python")
+
+    st = se.prepare_managed("k", "https://x/r.git", "main")
+    assert st["managed"] is True
+    assert st["repo"] == "https://x/r.git" and st["ref"] == "main"
+    assert st["status"] == se.MATERIALIZING
+    go.set()
+    assert _wait_ready("k")
+    final = se.status("k")
+    assert final["interpreter"] == "/built/bin/python"
+    assert final["path"] == str(tmp_path / "s")
+    assert final["commit"] == "e" * 40

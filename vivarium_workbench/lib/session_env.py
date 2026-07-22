@@ -35,14 +35,22 @@ _LOCK = threading.Lock()
 
 
 def _map_job(snap: dict) -> dict:
-    """Map an async job snapshot (materialization_jobs) → the session-level view."""
+    """Map an async job snapshot (materialization_jobs) → the session-level view.
+    The job's coarse phases (`queued`/`cloning`/`syncing`) all read as the
+    session-level `materializing`; `phase` carries the fine detail."""
     st = snap.get("status")
     if st == _mj.READY:
-        return {"status": READY, "interpreter": snap.get("interpreter")}
-    if st == _mj.FAILED:
-        return {"status": FAILED, "error": snap.get("error"), "tail": snap.get("tail", "")}
-    return {"status": MATERIALIZING, "phase": snap.get("phase"),
-            "elapsed_s": snap.get("elapsed_s")}
+        out = {"status": READY, "interpreter": snap.get("interpreter")}
+    elif st == _mj.FAILED:
+        out = {"status": FAILED, "error": snap.get("error"), "tail": snap.get("tail", "")}
+    else:
+        out = {"status": MATERIALIZING, "phase": snap.get("phase"),
+               "elapsed_s": snap.get("elapsed_s")}
+    # Staged managed sources expose the checkout path + commit as they progress.
+    if snap.get("path") is not None:
+        out["path"] = snap["path"]
+        out["commit"] = snap.get("commit")
+    return out
 
 
 def prepare(session_key: str, source: Path | str, *,
@@ -59,6 +67,21 @@ def prepare(session_key: str, source: Path | str, *,
         job = _mj.get_registry().start(src, timeout=timeout)
         state = {"source": str(src), "managed": True,
                  "coordinate": job.coordinate, **_map_job(job.snapshot())}
+    with _LOCK:
+        _SESSION_ENV[session_key] = state
+    return state
+
+
+def prepare_managed(session_key: str, repo: str, ref: str, *,
+                    timeout: "float | None" = None) -> dict:
+    """Start (or attach to) materialization of a managed ``(repo, ref)`` for this
+    session — an async clone → sync job (§9c). Returns the initial status; the
+    session's **active workspace is not switched** to the staged checkout by this
+    call (that binding lifecycle is a deferred decision — see the doc §11 log).
+    The client polls `status`/`GET /api/source/materialization` until ready."""
+    job = _mj.get_registry().start_managed(repo, ref, timeout=timeout)
+    state = {"managed": True, "repo": repo, "ref": ref,
+             "coordinate": job.coordinate, **_map_job(job.snapshot())}
     with _LOCK:
         _SESSION_ENV[session_key] = state
     return state
