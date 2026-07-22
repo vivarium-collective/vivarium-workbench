@@ -77,12 +77,15 @@ def _read_frame(sock: socket.socket) -> "dict | None":
 
 
 def _write_frame(sock: socket.socket, obj: dict) -> None:
-    body = json.dumps(obj).encode("utf-8")
+    # default=str coerces the odd non-JSON leaf (numpy scalar, Path, …) that
+    # survives a state doc, matching the old composite subprocess's
+    # json.dumps(default=str). Cheap for the string-only methods (never fires).
+    body = json.dumps(obj, default=str).encode("utf-8")
     sock.sendall(struct.pack(">I", len(body)) + body)
 
 
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
-                 "viz_classes", "shutdown"]
+                 "viz_classes", "resolve_composite_state", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -359,6 +362,134 @@ def _list_visualizations() -> dict:
     return {"classes": out}
 
 
+# --- process-doc decoration (ported from lib/process_docs.py; the worker can't
+#     import vivarium_workbench, and these must run where the workspace classes +
+#     the built doc's numpy values live, i.e. in this process) ------------------
+def _pd_describe_class(cls) -> str:
+    """Formal description for a process/step class via ``Edge.describe()`` on an
+    uninitialized instance, falling back to ``description`` / ``__doc__``."""
+    try:
+        inst = cls.__new__(cls)  # uninitialized — skips __init__/core requirement
+        describe = getattr(inst, "describe", None)
+        if callable(describe):
+            text = describe()
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    desc = getattr(cls, "description", "")
+    if isinstance(desc, str) and desc.strip():
+        return desc.strip()
+    doc = getattr(cls, "__doc__", None)
+    return doc.strip() if isinstance(doc, str) else ""
+
+
+def _pd_doc_for_address(address: str) -> str:
+    """Formal description for a ``local:<dotted.path>`` address, or ''."""
+    import importlib
+    if not isinstance(address, str) or not address:
+        return ""
+    addr = address.split(":", 1)[1] if ":" in address else address
+    if "." not in addr:
+        return ""  # bare registry name — can't import a dotted path
+    module_path, _, cls_name = addr.rpartition(".")
+    try:
+        mod = importlib.import_module(module_path)
+        cls = getattr(mod, cls_name, None)
+        return _pd_describe_class(cls) if cls is not None else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _summarize_large_values(node, max_list: int = 40, max_str: int = 2000):
+    """Copy of a composite-state doc with large leaf VALUES summarized — the
+    multi-MB numpy ``bulk`` store becomes ``⟨N items⟩`` so the response stays
+    small. Pure; must run here (numpy can't cross the socket)."""
+    if isinstance(node, dict):
+        return {k: _summarize_large_values(v, max_list, max_str) for k, v in node.items()}
+    if isinstance(node, (list, tuple)):
+        if len(node) > max_list:
+            return f"⟨{len(node)} items⟩"
+        return [_summarize_large_values(v, max_list, max_str) for v in node]
+    if isinstance(node, str):
+        return node[:max_str] + "…" if len(node) > max_str else node
+    if isinstance(node, (bytes, bytearray)):
+        return f"⟨{len(node)} bytes⟩"
+    try:
+        n = len(node)
+    except TypeError:
+        return node
+    return f"⟨{n} items⟩" if n > max_list else node
+
+
+def _attach_process_docs(doc):
+    """Walk a composite-state doc in place, setting ``node['doc']`` for each
+    process/step from its address's class description. All failures swallowed."""
+    _cache: dict = {}
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("_type") in ("process", "step") and "doc" not in node:
+                addr = node.get("address", "")
+                if addr not in _cache:
+                    _cache[addr] = _pd_doc_for_address(addr)
+                d = _cache[addr]
+                if d:
+                    node["doc"] = d
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    try:
+        walk(doc)
+    except Exception:  # noqa: BLE001
+        pass
+    return doc
+
+
+def _resolve_composite_state(params: dict) -> dict:
+    """Build a ``@composite_generator``'s state (spec §11), summarized +
+    doc-decorated. A faithful in-worker port of
+    ``composite_state_views.composite_state_via_subprocess``'s embedded script —
+    which ran under ``sys.executable``; now it runs on the workspace's own
+    interpreter. Returns ``{state, module, emitters}`` on success,
+    ``{__build_error__, emitters}`` if the build raised, ``{__not_registered__}``
+    if ``ref`` is not a registered generator."""
+    ref = (params or {}).get("ref")
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    # Import the workspace's own package so its @composite_generators register
+    # (discover_generators alone won't import a non-installed workspace package —
+    # same priming _list_generators does).
+    _import_workspace_package(_workspace)
+    out: dict = {"__not_registered__": True}
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, build_generator, discover_generators, emitter_defaults,
+        )
+        if not _REGISTRY:
+            discover_generators()
+        entry = _REGISTRY.get(ref)
+        if entry is not None:
+            try:
+                declared_emitters = emitter_defaults(entry)
+            except Exception:  # noqa: BLE001
+                declared_emitters = []
+            try:
+                doc = build_generator(entry)
+                doc = _summarize_large_values(doc)
+                _attach_process_docs(doc)
+                out = {"state": doc, "module": getattr(entry, "module", None),
+                       "emitters": declared_emitters}
+            except Exception as e:  # noqa: BLE001
+                out = {"__build_error__": str(e), "emitters": declared_emitters}
+    except Exception as e:  # noqa: BLE001
+        out = {"__build_error__": str(e)}
+    return out
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -426,6 +557,8 @@ def _handle(method: str, params: dict) -> dict:
         return _registry_catalog()
     if method == "viz_classes":
         return _list_visualizations()
+    if method == "resolve_composite_state":
+        return _resolve_composite_state(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

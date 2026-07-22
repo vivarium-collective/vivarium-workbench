@@ -64,6 +64,11 @@ class EnvWorker:
                  "--workspace", self.workspace],
                 pass_fds=[child.fileno()],
                 stdout=self._log, stderr=self._log,
+                # Run in the workspace dir: composite builds read cwd-relative
+                # paths (e.g. v2ecoli's `out/cache/initial_state.json`), matching
+                # the old `cwd=ws_root` subprocess. Safe — a worker is dedicated
+                # to one workspace, so this is not a process-global chdir.
+                cwd=self.workspace,
             )
         finally:
             child.close()  # the child holds its own inherited copy

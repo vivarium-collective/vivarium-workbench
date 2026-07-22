@@ -27,7 +27,6 @@ Caching: this module owns :data:`_COMPOSITE_STATE_CACHE`, DISJOINT from
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -50,14 +49,16 @@ def clear_cache() -> None:
 
 
 def composite_state_via_subprocess(ws_root: Path, ref: str) -> "dict | None":
-    """Build a generator composite's state in a fresh subprocess (its own MAIN thread).
+    """Build a generator composite's state in the workspace's **env worker**.
 
-    ``build_generator`` (and the discovery that primes it) lazily imports
-    composite-specific deps; some call ``signal.signal()`` at import, which only
-    works in the main thread — so building inside a ThreadingHTTPServer worker
-    raised "signal only works in main thread of the main interpreter". Running
-    the whole generator path (discover + lookup + build + summarize) in a
-    subprocess avoids that. Returns one of:
+    ``build_generator`` (and the discovery that primes it) must import
+    composite-specific workspace deps and call ``build_generator`` — work that
+    belongs in the session's env worker (``docs/env-worker-protocol.md``), not
+    the HTTP process. So this routes ``resolve_composite_state{ref}`` to the warm
+    pool; the worker builds on the *workspace's own interpreter* (correct for a
+    workspace like v2ecoli that pins a Python the workbench can't run) and does
+    the ``summarize_large_values`` + ``attach_process_docs`` decoration there,
+    before the (numpy-free) JSON crosses back. Returns one of:
       {"state": <doc>, "module": <str>, "emitters": [...]}  on success (already
                                           summarized + docs; "emitters" is the
                                           registered entry's declared
@@ -66,54 +67,20 @@ def composite_state_via_subprocess(ws_root: Path, ref: str) -> "dict | None":
                                           raised (emitters still resolved —
                                           entry lookup happens before the build)
       {"__not_registered__": true}        ref is not a registered generator
-      None                                the subprocess itself failed
+      None                                the worker itself was unavailable
 
-    NOTE: the embedded script does NOT import ``vivarium_workbench.server`` —
-    it puts the workspace on ``sys.path`` directly (``sys.argv[1]`` is
-    ``ws_root``), so this seam stays flip-ready. The body (pbg_superpowers
-    discover/build + lib.process_docs summarize/attach) is lib/3rd-party only.
+    (Historically this spawned a one-off ``sys.executable`` subprocess with an
+    embedded script; the pooled worker replaces that — warm, correct-interpreter,
+    and session-isolated — while keeping this exact return contract so
+    ``build_composite_state``'s branch logic is unchanged.)
     """
-    script = (
-        "import sys, json\n"
-        "from pathlib import Path\n"
-        "sys.path.insert(0, sys.argv[1])\n"
-        "ref = sys.argv[2]\n"
-        "out = {'__not_registered__': True}\n"
-        "try:\n"
-        "    from pbg_superpowers.composite_generator import (\n"
-        "        _REGISTRY, build_generator, discover_generators, emitter_defaults)\n"
-        "    if not _REGISTRY:\n"
-        "        discover_generators()\n"
-        "    entry = _REGISTRY.get(ref)\n"
-        "    if entry is not None:\n"
-        "        try:\n"
-        "            declared_emitters = emitter_defaults(entry)\n"
-        "        except Exception:\n"
-        "            declared_emitters = []\n"
-        "        try:\n"
-        "            doc = build_generator(entry)\n"
-        "            from vivarium_workbench.lib.process_docs import attach_process_docs, summarize_large_values\n"
-        "            doc = summarize_large_values(doc)\n"
-        "            attach_process_docs(doc)\n"
-        "            out = {'state': doc, 'module': getattr(entry, 'module', None), 'emitters': declared_emitters}\n"
-        "        except Exception as _e:\n"
-        "            out = {'__build_error__': str(_e), 'emitters': declared_emitters}\n"
-        "except Exception as _e:\n"
-        "    out = {'__build_error__': str(_e)}\n"
-        "sys.stdout.write('@@@S_START@@@' + json.dumps(out, default=str) + '@@@S_END@@@')\n"
-    )
+    from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+
     try:
-        result = subprocess.run(
-            [sys.executable, "-c", script, str(ws_root), ref],
-            cwd=str(ws_root), capture_output=True, text=True, timeout=180,
-        )
-        out = result.stdout
-        i, j = out.find("@@@S_START@@@"), out.find("@@@S_END@@@")
-        if i != -1 and j != -1:
-            return json.loads(out[i + len("@@@S_START@@@"):j])
-    except Exception:
-        pass
-    return None
+        return get_pool().call(ws_root, "resolve_composite_state", {"ref": ref})
+    except EnvWorkerUnavailable:
+        return None
 
 
 def build_composite_state(

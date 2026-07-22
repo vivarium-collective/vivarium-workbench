@@ -39,7 +39,10 @@ def _patch_subprocess(monkeypatch, result):
 def test_subprocess_script_does_not_import_server():
     src = inspect.getsource(csv.composite_state_via_subprocess)
     assert "import vivarium_workbench.server" not in src
-    assert "sys.path.insert(0, sys.argv[1])" in src
+    # The generator build now runs in the pooled env worker (not an embedded
+    # sys.executable script), routed by resolve_composite_state.
+    assert "resolve_composite_state" in src
+    assert "get_pool" in src
 
 
 # ---------------------------------------------------------------------------
