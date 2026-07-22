@@ -713,6 +713,12 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                                  "verdict": verdict, "groups": groups,
                                  "html_stub": html_stub}
         spec["report_card_urls"] = rc_urls
+        # Interactive plotly comparison (v2ecoli vs vEcoli overlays), rendered
+        # into <study>/viz/comparison_plotly.html — surfaced above the scorecards
+        # in the Report Cards tab. Absent for studies that don't have one.
+        _plotly = study_dir(ws_root, name) / "viz" / "comparison_plotly.html"
+        if _plotly.is_file():
+            spec["comparison_plotly_url"] = "/" + _plotly.relative_to(ws_root).as_posix()
     from vivarium_workbench.lib.run_commands import study_run_commands
     spec["run_commands"] = study_run_commands(spec, name)
     spec["derived"] = _study_derivations.derived_block(spec)

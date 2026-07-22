@@ -909,63 +909,126 @@
         + '<code>viz/report_card/</code>.</p>';
       return;
     }
-    host.innerHTML = cards.map(function (card) {
-      var rc = urls[card] || {};
-      var pill = _rcPill(rc.verdict);
-      var body;
-      // Prefer the fully rendered card HTML — for the vs-vEcoli comparison the
-      // `standard` card body IS the per-observable trace overlays (v2ecoli vs
-      // vEcoli). Fall back to the per-axis verdict table only when the card HTML
-      // is an unrendered stub (e.g. an 11-byte "<b>card</b>").
-      if (rc.url && !rc.html_stub) {
-        body = '<iframe class="viz-embed" src="' + escapeHtmlForTests(rc.url) + '" loading="lazy" '
-          + 'style="width:100%;height:760px;border:1px solid #e2e8f0;border-radius:8px;background:#fff"></iframe>';
-      } else if (rc.groups && Object.keys(rc.groups).length) {
-        body = _rcVerdictTables(rc.groups);
-      } else {
-        body = '<div class="muted" style="padding:8px">Verdict recorded, but the '
-          + 'card body has not been rendered yet — run the comparison to generate it.</div>';
-      }
-      return '<div class="report-card-block" style="margin-bottom:26px">'
-        + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
-        + '<strong style="font-size:1.05em">' + escapeHtmlForTests(card) + '</strong>' + pill
-        + '</div>' + body + '</div>';
+    // Study-level interactive comparison (plotly, v2ecoli vs vEcoli) shown once
+    // above the per-card scorecards when the study has one.
+    var plotly = '';
+    var pUrl = spec && spec.comparison_plotly_url;
+    if (pUrl) {
+      plotly = '<details open style="margin:0 0 22px 0">'
+        + '<summary style="cursor:pointer;font-weight:700;color:#111827;font-size:1.02em">'
+        + 'Interactive comparison — v2ecoli vs vEcoli (plotly)</summary>'
+        + '<iframe class="viz-embed" src="' + escapeHtmlForTests(pUrl) + '" loading="lazy" '
+        + 'style="width:100%;height:900px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;margin-top:8px"></iframe>'
+        + '</details>';
+    }
+    host.innerHTML = plotly + cards.map(_renderRichReportCard).join('');
+  }
+
+  // Verdict vocab: colour + glyph (matches the grade_card / render_html palette).
+  var _RC_GL = {
+    within_tol: ['#16a34a', '✓', 'within tol'],
+    drift:      ['#d97706', '≈', 'drift'],
+    mismatch:   ['#dc2626', '✗', 'mismatch'],
+    ungraded:   ['#64748b', '−', 'ungraded']
+  };
+
+  function _rcPill(verdict) {
+    var p = _RC_GL[verdict || 'ungraded'] || _RC_GL.ungraded;
+    return '<span style="font-size:0.72em;font-family:monospace;padding:2px 10px;'
+      + 'border-radius:9999px;background:' + p[0] + ';color:#fff">' + p[1] + ' ' + p[2] + '</span>';
+  }
+
+  function _rcCounts(groups) {
+    var c = { within_tol: 0, drift: 0, mismatch: 0, ungraded: 0 };
+    Object.keys(groups || {}).forEach(function (gn) {
+      ((groups[gn] || {}).axes || []).forEach(function (a) {
+        var v = a.verdict || 'ungraded';
+        if (c[v] == null) c.ungraded++; else c[v]++;
+      });
+    });
+    return c;
+  }
+
+  // Inline "1✓ 0≈ 3✗ 0−" tally used inside the dark header pill and group chips.
+  function _rcTally(c) {
+    return ['within_tol', 'drift', 'mismatch', 'ungraded'].map(function (v) {
+      return '<span style="margin-left:8px;opacity:0.95">' + c[v] + _RC_GL[v][1] + '</span>';
     }).join('');
   }
 
-  // A verdict pill (span) for any report-card verdict value.
-  function _rcPill(verdict) {
-    var p = _RC_PILL[verdict || 'ungraded'] || _RC_PILL.ungraded;
-    return '<span style="font-size:0.72em;font-family:monospace;padding:2px 10px;'
-      + 'border-radius:9999px;background:' + p[0] + ';color:' + p[1] + '">' + p[2] + '</span>';
+  function _rcGroupChip(v, n) {
+    var p = _RC_GL[v];
+    return '<span style="display:inline-block;padding:2px 9px;border-radius:9999px;background:'
+      + p[0] + ';color:#fff;font-size:0.72em;margin-left:5px">' + p[1] + ' ' + n + ' ' + p[2] + '</span>';
   }
 
-  // Render each group's axes as a table: observable | verdict | Δ meter.
-  function _rcVerdictTables(groups) {
+  // The graded-scorecard look (dark header + overall pill w/ tally + per-group
+  // count chips + per-axis tables) rendered from the study's verdict.json, PLUS
+  // the rendered comparison trajectories (and an interactive plotly overlay when
+  // one is available) in a drill-down.
+  function _renderRichReportCard(card) {
     var e = escapeHtmlForTests;
-    return Object.keys(groups).map(function (gname) {
+    var rc = (window._study && window._study.report_card_urls || {})[card] || {};
+    var groups = rc.groups || {};
+    var counts = _rcCounts(groups);
+    var overall = rc.verdict || 'ungraded';
+    var op = _RC_GL[overall] || _RC_GL.ungraded;
+
+    var header =
+      '<div style="background:linear-gradient(135deg,#1f2937,#0b1220);color:#fff;'
+      + 'padding:14px 18px;border-radius:10px 10px 0 0">'
+      + '<div style="font-weight:700;font-size:1.02em;letter-spacing:0.01em">'
+      + e(card) + ' — report card</div>'
+      + '<div style="margin-top:9px"><span style="display:inline-block;padding:3px 12px;'
+      + 'border-radius:9999px;background:' + op[0] + ';color:#fff;font-weight:700;'
+      + 'font-size:0.82em;letter-spacing:0.04em">'
+      + String(overall).toUpperCase().replace(/_/g, ' ') + _rcTally(counts) + '</span></div></div>';
+
+    var sections = Object.keys(groups).map(function (gname) {
       var g = groups[gname] || {};
       var axes = g.axes || [];
+      var gc = { within_tol: 0, drift: 0, mismatch: 0, ungraded: 0 };
+      axes.forEach(function (a) { var v = a.verdict || 'ungraded'; if (gc[v] == null) gc.ungraded++; else gc[v]++; });
       var rows = axes.map(function (a) {
-        var label = a.label || a.id || '';
         var meter = a.meter || (a.value != null ? String(a.value) : '');
-        return '<tr>'
-          + '<td style="padding:5px 10px;border-bottom:1px solid #eef2f7">' + e(String(label)) + '</td>'
-          + '<td style="padding:5px 10px;border-bottom:1px solid #eef2f7;white-space:nowrap">' + _rcPill(a.verdict) + '</td>'
-          + '<td style="padding:5px 10px;border-bottom:1px solid #eef2f7;color:#475569;font-size:0.88em">' + e(String(meter)) + '</td>'
+        var val = (a.value != null && typeof a.value === 'number') ? a.value.toPrecision(4) : '';
+        return '<tr class="rc-row-' + (a.verdict || 'ungraded') + '">'
+          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;border-left:3px solid ' + (_RC_GL[a.verdict] || _RC_GL.ungraded)[0] + '">'
+          + '<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:#1f2937">'
+          + e(String(a.label || a.id || '')) + '</span>' + _rcPill(a.verdict) + '</div></td>'
+          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;font-variant-numeric:tabular-nums;color:#334155">' + e(val) + '</td>'
+          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;color:#475569;font-size:0.9em">' + e(String(meter)) + '</td>'
           + '</tr>';
       }).join('');
-      var groupHead = axes.length
-        ? '<table style="width:100%;border-collapse:collapse;font-size:0.92em">'
-          + '<thead><tr style="text-align:left;color:#64748b;font-size:0.8em">'
-          + '<th style="padding:4px 10px">Observable</th><th style="padding:4px 10px">Verdict</th>'
-          + '<th style="padding:4px 10px">Comparison</th></tr></thead><tbody>' + rows + '</tbody></table>'
-        : '<div class="muted" style="padding:6px 10px">no axes recorded</div>';
-      return '<div style="margin-bottom:12px">'
-        + '<div style="display:flex;align-items:center;gap:8px;margin:0 0 4px 2px">'
-        + '<span style="font-weight:600;font-size:0.9em;color:#334155">' + e(String(gname)) + '</span>'
-        + _rcPill(g.verdict) + '</div>' + groupHead + '</div>';
+      return '<section style="background:#fff;border:1px solid #e5e7eb;border-top:0;padding:12px 14px">'
+        + '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">'
+        + '<h4 style="margin:0;font-size:0.98em;color:#111827">' + e(gname.replace(/_/g, ' ')) + '</h4>'
+        + _rcGroupChip('within_tol', gc.within_tol) + _rcGroupChip('drift', gc.drift)
+        + _rcGroupChip('mismatch', gc.mismatch) + _rcGroupChip('ungraded', gc.ungraded) + '</div>'
+        + (axes.length
+          ? '<table style="width:100%;border-collapse:collapse;font-size:0.9em">'
+            + '<thead><tr style="text-align:left;color:#94a3b8;font-size:0.78em">'
+            + '<th style="padding:4px 10px">Axis</th><th style="padding:4px 10px">Value</th>'
+            + '<th style="padding:4px 10px">Summary</th></tr></thead><tbody>' + rows + '</tbody></table>'
+          : '<div class="muted" style="padding:4px 10px">no axes recorded</div>')
+        + '</section>';
     }).join('');
+
+    // Comparison trajectories drill-down: the rendered trace-overlay card.
+    var viz = '';
+    if (rc.url && !rc.html_stub) {
+      viz += '<details style="margin-top:10px">'
+        + '<summary style="cursor:pointer;font-weight:600;color:#334155">Comparison trajectories (rendered)</summary>'
+        + '<iframe class="viz-embed" src="' + e(rc.url) + '" loading="lazy" '
+        + 'style="width:100%;height:720px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;margin-top:8px"></iframe>'
+        + '</details>';
+    } else if (!Object.keys(groups).length) {
+      viz = '<div class="muted" style="padding:8px">Verdict recorded, but the card body '
+        + 'has not been rendered yet — run the comparison to generate it.</div>';
+    }
+
+    return '<div class="report-card-block" style="margin-bottom:28px;border-radius:10px;'
+      + 'box-shadow:0 1px 3px rgba(0,0,0,0.06)">' + header + sections + '</div>' + viz;
   }
 
   function loadTestsTab(spec) {
