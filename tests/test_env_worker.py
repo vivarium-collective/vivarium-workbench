@@ -6,6 +6,7 @@ suite runs on — so macOS locally and Linux in CI both cover the fd-passing +
 framing transport (spec §2, platform support).
 """
 import socket
+from pathlib import Path
 
 import pytest
 
@@ -136,3 +137,35 @@ def test_list_generators_tolerates_a_workspace_with_no_package(tmp_path):
     (tmp_path / "workspace.yaml").write_text("name: bare\n")
     with EnvWorker(tmp_path) as w:
         assert isinstance(w.call("list_generators")["generators"], list)  # no crash
+
+
+# ---------------------------------------------------------------------------
+# Slice 3: registry_catalog — build_core + introspection, faithful to the
+# existing embedded-subprocess path in registry.build_registry.
+# ---------------------------------------------------------------------------
+_FIXTURE = Path(__file__).parent / "_fixtures" / "ws_increase_demo"
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_registry_catalog_matches_build_registry(monkeypatch):
+    """Strong port check: the worker's registry_catalog reproduces
+    build_registry's introspection (name/address/kind/source) exactly."""
+    pytest.importorskip("pbg_superpowers")
+    from vivarium_workbench.lib import registry
+
+    expected = registry.build_registry(_FIXTURE, bypass_cache=True)
+    if expected.get("error"):
+        pytest.skip(f"build_registry unavailable in this env: {expected['error']}")
+
+    with EnvWorker(_FIXTURE) as w:
+        got = w.call("registry_catalog")
+    assert not got.get("error"), got.get("error")
+
+    def _core(entries):
+        # compare on the introspection fields (ignore workbench post-processing
+        # like emitter is_workspace_default that build_registry adds on top).
+        return sorted((p["name"], p["address"], p["kind"], p["source"])
+                      for p in entries)
+
+    assert _core(got["processes"]) == _core(expected["processes"])
+    assert [t["name"] for t in got["types"]] == [t["name"] for t in expected["types"]]

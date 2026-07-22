@@ -80,7 +80,158 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
     sock.sendall(struct.pack(">I", len(body)) + body)
 
 
-_CAPABILITIES = ["initialize", "ping", "list_generators", "shutdown"]
+_CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog", "shutdown"]
+
+_FRAMEWORK_PKGS = {
+    "process_bigraph", "bigraph_schema", "bigraph_viz",
+    "pbg_superpowers", "vivarium_workbench", "pbg_emitters",
+}
+
+
+def _workspace_meta(workspace: str):
+    """``(package_name, workspace_pkgs_set, ws_data)`` from ``workspace.yaml`` —
+    faithful to ``registry.build_registry``'s pre-script computation (both
+    ``imports:`` shapes: dict keyed by catalog name, or list of dicts/strings)."""
+    from pathlib import Path
+
+    import yaml
+    ws_data = yaml.safe_load((Path(workspace) / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    slug = ws_data.get("name", "")
+    package_name = ws_data.get("package_path") or ("pbg_" + str(slug).replace("-", "_"))
+    imports_raw = ws_data.get("imports") or []
+    pkgs: list = []
+    if isinstance(imports_raw, dict):
+        for cat_name, imp_val in imports_raw.items():
+            pkg = (imp_val.get("package") if isinstance(imp_val, dict) else None) \
+                or cat_name.replace("-", "_")
+            pkgs.append(pkg.split(".")[0])
+    elif isinstance(imports_raw, list):
+        for entry in imports_raw:
+            if isinstance(entry, dict):
+                pkg = entry.get("package") or (entry.get("name") or "").replace("-", "_")
+            elif isinstance(entry, str):
+                pkg = entry.replace("-", "_")
+            else:
+                continue
+            if pkg:
+                pkgs.append(pkg.split(".")[0])
+    pkgs.append(package_name.split(".")[0])
+    return package_name, set(dict.fromkeys(pkgs)), ws_data
+
+
+def _registry_catalog() -> dict:
+    """Build the workspace's core and introspect its registered processes/types
+    (spec §11). A faithful in-worker port of ``registry.build_registry``'s
+    embedded subprocess script — the ``core`` object can't cross the socket, so
+    the introspection must run where the core lives. Returns the RAW
+    ``{processes, types, workspace_pkgs}`` (the workbench applies its emitter
+    ``is_workspace_default`` post-processing on top)."""
+    import inspect as _inspect
+    import json as _json
+
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    try:
+        package_name, workspace_pkgs, _ws_data = _workspace_meta(_workspace)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"workspace.yaml unreadable: {e}", "processes": [], "types": []}
+
+    try:
+        mod = __import__(f"{package_name}.core", fromlist=["build_core"])
+        core = mod.build_core()
+    except ImportError as e:
+        return {"error": f"could not import {package_name}.core: {e}", "processes": [], "types": []}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"build_core() failed: {e}", "processes": [], "types": []}
+
+    import process_bigraph as _pb
+    EMITTER_CLS = getattr(_pb, "Emitter", None)
+    try:
+        from pbg_superpowers.visualization import Visualization as VISUALIZATION_CLS
+    except ImportError:
+        VISUALIZATION_CLS = None
+
+    def _classify_source(cls):
+        try:
+            top_pkg = cls.__module__.split(".")[0]
+        except Exception:
+            return "environment_only"
+        if top_pkg in workspace_pkgs:
+            return "in_workspace"
+        if top_pkg in _FRAMEWORK_PKGS:
+            return "framework"
+        return "environment_only"
+
+    processes: list = []
+    seen_classes: dict = {}
+    link_reg = getattr(core, "link_registry", {}) or {}
+    for name, cls in link_reg.items():
+        cls_id = id(cls)
+        is_qualified = "." in name
+        if cls_id in seen_classes:
+            existing = seen_classes[cls_id]
+            if not is_qualified and "." in processes[existing]["name"]:
+                processes[existing]["aliases"].append(processes[existing]["name"])
+                processes[existing]["name"] = name
+            else:
+                processes[existing]["aliases"].append(name)
+            continue
+        try:
+            addr = f"{cls.__module__}.{cls.__qualname__}"
+        except Exception:
+            addr = str(cls)
+        kind = "other"
+        if isinstance(cls, type):
+            if EMITTER_CLS is not None and issubclass(cls, EMITTER_CLS) and cls is not EMITTER_CLS:
+                kind = "emitter"
+            elif VISUALIZATION_CLS is not None and issubclass(cls, VISUALIZATION_CLS) and cls is not VISUALIZATION_CLS:
+                kind = "visualization"
+            elif hasattr(cls, "__mro__"):
+                for ancestor in cls.__mro__:
+                    if ancestor.__name__ in ("Process", "ProcessEnsemble"):
+                        kind = "process"
+                        break
+                    if ancestor.__name__ == "Step":
+                        kind = "step"
+                        break
+        schema_preview = ""
+        if hasattr(cls, "config_schema"):
+            try:
+                schema_preview = _json.dumps(cls.config_schema, default=str)[:400]
+            except Exception:
+                schema_preview = "<unserializable>"
+        source = _classify_source(cls)
+        # Framework hygiene: hide process_bigraph's OWN built-in process/step/other
+        # classes from every workspace's registry (emitters + visualizations kept).
+        _topmod = (getattr(cls, "__module__", "") or "").split(".")[0]
+        if _topmod == "process_bigraph" and kind in ("process", "step", "other"):
+            continue
+        try:
+            if isinstance(cls, type) and _inspect.isabstract(cls):
+                continue
+        except Exception:
+            pass
+        seen_classes[cls_id] = len(processes)
+        processes.append({
+            "name": name, "address": addr, "kind": kind,
+            "schema_preview": schema_preview, "aliases": [], "source": source,
+        })
+    _source_order = {"in_workspace": 0, "framework": 1, "environment_only": 2}
+    processes.sort(key=lambda p: (
+        _source_order.get(p.get("source", "environment_only"), 2),
+        "." in p["name"], p["name"]))
+
+    types: list = []
+    type_reg = getattr(core, "registry", {}) or {}
+    for name in sorted(type_reg.keys()):
+        try:
+            td = core.access(name)
+            preview = str(td)[:200] if td is not None else ""
+        except Exception as e:  # noqa: BLE001
+            preview = f"<error: {e}>"
+        types.append({"name": name, "schema_preview": preview})
+
+    return {"processes": processes, "types": types, "workspace_pkgs": list(workspace_pkgs)}
 
 
 def _import_workspace_package(workspace: str) -> None:
@@ -146,6 +297,8 @@ def _handle(method: str, params: dict) -> dict:
         }
     if method == "list_generators":
         return _list_generators()
+    if method == "registry_catalog":
+        return _registry_catalog()
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")
