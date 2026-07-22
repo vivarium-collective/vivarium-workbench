@@ -78,3 +78,43 @@ def test_bound_session_resolves_to_its_path(tmp_path):
 
     assert workspace_context.resolve("s1").ws_root == other  # bound → its own
     assert workspace_context.resolve(None).ws_root == tmp_path.resolve()  # unbound → default
+
+
+# ---------------------------------------------------------------------------
+# Slice 4: per-session switch semantics (endpoint-level, in-process)
+# ---------------------------------------------------------------------------
+def test_switch_is_isolated_across_sessions(tmp_path, monkeypatch):
+    """The load-bearing slice-4 property: session A switching does not move
+    session B, nor the process-global default."""
+    from fastapi.testclient import TestClient
+    from pbg_superpowers import workspace_catalog
+    from vivarium_workbench.api.app import create_app
+    from vivarium_workbench.lib import _root
+
+    session_registry.clear()
+    default = tmp_path / "default"; default.mkdir(); (default / "workspace.yaml").write_text("name: d\n")
+    other = tmp_path / "other"; other.mkdir(); (other / "workspace.yaml").write_text("name: o\n")
+    _root.set_workspace_root(default)
+    monkeypatch.setattr(workspace_catalog, "list_workspaces",
+                        lambda: [{"path": str(other), "name": "o"}])
+
+    app = create_app()
+    a = TestClient(app)   # each TestClient keeps its own cookie jar = its own session
+    b = TestClient(app)
+
+    # Establish both sessions (first GET mints each cookie).
+    assert a.get("/health").status_code == 200
+    assert b.get("/health").status_code == 200
+
+    # Session A switches to `other`.
+    r = a.post("/api/source/switch", json={"path": str(other)})
+    assert r.status_code == 200
+
+    key_a = a.cookies.get(session_registry.SESSION_COOKIE)
+    key_b = b.cookies.get(session_registry.SESSION_COOKIE)
+    assert key_a and key_b and key_a != key_b
+
+    # A is bound to `other`; B is untouched (unbound → default); global unmoved.
+    assert session_registry.get(key_a).source_path == Path(str(other))
+    assert session_registry.get(key_b) is None
+    assert _root.get_workspace_root() == default.resolve()

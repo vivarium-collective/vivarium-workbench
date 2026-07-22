@@ -4429,9 +4429,12 @@ class TestSourceSwitchRoute:
         assert r.status_code == 400
         assert r.json() == {"error": f"{p!r} is not a registered workspace"}
 
-    def test_happy_path_repoints(self, client, tmp_path, monkeypatch):
+    def test_switch_binds_session_not_global(self, client, tmp_path, monkeypatch):
+        """Slice 4: a switch is PER SESSION — it binds the caller's session and
+        leaves the process-global root (and other sessions) untouched."""
         from pbg_superpowers import workspace_catalog
-        from vivarium_workbench.lib import _root
+        from vivarium_workbench.lib import _root, session_registry
+        session_registry.clear()
         ws = tmp_path / "ws2"
         ws.mkdir()
         (ws / "workspace.yaml").write_text("name: w2\n")
@@ -4439,11 +4442,17 @@ class TestSourceSwitchRoute:
             workspace_catalog, "list_workspaces",
             lambda: [{"path": str(ws), "name": "w2"}],
         )
+        before = _root.get_workspace_root()
         r = client.post("/api/source/switch", json={"path": str(ws)})
         assert r.status_code == 200
         assert r.json() == {"ok": True, "source": {"path": str(ws), "name": "w2"}}
-        # The route re-pointed the shared lib root (autouse fixture resets it).
-        assert _root.get_workspace_root() == ws.resolve()
+        # The process-global root is NOT re-pointed (no cross-session bleed).
+        assert _root.get_workspace_root() == before
+        # The calling session IS bound to the new workspace (its cookie routes it).
+        key = client.cookies.get(session_registry.SESSION_COOKIE)
+        assert key is not None
+        entry = session_registry.get(key)
+        assert entry is not None and entry.source_path == Path(str(ws))
 
     def test_route_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]

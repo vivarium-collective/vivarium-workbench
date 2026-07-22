@@ -343,8 +343,18 @@ def get_workspace_context(request: Request = None) -> "WorkspaceContext":
     See ``lib/workspace_context.py`` and ``docs/session-registry.md``.
     """
     from vivarium_workbench.lib import workspace_context
-    key = request.cookies.get(session_registry.SESSION_COOKIE) if request is not None else None
+    key = _session_key_of(request)
     return workspace_context.resolve(key)
+
+
+def _session_key_of(request: "Request | None") -> "str | None":
+    """The request's session key — the middleware-stashed value (available even
+    on a first request), falling back to the raw cookie, or ``None`` for a
+    direct/cookie-less call."""
+    if request is None:
+        return None
+    key = getattr(request.state, "session_key", None)
+    return key or request.cookies.get(session_registry.SESSION_COOKIE)
 
 
 def get_workspace(request: Request = None) -> Path:
@@ -538,7 +548,13 @@ def create_app() -> FastAPI:
         """
         from vivarium_workbench.lib import _root, workspace_context
         existing = request.cookies.get(session_registry.SESSION_COOKIE)
-        ctx = workspace_context.resolve(existing)
+        # The effective key is the existing cookie, or one minted now. Stash it on
+        # request.state so handlers (e.g. /api/source/switch's per-session rebind)
+        # can act on the session even on its FIRST request — before the minted
+        # cookie has round-tripped.
+        session_key = existing or session_registry.mint_key()
+        request.state.session_key = session_key
+        ctx = workspace_context.resolve(session_key)
         token = _root.set_request_workspace_root(ctx.ws_root)
         try:
             response = await call_next(request)
@@ -547,7 +563,7 @@ def create_app() -> FastAPI:
         if not existing:
             response.set_cookie(
                 session_registry.SESSION_COOKIE,
-                session_registry.mint_key(),
+                session_key,
                 httponly=True,
                 samesite="lax",
                 secure=(request.url.scheme == "https"),
@@ -4753,31 +4769,31 @@ def create_app() -> FastAPI:
     ) -> Union[SourceSwitchResponse, JSONResponse]:
         """Re-point the active workspace to a registered catalog entry.
 
-        Mirrors the stdlib ``POST /api/source/switch``.  Body: ``{"path": <dir>}``
-        — the path MUST resolve to a registered ``workspace_catalog`` entry (no
-        arbitrary paths).  On success the lib-side switch fires (sets
-        ``lib._root`` + invalidates the lib caches via
-        ``active_workspace.switch_workspace``) and returns ``{ok, source}``; the
-        client reloads.
+        Body: ``{"path": <dir>}`` — the path MUST resolve to a registered
+        ``workspace_catalog`` entry (no arbitrary paths). The switch is **per
+        session** (§ session-registry §8): it binds the *calling* session to the
+        chosen workspace and leaves the process-global root and every other
+        session untouched. On success returns ``{ok, source}``; the client reloads
+        (its cookie now routes it to the new workspace). This is the slice-4
+        behavior change — a switch no longer re-points the whole process.
 
-        Status codes (byte-identical to the legacy handler):
+        Status codes:
           - 400  missing ``path`` (``{"error": "missing 'path'"}``)
           - 400  unregistered path (``{"error": "<path> is not a registered workspace"}``)
           - 200  ``{ok: true, source: {path, name}}``
 
-        The CSRF middleware already guards this POST.  Library-backed via
-        ``lib.source_switch_views.source_switch``.
+        The CSRF middleware already guards this POST. Validation via
+        ``lib.source_switch_views.source_switch`` (``switch_active=False`` — no
+        global re-point); the per-session bind is ``session_registry.rebind``.
         """
-        body, status = _source_switch_views.source_switch(req.model_dump())
+        # switch_active=False: validate + resolve the source WITHOUT the legacy
+        # global re-point. Safe now that reads route per-request (slice 2) and
+        # caches are workspace-keyed (slice 3), so no global invalidate is needed.
+        body, status = _source_switch_views.source_switch(
+            req.model_dump(), switch_active=False)
         if status != 200:
             return JSONResponse(status_code=status, content=body)
-        # Record the switch on THIS session too (§ session-registry §8). Slice 1
-        # keeps the global switch above (so the lib layer, still reading the
-        # global root, stays consistent) and *additionally* binds the calling
-        # session — laying the per-session groundwork. When the lib layer is
-        # threaded through the context, the global half is removed and the switch
-        # becomes truly per-session.
-        session_key = request.cookies.get(session_registry.SESSION_COOKIE)
+        session_key = _session_key_of(request)
         source_path = (body.get("source") or {}).get("path")
         if session_key and source_path:
             session_registry.rebind(session_key, source_path)
