@@ -306,19 +306,26 @@ function InspectorTab(props: {
   );
 }
 
-/** A labeled inspector section. */
-function InspectorSection(props: { title: string; children: React.ReactNode }) {
+/** A labeled inspector section — collapsible (open by default) so long schemas
+ * can be folded away. Content flows at full height into the panel's single
+ * scrollbar; no inner scroll box. */
+function InspectorSection(props: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
   return (
-    <div style={{ margin: '10px 0' }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>
+    <details className="inspector-section" open={props.defaultOpen !== false} style={{ margin: '10px 0' }}>
+      <summary style={{
+        fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer',
+        userSelect: 'none', display: 'flex', alignItems: 'center', gap: 5,
+      }}>
+        <span className="inspector-caret" style={{ fontSize: 9, color: '#9ca3af' }}>▶</span>
         {props.title}
-      </div>
-      {props.children}
-    </div>
+      </summary>
+      <div style={{ marginTop: 5 }}>{props.children}</div>
+    </details>
   );
 }
 
-/** A pretty-printed JSON block, or an em-dash when empty. */
+/** A pretty-printed JSON block, or an em-dash when empty. Flows at full height —
+ * long lines wrap (no inner scrollbar); the inspector panel scrolls as a whole. */
 function SchemaBlock(props: { value: unknown }) {
   const v = props.value;
   const empty = v == null
@@ -327,7 +334,7 @@ function SchemaBlock(props: { value: unknown }) {
   return (
     <pre style={{
       fontSize: 11, background: '#f7f7f7', padding: 8, margin: 0, borderRadius: 4,
-      overflow: 'auto', maxHeight: 260, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#1f2937',
     }}>
       {JSON.stringify(v, null, 2)}
