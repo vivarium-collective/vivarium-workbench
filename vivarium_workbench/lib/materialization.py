@@ -39,6 +39,11 @@ _DEFAULT_TIMEOUT_S = 900.0
 # venv interpreter relative paths — POSIX first, then Windows (mirrors env_resolver).
 _VENV_INTERPRETERS = ("bin/python", "Scripts/python.exe")
 
+# Completion marker: written only after a `uv sync` fully succeeds. A cache hit
+# requires it, so a partial venv left by an interrupted/killed sync (a `bin/python`
+# but no marker) is re-synced, never served as a broken interpreter (§7 robustness).
+_MARKER = ".vwb-materialized"
+
 
 class MaterializationError(Exception):
     """A managed environment build failed (lifecycle §6). ``tail`` carries the
@@ -85,9 +90,14 @@ def _venv_python(venv_dir: Path) -> "Path | None":
 
 
 def cached_interpreter(coordinate: str) -> "str | None":
-    """The interpreter for an already-materialized coordinate, or ``None`` — the
-    fast path (§5): a present venv skips ``uv sync`` entirely."""
-    py = _venv_python(store_root() / coordinate)
+    """The interpreter for an already-**completed** coordinate, or ``None`` — the
+    fast path (§5): a present, marker-complete venv skips ``uv sync``. A partial
+    venv (interrupted sync — a ``bin/python`` but no completion marker) returns
+    ``None`` so it is re-synced rather than served broken."""
+    venv_dir = store_root() / coordinate
+    if not (venv_dir / _MARKER).is_file():
+        return None
+    py = _venv_python(venv_dir)
     return str(py) if py is not None else None
 
 
@@ -157,4 +167,6 @@ def materialize(source: Path, *, timeout: float = _DEFAULT_TIMEOUT_S) -> str:
     if py is None:
         raise MaterializationError(
             "uv sync completed but no interpreter was found in the venv", tail="")
+    # Mark complete only now — a later `cached_interpreter` trusts this venv.
+    (venv_dir / _MARKER).write_text("ok\n", encoding="utf-8")
     return str(py)
