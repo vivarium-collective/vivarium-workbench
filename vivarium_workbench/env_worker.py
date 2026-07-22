@@ -86,7 +86,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
-                 "study_readout_check", "shutdown"]
+                 "study_readout_check", "attach_process_docs", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -450,6 +450,17 @@ def _attach_process_docs(doc):
     return doc
 
 
+def _attach_process_docs_method(params: dict) -> dict:
+    """Attach per-process docstrings to an already-resolved state ``document``
+    passed inline (spec §11 ``{document}``). Read-shaped: the workbench owns the
+    science file, hands us the doc, and we import the process classes to read
+    their descriptions — so the HTTP process imports no workspace Python for the
+    composite-state static-fallback / spec branches."""
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    return {"document": _attach_process_docs((params or {}).get("document"))}
+
+
 def _resolve_composite_state(params: dict) -> dict:
     """Build a ``@composite_generator``'s state (spec §11), summarized +
     doc-decorated. A faithful in-worker port of
@@ -722,6 +733,8 @@ def _handle(method: str, params: dict) -> dict:
         return _observables(params)
     if method == "study_readout_check":
         return _study_readout_check(params)
+    if method == "attach_process_docs":
+        return _attach_process_docs_method(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

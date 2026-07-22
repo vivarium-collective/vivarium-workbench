@@ -187,11 +187,10 @@ def resolve_composite(
             else:
                 notice = (f"static composite '{spec.name}' has no inline state to display.")
         if state is not None:
-            try:
-                from vivarium_workbench.lib.process_docs import attach_process_docs
-                attach_process_docs(state)
-            except Exception:
-                pass
+            # Per-process docstrings via the env worker (no in-process workspace
+            # import); best-effort — decoration never fails the resolve.
+            from vivarium_workbench.lib.process_docs import attach_process_docs_via_worker
+            state = attach_process_docs_via_worker(ws_root, state)
             # Embed the declared emit-all paths INSIDE `state` (not as a
             # sibling of it): the dashboard glue (walkthrough.js) and loom's
             # popup/static hydration paths all forward only `payload.state`

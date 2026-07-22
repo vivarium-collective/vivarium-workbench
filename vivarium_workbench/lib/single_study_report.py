@@ -1860,10 +1860,10 @@ def _resolve_composite_doc(ws_root: Path, spec: dict) -> Optional[dict]:
         return None
     try:
         from vivarium_workbench.lib.process_docs import (
-            attach_process_docs, summarize_large_values,
+            attach_process_docs_via_worker, summarize_large_values,
         )
-        doc = summarize_large_values(doc)
-        attach_process_docs(doc)
+        doc = summarize_large_values(doc)          # pure (no workspace import) — stays in-process
+        doc = attach_process_docs_via_worker(ws_root, doc)  # docstrings via the env worker
     except Exception:
         pass
     # A composite file usually nests the wiring under a `state:` key; the

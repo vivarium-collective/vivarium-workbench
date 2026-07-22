@@ -370,3 +370,37 @@ def test_build_registry_serves_v2ecoli_via_its_own_venv():
     assert not d.get("error"), d.get("error")
     assert len(d["processes"]) > 50 and len(d["types"]) > 20
     assert any(p["source"] == "in_workspace" for p in d["processes"])
+
+
+# ---------------------------------------------------------------------------
+# attach_process_docs — decorate a resolved state doc with per-process docstrings
+# in the worker (composite-state static-fallback/spec + resolve/report paths).
+# ---------------------------------------------------------------------------
+def test_attach_process_docs_tolerates_unresolvable_addresses(tmp_path):
+    """The method decorates process/step nodes and, for an address that can't be
+    imported, leaves the node undecorated — never crashes, structure preserved."""
+    doc = {
+        "processes": {"p": {"_type": "process", "address": "no.such.module.Cls"}},
+        "step": {"_type": "step", "address": "local:also.missing.Cls"},
+        "leaf": [1, 2, 3],
+        "scalar": 5,
+    }
+    with EnvWorker(tmp_path) as w:
+        r = w.call("attach_process_docs", {"document": doc})
+    d = r["document"]
+    assert "doc" not in d["processes"]["p"]      # unresolvable → no doc attached
+    assert d["leaf"] == [1, 2, 3] and d["scalar"] == 5   # structure preserved
+
+
+def test_attach_process_docs_via_worker_soft_degrades(monkeypatch):
+    """If the worker is unavailable, decoration returns the doc unchanged rather
+    than failing the composite-state / resolve / report request."""
+    from vivarium_workbench.lib import env_worker_pool, process_docs
+
+    class _Down:
+        def call(self, *a, **k):
+            raise RuntimeError("worker down")
+
+    monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Down())
+    doc = {"processes": {"p": {"_type": "process", "address": "x.Y"}}}
+    assert process_docs.attach_process_docs_via_worker("/ws", doc) is doc
