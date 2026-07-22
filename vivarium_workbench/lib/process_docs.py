@@ -125,3 +125,18 @@ def attach_process_docs(doc: Any) -> Any:
     except Exception:
         pass
     return doc
+
+
+def attach_process_docs_via_worker(ws_root: Any, doc: Any) -> Any:
+    """Route :func:`attach_process_docs` decoration to the workspace's env worker,
+    so the HTTP process imports no workspace Python to read process docstrings
+    (env-worker method ``attach_process_docs{document}``; the workbench passes the
+    already-resolved doc inline, §11). **Soft-degrade**: decoration is optional, so
+    if the worker is unavailable, return the doc undecorated. ``summarize_large_values``
+    stays a separate in-process call where needed — it is pure (no workspace import)."""
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+    try:
+        r = get_pool().call(ws_root, "attach_process_docs", {"document": doc})
+        return r["document"] if isinstance(r, dict) and "document" in r else doc
+    except Exception:  # noqa: BLE001 — decoration is best-effort; never break the request
+        return doc

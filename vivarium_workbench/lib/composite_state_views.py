@@ -34,6 +34,8 @@ from typing import Any
 
 import yaml
 
+from vivarium_workbench.lib import process_docs
+
 # Cache of built composite-state payloads, keyed by ``(ws_root, ref)``:
 # {ref: (built_at_epoch, payload_dict)}. Building a whole-cell composite is
 # ~1s+ (run in a subprocess), so repeat explorer opens + pop-outs are cached.
@@ -152,8 +154,7 @@ def build_composite_state(
             try:
                 _doc = json.loads(_static.read_text(encoding="utf-8"))
                 _inner = _doc.get("state", _doc) if isinstance(_doc, dict) else _doc
-                from vivarium_workbench.lib.process_docs import attach_process_docs as _apd
-                _apd(_inner)
+                _inner = process_docs.attach_process_docs_via_worker(ws_root, _inner)
                 # The subprocess resolved `entry` before the build failed, so
                 # its declared emitters are still authoritative here (more
                 # accurate than trusting a possibly-stale static artifact).
@@ -209,8 +210,7 @@ def build_composite_state(
     except Exception as e:  # noqa: BLE001
         return {"error": f"parse failed: {e}"}, 500
 
-    from vivarium_workbench.lib.process_docs import attach_process_docs
-    attach_process_docs(doc)  # per-process docstrings for the inspector
+    doc = process_docs.attach_process_docs_via_worker(ws_root, doc)  # per-process docstrings for the inspector
     # This branch's `doc` is either a raw composite-spec file (top-level
     # `state:`/`emitters:` keys, e.g. a `.composite.yaml`) or an already
     # resolve()-shaped static snapshot (top-level `state:` nested one level,
