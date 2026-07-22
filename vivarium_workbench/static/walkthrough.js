@@ -4364,9 +4364,6 @@
         );
         // Render parameter editor
         _ceRenderParameters(data.parameters);
-        // Characterization: fold in emitted observables + measured wall-time so
-        // the Composites tab tells you what this composite emits and costs.
-        if (typeof _ceLoadCharacterization === 'function') _ceLoadCharacterization(data.id);
         // Render state JSON (Document tab now lives inside the iframe — this
         // outer #ce-state-json element was removed when the outer tab strip
         // was retired. Null-guard for resilience if it's ever reintroduced.)
@@ -4380,91 +4377,6 @@
         document.getElementById('ce-loading').innerHTML =
           '<span style="color:#c00">' + msg + '</span>';
       });
-  }
-
-  // Characterization surfacing (Phase 3): fold a composite's emitted observables
-  // (GET /api/observables) + measured wall-time (last completed run's runs_meta
-  // timing, keyed by current param-signature) into the Composites-tab view. Both
-  // reuse existing endpoints — no new backend. Degrades quietly in snapshot mode.
-  function _ceLoadCharacterization(id) {
-    var outEl = document.getElementById('ce-outputs');
-    var wtEl = document.getElementById('ce-walltime');
-    if (document.body.classList.contains('snapshot')) {
-      if (outEl) outEl.textContent = 'Available on a live dashboard.';
-      if (wtEl) wtEl.textContent = 'unavailable in read-only view';
-      return;
-    }
-    // --- Outputs / observables ---
-    if (outEl) {
-      outEl.textContent = 'Loading…';
-      fetch(_api('/api/observables?ref=' + encodeURIComponent(id)))
-        .then(function(r) { return r.text().then(function(t) {
-          var d = null; try { d = t ? JSON.parse(t) : null; } catch (e) { d = null; }
-          return { ok: r.ok, status: r.status, d: d };
-        }); })
-        .then(function(res) {
-          if (!res.ok || !res.d) {
-            outEl.textContent = (res.d && res.d.error) ? res.d.error : 'No observables reported.';
-            return;
-          }
-          var leaves = res.d.leaves || [];
-          var catalogs = res.d.catalogs || {};
-          var catKeys = Object.keys(catalogs);
-          if (!leaves.length && !catKeys.length) {
-            outEl.textContent = 'This composite emits no observables.';
-            return;
-          }
-          var html = '';
-          if (leaves.length) {
-            html += '<div><em>' + leaves.length + ' leaf observable' +
-              (leaves.length === 1 ? '' : 's') + '</em>: ' +
-              leaves.slice(0, 40).map(function(x) { return '<code>' + _esc(x) + '</code>'; }).join(', ') +
-              (leaves.length > 40 ? ' …' : '') + '</div>';
-          }
-          if (catKeys.length) {
-            html += '<div style="margin-top:4px"><em>' + catKeys.length + ' catalog' +
-              (catKeys.length === 1 ? '' : 's') + '</em>: ' +
-              catKeys.slice(0, 20).map(function(k) {
-                var n = (catalogs[k] || []).length;
-                return '<code>' + _esc(k) + '</code> (' + n + ')';
-              }).join(', ') + '</div>';
-          }
-          outEl.innerHTML = html;
-        })
-        .catch(function() { outEl.textContent = 'Could not load observables.'; });
-    }
-    // --- Measured wall-time (last completed run matching current params) ---
-    if (wtEl) {
-      var curParams = JSON.stringify((window._ceCurrent && window._ceCurrent.overrides) || {});
-      fetch(_api('/api/composite-runs?spec_id=' + encodeURIComponent(id)))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var runs = (data && data.runs) || [];
-          var match = null;
-          for (var i = 0; i < runs.length; i++) {
-            var rr = runs[i];
-            if (rr.status !== 'completed' || rr.completed_at == null || rr.started_at == null) continue;
-            // Prefer a param-signature match; fall back to the most recent completed run.
-            if (JSON.stringify(rr.params || {}) === curParams) { match = rr; break; }
-            if (!match) match = rr;
-          }
-          if (!match) { wtEl.textContent = 'unknown (no completed run yet)'; return; }
-          var secs = Math.max(0, match.completed_at - match.started_at);
-          var exact = JSON.stringify(match.params || {}) === curParams;
-          wtEl.textContent = _ceFmtDuration(secs) +
-            ' (' + (match.n_steps != null ? match.n_steps + ' steps' : 'last run') +
-            (exact ? ', these params' : ', other params') + ')';
-        })
-        .catch(function() { wtEl.textContent = 'unknown'; });
-    }
-  }
-  window._ceLoadCharacterization = _ceLoadCharacterization;
-
-  function _ceFmtDuration(secs) {
-    if (secs < 1) return (secs * 1000).toFixed(0) + ' ms';
-    if (secs < 60) return secs.toFixed(1) + ' s';
-    var m = Math.floor(secs / 60), s = Math.round(secs % 60);
-    return m + ' min ' + s + ' s';
   }
 
   function _legacyLoadCompositeSvg(ref) {
