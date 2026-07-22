@@ -683,12 +683,21 @@
     return '<p class="muted" style="font-style:italic;margin:4px 0">none</p>';
   }
 
-  // A download link to a workspace-relative path. The server GET-serves any
-  // file under the workspace by its workspace-relative path (do_GET ->
-  // WORKSPACE / rel), so the href is simply '/' + path.
+  // A download link to a workspace-relative path.
+  //  - Live server: GET-serves any file under the workspace by its
+  //    workspace-relative path (do_GET -> WORKSPACE / rel), so href = '/' + path.
+  //  - Published snapshot: input binaries (expert docs / datasets) are NOT
+  //    staged in the bundle, so a '/' + path href 404s on GitHub Pages. Instead
+  //    link to the committed file in the GitHub source repo via the raw base
+  //    injected as __DASH_CONFIG__.inputsDownloadBase (see publish.py). Falls
+  //    back to '/' + path when no base is configured.
   function _inputsDownloadLink(path, label) {
     if (!path) return '';
-    var href = '/' + String(path).replace(/^\/+/, '');
+    var cfg = window.__DASH_CONFIG__ || {};
+    var rel = String(path).replace(/^\/+/, '');
+    var href = (cfg.mode === 'snapshot' && cfg.inputsDownloadBase)
+      ? String(cfg.inputsDownloadBase).replace(/\/+$/, '') + '/' + rel
+      : '/' + rel;
     return '<a href="' + _esc(href) + '" download class="action-btn" ' +
       'style="font-size:0.8em;padding:1px 8px;text-decoration:none">⬇ ' +
       _esc(label || 'Download') + '</a>';

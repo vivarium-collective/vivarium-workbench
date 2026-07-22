@@ -187,6 +187,62 @@ def _git_info(ws_root: Path) -> tuple:
     return commit, remote, branch
 
 
+def _inputs_download_base(ws_root: Path) -> str:
+    """Base URL for input-file (expert-doc / dataset) downloads in a *published*
+    bundle.
+
+    Published bundles do not stage input binaries — they can be large (a paper
+    PDF is often several MB) and are already committed to the source repo. So
+    the read-only dashboard links each input's workspace-relative ``path`` to the
+    committed file in the GitHub source repo via the ``raw`` endpoint, rather
+    than to a bundle-relative path that was never copied in (which 404s on
+    GitHub Pages).
+
+    Returns ``https://github.com/<owner>/<repo>/raw/<branch>[/<prefix>]`` where
+    ``<prefix>`` is the workspace directory relative to the repo root (e.g.
+    ``workspace``), so ``<base>/<workspace-relative path>`` is the file's
+    canonical repo URL. Returns ``""`` when the workspace has no GitHub
+    ``origin`` remote — the frontend then falls back to the live ``'/' + path``.
+    """
+    try:
+        from vivarium_workbench.lib.report import _detect_github_repo
+        repo = _detect_github_repo(ws_root)
+    except Exception:
+        repo = None
+    if not repo:
+        return ""
+
+    def _git(*args) -> str:
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(ws_root), *args],
+                capture_output=True, text=True, timeout=5,
+            )
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    # Link to the branch the bundle is published FROM — that is the branch that
+    # actually contains the committed input files (investigations are commonly
+    # published from a per-investigation feature branch that is pushed to origin
+    # but not yet merged to main, so a "main" link would 404). The published
+    # snapshot is a point-in-time view of this branch.
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "main"
+
+    # Workspace directory relative to the repo root (e.g. "workspace").
+    prefix = ""
+    top = _git("rev-parse", "--show-toplevel")
+    if top:
+        try:
+            rel = Path(ws_root).resolve().relative_to(Path(top).resolve())
+            prefix = "" if str(rel) == "." else rel.as_posix()
+        except Exception:
+            prefix = ""
+
+    base = f"https://github.com/{repo}/raw/{branch}"
+    return base + ("/" + prefix if prefix else "")
+
+
 def _normalize_base_path(base_path: str) -> str:
     """Normalize a *base_path* value: strip trailing slashes, ensure a leading
     slash when the value is non-empty.  Empty string (root hosting) is returned
@@ -448,6 +504,7 @@ def _set_snapshot_config(
     html: str,
     interactive_url: str = "",
     base_path: str = "",
+    inputs_download_base: str = "",
 ) -> str:
     """Swap the ``__DASH_CONFIG__`` mode from *local-server* to *snapshot*.
 
@@ -457,6 +514,11 @@ def _set_snapshot_config(
     - ``basePath`` — URL prefix for subpath hosting so ``data-source.js`` can
       resolve ``/api/*.json`` paths correctly when the bundle is served under a
       non-root path (``--base-path`` CLI arg).  Only injected when non-empty.
+    - ``inputsDownloadBase`` — GitHub ``raw`` base URL for expert-doc / dataset
+      downloads. Input binaries aren't staged in the bundle, so the frontend
+      links them to the committed source-repo file instead of a bundle-relative
+      path that 404s on GitHub Pages (see :func:`_inputs_download_base`). Only
+      injected when non-empty.
     """
     import json as _json
     config_js = 'window.__DASH_CONFIG__ = { mode: "snapshot"'
@@ -464,6 +526,8 @@ def _set_snapshot_config(
         config_js += ', interactiveUrl: ' + _json.dumps(interactive_url)
     if base_path:
         config_js += ', basePath: ' + _json.dumps(base_path)
+    if inputs_download_base:
+        config_js += ', inputsDownloadBase: ' + _json.dumps(inputs_download_base)
     config_js += ' };'
     return html.replace(
         'window.__DASH_CONFIG__ = { mode: "local-server" };',
@@ -915,11 +979,15 @@ def _do_build(
     # ------------------------------------------------------------------
     # 4. Render home SPA shell → bundle/index.html
     # ------------------------------------------------------------------
+    # Input downloads (expert docs / datasets) aren't staged in the bundle;
+    # link them to the committed file in the GitHub source repo.
+    inputs_download_base = _inputs_download_base(ws_root)
     home_html = _render_home_html(ws_root)
     home_html = _normalize_asset_urls(home_html)
     home_html = _apply_base_path(home_html, base_path)
     home_html = _set_snapshot_config(
         home_html, interactive_url=interactive_url, base_path=base_path,
+        inputs_download_base=inputs_download_base,
     )
     (out_dir / "index.html").write_text(home_html, encoding="utf-8")
 
@@ -947,6 +1015,7 @@ def _do_build(
             study_html = _apply_base_path(study_html, base_path)
             study_html = _set_snapshot_config(
                 study_html, interactive_url=interactive_url, base_path=base_path,
+                inputs_download_base=inputs_download_base,
             )
         except Exception as exc:  # noqa: BLE001 — one bad study must not abort the whole publish
             print(f"  warn: study-shell render failed for {slug!r}: {exc}")
