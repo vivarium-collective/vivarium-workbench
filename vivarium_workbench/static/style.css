@@ -2426,6 +2426,32 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   height:auto !important; min-height:0 !important;
   width:100% !important;
 }
+/* ── Registry: full-bleed, flush Modules / Discovered sub-tabs ───────────────
+ * The two sub-tabs (Modules, Discovered registry) used to render in a centred
+ * column, leaving a wide blank strip on the right and shifting margins when you
+ * switched between them. Tighten the outer padding and force the page + every
+ * sub-tab container to fill the content width, so both sub-tabs share one
+ * uniform, marginless layout with a single (gutter-stable) scrollbar. */
+.viv-content:has(> #page-registry.active){
+  padding:8px 16px !important;
+  width:100% !important; max-width:none !important;
+}
+.viv-content > #page-registry.active,
+#page-registry.active{
+  max-width:none !important; width:100% !important; margin:0 !important;
+  box-sizing:border-box;
+}
+#page-registry.active .registry-subtabs,
+#page-registry.active .registry-subtab-panel.active,
+#page-registry.active .registry-tabs,
+#page-registry.active .registry-tab-panel,
+#page-registry.active .card-browse-toolbar,
+#page-registry.active .module-grid,
+#page-registry.active .registry-search{
+  width:100% !important; max-width:none !important;
+  margin-left:0 !important; margin-right:0 !important;
+  box-sizing:border-box;
+}
 /* ── Investigation DAG semantic zoom slider ────────────────────────────────── */
 #aig-zoom-slider {
   cursor: pointer;
