@@ -332,8 +332,10 @@ resolve §10 open questions, some are pragmatic scoping calls). Newest first.
   staged tree after phase 1?), and flip-on-ready vs. keep-prior — is a routing/UX
   decision that touches the request hot path and the env-worker interpreter
   choice, and is better shaped with the team than guessed. The materialization
-  capability itself is fully proven end-to-end without it. **Next:** decide + wire
-  the managed session-binding lifecycle.
+  capability itself is fully proven end-to-end without it. **Next:**
+  [`docs/session-binding.md`](session-binding.md) proposes the lifecycle (unify
+  the two binding mechanisms into `committed` + `pending`, promote-on-ready,
+  keep-prior) — for review before the hot-path change is written.
 - **2026-07-22 — Managed job runs clone → sync as one async job, two phases**
   (`cloning → syncing → ready|failed`), keyed by `(repo, ref)` and deduped; the
   venv inside is still coordinate-keyed by the staged lock (so two `(repo, ref)`
