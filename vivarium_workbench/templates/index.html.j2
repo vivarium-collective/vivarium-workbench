@@ -1323,14 +1323,19 @@ window.addEventListener('pageshow', function (e) {
          not a production launcher. Outputs come from GET /api/observables; the
          measured wall-time comes from the last completed run's runs_meta timing
          (started_at/completed_at), keyed by the current param-signature. -->
-    <div class="panel" id="ce-characterization">
-      <h4 style="margin-top:0">Characterization</h4>
-      <p style="margin:2px 0"><strong>Est. wall-time:</strong> <span id="ce-walltime" class="muted">unknown (no run yet)</span></p>
-      <div style="margin-top:8px">
+    <!-- Collapsed by default: the 1000+-observable list dominated the top and
+         cramped the loom viewer. Summary keeps the wall-time visible; expand for
+         the full outputs list. -->
+    <details class="panel" id="ce-characterization" style="flex:none">
+      <summary style="cursor:pointer;font-weight:600;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+        <span>Characterization</span>
+        <span class="muted" style="font-weight:400;font-size:0.9em"><strong>Est. wall-time:</strong> <span id="ce-walltime">unknown (no run yet)</span></span>
+      </summary>
+      <div style="margin-top:10px">
         <strong>Outputs / observables</strong>
-        <div id="ce-outputs" class="muted" style="margin-top:4px">Loading…</div>
+        <div id="ce-outputs" class="muted" style="margin-top:4px">Loading&hellip;</div>
       </div>
-    </div>
+    </details>
 
     <!-- Loom explorer: bigraph-loom iframe (Setup & Run tab lives inside) -->
     <div class="panel">
