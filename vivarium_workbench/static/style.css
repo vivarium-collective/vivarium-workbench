@@ -712,6 +712,8 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
 .na-item-click{ transition:background 0.12s ease, box-shadow 0.12s ease; }
 .na-item-click:hover{ background:rgba(0,0,0,0.05); box-shadow:inset 0 0 0 1px rgba(0,0,0,0.10); }
 .na-item-click:hover span[style*="float:right"]{ opacity:0.9 !important; }
+/* "Needs attention" starts collapsed; hide the "click to expand" hint once open. */
+.needs-attention-banner[open] .na-toggle-hint{ display:none; }
 .viv-rail-section-label{
   padding:0 16px 6px;
   font-size:0.68em; font-weight:600; letter-spacing:0.08em;
