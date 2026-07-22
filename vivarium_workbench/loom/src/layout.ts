@@ -27,8 +27,8 @@ const COMMON_LAYOUT: Record<string, string> = {
   "elk.direction": "DOWN",
   "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
   "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
-  "elk.layered.spacing.nodeNodeBetweenLayers": "60",
-  "elk.spacing.nodeNode": "40",
+  "elk.layered.spacing.nodeNodeBetweenLayers": "200",
+  "elk.spacing.nodeNode": "55",
   "elk.padding": "[top=20,left=20,bottom=20,right=20]",
 };
 

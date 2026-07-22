@@ -90,8 +90,44 @@ export function defaultCollapsedIds(state: any, minDepth = 3): Set<string> {
     if (node._type === 'process' || node._type === 'step') return;
     if ('_type' in node) return;  // typed leaf store
     if (path.length >= minDepth && Object.keys(node).length > 0) {
-      out.add(path.join('.'));
+      // Keep the `unique` store expanded by default so its sub-stores (RNA, DNA,
+      // …) are visible; still recurse so those sub-stores collapse.
+      if (path[path.length - 1] !== 'unique') {
+        out.add(path.join('.'));
+      }
     }
+    for (const [k, v] of Object.entries(node)) {
+      if (k === DECLARED_EMIT_PATHS_KEY) continue;
+      walk(v, [...path, k]);
+    }
+  }
+  walk(root, []);
+  return out;
+}
+
+/**
+ * Process node ids hidden BY DEFAULT to declutter the whole-cell view: the
+ * per-generation `unique_update*` updaters, the `allocator_*` allocators, and
+ * the `*listener*` listeners are bookkeeping processes that dominate the graph
+ * with wires without being the biology. Node ids are the joined path; a hidden
+ * process cascades via `isHiddenByAncestor`. Users can re-show any via the
+ * Processes sidebar.
+ */
+export function defaultHiddenIds(state: any): Set<string> {
+  const root = state?.state ?? state ?? {};
+  const out = new Set<string>();
+  const isNoise = (name: string) =>
+    name.includes('unique_update') ||
+    name.startsWith('allocator') ||
+    name.includes('listener');
+  function walk(node: any, path: string[]) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+    if (node._type === 'process' || node._type === 'step') {
+      const name = path[path.length - 1] || '';
+      if (isNoise(name)) out.add(path.join('.'));
+      return;
+    }
+    if ('_type' in node) return;  // typed leaf store
     for (const [k, v] of Object.entries(node)) {
       if (k === DECLARED_EMIT_PATHS_KEY) continue;
       walk(v, [...path, k]);

@@ -504,6 +504,13 @@
     if (pageId === 'visualizations') {
       _loadAnalysesPage();
     }
+    // Branch page: render the Source (Scope Local/Remote, repo, branch) section on
+    // every navigation, so it's populated from the first visit instead of relying
+    // on the one-time DOMContentLoaded render (which may not have finished — or ran
+    // before the page existed — the first time the user opens Branch).
+    if (pageId === 'github' && typeof window._renderBranchSource === 'function') {
+      window._renderBranchSource();
+    }
     if (pageId === 'simulation-setup') {
       _loadComposites();
     }
@@ -4357,9 +4364,6 @@
         );
         // Render parameter editor
         _ceRenderParameters(data.parameters);
-        // Characterization: fold in emitted observables + measured wall-time so
-        // the Composites tab tells you what this composite emits and costs.
-        if (typeof _ceLoadCharacterization === 'function') _ceLoadCharacterization(data.id);
         // Render state JSON (Document tab now lives inside the iframe — this
         // outer #ce-state-json element was removed when the outer tab strip
         // was retired. Null-guard for resilience if it's ever reintroduced.)
@@ -4373,91 +4377,6 @@
         document.getElementById('ce-loading').innerHTML =
           '<span style="color:#c00">' + msg + '</span>';
       });
-  }
-
-  // Characterization surfacing (Phase 3): fold a composite's emitted observables
-  // (GET /api/observables) + measured wall-time (last completed run's runs_meta
-  // timing, keyed by current param-signature) into the Composites-tab view. Both
-  // reuse existing endpoints — no new backend. Degrades quietly in snapshot mode.
-  function _ceLoadCharacterization(id) {
-    var outEl = document.getElementById('ce-outputs');
-    var wtEl = document.getElementById('ce-walltime');
-    if (document.body.classList.contains('snapshot')) {
-      if (outEl) outEl.textContent = 'Available on a live dashboard.';
-      if (wtEl) wtEl.textContent = 'unavailable in read-only view';
-      return;
-    }
-    // --- Outputs / observables ---
-    if (outEl) {
-      outEl.textContent = 'Loading…';
-      fetch(_api('/api/observables?ref=' + encodeURIComponent(id)))
-        .then(function(r) { return r.text().then(function(t) {
-          var d = null; try { d = t ? JSON.parse(t) : null; } catch (e) { d = null; }
-          return { ok: r.ok, status: r.status, d: d };
-        }); })
-        .then(function(res) {
-          if (!res.ok || !res.d) {
-            outEl.textContent = (res.d && res.d.error) ? res.d.error : 'No observables reported.';
-            return;
-          }
-          var leaves = res.d.leaves || [];
-          var catalogs = res.d.catalogs || {};
-          var catKeys = Object.keys(catalogs);
-          if (!leaves.length && !catKeys.length) {
-            outEl.textContent = 'This composite emits no observables.';
-            return;
-          }
-          var html = '';
-          if (leaves.length) {
-            html += '<div><em>' + leaves.length + ' leaf observable' +
-              (leaves.length === 1 ? '' : 's') + '</em>: ' +
-              leaves.slice(0, 40).map(function(x) { return '<code>' + _esc(x) + '</code>'; }).join(', ') +
-              (leaves.length > 40 ? ' …' : '') + '</div>';
-          }
-          if (catKeys.length) {
-            html += '<div style="margin-top:4px"><em>' + catKeys.length + ' catalog' +
-              (catKeys.length === 1 ? '' : 's') + '</em>: ' +
-              catKeys.slice(0, 20).map(function(k) {
-                var n = (catalogs[k] || []).length;
-                return '<code>' + _esc(k) + '</code> (' + n + ')';
-              }).join(', ') + '</div>';
-          }
-          outEl.innerHTML = html;
-        })
-        .catch(function() { outEl.textContent = 'Could not load observables.'; });
-    }
-    // --- Measured wall-time (last completed run matching current params) ---
-    if (wtEl) {
-      var curParams = JSON.stringify((window._ceCurrent && window._ceCurrent.overrides) || {});
-      fetch(_api('/api/composite-runs?spec_id=' + encodeURIComponent(id)))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var runs = (data && data.runs) || [];
-          var match = null;
-          for (var i = 0; i < runs.length; i++) {
-            var rr = runs[i];
-            if (rr.status !== 'completed' || rr.completed_at == null || rr.started_at == null) continue;
-            // Prefer a param-signature match; fall back to the most recent completed run.
-            if (JSON.stringify(rr.params || {}) === curParams) { match = rr; break; }
-            if (!match) match = rr;
-          }
-          if (!match) { wtEl.textContent = 'unknown (no completed run yet)'; return; }
-          var secs = Math.max(0, match.completed_at - match.started_at);
-          var exact = JSON.stringify(match.params || {}) === curParams;
-          wtEl.textContent = _ceFmtDuration(secs) +
-            ' (' + (match.n_steps != null ? match.n_steps + ' steps' : 'last run') +
-            (exact ? ', these params' : ', other params') + ')';
-        })
-        .catch(function() { wtEl.textContent = 'unknown'; });
-    }
-  }
-  window._ceLoadCharacterization = _ceLoadCharacterization;
-
-  function _ceFmtDuration(secs) {
-    if (secs < 1) return (secs * 1000).toFixed(0) + ' ms';
-    if (secs < 60) return secs.toFixed(1) + ' s';
-    var m = Math.floor(secs / 60), s = Math.round(secs % 60);
-    return m + ' min ' + s + ' s';
   }
 
   function _legacyLoadCompositeSvg(ref) {
@@ -5855,18 +5774,13 @@
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
+      // Single click opens the full study view directly — no quick-look
+      // side-card, no double-click.
       node.onclick = function() {
-        if (window._openInvestigationDrawer) window._openInvestigationDrawer('study', s);
-        else _openStudyInsideInvestigation(s.name);
-      };
-      // Double-click opens the full study directly (dismisses the quick-look drawer).
-      node.ondblclick = function() {
-        var _drawer = document.getElementById('investigation-detail-drawer');
-        if (_drawer) _drawer.style.display = 'none';
         _openStudyInsideInvestigation(s.name);
       };
       node.title = s.name + ' — ' + confidence + (claim ? '\n\nFinds: ' + claim : '') +
-        '\n\nClick for a quick look · double-click to open the study';
+        '\n\nClick to open the study';
       var x = PAD_X + depth[s.name] * (CARD_W + X_GAP);
       node.style.cssText =
         'position:absolute;left:' + x + 'px;top:0px;' +
@@ -5912,14 +5826,9 @@
       if (_badge) {
         var _openReason = function (ev) {
           ev.stopPropagation();
-          // Prefer the quick-look drawer opened to the finding/evidence; fall
-          // back to opening the full study. _openInvestigationDrawer renders the
-          // study's findings/evidence in the drawer body.
-          if (window._openInvestigationDrawer) window._openInvestigationDrawer('study', s);
-          else _openStudyInsideInvestigation(s.name);
-          var body = document.getElementById('investigation-detail-drawer-body');
-          var target = body && (body.querySelector('[data-section="findings"]') || body.querySelector('.aig-claim-row'));
-          if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
+          // The quick-look side-card is gone — the verdict badge opens the full
+          // study (its findings/evidence live there).
+          _openStudyInsideInvestigation(s.name);
         };
         _badge.addEventListener('click', _openReason);
         _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _openReason(ev); } });
@@ -5930,8 +5839,7 @@
           node.querySelectorAll('.aig-claim-row').forEach(function (row) {
             row.addEventListener('click', function (ev) {
               ev.stopPropagation();
-              var idx = parseInt(row.getAttribute('data-claim-index'), 10);
-              if (claims[idx]) window._openInvestigationDrawer('claim', { claim: claims[idx], study: study });
+              _openStudyInsideInvestigation(study.name);
             });
           });
         })(s, chainsBySlug[s.name]);
@@ -6066,14 +5974,16 @@
   }
   window._setAigBand = _setAigBand;
 
-  // Wheel over the graph shell zooms bands (one notch per gesture, threshold +
-  // cooldown so a single scroll doesn't skip bands). preventDefault so the page
-  // doesn't scroll while zooming the graph.
+  // Wheel semantic-zooms bands ONLY when the pointer is over a study card; over
+  // the graph background the wheel is left alone so the page scrolls normally
+  // (so you can scroll past the graph without it hijacking the wheel). One notch
+  // per gesture, with a threshold + cooldown so a single scroll doesn't skip
+  // bands.
   (function _wireAigWheel() {
     var lastWheel = 0;
     document.addEventListener('wheel', function (ev) {
-      var shell = document.getElementById('investigation-dag-shell');
-      if (!shell || !shell.contains(ev.target)) return;   // only over the graph
+      var card = ev.target && ev.target.closest && ev.target.closest('.iset-dag-node');
+      if (!card) return;                                  // background → page scrolls
       ev.preventDefault();
       var now = Date.now();
       if (now - lastWheel < 220) return;                  // cooldown between steps
@@ -14775,6 +14685,16 @@
   }
   window._openSimulationInExplorer = _openSimulationInExplorer;
 
+  /** Open a Simulations-DB row: the associated STUDY when the run has one, else
+   *  the Composite Explorer (bigraph-loom) seeded to this run's results. */
+  function _openSimulation(row) {
+    if (!row) return;
+    var study = _simStudy(row);
+    if (study) { _openStudyEmbedded(study); return; }
+    if (row.run_id && row.spec_id) { _openSimulationInExplorer(row.run_id, row.spec_id); }
+  }
+  window._openSimulation = _openSimulation;
+
   function _renderSimRow(row) {
     var inv = _simInvestigation(row);
     var invCell = inv
@@ -14810,7 +14730,8 @@
         'href="/api/study-analysis-zip?study=' + encodeURIComponent(studySlug) + '" download style="text-decoration:none;">⬇ Analysis</a>'
       : '';
     return (
-      '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
+      '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;cursor:pointer;" ' +
+        'title="Click to open this run — its study, or the Composite Explorer">' +
       '<td style="padding:6px 8px; overflow-wrap:anywhere;">' + invCell + '</td>' +
       '<td style="padding:6px 8px; overflow-wrap:anywhere;">' + studyCell + '</td>' +
       '<td style="padding:6px 8px; overflow:hidden;"><code style="font-size:11px; color:#6b7280; ' +
@@ -14899,6 +14820,19 @@
     var table = document.getElementById('sim-table');
     var empty = document.getElementById('sim-empty');
     if (tbody) tbody.innerHTML = visible.map(_renderSimRow).join('');
+    // Row click opens the run (delegated once, survives re-renders); the
+    // download links/buttons keep their own behaviour.
+    if (tbody && !tbody._simClickWired) {
+      tbody._simClickWired = true;
+      tbody.addEventListener('click', function (e) {
+        if (e.target.closest('a, button, .action-btn')) return;
+        var tr = e.target.closest('tr[data-run-id]');
+        if (!tr) return;
+        var rid = tr.getAttribute('data-run-id');
+        var row = (window._simRows || []).filter(function (r) { return String(r.run_id) === rid; })[0];
+        if (row) _openSimulation(row);
+      });
+    }
     if (table) table.style.display = visible.length ? '' : 'none';
     if (empty) empty.style.display = visible.length ? 'none' : '';
 

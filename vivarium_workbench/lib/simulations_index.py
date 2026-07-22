@@ -659,6 +659,25 @@ def _emitter_for_row(workspace: Path, row: dict) -> str:
     return emitters.label_for_run(row, workspace)
 
 
+def _discover_ce_store_path(workspace: Path, run_id: str) -> str | None:
+    """Native store for a Composite Explorer run that was recorded without a
+    ``store_path``. The Explorer writes its per-agent parquet sweep to
+    ``<ws>/.pbg/runs/<run_id>/parquet/<run_id>`` (and, for xarray runs, a
+    ``store.zarr`` under the same run dir), but runs_meta carries no store_path —
+    so ``Location`` fell back to the sqlite runs.db. Return the workspace-relative
+    store path when it exists on disk, else ``None``."""
+    if not run_id:
+        return None
+    base = Path(workspace) / ".pbg" / "runs" / str(run_id)
+    for cand in (base / "parquet" / str(run_id), base / "store.zarr"):
+        if cand.is_dir():
+            try:
+                return cand.relative_to(workspace).as_posix()
+            except ValueError:
+                return str(cand)
+    return None
+
+
 def list_simulations(workspace: Path) -> list[dict]:
     """Return every persisted simulation in ``workspace``, newest first.
 
@@ -777,9 +796,26 @@ def list_simulations(workspace: Path) -> list[dict]:
                 r["investigation_slug"] = _wp.study_owner(r["study_slug"]) or None
             except Exception:
                 pass
+        # Surface the Composite Explorer run's on-disk parquet sweep as the store
+        # location (runs_meta didn't record it → store_path was None → Location
+        # showed the sqlite db).
+        _ce_store = False
+        if not r.get("store_path") and r.get("run_id"):
+            _sp = _discover_ce_store_path(workspace, r["run_id"])
+            if _sp:
+                r["store_path"] = _sp
+                _ce_store = True
         # Emitter-awareness: tag each row with the emitter that persisted it
         # (xarray / parquet / sqlite) so the Simulations DB can show a column.
         r["emitter"] = _emitter_for_row(workspace, r)
+        # A CE run writes BOTH a sqlite history sidecar and its declared
+        # parquet/zarr sweep; when we found the native sweep, classify the row by
+        # it (matches the Location) instead of the sqlite sidecar.
+        if _ce_store:
+            _k = {"zarr": "xarray", "parquet": "parquet"}.get(
+                run_store.detect_kind(r["store_path"]))
+            if _k:
+                r["emitter"] = _k
     return rows
 
 

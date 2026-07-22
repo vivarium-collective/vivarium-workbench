@@ -78,4 +78,51 @@ def derive_chain_nodes(study_spec: dict, slug: str) -> dict[str, dict]:
                           "owner": "derived", "provenance": _prov(slug, f"findings.entries[{j}]"),
                           "validation_status": "derived",
                           "statement": stmt, "runs": [f"run/{slug}"]}
+
+    # v4 studies carry findings as a LIST of {statement, status, evidence:{...}}
+    # (not the {entries:[...]} dict shape above). Lift each into the SAME
+    # Finding->Evidence->Decision(->Conclusion) micro-chain the conclusion_verdicts
+    # path emits — sourced from the finding's status (confirms/contradicts/partial)
+    # — so these investigations' cards populate the Evidence chain like the others.
+    if isinstance(findings, list):
+        _STATUS_VERDICT = {"confirms": "supported", "contradicts": "refuted",
+                           "partial": "partial", "inconclusive": "partial"}
+        k = 0
+        for raw_j, fe in enumerate(findings):
+            if not (isinstance(fe, dict) and str(fe.get("statement", "")).strip()):
+                continue
+            claim = str(fe["statement"]).strip()
+            ev = fe.get("evidence") if isinstance(fe.get("evidence"), dict) else {}
+            basis = str(ev.get("observed") or claim).strip()
+            verdict = _STATUS_VERDICT.get(str(fe.get("status", "")).strip().lower(), "")
+            fid, eid = f"finding/derived-{slug}-fl{k}", f"evidence/derived-{slug}-fl{k}"
+            did, cid = f"decision/derived-{slug}-fl{k}", f"conclusion/derived-{slug}-fl{k}"
+            src = f"findings[{raw_j}]"
+            # The finding's status IS the verdict for these studies (they use
+            # confidence/status rather than a separate gate), so derive the
+            # decision directly from it rather than gating on gate_status.
+            outcome = _DECISION_OUTCOME.get(verdict)
+            ev_state = _EVIDENCE_STATE.get(outcome, "proposed") if outcome else "proposed"
+            nodes[fid] = {"id": fid, "type": "finding", "lifecycle_state": "asserted",
+                          "owner": "derived", "provenance": _prov(slug, src),
+                          "validation_status": "derived",
+                          "statement": claim, "runs": [f"run/{slug}"]}
+            nodes[eid] = {"id": eid, "type": "evidence", "lifecycle_state": ev_state,
+                          "owner": "derived", "provenance": _prov(slug, src),
+                          "validation_status": "derived",
+                          "findings": [fid], "hypotheses": [f"hyp/derived-{slug}-fl{k}"],
+                          "confidence": 0.0, "statement": basis}
+            if outcome:
+                nodes[did] = {"id": did, "type": "decision", "lifecycle_state": "recorded",
+                              "owner": "derived", "provenance": _prov(slug, src),
+                              "validation_status": "derived",
+                              "evidence": [eid], "outcome": outcome,
+                              "rationale": basis, "decided_by": "chain-derivation"}
+            if verdict == "supported":
+                nodes[cid] = {"id": cid, "type": "conclusion", "lifecycle_state": "published",
+                              "owner": "derived", "provenance": _prov(slug, src),
+                              "validation_status": "derived",
+                              "evidence": [eid], "decisions": [did], "hypotheses": [],
+                              "statement": claim}
+            k += 1
     return nodes

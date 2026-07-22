@@ -2415,11 +2415,16 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   flex:1 1 auto; min-height:0;
   display:flex; flex-direction:column;
 }
-/* metadata card keeps its natural height; the loom card grows to fill */
+/* compact metadata card at the top; small gap to the loom card below */
+#page-composite-explore.active #ce-main > #ce-meta{
+  flex:0 0 auto; margin-bottom:8px;
+}
+/* the loom card grows to fill — trim its panel padding so the iframe uses the
+   full width/height (the loom app scrolls itself, so there's no wasted chrome) */
 #page-composite-explore.active #ce-main > .panel:last-child{
   flex:1 1 auto; min-height:0;
   display:flex; flex-direction:column;
-  margin-bottom:0;
+  margin-bottom:0; padding:6px;
 }
 #page-composite-explore.active #composite-explore-frame{
   flex:1 1 auto !important;

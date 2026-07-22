@@ -118,8 +118,14 @@
   async function _loadEntries() {
     state.error = null;  // start each load clean so a stale remote error never lingers
     if (state.scope === "local") {
-      var r = await fetch("/api/workspaces");
-      var d = r.ok ? await r.json() : { workspaces: [] };
+      // Reuse the workspaces payload refresh() already fetched (it's slow); only
+      // fetch again if we don't have it (e.g. a scope-toggle re-load).
+      var d = state._wsData;
+      if (!d) {
+        var r = await fetch("/api/workspaces").catch(function () { return null; });
+        d = (r && r.ok) ? await r.json() : { workspaces: [] };
+      }
+      state._wsData = null;  // consume it, so an explicit reload refetches
       state.entries = (d.workspaces || []).map(function (w) {
         return { repo: w.repo || w.name, branch: w.branch || "", commit: w.commit || "",
                  label: w.label || w.name, path: w.path, current: w.status === "current" };
@@ -477,8 +483,19 @@
     if (!host) return;
     if (SNAP) { await _loadSnapshotEntries(); _renderSnapshot(); return; }
     _stopBuildsPoll();
+    // Paint the Source shell (title + Scope toggle + selectors) IMMEDIATELY so it
+    // appears on the first visit even while the workspace/builds fetches are in
+    // flight — those can take many seconds, and the panel previously stayed blank
+    // until they finished. A second _render() below fills in the loaded entries.
+    state.loading = true;
+    _render();
+    // /api/workspaces is slow (git status across every workspace). Fetch it ONCE
+    // here and reuse it for both `current` and the local entries (was fetched
+    // twice, doubling the wait).
     var r = await fetch("/api/workspaces").catch(function () { return null; });
-    var cur = (r && r.ok) ? ((await r.json()).current || null) : null;
+    var wsData = (r && r.ok) ? await r.json().catch(function () { return {}; }) : {};
+    state._wsData = wsData;
+    var cur = wsData.current || null;
     var curPath = (cur && cur.path) || "";
     // A materialized remote build lives at .../build-cache/sim<id>-<commit>.
     var bm = curPath.match(/build-cache\/sim(\d+)-/);
@@ -493,6 +510,7 @@
     }
     state.current = cur ? { repo: cur.name } : null;
     await _loadEntries();
+    state.loading = false;
     // Seed the selectors from the active remote build so it shows as current.
     if (state.currentSimId != null) {
       var cb = state.entries.filter(function (e) { return e.simulator_id === state.currentSimId; })[0];
