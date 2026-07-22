@@ -66,8 +66,15 @@ class WorkerPool:
     def call(self, workspace, method: str, params: dict | None = None,
              *, interpreter: str | None = None) -> dict:
         """Query the warm worker for this environment. On a worker that died or
-        was evicted mid-flight, drop it and respawn once (protocol §9)."""
-        ws, interp = str(Path(workspace)), interpreter or sys.executable
+        was evicted mid-flight, drop it and respawn once (protocol §9).
+
+        When ``interpreter`` is not given, ``EnvironmentResolver`` picks it from
+        the workspace — its own ``.venv`` if present, else the running Python — so
+        a workspace with a provisioned venv builds under *its* interpreter.
+        """
+        from vivarium_workbench.lib import env_resolver
+        ws = str(Path(workspace))
+        interp = interpreter or env_resolver.resolve_interpreter(workspace)
         try:
             return self._acquire(ws, interp).call(method, params)
         except EnvWorkerUnavailable:
