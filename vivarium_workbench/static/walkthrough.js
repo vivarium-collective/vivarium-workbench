@@ -5508,10 +5508,11 @@
         + 'verdict is <em>failed</em> or <em>needs-calibration</em> but has no diagnostic study seeded '
         + 'to investigate why. Not app updates. <strong>Click any item</strong> to open that study at the verdict.</div>';
       container.innerHTML =
-        '<details class="needs-attention-banner" open style="margin:10px 0 14px 0;background:' + sev.bg
+        '<details class="needs-attention-banner" style="margin:10px 0 14px 0;background:' + sev.bg
         + ';border:1px solid ' + sev.bd + ';border-left-width:5px;border-radius:6px;color:' + sev.col + '">'
         + '<summary style="padding:10px 14px;cursor:pointer;list-style:none;outline:none">'
         + '<strong>' + head + '</strong>'
+        + '<span class="na-toggle-hint" style="opacity:.6;font-style:italic;font-size:0.85em;margin-left:8px">— click to expand</span>'
         + (breakdown ? '<div class="muted" style="font-size:0.82em;margin-top:5px">' + breakdown + '</div>' : '')
         + '</summary>'
         + explain
