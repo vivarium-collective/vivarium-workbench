@@ -2286,7 +2286,7 @@ wheels = [
 [[package]]
 name = "investigation-contracts"
 version = "0.2.0"
-source = { git = "https://github.com/vivarium-collective/investigation-contracts.git?branch=main#65c793fd231d952e49a9cfe4244797dadde1bedc" }
+source = { git = "https://github.com/vivarium-collective/investigation-contracts.git?rev=65c793fd231d952e49a9cfe4244797dadde1bedc#65c793fd231d952e49a9cfe4244797dadde1bedc" }
 dependencies = [
     { name = "bigraph-schema", marker = "python_full_version == '3.12.12'" },
     { name = "pydantic", marker = "python_full_version == '3.12.12'" },
@@ -7431,7 +7431,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "imageio", marker = "extra == 'viz'" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
-    { name = "investigation-contracts", git = "https://github.com/vivarium-collective/investigation-contracts.git?branch=main" },
+    { name = "investigation-contracts", git = "https://github.com/vivarium-collective/investigation-contracts.git?rev=65c793fd231d952e49a9cfe4244797dadde1bedc" },
     { name = "jinja2" },
     { name = "jsonschema", extras = ["format-nongpl"], specifier = ">=4.21" },
     { name = "matplotlib", marker = "extra == 'viz'" },

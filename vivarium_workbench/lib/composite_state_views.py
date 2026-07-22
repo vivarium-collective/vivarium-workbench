@@ -35,7 +35,7 @@ from typing import Any
 
 import yaml
 
-# Cache of built composite-state payloads, keyed by the string ``ref``:
+# Cache of built composite-state payloads, keyed by ``(ws_root, ref)``:
 # {ref: (built_at_epoch, payload_dict)}. Building a whole-cell composite is
 # ~1s+ (run in a subprocess), so repeat explorer opens + pop-outs are cached.
 # Short TTL so code edits are picked up. 16-entry cap. EXCLUSIVE to this route
@@ -137,7 +137,7 @@ def build_composite_state(
       failure → 500 ``{"error": "parse failed: <e>"}``.
     - **nothing resolves** → 404 ``{"error": "composite not found: ... ", "unresolved": true, "ref": ref}``.
 
-    A TTL cache keyed by ``ref`` (16-entry cap) is checked first; ``fresh=True``
+    A TTL cache keyed by ``(ws_root, ref)`` (16-entry cap) is checked first; ``fresh=True``
     bypasses it and a cache hit adds ``"cached": True``.
     """
     ref = (ref or "").strip()
@@ -150,12 +150,18 @@ def build_composite_state(
     # on every explorer open / pop-out. Checked FIRST so a hit skips the
     # per-request sys.path + subprocess setup entirely. Bypass with ?fresh=1.
     cache = _COMPOSITE_STATE_CACHE
+    ws_str = str(ws_root)
+    # Key by (workspace, ref): the same ref resolves to a DIFFERENT composite
+    # in a different workspace, so a bare ``ref`` key would serve one session's
+    # state to another under multi-session (slice 3 of the multi-workspace
+    # refactor). data_sources/observables/readouts/report_views already key by
+    # ws_root; this closes the composite-state hole.
+    ckey = (ws_str, ref)
     if not fresh:
-        hit = cache.get(ref)
+        hit = cache.get(ckey)
         if hit is not None and (time.time() - hit[0]) < _COMPOSITE_STATE_TTL_S:
             return {**hit[1], "cached": True}, 200
 
-    ws_str = str(ws_root)
     if ws_str not in sys.path:
         sys.path.insert(0, ws_str)
 
@@ -165,7 +171,7 @@ def build_composite_state(
         state_doc = res["state"]
         _embed_declared_emit_paths(state_doc, res.get("emitters"))
         payload = {"state": state_doc, "kind": "generator", "module": res.get("module")}
-        cache[ref] = (time.time(), payload)
+        cache[ckey] = (time.time(), payload)
         if len(cache) > 16:  # cap memory; drop the oldest entry
             cache.pop(next(iter(cache)))
         return payload, 200
@@ -187,7 +193,7 @@ def build_composite_state(
                 _embed_declared_emit_paths(_inner, res.get("emitters"))
                 _payload = {"state": _inner, "kind": "static-fallback",
                             "note": f"served pre-generated state (live build failed: {e})"}
-                cache[ref] = (time.time(), _payload)
+                cache[ckey] = (time.time(), _payload)
                 return _payload, 200
             except Exception:
                 pass

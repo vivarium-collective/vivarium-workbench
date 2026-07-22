@@ -45,6 +45,8 @@ from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.request_logging import install_request_logging
 
 from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib import session_registry
+from vivarium_workbench.lib.workspace_context import WorkspaceContext
 from vivarium_workbench.lib import csrf as _csrf
 from vivarium_workbench.lib import source_switch_views as _source_switch_views
 from vivarium_workbench.lib import source_build_views as _source_build_views
@@ -330,19 +332,30 @@ from vivarium_workbench.lib.study_charts import build_study_charts_payload
 WORKSPACE_ENV = "VIVARIUM_WORKBENCH_WORKSPACE"
 
 
-def get_workspace() -> Path:
-    """Resolve the workspace root (overridable in tests via dependency_overrides).
+def get_workspace_context(request: Request = None) -> "WorkspaceContext":
+    """Resolve the per-request ``WorkspaceContext`` — the single seam a request
+    operates through (session → its workspace + ports).
 
-    Prefers a root registered via ``active_workspace.set_workspace_root`` (the
-    single source of truth shared with the stdlib server). Falls back to the
-    ``VIVARIUM_WORKBENCH_WORKSPACE`` env var (default ``"."``) when none is set,
-    preserving the prior env-var + dependency_overrides behavior.
+    ``request`` is FastAPI-injected when used as a dependency; a direct call
+    (unit tests) passes ``None`` → an unbound session → the process default
+    workspace. So cookie-less clients (curl, the CLI, the urllib test harness)
+    and unbound browser sessions are byte-identical to before this seam existed.
+    See ``lib/workspace_context.py`` and ``docs/session-registry.md``.
     """
-    root = active_workspace.get_workspace_root()
-    if root is not None:
-        return root
-    from vivarium_workbench.lib.env_compat import get_env
-    return Path(get_env("WORKSPACE", ".")).resolve()
+    from vivarium_workbench.lib import workspace_context
+    key = request.cookies.get(session_registry.SESSION_COOKIE) if request is not None else None
+    return workspace_context.resolve(key)
+
+
+def get_workspace(request: Request = None) -> Path:
+    """Resolve the workspace root for a request (overridable in tests via
+    dependency_overrides). Thin shim over :func:`get_workspace_context` — the
+    routing now flows through the per-session context, but a bound session
+    resolves to its bound path and an unbound one to the process default (the
+    prior ``active_workspace`` root, else the ``VIVARIUM_WORKBENCH_WORKSPACE``
+    env var / cwd), so existing behavior is preserved.
+    """
+    return get_workspace_context(request).ws_root
 
 
 _OPENAPI_TAGS = [
@@ -503,6 +516,44 @@ def create_app() -> FastAPI:
                     {"error": "cross-origin request forbidden"}, status_code=403
                 )
         return await call_next(request)
+
+    @app.middleware("http")
+    async def _session_workspace_mw(request: Request, call_next):
+        """Route the request to its session's workspace + mint the session cookie.
+
+        Two jobs (§ session-registry §4, §7):
+
+        1. Resolve the request's ``WorkspaceContext`` from its session cookie and
+           set the **per-request workspace root** (``_root.set_request_workspace_root``)
+           for the duration of the request — so every ``workspace_root()`` read in
+           the lib layer resolves to *this session's* workspace, request-scoped,
+           instead of one process-global root.
+        2. Mint an opaque ``HttpOnly`` / ``SameSite=Lax`` ``vw_session`` cookie when
+           absent, so a real browser carries a session forward.
+
+        Behavior-preserving: a fresh/unbound session and every cookie-less client
+        (curl, CLI, the urllib test harness) resolve to the process default
+        workspace, so ``workspace_root()`` returns exactly what it did before. The
+        cookie is *routing*, not auth — the existing CSRF/origin guard is untouched.
+        """
+        from vivarium_workbench.lib import _root, workspace_context
+        existing = request.cookies.get(session_registry.SESSION_COOKIE)
+        ctx = workspace_context.resolve(existing)
+        token = _root.set_request_workspace_root(ctx.ws_root)
+        try:
+            response = await call_next(request)
+        finally:
+            _root.reset_request_workspace_root(token)
+        if not existing:
+            response.set_cookie(
+                session_registry.SESSION_COOKIE,
+                session_registry.mint_key(),
+                httponly=True,
+                samesite="lax",
+                secure=(request.url.scheme == "https"),
+                path="/",
+            )
+        return response
 
     # ------------------------------------------------------------------
     # Canonical error envelope. Every error the API emits uses the shape
@@ -4698,6 +4749,7 @@ def create_app() -> FastAPI:
     )
     def source_switch(
         req: SourceSwitchRequest,
+        request: Request,
     ) -> Union[SourceSwitchResponse, JSONResponse]:
         """Re-point the active workspace to a registered catalog entry.
 
@@ -4719,6 +4771,16 @@ def create_app() -> FastAPI:
         body, status = _source_switch_views.source_switch(req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
+        # Record the switch on THIS session too (§ session-registry §8). Slice 1
+        # keeps the global switch above (so the lib layer, still reading the
+        # global root, stays consistent) and *additionally* binds the calling
+        # session — laying the per-session groundwork. When the lib layer is
+        # threaded through the context, the global half is removed and the switch
+        # becomes truly per-session.
+        session_key = request.cookies.get(session_registry.SESSION_COOKIE)
+        source_path = (body.get("source") or {}).get("path")
+        if session_key and source_path:
+            session_registry.rebind(session_key, source_path)
         return SourceSwitchResponse.model_validate(body)
 
     @app.post(

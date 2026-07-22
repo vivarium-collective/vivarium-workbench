@@ -1,0 +1,30 @@
+name: js
+
+# Frontend unit tests (tests/js/). The dashboard's static/*.js has no bundler
+# and no framework — these are plain Node scripts (require + assert). The audit
+# flagged that the one existing JS test was never wired to run at all; this is
+# that wiring. Fast (seconds), so it's its own check rather than folded into the
+# Python suite.
+#
+# Scope is deliberately small for now: run the existing tests/js/ files. Broader
+# coverage of the large unverified frontend (walkthrough.js et al.) is later
+# hardening work, not this job.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  js:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # node is preinstalled on ubuntu-latest; setup-node pins it and makes the
+      # version explicit/upgradable rather than implicit.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: run JS tests
+        run: bash scripts/run_js_tests.sh
