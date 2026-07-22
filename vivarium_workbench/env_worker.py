@@ -87,7 +87,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites",
-                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "shutdown"]
+                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "report_core_snapshot", "reexport_map", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -945,6 +945,93 @@ def _render_viz_doc(params: dict) -> dict:
     return {"html": html if isinstance(html, str) else ""}
 
 
+def _report_core_snapshot(params: dict) -> dict:
+    """Registry snapshot (process/type names) + the workspace document for the
+    report render (spec §11) — imports ``<pkg>.core`` (registry_snapshot) +
+    ``<pkg>.document`` (build_document) in the worker. Faithful port of
+    report._load_registry + _load_document. Returns finite JSON."""
+    package_path = (params or {}).get("package_path")
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+
+    registry = {"processes": [], "types": []}
+    warning = None
+    if package_path:
+        try:
+            core = __import__(f"{package_path}.core", fromlist=["build_core"])
+            build_core = getattr(core, "build_core", None)
+            registry_snapshot = getattr(core, "registry_snapshot", None)
+            if build_core is None or registry_snapshot is None:
+                warning = (f"{package_path}.core imported but missing build_core() or "
+                           "registry_snapshot().")
+            else:
+                build_core()
+                snap = registry_snapshot()
+
+                def _names(items):
+                    if not items:
+                        return []
+                    if isinstance(items[0], str):
+                        return list(items)
+                    return [it.get("name", str(it)) for it in items]
+                registry = {"processes": _names(snap.get("processes", [])),
+                            "types": _names(snap.get("types", []))}
+        except ModuleNotFoundError:
+            warning = (f"Package '{package_path}' is not importable — registry shown as "
+                       "empty. Install it in the workspace venv or run /pbg-pull-processes.")
+        except Exception as exc:  # noqa: BLE001
+            warning = f"{package_path}.core raised {type(exc).__name__}: {exc}"
+
+    document: dict = {}
+    if package_path:
+        try:
+            doc_mod = __import__(f"{package_path}.document", fromlist=["build_document"])
+            build_document = getattr(doc_mod, "build_document", None)
+            if build_document is not None:
+                document = build_document() or {}
+        except Exception:  # noqa: BLE001
+            document = {}
+
+    return {"registry": registry, "registry_warning": warning, "document": document}
+
+
+def _reexport_map(params: dict) -> dict:
+    """Map re-exported classes → the allow-listed package that re-exports them
+    (spec §11) — imports each allow-listed package + scans its namespace in the
+    worker. Faithful port of registry._build_reexport_map."""
+    import importlib
+    import inspect
+
+    include = set((params or {}).get("include") or [])
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    framework = {"process_bigraph", "bigraph_schema", "bigraph_viz",
+                 "pbg_superpowers", "vivarium_workbench"}
+    reexports: dict = {}
+    for pkg in sorted(include):
+        try:
+            mod = importlib.import_module(pkg)
+        except Exception:  # noqa: BLE001
+            continue
+        for attr in dir(mod):
+            try:
+                obj = getattr(mod, attr)
+            except Exception:  # noqa: BLE001
+                continue
+            if not inspect.isclass(obj):
+                continue
+            def_mod = getattr(obj, "__module__", "") or ""
+            def_top = def_mod.split(".")[0].replace("-", "_")
+            if not def_top or def_top == pkg:
+                continue
+            if def_top in include or def_top in framework:
+                continue
+            qualname = getattr(obj, "__qualname__", attr) or attr
+            reexports[f"{def_mod}.{qualname}"] = pkg
+            reexports[f"{def_top}::{qualname}"] = pkg
+    return {"reexports": reexports}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -1030,6 +1117,10 @@ def _handle(method: str, params: dict) -> dict:
         return _viz_class_inputs()
     if method == "render_viz_doc":
         return _render_viz_doc(params)
+    if method == "report_core_snapshot":
+        return _report_core_snapshot(params)
+    if method == "reexport_map":
+        return _reexport_map(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

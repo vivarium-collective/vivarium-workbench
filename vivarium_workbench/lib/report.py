@@ -113,6 +113,24 @@ def _resolve_branding(
     return dashboard_name, dashboard_logo_src
 
 
+def _report_core_via_worker(ws_root: Path, package_path: str | None) -> dict:
+    """Registry snapshot (process/type names) + the workspace document for the
+    report render, via the env worker (no in-process workspace import). Soft-
+    degrade: an unavailable worker yields an empty registry + document."""
+    from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+    try:
+        r = get_pool().call(ws_root, "report_core_snapshot", {"package_path": package_path})
+        if not isinstance(r, dict):
+            raise EnvWorkerUnavailable("bad response")
+        return {"registry": r.get("registry") or {"processes": [], "types": []},
+                "registry_warning": r.get("registry_warning"),
+                "document": r.get("document") or {}}
+    except EnvWorkerUnavailable:
+        return {"registry": {"processes": [], "types": []},
+                "registry_warning": None, "document": {}}
+
+
 def _load_registry(ws_root: Path, package_path: str | None) -> tuple[dict, str | None]:
     """Try to import the workspace package and call build_core()/registry_snapshot().
 
@@ -572,9 +590,11 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     simulations = ws.get("simulations") or []
     package_path = ws.get("package_path")
 
-    # Load registry from workspace package.
-    registry, registry_warning = _load_registry(ws_root, package_path)
-    pbg_doc = _load_document(ws_root, package_path)
+    # Load registry snapshot + document from the workspace package — in the env
+    # worker, so the HTTP process imports no workspace Python for the report.
+    _snap = _report_core_via_worker(ws_root, package_path)
+    registry, registry_warning = _snap["registry"], _snap["registry_warning"]
+    pbg_doc = _snap["document"]
 
     # Active investigation: when the workspace has exactly one
     # investigation declared at investigations/<name>/investigation.yaml,
