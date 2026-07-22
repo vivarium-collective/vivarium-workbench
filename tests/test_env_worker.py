@@ -172,6 +172,44 @@ def test_registry_catalog_matches_build_registry(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Slice: viz_classes — build_core + viz/analysis discovery in the worker,
+# a faithful port of visualization_classes.list_visualization_classes.
+# ---------------------------------------------------------------------------
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_viz_classes_discovers_workspace_and_default_classes():
+    """The worker builds the fixture core and returns its viz classes as JSON —
+    the workspace's own Demo* classes plus the pbg_superpowers defaults."""
+    pytest.importorskip("pbg_superpowers")
+    with EnvWorker(_FIXTURE) as w:
+        classes = w.call("viz_classes")["classes"]
+    names = {c["name"] for c in classes}
+    # pbg_superpowers defaults are always injected...
+    assert {"Distribution", "Heatmap", "ParamVsObservable", "PhaseSpace"} <= names
+    # ...alongside the workspace core's own registered viz classes.
+    assert any(n.startswith("Demo") for n in names), sorted(names)
+    assert all(c["kind"] in ("visualization", "analysis") for c in classes)
+    assert all(c["address"].startswith("local:") for c in classes)
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_viz_classes_lib_entrypoint_routes_through_the_worker():
+    """The lib entry point produces the same catalog the worker does — i.e. it is
+    now backed by the worker, not an in-process build_core."""
+    pytest.importorskip("pbg_superpowers")
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+    from vivarium_workbench.lib.visualization_classes import list_visualization_classes
+
+    try:
+        via_lib = list_visualization_classes(_FIXTURE)
+        with EnvWorker(_FIXTURE) as w:
+            via_worker = w.call("viz_classes")
+    finally:
+        get_pool().close_all()
+    assert sorted(c["name"] for c in via_lib["classes"]) == \
+        sorted(c["name"] for c in via_worker["classes"])
+
+
+# ---------------------------------------------------------------------------
 # Opt-in real-workspace check: run the worker against a real v2ecoli checkout
 # on ITS OWN venv interpreter. Skips unless ../v2ecoli/.venv exists (build it
 # with `cd ../v2ecoli && uv sync`). This is the e2e that the minimal fixture
@@ -197,6 +235,10 @@ def test_env_worker_against_real_v2ecoli():
         assert len(cat["processes"]) > 50 and len(cat["types"]) > 20
         assert "v2ecoli" in cat["workspace_pkgs"]
         assert any(p["source"] == "in_workspace" for p in cat["processes"])
+
+        viz = w.call("viz_classes")["classes"]
+        assert any(c["kind"] == "analysis" for c in viz)       # v2ecoli Analysis steps
+        assert any(c["kind"] == "visualization" for c in viz)  # + the default viz classes
 
 
 def test_build_registry_serves_v2ecoli_via_its_own_venv():

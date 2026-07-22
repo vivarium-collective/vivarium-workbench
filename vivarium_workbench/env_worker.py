@@ -8,12 +8,13 @@ in later slices, what the workspace venv already has). It never imports
 ``vivarium_workbench``.
 
 **Scope so far:** the transport + lifecycle (``initialize`` / ``ping`` /
-``shutdown``) and the first environment query, ``list_generators`` — which
-imports the workspace's own package + the generator registry **in this process**
-(so the imports the HTTP process must not do live here instead). The heavier
-``build_core``-backed methods (``registry_catalog``, ``resolve_composite_state`` …)
-land in later slices. ``list_generators`` imports pbg_superpowers + the workspace
-package (both workspace-venv deps, spec §4); everything else is stdlib.
+``shutdown``) and the environment queries ``list_generators``,
+``registry_catalog``, and ``viz_classes`` — each imports the workspace's own
+package (and, for the latter two, calls ``build_core``) **in this process**, so
+the imports the HTTP process must not do live here instead. The remaining
+``build_core``-backed methods (``resolve_composite_state``, ``observables`` …)
+land in later slices. These import pbg_superpowers + the workspace package (both
+workspace-venv deps, spec §4); everything else is stdlib.
 
 Invocation (spec §4/§5)::
 
@@ -80,7 +81,8 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
     sock.sendall(struct.pack(">I", len(body)) + body)
 
 
-_CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog", "shutdown"]
+_CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
+                 "viz_classes", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -234,6 +236,129 @@ def _registry_catalog() -> dict:
     return {"processes": processes, "types": types, "workspace_pkgs": list(workspace_pkgs)}
 
 
+def _list_visualizations() -> dict:
+    """Registered Visualization / Analysis classes for this environment (spec §11).
+
+    A faithful in-worker port of ``visualization_classes.list_visualization_classes``
+    — build the workspace core, snapshot its ``link_registry``, inject the default
+    ``pbg_superpowers`` viz classes + any workspace-local ``<pkg>.visualizations``
+    submodules, filter to ``Visualization`` subclasses, and append the v2ecoli
+    ``Analysis`` steps. Returns the JSON ``{"classes": [...]}`` (the live classes
+    can't cross the socket, so this introspection runs where they live). Tolerant:
+    a build_core / import failure degrades to the classes still discoverable."""
+    from pathlib import Path
+
+    import yaml
+
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+
+    # Build the class registry from the workspace's core module (tolerant).
+    try:
+        ws_data = (
+            yaml.safe_load((Path(_workspace) / "workspace.yaml").read_text(encoding="utf-8")) or {}
+        )
+        pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+        core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+        core = core_module.build_core()
+        registry: dict = dict(core.link_registry)
+    except Exception:  # noqa: BLE001 — a broken core still yields the defaults below
+        registry = {}
+        ws_data = {}
+
+    # Inject the standard pbg-superpowers visualization classes.
+    try:
+        from pbg_superpowers.visualizations import (
+            Distribution, Heatmap, ParamVsObservable, PhaseSpace, TimeSeriesPlot,
+        )
+        for cls in [TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap]:
+            registry[cls.__name__] = cls
+    except ImportError:
+        pass
+
+    # Inject workspace-local viz classes (non-pip-installed) from <pkg>.visualizations.
+    try:
+        import importlib as _importlib
+        import pkgutil as _pkgutil
+
+        from pbg_superpowers.visualization import Visualization as _VizBase
+        _pkg_name = ws_data.get("package_path") or (
+            "pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+        viz_pkg = _importlib.import_module(f"{_pkg_name}.visualizations")
+        for _, modname, _ in _pkgutil.iter_modules(viz_pkg.__path__):
+            try:
+                mod = _importlib.import_module(f"{_pkg_name}.visualizations.{modname}")
+                for attr_val in vars(mod).values():
+                    if not isinstance(attr_val, type):
+                        continue
+                    if attr_val is _VizBase:
+                        continue
+                    if issubclass(attr_val, _VizBase):
+                        registry[attr_val.__name__] = attr_val
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        from pbg_superpowers.visualization import Visualization as _VB
+    except ImportError:
+        _VB = None
+
+    def _is_viz(cls):
+        if _VB is not None and cls is _VB:
+            return False
+        marker = getattr(cls, "is_visualization", None)
+        if callable(marker):
+            try:
+                if marker() is True:
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        if _VB is not None:
+            try:
+                if isinstance(cls, type) and issubclass(cls, _VB):
+                    return True
+            except TypeError:
+                pass
+        return False
+
+    per_cls: dict = {}
+    for name, cls in registry.items():
+        if not _is_viz(cls) or name == "Visualization":
+            continue
+        existing = per_cls.get(id(cls))
+        if existing is None or len(name) < len(existing[0]):
+            per_cls[id(cls)] = (name, cls)
+
+    out = []
+    for name, cls in sorted(per_cls.values(), key=lambda kv: kv[0]):
+        try:
+            doc = (cls.__doc__ or "").strip().split("\n", 1)[0] if cls.__doc__ else ""
+        except Exception:  # noqa: BLE001
+            doc = ""
+        out.append({"address": f"local:{name}", "name": name, "doc": doc, "kind": "visualization"})
+
+    # Append Analysis classes (process-bigraph Steps) from v2ecoli, if installed.
+    try:
+        import v2ecoli.workflow.analyses  # noqa: F401  (import-time registration)
+        from v2ecoli.workflow.analysis import ANALYSIS_REGISTRY, Analysis
+        for _name, _cls in sorted(ANALYSIS_REGISTRY.items()):
+            if isinstance(_cls, type) and issubclass(_cls, Analysis):
+                try:
+                    _doc = (_cls.__doc__ or "").strip().split("\n")[0]
+                except Exception:  # noqa: BLE001
+                    _doc = ""
+                out.append({
+                    "address": f"local:{_cls.__module__}.{_cls.__qualname__}",
+                    "name": _name, "doc": _doc, "kind": "analysis",
+                })
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {"classes": out}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -299,6 +424,8 @@ def _handle(method: str, params: dict) -> dict:
         return _list_generators()
     if method == "registry_catalog":
         return _registry_catalog()
+    if method == "viz_classes":
+        return _list_visualizations()
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

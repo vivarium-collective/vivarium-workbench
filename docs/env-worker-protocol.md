@@ -10,7 +10,14 @@ Context and the decisions this realizes: `docs/REFACTOR-PLAN.md` **§2A.7**
 (`WorkspaceContext` / `WorkspaceStore`, which owns the worker's lifecycle). This
 doc specifies the wire contract those sections left open.
 
-Status: **proposed** (spike). Not yet implemented.
+Status: **in progress.** Transport + lifecycle and the `initialize` / `ping` /
+`list_generators` / `registry_catalog` / `viz_classes` / `shutdown` methods are
+implemented (`vivarium_workbench/env_worker.py`, warm-pooled via
+`lib/env_worker_pool.py`); `registry.build_registry` and
+`visualization_classes.list_visualization_classes` route through the worker
+today. The remaining methods (`resolve_composite_state`, `observables`,
+`composite_document`, `declared_emit_paths`) are still in-process pending their
+slices.
 
 ---
 
