@@ -1533,8 +1533,16 @@
     _renderReadinessPanel();
     _renderSpineSummary();
     _populateConclusionVerdictBadges();
-    // Open Understand/Overview and show only Understand's sub-nav on load.
-    _setStudyTab('overview');
+    // Open Understand/Overview and show only Understand's sub-nav on load —
+    // unless a ?tab=<kind> deep-link asks for a specific tab. Needs-attention
+    // items link here with ?tab=conclusions so a click lands on the verdict
+    // that triggered the alert.
+    var _tab = 'overview';
+    try {
+      var _q = new URLSearchParams(window.location.search).get('tab');
+      if (_q && document.querySelector('.study-tab[data-kind="' + _q + '"]')) _tab = _q;
+    } catch (_e) { /* no URLSearchParams — keep overview */ }
+    _setStudyTab(_tab);
   }
 
   // ── C2 — conclusion verdicts: read precomputed block from window._study.derived ─

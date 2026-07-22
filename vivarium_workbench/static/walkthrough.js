@@ -5455,33 +5455,63 @@
       var bySev = d.summary.by_severity || {};
       var high = bySev.high || 0;
       var head = '⚠ Needs attention — ' + high + ' high, ' + total + ' total';
+      // Human-readable name + which study tab a click should land on, per kind.
+      // These are follow-ups the deterministic scan flags — NOT app updates.
+      var _naKindMeta = {
+        diagnostic_branch_needed: {label: 'Diagnostic study needed', tab: 'conclusions'},
+        next_action_ready:        {label: 'Next action ready',        tab: 'conclusions'},
+        invariant_regression:     {label: 'Invariant regression',     tab: 'conclusions'},
+        uncovered_ac:             {label: 'Acceptance criterion uncovered', tab: 'tests'},
+        open_feedback:            {label: 'Open expert feedback',      tab: 'overview'}
+      };
       var items = (d.items || []).map(function(it) {
         var st = _naSeverityStyle(it.severity);
         var ref = (it.study || it.ref || '').toString();
-        var kind = _esc((it.kind || '').toString());
+        var kindRaw = (it.kind || '').toString();
+        var meta = _naKindMeta[kindRaw] || {label: kindRaw.replace(/_/g, ' '), tab: 'conclusions'};
         var refHtml = ref ? '<code>' + _esc(ref) + '</code>' : '<span class="muted">—</span>';
         var hint = it.action_hint ? ' &nbsp;·&nbsp; ' + _esc(it.action_hint.toString()) : '';
         var titleLine = it.title
           ? '<div style="font-size:0.9em;margin-top:2px">' + _esc(it.title.toString()) + '</div>'
           : '';
-        return '<li style="margin-top:7px;padding-left:10px;border-left:3px solid ' + st.bd + '">'
+        // Clickable when the item names a study: open it at the relevant tab
+        // (verdict-based items → the conclusions/Decide tab).
+        var open = ref
+          ? ' role="button" tabindex="0" onclick="_openStudyInsideInvestigation(\'' + _esc(ref) + '\',\'' + meta.tab + '\')"'
+            + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}"'
+            + ' title="Open study &quot;' + _esc(ref) + '&quot; at its verdict"'
+          : '';
+        var arrow = ref ? '<span style="float:right;opacity:.55;font-size:0.9em">open →</span>' : '';
+        return '<li class="na-item' + (ref ? ' na-item-click' : '') + '"' + open
+          + ' style="margin-top:7px;padding:5px 8px 6px 10px;border-left:3px solid ' + st.bd + ';border-radius:4px'
+          + (ref ? ';cursor:pointer' : '') + '">'
+          + arrow
           + '<span style="color:' + st.dot + ';font-weight:700">●</span> '
-          + '<code style="font-size:0.85em">' + kind + '</code> &nbsp;·&nbsp; ' + refHtml + hint
+          + '<strong style="font-size:0.9em">' + _esc(meta.label) + '</strong> &nbsp;·&nbsp; ' + refHtml + hint
           + titleLine + '</li>';
       }).join('');
       var byKind = d.summary.by_kind || {};
       var breakdown = Object.keys(byKind).sort(function(a, b) {
         return (byKind[b] || 0) - (byKind[a] || 0);
-      }).map(function(k) { return (byKind[k] || 0) + '× ' + _esc(k); }).join(' &nbsp;·&nbsp; ');
+      }).map(function(k) {
+        var m = _naKindMeta[k];
+        return (byKind[k] || 0) + '× ' + _esc(m ? m.label : k.replace(/_/g, ' '));
+      }).join(' &nbsp;·&nbsp; ');
       var sev = _naSeverityStyle(high ? 'high' : 'medium');
+      // Plain-language explainer so the panel is self-describing (the user asked
+      // "what ARE these?"): they're automated follow-ups, and each is clickable.
+      var explain = '<div class="muted" style="font-size:0.84em;margin:2px 14px 4px;line-height:1.45">'
+        + 'Automated checks (no AI) that flag studies needing a follow-up — e.g. a study whose '
+        + 'verdict is <em>failed</em> or <em>needs-calibration</em> but has no diagnostic study seeded '
+        + 'to investigate why. Not app updates. <strong>Click any item</strong> to open that study at the verdict.</div>';
       container.innerHTML =
-        '<details class="needs-attention-banner" style="margin:10px 0 14px 0;background:' + sev.bg
+        '<details class="needs-attention-banner" open style="margin:10px 0 14px 0;background:' + sev.bg
         + ';border:1px solid ' + sev.bd + ';border-left-width:5px;border-radius:6px;color:' + sev.col + '">'
         + '<summary style="padding:10px 14px;cursor:pointer;list-style:none;outline:none">'
-        + '<strong>' + head + '</strong> ' + lbl
-        + (breakdown ? '<div class="muted" style="font-size:0.82em;margin-top:5px">' + breakdown
-            + ' &nbsp;·&nbsp; <span style="opacity:.7;font-style:italic">click to expand</span></div>' : '')
+        + '<strong>' + head + '</strong>'
+        + (breakdown ? '<div class="muted" style="font-size:0.82em;margin-top:5px">' + breakdown + '</div>' : '')
         + '</summary>'
+        + explain
         + '<ul style="margin:4px 0 12px 0;padding:0 14px 0 18px;list-style:none;font-size:0.92em">'
         + items + '</ul>'
         + '</details>';
@@ -6222,19 +6252,22 @@
   // Click a DAG node → load the full study in an in-page iframe BELOW the
   // DAG (no jump to the legacy Studies tab). The iframe is the same
   // /studies/<name> route the standalone embed uses.
-  function _openStudyInsideInvestigation(name) {
+  function _openStudyInsideInvestigation(name, tab) {
     var panel = document.getElementById('investigation-study-embed-panel');
     var frame = document.getElementById('investigation-study-embed-frame');
     var nameEl = document.getElementById('investigation-study-embed-name');
+    // Optional deep-link to a specific study tab (e.g. a Needs-attention item
+    // pointing at the verdict opens ?tab=conclusions).
+    var href = _studyHref(name) + (tab ? (_studyHref(name).indexOf('?') >= 0 ? '&' : '?') + 'tab=' + encodeURIComponent(tab) : '');
     if (!panel || !frame) {
       // This view (e.g. the report / deep-link investigation view) has no
       // in-place study-embed panel — navigate to the study page directly so the
       // sidebar study link still works instead of dying silently.
-      window.location = _studyHref(name);
+      window.location = href;
       return;
     }
     window._currentInvestigationStudy = name;
-    frame.src = _studyHref(name);
+    frame.src = href;
     if (nameEl) nameEl.textContent = name;
     panel.style.display = '';
     panel.scrollIntoView({behavior: 'smooth', block: 'start'});

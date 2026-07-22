@@ -706,6 +706,12 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   flex:1 1 auto; min-height:0;
   overflow-y:auto; overflow-x:hidden;
 }
+
+/* Clickable "Needs attention" items — hover affordance so it reads as a link
+   to the associated study (each opens that study at its verdict). */
+.na-item-click{ transition:background 0.12s ease, box-shadow 0.12s ease; }
+.na-item-click:hover{ background:rgba(0,0,0,0.05); box-shadow:inset 0 0 0 1px rgba(0,0,0,0.10); }
+.na-item-click:hover span[style*="float:right"]{ opacity:0.9 !important; }
 .viv-rail-section-label{
   padding:0 16px 6px;
   font-size:0.68em; font-weight:600; letter-spacing:0.08em;
