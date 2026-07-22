@@ -5862,18 +5862,13 @@
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
+      // Single click opens the full study view directly — no quick-look
+      // side-card, no double-click.
       node.onclick = function() {
-        if (window._openInvestigationDrawer) window._openInvestigationDrawer('study', s);
-        else _openStudyInsideInvestigation(s.name);
-      };
-      // Double-click opens the full study directly (dismisses the quick-look drawer).
-      node.ondblclick = function() {
-        var _drawer = document.getElementById('investigation-detail-drawer');
-        if (_drawer) _drawer.style.display = 'none';
         _openStudyInsideInvestigation(s.name);
       };
       node.title = s.name + ' — ' + confidence + (claim ? '\n\nFinds: ' + claim : '') +
-        '\n\nClick for a quick look · double-click to open the study';
+        '\n\nClick to open the study';
       var x = PAD_X + depth[s.name] * (CARD_W + X_GAP);
       node.style.cssText =
         'position:absolute;left:' + x + 'px;top:0px;' +
@@ -5919,14 +5914,9 @@
       if (_badge) {
         var _openReason = function (ev) {
           ev.stopPropagation();
-          // Prefer the quick-look drawer opened to the finding/evidence; fall
-          // back to opening the full study. _openInvestigationDrawer renders the
-          // study's findings/evidence in the drawer body.
-          if (window._openInvestigationDrawer) window._openInvestigationDrawer('study', s);
-          else _openStudyInsideInvestigation(s.name);
-          var body = document.getElementById('investigation-detail-drawer-body');
-          var target = body && (body.querySelector('[data-section="findings"]') || body.querySelector('.aig-claim-row'));
-          if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
+          // The quick-look side-card is gone — the verdict badge opens the full
+          // study (its findings/evidence live there).
+          _openStudyInsideInvestigation(s.name);
         };
         _badge.addEventListener('click', _openReason);
         _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _openReason(ev); } });
@@ -5937,8 +5927,7 @@
           node.querySelectorAll('.aig-claim-row').forEach(function (row) {
             row.addEventListener('click', function (ev) {
               ev.stopPropagation();
-              var idx = parseInt(row.getAttribute('data-claim-index'), 10);
-              if (claims[idx]) window._openInvestigationDrawer('claim', { claim: claims[idx], study: study });
+              _openStudyInsideInvestigation(study.name);
             });
           });
         })(s, chainsBySlug[s.name]);
@@ -6073,14 +6062,16 @@
   }
   window._setAigBand = _setAigBand;
 
-  // Wheel over the graph shell zooms bands (one notch per gesture, threshold +
-  // cooldown so a single scroll doesn't skip bands). preventDefault so the page
-  // doesn't scroll while zooming the graph.
+  // Wheel semantic-zooms bands ONLY when the pointer is over a study card; over
+  // the graph background the wheel is left alone so the page scrolls normally
+  // (so you can scroll past the graph without it hijacking the wheel). One notch
+  // per gesture, with a threshold + cooldown so a single scroll doesn't skip
+  // bands.
   (function _wireAigWheel() {
     var lastWheel = 0;
     document.addEventListener('wheel', function (ev) {
-      var shell = document.getElementById('investigation-dag-shell');
-      if (!shell || !shell.contains(ev.target)) return;   // only over the graph
+      var card = ev.target && ev.target.closest && ev.target.closest('.iset-dag-node');
+      if (!card) return;                                  // background → page scrolls
       ev.preventDefault();
       var now = Date.now();
       if (now - lastWheel < 220) return;                  // cooldown between steps

@@ -8,12 +8,14 @@ def test_drawer_element_present():
     assert 'id="investigation-detail-drawer-body"' in html
 
 
-def test_drawer_wired_in_walkthrough():
+def test_dag_card_opens_full_study_not_drawer():
+    # A DAG card click opens the full study directly; the quick-look side-card
+    # drawer is no longer wired from the graph (single click, no double-click).
     js = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text()
-    assert "function _openInvestigationDrawer(" in js
-    assert "_openInvestigationDrawer('study'" in js or '_openInvestigationDrawer("study"' in js
-    assert "aig-claim-row" in js            # claim-row click wiring
-    assert "stopPropagation" in js          # row clicks don't trigger the card
+    assert "_openStudyInsideInvestigation(s.name)" in js
+    assert "_openInvestigationDrawer('study', s)" not in js
+    assert "aig-claim-row" in js            # claim-row rendering still present
+    assert "stopPropagation" in js          # row clicks don't double-trigger the card
 
 
 def test_intro_description_collapsed_by_default():
