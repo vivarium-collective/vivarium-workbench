@@ -28,13 +28,18 @@ from vivarium_workbench.lib import emitters
 # Module-level registry cache (shared by server.py thin wrapper + FastAPI route)
 # ---------------------------------------------------------------------------
 
-_REGISTRY_CACHE: dict = {"data": None, "ts": 0.0}
+# Keyed by ``str(ws_root)`` -> ``{"data": <payload>, "ts": <epoch>}`` (slice 3
+# of the multi-workspace refactor). A single global slot served one session's
+# registry catalog to another under multi-session; the catalog is workspace-
+# specific (the workspace's own package + declared imports), so it must key on
+# the workspace.
+_REGISTRY_CACHE: dict = {}
 _REGISTRY_TTL = 30.0  # seconds
 
 
 def clear_registry_cache() -> None:
     """Invalidate the registry cache so the next call rebuilds from scratch."""
-    _REGISTRY_CACHE["data"] = None
+    _REGISTRY_CACHE.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -419,9 +424,11 @@ def build_registry(ws_root: Path, *, bypass_cache: bool = False) -> dict:
         When ``True`` forces a fresh subprocess run even if the cache is warm.
     """
     now = time.time()
-    if not bypass_cache and _REGISTRY_CACHE["data"] is not None:
-        if now - _REGISTRY_CACHE["ts"] < _REGISTRY_TTL:
-            return _REGISTRY_CACHE["data"]
+    _cache_key = str(ws_root)
+    _slot = _REGISTRY_CACHE.get(_cache_key)
+    if not bypass_cache and _slot is not None:
+        if now - _slot["ts"] < _REGISTRY_TTL:
+            return _slot["data"]
 
     try:
         import yaml
@@ -646,8 +653,7 @@ except Exception as e:
     except Exception as e:
         data = {"error": str(e), "processes": [], "types": []}
 
-    _REGISTRY_CACHE["data"] = data
-    _REGISTRY_CACHE["ts"] = now
+    _REGISTRY_CACHE[_cache_key] = {"data": data, "ts": now}
     return data
 
 
@@ -659,8 +665,7 @@ def clear_cache() -> None:
     invalidated identically via active_workspace.invalidate(). Distinct from
     :func:`clear_registry_cache` (data-only), kept for its other call sites.
     """
-    _REGISTRY_CACHE["data"] = None
-    _REGISTRY_CACHE["ts"] = 0.0
+    _REGISTRY_CACHE.clear()
 
 
 # Register this module's cache-clear with the active-workspace registry so a
