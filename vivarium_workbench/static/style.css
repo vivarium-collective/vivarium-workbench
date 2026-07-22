@@ -693,6 +693,19 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
 .viv-rail-section + .viv-rail-section{
   border-top:1px solid #ececec; margin-top:4px;
 }
+/* Studies fill the rail's remaining height and scroll on their own, so a long
+   study list (many investigations) never clips below the rail's bottom edge.
+   The nav above stays fixed; only this section scrolls. min-height:0 is what
+   lets a flex child shrink below its content height and actually overflow. */
+#viv-rail-studies-section{
+  flex:1 1 auto; min-height:0;
+  display:flex; flex-direction:column;
+  overflow:hidden;
+}
+#viv-rail-investigations{
+  flex:1 1 auto; min-height:0;
+  overflow-y:auto; overflow-x:hidden;
+}
 .viv-rail-section-label{
   padding:0 16px 6px;
   font-size:0.68em; font-weight:600; letter-spacing:0.08em;
