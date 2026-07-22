@@ -15,7 +15,7 @@ import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
 } from './layoutStore';
-import { stateToReactFlow, defaultCollapsedIds, initialEmitSet } from './convert';
+import { stateToReactFlow, defaultCollapsedIds, defaultHiddenIds, initialEmitSet } from './convert';
 import { isHiddenByAncestor, retargetEdgesToVisible, hiddenNodeIds } from './panels/filterHidden';
 import ViewsMenu from './panels/ViewsMenu';
 import { getDefaultView, decodeView, fetchView, type View } from './viewStore';
@@ -64,8 +64,12 @@ export default function App() {
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => defaultCollapsedIds(decodeUrlComposite()),
   );
-  // Explicitly hidden node ids (via the sidebar Processes/Nodes toggles).
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  // Explicitly hidden node ids (via the sidebar Processes/Nodes toggles). Seeded
+  // with the noisy bookkeeping processes (unique_update*/allocator_*/*listener*)
+  // so the default view is clean; re-show any via the Processes sidebar.
+  const [hidden, setHidden] = useState<Set<string>>(
+    () => defaultHiddenIds(decodeUrlComposite()),
+  );
   // Mirror `hidden` in a ref so the (async) layout effect can read the LATEST
   // hidden set without taking it as a dependency — which would force an ELK
   // relayout on every toggle. Needed so rebuilt edges stay hidden-correct: the
@@ -129,7 +133,7 @@ export default function App() {
     const off = onCompositeLoad((msg) => {
       setState(msg.state);
       setCollapsed(defaultCollapsedIds(msg.state));  // light overview by default
-      setHidden(new Set());     // reset show/hide selections too
+      setHidden(defaultHiddenIds(msg.state));   // re-seed the noisy-process hide
       // Seed from the composite's declared emit-all paths when present, else
       // every top-level store, and broadcast so the dashboard's run-emit
       // selection stays in sync.
@@ -182,6 +186,7 @@ export default function App() {
           setState(st);
           setEmitSet(initialEmitSet(st));
           setCollapsed(defaultCollapsedIds(st));
+          setHidden(defaultHiddenIds(st));
           // The published composite-state JSON is the full resolve dict — it also
           // carries the configure-form inputs. Seed them so Setup & Run renders
           // (read-only) in static mode. Absent on bare-state snapshots — tolerate.
