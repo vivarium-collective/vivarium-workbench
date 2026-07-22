@@ -206,11 +206,43 @@ def augment_lineage_aliases(available: dict) -> dict:
     return {"leaves": leaves + extra_leaves, "catalogs": catalogs}
 
 
+def _call_obs_worker(ws_root: Path, method: str, params: dict) -> "dict | None":
+    """Route an observables method to the session's env worker; ``None`` when the
+    worker is unavailable (crash / can't spawn)."""
+    from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+    try:
+        return get_pool().call(ws_root, method, params)
+    except EnvWorkerUnavailable:
+        return None
+
+
+def _resolve_spec_params(ws_root: Path, ref: str) -> dict:
+    """``__not_registered__`` fallback: resolve ``ref`` to a spec file, parse +
+    ``substitute_parameters`` → ``{'state', 'schema'}`` for an inline worker
+    build. Mirrors ``build_composite_state_for_observables``'s spec-parse branch.
+    Raises ``LookupError`` (→404) if unresolved, other exceptions (→400) on parse
+    failure. The file I/O stays workbench-side (science record; §11)."""
+    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+    from vivarium_workbench.lib.composite_lookup import find_composite_path, substitute_parameters
+    path = find_composite_path(ws_root, pkg, ref)
+    if path is None or not path.is_file():
+        raise LookupError(f"composite not found: {ref}")
+    text = path.read_text(encoding="utf-8")
+    spec = json.loads(text) if path.suffix.lower() == ".json" else (yaml.safe_load(text) or {})
+    state = substitute_parameters(spec.get("state") or {}, spec.get("parameters") or {}, {})
+    return {"state": state, "schema": spec.get("schema") or spec.get("composition")}
+
+
 def build_observables(ws_root: Path, ref: str) -> tuple[dict, int]:
     """GET /api/observables?ref=<id> worker — returns ``(payload_dict, status)``.
 
-    Builds the composite (shared TTL cache, since a whole-cell build is ~3s)
-    and reports its emittable observables via ``available_observables``:
+    The composite build + ``available_observables`` introspection runs in the
+    session's env worker (it needs the live core + polars, which the HTTP process
+    must not import); this routes ``observables{ref}`` there, falling back to an
+    inline ``observables{state, schema}`` for a spec-file composite the worker's
+    registry doesn't know. Payload:
     ``{"ref", "leaves": [dotted paths], "catalogs": {observable: [labels]}}``.
     Unknown ref → 404; build failure → 400; validator absent → 501.
     """
@@ -225,28 +257,33 @@ def build_observables(ws_root: Path, ref: str) -> tuple[dict, int]:
     if hit is not None and (_time.time() - hit[0]) < _OBS_CACHE_TTL_S:
         return {**hit[1], "cached": True}, 200
 
-    # Lazy import — tolerant if pbg_superpowers predates readout_validation.
-    try:
-        from pbg_superpowers.readout_validation import available_observables
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"readout_validation unavailable: {e}"}, 501
+    r = _call_obs_worker(ws_root, "observables", {"ref": ref})
+    if r is None:
+        return {"error": "environment worker unavailable"}, 500
+    if "__not_registered__" in r:
+        # Not a registered generator → resolve the spec file (workbench-side) and
+        # build from the inline document.
+        try:
+            params = _resolve_spec_params(ws_root, ref)
+        except LookupError as e:
+            return {"error": str(e)}, 404
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"composite build failed: {e}"}, 400
+        r = _call_obs_worker(ws_root, "observables", params)
+        if r is None:
+            return {"error": "environment worker unavailable"}, 500
 
-    try:
-        core, state, schema = build_composite_state_for_observables(ws_root, ref)
-    except LookupError as e:
-        return {"error": str(e)}, 404
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"composite build failed: {e}"}, 400
-
-    try:
-        available = available_observables(core, state, schema)
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"observable introspection failed: {e}"}, 500
+    if "__no_validator__" in r:
+        return {"error": f"readout_validation unavailable: {r['__no_validator__']}"}, 501
+    if "__build_error__" in r:
+        return {"error": f"composite build failed: {r['__build_error__']}"}, 400
+    if "__introspect_error__" in r:
+        return {"error": r["__introspect_error__"]}, 500
 
     payload = {
         "ref": ref,
-        "leaves": available.get("leaves", []),
-        "catalogs": available.get("catalogs", {}),
+        "leaves": r.get("leaves", []),
+        "catalogs": r.get("catalogs", {}),
     }
     cache[ckey] = (_time.time(), payload)
     if len(cache) > 32:  # cap memory; drop the oldest entry
@@ -294,15 +331,9 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
     if not ref:
         return {"error": "baseline entry has no composite ref", "readouts": []}, 422
 
-    try:
-        from pbg_superpowers.readout_validation import available_observables, validate_readouts
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"readout_validation unavailable: {e}"}, 501
-
     readouts = spec.get("readouts") or []
-    try:
-        core, state, schema = build_composite_state_for_observables(ws_root, ref)
-    except Exception as e:  # noqa: BLE001 (LookupError / RuntimeError both land here)
+
+    def _aspirational(reason: str) -> tuple[dict, int]:
         # Composite can't build → clear non-500: surface every readout as
         # aspirational (unverifiable) with a note, rather than crashing.
         out = [
@@ -310,23 +341,34 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
              "detail": f"composite {ref!r} could not be built — readout unverified"}
             for i, r in enumerate(readouts)
         ]
-        return {
-            "composite": ref,
-            "readouts": out,
-            "note": f"composite {ref!r} could not be built: {e}",
-        }, 422
+        return {"composite": ref, "readouts": out,
+                "note": f"composite {ref!r} could not be built: {reason}"}, 422
 
-    try:
-        # Normalize the lineage prefix: the whole-cell composite nests the cell
-        # under ``agents.<n>.`` but studies author bare single-cell paths, so
-        # augment the VALIDATION set with prefix-stripped aliases (never-fabricate
-        # preserved — only a leading ``agents.<n>.`` is stripped).
-        available = augment_lineage_aliases(available_observables(core, state, schema))
-        results = validate_readouts(spec, available=available)
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"readout validation failed: {e}", "composite": ref}, 500
+    # The build + available_observables + augment + validate_readouts all run in
+    # the env worker (live core + polars). The lineage-alias augmentation is the
+    # dashboard's agent-structure convention, applied worker-side before the
+    # general validator (never-fabricate: only a leading ``agents.<n>.`` stripped).
+    r = _call_obs_worker(ws_root, "study_readout_check", {"ref": ref, "spec": spec})
+    if r is None:
+        return _aspirational("environment worker unavailable")
+    if "__not_registered__" in r:
+        try:
+            params = _resolve_spec_params(ws_root, ref)
+        except Exception as e:  # noqa: BLE001 (LookupError / parse both → can't build)
+            return _aspirational(str(e))
+        r = _call_obs_worker(ws_root, "study_readout_check", {**params, "spec": spec})
+        if r is None:
+            return _aspirational("environment worker unavailable")
 
-    return {"composite": ref, "readouts": results}, 200
+    if "__no_validator__" in r:
+        return {"error": f"readout_validation unavailable: {r['__no_validator__']}"}, 501
+    if "__build_error__" in r:
+        return _aspirational(r["__build_error__"])
+    if "__introspect_error__" in r or "__validate_error__" in r:
+        return {"error": r.get("__introspect_error__") or r.get("__validate_error__"),
+                "composite": ref}, 500
+
+    return {"composite": ref, "readouts": r.get("readouts", [])}, 200
 
 
 def observables_for_ref_payload(ws_root: Path, ref: str) -> dict:
