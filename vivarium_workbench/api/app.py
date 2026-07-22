@@ -518,18 +518,32 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     @app.middleware("http")
-    async def _session_cookie_mw(request: Request, call_next):
-        """Ensure every browser carries a session cookie (§ session-registry §4).
+    async def _session_workspace_mw(request: Request, call_next):
+        """Route the request to its session's workspace + mint the session cookie.
 
-        Mints an opaque, unguessable key and sets it ``HttpOnly`` /
-        ``SameSite=Lax`` (``Secure`` over https) when absent. Behavior-preserving:
-        a fresh/unbound session and every cookie-less client (curl, CLI, the
-        urllib test harness) resolve to the process default workspace, exactly as
-        before (see ``get_workspace_context``). The cookie is *routing*, not auth
-        — the existing CSRF/origin guard still blocks cross-site mutations.
+        Two jobs (§ session-registry §4, §7):
+
+        1. Resolve the request's ``WorkspaceContext`` from its session cookie and
+           set the **per-request workspace root** (``_root.set_request_workspace_root``)
+           for the duration of the request — so every ``workspace_root()`` read in
+           the lib layer resolves to *this session's* workspace, request-scoped,
+           instead of one process-global root.
+        2. Mint an opaque ``HttpOnly`` / ``SameSite=Lax`` ``vw_session`` cookie when
+           absent, so a real browser carries a session forward.
+
+        Behavior-preserving: a fresh/unbound session and every cookie-less client
+        (curl, CLI, the urllib test harness) resolve to the process default
+        workspace, so ``workspace_root()`` returns exactly what it did before. The
+        cookie is *routing*, not auth — the existing CSRF/origin guard is untouched.
         """
+        from vivarium_workbench.lib import _root, workspace_context
         existing = request.cookies.get(session_registry.SESSION_COOKIE)
-        response = await call_next(request)
+        ctx = workspace_context.resolve(existing)
+        token = _root.set_request_workspace_root(ctx.ws_root)
+        try:
+            response = await call_next(request)
+        finally:
+            _root.reset_request_workspace_root(token)
         if not existing:
             response.set_cookie(
                 session_registry.SESSION_COOKIE,
