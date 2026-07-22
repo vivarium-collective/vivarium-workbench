@@ -913,13 +913,15 @@
       var rc = urls[card] || {};
       var pill = _rcPill(rc.verdict);
       var body;
-      // Prefer the rich per-axis verdict table; the card HTML is often an
-      // unrendered stub, so only embed the iframe when it has real content.
-      if (rc.groups && Object.keys(rc.groups).length) {
-        body = _rcVerdictTables(rc.groups);
-      } else if (rc.url && !rc.html_stub) {
+      // Prefer the fully rendered card HTML — for the vs-vEcoli comparison the
+      // `standard` card body IS the per-observable trace overlays (v2ecoli vs
+      // vEcoli). Fall back to the per-axis verdict table only when the card HTML
+      // is an unrendered stub (e.g. an 11-byte "<b>card</b>").
+      if (rc.url && !rc.html_stub) {
         body = '<iframe class="viz-embed" src="' + escapeHtmlForTests(rc.url) + '" loading="lazy" '
-          + 'style="width:100%;height:560px;border:1px solid #e2e8f0;border-radius:8px"></iframe>';
+          + 'style="width:100%;height:760px;border:1px solid #e2e8f0;border-radius:8px;background:#fff"></iframe>';
+      } else if (rc.groups && Object.keys(rc.groups).length) {
+        body = _rcVerdictTables(rc.groups);
       } else {
         body = '<div class="muted" style="padding:8px">Verdict recorded, but the '
           + 'card body has not been rendered yet — run the comparison to generate it.</div>';
