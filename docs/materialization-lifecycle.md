@@ -226,6 +226,11 @@ the workbench and sms-api materialization paths, and the local `uv sync`/venv wo
 must land first. Captured here so the phase-1 clone is written against a `RepoSource`
 seam (GitHub now, S3 later) rather than a hardcoded `git clone <github-url>`.
 
+**Status (confirmed, Jim, 2026-07-22):** the S3 optimization stays **deferred**;
+it will be coordinated with sms-api (checked out locally at `../sms-api`) when the
+workbench clone seam + venv materialization are in place. Until then the
+`RepoSource` seam clones from GitHub, and the double-download is accepted.
+
 ## 6. Failure surfacing — expected, not a crash
 
 Materialization failures are **normal** (a workspace can have an unreachable repo,
