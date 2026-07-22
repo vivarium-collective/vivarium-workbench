@@ -87,7 +87,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites",
-                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "shutdown"]
+                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "data_sources_provider", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -1230,6 +1230,35 @@ def _reexport_map(params: dict) -> dict:
     return {"reexports": reexports}
 
 
+def _data_sources_provider(params: dict) -> dict:
+    """Import + invoke the workspace's ``dashboard.data_sources`` provider (spec §11)
+    — a ``module:func`` spec that usually resolves into the workspace's own package,
+    so the import must not run in the HTTP process. Faithful port of
+    ``data_sources.import_provider`` + the ``fn()`` call.
+
+    Returns ``{"rows": [...], "error": None}`` on success, else ``{"rows": [],
+    "error": "TypeName: msg"}`` — the worker CATCHES the provider exception (rather
+    than raising) so the workbench reproduces the old in-process
+    ``{"sources": [], "error": ...}`` degrade verbatim."""
+    import importlib
+
+    spec = str((params or {}).get("provider") or "").strip()
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    try:
+        if ":" not in spec:
+            raise ValueError(f"provider must be 'module:func', got {spec!r}")
+        mod_name, _, func_name = spec.partition(":")
+        mod = importlib.import_module(mod_name)
+        fn = getattr(mod, func_name)
+        if not callable(fn):
+            raise TypeError(f"provider {spec!r} is not callable")
+        rows = list(fn() or [])
+        return {"rows": rows, "error": None}
+    except Exception as e:  # noqa: BLE001 — degrade, never crash the dashboard
+        return {"rows": [], "error": f"{type(e).__name__}: {e}"}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -1321,6 +1350,8 @@ def _handle(method: str, params: dict) -> dict:
         return _report_core_snapshot(params)
     if method == "reexport_map":
         return _reexport_map(params)
+    if method == "data_sources_provider":
+        return _data_sources_provider(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")
