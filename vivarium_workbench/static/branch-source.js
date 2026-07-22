@@ -332,12 +332,17 @@
 
     // Search / paste-a-commit filter. While filtering in remote scope, search
     // across ALL builds of the repo (every branch) so you can paste any commit.
-    var search = _el("input", "viv-bs-search");
-    search.type = "search";
-    search.placeholder = state.scope === "remote"
-      ? "search or paste a commit / date / branch…" : "filter workspaces…";
-    search.value = state.filter || "";
-    host.appendChild(search);
+    // Only shown when there's actually more than one source to pick from — a lone
+    // current workspace doesn't need a filter box (it read as idle noise).
+    var search = null;
+    if (matches.length > 1 || (state.filter || "").trim()) {
+      search = _el("input", "viv-bs-search");
+      search.type = "search";
+      search.placeholder = state.scope === "remote"
+        ? "search or paste a commit / date / branch…" : "filter workspaces…";
+      search.value = state.filter || "";
+      host.appendChild(search);
+    }
 
     var list = _el("ul", "viv-bs-list");
     host.appendChild(list);
@@ -370,9 +375,11 @@
         }
         list.appendChild(li);
       });
-      if (!rows.length) list.appendChild(_el("li", "viv-bs-list-empty", "no matches"));
+      // "no matches" only while actively filtering — never as idle noise when
+      // there's simply nothing else to switch to.
+      if (!rows.length && f) list.appendChild(_el("li", "viv-bs-list-empty", "no matches"));
     }
-    search.addEventListener("input", function () { state.filter = search.value; _fillList(); });
+    if (search) search.addEventListener("input", function () { state.filter = search.value; _fillList(); });
     _fillList();
   }
 

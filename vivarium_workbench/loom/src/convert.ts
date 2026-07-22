@@ -120,14 +120,25 @@ export function defaultHiddenIds(state: any): Set<string> {
     name.includes('unique_update') ||
     name.startsWith('allocator') ||
     name.includes('listener');
+  // Bookkeeping STORES that clutter the biology view without being biology:
+  // the allocator RNG, per-tick timing scratch, config-only stores, and the
+  // top-level `global_time` duplicate (the per-agent `agents.0.global_time`
+  // stays). Stores are typed leaves, so they're matched before the leaf return.
+  const isNoiseStore = (name: string, path: string[]) =>
+    name.startsWith('allocator') ||
+    name === 'timestep' ||
+    name === 'next_update_time' ||
+    name === 'pinned_flux_targets' ||
+    (name === 'global_time' && path.length === 1);
   function walk(node: any, path: string[]) {
     if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+    const name = path[path.length - 1] || '';
     if (node._type === 'process' || node._type === 'step') {
-      const name = path[path.length - 1] || '';
       if (isNoise(name)) out.add(path.join('.'));
       return;
     }
-    if ('_type' in node) return;  // typed leaf store
+    if (path.length > 0 && isNoiseStore(name, path)) { out.add(path.join('.')); return; }
+    if ('_type' in node) return;  // other typed leaf store
     for (const [k, v] of Object.entries(node)) {
       if (k === DECLARED_EMIT_PATHS_KEY) continue;
       walk(v, [...path, k]);
