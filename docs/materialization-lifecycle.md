@@ -332,8 +332,12 @@ resolve §10 open questions, some are pragmatic scoping calls). Newest first.
   staged tree after phase 1?), and flip-on-ready vs. keep-prior — is a routing/UX
   decision that touches the request hot path and the env-worker interpreter
   choice, and is better shaped with the team than guessed. The materialization
-  capability itself is fully proven end-to-end without it. **Next:** decide + wire
-  the managed session-binding lifecycle.
+  capability itself is fully proven end-to-end without it. **Next:**
+  [`docs/session-binding.md`](session-binding.md) proposes the lifecycle as
+  **session-per-tab** (Eran's request): each browser tab is its own session on
+  one workspace, born `preparing` (hourglass) → `ready`. Per-tab makes a session's
+  workspace fixed, so it removes the need for a `committed`/`pending` flip — the
+  hourglass *is* this tab's `MATERIALIZING` state. For review before the change.
 - **2026-07-22 — Managed job runs clone → sync as one async job, two phases**
   (`cloning → syncing → ready|failed`), keyed by `(repo, ref)` and deduped; the
   venv inside is still coordinate-keyed by the staged lock (so two `(repo, ref)`
