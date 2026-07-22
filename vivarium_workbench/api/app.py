@@ -351,12 +351,14 @@ def get_workspace_context(request: Request = None) -> "WorkspaceContext":
 
 def _session_key_of(request: "Request | None") -> "str | None":
     """The request's session key — the middleware-stashed value (available even
-    on a first request), falling back to the raw cookie, or ``None`` for a
-    direct/cookie-less call."""
+    on a first request), falling back to the raw ``X-VW-Session`` header then the
+    cookie, or ``None`` for a direct/identity-less call."""
     if request is None:
         return None
     key = getattr(request.state, "session_key", None)
-    return key or request.cookies.get(session_registry.SESSION_COOKIE)
+    return (key
+            or request.headers.get(session_registry.SESSION_HEADER)
+            or request.cookies.get(session_registry.SESSION_COOKIE))
 
 
 def get_workspace(request: Request = None) -> Path:
@@ -531,29 +533,35 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def _session_workspace_mw(request: Request, call_next):
-        """Route the request to its session's workspace + mint the session cookie.
+        """Route the request to its session's workspace + carry the session id.
 
-        Two jobs (§ session-registry §4, §7):
+        Two jobs (§ session-registry §4, §7; session-per-tab, docs/session-binding.md §3):
 
-        1. Resolve the request's ``WorkspaceContext`` from its session cookie and
-           set the **per-request workspace root** (``_root.set_request_workspace_root``)
-           for the duration of the request — so every ``workspace_root()`` read in
-           the lib layer resolves to *this session's* workspace, request-scoped,
-           instead of one process-global root.
-        2. Mint an opaque ``HttpOnly`` / ``SameSite=Lax`` ``vw_session`` cookie when
-           absent, so a real browser carries a session forward.
+        1. Resolve the request's ``WorkspaceContext`` from its session id and set the
+           **per-request workspace root** (``_root.set_request_workspace_root``) for
+           the duration of the request — so every ``workspace_root()`` read in the lib
+           layer resolves to *this session's* workspace, request-scoped, instead of
+           one process-global root.
+        2. Carry the session id forward. Identity comes from the ``X-VW-Session``
+           header first (the per-tab id a browser tab keeps in ``sessionStorage``),
+           then the ``vw_session`` cookie, else one minted now. When the request
+           arrived with **no header**, echo the effective id back in the ``X-VW-Session``
+           response header so the tab can capture and store it; when it arrived with
+           **no cookie**, also mint the ``HttpOnly`` / ``SameSite=Lax`` cookie so a
+           browser not yet running the fetch override still carries a session.
 
-        Behavior-preserving: a fresh/unbound session and every cookie-less client
-        (curl, CLI, the urllib test harness) resolve to the process default
-        workspace, so ``workspace_root()`` returns exactly what it did before. The
-        cookie is *routing*, not auth — the existing CSRF/origin guard is untouched.
+        Behavior-preserving: a header-less, cookie-less client (curl, CLI, the urllib
+        test harness) resolves to the process default workspace exactly as before —
+        the header is preferred only when present. The id is *routing*, not auth — the
+        existing CSRF/origin guard is untouched.
         """
         from vivarium_workbench.lib import _root, workspace_context
-        existing = request.cookies.get(session_registry.SESSION_COOKIE)
-        # The effective key is the existing cookie, or one minted now. Stash it on
-        # request.state so handlers (e.g. /api/source/switch's per-session rebind)
-        # can act on the session even on its FIRST request — before the minted
-        # cookie has round-tripped.
+        header_key = request.headers.get(session_registry.SESSION_HEADER)
+        cookie_key = request.cookies.get(session_registry.SESSION_COOKIE)
+        existing = header_key or cookie_key
+        # The effective key is the header, the cookie, or one minted now. Stash it on
+        # request.state so handlers (e.g. /api/source/switch's per-session rebind) can
+        # act on the session even on its FIRST request — before the id round-trips.
         session_key = existing or session_registry.mint_key()
         request.state.session_key = session_key
         ctx = workspace_context.resolve(session_key)
@@ -562,7 +570,11 @@ def create_app() -> FastAPI:
             response = await call_next(request)
         finally:
             _root.reset_request_workspace_root(token)
-        if not existing:
+        # Echo the id back to a header-less request so the tab's sessionStorage can
+        # capture it (whether it was minted now or carried only by the cookie).
+        if not header_key:
+            response.headers[session_registry.SESSION_HEADER] = session_key
+        if not cookie_key:
             response.set_cookie(
                 session_registry.SESSION_COOKIE,
                 session_key,

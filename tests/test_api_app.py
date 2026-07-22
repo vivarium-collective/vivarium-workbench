@@ -38,6 +38,50 @@ def test_health(client):
     assert r.json() == {"status": "ok"}
 
 
+# ---------------------------------------------------------------------------
+# Session-per-tab identity — the X-VW-Session header (docs/session-binding.md §3,
+# migration slice 1). The header is preferred over the cookie and echoed back to
+# a header-less request; behavior is preserved for header-less/cookie-less clients.
+# ---------------------------------------------------------------------------
+
+def test_session_header_echoed_when_request_has_none(client):
+    """A header-less request gets the effective session id echoed in the
+    X-VW-Session response header, so a tab's sessionStorage can capture it — and
+    the vw_session cookie is still minted for back-compat."""
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.headers.get("X-VW-Session")  # non-empty minted id, echoed back
+    assert "vw_session=" in r.headers.get("set-cookie", "")
+
+
+def test_session_header_not_echoed_when_supplied(client):
+    """When the request already carries X-VW-Session, the server does not echo it
+    back (the tab already has its id)."""
+    r = client.get("/health", headers={"X-VW-Session": "tab-abc"})
+    assert r.status_code == 200
+    assert "x-vw-session" not in {k.lower() for k in r.headers.keys()}
+
+
+def test_session_header_takes_precedence_for_binding(client, tmp_path, monkeypatch):
+    """The X-VW-Session id is the session key used for per-session binding: a
+    switch carrying the header binds THAT id (preferred over cookie/minted)."""
+    from pbg_superpowers import workspace_catalog
+    from vivarium_workbench.lib import session_registry
+    session_registry.clear()
+    ws = tmp_path / "ws_hdr"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: whdr\n")
+    monkeypatch.setattr(
+        workspace_catalog, "list_workspaces",
+        lambda: [{"path": str(ws), "name": "whdr"}],
+    )
+    r = client.post("/api/source/switch", json={"path": str(ws)},
+                    headers={"X-VW-Session": "tab-hdr-1"})
+    assert r.status_code == 200
+    entry = session_registry.get("tab-hdr-1")
+    assert entry is not None and entry.source_path == Path(str(ws))
+
+
 def test_simulations_empty_workspace(client):
     """An empty workspace yields the typed empty payload, not a 500."""
     r = client.get("/api/simulations")
