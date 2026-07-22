@@ -14728,11 +14728,14 @@
   window._openSimulationInExplorer = _openSimulationInExplorer;
 
   /** Open a Simulations-DB row: the associated STUDY when the run has one, else
-   *  the Composite Explorer (bigraph-loom) seeded to this run's results. */
+   *  the Composite Explorer (bigraph-loom) seeded to this run's results.
+   *  Study-associated runs NAVIGATE to the study page — not _openStudyEmbedded,
+   *  whose embed panel lives in a different page section that is hidden while the
+   *  Simulations page is active, so it silently did nothing here. */
   function _openSimulation(row) {
     if (!row) return;
     var study = _simStudy(row);
-    if (study) { _openStudyEmbedded(study); return; }
+    if (study) { window.location = _studyHref(study); return; }
     if (row.run_id && row.spec_id) { _openSimulationInExplorer(row.run_id, row.spec_id); }
   }
   window._openSimulation = _openSimulation;
