@@ -4597,14 +4597,20 @@ class TestSourceSwitchBuildRoute:
         monkeypatch.setattr(
             sbv, "materialize_build", lambda c, sim_id, commit: cache,
         )
+        from vivarium_workbench.lib import session_registry
+        session_registry.clear()
+        before = _root.get_workspace_root()
         r = client.post("/api/source/switch-build", json={"simulator_id": 5})
         assert r.status_code == 200
         assert r.json() == {
             "ok": True,
             "source": {"path": str(cache), "name": "y @ deadbeef (build #5)"},
         }
-        # The route re-pointed the shared lib root (autouse fixture resets it).
-        assert _root.get_workspace_root() == cache.resolve()
+        # Per-session (slice 4/5): the global root is NOT re-pointed; the caller's
+        # session is bound to the materialized cache dir.
+        assert _root.get_workspace_root() == before
+        key = client.cookies.get(session_registry.SESSION_COOKIE)
+        assert key is not None and session_registry.get(key).source_path == Path(str(cache))
 
     def test_route_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]

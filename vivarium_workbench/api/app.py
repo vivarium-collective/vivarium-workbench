@@ -4837,30 +4837,35 @@ def create_app() -> FastAPI:
     )
     def source_switch_build(
         req: SwitchBuildRequest,
+        request: Request,
     ) -> Union[SourceSwitchResponse, JSONResponse]:
         """Materialize a remote build's workspace (cached) and re-point to it.
 
-        Mirrors the stdlib ``POST /api/source/switch-build``.  Body:
-        ``{"simulator_id"}`` — looks the build up in the sms-api listing,
+        Body: ``{"simulator_id"}`` — looks the build up in the sms-api listing,
         downloads+extracts its workspace once (cached per commit), stamps build
-        provenance into the cache dir (best-effort), then fires the lib-side
-        switch (``active_workspace.switch_workspace`` — sets ``lib._root`` +
-        invalidates the lib caches) and returns ``{ok, source}``.
+        provenance into the cache dir (best-effort), then binds the **calling
+        session** to it (per-session, slice 4/5 — the process-global root and
+        other sessions are untouched) and returns ``{ok, source}``.
 
-        Status codes (byte-identical to the legacy handler):
+        Status codes:
           - 400  missing ``simulator_id`` (``{"error": "missing 'simulator_id'"}``)
           - 502  sms-api unreachable (``{"error": "sms-api unavailable: <err>"}``)
           - 404  build not found (``{"error": "build <id> not found"}``)
           - 502  materialize failed (``{"error": "materialize failed: <err>"}``)
           - 200  ``{ok: true, source: {path, name}}``
 
-        The CSRF middleware already guards this POST.  Library-backed via
-        ``lib.source_build_views.switch_build`` (a network route — sms-api is
-        reached through the lib client).
+        The CSRF middleware already guards this POST.  ``switch_active=False`` —
+        materialize + resolve without the global re-point; the per-session bind is
+        ``session_registry.rebind``.
         """
-        body, status = _source_build_views.switch_build(req.model_dump())
+        body, status = _source_build_views.switch_build(
+            req.model_dump(), switch_active=False)
         if status != 200:
             return JSONResponse(status_code=status, content=body)
+        session_key = _session_key_of(request)
+        source_path = (body.get("source") or {}).get("path")
+        if session_key and source_path:
+            session_registry.rebind(session_key, source_path)
         return SourceSwitchResponse.model_validate(body)
 
     # -----------------------------------------------------------------------
