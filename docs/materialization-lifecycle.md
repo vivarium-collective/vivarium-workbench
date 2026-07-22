@@ -21,12 +21,18 @@ at once, a failure carries the `uv` tail (§6). The wiring is in: `lib/session_e
 prepares a session's env **eager-on-switch** (§10) — `/api/source/switch[-build]`
 resolves the interpreter for an in-place source (`ready` at once, §2a) or starts a
 materialization job for a managed one (`materializing`) — and `GET
-/api/source/materialization` is the poll (`ready | materializing | failed`). The
-managed branch is dormant until the clone seam introduces managed sources; the
-switch endpoint drives only in-place today. Still to come: §9(d) — a detached
-*process* + durable record surviving restart, restart reconcile, a `uv sync`
-concurrency cap, and GC (§7/§10) — and the `RepoSource` clone seam / S3 cache
-(§2/§5a). The in-place local path (§2a) does not route through `materialize`.
+/api/source/materialization` is the poll (`ready | materializing | failed`).
+**Phase 1 (§2) is implemented**: `lib/repo_source.py` stages a managed
+`(repo, ref)` — a per-repo bare-mirror cache (`git clone --mirror` once, `git
+fetch` after) + a `git worktree` checkout of the resolved commit — behind the
+`RepoSource` seam (git/GitHub today, S3 later, §5a). Still to wire: a managed
+switch that chains `repo_source.stage` → `session_env.prepare(…, managed=True)`
+(→ `materialize`, §9b) — the pieces compose (a staging path carries a `pyproject`/
+`uv.lock`); it needs an endpoint accepting a `(repo, ref)`. Still to come: §9(d) —
+a detached *process* + durable record surviving restart, restart reconcile, a `uv
+sync` concurrency cap, per-session worktree isolation + GC (§5/§7/§10) — and the S3
+`RepoSource` adapter (§5a). The in-place local path (§2a) does not route through
+`materialize`.
 
 ---
 
