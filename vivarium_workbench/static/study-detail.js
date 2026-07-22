@@ -1014,15 +1014,14 @@
         + '</section>';
     }).join('');
 
-    // Comparison trajectories drill-down: the rendered trace-overlay card.
+    // The actual comparison TRAJECTORIES are the study-level interactive plotly
+    // (v2ecoli vs vEcoli time-series overlays) rendered once at the top of the
+    // Report Cards tab — NOT rc.url. rc.url is the rendered report-card HTML,
+    // i.e. the same scorecard already shown above as native tables; embedding it
+    // under a "Comparison trajectories" label showed a second report card, which
+    // is exactly the confusion we're removing. So no per-card iframe here.
     var viz = '';
-    if (rc.url && !rc.html_stub) {
-      viz += '<details style="margin-top:10px">'
-        + '<summary style="cursor:pointer;font-weight:600;color:#334155">Comparison trajectories (rendered)</summary>'
-        + '<iframe class="viz-embed" src="' + e(rc.url) + '" loading="lazy" '
-        + 'style="width:100%;height:720px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;margin-top:8px"></iframe>'
-        + '</details>';
-    } else if (!Object.keys(groups).length) {
+    if (!Object.keys(groups).length) {
       viz = '<div class="muted" style="padding:8px">Verdict recorded, but the card body '
         + 'has not been rendered yet — run the comparison to generate it.</div>';
     }
