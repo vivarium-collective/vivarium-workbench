@@ -32,7 +32,7 @@ from pathlib import Path
 import yaml
 
 from vivarium_workbench.lib.registry import (
-    _build_reexport_map,
+    _reexport_map_via_worker,
     _registry_include_pkgs,
     _registry_modules_override,
 )
@@ -177,7 +177,7 @@ def _build_override_catalog(override: list, default_modules: list) -> list:
 # ---------------------------------------------------------------------------
 
 def _build_reexport_origin_modules(
-    ws_data: dict | None, existing_modules: list
+    ws_root: Path, ws_data: dict | None, existing_modules: list
 ) -> list[dict]:
     """Synthesize catalog entries for re-export-ORIGIN packages.
 
@@ -208,7 +208,9 @@ def _build_reexport_origin_modules(
     if include is None:
         return []
     try:
-        reexports = _build_reexport_map(include)
+        # Via the env worker (imports the allow-listed packages there, not in the
+        # HTTP process). Soft-degrades to {} on an unavailable worker.
+        reexports = _reexport_map_via_worker(ws_root, include)
     except Exception:
         return []
     if not reexports:
@@ -608,7 +610,7 @@ def build_catalog(ws_root: Path) -> dict:
             modules.append(mod)
             _known_variants |= variants
 
-    reexport_origins = _build_reexport_origin_modules(ws_data, modules)
+    reexport_origins = _build_reexport_origin_modules(ws_root, ws_data, modules)
     if reexport_origins:
         modules = modules + reexport_origins
 
