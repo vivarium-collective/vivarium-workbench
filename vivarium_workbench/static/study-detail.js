@@ -46,7 +46,8 @@
       p.classList.toggle('active', p.dataset.kind === kind);
     });
     if (kind === 'tests') { loadTestsTab(window._study); }
-    if (kind === 'visualize') { _loadReadouts(); _loadCharts('viz-charts-panel'); }
+    if (kind === 'report-cards') { _fillReportCardsTab(window._study); }
+    if (kind === 'visualize') { _loadReadouts(); _loadNativeGallery(); _loadCharts('viz-charts-panel'); }
     if (kind === 'data') { _loadAnalysisOutputs(); }
     if (kind === 'simulate') { _renderReproduceCard(); }
   }
@@ -227,6 +228,44 @@
     return '<div class="chart-card">' + title + media +
            '<div class="chart-caption">' + (c.caption || '') + '</div></div>';
   }
+  // Baseline native-analysis gallery — the study's latest completed run's
+  // viz.json panels (mass fractions, cell mass, replication, …). Each panel is
+  // a self-contained Altair/Plotly doc, so it renders in its own srcdoc iframe
+  // (innerHTML would not execute the embedded vega/plotly <script> tags).
+  var _nativeGalleryLoaded = false;
+  function _loadNativeGallery() {
+    var host = document.getElementById('native-gallery-panel');
+    if (!host || _nativeGalleryLoaded) return;
+    _nativeGalleryLoaded = true;
+    var slug = studyName();
+    fetch('/api/study-native-gallery/' + encodeURIComponent(slug))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var panels = (d && d.panels) || {};
+        var names = Object.keys(panels);
+        if (!names.length) {
+          host.innerHTML = '<p class="muted" style="padding:8px">No baseline '
+            + 'figures yet — run this study to generate its analysis gallery '
+            + '(the run renders them into <code>viz.json</code>).</p>';
+          _nativeGalleryLoaded = false;  // allow a retry after a run completes
+          return;
+        }
+        function attr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); }
+        host.innerHTML = names.map(function (n) {
+          return '<div class="native-fig" style="margin-bottom:18px">'
+            + '<div style="font-weight:600;font-size:0.92em;margin:0 0 5px 2px;color:#334155">'
+            + escapeHtmlForTests(n) + '</div>'
+            + '<iframe srcdoc="' + attr(panels[n]) + '" loading="lazy" '
+            + 'style="width:100%;height:480px;border:1px solid #e2e8f0;border-radius:8px;background:#fff"></iframe>'
+            + '</div>';
+        }).join('');
+      })
+      .catch(function () {
+        host.innerHTML = '<p class="muted" style="padding:8px">Failed to load baseline figures.</p>';
+        _nativeGalleryLoaded = false;
+      });
+  }
+
   function _loadCharts(panelId) {
     if (_chartsLoadedFor[panelId]) return;
     var panel = document.getElementById(panelId);
@@ -852,6 +891,79 @@
       if (pill) { pill.style.background = p[0]; pill.style.color = p[1]; pill.textContent = p[2]; }
       mount.dataset.filled = '1';
     });
+  }
+
+  // Render EVERY generated report card for this study as its own labelled,
+  // verdict-pilled iframe — independent of whether the study declared a
+  // `kind: report_card` test entry (the Tests-tab path only shows test-linked
+  // cards, so cards on studies without those entries were otherwise invisible).
+  function _fillReportCardsTab(spec) {
+    var host = document.getElementById('report-cards-panel');
+    if (!host) return;
+    var urls = (spec && spec.report_card_urls) || {};
+    var cards = Object.keys(urls).sort();
+    if (!cards.length) {
+      host.innerHTML = '<p class="muted" style="padding:8px">No report cards '
+        + 'generated for this study yet. They are produced during the post-sim '
+        + 'flush from the study\'s <code>report_cards:</code> declaration into '
+        + '<code>viz/report_card/</code>.</p>';
+      return;
+    }
+    host.innerHTML = cards.map(function (card) {
+      var rc = urls[card] || {};
+      var pill = _rcPill(rc.verdict);
+      var body;
+      // Prefer the rich per-axis verdict table; the card HTML is often an
+      // unrendered stub, so only embed the iframe when it has real content.
+      if (rc.groups && Object.keys(rc.groups).length) {
+        body = _rcVerdictTables(rc.groups);
+      } else if (rc.url && !rc.html_stub) {
+        body = '<iframe class="viz-embed" src="' + escapeHtmlForTests(rc.url) + '" loading="lazy" '
+          + 'style="width:100%;height:560px;border:1px solid #e2e8f0;border-radius:8px"></iframe>';
+      } else {
+        body = '<div class="muted" style="padding:8px">Verdict recorded, but the '
+          + 'card body has not been rendered yet — run the comparison to generate it.</div>';
+      }
+      return '<div class="report-card-block" style="margin-bottom:26px">'
+        + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+        + '<strong style="font-size:1.05em">' + escapeHtmlForTests(card) + '</strong>' + pill
+        + '</div>' + body + '</div>';
+    }).join('');
+  }
+
+  // A verdict pill (span) for any report-card verdict value.
+  function _rcPill(verdict) {
+    var p = _RC_PILL[verdict || 'ungraded'] || _RC_PILL.ungraded;
+    return '<span style="font-size:0.72em;font-family:monospace;padding:2px 10px;'
+      + 'border-radius:9999px;background:' + p[0] + ';color:' + p[1] + '">' + p[2] + '</span>';
+  }
+
+  // Render each group's axes as a table: observable | verdict | Δ meter.
+  function _rcVerdictTables(groups) {
+    var e = escapeHtmlForTests;
+    return Object.keys(groups).map(function (gname) {
+      var g = groups[gname] || {};
+      var axes = g.axes || [];
+      var rows = axes.map(function (a) {
+        var label = a.label || a.id || '';
+        var meter = a.meter || (a.value != null ? String(a.value) : '');
+        return '<tr>'
+          + '<td style="padding:5px 10px;border-bottom:1px solid #eef2f7">' + e(String(label)) + '</td>'
+          + '<td style="padding:5px 10px;border-bottom:1px solid #eef2f7;white-space:nowrap">' + _rcPill(a.verdict) + '</td>'
+          + '<td style="padding:5px 10px;border-bottom:1px solid #eef2f7;color:#475569;font-size:0.88em">' + e(String(meter)) + '</td>'
+          + '</tr>';
+      }).join('');
+      var groupHead = axes.length
+        ? '<table style="width:100%;border-collapse:collapse;font-size:0.92em">'
+          + '<thead><tr style="text-align:left;color:#64748b;font-size:0.8em">'
+          + '<th style="padding:4px 10px">Observable</th><th style="padding:4px 10px">Verdict</th>'
+          + '<th style="padding:4px 10px">Comparison</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        : '<div class="muted" style="padding:6px 10px">no axes recorded</div>';
+      return '<div style="margin-bottom:12px">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin:0 0 4px 2px">'
+        + '<span style="font-weight:600;font-size:0.9em;color:#334155">' + e(String(gname)) + '</span>'
+        + _rcPill(g.verdict) + '</div>' + groupHead + '</div>';
+    }).join('');
   }
 
   function loadTestsTab(spec) {

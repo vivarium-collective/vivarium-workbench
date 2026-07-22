@@ -690,13 +690,28 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                 card = html.name[: -len(".html")]
                 vf = html.with_name(card + ".verdict.json")
                 verdict = None
+                groups = None
                 if vf.is_file():
                     try:
-                        verdict = _json.loads(vf.read_text(encoding="utf-8")).get("overall")
+                        _vj = _json.loads(vf.read_text(encoding="utf-8"))
+                        verdict = _vj.get("overall")
+                        # Full per-group/per-axis detail so the Report Cards tab
+                        # can render the observable-by-observable comparison
+                        # (label / verdict / Δ meter) even when the HTML card is
+                        # an unrendered stub.
+                        groups = _vj.get("groups")
                     except Exception:  # noqa: BLE001
                         verdict = None
+                # The card HTML is sometimes an unrendered stub (e.g. "<b>card</b>");
+                # flag tiny files so the frontend renders the verdict table rather
+                # than an empty iframe.
+                try:
+                    html_stub = html.stat().st_size < 64
+                except OSError:
+                    html_stub = True
                 rc_urls[card] = {"url": "/" + html.relative_to(ws_root).as_posix(),
-                                 "verdict": verdict}
+                                 "verdict": verdict, "groups": groups,
+                                 "html_stub": html_stub}
         spec["report_card_urls"] = rc_urls
     from vivarium_workbench.lib.run_commands import study_run_commands
     spec["run_commands"] = study_run_commands(spec, name)

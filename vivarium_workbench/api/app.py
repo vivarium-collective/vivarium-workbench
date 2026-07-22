@@ -678,6 +678,24 @@ def create_app() -> FastAPI:
         return StudyChartsPayload.model_validate(build_study_charts_payload(ws, slug))
 
     @app.get(
+        "/api/study-native-gallery/{slug}",
+        tags=["Studies"],
+        summary="Native-analysis figure gallery from a study's latest run viz.json",
+    )
+    def study_native_gallery_route(slug: str, ws: Path = Depends(get_workspace)):
+        """The native-analysis gallery (mass fractions, cell mass, replication,
+        ribosome usage, ...) rendered by the study's most recent COMPLETED run
+        into its ``viz.json`` — the same figures the Composite Explorer shows,
+        surfaced in the study Results tab. Returns
+        ``{run_id, panels: {name: html}}`` (``panels`` empty when the study has
+        no completed run yet). Library-backed via
+        ``lib.study_native_gallery.build_study_native_gallery``."""
+        from vivarium_workbench.lib.study_native_gallery import (
+            build_study_native_gallery,
+        )
+        return JSONResponse(build_study_native_gallery(ws, slug))
+
+    @app.get(
         "/api/visualization-classes",
         response_model=VisualizationClassesPayload,
         tags=["Studies"],
