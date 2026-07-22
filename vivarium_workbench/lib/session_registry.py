@@ -24,6 +24,13 @@ from pathlib import Path
 
 SESSION_COOKIE = "vw_session"
 
+# Per-tab identity header (session-per-tab, docs/session-binding.md §3). A browser
+# tab carries its session id in ``sessionStorage`` and sends it as this request
+# header; the server prefers it over the cookie and echoes the effective id back in
+# the same-named response header when the request arrived without one. The cookie
+# stays as the back-compat fallback for clients not yet running the fetch override.
+SESSION_HEADER = "X-VW-Session"
+
 
 @dataclass
 class SessionEntry:
