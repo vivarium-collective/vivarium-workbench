@@ -11,13 +11,14 @@ Context and the decisions this realizes: `docs/REFACTOR-PLAN.md` **§2A.7**
 doc specifies the wire contract those sections left open.
 
 Status: **in progress.** Transport + lifecycle and the `initialize` / `ping` /
-`list_generators` / `registry_catalog` / `viz_classes` / `shutdown` methods are
-implemented (`vivarium_workbench/env_worker.py`, warm-pooled via
-`lib/env_worker_pool.py`); `registry.build_registry` and
-`visualization_classes.list_visualization_classes` route through the worker
-today. The remaining methods (`resolve_composite_state`, `observables`,
-`composite_document`, `declared_emit_paths`) are still in-process pending their
-slices.
+`list_generators` / `registry_catalog` / `viz_classes` / `resolve_composite_state`
+/ `shutdown` methods are implemented (`vivarium_workbench/env_worker.py`,
+warm-pooled via `lib/env_worker_pool.py`); `registry.build_registry`,
+`visualization_classes.list_visualization_classes`, and
+`composite_state_views.build_composite_state` (generator branch) route through the
+worker today. The remaining methods (`observables`, `composite_document`,
+`declared_emit_paths`) — and the static-fallback / spec-file branches' in-process
+`attach_process_docs` — are still in-process pending their slices.
 
 ---
 

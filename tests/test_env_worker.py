@@ -210,6 +210,49 @@ def test_viz_classes_lib_entrypoint_routes_through_the_worker():
 
 
 # ---------------------------------------------------------------------------
+# Slice: resolve_composite_state — build a @composite_generator in the worker
+# (the old sys.executable subprocess), summarized + doc-decorated.
+# ---------------------------------------------------------------------------
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_resolve_composite_state_builds_registered_generator():
+    """A registered generator ref builds → {state, module, emitters}; the module
+    is the workspace's, proving the workspace package was imported in-worker."""
+    pytest.importorskip("pbg_superpowers")
+    ref = "pbg_ws_increase_demo.composites.hint_test"
+    with EnvWorker(_FIXTURE.resolve()) as w:
+        r = w.call("resolve_composite_state", {"ref": ref})
+    assert set(r) == {"state", "module", "emitters"}, r
+    assert r["module"] == "pbg_ws_increase_demo.composites"
+    assert isinstance(r["emitters"], list)
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_resolve_composite_state_unknown_ref_is_not_registered():
+    with EnvWorker(_FIXTURE.resolve()) as w:
+        r = w.call("resolve_composite_state", {"ref": "no.such.generator"})
+    assert r == {"__not_registered__": True}
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_build_composite_state_routes_generator_branch_through_worker():
+    """End-to-end through the lib entry point: the generator branch returns the
+    worker-built state with kind='generator'."""
+    pytest.importorskip("pbg_superpowers")
+    from vivarium_workbench.lib import composite_state_views as csv
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+
+    csv.clear_cache()
+    try:
+        body, status = csv.build_composite_state(
+            _FIXTURE.resolve(), "pbg_ws_increase_demo.composites.hint_test", fresh=True)
+    finally:
+        get_pool().close_all()
+    assert status == 200, body
+    assert body["kind"] == "generator"
+    assert "state" in body
+
+
+# ---------------------------------------------------------------------------
 # Opt-in real-workspace check: run the worker against a real v2ecoli checkout
 # on ITS OWN venv interpreter. Skips unless ../v2ecoli/.venv exists (build it
 # with `cd ../v2ecoli && uv sync`). This is the e2e that the minimal fixture
@@ -239,6 +282,17 @@ def test_env_worker_against_real_v2ecoli():
         viz = w.call("viz_classes")["classes"]
         assert any(c["kind"] == "analysis" for c in viz)       # v2ecoli Analysis steps
         assert any(c["kind"] == "visualization" for c in viz)  # + the default viz classes
+
+        # resolve_composite_state: build the real baseline generator. Either it
+        # builds (state doc) or raises for an environmental reason (e.g. an
+        # absent ParCa cache) — both are valid worker responses, never a crash,
+        # and any returned state must be finite JSON (numpy summarized away).
+        cs = w.call("resolve_composite_state", {"ref": "v2ecoli.composites.baseline"})
+        assert "state" in cs or "__build_error__" in cs, cs
+        if "state" in cs:
+            import json as _json
+            _json.dumps(cs["state"])   # must be serializable (no raw numpy)
+            assert cs["module"]
 
 
 def test_build_registry_serves_v2ecoli_via_its_own_venv():
