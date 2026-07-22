@@ -4445,7 +4445,11 @@ class TestSourceSwitchRoute:
         before = _root.get_workspace_root()
         r = client.post("/api/source/switch", json={"path": str(ws)})
         assert r.status_code == 200
-        assert r.json() == {"ok": True, "source": {"path": str(ws), "name": "w2"}}
+        body = r.json()
+        assert body["ok"] is True
+        assert body["source"] == {"path": str(ws), "name": "w2"}
+        # Eager-on-switch: the in-place env is prepared → ready (materialization §9c).
+        assert body["materialization"]["status"] == "ready"
         # The process-global root is NOT re-pointed (no cross-session bleed).
         assert _root.get_workspace_root() == before
         # The calling session IS bound to the new workspace (its cookie routes it).
@@ -4602,10 +4606,11 @@ class TestSourceSwitchBuildRoute:
         before = _root.get_workspace_root()
         r = client.post("/api/source/switch-build", json={"simulator_id": 5})
         assert r.status_code == 200
-        assert r.json() == {
-            "ok": True,
-            "source": {"path": str(cache), "name": "y @ deadbeef (build #5)"},
-        }
+        body = r.json()
+        assert body["ok"] is True
+        assert body["source"] == {"path": str(cache), "name": "y @ deadbeef (build #5)"}
+        # Eager-on-switch: the materialized build workspace is prepared → ready.
+        assert body["materialization"]["status"] == "ready"
         # Per-session (slice 4/5): the global root is NOT re-pointed; the caller's
         # session is bound to the materialized cache dir.
         assert _root.get_workspace_root() == before
@@ -6477,3 +6482,42 @@ def test_study_refresh_viz_in_openapi(client):
     paths = client.get("/openapi.json").json()["paths"]
     assert "/api/study-refresh-viz/{name}" in paths
     assert "post" in paths["/api/study-refresh-viz/{name}"]
+
+
+# ===========================================================================
+# Eager-on-switch materialization wiring (materialization-lifecycle §9c)
+# ===========================================================================
+def test_switch_returns_ready_materialization_and_status_polls(client, monkeypatch, tmp_path):
+    """A per-session switch to an in-place catalog entry prepares its env eagerly
+    → `materialization: ready`, and the poll endpoint reflects it for the session."""
+    ws = tmp_path / "wsx"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: wsx\n")
+    from pbg_superpowers import workspace_catalog
+    monkeypatch.setattr(workspace_catalog, "list_workspaces",
+                        lambda: [{"path": str(ws), "name": "wsx"}])
+
+    r = client.post("/api/source/switch", json={"path": str(ws)})
+    assert r.status_code == 200, r.text
+    mat = r.json()["materialization"]
+    assert mat["status"] == "ready"
+    assert mat["managed"] is False
+    assert mat["interpreter"]
+
+    # Same TestClient carries the session cookie → the poll reflects this session.
+    s = client.get("/api/source/materialization")
+    assert s.status_code == 200
+    assert s.json()["status"] == "ready"
+
+
+def test_materialization_status_unbound_session_is_ready(client):
+    """A session that never switched is on the in-place default workspace → ready."""
+    r = client.get("/api/source/materialization")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ready"
+
+
+def test_materialization_endpoint_in_openapi(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/api/source/materialization" in paths
+    assert "get" in paths["/api/source/materialization"]
