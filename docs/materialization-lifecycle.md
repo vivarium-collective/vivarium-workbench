@@ -52,6 +52,44 @@ Materializing a `(repo, ref)` source into a usable workspace is two steps, both
 
 The env worker is spawned on the venv's interpreter only after **both** complete.
 
+## 2a. The local / in-place path — find, don't clone (READY immediately)
+
+Not every workspace is materialized from GitHub. **Running locally, the workspaces
+already exist on disk** — a developer keeps several local git checkouts and
+*switches among them* (Eran's flow today); re-cloning them from GitHub would be pure
+friction. This is the **in-place-local** adapter (workspace-store §7) and it is the
+common local-dev path.
+
+**Decision:** local dev **uses existing local checkouts in place; it does not
+re-clone from GitHub.** Only the **managed** path — a session picking a `(repo, ref)`
+it hasn't checked out (the multi-session / cloud case) — clones + materializes (§2).
+
+For an in-place local workspace the two phases degenerate:
+
+- **Discovery, not clone (phase 1).** The workspace is *found*, not fetched — from
+  the **local workspace catalog** (`pbg_superpowers.workspace_catalog` — a
+  `workspaces.json` registry of registered local checkout paths, already what
+  `/api/source/switch` validates against). `serve --workspace <path>` is the
+  degenerate one-entry case (session-registry §9, the local default-bind). The
+  checkout **is** the staging area, edited in place.
+- **Use the existing environment (phase 2).** The checkout already has its own
+  environment — its `.venv` from the developer's own `uv sync`, or the active
+  interpreter. `EnvironmentResolver`'s in-place adapter **uses it** (the checkout's
+  `.venv/bin/python`, else the running interpreter — today's `sys.executable`
+  behavior); it does **not** force a `uv sync` on a dev checkout the user maintains.
+- **Materialization is a no-op → READY immediately.** Nothing to fetch or build, so
+  an in-place `bind`/`switch` **skips `MATERIALIZING`** (§4) and goes straight to
+  READY. The whole clone + `uv sync` + progress apparatus (§§2–7) is the **managed**
+  path only.
+
+So the **lifecycle model is one and the same** — the session states, the
+env-worker-spawns-on-READY precondition (env-worker §7), the per-session routing —
+and the *in-place adapter simply short-circuits the expensive parts*. Local dev
+stays instant; the cloud/managed path pays the materialize cost. Because both go
+through the same `RepoSource`/venv seams (§5a), a future "pull a not-checked-out
+repo on demand *locally* too" is an adapter choice, not a redesign — but the
+**default local experience is find + use, never re-clone**.
+
 ## 3. Asynchronous and out-of-band — the HTTP worker never blocks
 
 Materialization runs as a **detached job**, not inside the HTTP request — the same
@@ -74,12 +112,15 @@ The `SessionRegistry` lifecycle (session-registry §5) gains a `MATERIALIZING`
 state and a terminal `FAILED`:
 
 ```
- UNBOUND ──bind/switch(source)──▶ (source_version's env cached?)
+ UNBOUND ──bind/switch(source)──▶ (in-place local, or env already cached?)
                                       │ yes → READY (bound; worker spawns lazily)
                                       │ no  → MATERIALIZING ──▶ READY
                                                      │
                                                      └─ (clone/sync error | timeout) ──▶ FAILED
 ```
+
+An **in-place local** workspace (§2a) is always the top branch — it is already on
+disk, so it binds straight to READY, never entering MATERIALIZING.
 
 - **MATERIALIZING** — the workspace is being prepared. Requests that need the
   environment return a structured `{status: "materializing", phase, progress}` the
