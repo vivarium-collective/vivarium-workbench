@@ -20,10 +20,37 @@ from pathlib import Path
 import yaml
 
 from . import active_workspace as _aw
-from .observables_views import build_composite_state_for_observables
 
 _READOUTS_CACHE: dict = {}
 _READOUTS_CACHE_TTL_S = 300.0
+
+
+class _ValidatorUnavailable(Exception):
+    """readout_validation not importable in the worker's environment (→ 501)."""
+
+
+def _available_observables_for_ref(ws_root: Path, ref: str) -> dict:
+    """Worker-backed ``available_observables`` for a composite ``ref`` →
+    ``{leaves, catalogs}``.
+
+    Routes through the session's env worker (``observables{ref}``), falling back
+    to an inline ``{state, schema}`` for a spec-file composite the registry
+    doesn't know — the same plumbing ``observables_views.build_observables`` uses,
+    so readouts never build the composite (or import polars) in the HTTP process.
+    Raises ``_ValidatorUnavailable`` (→501) when the validator is absent, and
+    ``RuntimeError`` on a build failure so the caller's soft-degrade path fires."""
+    from .observables_views import _call_obs_worker, _resolve_spec_params
+    r = _call_obs_worker(ws_root, "observables", {"ref": ref})
+    if r is not None and "__not_registered__" in r:
+        params = _resolve_spec_params(ws_root, ref)  # LookupError → build failure
+        r = _call_obs_worker(ws_root, "observables", params)
+    if r is None:
+        raise RuntimeError("environment worker unavailable")
+    if "__no_validator__" in r:
+        raise _ValidatorUnavailable(r["__no_validator__"])
+    if "__build_error__" in r or "__introspect_error__" in r:
+        raise RuntimeError(r.get("__build_error__") or r.get("__introspect_error__"))
+    return r  # {leaves, catalogs}
 
 _LINEAGE_RE = re.compile(r"^agents\.\d+\.")
 _GENERIC_LEAF = {"count", "id", "value"}
@@ -176,13 +203,9 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
         return {**hit[1], "cached": True}, 200
 
     try:
-        from pbg_superpowers.readout_validation import available_observables
-    except Exception as e:  # noqa: BLE001
+        available = _available_observables_for_ref(ws_root, ref)
+    except _ValidatorUnavailable as e:
         return {"error": f"readout_validation unavailable: {e}"}, 501
-
-    try:
-        core, state, schema = build_composite_state_for_observables(ws_root, ref)
-        available = available_observables(core, state, schema)
     except Exception as e:  # noqa: BLE001
         rows = _merge_readouts(spec, {"leaves": []}, plan_available=False)
         # On a remote build (a materialized repo@commit, marked by .viv-build.json)

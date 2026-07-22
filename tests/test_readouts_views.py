@@ -163,7 +163,7 @@ def test_readouts_remote_build_degrades_softly(tmp_path, monkeypatch):
     }))
     (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66, "commit": "abc"}')
     monkeypatch.setattr(
-        rv, "build_composite_state_for_observables",
+        rv, "_available_observables_for_ref",
         lambda ws, ref: (_ for _ in ()).throw(FileNotFoundError("out/cache/initial_state.json")),
     )
     body, status = rv.build_study_readouts(tmp_path, "rdemo")
@@ -189,7 +189,7 @@ def test_readouts_local_build_failure_still_422_but_unverified(tmp_path, monkeyp
         "readouts": [{"name": "panel-y", "store_path": "listeners.foo.baz"}],
     }))
     monkeypatch.setattr(
-        rv, "build_composite_state_for_observables",
+        rv, "_available_observables_for_ref",
         lambda ws, ref: (_ for _ in ()).throw(FileNotFoundError("out/cache/initial_state.json")),
     )
     body, status = rv.build_study_readouts(tmp_path, "ldemo")
