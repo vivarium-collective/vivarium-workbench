@@ -106,35 +106,48 @@
   }
 
   // Spawn bootstrap (session-per-tab slice 3). Opening a workspace in a new tab is
-  // window.open('/?workspace=<catalog-name>'). When THIS tab loads with that param
-  // it must (a) take its OWN session — never the id a sibling tab's sessionStorage
-  // was copied into when the browser cloned it — so we force-mint fresh; (b) bind
-  // that session to the workspace by name; (c) strip the param so a reload is a
-  // plain load of this now-bound session; (d) reload once bound, so the server
-  // re-renders GET / for the bound workspace (the first paint was the default).
-  function bootstrapWorkspaceParam() {
+  // window.open('/?workspace=<catalog-name>') for a LOCAL workspace, or
+  // window.open('/?build=<simulator_id>') for an sms-api REMOTE build. When THIS
+  // tab loads with either param it must (a) take its OWN session — never the id a
+  // sibling tab's sessionStorage was copied into when the browser cloned it — so
+  // we force-mint fresh; (b) bind that session to the source (by name → switch, or
+  // by simulator_id → switch-build, which materializes the build's workspace);
+  // (c) strip the param so a reload is a plain load of this now-bound session;
+  // (d) reload once bound, so the server re-renders GET / for the bound workspace
+  // (the first paint was the default). A managed/remote bind returns 'materializing'
+  // — session-status.js then shows the ⏳ favicon until it settles.
+  function bootstrapSpawn() {
     var loc = window.location || {};
     var params;
     try { params = new URLSearchParams(loc.search || ""); } catch (e) { return null; }
     var ws = params.get("workspace");
-    if (!ws) return null;
+    var build = params.get("build");
+    if (!ws && !build) return null;
 
     clearId();          // discard any inherited (copied) id
     ensureId();         // mint this tab's own fresh id — race-free, before the bind
 
+    var endpoint, payload, key;
+    if (ws) {
+      endpoint = "/api/source/switch"; payload = { name: ws }; key = "workspace";
+    } else {
+      endpoint = "/api/source/switch-build";
+      payload = { simulator_id: Number(build) }; key = "build";
+    }
+
     function stripParam() {
       try {
-        params.delete("workspace");
+        params.delete(key);
         var qs = params.toString();
         var clean = (loc.pathname || "/") + (qs ? "?" + qs : "") + (loc.hash || "");
         window.history.replaceState(null, "", clean);
       } catch (e) { /* history unavailable — harmless */ }
     }
 
-    return window.fetch("/api/source/switch", {
+    return window.fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: ws }),
+      body: JSON.stringify(payload),
     }).then(function (r) {
       stripParam();
       // Reload the (now clean) URL so GET / re-renders for the bound workspace.
@@ -158,7 +171,7 @@
     mintId: mintId,
     ensureId: ensureId,
     installFetch: installFetch,
-    bootstrapWorkspaceParam: bootstrapWorkspaceParam,
+    bootstrapSpawn: bootstrapSpawn,
     _sameOrigin: _sameOrigin,
   };
 
@@ -168,7 +181,7 @@
   if (typeof window !== "undefined") {
     installFetch(window);
     window.vivSession = api;
-    bootstrapWorkspaceParam();
+    bootstrapSpawn();
   }
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;
