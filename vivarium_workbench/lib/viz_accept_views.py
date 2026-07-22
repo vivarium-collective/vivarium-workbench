@@ -22,23 +22,12 @@ Part of the FastAPI strangler-fig migration (POST phase, Phase C-state).
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from vivarium_workbench.lib.registry import clear_registry_cache
-
-
-def _ws_add_to_sys_path(ws_root: Path) -> None:
-    """Ensure the workspace root is on ``sys.path`` so its package is importable.
-
-    Replicates the stdlib server's ``_ws_add_to_sys_path`` helper inline.
-    """
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
 
 
 def visualization_accept(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
@@ -71,88 +60,23 @@ def visualization_accept(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
         return {"error": f"generated file not found at {target_rel}"}, 404
 
     # Invalidate the module-level registry cache so the next registry
-    # fetch will rebuild from disk.
+    # fetch will rebuild from disk. (Workbench-process cache — stays here.)
     clear_registry_cache()
 
-    # Attempt a fresh in-process import to verify the file loads cleanly.
+    # Import-verify + build_core() smoke-test + class discovery run in the
+    # workspace's env worker (importing the generated module + build_core is
+    # workspace Python — kept out of the HTTP process). HARD-fail on an
+    # unavailable worker: a smoke-test that could not run must NOT report success.
+    from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+    from vivarium_workbench.lib.env_worker_pool import get_pool
     try:
-        _ws_add_to_sys_path(ws_root)
-        sys.path.insert(0, str(ws_root))
-        import importlib
-        mod_name = f"{pkg}.visualizations.{snake}"
-        if mod_name in sys.modules:
-            importlib.reload(sys.modules[mod_name])
-        else:
-            __import__(mod_name)
-        # Also reload the visualizations package itself so the new module
-        # is picked up by subsequent _list_visualization_classes calls.
-        pkg_viz_mod = f"{pkg}.visualizations"
-        if pkg_viz_mod in sys.modules:
-            importlib.reload(sys.modules[pkg_viz_mod])
-    except Exception as e:
-        return {
-            "error": f"generated file failed to import: {type(e).__name__}: {e}"
-        }, 500
-
-    # Smoke-test the workspace's build_core() so a generated class that
-    # breaks bigraph-schema discovery (e.g. malformed inputs type strings,
-    # circular imports, type registration errors) surfaces here rather
-    # than at first investigation run. Invalidate the cached base core so
-    # the rebuild walks the new module too.
-    try:
-        import bigraph_schema.core as _bsc
-        _bsc._cached_base_core = None
-    except Exception:
-        pass
-    try:
-        core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
-        core_module.build_core()
-    except Exception as e:
-        return {
-            "error": (
-                f"workspace build_core() failed after importing the generated file: "
-                f"{type(e).__name__}: {e}"
-            )
-        }, 500
-
-    # Verify the class is discoverable when class_name is supplied.
-    # We walk the imported module's attributes directly (using the
-    # is_visualization() marker) rather than relying on core.link_registry,
-    # because non-installed workspace packages are not discovered by
-    # discover_packages() / importlib.metadata.
-    if class_name:
-        found = False
-        mod = sys.modules.get(f"{pkg}.visualizations.{snake}")
-        if mod is not None:
-            for attr_val in vars(mod).values():
-                if not isinstance(attr_val, type):
-                    continue
-                if getattr(attr_val, "__name__", None) != class_name:
-                    continue
-                marker = getattr(attr_val, "is_visualization", None)
-                if callable(marker):
-                    try:
-                        if marker() is True:
-                            found = True
-                            break
-                    except Exception:
-                        pass
-                # Fallback: check subclass of Visualization base
-                if not found:
-                    try:
-                        from pbg_superpowers.visualization import Visualization as _VizBase
-                        if issubclass(attr_val, _VizBase) and attr_val is not _VizBase:
-                            found = True
-                            break
-                    except ImportError:
-                        pass
-        if not found:
-            return {
-                "error": (
-                    f"class {class_name!r} not found in generated file after import; "
-                    f"check the @as_visualization name= argument matches"
-                )
-            }, 500
+        res = get_pool().call(ws_root, "validate_generated_visualization",
+                              {"pkg": pkg, "module": snake, "class_name": class_name})
+    except EnvWorkerUnavailable:
+        return {"error": "could not verify the generated visualization — "
+                         "environment worker unavailable"}, 500
+    if isinstance(res, dict) and res.get("error"):
+        return {"error": res["error"]}, 500
 
     # Step 7 (the _active_branch_action git commit with a no-op action) is
     # DEFERRED to the FastAPI flip; on success return the success payload.

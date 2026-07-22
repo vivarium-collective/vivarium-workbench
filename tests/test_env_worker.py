@@ -447,3 +447,55 @@ def test_discover_generators_via_worker_soft_degrades(monkeypatch):
 
     monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Down())
     assert cl._discover_generators_via_worker("/ws") == {}   # spec-only fallback
+
+
+# ---------------------------------------------------------------------------
+# validate_generated_visualization — the viz-accept smoke-test in the worker.
+# ---------------------------------------------------------------------------
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_validate_generated_visualization_ok_and_failures():
+    pytest.importorskip("pbg_superpowers")
+    fx = _FIXTURE.resolve()
+    vdir = fx / "pbg_ws_increase_demo" / "visualizations"
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "__init__.py").write_text("")
+    probe = vdir / "wvprobe.py"
+    probe.write_text(
+        "from pbg_superpowers.visualization import as_visualization\n"
+        '@as_visualization(inputs={"x": "list[float]"}, name="CacheProbe", demo={"x": [1.0]})\n'
+        'def update_cache_probe(state):\n    return {"html": ""}\n')
+    try:
+        with EnvWorker(fx) as w:
+            ok = w.call("validate_generated_visualization",
+                        {"pkg": "pbg_ws_increase_demo", "module": "wvprobe",
+                         "class_name": "CacheProbe"})
+            assert ok == {"ok": True}, ok
+            missing = w.call("validate_generated_visualization",
+                             {"pkg": "pbg_ws_increase_demo", "module": "no_such_mod",
+                              "class_name": "X"})
+            assert missing.get("code") == "import_failed"
+            wrong = w.call("validate_generated_visualization",
+                           {"pkg": "pbg_ws_increase_demo", "module": "wvprobe",
+                            "class_name": "NotThere"})
+            assert wrong.get("code") == "class_not_found"
+    finally:
+        probe.unlink(missing_ok=True)
+
+
+def test_viz_accept_hard_fails_when_worker_unavailable(tmp_path, monkeypatch):
+    """A smoke-test that can't run must NOT report success — hard-fail 500."""
+    from vivarium_workbench.lib import env_worker_pool, viz_accept_views
+    ws = tmp_path / "ws"
+    (ws / "pbg_x" / "visualizations").mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: x\npackage_path: pbg_x\n")
+    (ws / "pbg_x" / "visualizations" / "v.py").write_text("x = 1\n")
+
+    class _Down:
+        def call(self, *a, **k):
+            from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+            raise EnvWorkerUnavailable("down")
+
+    monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Down())
+    body, status = viz_accept_views.visualization_accept(ws, {"name": "v"})
+    assert status == 500
+    assert "environment worker unavailable" in body["error"]

@@ -87,7 +87,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites",
-                 "shutdown"]
+                 "validate_generated_visualization", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -709,6 +709,79 @@ def _discover_composites() -> dict:
     return {"generators": out}
 
 
+def _validate_generated_visualization(params: dict) -> dict:
+    """Smoke-test a just-accepted generated visualization module (spec §11), in
+    the workspace's env (import-verify → `build_core()` → class discovery) — the
+    write-path equivalent of the old in-process ``visualization_accept`` verify.
+    A warm worker may already hold the module, so **reload** it (picks up an edit).
+    Returns ``{"ok": True}`` or a structured ``{"error", "code"}`` (import_failed /
+    build_core_failed / class_not_found) — the workbench maps ``error`` to a 500."""
+    import importlib
+
+    pkg = (params or {}).get("pkg") or ""
+    snake = (params or {}).get("module") or ""
+    class_name = (params or {}).get("class_name") or ""
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+
+    mod_name = f"{pkg}.visualizations.{snake}"
+    try:
+        if mod_name in sys.modules:
+            importlib.reload(sys.modules[mod_name])
+        else:
+            __import__(mod_name)
+        pkg_viz_mod = f"{pkg}.visualizations"
+        if pkg_viz_mod in sys.modules:
+            importlib.reload(sys.modules[pkg_viz_mod])
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"generated file failed to import: {type(e).__name__}: {e}",
+                "code": "import_failed"}
+
+    # Invalidate the cached base core so build_core re-walks the new module.
+    try:
+        import bigraph_schema.core as _bsc
+        _bsc._cached_base_core = None
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+        core_module.build_core()
+    except Exception as e:  # noqa: BLE001
+        return {"error": ("workspace build_core() failed after importing the generated "
+                          f"file: {type(e).__name__}: {e}"), "code": "build_core_failed"}
+
+    if class_name:
+        found = False
+        mod = sys.modules.get(mod_name)
+        if mod is not None:
+            for attr_val in vars(mod).values():
+                if not isinstance(attr_val, type):
+                    continue
+                if getattr(attr_val, "__name__", None) != class_name:
+                    continue
+                marker = getattr(attr_val, "is_visualization", None)
+                if callable(marker):
+                    try:
+                        if marker() is True:
+                            found = True
+                            break
+                    except Exception:  # noqa: BLE001
+                        pass
+                if not found:
+                    try:
+                        from pbg_superpowers.visualization import Visualization as _VizBase
+                        if issubclass(attr_val, _VizBase) and attr_val is not _VizBase:
+                            found = True
+                            break
+                    except ImportError:
+                        pass
+        if not found:
+            return {"error": (f"class {class_name!r} not found in generated file after "
+                              "import; check the @as_visualization name= argument matches"),
+                    "code": "class_not_found"}
+    return {"ok": True}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -786,6 +859,8 @@ def _handle(method: str, params: dict) -> dict:
         return _attach_process_docs_method(params)
     if method == "discover_composites":
         return _discover_composites()
+    if method == "validate_generated_visualization":
+        return _validate_generated_visualization(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")
