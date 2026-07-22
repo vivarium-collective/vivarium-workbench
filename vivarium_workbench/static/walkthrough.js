@@ -5406,8 +5406,14 @@
         (function () {
           var slug = d.slug || d.name || name;
           if (!slug) { _renderInvestigationDag(d.studies || []); return; }
-          fetch('/api/investigation-graph?investigation=' + encodeURIComponent(slug))
-            .then(function (r) { if (!r.ok) throw new Error('graph ' + r.status); return r.json(); })
+          // Snapshot-aware: DataSource resolves to /api/investigation-graph/<slug>.json
+          // in the published read-only (a raw fetch of the query-string endpoint
+          // 404s there, dropping the evidence chains from every card).
+          (window.DataSource && window.DataSource.loadInvestigationGraph
+            ? window.DataSource.loadInvestigationGraph(slug)
+            : fetch('/api/investigation-graph?investigation=' + encodeURIComponent(slug))
+                .then(function (r) { if (!r.ok) throw new Error('graph ' + r.status); return r.json(); })
+          )
             .then(function (graph) {
               _renderInvestigationDag(d.studies || [], (graph && graph.chains) || {});
             })
