@@ -67,7 +67,7 @@ store rather than a raw global path.
 ## 4. Interface
 
 ```
-materialize(source) -> WorkspaceHandle     # (repo, ref) -> an isolated staging area
+materialize(source) -> WorkspaceHandle     # (repo, ref) -> an isolated staging area  [ASYNC — see materialization-lifecycle.md]
 list()              -> [WorkspaceHandle]   # from the manifest
 discard(handle)     -> None                # remove the staging area; GC (§9)
 persist(handle)     -> artifact_version    # staging -> durable artifact  (Phase 3, §10)

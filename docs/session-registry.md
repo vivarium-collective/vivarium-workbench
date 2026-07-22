@@ -101,7 +101,11 @@ layers on top — but the routing this spec defines is unchanged by that.
   workspace picker. (Local dev skips this — §9.)
 - **BOUND** — `bind`/`switch(source)` resolves the source through `WorkspaceStore`
   (materialize `(repo, ref)` → a `WorkspaceHandle`, §2A.6) and stores it on the
-  registry entry. The session is now routable.
+  registry entry. The session is now routable. When the source's environment isn't
+  yet materialized, `bind` passes through an intermediate **`MATERIALIZING`** state
+  (and, on clone/`uv sync` failure, a terminal `FAILED`) before BOUND — the
+  minutes-scale async prepare, specified in
+  [`materialization-lifecycle.md`](materialization-lifecycle.md).
 - **EXPIRED** — after `T_session` idle (no request), or an explicit `end`, the
   entry is dropped. This is the **session** idle horizon — deliberately *longer*
   than the env-worker idle horizon (protocol §17), so a user who steps away keeps their
