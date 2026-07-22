@@ -17,12 +17,16 @@ managed cache (behavior-preserving — the store is empty until the managed path
 populates it). §9(c) has begun: `lib/materialization_jobs.py` runs `materialize`
 **out-of-band** (a background job per coordinate, deduped, §5) with progress
 (`queued → syncing → ready | failed`) and status polling — a cached venv is `ready`
-at once, a failure carries the `uv` tail (§6). Still to come: wiring the job
-registry into session `bind`/`switch` + the `MATERIALIZING`/`FAILED` session states
-+ a status endpoint (§4/§8); then §9(d) — a detached *process* + durable record
-surviving restart, restart reconcile, a `uv sync` concurrency cap, and GC (§7/§10)
-— and the `RepoSource` clone seam / S3 cache (§2/§5a). The in-place local path
-(§2a) is unchanged and does not route through `materialize`.
+at once, a failure carries the `uv` tail (§6). The wiring is in: `lib/session_env.py`
+prepares a session's env **eager-on-switch** (§10) — `/api/source/switch[-build]`
+resolves the interpreter for an in-place source (`ready` at once, §2a) or starts a
+materialization job for a managed one (`materializing`) — and `GET
+/api/source/materialization` is the poll (`ready | materializing | failed`). The
+managed branch is dormant until the clone seam introduces managed sources; the
+switch endpoint drives only in-place today. Still to come: §9(d) — a detached
+*process* + durable record surviving restart, restart reconcile, a `uv sync`
+concurrency cap, and GC (§7/§10) — and the `RepoSource` clone seam / S3 cache
+(§2/§5a). The in-place local path (§2a) does not route through `materialize`.
 
 ---
 

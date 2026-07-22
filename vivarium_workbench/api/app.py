@@ -45,6 +45,7 @@ from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.request_logging import install_request_logging
 
 from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib import session_env
 from vivarium_workbench.lib import session_registry
 from vivarium_workbench.lib.workspace_context import WorkspaceContext
 from vivarium_workbench.lib import csrf as _csrf
@@ -4797,6 +4798,9 @@ def create_app() -> FastAPI:
         source_path = (body.get("source") or {}).get("path")
         if session_key and source_path:
             session_registry.rebind(session_key, source_path)
+            # Eager-on-switch (materialization-lifecycle §10): prepare the env now.
+            # A catalog entry is in-place local (§2a) → ready at once, no uv sync.
+            body["materialization"] = session_env.prepare(session_key, source_path)
         return SourceSwitchResponse.model_validate(body)
 
     @app.post(
@@ -4866,7 +4870,25 @@ def create_app() -> FastAPI:
         source_path = (body.get("source") or {}).get("path")
         if session_key and source_path:
             session_registry.rebind(session_key, source_path)
+            # The downloaded build workspace is on disk → in-place (§2a) today.
+            body["materialization"] = session_env.prepare(session_key, source_path)
         return SourceSwitchResponse.model_validate(body)
+
+    @app.get(
+        "/api/source/materialization",
+        tags=["Workspaces & sources"],
+        summary="Poll the calling session's environment materialization status",
+    )
+    def source_materialization(request: Request) -> dict:
+        """The calling session's environment-preparation status
+        (materialization-lifecycle §4): ``{status: ready|materializing|failed, …}``.
+
+        Eager-on-switch means a `/api/source/switch` already kicked preparation
+        off; this is the poll the client repeats until ``ready`` / ``failed`` (a
+        managed source's `uv sync` is minutes-scale, §1). A session that never
+        switched is on the in-place default workspace → ``ready``."""
+        st = session_env.status(_session_key_of(request))
+        return st if st is not None else {"status": session_env.READY}
 
     # -----------------------------------------------------------------------
     # Study runs — local study-run engine + workspace/study test runners
