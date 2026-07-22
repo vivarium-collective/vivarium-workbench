@@ -186,8 +186,9 @@ class TestVisualizationAccept:
         assert code == 200, resp
         assert resp == {"ok": True}
         assert spy_clear["n"] == 1
-        # the generated module was actually imported into the process
-        assert "pbg_wsok1.visualizations.my_viz" in sys.modules
+        # The verify (import + build_core) now runs in the env worker, so the
+        # generated module is imported THERE — never into this HTTP process.
+        assert "pbg_wsok1.visualizations.my_viz" not in sys.modules
 
     def test_200_happy_without_class(self, tmp_path: Path, spy_clear) -> None:
         # No class_name → the class-walk is skipped; import + build_core only.
