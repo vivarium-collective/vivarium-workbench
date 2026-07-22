@@ -88,3 +88,51 @@ def test_transport_is_socketpair_no_filesystem(tmp_path):
         assert w.call("ping")["ok"] is True
     finally:
         w.close()
+
+
+# ---------------------------------------------------------------------------
+# Slice 2: list_generators — the worker holds the workspace env in ITS process
+# ---------------------------------------------------------------------------
+def _make_ws(root, pkg, gen_name):
+    """A minimal workspace whose package registers one @composite_generator."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "workspace.yaml").write_text(f"name: {pkg}\npackage_path: {pkg}\n")
+    comp = root / pkg / "composites"
+    comp.mkdir(parents=True)
+    (root / pkg / "__init__.py").write_text("from . import composites\n")
+    (comp / "__init__.py").write_text(
+        "from pbg_superpowers.composite_generator import composite_generator\n"
+        f"@composite_generator(name='{gen_name}', description='')\n"
+        "def g(core=None):\n    return {}\n"
+    )
+    return root
+
+
+def test_list_generators_finds_the_workspace_package_generator(tmp_path):
+    pytest.importorskip("pbg_superpowers")
+    ws = _make_ws(tmp_path / "wsA", "pbg_wa", "gen_a")
+    with EnvWorker(ws) as w:
+        gens = w.call("list_generators")["generators"]
+        assert "pbg_wa.composites.gen_a" in gens
+
+
+def test_two_workers_have_isolated_registries(tmp_path):
+    """The load-bearing M2 property: process isolation. Each worker holds only
+    its own workspace's generators — one process cannot do this in-place."""
+    pytest.importorskip("pbg_superpowers")
+    a = _make_ws(tmp_path / "a", "pbg_iso_a", "gen_a")
+    b = _make_ws(tmp_path / "b", "pbg_iso_b", "gen_b")
+    with EnvWorker(a) as wa, EnvWorker(b) as wb:
+        ga = wa.call("list_generators")["generators"]
+        gb = wb.call("list_generators")["generators"]
+        assert "pbg_iso_a.composites.gen_a" in ga
+        assert "pbg_iso_b.composites.gen_b" in gb
+        assert "pbg_iso_b.composites.gen_b" not in ga   # A never sees B's env
+        assert "pbg_iso_a.composites.gen_a" not in gb   # and vice versa
+
+
+def test_list_generators_tolerates_a_workspace_with_no_package(tmp_path):
+    pytest.importorskip("pbg_superpowers")
+    (tmp_path / "workspace.yaml").write_text("name: bare\n")
+    with EnvWorker(tmp_path) as w:
+        assert isinstance(w.call("list_generators")["generators"], list)  # no crash

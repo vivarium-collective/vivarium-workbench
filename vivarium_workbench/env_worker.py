@@ -7,12 +7,13 @@ workspace's interpreter by path, importing **only the standard library** (plus,
 in later slices, what the workspace venv already has). It never imports
 ``vivarium_workbench``.
 
-**Slice 1 scope:** the transport + lifecycle only — the JSON-RPC framing over the
-inherited socket, and ``initialize`` / ``ping`` / ``shutdown``. The environment
-methods (``registry_catalog``, ``resolve_composite_state`` …) that call
-``build_core`` / the generator registry land in later slices; ``initialize`` here
-does **not** build the core yet, so this file stays stdlib-only and the transport
-can be proven against any workspace.
+**Scope so far:** the transport + lifecycle (``initialize`` / ``ping`` /
+``shutdown``) and the first environment query, ``list_generators`` — which
+imports the workspace's own package + the generator registry **in this process**
+(so the imports the HTTP process must not do live here instead). The heavier
+``build_core``-backed methods (``registry_catalog``, ``resolve_composite_state`` …)
+land in later slices. ``list_generators`` imports pbg_superpowers + the workspace
+package (both workspace-venv deps, spec §4); everything else is stdlib.
 
 Invocation (spec §4/§5)::
 
@@ -79,20 +80,72 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
     sock.sendall(struct.pack(">I", len(body)) + body)
 
 
+_CAPABILITIES = ["initialize", "ping", "list_generators", "shutdown"]
+
+
+def _import_workspace_package(workspace: str) -> None:
+    """Import the workspace's own package so its ``@composite_generator``s register
+    into *this worker's* process registry. Best-effort — a workspace without a
+    package (or an unparseable ``workspace.yaml``) just yields no workspace-local
+    generators. Uses pyyaml (a workspace-venv dep, spec §4); falls back to a
+    minimal ``package_path:`` scan if pyyaml is unavailable."""
+    import importlib
+    from pathlib import Path
+
+    ws_yaml = Path(workspace) / "workspace.yaml"
+    if not ws_yaml.is_file():
+        return
+    text = ws_yaml.read_text(encoding="utf-8")
+    pkg = None
+    try:
+        import yaml
+        data = yaml.safe_load(text) or {}
+        pkg = data.get("package_path") or (
+            "pbg_" + str(data.get("name", "")).replace("-", "_") if data.get("name") else None)
+    except Exception:  # pyyaml absent / parse error → cheap line scan for package_path
+        for line in text.splitlines():
+            if line.strip().startswith("package_path:"):
+                pkg = line.split(":", 1)[1].strip().strip("'\"") or None
+                break
+    if pkg:
+        try:
+            importlib.import_module(pkg)
+        except Exception:  # noqa: BLE001 — a broken workspace package must not crash the worker
+            pass
+
+
+def _list_generators() -> dict:
+    """Registry keys for this worker's environment (spec §11) — the workspace's
+    own ``@composite_generator``s plus installed bigraph-package generators, held
+    in THIS process (isolated from the HTTP process and from other sessions)."""
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    _import_workspace_package(_workspace)
+    from pbg_superpowers.composite_generator import _REGISTRY, discover_generators
+    try:
+        if not _REGISTRY:
+            discover_generators()
+    except Exception:  # noqa: BLE001 — best-effort; return whatever registered
+        pass
+    return {"generators": sorted(_REGISTRY.keys())}
+
+
 def _handle(method: str, params: dict) -> dict:
-    """Dispatch one method (spec §11). Slice 1: lifecycle only."""
+    """Dispatch one method (spec §11)."""
     if method == "ping":
         return {"ok": True, "uptime_s": time.monotonic() - _started}
     if method == "initialize":
-        # Slice 1: handshake only — no build_core yet (that's a later slice, and
-        # it keeps this file stdlib-only).
+        # Handshake. build_core is deferred to the environment methods (warm on
+        # first query, protocol §17), keeping initialize cheap.
         return {
             "protocol_version": PROTOCOL_VERSION,
             "workspace": _workspace,
             "python": sys.version.split()[0],
             "pid": os.getpid(),
-            "capabilities": ["initialize", "ping", "shutdown"],
+            "capabilities": _CAPABILITIES,
         }
+    if method == "list_generators":
+        return _list_generators()
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")
