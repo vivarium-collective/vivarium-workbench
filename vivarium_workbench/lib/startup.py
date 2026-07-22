@@ -4,10 +4,11 @@ This replaces the retired stdlib HTTP server (``server.serve``). It reproduces
 the side effects ``server.serve`` performed before accepting requests, then runs
 the FastAPI app (``api.app:app``) under uvicorn:
 
-* put the workspace on ``sys.path`` so its ``pbg_*`` package imports;
-  (no ``os.chdir`` — the process cwd is a single-workspace global; compute now
-  runs in per-session env workers with their own cwd, so cwd-relative reads like
-  ``out/cache/initial_state.json`` resolve there, not here);
+* (no ``os.chdir`` and no ``sys.path.insert(workspace)`` — both are single-
+  workspace process globals that would corrupt concurrent different-workspace
+  sessions; per-session compute + every in-process workspace import now runs in
+  the env worker, on the workspace's own ``sys.path``/cwd, and HTTP-process file
+  access resolves through an explicit per-request ``ws_root``);
 * register the active workspace root (the FastAPI ``get_workspace`` dependency
   reads it via ``active_workspace`` → ``_root``) and mirror it into the
   ``VIVARIUM_WORKBENCH_WORKSPACE`` env var;
@@ -67,16 +68,21 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
-    # No `os.chdir(workspace)`: the process cwd is a single-workspace global that
-    # would corrupt concurrent different-workspace sessions (audit risk #5). It is
-    # no longer needed — every subprocess sets its own cwd (composite_subprocess,
-    # the env worker) or targets the repo cwd-independently (`git -C`, global gh),
-    # and all HTTP-process file access resolves through an explicit ws_root (the
-    # per-request ContextVar in `_root`). The workspace still goes on sys.path so
-    # the process default's package resolves for any residual in-process import;
-    # per-session compute runs in the env worker, on the workspace's own sys.path.
-    if str(workspace) not in sys.path:
-        sys.path.insert(0, str(workspace))
+    # No `os.chdir(workspace)` and no `sys.path.insert(workspace)`: both are
+    # single-workspace process globals that would corrupt concurrent different-
+    # workspace sessions (audit risk #5). Neither is needed anymore:
+    #   * cwd — every subprocess sets its own (composite_subprocess, the env worker)
+    #     or targets the repo cwd-independently (`git -C`, global gh); all
+    #     HTTP-process file access resolves through an explicit ws_root (the
+    #     per-request ContextVar in `_root`).
+    #   * sys.path — no `/api/*` request path imports the workspace's own package
+    #     into this process anymore. Every read path that used to (registry/report
+    #     snapshot, re-export grids, viz preview, data-source providers, analysis
+    #     viewers) now runs in the per-session env worker, on the workspace's own
+    #     sys.path. The remaining in-process *compute* paths (composite state/
+    #     resolve/mutations) self-insert ws_root right before their import, so they
+    #     do not depend on a boot-time global — a follow-on can move them to the
+    #     worker too for full sys.modules isolation.
 
     from vivarium_workbench.lib._root import set_workspace_root
     set_workspace_root(workspace)

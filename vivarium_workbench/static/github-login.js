@@ -45,6 +45,22 @@
       }
       chip.title = 'Click to sign out';
       chip.onclick = doLogout;
+    } else if (chip.dataset.ghOwner) {
+      // No dashboard-managed token/OAuth, but the server resolved a gh-CLI
+      // identity (`gh api user`). You ARE operating as this user — show it
+      // rather than implying you're signed out. Click still opens the flow so
+      // you can add a token for browser-based push.
+      chip.dataset.state = 'in';
+      chip.classList.remove('viv-rail-footer-no-github');
+      const who = document.createElement('span');
+      who.textContent = '@' + chip.dataset.ghOwner;
+      chip.appendChild(who);
+      const src = document.createElement('span');
+      src.className = 'viv-gh-source';
+      src.textContent = '(via gh)';
+      chip.appendChild(src);
+      chip.title = 'Signed in via the gh CLI — click to add a token for browser push';
+      chip.onclick = startFlow;
     } else {
       chip.textContent = 'Sign in with GitHub';
       chip.title = 'Start GitHub OAuth Device Flow';

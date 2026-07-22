@@ -543,7 +543,7 @@ window.addEventListener('pageshow', function (e) {
             <circle cx="19" cy="10" r="1.05" fill="currentColor" stroke="none"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Analyses</span>
+        <span class="viv-rail-link-label">Analysis Tools</span>
       </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
@@ -558,49 +558,10 @@ window.addEventListener('pageshow', function (e) {
       </div>
     </div>
 
-    <!-- Footer: user identity + collapse toggle.
-         Workspace owner is resolved from `gh api user` (which requires
-         the user to have authenticated `gh auth login`). When that
-         succeeds, `owner_login` is the GitHub username and we link to
-         their profile. When it doesn't, we fall back to a GENERIC
-         "Connect GitHub" prompt — never to git-config name/email —
-         so a workspace shown on screen / shared in a screenshot
-         doesn't leak the local user's personal git identity. -->
-    {% if owner_login %}
-    {% set _owner_label = owner_name or owner_login %}
-    {% set _owner_sub = '@' + owner_login %}
-    {% if owner_html_url %}
-    <a class="viv-rail-footer viv-rail-footer-link" href="{{ owner_html_url }}" target="_blank" rel="noopener" title="Open {{ owner_login }} on GitHub ↗">
-    {% else %}
-    <div class="viv-rail-footer">
-    {% endif %}
-      {% if owner_avatar_url %}
-        <img class="viv-avatar viv-avatar-rail viv-avatar-img" src="{{ owner_avatar_url }}" alt="{{ owner_login }}" loading="lazy" referrerpolicy="no-referrer">
-      {% else %}
-        <div class="viv-avatar viv-avatar-rail">{{ owner_initials or '—' }}</div>
-      {% endif %}
-      <div class="viv-rail-footer-text">
-        <strong>{{ _owner_label }}</strong>
-        <small>{{ _owner_sub }}</small>
-      </div>
-    {% if owner_html_url %}
-    </a>
-    {% else %}
-    </div>
-    {% endif %}
-    {% else %}
-    {# No GitHub identity → generic prompt linking to gh-cli setup. #}
-    <a class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
-       href="https://cli.github.com/manual/gh_auth_login"
-       target="_blank" rel="noopener"
-       title="Connect this workspace to GitHub — run `gh auth login`">
-      <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
-      <div class="viv-rail-footer-text">
-        <strong>Connect GitHub</strong>
-        <small>run <code>gh auth login</code></small>
-      </div>
-    </a>
-    {% endif %}
+    <!-- The rail user-identity footer was removed: it added no navigation and
+         (in snapshot/screenshot contexts) surfaced a personal GitHub identity.
+         Dropping it also lets the Studies section grow to the rail's full
+         height so long study lists scroll instead of clipping. -->
 
   </aside>
 
@@ -661,9 +622,9 @@ window.addEventListener('pageshow', function (e) {
 
 </section>
 
-<!-- ===== PAGE: ANALYSES ===== -->
+<!-- ===== PAGE: ANALYSIS TOOLS ===== -->
 <section id="page-visualizations" class="page" data-page="visualizations">
-  <h2 class="page-title">Analyses</h2>
+  <h2 class="page-title">Analysis Tools</h2>
 
   <div class="panel">
     <h3>Saved visualizations <span id="viz-count" class="count-badge"></span></h3>
@@ -992,45 +953,44 @@ window.addEventListener('pageshow', function (e) {
       <div class="gh-row">
         <div class="gh-label">Signed in as</div>
         <div class="gh-value">
+          {#- Seed the chip with the gh-CLI identity the server already resolved
+              (`gh api user`, same source as the workspace owner), so it shows
+              "@login" immediately instead of implying you're signed out.
+              github-login.js keeps this when the browser-OAuth status is absent
+              and only upgrades the chip if a dashboard token/OAuth is present. -#}
           <div id="viv-gh-chip"
-               class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+               class="viv-rail-footer viv-rail-footer-link{% if not owner_login %} viv-rail-footer-no-github{% endif %}"
                data-state="loading"
-               title="Sign in to GitHub from the dashboard"
+               {% if owner_login %}data-gh-owner="{{ owner_login }}"{% endif %}
+               title="{% if owner_login %}Signed in via the gh CLI — click to add a token for browser push{% else %}Sign in to GitHub from the dashboard{% endif %}"
                style="cursor:pointer;display:inline-flex">
-            <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
-            <div class="viv-rail-footer-text">
-              <strong>Connect GitHub</strong>
-              <small>checking…</small>
-            </div>
+            {% if owner_login %}
+              {% if owner_avatar_url %}
+              <img class="viv-avatar viv-avatar-rail viv-avatar-img" src="{{ owner_avatar_url }}" alt="{{ owner_login }}" loading="lazy" referrerpolicy="no-referrer">
+              {% else %}
+              <div class="viv-avatar viv-avatar-rail">{{ owner_initials or '@' }}</div>
+              {% endif %}
+              <div class="viv-rail-footer-text">
+                <strong>@{{ owner_login }}</strong>
+                <small>{% if owner_name %}{{ owner_name }} · {% endif %}via gh</small>
+              </div>
+            {% else %}
+              <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
+              <div class="viv-rail-footer-text">
+                <strong>Connect GitHub</strong>
+                <small>checking…</small>
+              </div>
+            {% endif %}
           </div>
-          <div class="gh-value-hint">No terminal required. Uses your <code>gh</code> session if present; otherwise sign in with a token below (works anywhere) or the OAuth Device Flow.</div>
-          <div class="gh-value-hint" id="viv-gh-token-fallback" style="margin-top:8px">
-            Or <a href="#" id="viv-gh-token-toggle">paste a GitHub token</a> — the simplest path on any machine (no popup, no CLI).
+          <div class="gh-value-hint">Uses your <code>gh</code> session, or <a href="#" id="viv-gh-token-toggle">paste a token</a> for browser-based push.
             <div id="viv-gh-token-box" style="display:none;margin-top:8px">
               <input id="viv-gh-token-input" class="gh-input" type="password"
                      placeholder="ghp_… / gho_… / github_pat_…" autocomplete="off"
                      spellcheck="false" style="width:280px;max-width:100%">
               <button id="viv-gh-token-submit" class="btn-mini" type="button">Sign in</button>
               <span id="viv-gh-token-msg" style="margin-left:8px;font-size:0.85em"></span>
-              <div class="gh-value-hint" style="margin-top:6px">
-                Create one at <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">github.com/settings/tokens</a>
-                with <code>repo</code> scope. Stored in your OS keychain, never written to the workspace.
-              </div>
             </div>
           </div>
-          <noscript>
-            <div class="gh-value-hint">Dashboard JS is disabled — run <code>gh auth login</code> from a terminal.</div>
-          </noscript>
-        </div>
-      </div>
-
-      <div class="gh-row">
-        <div class="gh-label">Default org</div>
-        <div class="gh-value">
-          <select id="viv-gh-default-org" class="gh-input">
-            <option value="">Sign in to load orgs…</option>
-          </select>
-          <div id="viv-gh-default-org-hint" class="gh-value-hint">Used to pre-fill <strong>org</strong> for new workspaces and <em>Create GitHub repo</em> actions.</div>
         </div>
       </div>
     </div>
@@ -1143,13 +1103,7 @@ window.addEventListener('pageshow', function (e) {
 
 <!-- ===== PAGE: SIMULATIONS ===== -->
 <section id="page-simulations" class="page" data-page="simulations">
-  <h2 class="page-title">Simulations DB</h2>
-  <p class="page-lead">
-    Persisted runs gathered from each <code>studies/&lt;name&gt;/runs.db</code>,
-    tagged by investigation and study, with the storage location for each run.
-    On a remote build, the deployment's runs for that build's commit are
-    included too (Origin column). Scoped to the current branch's investigation
-    by default and refreshed automatically.
+  <p class="page-lead" style="margin:0 0 8px 0">
     <span id="sim-scope-note" style="color:#6b7280;"></span>
   </p>
 

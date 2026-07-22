@@ -87,7 +87,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites",
-                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "shutdown"]
+                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "data_sources_provider", "analysis_viewers", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -1230,6 +1230,198 @@ def _reexport_map(params: dict) -> dict:
     return {"reexports": reexports}
 
 
+def _data_sources_provider(params: dict) -> dict:
+    """Import + invoke the workspace's ``dashboard.data_sources`` provider (spec §11)
+    — a ``module:func`` spec that usually resolves into the workspace's own package,
+    so the import must not run in the HTTP process. Faithful port of
+    ``data_sources.import_provider`` + the ``fn()`` call.
+
+    Returns ``{"rows": [...], "error": None}`` on success, else ``{"rows": [],
+    "error": "TypeName: msg"}`` — the worker CATCHES the provider exception (rather
+    than raising) so the workbench reproduces the old in-process
+    ``{"sources": [], "error": ...}`` degrade verbatim."""
+    import importlib
+
+    spec = str((params or {}).get("provider") or "").strip()
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    try:
+        if ":" not in spec:
+            raise ValueError(f"provider must be 'module:func', got {spec!r}")
+        mod_name, _, func_name = spec.partition(":")
+        mod = importlib.import_module(mod_name)
+        fn = getattr(mod, func_name)
+        if not callable(fn):
+            raise TypeError(f"provider {spec!r} is not callable")
+        rows = list(fn() or [])
+        return {"rows": rows, "error": None}
+    except Exception as e:  # noqa: BLE001 — degrade, never crash the dashboard
+        return {"rows": [], "error": f"{type(e).__name__}: {e}"}
+
+
+# --- analysis viewers (spec §11): discover + launch repo-contributed viewers ----
+#     A workspace/pbg-* package MAY expose a ``workbench_viewers`` module with
+#     ``get_viewers(ws_root) -> [dict]`` (callables for applies/launch/targets).
+#     Discovery, predicate evaluation, target resolution, and launch all touch the
+#     contributor's live callables, so they run here; only JSON-safe descriptors +
+#     launch-result dicts cross the socket. Faithful port of lib.analysis_viewers.
+
+
+def _av_workspace_package(ws_root) -> str:
+    import yaml as _yaml
+    try:
+        ws_data = _yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        return ""
+    return ws_data.get("package_path") or (
+        "pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+
+
+def _av_candidate_packages(ws_root) -> list:
+    import importlib.metadata as _metadata
+    seen: set = set()
+    out: list = []
+
+    def _add(pkg: str) -> None:
+        if pkg and pkg not in seen:
+            seen.add(pkg)
+            out.append(pkg)
+
+    _add(_av_workspace_package(ws_root))
+    try:
+        for dist in _metadata.distributions():
+            name = (dist.metadata.get("Name") or "").strip()
+            if name.startswith("pbg-"):
+                _add(name.replace("-", "_"))
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def _av_load_viewers_module(pkg: str):
+    import importlib
+    import warnings
+    mod_name = f"{pkg}.workbench_viewers"
+    try:
+        return importlib.import_module(mod_name)
+    except ModuleNotFoundError:
+        return None
+    except Exception as e:  # noqa: BLE001 — a broken contributor must not 500 the page
+        warnings.warn(f"analysis_viewers: {mod_name} failed to import: "
+                      f"{type(e).__name__}: {e}", stacklevel=2)
+        return None
+
+
+def _av_applies(viewer: dict, ws_root) -> bool:
+    cond = viewer.get("applies", True)
+    if callable(cond):
+        try:
+            return bool(cond(ws_root))
+        except Exception:  # noqa: BLE001
+            return False
+    return bool(cond)
+
+
+def _av_discover_viewers(ws_root) -> list:
+    import warnings
+    out: list = []
+    for pkg in _av_candidate_packages(ws_root):
+        mod = _av_load_viewers_module(pkg)
+        if mod is None or not hasattr(mod, "get_viewers"):
+            continue
+        try:
+            viewers = mod.get_viewers(ws_root) or []
+        except Exception as e:  # noqa: BLE001
+            warnings.warn(f"analysis_viewers: {pkg}.workbench_viewers.get_viewers raised "
+                          f"{type(e).__name__}: {e}", stacklevel=2)
+            continue
+        for v in viewers:
+            if not isinstance(v, dict) or not v.get("id"):
+                continue
+            if not _av_applies(v, ws_root):
+                continue
+            rec = dict(v)
+            rec["package"] = pkg
+            rec["uid"] = f"{pkg}::{v['id']}"
+            out.append(rec)
+    return out
+
+
+def _av_resolve_targets(viewer: dict, ws_root) -> list:
+    t = viewer.get("targets")
+    if callable(t):
+        try:
+            t = t(ws_root)
+        except Exception:  # noqa: BLE001
+            return []
+    if not isinstance(t, list):
+        return []
+    out: list = []
+    for item in t:
+        if isinstance(item, dict) and item.get("study"):
+            out.append({
+                "study": str(item["study"]),
+                "label": str(item.get("label") or item["study"]),
+                "detail": str(item.get("detail") or ""),
+            })
+    return out
+
+
+def _av_public_spec(viewer: dict, ws_root) -> dict:
+    assets = viewer.get("assets") or {}
+    return {
+        "uid": viewer["uid"],
+        "id": viewer.get("id"),
+        "package": viewer.get("package"),
+        "title": viewer.get("title") or viewer.get("id"),
+        "description": viewer.get("description", ""),
+        "kind": viewer.get("kind", "launcher"),
+        "targets": _av_resolve_targets(viewer, ws_root),
+        "assets": {
+            "js": list(assets.get("js") or []),
+            "mount_id": assets.get("mount_id"),
+            "api_prefix": assets.get("api_prefix"),
+        } if assets else None,
+    }
+
+
+def _av_resolve_launch(ws_root, uid, study, run, ctx) -> dict:
+    ctx = ctx or {}
+    match = next((v for v in _av_discover_viewers(ws_root) if v.get("uid") == uid), None)
+    if match is None:
+        return {"error": f"viewer not found: {uid}", "status": 404}
+    launch = match.get("launch")
+    if not callable(launch):
+        return {"error": f"viewer {uid} is not launchable", "status": 400}
+    try:
+        result = launch(ws_root, study, run, ctx)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}", "status": 500}
+    if not isinstance(result, dict):
+        return {"error": "viewer launch returned a non-dict result", "status": 500}
+    return result
+
+
+def _analysis_viewers(params: dict) -> dict:
+    """List JSON-safe viewer descriptors, or resolve+invoke a viewer's launch (spec §11).
+
+    ``params``: ``{"action": "list"}`` → ``{"viewers": [public_spec...]}``; or
+    ``{"action": "launch", "uid", "study"?, "run"?, "ctx"?}`` → ``{"result": {...}}``
+    (the contributor's launch dict, or a shaped error). Faithful port of
+    ``analysis_viewers.viewers_public`` / ``resolve_launch``."""
+    from pathlib import Path
+    p = params or {}
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    ws_root = Path(_workspace) if _workspace else Path(".")
+    action = p.get("action")
+    if action == "launch":
+        return {"result": _av_resolve_launch(
+            ws_root, p.get("uid"), p.get("study"), p.get("run"), p.get("ctx"))}
+    # default / "list"
+    return {"viewers": [_av_public_spec(v, ws_root) for v in _av_discover_viewers(ws_root)]}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -1321,6 +1513,10 @@ def _handle(method: str, params: dict) -> dict:
         return _report_core_snapshot(params)
     if method == "reexport_map":
         return _reexport_map(params)
+    if method == "data_sources_provider":
+        return _data_sources_provider(params)
+    if method == "analysis_viewers":
+        return _analysis_viewers(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

@@ -318,24 +318,29 @@ for a single local workspace; (c) make it async + the `MATERIALIZING` session st
 A running record of the choices made while building this (for later review — some
 resolve §10 open questions, some are pragmatic scoping calls). Newest first.
 
-- **2026-07-22 — `sys.path` cleanup: the last per-request in-process workspace
-  imports moved to the env worker (3 PRs), so `startup.py`'s `sys.path.insert(0,
-  workspace)` can be removed.** The statelessness long-tail left three request
-  paths that still `import <pkg>.*` in the shared HTTP process (poisoning
-  `sys.modules` and blocking multi-workspace): (1) report render's registry/
-  document load → worker `report_core_snapshot`; (2) registry re-export grid →
-  worker `reexport_map` (both #530); (3) the viz-preview render (`viz_preview_views`
-  + `viz_core`) → worker `viz_preview`. **Split for #3:** the class-touching render
-  (resolve off the cached viz core, demo/streaming/investigation `.update()`) runs
-  in the worker; the investigation `inputs_store` is still assembled HTTP-side
-  (`gather_emitter_outputs` + `build_viz_composite` in its worker-provided
-  `inputs_by_class` mode — both are workbench code, not workspace code). **Deleted**
-  the now-dead `lib/viz_core.py` + its test (a self-contained module, unlike the
-  report/registry dead helpers left in #530). **Behaviour preserved:** only a
-  missing address (400) / unregistered class (404) are non-200; every render
-  outcome is a 200 body, plus a new worker-down 200 stub. **Next:** PR-3 removes the
-  `sys.path.insert` once these land (an audit confirms no other request path imports
-  workspace Python in-process).
+- **2026-07-22 — `sys.path` cleanup COMPLETE: every `/api/*` request path's
+  in-process workspace import moved to the env worker (6 PRs), and `startup.py`'s
+  `sys.path.insert(0, workspace)` is removed.** The statelessness long-tail's
+  "3 residual imports" estimate was an undercount — a code audit (recorded below)
+  found 6 request paths that `import <pkg>.*` in the shared HTTP process. All are
+  now worker-backed: (1) report render's registry/document load → `report_core_snapshot`;
+  (2) registry re-export grid → `reexport_map` (#530); (3) viz-preview render
+  (`viz_preview_views` + `viz_core`) → `viz_preview`, and the dead `lib/viz_core.py`
+  deleted (#531); (4) catalog re-export-origin rows → the same `reexport_map`
+  (#532); (5) the `dashboard.data_sources` provider → `data_sources_provider`,
+  `import_provider` deleted (#533); (6) analysis viewers discover+launch → the
+  `analysis_viewers` method, `lib/analysis_viewers.py` reduced to a thin seam (#534).
+  Each split keeps file/spec resolution + normalization + degrade HTTP-side and
+  moves only the workspace-Python import/call to the worker; every one soft-degrades
+  on an unavailable worker (empty result or a shaped error, never a 500). **The
+  removal** (this PR) drops the boot-time global so a pure read/browse session keeps
+  `sys.path` clean and is multi-workspace-safe by construction. **Follow-on (NOT a
+  blocker):** the in-process *compute* paths (`composite_state_views`,
+  `composite_resolve`, `composite_mutations`) still `sys.path.insert(ws_root)`
+  themselves right before importing the workspace package — the audit's "bucket C".
+  They don't depend on the boot-time global (so removal is crash-safe), but they do
+  re-add the workspace to `sys.path` on first compute use; moving them to the worker
+  too is the remaining step for full `sys.modules` isolation.
 - **2026-07-22 — A venv is only cached once a completion marker is written**
   (`.vwb-materialized`, after `uv sync` fully succeeds). An interrupted/killed
   sync leaves a `bin/python` but no marker, so `cached_interpreter` re-syncs it
