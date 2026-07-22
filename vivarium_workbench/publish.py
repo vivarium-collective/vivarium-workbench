@@ -887,6 +887,11 @@ def _do_build(
     from vivarium_workbench.lib.notebook_export import export_investigation_notebook
     nb_out_dir = out_dir / "investigation-notebooks"
     notebook_manifest: list[dict] = []
+    # api/investigation-graph/<slug>.json — study nodes + typed evidence chains,
+    # byte-parity with GET /api/investigation-graph?investigation=<slug>. Without
+    # this, the read-only DAG cards can't render the evidence chain at near zoom.
+    from vivarium_workbench.lib.investigation_graph_views import build_investigation_graph
+    (api_dir / "investigation-graph").mkdir(parents=True, exist_ok=True)
     for inv_name in investigations:
         data = build_iset_detail(ws_root, inv_name)
         if data is None:
@@ -894,6 +899,11 @@ def _do_build(
         # iset JSON stays byte-parity with the live builder; notebook urls live
         # in the separate manifest (the SPA derives the snapshot url from slug).
         _write_json(api_dir / "investigation" / f"{inv_name}.json", data)
+        try:
+            _graph, _ = build_investigation_graph(ws_root, inv_name)
+            _write_json(api_dir / "investigation-graph" / f"{inv_name}.json", _graph)
+        except Exception as exc:  # noqa: BLE001 — never abort a publish on one graph
+            print(f"  warn: investigation-graph export failed for {inv_name!r}: {exc}")
         try:
             paths = export_investigation_notebook(ws_root, inv_name, out_dir=nb_out_dir)
             notebook_manifest.append({

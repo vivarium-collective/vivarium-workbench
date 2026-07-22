@@ -104,6 +104,12 @@
       : "/api/investigation-summaries";
   }
 
+  function _investigationGraphUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/investigation-graph/" + encodeURIComponent(slug) + ".json"
+      : "/api/investigation-graph?investigation=" + encodeURIComponent(slug);
+  }
+
   function _inputsUrl(slug) {
     if (!slug) {
       // No investigation context → global/shared inputs.
@@ -246,6 +252,15 @@
      */
     async loadIsetList() {
       return _get(_isetListUrl());
+    },
+
+    /**
+     * Investigation graph (study nodes + typed evidence chains) for one
+     * investigation. Local: GET /api/investigation-graph?investigation=<slug>.
+     * Snapshot: /api/investigation-graph/<slug>.json from the static bundle.
+     */
+    async loadInvestigationGraph(slug) {
+      return _get(_investigationGraphUrl(slug));
     },
 
     /**
