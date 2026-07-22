@@ -19,10 +19,14 @@ def test_filter_input_present_and_dead_div_gone():
     assert 'actions now live in' not in p  # dead actions comment/div removed
 
 
-def test_lead_condensed():
+def test_lead_dropped():
+    # #540 (chore: drop the page title + lead text) removed the investigations
+    # header prose entirely — no verbose lead, no condensed lead, no title.
     p = page_investigations()
-    assert 'preserved as artifacts' not in p          # verbose lead gone
-    assert 'open its study graph' in p                # condensed lead
+    assert 'preserved as artifacts' not in p          # old verbose lead gone
+    assert 'open its study graph' not in p            # condensed lead also dropped
+    assert 'page-lead' not in p                       # no lead element at all
+    assert 'page-title' not in p                      # title dropped too
 
 
 def test_list_container_not_inline_grid():
