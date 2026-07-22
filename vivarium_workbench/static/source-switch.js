@@ -2,10 +2,15 @@
 //
 // Triggered by the left-rail workspace-name chip (#viv-source-switch-trigger).
 // Click it to open a dropdown listing Local workspaces (/api/workspaces) and
-// remote sms-api Builds (/api/source/builds). Selecting one re-points the
-// dashboard's active source IN-PROCESS (POST /api/source/switch[-build]) and
-// reloads — one server, one URL, no port change. Styled with the shared
-// .viv-iset-menu classes so it matches the rest of the rail.
+// remote sms-api Builds (/api/source/builds).
+//
+// Session-per-tab (pinned-for-life): picking a LOCAL workspace opens it in a NEW
+// TAB — window.open('/?workspace=<catalog-name>'), which session.js's ?workspace=
+// bootstrap force-mints a fresh per-tab session for and binds — rather than
+// re-pointing THIS tab in place. A tab keeps its workspace for life; to view
+// another, open another tab. (sms-api Builds still switch in place for now — the
+// hosted spawn is a later slice.) A name-less catalog entry falls back to the
+// in-place path switch. Styled with the shared .viv-iset-menu classes.
 (function () {
   "use strict";
 
@@ -14,6 +19,19 @@
   var escHandler = null;
 
   function _trigger() { return document.getElementById("viv-source-switch-trigger"); }
+
+  // Pinned-for-life: open the workspace in a NEW tab bound to it by name. Falls
+  // back to an in-place switch by path when the catalog entry has no name (can't
+  // spawn by name). session.js handles the fresh-session bootstrap in the new tab.
+  function _openWorkspaceTab(ws) {
+    _close();
+    var name = ws && ws.name;
+    if (name) {
+      window.open("/?workspace=" + encodeURIComponent(name), "_blank");
+    } else {
+      _switch(ws.path);
+    }
+  }
 
   async function _switch(path) {
     const r = await fetch("/api/source/switch", {
@@ -82,6 +100,14 @@
       tag.textContent = "current";
       line.appendChild(tag);
     }
+    if (opts.openInTab) {
+      const arr = document.createElement("span");
+      arr.className = "viv-iset-menu-row-newtab";
+      arr.textContent = "↗";
+      arr.title = "Opens in a new tab";
+      arr.setAttribute("aria-label", "opens in a new tab");
+      line.appendChild(arr);
+    }
     if (opts.forgetPath) {
       const x = document.createElement("button");
       x.type = "button";
@@ -127,9 +153,10 @@
           items.forEach(function (ws) {
             const cur = ws.status === "current";
             const label = ws.label || ws.name || ws.path;
-            listEl.appendChild(_row(label, function () { _switch(ws.path); }, {
+            listEl.appendChild(_row(label, function () { _openWorkspaceTab(ws); }, {
               current: cur,
               forgetPath: cur ? null : ws.path,   // can't forget the active one
+              openInTab: !cur && !!ws.name,       // shows the ↗ "opens a new tab" hint
             }));
           });
         }
