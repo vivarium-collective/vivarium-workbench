@@ -217,6 +217,19 @@ def _build_reexport_map(include: set[str]) -> dict[str, str]:
     return reexports
 
 
+def _reexport_map_via_worker(ws_root: "Path", include: set) -> dict:
+    """The re-export map via the env worker (imports the allow-listed packages
+    there, not in the HTTP process). Soft-degrade to ``{}`` — a bad import or an
+    unavailable worker never blanks the registry grid."""
+    from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+    try:
+        r = get_pool().call(ws_root, "reexport_map", {"include": sorted(include)})
+        return r.get("reexports", {}) if isinstance(r, dict) else {}
+    except EnvWorkerUnavailable:
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Registry post-processing helpers
 # ---------------------------------------------------------------------------
@@ -291,7 +304,7 @@ def _registry_imports_meta(ws_data: dict | None) -> list[dict]:
     return out
 
 
-def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
+def _apply_registry_include_filter(data: dict, ws_data: dict | None, ws_root: Path) -> None:
     """Filter ``data['processes']`` to only classes from allow-listed packages.
 
     Display-only: matches each entry's originating top-level package (derived
@@ -330,11 +343,10 @@ def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
             mod = str(entry.get("name") or "")
         return mod.split(".")[0].replace("-", "_")
 
-    # Build the re-export map (guarded so a bad import never blanks the grid).
-    try:
-        reexports = _build_reexport_map(include)
-    except Exception:
-        reexports = {}
+    # Build the re-export map in the env worker (importing the allow-listed
+    # packages is workspace Python, kept out of the HTTP process). Guarded so a
+    # bad import / unavailable worker never blanks the grid.
+    reexports = _reexport_map_via_worker(ws_root, include)
 
     def _reexporter(entry: dict) -> str | None:
         """Return the allow-listed pkg that re-exports this entry, else None."""
@@ -451,7 +463,7 @@ def build_registry(ws_root: Path, *, bypass_cache: bool = False) -> dict:
         # When set, the Registry tab shows ONLY classes whose originating package
         # is in the list (discovery is unchanged). No-op when unset → current
         # behavior (show everything).
-        _apply_registry_include_filter(data, ws_data)
+        _apply_registry_include_filter(data, ws_data, ws_root)
         # Imported-repositories metadata (workspace.yaml::imports): name, source
         # URL, ref, description — so the Registry can show each imported repo
         # alongside the processes/steps it contributes (grouped by package).

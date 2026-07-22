@@ -318,12 +318,15 @@ def test_filter_catalog_noop_without_include():
     assert catalog._filter_catalog_modules(modules, {}) == modules
 
 
-def test_registry_filter_always_keeps_emitters():
+def test_registry_filter_always_keeps_emitters(tmp_path, monkeypatch):
     """`dashboard.registry.include` scopes processes to the repo, but emitters
     (the workspace's I/O backends, in framework/env packages outside the
     include) must always survive — else the Registry's Emitters section is
     empty under a repo-scoped include like [v2ecoli]."""
     from vivarium_workbench.lib import registry
+    # the re-export map is worker-backed; this unit test exercises only the
+    # include filter, so stub it (no worker spawn).
+    monkeypatch.setattr(registry, "_reexport_map_via_worker", lambda ws_root, include: {})
 
     data = {"processes": [
         {"name": "EcoliWCM", "address": "v2ecoli.bridge.EcoliWCM", "kind": "process"},
@@ -331,7 +334,7 @@ def test_registry_filter_always_keeps_emitters():
         {"name": "XArrayEmitter", "address": "pbg_emitters.x.XArrayEmitter", "kind": "emitter"},
         {"name": "ConsoleEmitter", "address": "process_bigraph.emitter.ConsoleEmitter", "kind": "emitter"},
     ]}
-    registry._apply_registry_include_filter(data, {"dashboard": {"registry": {"include": ["v2ecoli"]}}})
+    registry._apply_registry_include_filter(data, {"dashboard": {"registry": {"include": ["v2ecoli"]}}}, tmp_path)
     kept = {p["name"] for p in data["processes"]}
     assert "EcoliWCM" in kept            # own package
     assert "XArrayEmitter" in kept       # emitter (env pkg) survives
