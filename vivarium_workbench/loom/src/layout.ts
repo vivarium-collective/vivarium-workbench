@@ -182,7 +182,10 @@ export async function applyLayout(
   const storePts = [...positions.values()];
   const procNodes = nodes.filter((n) => n.type === "process");
   if (storePts.length > 0 && procNodes.length > 0) {
-    const PROC_W = 140, PROC_H = 60, GAP_X = 240, H_SPACE = 70, V_SPACE = 50;
+    // H_SPACE is the gap BETWEEN process columns. Process port labels render
+    // outside the 140px box, so a tight gap let adjacent columns' port text
+    // overlap; widen it substantially so columns read as clearly separated.
+    const PROC_W = 140, PROC_H = 60, GAP_X = 240, H_SPACE = 210, V_SPACE = 66;
     const maxRight = Math.max(...storePts.map((p) => p.x)) + 80; // +store circle width
     const minY = Math.min(...storePts.map((p) => p.y));
     const procColX = maxRight + GAP_X;
