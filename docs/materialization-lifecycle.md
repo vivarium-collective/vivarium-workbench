@@ -40,7 +40,11 @@ Materializing a `(repo, ref)` source into a usable workspace is two steps, both
 1. **Staging area** (`WorkspaceStore`, workspace-store §6) — resolve `ref` →
    `source_version`, `git worktree add` off the per-repo bare mirror →
    `staging_path`. Usually seconds; the **first** bare-mirror clone of a large repo
-   can itself be minutes.
+   can itself be minutes. **Source of the clone:** the origin (GitHub) today. The
+   per-repo bare mirror is a **per-pod** cache — repeated materializes of the same
+   repo within a pod only `fetch`, never re-clone; but a *fresh* pod, and every
+   *other* consumer of the repo (notably sms-api, §5a), pulls from GitHub
+   independently.
 2. **Environment** (`EnvironmentResolver`, workspace-store §8) — `uv sync` a venv
    from the staging area's lockfile. **The minutes-scale step.** Cached by
    `source_version` (§5): built once, shared read-only across every session/handle
@@ -101,6 +105,31 @@ state and a terminal `FAILED`:
   **the venv is per-coordinate** (shared). So five sessions on the same
   `source_version` = five cheap worktrees + **one** `uv sync` + five worker
   processes.
+
+## 5a. Repo source & the double-download — a future S3 optimization (deferred)
+
+The clone in phase 1 pulls from **GitHub**, and so does sms-api — **independently**.
+Confirmed in the sms-api tree: the Ray/Batch build does
+`git clone --branch <ref> --single-branch <CLONE_URL> /build/v2ecoli`
+(`simulation_service_ray.py`), and the compose path pip-installs
+`git+https://github.com/vivarium-collective/v2ecoli.git`. So for the **same
+`(repo, commit)`**, a workbench materialize (its venv/staging) **and** an sms-api
+run each fetch the repo from GitHub separately — **downloaded twice** (sms-api
+reportedly discards its copy per run, so it re-pulls every time). At v2ecoli scale
+that is real egress, latency, and GitHub rate-limit exposure — on the same commit
+sms-api has *already* built and keyed its ParCa cache by (the F′ north-star in
+Alex's #486 review: the runner-image commit and the resolved pip commit should be
+one source of truth, not two).
+
+**Future optimization (deferred — needs sms-api coordination):** a **shared repo
+cache in S3** — the `(repo, commit)` tree (or bare mirror) synced to an S3 bucket
+once, and **both** the workbench materialize and sms-api pull from S3 instead of
+GitHub. Benefits: one fetch per commit instead of N; no GitHub rate-limit/egress on
+the hot path; byte-identical source across both sides. It is **not** in scope now —
+it is a cross-service change (S3 layout + who writes the cache + auth) that couples
+the workbench and sms-api materialization paths, and the local `uv sync`/venv work
+must land first. Captured here so the phase-1 clone is written against a `RepoSource`
+seam (GitHub now, S3 later) rather than a hardcoded `git clone <github-url>`.
 
 ## 6. Failure surfacing — expected, not a crash
 
@@ -173,3 +202,7 @@ for a single local workspace; (c) make it async + the `MATERIALIZING` session st
 - **Cloud parity** — in the cloud adapter the "venv" is the `(repo, commit)` image
   built by sms-api; the same lifecycle states apply, but phase 2 is "image ready"
   (poll sms-api) rather than a local `uv sync`.
+- **Shared S3 repo cache (§5a)** — pull the repo from S3, not GitHub, so the
+  workbench and sms-api don't each clone the same commit. Deferred (cross-service,
+  needs sms-api coordination); phase 1 should still expose a `RepoSource` seam now
+  so GitHub→S3 is later a swap, not a rewrite.
