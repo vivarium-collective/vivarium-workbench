@@ -46,8 +46,8 @@
       p.classList.toggle('active', p.dataset.kind === kind);
     });
     if (kind === 'tests') { loadTestsTab(window._study); }
+    if (kind === 'visualize') { _loadReadouts(); _loadCharts('viz-charts-panel'); _loadNativeGallery(); }
     if (kind === 'report-cards') { _fillReportCardsTab(window._study); }
-    if (kind === 'visualize') { _loadReadouts(); _loadNativeGallery(); _loadCharts('viz-charts-panel'); }
     if (kind === 'data') { _loadAnalysisOutputs(); }
     if (kind === 'simulate') { _renderReproduceCard(); }
   }
