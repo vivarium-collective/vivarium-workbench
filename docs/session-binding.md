@@ -1,192 +1,224 @@
-# Managed session-binding lifecycle — how a materialized `(repo, ref)` becomes a session's workspace
+# Session-per-tab — one workspace per browser tab
 
-Design proposal for the one piece deliberately deferred while building
-materialization (materialization-lifecycle.md §11): **how a managed
-`(repo, ref)` a session materializes actually becomes that session's active
-workspace**, and what requests observe while it is being prepared.
+Design proposal for the session/workspace binding model: **each browser tab is
+its own session on its own workspace.** A new workspace opens a new tab, born
+"preparing" (an hourglass), that you switch to once it is ready. This is the
+deferred materialization-binding piece (materialization-lifecycle.md §11), now
+shaped by Eran's request for one-tab-per-session.
 
-Context: `docs/session-registry.md` (§5 states, §8 switch), `docs/materialization-lifecycle.md`
-(§3 async, §4 MATERIALIZING, §11 decisions log). Ties them together.
+Context: `docs/session-registry.md` (§3 defines today's *per-browser* model — this
+proposal **reverses** it), `docs/materialization-lifecycle.md` (§3 async, §4
+MATERIALIZING, §9c jobs). Ties them together.
 
-Status: **proposed.** Not implemented — this resolves the routing/precedence
-questions on paper so the hot-path change can be reviewed before it is written.
+Status: **proposed.** Not implemented. **Supersedes** this doc's earlier
+`committed`/`pending`/keep-prior draft — per-tab makes that machinery unnecessary
+(§4).
 
 ---
 
-## 1. The gap this closes
+## 1. The shift
 
-There are **two** per-session binding mechanisms today, and they don't meet:
+Two things move together here:
 
-1. **`session_registry`** — `session_key → source_path`. This is what request
-   routing actually reads: `workspace_context.resolve(key)` → `session_registry.get(key).source_path`
-   (else the process default). `/api/source/switch[-build]` writes it via `rebind`.
-   Everything on-disk and **in-place** (§2a) flows through here.
-2. **`session_env`** — `session_key → materialization state` (in-place `ready`, or a
-   managed job's `cloning → syncing → ready|failed` with the staged path +
-   interpreter). This is **only** read by the status poll; **routing never
-   consults it.**
+1. **Bind materialization to a session.** Routing reads `session_registry`
+   (`session_key → source_path`); the materialization state (`session_env`) is
+   read only by the status poll. So materializing a `(repo, ref)` builds the env
+   but never binds a session to it. This proposal closes that.
+2. **Session = tab, not session = browser.** Today (session-registry §3) a session
+   is a *browser* (the `vw_session` cookie, shared across tabs), deliberately so
+   "all tabs move together — consistent by construction." Eran wants the opposite:
+   **each tab is an independent session on its own workspace**, so you can have
+   several workspaces open side by side. This is a deliberate reversal (§9).
 
-So `POST /api/source/materialize-repo` provisions + caches a managed env, but
-**nothing binds the session to the staged checkout** — the materialized workspace
-is unreachable. Closing that is the last step that makes managed materialization
-actually serve a workspace.
-
-The deeper issue is the **split**: two mechanisms, one of which (materialization)
-routing ignores. This proposal **unifies them** into one binding a request
-resolves through.
+The happy consequence: per-tab **removes** the need for the earlier draft's
+`committed`/`pending`/keep-prior/flip machinery. That complexity existed only
+because a switch *reused one session* and had to avoid disrupting its current
+workspace while the new one materialized. If a new workspace is a **new tab**, you
+never re-point a live workspace — each session is born on one workspace and keeps
+it. The lifecycle collapses (§4).
 
 ## 2. Goals / non-goals
 
 **Goals**
-- A managed `(repo, ref)` that reaches `ready` becomes the session's active
-  workspace — routing, env worker, and caches all follow — with **no HTTP
-  request ever blocking** on the minutes-scale prepare (materialization §3).
-- **Most-recent-switch-wins**: the session's workspace is whatever it last
-  switched to (in-place or managed); no stale precedence between the two
-  mechanisms.
-- **A switch to a not-yet-ready managed source does not disrupt the session's
-  current workspace** — the user keeps working until the new one is ready
-  ("keep-prior"), then it flips.
-- Resolution stays **side-effect-free** (safe on a GET) and **cheap** (it is on
-  every request).
+- Each browser **tab** is its own session on its own workspace — independent,
+  concurrent, different workspaces side by side.
+- Opening a workspace opens a **new tab**, born `preparing` (hourglass favicon);
+  you switch to it when it is `ready`. No HTTP request blocks on the minutes-scale
+  prepare (materialization §3).
+- The session lifecycle is **one workspace, simple states** (§4) — no cross-session
+  flip.
+- **Back-compatible** for non-browser clients (curl, CLI, tests): they keep
+  resolving to the process default workspace exactly as today (§3).
 
 **Non-goals (v1)**
-- Serving the half-materialized workspace (science-only reads off the staged tree
-  after clone but before sync, materialization §4) — a later refinement (§6).
-- Per-session worktree isolation (§5 of materialization-lifecycle) — staging is
-  still keyed per `(repo, commit)` and shared; fine for read-mostly managed
-  sources.
-- Cancelling a superseded in-flight job — a superseded materialize simply runs to
-  completion and caches its venv (harmless; GC reclaims it, §9d).
+- Serving a half-materialized workspace (science-only reads off the staged tree
+  after clone but before sync, materialization §4) — the frontend just shows
+  "preparing" until `ready`.
+- Cross-tab synchronization — the whole point is that tabs are independent.
+- Auth — the per-tab id is a routing token, not identity (§3), same as the cookie
+  it replaces.
 
-## 3. The unified binding — `committed` + `pending`
+## 3. Per-tab identity — `sessionStorage` + an `X-VW-Session` header
 
-Replace the two mechanisms with **one per-session record** holding two slots:
+The blocker: a **cookie is per-browser** (shared across tabs), so it cannot
+distinguish tabs. **`sessionStorage` is per-tab** — unique per tab, survives a
+reload, dies when the tab closes. So the session id moves from a cookie to
+sessionStorage, carried as a request header:
+
+- **Server-minted, header-carried.** On a request with **no** `X-VW-Session`
+  header, the middleware mints a CSPRNG key (as it does for the cookie today) and
+  returns it in an **`X-VW-Session` response header**. The client stores it in
+  `sessionStorage` and sends it as the `X-VW-Session` **request** header on every
+  subsequent call. Server-minted keeps the property that a client can't assert
+  another session's key by choosing it (session-registry §4).
+- **Client wiring is tiny.** There is no central fetch wrapper in `static/`, so a
+  one-time `window.fetch` override (~10 lines) reads the stored id (attaching it as
+  a request header) and captures a minted id from the response header into
+  `sessionStorage`. No call site changes.
+- **Back-compat / fallback order** in the middleware: `X-VW-Session` header →
+  (legacy) `vw_session` cookie → mint. A header-less client (curl, CLI, the test
+  harness) has neither → unbound → process default workspace, **unchanged**.
+- **Security.** Still a CSPRNG *routing* token, not auth; the CSRF/origin guard is
+  untouched. A header (unlike a cookie) is not auto-sent cross-site, a mild CSRF
+  improvement, but we keep the origin check regardless. Same-origin fetch can read
+  the response header freely (no CORS exposure needed).
+
+Everything **downstream is unchanged** — `session_registry`, `workspace_context.resolve`,
+the env-worker pool (keyed by `(workspace, interpreter)`, already deduping N tabs
+on one workspace) all key off `session_key`; only its *source* changes from cookie
+to header.
+
+**Edge — tab duplication.** "Duplicate tab" copies `sessionStorage`, so the copy
+shares the original's session (same workspace). Opening a new tab via link/`⌘-click`
+does not. Acceptable; a collision could be re-minted if it ever matters.
+
+## 4. The lifecycle — one workspace per session
+
+Because a new workspace is a new tab/session, a session is **born on one
+workspace and keeps it** for its life. The states (session-registry §5, simplified):
 
 ```
-SessionBinding {
-  committed : LocalPath | None     # the workspace being SERVED right now
-                                   #   (an in-place path, or a flipped managed
-                                   #    staging path — both are just local dirs)
-  pending   : ManagedRef | None    # a managed (repo, ref) being materialized,
-                                   #   not yet serving. Carries its job coordinate.
-}
+ (fresh tab) ── no session id ──▶ UNBOUND ──pick a workspace──▶
+                                    │
+             in-place (§2a): READY at once ─────────────────────▶ READY
+             managed (repo,ref): PREPARING (cloning→syncing) ────▶ READY
+                                    │  └─ (clone/sync error) ─────▶ FAILED
+                                    ▼
+                              (tab closes / idle) ─▶ session ends
 ```
 
-- **`committed`** is what routing resolves to. It is always a ready, local
-  directory (an in-place checkout, or a managed staging path *after* its venv is
-  ready). `None` → the process default (UNBOUND / `serve --workspace`, unchanged).
-- **`pending`** is a managed materialization in flight. It does **not** affect
-  routing until it flips into `committed` (§4). At most one pending per session;
-  a new managed switch replaces it.
+- **UNBOUND** — a fresh tab with no workspace; the UI shows the workspace picker.
+  (Local `serve --workspace` auto-binds the default, unchanged — session-registry §9.)
+- **PREPARING** — this tab's managed workspace is materializing (the async job of
+  §9c). The tab shows an hourglass; it does not load workspace content yet.
+- **READY** — the workspace (in-place path, or the managed staged checkout with its
+  built venv) is serving. Requests resolve to it normally; the env worker runs on
+  its interpreter (`env_resolver` picks the staged venv, #518).
+- **FAILED** — clone/sync failed (materialization §6); the tab shows the error +
+  the `uv`/git tail, with a retry.
 
-This single record subsumes both of today's mechanisms: `session_registry`'s
-`source_path` **is** `committed`; `session_env`'s managed state **is** `pending`
-(its terminal `ready` is the flip).
+**No `committed`/`pending`, no keep-prior, no flip.** "Your current work" is never
+disrupted by preparing a new workspace, because that work is in *another tab*. The
+hourglass **is** the `MATERIALIZING` state of *this* tab's one session. Whether
+`resolve` returns the workspace during PREPARING doesn't matter for correctness —
+the frontend gates on the status and simply doesn't issue workspace/env requests
+until `READY`.
 
-## 4. Resolution — promote-on-ready, keep-prior
+## 5. Opening a workspace = opening a tab
 
-`workspace_context.resolve(key)` becomes (pull model, evaluated per request):
+- From a fresh (UNBOUND) tab, picking a source binds **this** tab's session:
+  - an **in-place** catalog entry (§2a) → `READY` at once;
+  - a **managed** `(repo, ref)` → start the materialization job → `PREPARING`.
+- **"Open in a new tab"** = `window.open` a new tab → fresh `sessionStorage` → new
+  UNBOUND session → pick → prepare → ready. This is the primary way to get a second
+  workspace.
+- **Favicon = status** (Eran's hourglass): PREPARING → hourglass, READY → the
+  normal icon, FAILED → an error badge. Driven by polling `GET /api/source/materialization`.
+  The tab **title** can carry the workspace name + state.
+- **Re-pointing a live tab** (optional): a tab *may* switch its own source; since a
+  session has only one workspace, this is a plain rebind — the tab enters
+  `PREPARING` for the new source (no keep-prior; the user's other work is in other
+  tabs). The expected flow is new-tab-per-workspace, so re-point is secondary
+  (open question, §10).
+
+## 6. Managed workspace storage — worktree-per-session, on a branch
+
+Today the clone seam (`repo_source.py`) checks a managed source out with
+`git worktree add --detach` — a **detached HEAD, no branch**, shared per
+`(repo, commit)`. That is right for *read-only* env-building, but the dashboard's
+audit model commits **every action to a branch** (CLAUDE.md), which a detached HEAD
+has nowhere to record.
+
+So once a per-tab managed workspace is **editable**, the clone seam should use:
 
 ```
-b = binding(key)
-if b.pending and job(b.pending.coordinate).status == READY:
-    b.committed = b.pending.staged_path     # FLIP (promote)
-    b.pending   = None
-return b.committed  (or the process default if None)
+git worktree add -b <session-branch> <staging> <commit>
 ```
 
-- **Flip-on-ready is derived at resolve time** — no background pusher, no GET
-  that mutates on behalf of the client from the outside. The promotion is an
-  idempotent state fold: the first request after the job reaches `ready` flips the
-  binding; every request after sees `committed`. (The tiny mutation is *internal
-  bookkeeping of already-observed job state*, not an externally-visible
-  side-effect — a GET remains safe.)
-- **Keep-prior falls out**: while `pending` is not ready, `committed` is
-  unchanged — the session keeps serving whatever it was on (its prior workspace,
-  or the default). The client's status poll shows `materializing`; on `ready` it
-  reloads and the next request resolves to the new workspace.
-- **Env worker + interpreter follow for free**: once `committed` is the staged
-  path, `env_resolver.resolve_interpreter(staged_path)` already returns that
-  path's coordinate-keyed managed venv (marker-complete, #518), so the worker pool
-  spawns on the right interpreter with no special casing.
+— a **per-session worktree on its own branch**. One move buys three things:
+- **per-session isolation** (materialization §5, otherwise deferred),
+- the **audit-trail branch** the write model needs, and
+- it **resolves the same-workspace-in-two-tabs race** — two tabs on the same
+  `(repo, ref)` each get their own worktree + branch, so they cannot clobber each
+  other.
 
-## 5. Switch flows
+Cost: a worktree per tab (disk), so pair it with the store GC (§9d). A purely
+**read-only** managed view could keep the cheaper shared detached worktree; a tab
+that writes gets its own branch. (Decision, §10.)
 
-| action | effect on the binding |
-|---|---|
-| `switch` (in-place catalog path) | `committed = path`; `pending = None`. Immediate — in-place is `ready` at once (§2a). |
-| `switch-managed (repo, ref)` | start/attach the materialization job; `pending = (repo, ref, coordinate)`. `committed` **unchanged** (keep-prior). Returns `materializing` (or `ready` immediately on a warm venv → flips at once). |
-| managed job reaches `ready` | on the next `resolve`, `pending` promotes to `committed` (the flip). |
-| managed job `failed` | `committed` unchanged (stay on prior); `pending` stays `failed` so the poll keeps reporting it, until a retry or another switch replaces it (§4 "not retried in a loop"). |
-| a second switch before the first is ready | the newer switch wins: it sets `committed` (in-place) or replaces `pending` (managed). The superseded job runs to completion, caches its venv, and is otherwise ignored. |
+## 7. What is already built for this
 
-**Endpoint shape.** `/api/source/materialize-repo` becomes the managed switch —
-rename to **`/api/source/switch-managed`** for symmetry with `/api/source/switch`
-(both "switch this session's source"; one in-place, one managed). It sets
-`pending` and returns the `materialization` envelope. `GET
-/api/source/materialization` is unchanged (it already reports the job state; it
-now also reflects the flip once `committed` is the staged path → `ready`).
+The multi-workspace backend from this session was built for exactly this shape:
 
-## 6. What requests see during MATERIALIZING (and the deferred refinement)
+- **Env-worker pool** keyed by `(workspace, interpreter)` with dedup — N tabs on
+  one workspace share a worker; different workspaces get their own. Concurrent
+  per-tab workspaces already work.
+- **Per-request workspace routing** (`workspace_context.resolve` + the
+  `_root` request ContextVar) — each request already resolves to *its* session's
+  workspace.
+- **Materialization job** (§9c) — the per-tab "preparing" driver; `GET
+  /api/source/materialization` is the poll the favicon reads.
 
-**v1 — keep-prior (this proposal).** During `cloning`/`syncing`, routing resolves
-to `committed` (the prior workspace / default). Nothing serves the half-ready
-source. Simple, safe, and matches "a user keeps their workspace selection while
-the heavier work happens" (session-registry §5).
+So the backend delta is small (§8, item 1); the work is mostly frontend.
 
-**Deferred refinement — science-reads-after-clone (materialization §4).** Once
-phase 1 (clone) is done, science-only reads (listing studies, reading YAML) *could*
-resolve to the staged tree while env queries still report `materializing`. This
-needs a request-level **env-vs-science classification** (which routes touch the
-compute env vs. only the science record) that does not exist yet. Deferred — v1
-keep-prior is correct without it.
+## 8. Migration slices
 
-## 7. Concurrency & safety
+1. **Backend — header identity.** Middleware prefers `X-VW-Session` (header) over
+   the cookie; mints + returns it when absent. Behavior-preserving (no header →
+   cookie → default). *Small.*
+2. **Frontend — the enabler.** `sessionStorage` id + the `window.fetch` override
+   (attach request header, capture minted response header). *Small.*
+3. **Frontend — the tab UX.** Favicon-by-status, tab title, the workspace picker,
+   "open in new tab". *The bulk of the work.*
+4. **Managed bind + preparing gate.** Bind a tab to a managed source on pick; the
+   frontend shows "preparing" until `READY` (polling the status). *Moderate.*
+5. **Storage — worktree-per-session branch.** `worktree add -b` for editable
+   managed workspaces, paired with GC. *Moderate; can follow.*
 
-- The binding store is read on **every** request → an in-memory dict behind a
-  short lock (as `session_registry` is today). The per-request `resolve` does one
-  dict get + (only when `pending`) one job-status read — negligible.
-- The flip is a compare-and-set under the lock (promote only if `pending` is still
-  the one that went ready), so two concurrent requests racing the flip converge on
-  the same `committed`.
-- Durability is unchanged from session-registry §6: `committed`'s *source
-  selection* is the only thing worth persisting (a managed `committed` persists as
-  its `(repo, ref)`, re-materialized lazily on restart — the venv is cached on
-  disk by coordinate, so re-warm is usually instant). `pending` and job state are
-  ephemeral (a restart mid-materialize re-starts it on next touch).
+## 9. What we give up (the reversal)
 
-## 8. Migration — what the implementation changes
+session-registry §3 chose *per-browser* deliberately: all of a browser's tabs share
+one workspace and "move together — consistent by construction." Per-tab **reverses**
+that — tabs are independent. We lose cross-tab consistency (two tabs no longer
+auto-track one workspace); we gain multiple workspaces open at once, which is what
+the multi-workspace refactor was for. This is the one point to confirm with the
+team before building. (session-registry §3 should be updated to match once agreed.)
 
-1. **New `lib/session_binding.py`** (or evolve `session_registry`): the
-   `committed`/`pending` record + `set_committed(path)`, `set_pending(repo, ref)`,
-   `resolve(key) -> path` (with the promote-on-ready fold), `status(key)`.
-2. **`workspace_context.resolve`** reads `session_binding.resolve` instead of
-   `session_registry.get`.
-3. **`/api/source/switch[-build]`** → `set_committed` (replacing `rebind`).
-4. **`/api/source/switch-managed`** (renamed from `materialize-repo`) →
-   `set_pending` + start the job.
-5. **`session_env`** folds into `session_binding` (its managed state *is*
-   `pending`; its in-place `ready` *is* `set_committed`). The status endpoint
-   reads the unified record.
-6. `session_registry` retires (or becomes a thin shim during migration).
+## 10. Open questions (for review)
 
-Each numbered item is a small, gated slice; 1–2 are behavior-preserving (the fold
-of today's `session_registry` into `committed` with no `pending` in play).
-
-## 9. Open questions (for review)
-
-- **Keep-prior vs. drop-to-default** on a managed switch when the session has a
-  prior in-place binding: keep-prior (proposed) is nicer but means a managed
-  switch that later *fails* leaves the user on the old workspace (good) — confirm
-  that is the desired UX vs. an explicit "you were switching to X, it failed"
-  interstitial.
-- **Rename `materialize-repo` → `switch-managed`?** (proposed) or keep them
-  distinct (a "prepare without switching" *and* a "switch")? The two-verb split
-  might be worth keeping for pre-warming.
-- **Persisting a managed `committed`** across restart as `(repo, ref)` vs. the
-  resolved commit — the commit is reproducible, the ref may have moved. Likely
-  persist the ref *and* the last resolved commit; re-materialize the commit.
-- **Per-session worktree isolation** (materialization §5) — if managed sources
-  become editable in place, staging must be per-session, not per-`(repo, commit)`.
-  Out of scope until managed sources are writable.
+- **Re-point a live tab, or always-new-tab only?** Proposed: allow re-point as a
+  plain rebind (enters PREPARING), but treat new-tab-per-workspace as the primary
+  flow. Or forbid re-point (a tab is pinned to its workspace for its life) for
+  maximum simplicity.
+- **Detached (shared, read-only) vs. branch-per-session (editable) worktrees — or
+  both?** Proposed: read-only view keeps the shared detached checkout; a writing
+  tab gets its own `-b` branch. Confirm this is the same-workspace-twice resolution.
+- **Server-minted-via-response-header vs. client-minted CSPRNG** for the
+  sessionStorage id. Proposed: server-minted (keeps §4's property); the response-
+  header handshake is the small extra step over the cookie flow.
+- **Tab duplication** shares `sessionStorage` (same session) — leave it, or
+  re-mint on a detected duplicate?
+- **Idle/close lifecycle.** A tab close can't be reliably signaled to the server;
+  sessions idle-expire (session-registry §5 `T_session`) and their worker idle-evicts
+  (protocol §17) — confirm the horizons feel right for the per-tab cadence (many
+  short-lived tabs).
