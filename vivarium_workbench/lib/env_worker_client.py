@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 # The worker program, shipped in the package (spec §4) and located by path so the
 # workspace venv needs no vivarium-workbench dependency.
@@ -72,7 +73,7 @@ class EnvWorker:
         self._lock = threading.Lock()
 
     # -- protocol -----------------------------------------------------------
-    def call(self, method: str, params: dict | None = None) -> dict:
+    def call(self, method: str, params: dict | None = None) -> Any:
         """Send one request, return its ``result`` (or raise on error). Serial:
         holds the lock so the next frame read is unambiguously this call's reply."""
         with self._lock:
@@ -103,7 +104,7 @@ class EnvWorker:
         except OSError:
             pass
         self._terminate()
-        if self._log is not subprocess.DEVNULL:
+        if not isinstance(self._log, int):   # a real file, not subprocess.DEVNULL
             try:
                 self._log.close()
             except OSError:

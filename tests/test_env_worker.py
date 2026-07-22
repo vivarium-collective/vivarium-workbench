@@ -197,3 +197,17 @@ def test_env_worker_against_real_v2ecoli():
         assert len(cat["processes"]) > 50 and len(cat["types"]) > 20
         assert "v2ecoli" in cat["workspace_pkgs"]
         assert any(p["source"] == "in_workspace" for p in cat["processes"])
+
+
+def test_build_registry_serves_v2ecoli_via_its_own_venv():
+    """/api/registry (build_registry) serves v2ecoli through its OWN venv
+    interpreter — impossible before EnvironmentResolver, since the workbench venv
+    has no v2ecoli. Skips unless ../v2ecoli/.venv exists."""
+    if not _V2ECOLI_VENV.is_file():
+        import pytest as _pytest
+        _pytest.skip("no ../v2ecoli/.venv (build with `cd ../v2ecoli && uv sync`)")
+    from vivarium_workbench.lib import registry
+    d = registry.build_registry(_V2ECOLI, bypass_cache=True)
+    assert not d.get("error"), d.get("error")
+    assert len(d["processes"]) > 50 and len(d["types"]) > 20
+    assert any(p["source"] == "in_workspace" for p in d["processes"])
