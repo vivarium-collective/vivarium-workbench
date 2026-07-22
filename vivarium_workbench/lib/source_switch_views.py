@@ -23,8 +23,15 @@ from vivarium_workbench.lib import active_workspace
 def source_switch(body: dict, *, switch_active: bool = True) -> tuple[dict, int]:
     """Validate a workspace switch (and, by default, apply it). Returns ``(body, status)``.
 
-      * missing ``path``        → ``({"error": "missing 'path'"}, 400)``
+    Resolves the target catalog entry by **path** (legacy) or by **name** (the
+    session-per-tab spawn: a tab opens ``/?workspace=<name>``, whose bootstrap POSTs
+    ``{"name": <catalog name>}`` — no filesystem path in the URL). ``path`` wins when
+    both are present.
+
+      * neither path nor name   → ``({"error": "missing 'path'"}, 400)``
       * unregistered path       → ``({"error": f"{path!r} is not a registered workspace"}, 400)``
+      * unknown name            → ``({"error": f"{name!r} is not a registered workspace"}, 400)``
+      * ambiguous name          → ``({"error": f"{name!r} is ambiguous …"}, 400)``
       * registered entry        → ``({"ok": True, "source": {...}}, 200)``
 
     ``switch_active`` (default ``True``) keeps the legacy behavior — re-point the
@@ -36,17 +43,33 @@ def source_switch(body: dict, *, switch_active: bool = True) -> tuple[dict, int]
     """
     from pbg_superpowers import workspace_catalog
 
-    path = str((body or {}).get("path") or "").strip()
-    if not path:
+    body = body or {}
+    path = str(body.get("path") or "").strip()
+    name = str(body.get("name") or "").strip()
+    entries = workspace_catalog.list_workspaces()
+
+    if path:
+        target = str(Path(path).resolve())
+        entry = next(
+            (w for w in entries if str(Path(w["path"]).resolve()) == target),
+            None,
+        )
+        if entry is None:
+            return {"error": f"{path!r} is not a registered workspace"}, 400
+    elif name:
+        matches = [w for w in entries if str(w.get("name") or "") == name]
+        if not matches:
+            return {"error": f"{name!r} is not a registered workspace"}, 400
+        if len(matches) > 1:
+            return (
+                {"error": f"{name!r} is ambiguous ({len(matches)} registered "
+                          "workspaces share it) — open it by path"},
+                400,
+            )
+        entry = matches[0]
+    else:
         return {"error": "missing 'path'"}, 400
-    target = str(Path(path).resolve())
-    entry = next(
-        (w for w in workspace_catalog.list_workspaces()
-         if str(Path(w["path"]).resolve()) == target),
-        None,
-    )
-    if entry is None:
-        return {"error": f"{path!r} is not a registered workspace"}, 400
+
     if switch_active:
         active_workspace.switch_workspace(entry["path"])
     return (
