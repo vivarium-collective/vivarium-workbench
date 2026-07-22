@@ -1186,23 +1186,38 @@ def _resolve_observable(observables: dict, path: str) -> list | None:
     return res
 
 
-def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict) -> dict:
-    """Build the small composite that dispatches one visualization."""
+def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict,
+                        *, inputs_by_class: "dict | None" = None) -> dict:
+    """Build the small composite that dispatches one visualization.
+
+    Two modes for the viz class's declared inputs:
+      * **in-process** (``inputs_by_class is None``): look the class up in
+        ``core_registry`` and call ``.inputs()`` on it — used by the detached run
+        subprocess (`run_runner`) and the viz preview, which legitimately hold the
+        live classes.
+      * **worker-provided** (``inputs_by_class`` given): the HTTP-process render
+        paths don't hold the live classes, so the env worker supplies
+        ``{class: declared_inputs}`` (``viz_class_inputs``). Presence == registered.
+    """
     address = viz_spec["address"]
     class_key = address.split(":", 1)[1] if ":" in address else address
-    viz_class = core_registry.get(class_key)
-    if viz_class is None:
-        raise KeyError(f"Visualization class not registered: {address}")
+
+    if inputs_by_class is not None:
+        if class_key not in inputs_by_class:
+            raise KeyError(f"Visualization class not registered: {address}")
+        declared_inputs = inputs_by_class.get(class_key) or {}
+    else:
+        viz_class = core_registry.get(class_key)
+        if viz_class is None:
+            raise KeyError(f"Visualization class not registered: {address}")
+        try:
+            declared_inputs = viz_class.__new__(viz_class).inputs()
+        except Exception:
+            declared_inputs = {}
 
     config = dict(viz_spec.get("config") or {})
     inputs_map = config.get("inputs_map") or {}
     sources = config.get("sources")
-
-    try:
-        instance = viz_class.__new__(viz_class)
-        declared_inputs = instance.inputs()
-    except Exception:
-        declared_inputs = {}
 
     candidate_runs = []
     by_sim = gathered.get("by_sim") or {}
@@ -1759,7 +1774,8 @@ def run_investigation(ws_root: Path, name: str, *,
 
 
 def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
-                          core_registry: dict,
+                          core_registry: "dict | None" = None,
+                          inputs_by_class: "dict | None" = None,
                           build_and_run=None) -> list[Path]:
     """Render every viz in ``spec.visualizations`` against the investigation's runs.db.
 
@@ -1797,7 +1813,8 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
     for viz_spec in visualizations:
         target = viz_dir / f"{viz_spec['name']}.html"
         try:
-            doc = build_viz_composite(viz_spec, gathered, core_registry)
+            doc = build_viz_composite(viz_spec, gathered, core_registry or {},
+                                      inputs_by_class=inputs_by_class)
             html = build_and_run(doc, core_registry)
         except Exception as e:
             html = (

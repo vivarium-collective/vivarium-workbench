@@ -87,7 +87,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites",
-                 "validate_generated_visualization", "run_study_analyses", "shutdown"]
+                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -859,6 +859,92 @@ def _run_study_analyses(params: dict) -> dict:
              "traceback": traceback.format_exc()}]}
 
 
+# --- viz rendering (spec §11): build_core + viz-class registration + Composite.run
+#     all in-worker (live viz classes + core can't cross the socket). Cached per
+#     worker — build_core is ~15s and every viz render reuses it. --------------
+_VIZ_CORE = None  # (core, registry) once built
+
+
+def _build_viz_core():
+    """Build the workspace core + register every Visualization class onto it
+    (pbg_superpowers defaults + the whole Visualization subclass tree), cached per
+    worker. Faithful port of study_run_post.render_study_visualizations' in-process
+    core+registry build. Returns ``(core, registry_dict)``."""
+    global _VIZ_CORE
+    if _VIZ_CORE is not None:
+        return _VIZ_CORE
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    package_name, _pkgs, _ws = _workspace_meta(_workspace)
+    core_module = __import__(f"{package_name}.core", fromlist=["build_core"])
+    core = core_module.build_core()
+    registry = dict(core.link_registry)
+
+    try:
+        from pbg_superpowers.visualizations import (
+            Distribution, Heatmap, ParamVsObservable, PhaseSpace, TimeSeriesPlot,
+        )
+        for cls in (TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap):
+            core.register_link(cls.__name__, cls)
+            registry[cls.__name__] = cls
+    except ImportError:
+        pass
+
+    try:
+        from pbg_superpowers.composite_generator import discover_generators
+        from pbg_superpowers.visualization import Visualization
+        discover_generators()  # force-load packages so @Visualization classes appear
+
+        def _walk(cls):
+            for sub in cls.__subclasses__():
+                yield sub
+                yield from _walk(sub)
+        for sub in _walk(Visualization):
+            if sub.__name__ in registry:
+                continue
+            try:
+                core.register_link(sub.__name__, sub)
+                registry[sub.__name__] = sub
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001 — discovery is best-effort
+        pass
+
+    _VIZ_CORE = (core, registry)
+    return _VIZ_CORE
+
+
+def _viz_class_inputs() -> dict:
+    """``{class_name: declared_inputs}`` for every registered class (spec §11), so
+    the workbench's ``build_viz_composite`` can assemble viz docs without holding
+    the live class objects. Presence in the map == 'registered'."""
+    _core, registry = _build_viz_core()
+    out: dict = {}
+    for name, cls in registry.items():
+        try:
+            inp = cls.__new__(cls).inputs()
+            out[name] = inp if isinstance(inp, dict) else {}
+        except Exception:  # noqa: BLE001
+            out[name] = {}
+    return {"inputs": out}
+
+
+def _render_viz_doc(params: dict) -> dict:
+    """Render ONE viz composite doc → HTML: ``Composite({'state': doc}, core).run(1)``
+    against the cached viz core, extracting ``output_store`` (spec §11). Faithful
+    port of the old in-process ``build_and_run`` hook."""
+    viz_doc = (params or {}).get("viz_doc")
+    core, _registry = _build_viz_core()
+    from process_bigraph import Composite
+    composite = Composite({"state": viz_doc}, core=core)
+    composite.run(1)
+    state = composite.state
+    html = state.get("output_store")
+    if isinstance(html, dict):
+        html = html.get("value") or html.get("_value") or ""
+    return {"html": html if isinstance(html, str) else ""}
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -940,6 +1026,10 @@ def _handle(method: str, params: dict) -> dict:
         return _validate_generated_visualization(params)
     if method == "run_study_analyses":
         return _run_study_analyses(params)
+    if method == "viz_class_inputs":
+        return _viz_class_inputs()
+    if method == "render_viz_doc":
+        return _render_viz_doc(params)
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

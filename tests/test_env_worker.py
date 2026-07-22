@@ -517,3 +517,29 @@ def test_run_study_analyses_reports_missing_v2ecoli(tmp_path):
                    {"entries": [{"name": "x"}], "sweep_dir": str(tmp_path)})
     assert r["written"] == []
     assert "v2ecoli" in r["errors"][0]["error"]
+
+
+# ---------------------------------------------------------------------------
+# viz_class_inputs / render_viz_doc — study+investigation report rendering.
+# ---------------------------------------------------------------------------
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_viz_class_inputs_returns_input_maps():
+    pytest.importorskip("pbg_superpowers")
+    with EnvWorker(_FIXTURE.resolve()) as w:
+        inputs = w.call("viz_class_inputs")["inputs"]
+    assert any(k.startswith("Demo") for k in inputs)        # workspace viz classes
+    assert all(isinstance(v, dict) for v in inputs.values())  # {class: declared_inputs}
+
+
+def test_viz_render_hooks_soft_degrade(monkeypatch):
+    from vivarium_workbench.lib import env_worker_pool, viz_render
+
+    class _Down:
+        def call(self, *a, **k):
+            from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+            raise EnvWorkerUnavailable("down")
+
+    monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Down())
+    inputs, build_and_run = viz_render.viz_render_hooks("/ws")
+    assert inputs == {}
+    assert build_and_run({"any": "doc"}) == ""      # never raises
