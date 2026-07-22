@@ -80,8 +80,14 @@ def build_remote(body: dict) -> tuple[dict, int]:
     )
 
 
-def switch_build(body: dict) -> tuple[dict, int]:
-    """Materialize a build's workspace (cached) + re-point in-process. ``(body, status)``.
+def switch_build(body: dict, *, switch_active: bool = True) -> tuple[dict, int]:
+    """Materialize a build's workspace (cached) + re-point. ``(body, status)``.
+
+    ``switch_active`` (default ``True``) keeps the legacy **process-global**
+    re-point via ``active_workspace.switch_workspace``. The FastAPI
+    ``/api/source/switch-build`` route passes ``switch_active=False`` so the
+    switch is **per session** (the route binds the caller's session to the
+    materialized cache dir instead — mirrors ``/api/source/switch``, slice 4).
 
     Behaviour-preserving port of ``_post_source_switch_build``:
 
@@ -116,5 +122,6 @@ def switch_build(body: dict) -> tuple[dict, int]:
         }), encoding="utf-8")
     except Exception:
         pass  # provenance stamp is best-effort, never block the switch
-    active_workspace.switch_workspace(cache_dir)
+    if switch_active:
+        active_workspace.switch_workspace(cache_dir)
     return {"ok": True, "source": {"path": str(cache_dir), "name": entry["label"]}}, 200
