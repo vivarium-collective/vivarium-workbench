@@ -504,6 +504,13 @@
     if (pageId === 'visualizations') {
       _loadAnalysesPage();
     }
+    // Branch page: render the Source (Scope Local/Remote, repo, branch) section on
+    // every navigation, so it's populated from the first visit instead of relying
+    // on the one-time DOMContentLoaded render (which may not have finished — or ran
+    // before the page existed — the first time the user opens Branch).
+    if (pageId === 'github' && typeof window._renderBranchSource === 'function') {
+      window._renderBranchSource();
+    }
     if (pageId === 'simulation-setup') {
       _loadComposites();
     }
