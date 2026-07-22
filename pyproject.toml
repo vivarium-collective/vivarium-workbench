@@ -178,6 +178,7 @@ files = [
     "vivarium_workbench/api/app.py",
     "vivarium_workbench/lib/env_resolver.py",
     "vivarium_workbench/lib/materialization.py",
+    "vivarium_workbench/lib/materialization_jobs.py",
     "vivarium_workbench/lib/env_worker_client.py",
     "vivarium_workbench/lib/env_worker_pool.py",
     "vivarium_workbench/lib/session_registry.py",
