@@ -39,7 +39,6 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_workbench.lib import core_builder
 from vivarium_workbench.lib import study_crud_mutations
 from vivarium_workbench.lib.json_serialize import _json_default
 
@@ -161,26 +160,11 @@ def investigation_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
                      "error": "runner returned unexpected output"}
         return {"status": "completed"}
 
-    # Build the visualization registry. We need the workspace's core for
-    # the Visualization class lookup; import the workspace package and
-    # build a fresh core here (in-process, no subprocess needed).
-    try:
-        core, registry = core_builder.build_viz_registry(ws_root, pkg)
-    except Exception as e:
-        return {"error": f"failed to build core: {e}"}, 500
-
-    def build_and_run(viz_doc, registry_arg):
-        """Production hook: build a Composite from viz_doc, run 1 step,
-        return the output_store's html string.
-        """
-        from process_bigraph import Composite
-        composite = Composite({'state': viz_doc}, core=core)
-        composite.run(1)
-        state = composite.state
-        html = state.get('output_store')
-        if isinstance(html, dict):
-            html = html.get('value') or html.get('_value') or ''
-        return html if isinstance(html, str) else ''
+    # The viz-class lookup + per-viz Composite.run happen in the env worker
+    # (live viz classes + core, kept out of the HTTP process). `viz_render_hooks`
+    # gives run_investigation the inputs-by-class map + a worker-backed build_and_run.
+    from vivarium_workbench.lib.viz_render import viz_render_hooks
+    inputs_by_class, build_and_run = viz_render_hooks(ws_root)
 
     # Run the orchestration inline (the live handler wraps this in
     # ``_active_branch_action``; here the commit is DEFERRED and we just return
@@ -189,7 +173,7 @@ def investigation_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
         summary = run_investigation(
             ws_root, name,
             run_one_composite=run_one_composite,
-            core_registry=registry,
+            inputs_by_class=inputs_by_class,
             build_and_run=build_and_run,
         )
     except InvestigationSpecError as e:

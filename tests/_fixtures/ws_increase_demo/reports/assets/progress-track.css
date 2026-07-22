@@ -1,0 +1,109 @@
+/* progress-track.css — Plan 7 (WS-1)
+ * Styles for the reusable ProgressTrack component (progress-track.js).
+ * Namespaced .ptrack-* so it never collides with the .inv-run-* stepper it
+ * replaces; palette intentionally matches .inv-run-* (style.css:1660+):
+ * gray=pending, blue=running/active, green=done, red=failed. */
+
+.ptrack {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 10px 0 16px 0;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+}
+.ptrack-note { font-size: 0.95em; color: #1f2937; margin-bottom: 8px; }
+.ptrack-note .inv-run-err { color: #991b1b; }
+
+/* Segmented milestone bar. Each stage is one track that fills left→right. */
+.ptrack-bar {
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
+}
+.ptrack-seg {
+  position: relative;
+  flex: 1 1 0;
+  height: 10px;
+  border-radius: 999px;
+  background: #e5e7eb;             /* pending */
+  overflow: hidden;
+}
+.ptrack-bar-solo .ptrack-seg { height: 12px; }
+.ptrack-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: #2563eb;            /* active/measured fill */
+  transition: width 0.4s linear;
+}
+.ptrack-seg-done .ptrack-fill    { background: #16a34a; }
+.ptrack-seg-active .ptrack-fill  { background: #2563eb; }
+.ptrack-seg-failed .ptrack-fill  { background: #dc2626; }
+.ptrack-seg-active               { background: #dbeafe; }
+.ptrack-seg-failed               { background: #fee2e2; }
+
+/* Spinner marking the active segment. Sits at the leading edge of the fill. */
+.ptrack-spin {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border: 2px solid rgba(255, 255, 255, 0.65);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ptrack-spin 0.8s linear infinite;
+}
+@keyframes ptrack-spin { to { transform: rotate(360deg); } }
+
+/* Stage labels under the bar, colour-coded to their state. */
+.ptrack-labels {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+.ptrack-label {
+  flex: 1 1 0;
+  text-align: center;
+  font-size: 0.72em;
+  color: #94a3b8;                 /* pending */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ptrack-label-done   { color: #16a34a; font-weight: 600; }
+.ptrack-label-active { color: #1e3a8a; font-weight: 700; }
+.ptrack-label-failed { color: #dc2626; font-weight: 700; }
+
+.ptrack-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 6px;
+  font-size: 0.8em;
+  color: #475569;
+}
+.ptrack-pct { font-weight: 700; color: #1e3a8a; }
+.ptrack-steptext { color: #6b7280; }
+.ptrack-detail { margin-top: 6px; font-size: 0.82em; color: #6b7280; }
+
+/* Screen-reader-only live region (visual state is conveyed by the bar). */
+.ptrack-live {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Honour reduced-motion: no spinner rotation, no fill tween — a static,
+ * truthful bar. (First reduced-motion affordance in this frontend.) */
+@media (prefers-reduced-motion: reduce) {
+  .ptrack-fill { transition: none; }
+  .ptrack-spin { animation: none; opacity: 0.85; }
+}

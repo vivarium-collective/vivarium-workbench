@@ -1,0 +1,1827 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><title>ws_increase_demo</title>
+<link rel="stylesheet" href="assets/style.css?v=1784728790_1784728790">
+<link rel="stylesheet" href="assets/snapshot-readonly.css">
+<script>
+// Per-workspace branding (rail logo, title, brand text) is resolved
+// server-side at GET / and is NOT re-applied by any client script. The
+// cross-workspace switcher navigates between dashboard ports with a full
+// location.assign(), so a round-trip switch (workspace A -> B -> A) relies on
+// the browser actually re-running GET / for A to restore A's custom branding.
+// Modern browsers instead restore A from the back/forward cache (bfcache) — a
+// frozen DOM snapshot served WITHOUT a new server render — so A's branding can
+// come back stale (the Vivarium default that was showing when A was frozen).
+// `Cache-Control: no-store` on sub-resources does not disable page bfcache.
+// Force a real reload on bfcache restore so branding is always re-rendered.
+window.addEventListener('pageshow', function (e) {
+  if (e.persisted) { window.location.reload(); }
+});
+</script>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-weighted-voronoi@1"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-voronoi-map@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-voronoi-treemap@1"></script>
+<script src="https://unpkg.com/escher@1.7.3/dist/escher.min.js"></script>
+<style>
+/* Modal overlay */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+.modal-box {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px 28px;
+  min-width: 360px;
+  max-width: 560px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  position: relative;
+}
+.modal-box h3 { margin-top: 0; }
+.modal-box label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.9em; }
+.modal-box input, .modal-box select, .modal-box textarea {
+  width: 100%; box-sizing: border-box;
+  border: 1px solid #ccc; border-radius: 4px;
+  padding: 6px 8px; font-size: 0.92em; margin-bottom: 12px;
+}
+.modal-box textarea { min-height: 90px; font-family: monospace; }
+.modal-box button[type=submit] {
+  background: #1976d2; color: #fff; border: none;
+  border-radius: 4px; padding: 8px 18px; cursor: pointer; font-size: 0.95em;
+}
+.modal-box button[type=submit]:disabled { opacity: 0.6; cursor: not-allowed; }
+.modal-close {
+  position: absolute; top: 10px; right: 14px;
+  background: none; border: none; font-size: 1.3em; cursor: pointer; color: #888;
+}
+.form-error { color: #c00; font-size: 0.9em; margin-top: 4px; min-height: 1.2em; }
+.action-btn {
+  margin-top: 10px; padding: 5px 12px;
+  border: 1px solid #1976d2; background: #e3f2fd;
+  border-radius: 4px; cursor: pointer; font-size: 0.88em;
+}
+.action-btn:hover { background: #bbdefb; }
+/* Emitter-type pills for the Simulations DB table */
+.emitter-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+.emitter-sqlite  { background: #e5e7eb; color: #374151; }   /* gray  */
+.emitter-parquet { background: #fef3c7; color: #92400e; }   /* amber */
+.emitter-xarray  { background: #ccfbf1; color: #0f766e; }   /* teal  */
+.emitter-none    { background: transparent; color: #9ca3af; }   /* no emitter (summary-only) */
+    .origin-pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+    .origin-remote { background:#dbeafe; color:#1e40af; }   /* blue — remote (AWS) */
+    .origin-local  { background:transparent; color:#9ca3af; }
+.action-btn--secondary {
+  margin-top: 10px; padding: 5px 12px;
+  border: 1px solid #b91c1c; background: #fef2f2;
+  border-radius: 4px; cursor: pointer; font-size: 0.88em; color: #b91c1c;
+}
+.action-btn--secondary:hover { background: #fee2e2; }
+.action-btn-small {
+  padding: 2px 8px; border: 1px solid #c62828; background: #ffebee;
+  border-radius: 4px; cursor: pointer; font-size: 0.82em; color: #c62828;
+}
+.action-btn-small:hover { background: #ffcdd2; }
+.pill-btn {
+  font-size: 0.78em; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid #666; background: #fff; cursor: pointer; margin-left: 6px;
+  vertical-align: middle;
+}
+.pill-btn:hover { background: #eee; }
+.btn-mini {
+  font-size: 0.78em; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid #1976d2; background: #e3f2fd; cursor: pointer; margin-left: 8px;
+  vertical-align: middle;
+}
+.btn-mini:hover { background: #bbdefb; }
+.section-header {
+  margin: 28px 0 6px 0;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #e0e0e0;
+  color: #333;
+}
+.section-lead {
+  color: #666; font-size: 0.92em; margin: 0 0 16px 0; font-style: italic;
+}
+.source-artifact-tag {
+  font-size: 0.78em; color: #555; font-style: italic; margin-left: 8px;
+}
+#run-tests-output {
+  white-space: pre-wrap; font-family: monospace; font-size: 0.82em;
+  background: #f8f8f8; border: 1px solid #ccc; border-radius: 4px;
+  padding: 10px; margin-top: 10px; max-height: 420px; overflow-y: auto;
+  display: none;
+}
+#run-tests-spinner { display: none; margin-left: 8px; color: #888; }
+.panel-lead { color: #6b7280; margin-bottom: 16px; font-size: 0.92em; }
+.status-pill.installed{ background:#d1fae5; color:#065f46 }
+.status-pill.not_installed{ background:#fef3c7; color:#92400e }
+.registry-hint{
+  background:#eff6ff; border-left:4px solid #3b82f6; padding:10px 14px;
+  border-radius:4px; margin:0 0 16px; font-size:0.92em;
+}
+/* Composite Explorer editing tab panels (Tasks 4-6 populate these) */
+.ce-panel {
+  border: 1px solid #eee; border-radius: 4px; padding: 12px; background: #fff;
+}
+
+/* Workspace switcher (top of the left rail). */
+.viv-workspace-switcher { position: relative; padding: 0; }
+/* The workspace-name chip is the SOURCE SWITCHER trigger: a small status dot +
+   the current source name under the Vivarium brand. Click to switch local
+   workspace / remote build (source-switch.js opens a dropdown below it). */
+.viv-workspace-name {
+  display: flex; align-items: flex-start; gap: 7px;
+  padding: 0 16px 10px; margin: 0;
+  font-size: 12.5px; font-weight: 600;
+  color: #64748b; cursor: default;
+  background: none; border: none; border-radius: 0;
+  /* min-width:0 lets this flex item shrink below its content width so the
+     .viv-ws-text / .viv-ws-branch ellipsis actually engages; without it the
+     long branch name overflowed the fixed-width rail and hard-clipped. */
+  min-width: 0; max-width: 100%; overflow: hidden;
+}
+.viv-workspace-name strong { font-weight: 600; }
+.viv-ws-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+/* display:block so text-overflow:ellipsis actually applies (it's a no-op on an
+   inline span) — long branch names now truncate with "…" instead of clipping;
+   the full name stays available via the element's title= tooltip on hover. */
+.viv-ws-branch { color: #94a3b8; font-weight: 400; font-size: 0.84em;
+  display: block; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 100%; }
+.viv-ws-remote-tag { font-size: 0.7em; font-weight: 600; color: #7c3aed;
+  background: #f3e8ff; padding: 1px 5px; border-radius: 4px; vertical-align: middle; margin-left: 4px; }
+.viv-workspace-name .viv-workspace-switcher-glyph { font-size: 8px; margin-top: 4px; }
+.viv-workspace-switcher-glyph.viv-glyph-remote { color: #7c3aed; }
+.viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
+.viv-glyph-running { color: #2ea043; }
+/* The workspace name links to its GitHub repo; a small mark signals it. */
+.viv-ws-repo-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: inherit; text-decoration: none;
+}
+.viv-ws-repo-link strong { font-weight: 600; }
+.viv-ws-repo-link:hover { color: #0f172a; }
+.viv-ws-gh-mark { flex: none; color: #94a3b8; }
+.viv-ws-repo-link:hover .viv-ws-gh-mark { color: #0f172a; }
+/* The collapsed rail shows only the "open sidebar" toggle + the nav icons —
+   no brand avatar, no GitHub mark (both live in the expanded rail). */
+.viv-rail-repo-mini { display: none; }
+.viv-rail.viv-rail-collapsed .viv-rail-repo-mini { display: none; }
+/* Keep the snapshot repo label out of the collapsed rail (avoids truncation). */
+.viv-rail.viv-rail-collapsed #snapshot-repo-label { display: none !important; }
+.viv-glyph-stopped { color: #999; }
+.viv-glyph-stale   { color: #d29922; }
+.viv-glyph-missing { color: #cf222e; }
+.viv-ws-error { color: #cf222e; font-size: 11px; padding: 2px 0; }
+
+/* Workspace switcher v2 — centered modal mounted to body. */
+.viv-ws-modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.32);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.14s ease-out;
+}
+.viv-ws-modal.open {
+  display: flex;
+  opacity: 1;
+}
+.viv-ws-modal-card {
+  width: min(720px, 90vw);
+  max-height: 80vh;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.viv-ws-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #eee;
+}
+.viv-ws-modal-header h2 {
+  margin: 0; font-size: 15px; font-weight: 600; color: #333;
+}
+.viv-ws-modal-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 18px; color: #666; padding: 0 4px;
+}
+.viv-ws-modal-close:hover { color: #000; }
+.viv-ws-modal-list {
+  list-style: none; margin: 0; padding: 0;
+  overflow-y: auto; flex: 1;
+}
+.viv-ws-modal-footer {
+  padding: 10px 18px; border-top: 1px solid #eee;
+}
+.viv-ws-modal-add {
+  background: none; border: none; color: #0366d6;
+  cursor: pointer; font-size: 13px; padding: 0;
+}
+.viv-ws-modal-add:hover { text-decoration: underline; }
+
+/* Rows */
+.viv-ws-row {
+  padding: 10px 18px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+.viv-ws-row:last-child { border-bottom: none; }
+.viv-ws-row:hover { background: #f6f8fa; }
+.viv-ws-row-current { cursor: default; background: #f8f9fb; }
+.viv-ws-row-current:hover { background: #f8f9fb; }
+.viv-ws-line1 {
+  display: flex; align-items: center; gap: 10px;
+}
+.viv-ws-row .viv-ws-glyph { width: 18px; text-align: center; font-size: 14px; }
+.viv-ws-name { flex: 1; font-size: 13px; }
+.viv-ws-name small { color: #777; font-weight: normal; }
+.viv-ws-path {
+  font-size: 11px; color: #888;
+  margin-top: 3px; margin-left: 28px;
+  word-break: break-all;
+}
+.viv-ws-action {
+  font-size: 11px; padding: 4px 10px; cursor: pointer;
+  border: 1px solid #ccc; background: #fff; border-radius: 3px;
+}
+.viv-ws-action:hover { background: #f0f0f0; }
+.viv-ws-action:disabled { opacity: 0.6; cursor: progress; }
+.viv-ws-action-danger { color: #cf222e; border-color: #f6c4c9; }
+.viv-ws-action-danger:hover { background: #fdecef; }
+.viv-ws-action-warn { color: #b3700d; border-color: #f0d8a7; }
+.viv-ws-action-warn:hover { background: #fff5e1; }
+.viv-ws-action-muted { color: #666; }
+.viv-ws-loading {
+  padding: 16px 18px; color: #999; font-size: 12px;
+}
+/* .viv-ws-error reused from v1; no rule change needed. */
+.mode-selector { margin: 0.5rem 0; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; }
+.mode-selector legend { font-weight: bold; padding: 0 0.3rem; }
+.mode-selector label { display: block; margin: 0.3rem 0; font-weight: normal; }
+.viv-workspace-switcher-actions {
+  border-top: 1px solid #eee; margin-top: 0.4rem; padding-top: 0.4rem;
+}
+.viv-workspace-switcher-actions button {
+  display: block; width: 100%; text-align: left;
+  padding: 0.4rem 0.6rem; background: transparent; border: none; cursor: pointer;
+}
+.viv-workspace-switcher-actions button:hover { background: #f0f0f0; }
+
+/* Investigation switcher dropdown (anchored under the rail trigger). */
+.viv-workspace-switcher { position: relative; }
+.viv-iset-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 12px;
+  right: 12px;
+  z-index: 1500;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.14);
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 13px;
+}
+.viv-iset-menu.open { display: block; }
+.viv-iset-menu-header {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #6b7280; padding: 8px 12px 4px;
+}
+.viv-iset-menu-list { list-style: none; margin: 0; padding: 0; }
+.viv-iset-menu-row {
+  padding: 8px 12px; cursor: pointer;
+  border-top: 1px solid #f3f4f6;
+}
+.viv-iset-menu-row:first-child { border-top: none; }
+.viv-iset-menu-row:hover, .viv-iset-menu-row:focus { background: #f6f8fa; outline: none; }
+.viv-iset-menu-row-current { background: #eef4ff; }
+.viv-iset-menu-row-current:hover { background: #e3eefe; }
+.viv-iset-menu-row-line1 {
+  display: flex; align-items: center; gap: 8px;
+}
+.viv-iset-menu-row-title { flex: 1; font-size: 13px; color: #111827; }
+.viv-branch-source { padding: 4px 0 16px; max-width: 640px; }
+.viv-bs-title { font-size: 15px; margin: 0 0 12px; }
+.viv-bs-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.viv-bs-key { width: 64px; color: #6b7280; font-size: 13px; }
+.viv-bs-select, .viv-bs-commit-select { padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 13px; }
+.viv-bs-toggle { padding: 4px 12px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; border-radius: 6px; font-size: 13px; }
+.viv-bs-toggle.active { background: #eef4ff; border-color: #94b4ff; color: #1e40af; }
+.viv-bs-commit { font-family: ui-monospace, monospace; font-size: 13px; }
+.viv-bs-current { color: #1e40af; font-weight: 600; font-size: 12px; }
+.viv-bs-actions { display: flex; gap: 8px; margin: 14px 0; }
+.viv-bs-action { padding: 6px 14px; border: 1px solid #d0d7de; background: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.viv-bs-action:disabled { opacity: 0.45; cursor: default; }
+.viv-bs-note { color: #b45309; font-size: 12px; margin: 6px 0; }
+.viv-bs-list { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid #f3f4f6; }
+.viv-bs-list-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #f3f4f6; font-size: 13px; }
+.viv-bs-list-row.current { background: #eef4ff; }
+.viv-bs-list-label { flex: 1; }
+.viv-bs-list-label:hover { color: #0366d6; }
+.viv-bs-forget { border: none; background: none; cursor: pointer; color: #c0c4cc; }
+.viv-bs-forget:hover { color: #d1242f; }
+.viv-bs-search { width: 100%; max-width: 420px; margin: 10px 0 0; padding: 5px 9px;
+  border: 1px solid #d0d7de; border-radius: 6px; font-size: 13px; box-sizing: border-box; }
+.viv-bs-list-empty { padding: 8px 4px; color: #9ca3af; font-size: 13px; }
+.viv-bs-busy { margin: 8px 0; padding: 6px 10px; font-size: 12px; color: #1e40af;
+  background: #eef4ff; border: 1px solid #c7d7fe; border-radius: 6px; }
+.viv-iset-menu-forget {
+  flex: 0 0 auto; border: none; background: none; cursor: pointer;
+  color: #c0c4cc; font-size: 12px; line-height: 1; padding: 2px 4px;
+  border-radius: 4px; opacity: 0; transition: opacity 0.1s, color 0.1s, background 0.1s;
+}
+.viv-iset-menu-row:hover .viv-iset-menu-forget,
+.viv-iset-menu-row:focus-within .viv-iset-menu-forget { opacity: 1; }
+.viv-iset-menu-forget:hover { color: #d1242f; background: #ffebe9; }
+.viv-iset-menu-row-pill {
+  font-size: 0.7em !important;
+  padding: 1px 7px !important;
+  white-space: nowrap;
+}
+.viv-iset-menu-row-slug {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: #6b7280; margin-top: 2px;
+}
+.viv-iset-menu-row-current-tag { color: #1e40af; font-weight: 600; font-family: inherit; }
+.viv-iset-menu-loading, .viv-iset-menu-empty, .viv-iset-menu-error {
+  padding: 10px 12px; color: #6b7280; font-size: 12px;
+}
+.viv-iset-menu-error { color: #b91c1c; }
+.viv-iset-menu-divider { border-top: 1px solid #e5e7eb; }
+.viv-iset-menu-new {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer;
+  padding: 10px 12px; font-size: 13px; color: #0366d6;
+}
+.viv-iset-menu-new:hover { background: #f6f8fa; }
+/* Pass C: cross-worktree section divider + peer-row arrow */
+.viv-iset-menu-section {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #6b7280; padding: 10px 12px 4px;
+  border-top: 1px solid #e5e7eb;
+  background: #fafbfc;
+  list-style: none;
+}
+.viv-iset-menu-row-peer { padding-right: 28px; position: relative; }
+.viv-iset-menu-row-arrow {
+  color: #6b7280; font-size: 14px; padding-left: 6px;
+  flex: 0 0 auto;
+}
+.viv-iset-menu-row-peer:hover .viv-iset-menu-row-arrow { color: #0366d6; }
+</style>
+</head><body>
+
+<div class="viv-layout">
+
+  <!-- LEFT RAIL -->
+  <aside id="viv-rail" class="viv-rail">
+
+    <!-- Brand: fixed Vivarium logo + name (no per-workspace icon/name override). -->
+    <div class="viv-rail-header">
+      <img class="viv-rail-logo" src="assets/vivarium-logo.png?v=1784728790_1784728790" alt="Vivarium" loading="lazy">
+      <div class="viv-rail-brand">
+        <strong>Vivarium</strong>
+        <small>workbench</small>
+      </div>
+      <!-- Rail collapse/expand toggle. Lives in the header so, when collapsed, it
+           can overlay the logo and reveal on hover (see .viv-rail-collapsed CSS). -->
+      <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar" onclick="_vivToggleRail()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">
+          <rect x="3" y="4" width="18" height="16" rx="2"/>
+          <line x1="9" y1="4" x2="9" y2="20"/>
+        </svg>
+      </button>
+    </div>
+
+    
+    <!-- GitHub mark, defined once and reused (workspace-name link + collapsed icon). -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="viv-gh-mark" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol></svg>
+    
+
+    <div class="viv-workspace-switcher" id="viv-workspace-switcher">
+      <!-- The workspace-name chip opens the Branch page (#github): source,
+           repo/branch/commit, push & build actions. Replaces the old rail
+           dropdown and the standalone Branch rail item. -->
+      <div class="viv-workspace-name" role="button" tabindex="0"
+           title="Open Branch: source, repo · branch · commit, push & build"
+           style="cursor:pointer"
+           onclick="window.location.hash='#github'; if(window._switchPage)_switchPage('github');"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); window.location.hash='#github'; if(window._switchPage)_switchPage('github');}">
+        <span class="viv-workspace-switcher-glyph">●</span>
+        <span class="viv-ws-text">
+          <strong>ws_increase_demo</strong>
+          <span class="viv-ws-branch" title="ws_increase_demo · branch: feat/study-viz-via-worker">feat/study-viz-via-worker</span>
+        </span>
+      </div>
+    </div>
+    <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
+    <div class="viv-repo-label" id="snapshot-repo-label" style="display:none;cursor:pointer"
+         role="button" tabindex="0"
+         title="Open Source — switch workspace"
+         onclick="window.location.hash='#github'; if(window._switchPage)_switchPage('github');"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); window.location.hash='#github'; if(window._switchPage)_switchPage('github');}">
+      <span class="viv-workspace-switcher-glyph">●</span>
+      <strong>ws_increase_demo</strong>
+      
+      <a class="viv-ws-repo-link" href="https://github.com/vivarium-collective/vivarium-workbench" target="_blank" rel="noopener"
+         title="Open ws_increase_demo on GitHub" onclick="event.stopPropagation()">
+        <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg></a>
+      
+    </div>
+
+    
+    <!-- Collapsed rail: a single centered GitHub mark linking to the repo. -->
+    <a class="viv-rail-repo-mini" href="https://github.com/vivarium-collective/vivarium-workbench" target="_blank" rel="noopener"
+       title="Open ws_increase_demo on GitHub" aria-label="GitHub repository">
+      <svg width="16" height="16"><use href="#viv-gh-mark"/></svg>
+    </a>
+    
+
+    <!-- Primary nav -->
+    <nav class="viv-rail-section" role="tablist">
+      <div class="viv-rail-section-label">Workspace</div>
+      <!-- Inputs: 3 data streams flowing into a process rectangle (input ports) -->
+      <a href="#workspace-inputs"  class="viv-rail-link menu-link" data-page="workspace-inputs">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <path d="M2 7h6M2 12h6M2 17h6"/>
+            <path d="M7 5l2 2-2 2M7 10l2 2-2 2M7 15l2 2-2 2"/>
+            <rect x="12" y="4" width="10" height="16" rx="1"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Sources</span>
+      </a>
+      <!-- Registry: 3×2 grid of stores — the type catalog. Top row of
+           circles (continuous-type stores) over a bottom row of squares
+           (discrete/struct-type stores). The mixed-shape pair reads as
+           "different KINDS of stores" rather than a uniform grid, which
+           better matches the registry's heterogeneous-types semantics. -->
+      <a href="#registry"          class="viv-rail-link menu-link" data-page="registry">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="6"  cy="7" r="2.2"/>
+            <circle cx="12" cy="7" r="2.2"/>
+            <circle cx="18" cy="7" r="2.2"/>
+            <rect x="3.8"  y="14.8" width="4.4" height="4.4" rx="0.3"/>
+            <rect x="9.8"  y="14.8" width="4.4" height="4.4" rx="0.3"/>
+            <rect x="15.8" y="14.8" width="4.4" height="4.4" rx="0.3"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Registry</span>
+      </a>
+      <!-- Composites: composite-as-process — outer boundary containing a process rectangle wired to a store -->
+      <a href="#simulation-setup"  class="viv-rail-link menu-link" data-page="simulation-setup">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="2.5" y="6" width="19" height="12" rx="1.25"/>
+            <rect x="5.5" y="9" width="5.5" height="6"/>
+            <circle cx="16.5" cy="12" r="2.4"/>
+            <path d="M11 12h3.1"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Composites</span>
+      </a>
+      <!-- Investigations: DAG of related studies. Uses the branching-fan
+           icon (previously on the now-removed flat Studies catalog). -->
+      <a href="#investigations" class="viv-rail-link menu-link" data-page="investigations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="2.5" y="9" width="6" height="6"/>
+            <rect x="16" y="3" width="5.5" height="4"/>
+            <rect x="16" y="10" width="5.5" height="4"/>
+            <rect x="16" y="17" width="5.5" height="4"/>
+            <path d="M8.5 12L16 5"/>
+            <path d="M8.5 12h7.5"/>
+            <path d="M8.5 12L16 19"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Investigations</span>
+      </a>
+      <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <ellipse cx="12" cy="6" rx="8" ry="3"/>
+            <path d="M4 6v12c0 1.657 3.582 3 8 3s8-1.343 8-3V6"/>
+            <path d="M4 12c0 1.657 3.582 3 8 3s8-1.343 8-3"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Simulations DB</span>
+      </a>
+      <!-- Visualizations: axes + line-chart polyline + data points.
+           Polyline style (vs the previous smooth sigmoid) reads more
+           clearly as "scientific plot" at rail-icon size — matches the
+           chart-icon convention common across viz / analytics UIs and
+           the mockup's iconography. -->
+      <a href="#visualizations"    class="viv-rail-link menu-link" data-page="visualizations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <!-- L-shaped axes -->
+            <path d="M4 4 V20 H20"/>
+            <!-- chart polyline: low-left → peak → dip → higher peak → settle -->
+            <path d="M7 16 L 10 11 L 13 14 L 16 8 L 19 10"/>
+            <!-- data points at each vertex -->
+            <circle cx="7"  cy="16" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="10" cy="11" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="13" cy="14" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="16" cy="8"  r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="19" cy="10" r="1.05" fill="currentColor" stroke="none"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Analyses</span>
+      </a>
+      <!-- The Branch page (#github) is no longer a rail item — it's reached by
+           clicking the workspace source display at the top of the rail (see
+           #viv-workspace-switcher). Hash route #github kept for back-compat. -->
+    </nav>
+
+    <!-- Studies of the active investigation, dependency-ordered. -->
+    <div class="viv-rail-section" id="viv-rail-studies-section">
+      <div class="viv-rail-section-label">Studies</div>
+      <div id="viv-rail-investigations">
+        <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
+      </div>
+    </div>
+
+    <!-- Footer: user identity + collapse toggle.
+         Workspace owner is resolved from `gh api user` (which requires
+         the user to have authenticated `gh auth login`). When that
+         succeeds, `owner_login` is the GitHub username and we link to
+         their profile. When it doesn't, we fall back to a GENERIC
+         "Connect GitHub" prompt — never to git-config name/email —
+         so a workspace shown on screen / shared in a screenshot
+         doesn't leak the local user's personal git identity. -->
+    
+    
+    
+    
+    <a class="viv-rail-footer viv-rail-footer-link" href="https://github.com/jcschaff" target="_blank" rel="noopener" title="Open jcschaff on GitHub ↗">
+    
+      
+        <img class="viv-avatar viv-avatar-rail viv-avatar-img" src="https://avatars.githubusercontent.com/u/20616724?v=4" alt="jcschaff" loading="lazy" referrerpolicy="no-referrer">
+      
+      <div class="viv-rail-footer-text">
+        <strong>Jim Schaff</strong>
+        <small>@jcschaff</small>
+      </div>
+    
+    </a>
+    
+    
+
+  </aside>
+
+  <!-- MAIN: topbar + content -->
+  <div class="viv-main">
+
+    <!-- Read-only snapshot banner — hidden in local mode; shown when body.snapshot is set.
+         The link points at the vivarium-workbench repo (clone + `vivarium-workbench
+         serve` to run the full interactive workbench locally); there is no hosted
+         interactive version. -->
+    <div id="snapshot-banner">
+      <span>Read-only snapshot &mdash; run the workbench locally for the full interactive version.</span>
+      <a id="snapshot-interactive-link"
+         href="https://github.com/vivarium-collective/vivarium-workbench#readme"
+         target="_blank" rel="noopener">Get vivarium-workbench on GitHub →</a>
+    </div>
+
+    <!-- Top banner removed — was a non-functional breadcrumb + "Coming soon" Share/settings placeholders + a decorative avatar. -->
+
+    <main class="viv-content pages" id="viv-content">
+
+<!-- ===== PAGE: WORKSPACE INPUTS ===== -->
+<section id="page-workspace-inputs" class="page" data-page="workspace-inputs">
+
+  <!-- Investigation-first inputs, rendered client-side from /api/inputs.
+       Single source of truth for the datasets/references/expert-docs lists;
+       the management panels below provide the add/edit actions + bib explorer. -->
+  <div id="inputs-api-render" class="panel">
+    <p class="muted" style="font-style:italic">Loading inputs…</p>
+  </div>
+
+</section>
+
+<!-- ===== PAGE: SIMULATION SETUP ===== -->
+<section id="page-simulation-setup" class="page" data-page="simulation-setup">
+
+  <!-- Available Composites (workspace-local discovery) -->
+  <div class="panel">
+    <h3>Available Composites <span id="composite-count" class="count-badge"></span></h3>
+    <div class="card-browse-toolbar" id="composite-toolbar">
+      <input type="search" class="card-browse-search" id="composite-search" placeholder="Filter composites…">
+      <div class="card-browse-chips" id="composite-tag-chips"></div>
+      <span class="card-browse-view-toggle">
+        <button class="view-btn active" data-view="grid" onclick="_setCompositeView('grid')" title="Grid view">&#9638;</button>
+        <button class="view-btn" data-view="list" onclick="_setCompositeView('list')" title="List view">&#8801;</button>
+      </span>
+      <select id="composites-sort" class="composites-sort-select" onchange="_setCompositesSort(this.value)" title="Sort composites">
+        <option value="workspace-first">Sort: Workspace first</option>
+        <option value="name">Sort: Name</option>
+        <option value="module">Sort: Module</option>
+        <option value="kind">Sort: Kind</option>
+      </select>
+    </div>
+    <div id="composite-cards" class="module-grid">
+      <p class="empty-state">Loading composites&hellip;</p>
+    </div>
+  </div>
+
+</section>
+
+<!-- ===== PAGE: ANALYSES ===== -->
+<section id="page-visualizations" class="page" data-page="visualizations">
+  <h2 class="page-title">Analyses</h2>
+
+  <div class="panel">
+    <h3>Saved visualizations <span id="viz-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Interactive scenes saved as workspace artifacts. 3D models load embedded below; open any in a new tab for a full-window view. Produce a 3D model by running a parsimony packing composite (it writes <code>studies/&lt;name&gt;/viz/3d/&lt;name&gt;.pack.json</code>), then revisit this tab.</p>
+    <div id="analyses-gallery" class="analyses-gallery">
+      <p class="empty-state">Loading saved visualizations&hellip;</p>
+    </div>
+  </div>
+
+</section>
+
+<!-- Preview modal (iframe-based) -->
+<div id="modal-viz-preview" class="modal-overlay">
+  <div class="modal-box" style="max-width:900px">
+    <button class="modal-close" onclick="closeModal('modal-viz-preview')">&times;</button>
+    <h3 id="viz-preview-title">Preview</h3>
+    <div id="viz-preview-source-row" style="margin-bottom:8px;font-size:0.9em;color:#555"></div>
+    <iframe id="viz-preview-iframe" style="width:100%;height:480px;border:1px solid #ddd;background:#fff"></iframe>
+    <div id="viz-preview-notes" style="margin-top:8px;font-size:0.85em;color:#666"></div>
+  </div>
+</div>
+
+<!-- Data-source file preview modal (repo-wide data sources, Inputs tab) -->
+<div id="modal-ds-preview" class="modal-overlay">
+  <div class="modal-box" style="max-width:900px">
+    <button class="modal-close" onclick="closeModal('modal-ds-preview')">&times;</button>
+    <h3 style="margin-bottom:8px">Data source: <code id="ds-preview-title" style="font-size:0.85em"></code></h3>
+    <div style="margin-bottom:8px">
+      <a id="ds-preview-download" class="action-btn" download>Download</a>
+    </div>
+    <pre id="ds-preview-body" style="max-height:560px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-size:0.8em;line-height:1.4;white-space:pre;margin:0"></pre>
+  </div>
+</div>
+
+<!-- ===== PAGE: REGISTRY ===== -->
+<section id="page-registry" class="page" data-page="registry">
+
+  
+  <div class="registry-subtabs" role="tablist">
+    <button class="registry-subtab active" data-subtab="modules"
+            onclick="_setRegistrySubtab('modules')" role="tab">Modules</button>
+    <button class="registry-subtab" data-subtab="discovered"
+            onclick="_setRegistrySubtab('discovered')" role="tab">Discovered registry
+      <span class="count-badge muted" id="registry-total-count"></span></button>
+  </div>
+
+  <!-- Subtab: Modules (catalog grid; workspace + installed entries pinned at top) -->
+  <section class="panel registry-subtab-panel active" data-subtab="modules">
+    <div class="card-browse-toolbar" id="catalog-toolbar">
+      <input type="search" class="card-browse-search" id="catalog-search" placeholder="Filter modules…">
+      <div class="card-browse-chips" id="catalog-tag-chips"></div>
+      <div class="card-browse-options">
+        <label><input type="radio" name="catalog-installed-filter" value="all" checked> All</label>
+        <label><input type="radio" name="catalog-installed-filter" value="installed"> Installed</label>
+        <label><input type="radio" name="catalog-installed-filter" value="uninstalled"> Available</label>
+        <span class="card-browse-view-toggle">
+          <button class="view-btn active" data-view="grid" onclick="_setCatalogView('grid')" title="Grid view">&#9638;</button>
+          <button class="view-btn" data-view="list" onclick="_setCatalogView('list')" title="List view">&#8801;</button>
+        </span>
+      </div>
+    </div>
+    <div id="catalog-modules-grid" class="module-grid">
+      <p class="empty-state">Loading catalog&hellip;</p>
+    </div>
+    
+    <div id="installed-modules-sync-warning" style="display:none"></div>
+    
+    <div id="installed-modules-list" hidden></div>
+    <span id="installed-modules-count" hidden></span>
+  </section>
+
+  <!-- Subtab: Discovered registry (live build_core() introspection) -->
+  <section class="panel registry-subtab-panel" data-subtab="discovered">
+
+    <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
+    <div id="registry-status" class="muted" style="margin:8px 0"></div>
+
+    <!-- "Imported repositories" was removed: those repos are already shown in
+         the Modules tab, so duplicating them under Discovered registry was noise. -->
+
+    <div class="registry-tabs">
+      <button class="registry-tab active" data-kind="process"       onclick="_setRegistryTab('process')">Processes <span class="count-badge" id="registry-process-count"></span></button>
+      <button class="registry-tab"        data-kind="step"          onclick="_setRegistryTab('step')">Steps <span class="count-badge" id="registry-step-count"></span></button>
+      <button class="registry-tab"        data-kind="emitter"       onclick="_setRegistryTab('emitter')">Emitters <span class="count-badge" id="registry-emitter-count"></span></button>
+      <button class="registry-tab"        data-kind="visualization" onclick="_setRegistryTab('visualization')">Visualizations <span class="count-badge" id="registry-visualization-count"></span></button>
+      <button class="registry-tab"        data-kind="analysis"      onclick="_setRegistryTab('analysis')">Analyses <span class="count-badge" id="registry-analysis-count"></span></button>
+      <button class="registry-tab"        data-kind="type"          onclick="_setRegistryTab('type')">Types <span class="count-badge" id="registry-type-count"></span></button>
+    </div>
+
+    <input type="search" class="registry-search" id="registry-search" placeholder="Filter&hellip;" oninput="_filterRegistry(this.value)">
+
+    <div class="registry-tab-panel active" data-kind="process"       id="registry-processes-container"><p class="empty-state">Loading&hellip;</p></div>
+    <div class="registry-tab-panel"        data-kind="step"          id="registry-steps-container"></div>
+    <div class="registry-tab-panel"        data-kind="emitter"       id="registry-emitters-container"></div>
+    <div class="registry-tab-panel"        data-kind="visualization" id="registry-visualizations-container"></div>
+    <div class="registry-tab-panel"        data-kind="analysis"      id="registry-analyses-container"></div>
+    <div class="registry-tab-panel"        data-kind="type"          id="registry-types-container"></div>
+  </section>
+</section>
+
+<!-- ===== PAGE: STUDIES ===== -->
+<section id="page-investigations" class="page" data-page="investigations">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <h2 class="page-title" style="margin:0">Investigations</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="investigations-filter" type="search" placeholder="Filter investigations…"
+             aria-label="Filter investigations" oninput="_filterInvestigations()"
+             style="padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.9em;min-width:220px">
+    </div>
+  </div>
+  <p class="page-lead" id="investigation-page-lead">Select an investigation to open its study graph.</p>
+
+  <!-- List view: grouped investigation cards (Active / Closed). The grid lives on
+       the per-group .investigations-grid wrappers built by _renderInvestigationSets. -->
+  <div id="investigations-list">
+    <p class="empty-state">Loading…</p>
+  </div>
+
+  <!-- "+ New Investigation" modal. Hidden by default. -->
+  <div id="new-iset-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.4); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:8px; padding:20px 22px; width:min(540px, 92vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="margin:0">New Investigation</h3>
+        <button class="btn-mini" onclick="_closeNewIsetModal()">×</button>
+      </div>
+      <div id="new-iset-error" style="display:none; background:#fee2e2; color:#991b1b; padding:8px 12px; border-radius:6px; margin-bottom:10px; font-size:0.9em;"></div>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Name <span style="color:#dc2626">*</span></div>
+        <input type="text" id="new-iset-name" oninput="_updateNewIsetSlugPreview()" placeholder="My new investigation"
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;">
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">
+          Slug: <code id="new-iset-slug-preview" style="background:#f3f4f6; padding:1px 4px; border-radius:3px;">—</code>
+        </div>
+      </label>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Overview <span class="muted" style="font-weight:normal;">(optional)</span></div>
+        <textarea id="new-iset-overview" rows="3"
+                  style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em; font-family:inherit; resize:vertical;"
+                  placeholder="One- or two-line description of the research arc."></textarea>
+      </label>
+      <label style="display:block; margin-bottom:14px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Parent studies <span class="muted" style="font-weight:normal;">(optional, hold ⌘/Ctrl to multi-select)</span></div>
+        <select id="new-iset-parent-studies" multiple size="5"
+                style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;"></select>
+      </label>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-mini" onclick="_closeNewIsetModal()">Cancel</button>
+        <button class="action-btn" id="new-iset-submit-btn" onclick="_submitNewIset()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- "Clone investigation" modal. Hidden by default. -->
+  <div id="clone-iset-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.4); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:8px; padding:20px 22px; width:min(540px, 92vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="margin:0">Clone investigation</h3>
+        <button class="btn-mini" onclick="_closeCloneIsetModal()">×</button>
+      </div>
+      <div id="clone-iset-error" style="display:none; background:#fee2e2; color:#991b1b; padding:8px 12px; border-radius:6px; margin-bottom:10px; font-size:0.9em;"></div>
+      <p class="muted" style="font-size:0.85em; margin:0 0 12px 0;">
+        Copies the investigation + its studies, strips simulation results, resets statuses to <code>planning</code>.
+        Useful for a fresh attempt at the same plan or a demo fixture.
+      </p>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Source <span class="muted" style="font-weight:normal;">(this investigation)</span></div>
+        <input type="text" id="clone-iset-source" readonly
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em; background:#f9fafb; color:#475569;">
+      </label>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Target name <span style="color:#dc2626">*</span></div>
+        <input type="text" id="clone-iset-target" oninput="_updateCloneIsetSlugPreview()" placeholder="e.g. dnaa-replication-fresh"
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;">
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">
+          Slug: <code id="clone-iset-slug-preview" style="background:#f3f4f6; padding:1px 4px; border-radius:3px;">—</code>
+        </div>
+      </label>
+      <label style="display:block; margin-bottom:14px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Target study prefix <span class="muted" style="font-weight:normal;">(optional)</span></div>
+        <input type="text" id="clone-iset-target-prefix" placeholder="defaults to first dash-segment of target name"
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;">
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">
+          Studies like <code>dnaa-02-atp-hydrolysis</code> become <code>&lt;prefix&gt;-02-atp-hydrolysis</code>.
+        </div>
+      </label>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-mini" onclick="_closeCloneIsetModal()">Cancel</button>
+        <button class="action-btn" id="clone-iset-submit-btn" onclick="_submitCloneIset()">Clone</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail view: one investigation's DAG. Toggled on click. -->
+  <div id="investigation-detail-view" style="display:none; margin-top:8px">
+    <button class="iset-back-link" onclick="_showInvestigationList()" title="Back to all investigations"
+            style="background:none; border:none; padding:0; margin:0 0 4px; color:#64748b; font-size:0.82em; cursor:pointer; display:inline-flex; align-items:center; gap:4px">&larr; All investigations</button>
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+      <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
+      <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
+      <span class="inv-export-actions" style="display:inline-flex; gap:6px">
+        <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Report 📄</button>
+        <button class="btn-mini" onclick="_downloadInvestigationNotebook()" title="Download a self-contained Jupyter notebook (+ matching .py) that re-runs this investigation's studies via the process-bigraph protocol and renders their figures. The coder-facing complement to the HTML report.">Notebook 📓</button>
+      </span>
+    </div>
+    <!-- Run-progress panel: rendered while a run-unblocked job is active. -->
+    <div id="investigation-run-progress" class="inv-run-progress" style="display:none"></div>
+
+    <!-- Needs-attention elevated: a distinct, actionable banner directly below the
+         header. Populated by JS from /api/needs-attention; renders nothing when empty. -->
+    <div id="investigation-needs-attention"></div>
+
+    <div id="investigation-intro" class="inv-intro" style="margin: 0 0 16px 0;">
+      <!-- Single "About" disclosure (open by default): the lead/abstract, then any
+           supplementary context as labeled sub-blocks. Each sub-block keeps its id +
+           inner <ol>/<dl> so the existing render functions populate it unchanged; JS
+           toggles their display, so they stay hidden when the yaml omits them. -->
+      <details id="investigation-intro-details" class="inv-lead-details" open>
+        <summary>About this investigation</summary>
+        <div id="investigation-detail-description" class="inv-lead" style="margin-top:6px"></div>
+        <div id="investigation-how-to-read" class="inv-how-to-read" style="display:none; margin-top:12px">
+          <h4 class="inv-subhead">How to read this</h4>
+          <ol></ol>
+        </div>
+        <div id="investigation-glossary" class="inv-glossary" style="display:none; margin-top:12px">
+          <h4 class="inv-subhead">Glossary</h4>
+          <dl></dl>
+        </div>
+        <div id="investigation-biology-story" class="inv-bio-story" style="display:none; margin-top:12px">
+          <h4 class="inv-subhead inv-bio-story-label">Biology — the mechanism this investigation models</h4>
+          <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
+        </div>
+      </details>
+    </div>
+    <!-- Discourse-graph framing: studies as knowledge-producing operations. -->
+    <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
+      <strong>Investigation graph</strong>
+      <span class="viv-info-chip" data-tooltip="Each study is a knowledge-producing operation that builds understanding of the mechanism. Each node shows the question it asks and the evidence it produced; edges show what a result leads to.">?</span>
+      — nodes are studies; edges show what each result leads to.
+      <span class="aig-zoom-ctl" style="float:right;display:inline-flex;align-items:center;gap:6px;font-size:0.9em;color:#64748b">
+        <span title="Zoom out — overview">🔍−</span>
+        <input id="aig-zoom-slider" type="range" min="0" max="2" step="1" value="1"
+               oninput="window._setAigBand(parseInt(this.value,10))" style="width:110px" aria-label="Graph zoom / detail level">
+        <span title="Zoom in — full detail">🔍+</span>
+      </span>
+    </div>
+    <div id="investigation-dag-shell"
+         style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;
+                overflow-x: auto; overflow-y: hidden;">
+      <!-- overflow-y must be hidden (not visible): per CSS spec, when one axis
+           is `visible` and the other isn't, `visible` gets promoted to `auto`,
+           which gives this shell its own vertical scrollbar in addition to
+           .viv-content's. JS sets shell.style.height = canvasH so the full
+           DAG fits and the parent .viv-content handles vertical scroll. -->
+      <svg id="investigation-dag-edges" style="position:absolute; top:0; left:0; pointer-events:none;"></svg>
+      <div id="investigation-dag-nodes" style="position:relative; top:0; left:0;"></div>
+    </div>
+
+    <div id="investigation-detail-drawer" style="display:none; position:fixed; top:96px; right:16px; width:360px; max-height:78vh; overflow:auto; background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.12); padding:14px 16px; z-index:50; font-size:0.92em">
+      <button onclick="document.getElementById('investigation-detail-drawer').style.display='none'" style="float:right;border:none;background:none;cursor:pointer;font-size:1.15em;color:#94a3b8" title="Close">✕</button>
+      <div id="investigation-detail-drawer-body"></div>
+    </div>
+
+    <!-- In-place study embed: when a DAG node is clicked, the full study
+         loads below in an iframe (same /studies/<name> route the Studies
+         page uses). Pop-out button breaks it into a separate window. -->
+    <div id="investigation-study-embed-panel" class="panel"
+         style="display:none; margin-top:16px; padding:0; overflow:hidden">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #e5e7eb; background:#f9fafb">
+        <strong id="investigation-study-embed-name" style="font-size:1.05em"></strong>
+        <div style="display:flex; gap:6px">
+          <button class="btn-mini" onclick="_popoutInvestigationStudy()" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out ↗</button>
+          <button class="btn-mini" onclick="_closeInvestigationStudyEmbed()" title="Close">×</button>
+        </div>
+      </div>
+      <!-- Explicit height = its own scroll context, so `position:sticky` on
+           .study-tabs (inside the iframe) actually sticks to the iframe top
+           as the user scrolls through Overview → Build → … → Decide. -->
+      <iframe id="investigation-study-embed-frame" src="" title="Study detail"
+              style="width:100%; height:calc(100vh - 220px); min-height:600px;
+                     border:0; display:block"></iframe>
+    </div>
+  </div>
+</section>
+
+<!-- GitHub: in-UI sign-in + (future) org picker. The github-login.js widget
+     activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
+<section id="page-github" class="page" data-page="github">
+  <div id="viv-branch-source" class="viv-branch-source"></div>
+  <h2 class="page-title">Branch</h2>
+
+  <!-- Settings-style single panel: three sections (Account, Workspace
+       repository, Actions), each a list of label/value rows. Replaces the
+       three-panel layout — easier to scan, easier to extend. -->
+  <div class="panel github-settings">
+    <style>
+      .github-settings .gh-section { padding:18px 0; border-top:1px solid #e5e7eb }
+      .github-settings .gh-section:first-of-type { padding-top:6px; border-top:none }
+      .github-settings .gh-section-title { margin:0 0 14px; font-size:0.95em; color:#1f2937; font-weight:600; letter-spacing:0.02em }
+      .github-settings .gh-row { display:grid; grid-template-columns:180px 1fr; gap:16px; padding:8px 0; align-items:center }
+      .github-settings .gh-row[hidden] { display:none }
+      .github-settings .gh-label { color:#6b7280; font-size:0.88em }
+      .github-settings .gh-value { color:#111827; font-size:0.92em; min-width:0 }
+      .github-settings .gh-value code { font-size:0.92em }
+      .github-settings .gh-value-hint { color:#6b7280; font-size:0.82em; margin-top:4px }
+      .github-settings select.gh-input { width:100%; max-width:380px; padding:6px 8px; font:inherit; border:1px solid #cbd5e1; border-radius:4px; background:#fff }
+      .github-settings .gh-action-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+    </style>
+
+    <!-- ── Account ──────────────────────────────────────────────── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Account</h3>
+
+      <div class="gh-row">
+        <div class="gh-label">Signed in as</div>
+        <div class="gh-value">
+          <div id="viv-gh-chip"
+               class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+               data-state="loading"
+               title="Sign in to GitHub from the dashboard"
+               style="cursor:pointer;display:inline-flex">
+            <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
+            <div class="viv-rail-footer-text">
+              <strong>Connect GitHub</strong>
+              <small>checking…</small>
+            </div>
+          </div>
+          <div class="gh-value-hint">No terminal required. Uses your <code>gh</code> session if present; otherwise sign in with a token below (works anywhere) or the OAuth Device Flow.</div>
+          <div class="gh-value-hint" id="viv-gh-token-fallback" style="margin-top:8px">
+            Or <a href="#" id="viv-gh-token-toggle">paste a GitHub token</a> — the simplest path on any machine (no popup, no CLI).
+            <div id="viv-gh-token-box" style="display:none;margin-top:8px">
+              <input id="viv-gh-token-input" class="gh-input" type="password"
+                     placeholder="ghp_… / gho_… / github_pat_…" autocomplete="off"
+                     spellcheck="false" style="width:280px;max-width:100%">
+              <button id="viv-gh-token-submit" class="btn-mini" type="button">Sign in</button>
+              <span id="viv-gh-token-msg" style="margin-left:8px;font-size:0.85em"></span>
+              <div class="gh-value-hint" style="margin-top:6px">
+                Create one at <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">github.com/settings/tokens</a>
+                with <code>repo</code> scope. Stored in your OS keychain, never written to the workspace.
+              </div>
+            </div>
+          </div>
+          <noscript>
+            <div class="gh-value-hint">Dashboard JS is disabled — run <code>gh auth login</code> from a terminal.</div>
+          </noscript>
+        </div>
+      </div>
+
+      <div class="gh-row">
+        <div class="gh-label">Default org</div>
+        <div class="gh-value">
+          <select id="viv-gh-default-org" class="gh-input">
+            <option value="">Sign in to load orgs…</option>
+          </select>
+          <div id="viv-gh-default-org-hint" class="gh-value-hint">Used to pre-fill <strong>org</strong> for new workspaces and <em>Create GitHub repo</em> actions.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Workspace repository — one row per fact, settings-style ── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Workspace repository</h3>
+
+      <div class="gh-row" id="viv-gh-row-repo">
+        <div class="gh-label">Repository</div>
+        <div class="gh-value" id="viv-gh-repo"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-branch">
+        <div class="gh-label">Branch</div>
+        <div class="gh-value" id="viv-gh-branch"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-push-state">
+        <div class="gh-label">Push state</div>
+        <div class="gh-value" id="viv-gh-push-state"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-ahead">
+        <div class="gh-label">Ahead of base</div>
+        <div class="gh-value" id="viv-gh-ahead"><span class="muted">—</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-dirty">
+        <div class="gh-label">Working tree</div>
+        <div class="gh-value" id="viv-gh-dirty"><span class="muted">—</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-pr">
+        <div class="gh-label">Pull request</div>
+        <div class="gh-value" id="viv-gh-pr"><span class="muted">—</span></div>
+      </div>
+
+      <!-- Legacy hidden host for any code path that still writes to #viv-git-status.
+           The new field-by-field hooks above are the primary surface. -->
+      <div id="viv-git-status" class="git-status" hidden></div>
+    </div>
+
+    <!-- ── Actions ────────────────────────────────────────────────── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Actions</h3>
+
+      <div class="gh-row">
+        <div class="gh-label">Repo &amp; branch</div>
+        <div class="gh-value gh-action-row" id="viv-git-actions">
+          <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">Open PR ↗</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="page-studies" class="page" data-page="studies">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <h2 class="page-title" style="margin:0">Studies</h2>
+    <button class="action-btn" onclick="_createInvestigation()">+ New study</button>
+  </div>
+  <p class="page-lead">Declarative research recipes — pick a composite, declare simulations (single / sweep / seeds), name observables, choose visualizations. Run, save, compare.</p>
+
+  <!-- Browse toolbar matches v0.5.6 catalog/composite browse -->
+  <div class="card-browse-toolbar" id="investigations-toolbar">
+    <input type="search" class="card-browse-search" id="investigations-search" placeholder="Filter studies…">
+    <div class="card-browse-chips" id="investigations-tag-chips"></div>
+    <select id="investigations-sort" onchange="_setInvestigationsSort(this.value)" style="margin-left:12px">
+      <option value="dependencies" selected>Sort: Dependencies (topological)</option>
+      <option value="name">Sort: Name</option>
+      <option value="last_run">Sort: Last run</option>
+      <option value="status">Sort: Status</option>
+      <option value="phase">Sort: Phase (Design → Decide)</option>
+      <option value="topic">Sort: Topic</option>
+      <option value="n_runs">Sort: Run count</option>
+    </select>
+    <span class="card-browse-view-toggle">
+      <button class="view-btn active" data-view="grid" onclick="_setInvestigationsView('grid')">▦</button>
+      <button class="view-btn" data-view="list" onclick="_setInvestigationsView('list')">≡</button>
+    </span>
+  </div>
+
+  <div id="investigations-grid">
+    <p class="empty-state">Loading studies…</p>
+  </div>
+
+  <!-- Detail panel renders inline after a row is clicked -->
+  <div id="investigation-detail" style="display:none; margin-top:16px"></div>
+
+  <!--
+    Embedded study detail. Replaces the legacy full-window navigation to
+    /studies/<name> with an iframe that keeps the dashboard chrome visible.
+    The same /studies/<name> route serves both this iframe and the pop-out
+    window, so direct links keep working.
+  -->
+  <div id="study-detail-panel" class="panel" style="display:none; margin-top:16px; padding:0; overflow:hidden">
+    <div class="study-embed-header"
+         style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #e5e7eb; background:#f9fafb">
+      <strong id="study-detail-name" style="font-size:1.05em"></strong>
+      <div style="display:flex; gap:6px">
+        <button class="btn-mini" onclick="_popoutStudy()" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out &#8599;</button>
+        <button class="btn-mini" onclick="_closeStudyEmbedded()" title="Close">&times;</button>
+      </div>
+    </div>
+    <iframe id="study-detail-frame" src="" title="Study detail"
+            style="width:100%; height:calc(100vh - 220px); min-height:560px; border:0; display:block"></iframe>
+  </div>
+</section>
+
+<!-- ===== PAGE: SIMULATIONS ===== -->
+<section id="page-simulations" class="page" data-page="simulations">
+  <h2 class="page-title">Simulations DB</h2>
+  <p class="page-lead">
+    Persisted runs gathered from each <code>studies/&lt;name&gt;/runs.db</code>,
+    tagged by investigation and study, with the storage location for each run.
+    On a remote build, the deployment's runs for that build's commit are
+    included too (Origin column). Scoped to the current branch's investigation
+    by default and refreshed automatically.
+    <span id="sim-scope-note" style="color:#6b7280;"></span>
+  </p>
+
+  <div style="margin: 8px 0 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      Investigation
+      <select id="sim-inv-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      Study
+      <select id="sim-study-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      Emitter
+      <select id="sim-emitter-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
+    </label>
+    <button id="sim-refresh" class="action-btn">Refresh</button>
+  </div>
+
+  <div id="sim-loading" style="color: #6b7280; padding: 12px;">Loading simulations…</div>
+  <div id="sim-empty"   style="color: #6b7280; padding: 12px; display: none;">
+    No simulation runs found.
+  </div>
+
+  <style>
+    #sim-table th[data-sort-key]:hover { background:#e5e7eb; }
+    #sim-table th[data-sort-dir="asc"]::after { content:" \25B2"; }
+    #sim-table th[data-sort-dir="desc"]::after { content:" \25BC"; }
+  </style>
+
+  <table id="sim-table" style="width:100%; table-layout:fixed; border-collapse: collapse; font-size: 13px; display: none;">
+    <thead>
+      <tr style="background:#f3f4f6;">
+        <th data-sort-key="investigation" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:130px; cursor:pointer;">Investigation</th>
+        <th data-sort-key="study" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:130px; cursor:pointer;">Study</th>
+        <th data-sort-key="run" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; cursor:pointer;">Run</th>
+        <th style="text-align:left; padding:6px 8px; width:150px;">Location</th>
+        <th data-sort-key="origin" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:90px; cursor:pointer;">Origin</th>
+        <th data-sort-key="emitter_type" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:80px; cursor:pointer;">Emitter</th>
+        <th data-sort-key="time" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:104px; cursor:pointer;">Time</th>
+        <th data-sort-key="status" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:84px; cursor:pointer;">Status</th>
+        <th style="text-align:center; padding:6px 8px; width:158px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="sim-tbody"></tbody>
+  </table>
+
+  <!-- Confirmation dialog for full simulation delete -->
+  <div id="sim-delete-dialog" style="display:none; position:fixed; inset:0;
+       background:rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:1000;">
+    <div style="background:#fff; border-radius:8px; padding:20px; max-width:520px;
+         width:90%; box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 12px;">Delete simulation?</h3>
+      <div id="sim-delete-body" style="font-size:13px; color:#374151;"></div>
+      <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="sim-delete-cancel" class="action-btn">Cancel</button>
+        <button id="sim-delete-confirm" class="action-btn"
+                style="background:#dc2626; color:#fff;">Delete</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Modal: create investigation -->
+<div id="modal-investigation-create" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-investigation-create')">&times;</button>
+    <h3>Create investigation</h3>
+    <form id="form-investigation-create" onsubmit="event.preventDefault(); _submitInvestigationCreate(this)">
+      <label>Name <input name="name" placeholder="dnaa-binding-baseline" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Starting composite (optional — pick from workspace catalog)
+        <select name="source" id="create-inv-source">
+          <option value="">— blank composites list, add later —</option>
+        </select>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Create</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: add visualization to an investigation -->
+<div id="modal-investigation-add-viz" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-investigation-add-viz')">&times;</button>
+    <h3>Add visualization</h3>
+    <form id="form-investigation-add-viz" onsubmit="event.preventDefault(); _submitAddViz(this)">
+      <input type="hidden" name="investigation" id="add-viz-investigation">
+      <label>Name <input name="name" placeholder="trajectory" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Visualization class <select name="address" id="add-viz-class" required></select></label>
+      <label>Config (JSON; e.g. <code>{"observable":"level","sources":["baseline"]}</code>)
+        <textarea name="config" rows="4" placeholder='{"observable": "level", "sources": ["baseline"]}'></textarea>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Add</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Investigation — Add composite from Registry -->
+<div id="modal-inv-add-composite" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-inv-add-composite')">&times;</button>
+    <h3>Add composite from Registry</h3>
+    <form id="form-inv-add-composite"
+          onsubmit="event.preventDefault(); _submitAddComposite(this)">
+      <label>Composite (workspace catalog)
+        <select name="source" id="inv-add-composite-source" required></select>
+      </label>
+      <label>Name in this study
+        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="baseline">
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Add</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Investigation — Perturb composite -->
+<div id="modal-inv-perturb" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-inv-perturb')">&times;</button>
+    <h3>Perturb composite</h3>
+    <form id="form-inv-perturb"
+          onsubmit="event.preventDefault(); _submitPerturb(this)">
+      <input type="hidden" name="extends">
+      <label>New composite name
+        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="high-rate">
+      </label>
+      <label>Parameter overrides (JSON; dotted-path keys)
+        <textarea name="parameter_overrides" rows="3"
+                  placeholder='{"state.replication.config.rate": 2.0}'></textarea>
+      </label>
+      <label>Process overrides (JSON; null to remove, str for new address, dict for both)
+        <textarea name="process_overrides" rows="3"
+                  placeholder='{"replication": null}'></textarea>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Perturb</button>
+    </form>
+  </div>
+</div>
+
+<!-- ===== PAGE: COMPOSITE EXPLORER ===== -->
+<section id="page-composite-explore" class="page" data-page="composite-explore">
+  <h2 class="page-title">Composite Explorer</h2>
+
+  <div id="ce-loading" class="empty-state">Loading composite&hellip;</div>
+
+  <div id="ce-main" style="display:none">
+
+    <!-- Metadata header — compact single card so the loom iframe below fills the
+         viewport (was ~4 lines tall). ce-module kept (JS sets it) but folded into
+         the id line's title; ce-description trimmed to one muted line. -->
+    <div class="panel" id="ce-meta" style="flex:none;padding:9px 14px">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <h3 id="ce-name" style="margin:0;font-size:1.1em"></h3>
+        <span id="ce-kind" class="kind-badge"></span>
+        <code id="ce-id" style="font-size:0.82em;color:#64748b"></code>
+        <span id="ce-description" class="muted" style="font-size:0.86em;flex:1;min-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      </div>
+      <code id="ce-module" style="display:none"></code>
+    </div>
+
+    <!-- Loom explorer: bigraph-loom iframe (Setup & Run tab lives inside) -->
+    <div class="panel">
+      <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out &#8599;</button>
+      </div>
+      <iframe id="composite-explore-frame"
+              src="/bigraph-loom/index.html"
+              title="Composite Explorer"
+              style="width:100%;height:calc(100vh - 120px);min-height:520px;border:1px solid #ddd;background:#fff"></iframe>
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+  </div> <!-- /.viv-main -->
+</div> <!-- /.viv-layout -->
+
+<!-- ============================================================ -->
+<!-- MODALS -->
+<!-- ============================================================ -->
+
+<!-- Dataset modal -->
+<div id="modal-dataset" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-dataset')">&times;</button>
+    <h3>Add dataset</h3>
+    <form id="form-dataset" onsubmit="event.preventDefault(); _submitDataset(this)">
+      <label>Name *<input name="name" placeholder="e.g. bremer-1996" required></label>
+      <label style="margin-bottom:4px">Drop the data file here <small>(or skip if URL-based)</small></label>
+      <div id="ds-drop-zone" class="drop-zone">
+        <span class="drop-hint">Drag &amp; drop data file here, or click to select</span>
+        <div class="file-info"></div>
+        <div class="file-hash"></div>
+      </div>
+      <div id="ds-url-row" style="margin-top:8px">
+        <label>URL <small>(required if no file dropped)</small><input name="url" placeholder="https://example.com/data.csv"></label>
+        <label>SHA256 (required with URL)<input name="sha256" placeholder="abc123..."></label>
+      </div>
+      <label>Claims (comma-separated claim IDs)<input name="claims" placeholder="growth-rate-vs-medium, ribo-fraction"></label>
+      <div class="form-error"></div>
+      <button type="submit">Add dataset</button>
+    </form>
+  </div>
+</div>
+
+<!-- Reference modal -->
+<div id="modal-reference" class="modal-overlay">
+  <div class="modal-box" style="max-width:600px">
+    <button class="modal-close" onclick="closeModal('modal-reference')">&times;</button>
+    <h3>Add reference</h3>
+    <p class="subtitle" style="font-size:0.85em;color:#555;margin-bottom:12px">
+      Drop a PDF &mdash; metadata is auto-extracted from the PDF&rsquo;s embedded fields.
+    </p>
+
+    <label style="margin-bottom:4px;font-weight:600">Drop a PDF here *</label>
+    <div id="ref-pdf-drop-zone" class="drop-zone">
+      <span class="drop-hint">&#128196; Drop a PDF here, or click to browse</span>
+      <div class="file-info"></div>
+      <div class="file-hash"></div>
+    </div>
+
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;font-size:0.88em;color:#555;font-weight:600">Refinements (optional)</summary>
+      <div style="padding:12px 0;display:flex;flex-direction:column;gap:8px">
+        <label style="font-size:0.88em">bib_key (auto-generated if blank):
+          <input type="text" id="ref-bib_key" name="bib_key" placeholder="e.g. Smith2024" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Title (auto-extracted if blank):
+          <input type="text" id="ref-title" name="title" placeholder="Full paper title" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Authors (semicolon-separated; auto-extracted if blank):
+          <input type="text" id="ref-authors" name="authors" placeholder="Smith, J.; Doe, J." style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Year (auto-extracted if blank):
+          <input type="number" id="ref-year" name="year" placeholder="2024" min="1000" max="2100" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Journal (optional):
+          <input type="text" id="ref-journal" name="journal" placeholder="e.g. EcoSal Plus" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">DOI (optional):
+          <input type="text" id="ref-doi" name="doi" placeholder="e.g. 10.1145/..." style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Maps to claims (comma-separated, optional):
+          <input type="text" id="ref-claim_mappings" name="claim_mappings" placeholder="phase-1.dnaA-accumulation" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+      </div>
+    </details>
+
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;font-size:0.88em;color:#555;font-weight:600">Or paste an existing BibTeX entry (no PDF)</summary>
+      <div style="padding:12px 0">
+        <label style="font-size:0.88em;display:block">BibTeX entry:
+          <textarea id="ref-bibtex_text" name="bibtex_text" rows="6" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px;font-family:monospace"
+            placeholder="@article{Bremer1996,&#10;  author = {Bremer, H. and Dennis, P.},&#10;  title  = {...},&#10;  ...&#10;}"></textarea>
+        </label>
+        <label style="font-size:0.88em;display:block">Maps to claims (optional, format: <code>claim-id:bibkey, ...</code>):
+          <input type="text" id="ref-bibtex_claim_mappings" name="bibtex_claim_mappings" placeholder="growth-rate-vs-medium:Bremer1996" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+      </div>
+    </details>
+
+    <div class="form-error" id="ref-form-error" style="margin-top:8px"></div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="action-btn" style="background:#1976d2;color:#fff;border-color:#1976d2" onclick="submitReferenceForm()">Submit</button>
+      <button class="action-btn" onclick="closeModal('modal-reference')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Expert document modal -->
+<div id="modal-expert-doc" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-expert-doc')">&times;</button>
+    <h3>Add expert document</h3>
+    <p style="font-size:0.85em;color:#555">
+      Registers a local file (PDF, lab notes, etc.) in <code>workspace.yaml</code> and copies it to
+      <code>references/expert/</code> on a new <code>stage/5-expert-doc-*</code> branch.
+    </p>
+    <form id="form-expert-doc" onsubmit="event.preventDefault(); _submitExpertDoc(this)">
+      <label>Name * <small>(short label, used as filename stem)</small>
+        <input name="name" placeholder="e.g. ecoli-replication-review-2025" required>
+      </label>
+      <label style="margin-bottom:4px">Drop the expert document here * <small>(PDF / md / txt / &hellip;)</small></label>
+      <div id="expert-drop-zone" class="drop-zone">
+        <span class="drop-hint">Drag &amp; drop file here, or click to select</span>
+        <div class="file-info"></div>
+        <div class="file-hash"></div>
+      </div>
+      <label style="margin-top:8px">Description (optional)
+        <textarea name="description" placeholder="Expert review of E. coli chromosome replication mechanism"></textarea>
+      </label>
+      <label>Contributor (optional)
+        <input name="contributor" placeholder="Dr. Jane Smith">
+      </label>
+      <label>Claims supported (optional, comma-separated claim IDs)
+        <input name="claims_supported" placeholder="rep-initiation, ori-firing-rate">
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Register expert document</button>
+    </form>
+  </div>
+</div>
+
+<!-- Observable modal -->
+<div id="modal-observable" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-observable')">&times;</button>
+    <h3>Add observable</h3>
+    <p style="font-size:0.85em;color:#555">Register a state variable to track. The store path is a dotted path into the composite document.</p>
+    <form id="form-observable" onsubmit="event.preventDefault(); submitForm(this, '/api/observable', function(f){ return { name: f.obs_name.value.trim(), store_path: f.store_path.value.trim(), units: f.units.value.trim() || null, description: f.description.value.trim() || null }; })">
+      <label>Name * <small>(e.g. DnaA)</small><input name="obs_name" placeholder="DnaA" required></label>
+      <label>Store path * <small>(e.g. chromosome.DnaA_count)</small><input name="store_path" placeholder="chromosome.DnaA_count" required></label>
+      <label>Units (optional)<input name="units" placeholder="molecules"></label>
+      <label>Description (optional)<input name="description" placeholder="DnaA protein count in chromosome compartment"></label>
+      <div class="form-error"></div>
+      <button type="submit">Add observable</button>
+    </form>
+  </div>
+</div>
+
+<!-- Visualization modal -->
+<div id="modal-visualization" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-visualization')">&times;</button>
+    <h3>Add visualization</h3>
+    <p id="viz-already-registered" style="font-size:0.85em;color:#555;margin-bottom:8px"></p>
+    <form id="form-visualization" onsubmit="event.preventDefault(); submitForm(this, '/api/visualization', function(f){
+      var classVal = (f.viz_class.value || '').trim();
+      var cfgRaw = (f.viz_config.value || '').trim();
+      var cfg = null;
+      if (cfgRaw) {
+        try { cfg = JSON.parse(cfgRaw); }
+        catch (e) {
+          var err = f.querySelector('.form-error');
+          if (err) err.textContent = 'Invalid JSON in config: ' + String(e);
+          return null;
+        }
+      }
+      return {
+        name: f.viz_name.value.trim(),
+        description: (f.description.value.trim() || null),
+        'class': classVal || null,
+        config: cfg,
+      };
+    })">
+      <label>Name <input name="viz_name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="e.g. free_DnaA-trajectory"></label>
+      <label>Class (optional &mdash; pick a registered Visualization to make this a configured instance)
+        <select name="viz_class" id="viz-class-picker"><option value="">— none (description-only) —</option></select>
+      </label>
+      <label>Config (JSON; required when a class is picked)
+        <textarea name="viz_config" rows="3" placeholder='{"observable": "free_DnaA", "sources": ["baseline"]}'></textarea>
+      </label>
+      <label>Description (natural language &mdash; required when no class is picked)
+        <textarea name="description" rows="3"
+                  placeholder="e.g. 'A time-series of free_DnaA concentration over the baseline simulation, with a horizontal line at the binding threshold of 50 molecules.'"></textarea>
+      </label>
+      <p style="font-size:0.85em;color:#555">
+        Class-backed: ready to use immediately in investigations.<br>
+        Description-only: click <strong>Create</strong> after to invoke the <code>/pbg-viz</code> skill which generates the function.
+      </p>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Add visualization</button>
+    </form>
+  </div>
+</div>
+
+<!-- Configure composite modal -->
+<div id="modal-configure-composite" class="modal-overlay">
+  <div class="modal-box" style="max-width:560px">
+    <button class="modal-close" onclick="closeModal('modal-configure-composite')">&times;</button>
+    <h3>Configure composite</h3>
+    <p id="cc-composite-name" class="muted" style="margin:0 0 12px"></p>
+    <form id="form-configure-composite" onsubmit="event.preventDefault(); _submitConfigureComposite(this);">
+      <label>Simulation name <input name="sim_name" pattern="^[a-zA-Z0-9_-]+$" required></label>
+      <label>t_start <input name="t_start" type="number" step="any" min="0" value="0" required></label>
+      <label>t_end <input name="t_end" type="number" step="any" required value="10"></label>
+      <div id="cc-parameter-fields"></div>
+      <input type="hidden" name="composite_id">
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Create simulation</button>
+    </form>
+  </div>
+</div>
+
+
+<!-- Modal: Link to upstream branch -->
+<div id="modal-link-branch" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-link-branch')">&times;</button>
+    <h3>Link to upstream branch</h3>
+    <p class="muted">Push the current investigation branch to its upstream counterpart on GitHub.</p>
+    <form id="form-link-branch" onsubmit="event.preventDefault(); _submitLinkBranch(this);">
+      <label>Upstream repo:
+        <input name="upstream_repo" value="vivarium-collective/v2ecoli"
+               pattern="[A-Za-z0-9._-]+/[A-Za-z0-9._-]+" required>
+      </label>
+      <label>Branch name (optional — defaults to current branch):
+        <input name="branch_name" placeholder="leave blank to keep current">
+      </label>
+      <fieldset class="mode-selector">
+        <legend>Mode:</legend>
+        <label><input type="radio" name="mode" value="branch" checked> Branch off upstream (push current branch to a branch on the upstream repo)</label>
+        <label><input type="radio" name="mode" value="fork"> Fork upstream (create your own fork; current branch pushes to your fork's origin)</label>
+      </fieldset>
+      <div class="form-actions">
+        <button type="submit" class="action-btn">Push branch</button>
+        <button type="button" class="action-btn--secondary" onclick="closeModal('modal-link-branch')">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Create PR -->
+<div id="modal-create-pr" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px">
+    <button class="modal-close" onclick="closeModal('modal-create-pr')">&times;</button>
+    <h3>Create PR</h3>
+    <form id="form-create-pr" onsubmit="event.preventDefault(); _submitCreatePR(this);">
+      <label>Title
+        <div class="input-with-suggest">
+          <input name="title" required maxlength="100">
+          <button type="button" class="btn-suggest" onclick="_suggestInto(this, 'pr-title', 'title')">Suggest</button>
+        </div>
+      </label>
+      <label>Body
+        <div class="input-with-suggest input-with-suggest-textarea">
+          <textarea name="body" rows="6" placeholder="Summary + Test plan (markdown)"></textarea>
+          <button type="button" class="btn-suggest" onclick="_suggestInto(this, 'pr-body', 'body')">Suggest</button>
+        </div>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Create PR</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Open PR (top-bar action) -->
+<div id="modal-open-pr" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px">
+    <button class="modal-close" onclick="closeModal('modal-open-pr')">&times;</button>
+    <h3>Open Pull Request</h3>
+    <p class="muted">Opens a <strong>draft proposal</strong> to merge
+<code id="pr-head-display">…</code> → <code id="pr-base-display">main</code>.
+Nothing on <code id="pr-base-display-2">main</code> changes until someone presses
+"Merge" on the GitHub PR page. You can leave a draft PR open indefinitely.</p>
+    <form id="form-open-pr" onsubmit="event.preventDefault(); _submitOpenPR(this);">
+      <label>Title:
+        <div class="input-with-suggest">
+          <input name="title" required>
+          <button type="button" class="btn-suggest" onclick="_draftPRFromInvestigation('title', this.closest('form'))">Suggest from investigation</button>
+        </div>
+      </label>
+      <label>Body:<br>
+        <div class="input-with-suggest input-with-suggest-textarea">
+          <textarea name="body" rows="14" placeholder="Summary, what changed, test plan..."></textarea>
+          <button type="button" class="btn-suggest" onclick="_draftPRFromInvestigation('body', this.closest('form'))">Suggest from investigation</button>
+        </div>
+      </label>
+      <p class="muted" id="pr-suggest-context" style="font-size:0.82em;margin:-4px 0 4px 0"></p>
+      <label class="checkbox-row">
+        <input type="checkbox" name="draft" id="pr-draft-checkbox" checked>
+        Draft PR (recommended — can be marked ready for review later)
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="action-btn">Create PR</button>
+        <button type="button" class="action-btn--secondary" onclick="closeModal('modal-open-pr')">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Save as Study (from Composite Explorer test run) -->
+<div id="modal-save-as-study" class="modal-overlay">
+  <div class="modal-box" style="max-width:520px">
+    <button class="modal-close" onclick="closeModal('modal-save-as-study')">&times;</button>
+    <h3>Save as Study</h3>
+    <form id="form-save-as-study" onsubmit="event.preventDefault(); _ceSubmitSaveAsStudy()">
+      <label>Study name
+        <input id="sas-name" name="name" type="text" placeholder="chemotaxis-260513" required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" title="Lowercase letters, digits, and hyphens only (no leading/trailing hyphen)">
+      </label>
+      <label>Objective
+        <textarea id="sas-objective" name="objective" rows="3" placeholder="What question does this study address?"></textarea>
+      </label>
+      <label>Description
+        <input id="sas-description" name="description" type="text" placeholder="Optional short description">
+      </label>
+      <div class="form-error" id="sas-error" style="display:none"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button type="button" onclick="closeModal('modal-save-as-study')">Cancel</button>
+        <button type="submit" class="action-btn">Create Study</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- DataSource layer (client-fetch seam, sub-project #1).
+     __DASH_CONFIG__ sets the data-source mode; data-source.js exposes the
+     DataSource global that renderers call to fetch narrative data.
+     local-server mode (default) fetches from the same-origin /api/* endpoints.
+     Hosted mode (sub-projects #2/#3) will set a different config here. -->
+<script>window.__DASH_CONFIG__ = { mode: "local-server" };</script>
+<script src="assets/data-source.js"></script>
+<script src="assets/render-helpers.js"></script>
+<script src="assets/client.js" onerror="/* live mode unavailable */"></script>
+<script src="assets/aig-graph.js?v=1784728790_1784728790" onerror="/* aig-graph unavailable */"></script>
+<script src="assets/walkthrough.js?v=1784728790_1784728790" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/explorer.js?v=1784728790_1784728790" onerror="/* explorer unavailable */"></script>
+<script src="assets/explorer-views.js?v=1784728790_1784728790" onerror="/* explorer views unavailable */"></script>
+<script src="assets/github-login.js?v=1784728790_1784728790" onerror="/* github-login unavailable */"></script>
+<!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
+     it used to drive has been repurposed into the investigation switcher
+     (investigation-switcher.js). The /api/workspaces endpoints remain available
+     for CLI tooling. -->
+<script src="assets/investigation-switcher.js"></script>
+<script src="assets/branch-source.js?v=1784728790_1784728790"></script>
+<script>
+// Initialize drop zones once walkthrough.js is loaded.
+document.addEventListener("DOMContentLoaded", function() {
+  if (typeof setupDropZone === "function") {
+    setupDropZone("ds-drop-zone", "dataset");
+    setupDropZone("ref-pdf-drop-zone", "reference_pdf_primary");
+    setupDropZone("expert-drop-zone", "expert_doc");
+  }
+});
+
+// Dataset form submission.
+function _submitDataset(form) {
+  submitForm(form, '/api/dataset', function(f) {
+    var data = { name: f.name.value.trim(), claims: f.claims.value.trim() };
+    var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["dataset"] : null;
+    if (stored && stored.file_b64) {
+      data.file_b64 = stored.file_b64;
+      data.filename = stored.filename;
+    } else {
+      var url = f.url.value.trim();
+      if (url) {
+        data.url = url;
+        if (f.sha256.value.trim()) data.sha256 = f.sha256.value.trim();
+      } else {
+        var errEl = form.querySelector(".form-error");
+        if (errEl) errEl.textContent = "Error: drop a file or enter a URL.";
+        return null;
+      }
+    }
+    return data;
+  });
+}
+
+// Reference form submission.
+function submitReferenceForm() {
+  var errEl = document.getElementById("ref-form-error");
+  if (errEl) errEl.textContent = "";
+
+  var pdfStored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["reference_pdf_primary"] : null;
+  var bibtexText = (document.getElementById("ref-bibtex_text") || {}).value || "";
+  bibtexText = bibtexText.trim();
+
+  if (pdfStored && pdfStored.file_b64) {
+    var data = { pdf_b64: pdfStored.file_b64, pdf_filename: pdfStored.filename };
+    var bibKey    = (document.getElementById("ref-bib_key") || {}).value || "";
+    var title     = (document.getElementById("ref-title") || {}).value || "";
+    var authors   = (document.getElementById("ref-authors") || {}).value || "";
+    var yearStr   = (document.getElementById("ref-year") || {}).value || "";
+    var journal   = (document.getElementById("ref-journal") || {}).value || "";
+    var doi       = (document.getElementById("ref-doi") || {}).value || "";
+    var claims    = (document.getElementById("ref-claim_mappings") || {}).value || "";
+    if (bibKey.trim())  data.bib_key  = bibKey.trim();
+    if (title.trim())   data.title    = title.trim();
+    if (authors.trim()) data.authors  = authors.trim();
+    if (yearStr.trim()) data.year     = parseInt(yearStr.trim(), 10);
+    if (journal.trim()) data.journal  = journal.trim();
+    if (doi.trim())     data.doi      = doi.trim();
+    if (claims.trim()) {
+      data.claim_mappings = claims.trim().split(",").map(function(s) { return s.trim(); }).filter(Boolean);
+    }
+    _postReferenceData("/api/reference-pdf", data);
+
+  } else if (bibtexText) {
+    var bibClaims = (document.getElementById("ref-bibtex_claim_mappings") || {}).value || "";
+    var data = { bibtex_text: bibtexText, claim_mappings: bibClaims.trim() };
+    _postReferenceData("/api/reference-bibtex", data);
+
+  } else {
+    if (errEl) errEl.textContent = "Error: drop a PDF or paste a BibTeX entry.";
+  }
+}
+
+function _postReferenceData(endpoint, data) {
+  var errEl = document.getElementById("ref-form-error");
+  fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+    .then(function(res) {
+      return res.json().then(function(json) { return { ok: res.ok, status: res.status, json: json }; });
+    })
+    .then(function(r) {
+      if (!r.ok) {
+        var msg = (r.json && r.json.error) ? r.json.error : ("HTTP " + r.status);
+        if (errEl) errEl.textContent = "Error: " + msg;
+        return;
+      }
+      var branch = r.json.branch || "";
+      var commit = r.json.commit || "";
+      var bib_key = r.json.bib_key || "";
+      var pending = r.json.metadata_pending;
+      var msg = "Done!";
+      if (bib_key) msg += " bib_key: " + bib_key;
+      if (branch)  msg += "\nBranch: " + branch + (commit ? " (" + commit + ")" : "");
+      if (pending) msg += "\n\nNote: metadata incomplete — entry marked 'Needs metadata'.";
+      fetch("/api/render", { method: "POST" }).finally(function() {
+        alert(msg);
+        location.reload();
+      });
+    })
+    .catch(function(err) {
+      if (errEl) errEl.textContent = "Network error: " + String(err);
+    });
+}
+
+// Expert doc form submission.
+function _submitExpertDoc(form) {
+  submitForm(form, '/api/expert-doc', function(f) {
+    var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["expert_doc"] : null;
+    if (!stored || !stored.file_b64) {
+      var errEl = form.querySelector(".form-error");
+      if (errEl) errEl.textContent = "Error: please drop or select a file first.";
+      return null;
+    }
+    var data = {
+      name: f.name.value.trim(),
+      file_b64: stored.file_b64,
+      filename: stored.filename,
+    };
+    if (f.description && f.description.value.trim()) data.description = f.description.value.trim();
+    if (f.contributor && f.contributor.value.trim()) data.contributor = f.contributor.value.trim();
+    if (f.claims_supported && f.claims_supported.value.trim()) data.claims_supported = f.claims_supported.value.trim();
+    return data;
+  });
+}
+
+// Visualization form submission — v0.4.2: name + description only.
+// (The submitForm call is now inline in the form's onsubmit attribute.)
+// Kept as no-op for backward compat with any external callers.
+function _submitVisualization(form) {
+  submitForm(form, '/api/visualization', function(f) {
+    return {
+      name: f.viz_name.value.trim(),
+      description: f.description ? (f.description.value.trim() || null) : null,
+    };
+  });
+}
+
+
+// Run tests.
+function runTests() {
+  var btn = document.getElementById("run-tests-btn");
+  var spinner = document.getElementById("run-tests-spinner");
+  var output = document.getElementById("run-tests-output");
+  if (btn) btn.disabled = true;
+  if (spinner) spinner.style.display = "inline";
+  if (output) { output.style.display = "none"; output.textContent = ""; }
+  fetch("/api/run-tests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  })
+    .then(function(res) { return res.json(); })
+    .then(function(r) {
+      if (btn) btn.disabled = false;
+      if (spinner) spinner.style.display = "none";
+      if (output) {
+        output.style.display = "block";
+        var text = "";
+        if (r.error) {
+          text = "Error: " + r.error;
+        } else {
+          text = "Exit code: " + r.returncode + "\n\n" + (r.stdout || "") + (r.stderr ? "\nSTDERR:\n" + r.stderr : "");
+        }
+        output.textContent = text;
+      }
+    })
+    .catch(function(err) {
+      if (btn) btn.disabled = false;
+      if (spinner) spinner.style.display = "none";
+      if (output) { output.style.display = "block"; output.textContent = "Network error: " + err; }
+    });
+}
+</script>
+</body></html>

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Explorer — vivarium-dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Same client stack as the embedded card -->
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-weighted-voronoi@1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-voronoi-map@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-voronoi-treemap@1"></script>
+  <script src="https://unpkg.com/escher@1.7.3/dist/escher.min.js"></script>
+  <script src="explorer.js"></script>
+  <script src="explorer-views.js"></script>
+</head>
+<body class="explorer-standalone">
+  <div id="explorer-root"></div>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      window.Explorer.mount(document.getElementById("explorer-root"), {
+        basePath: "",                       // standalone is served same-origin
+        standalone: true,                   // hide the pop-out link
+        // published bundles set __DASH_CONFIG__.mode = "snapshot"; honor it so the
+        // full-window page reads static JSON like the embedded card does.
+        snapshot: (window.__DASH_CONFIG__ || {}).mode === "snapshot",
+        initialRun: params.get("run") || null,
+        initialDb: params.get("db") || null  // open an explicit run store (per-run view)
+      });
+    })();
+  </script>
+</body>
+</html>

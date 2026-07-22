@@ -164,7 +164,6 @@ files = [
     "vivarium_workbench/lib/study_create_views.py",
     "vivarium_workbench/lib/investigation_run_one_views.py",
     "vivarium_workbench/lib/investigation_run_views.py",
-    "vivarium_workbench/lib/core_builder.py",
     "vivarium_workbench/lib/json_serialize.py",
     "vivarium_workbench/lib/report_views.py",
     "vivarium_workbench/lib/system_info.py",

@@ -183,19 +183,9 @@ class TestRenderViz:
         assert resp["n_visualizations"] == 2
         assert resp["viz_paths"] == ["a.html", "b.html"]
 
-    def test_500_build_core_fails(self, ws: Path, monkeypatch: Any) -> None:
-        _make_inv(ws, dict(_VALID_SPEC))
-        fake_core = types.ModuleType("pbg_testws.core")
-
-        def _boom():
-            raise RuntimeError("core kaput")
-
-        fake_core.build_core = _boom  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "pbg_testws", types.ModuleType("pbg_testws"))
-        monkeypatch.setitem(sys.modules, "pbg_testws.core", fake_core)
-        resp, code = ivm.render_viz(ws, {"name": _INV})
-        assert code == 500
-        assert "failed to build core" in resp["error"]
+# (test_500_build_core_fails removed: the viz render + core build now run in the
+# env worker via viz_render_hooks, which soft-degrades — a build failure surfaces
+# as per-viz error-stub HTML, not a whole-request 500. See long-tail slice 5b.)
 
 
 # The commit-path (``server._active_branch_action`` wrapper) and render-viz

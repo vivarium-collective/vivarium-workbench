@@ -13,7 +13,7 @@ the inlined ``_ws_add_to_sys_path`` body, and the intra-closure call rewires).
 
 This module does NOT import ``server`` (no ``lib → server`` edge).
 
-NOTE: ``build_workspace_core`` overlaps ``lib.core_builder.build_core_for_pkg``
+NOTE: ``build_workspace_core`` overlaps the retired ``lib.core_builder``
 but has a DIFFERENT contract — it *swallows* any exception and returns
 ``(None, {})`` rather than raising.  That contract is reproduced here verbatim;
 do not swap in ``core_builder``'s raising behavior.
