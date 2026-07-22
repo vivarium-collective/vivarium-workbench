@@ -14685,6 +14685,16 @@
   }
   window._openSimulationInExplorer = _openSimulationInExplorer;
 
+  /** Open a Simulations-DB row: the associated STUDY when the run has one, else
+   *  the Composite Explorer (bigraph-loom) seeded to this run's results. */
+  function _openSimulation(row) {
+    if (!row) return;
+    var study = _simStudy(row);
+    if (study) { _openStudyEmbedded(study); return; }
+    if (row.run_id && row.spec_id) { _openSimulationInExplorer(row.run_id, row.spec_id); }
+  }
+  window._openSimulation = _openSimulation;
+
   function _renderSimRow(row) {
     var inv = _simInvestigation(row);
     var invCell = inv
@@ -14720,7 +14730,8 @@
         'href="/api/study-analysis-zip?study=' + encodeURIComponent(studySlug) + '" download style="text-decoration:none;">⬇ Analysis</a>'
       : '';
     return (
-      '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
+      '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;cursor:pointer;" ' +
+        'title="Click to open this run — its study, or the Composite Explorer">' +
       '<td style="padding:6px 8px; overflow-wrap:anywhere;">' + invCell + '</td>' +
       '<td style="padding:6px 8px; overflow-wrap:anywhere;">' + studyCell + '</td>' +
       '<td style="padding:6px 8px; overflow:hidden;"><code style="font-size:11px; color:#6b7280; ' +
@@ -14809,6 +14820,19 @@
     var table = document.getElementById('sim-table');
     var empty = document.getElementById('sim-empty');
     if (tbody) tbody.innerHTML = visible.map(_renderSimRow).join('');
+    // Row click opens the run (delegated once, survives re-renders); the
+    // download links/buttons keep their own behaviour.
+    if (tbody && !tbody._simClickWired) {
+      tbody._simClickWired = true;
+      tbody.addEventListener('click', function (e) {
+        if (e.target.closest('a, button, .action-btn')) return;
+        var tr = e.target.closest('tr[data-run-id]');
+        if (!tr) return;
+        var rid = tr.getAttribute('data-run-id');
+        var row = (window._simRows || []).filter(function (r) { return String(r.run_id) === rid; })[0];
+        if (row) _openSimulation(row);
+      });
+    }
     if (table) table.style.display = visible.length ? '' : 'none';
     if (empty) empty.style.display = visible.length ? 'none' : '';
 
