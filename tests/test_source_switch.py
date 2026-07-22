@@ -32,7 +32,7 @@ def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
 
     _root.set_workspace_root(a)
     # Dirty every workspace-keyed (lib) cache.
-    _registry._REGISTRY_CACHE["data"] = {"stale": True}
+    _registry._REGISTRY_CACHE["ws-a"] = {"data": {"stale": True}, "ts": 1.0}
     _report_views._LINKAGE_CACHE["x"] = 1     # linkage cache (lib)
     _obs_views._OBS_CACHE["x"] = 1            # observables build cache (lib)
     _cs_views._COMPOSITE_STATE_CACHE["x"] = 1  # composite-state build cache (lib)
@@ -41,8 +41,7 @@ def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     active_workspace.switch_workspace(b)
 
     assert _root.get_workspace_root() == b.resolve()
-    assert _registry._REGISTRY_CACHE["data"] is None
-    assert _registry._REGISTRY_CACHE["ts"] == 0.0
+    assert _registry._REGISTRY_CACHE == {}
     assert _report_views._LINKAGE_CACHE == {}
     assert _obs_views._OBS_CACHE == {}
     assert _cs_views._COMPOSITE_STATE_CACHE == {}
@@ -54,8 +53,7 @@ def test_invalidate_clears_identical_cache_set_via_registry():
     and assert all are empty/reset — proving the registry-driven invalidation
     clears the full set the old inline clears did.
     """
-    _registry._REGISTRY_CACHE["data"] = {"stale": True}
-    _registry._REGISTRY_CACHE["ts"] = 123.0
+    _registry._REGISTRY_CACHE["ws-a"] = {"data": {"stale": True}, "ts": 123.0}
     _report_views._LINKAGE_CACHE["x"] = 1
     _obs_views._OBS_CACHE["x"] = 1
     _cs_views._COMPOSITE_STATE_CACHE["x"] = 1
@@ -66,8 +64,7 @@ def test_invalidate_clears_identical_cache_set_via_registry():
 
     active_workspace.invalidate()
 
-    assert _registry._REGISTRY_CACHE["data"] is None
-    assert _registry._REGISTRY_CACHE["ts"] == 0.0
+    assert _registry._REGISTRY_CACHE == {}
     assert _report_views._LINKAGE_CACHE == {}
     assert _obs_views._OBS_CACHE == {}
     assert _cs_views._COMPOSITE_STATE_CACHE == {}
@@ -136,3 +133,21 @@ def test_one_server_switches_between_two_workspaces(tmp_path):
 def test_source_switch_warns_about_composites():
     js = _static("source-switch.js")
     assert "Composite" in js   # the honest until-SP2b note
+
+
+def test_composite_state_cache_is_workspace_keyed():
+    """Two workspaces caching the SAME ref must not collide (slice 3)."""
+    _cs_views._COMPOSITE_STATE_CACHE.clear()
+    _cs_views._COMPOSITE_STATE_CACHE[("/ws/a", "pkg.composites.x")] = (1.0, {"state": "A"})
+    _cs_views._COMPOSITE_STATE_CACHE[("/ws/b", "pkg.composites.x")] = (1.0, {"state": "B"})
+    assert _cs_views._COMPOSITE_STATE_CACHE[("/ws/a", "pkg.composites.x")][1]["state"] == "A"
+    assert _cs_views._COMPOSITE_STATE_CACHE[("/ws/b", "pkg.composites.x")][1]["state"] == "B"
+
+
+def test_registry_cache_is_workspace_keyed():
+    """The registry catalog cache keys on the workspace, not a single slot."""
+    _registry._REGISTRY_CACHE.clear()
+    _registry._REGISTRY_CACHE["/ws/a"] = {"data": {"processes": ["A"]}, "ts": 1.0}
+    _registry._REGISTRY_CACHE["/ws/b"] = {"data": {"processes": ["B"]}, "ts": 1.0}
+    assert _registry._REGISTRY_CACHE["/ws/a"]["data"]["processes"] == ["A"]
+    assert _registry._REGISTRY_CACHE["/ws/b"]["data"]["processes"] == ["B"]
