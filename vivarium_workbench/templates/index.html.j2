@@ -745,15 +745,13 @@ window.addEventListener('pageshow', function (e) {
 
 <!-- ===== PAGE: STUDIES ===== -->
 <section id="page-investigations" class="page" data-page="investigations">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-    <h2 class="page-title" style="margin:0">Investigations</h2>
+  <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px">
     <div style="display:flex;gap:8px;align-items:center">
       <input id="investigations-filter" type="search" placeholder="Filter investigations…"
              aria-label="Filter investigations" oninput="_filterInvestigations()"
              style="padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.9em;min-width:220px">
     </div>
   </div>
-  <p class="page-lead" id="investigation-page-lead">Select an investigation to open its study graph.</p>
 
   <!-- List view: grouped investigation cards (Active / Closed). The grid lives on
        the per-group .investigations-grid wrappers built by _renderInvestigationSets. -->
