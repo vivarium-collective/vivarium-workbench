@@ -31,13 +31,16 @@ def _make_project(root: Path, *, lock: str = "lock-a") -> Path:
     return root
 
 
-def _fake_venv(venv_dir: Path) -> Path:
-    """A minimal ``<venv>/bin/python`` so ``cached_interpreter`` finds it."""
+def _fake_venv(venv_dir: Path, *, complete: bool = True) -> Path:
+    """A minimal ``<venv>/bin/python``; ``complete`` also writes the completion
+    marker so ``cached_interpreter`` treats it as a finished (cacheable) venv."""
     b = venv_dir / "bin"
     b.mkdir(parents=True, exist_ok=True)
     py = b / "python"
     py.write_text("#!/bin/sh\n")
     py.chmod(0o755)
+    if complete:
+        (venv_dir / m._MARKER).write_text("ok\n")
     return py
 
 
@@ -70,6 +73,14 @@ def test_cached_interpreter_finds_a_present_venv(store, tmp_path):
 
 def test_cached_interpreter_absent_is_none(store):
     assert m.cached_interpreter("nope") is None
+
+
+def test_partial_venv_without_marker_is_not_cached(store, tmp_path):
+    """An interrupted `uv sync` leaves a bin/python but no completion marker — it
+    must NOT be treated as cached (it would be a broken interpreter)."""
+    coord = "partial123"
+    _fake_venv(store / coord, complete=False)
+    assert m.cached_interpreter(coord) is None            # re-sync, don't serve it
 
 
 def test_cached_interpreter_for_none_without_pyproject(store, tmp_path):

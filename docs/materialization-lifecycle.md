@@ -318,6 +318,11 @@ for a single local workspace; (c) make it async + the `MATERIALIZING` session st
 A running record of the choices made while building this (for later review — some
 resolve §10 open questions, some are pragmatic scoping calls). Newest first.
 
+- **2026-07-22 — A venv is only cached once a completion marker is written**
+  (`.vwb-materialized`, after `uv sync` fully succeeds). An interrupted/killed
+  sync leaves a `bin/python` but no marker, so `cached_interpreter` re-syncs it
+  rather than serving a broken interpreter (a first `§7` robustness step; full
+  restart-reconcile/GC still deferred).
 - **2026-07-22 — Managed materialization does not auto-switch the active
   workspace (this slice).** `POST /api/source/materialize-repo {repo, ref}` runs
   the async clone+sync job and reports status, provisioning + caching the venv,
