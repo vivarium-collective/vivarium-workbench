@@ -3,6 +3,11 @@
 <meta charset="UTF-8"><title>{% if dashboard_name %}{{ dashboard_name }} dashboard{% else %}{{ workspace_name }}{% endif %}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <link rel="stylesheet" href="assets/snapshot-readonly.css">
+<!-- Per-tab session identity (session-per-tab). Loaded FIRST, as a classic
+     blocking script, so the window.fetch override is in place before any other
+     script or inline fetch runs — every same-origin request then carries this
+     tab's X-VW-Session header. -->
+<script src="assets/session.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script>
 // Per-workspace branding (rail logo, title, brand text) is resolved
 // server-side at GET / and is NOT re-applied by any client script. The
