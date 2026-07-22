@@ -20,12 +20,19 @@ from pathlib import Path
 from vivarium_workbench.lib import active_workspace
 
 
-def source_switch(body: dict) -> tuple[dict, int]:
-    """Validate + apply a workspace switch. Returns ``(body, status)``.
+def source_switch(body: dict, *, switch_active: bool = True) -> tuple[dict, int]:
+    """Validate a workspace switch (and, by default, apply it). Returns ``(body, status)``.
 
       * missing ``path``        → ``({"error": "missing 'path'"}, 400)``
       * unregistered path       → ``({"error": f"{path!r} is not a registered workspace"}, 400)``
-      * registered entry        → re-points + ``({"ok": True, "source": {...}}, 200)``
+      * registered entry        → ``({"ok": True, "source": {...}}, 200)``
+
+    ``switch_active`` (default ``True``) keeps the legacy behavior — re-point the
+    **process-global** active workspace via ``active_workspace.switch_workspace``.
+    The FastAPI ``/api/source/switch`` route passes ``switch_active=False`` so the
+    switch is **per session** (the route binds the caller's session instead — see
+    ``docs/session-registry.md`` §8): validate + resolve the source, but leave the
+    global root and other sessions untouched.
     """
     from pbg_superpowers import workspace_catalog
 
@@ -40,7 +47,8 @@ def source_switch(body: dict) -> tuple[dict, int]:
     )
     if entry is None:
         return {"error": f"{path!r} is not a registered workspace"}, 400
-    active_workspace.switch_workspace(entry["path"])
+    if switch_active:
+        active_workspace.switch_workspace(entry["path"])
     return (
         {"ok": True,
          "source": {"path": str(entry["path"]), "name": entry.get("name")}},
