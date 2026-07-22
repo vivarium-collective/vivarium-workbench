@@ -3,15 +3,15 @@
 Extracted from server.py so the FastAPI ``/api/data-sources`` route can build
 the payload without reaching into the stdlib server. The provider is a
 ``module:func`` spec declared under ``workspace.yaml`` ``dashboard.data_sources``;
-it is imported and called in-process. Results are cached ~30s per workspace.
+it usually resolves into the workspace's own package, so it is imported + invoked
+in the **env worker** (``data_sources_provider``), not the HTTP process. Results
+are cached ~30s per workspace.
 """
 
 from __future__ import annotations
 
-import importlib
 import time
 from pathlib import Path
-from typing import Callable
 
 import yaml
 
@@ -28,16 +28,20 @@ def data_sources_config(ws_data: dict | None) -> dict:
     return ds if isinstance(ds, dict) else {}
 
 
-def import_provider(spec: str) -> Callable:
-    """Import a ``module:func`` spec and return the callable."""
-    if ":" not in spec:
-        raise ValueError(f"provider must be 'module:func', got {spec!r}")
-    mod_name, _, func_name = spec.partition(":")
-    mod = importlib.import_module(mod_name)
-    fn = getattr(mod, func_name)
-    if not callable(fn):
-        raise TypeError(f"provider {spec!r} is not callable")
-    return fn
+def _provider_rows_via_worker(ws_root: Path, provider: str) -> dict:
+    """Import + invoke the ``module:func`` provider in the workspace's env worker
+    (not the HTTP process) and return ``{"rows": [...], "error": str|None}``. The
+    worker catches provider errors into ``error``; an unavailable worker degrades
+    to an ``error`` string too — never raises, so the caller's bundle stays intact."""
+    from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
+    from vivarium_workbench.lib.env_worker_pool import get_pool
+    try:
+        r = get_pool().call(ws_root, "data_sources_provider", {"provider": provider})
+    except EnvWorkerUnavailable:
+        return {"rows": [], "error": "data-source provider unavailable (env worker could not start)"}
+    if not isinstance(r, dict):
+        return {"rows": [], "error": "malformed worker response"}
+    return {"rows": r.get("rows") or [], "error": r.get("error")}
 
 
 def enumerate_data_sources(ws_root: Path, bypass_cache: bool = False) -> dict:
@@ -62,21 +66,23 @@ def enumerate_data_sources(ws_root: Path, bypass_cache: bool = False) -> dict:
         if not provider:
             data = {"sources": []}
         else:
-            fn = import_provider(provider)
-            raw = fn() or []
-            sources = []
-            for entry in raw:
-                if not isinstance(entry, dict) or "key" not in entry:
-                    continue
-                sources.append({
-                    "key": str(entry.get("key")),
-                    "path": str(entry.get("path") or ""),
-                    "category": str(entry.get("category") or "uncategorized"),
-                    "kind": str(entry.get("kind") or "inherited"),
-                    "size_bytes": int(entry.get("size_bytes") or 0),
-                    "url": str(entry.get("url") or ""),
-                })
-            data = {"label": label, "sources": sources}
+            result = _provider_rows_via_worker(ws_root, provider)
+            if result.get("error"):
+                data = {"label": None, "sources": [], "error": result["error"]}
+            else:
+                sources = []
+                for entry in result["rows"]:
+                    if not isinstance(entry, dict) or "key" not in entry:
+                        continue
+                    sources.append({
+                        "key": str(entry.get("key")),
+                        "path": str(entry.get("path") or ""),
+                        "category": str(entry.get("category") or "uncategorized"),
+                        "kind": str(entry.get("kind") or "inherited"),
+                        "size_bytes": int(entry.get("size_bytes") or 0),
+                        "url": str(entry.get("url") or ""),
+                    })
+                data = {"label": label, "sources": sources}
     except Exception as e:  # noqa: BLE001 — never break the dashboard
         data = {"label": None, "sources": [], "error": f"{type(e).__name__}: {e}"}
 
