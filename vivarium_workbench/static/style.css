@@ -2426,3 +2426,35 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   height:auto !important; min-height:0 !important;
   width:100% !important;
 }
+/* ── Investigation DAG semantic zoom slider ────────────────────────────────── */
+#aig-zoom-slider {
+  cursor: pointer;
+  vertical-align: middle;
+  accent-color: #2563eb;
+}
+#aig-zoom-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2563eb;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+#aig-zoom-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2563eb;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Investigation-graph semantic zoom: status-badge click affordance + band tweaks. */
+.aig-status-badge { border-radius: 3px; padding: 0 2px; }
+.aig-status-badge:hover { background: rgba(0,0,0,0.06); }
+.aig-status-badge:focus-visible { outline: 2px solid #6366f1; outline-offset: 1px; }
+/* Far (overview) band: tighter cards so the whole DAG reads at a glance. */
+#investigation-dag-shell.aig-zoom-far .iset-dag-node { padding: 6px 8px; }

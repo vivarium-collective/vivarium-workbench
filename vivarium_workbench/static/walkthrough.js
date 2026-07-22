@@ -17,6 +17,12 @@
   }
 
   // -------------------------------------------------------------------------
+  // Investigation DAG band state
+  // -------------------------------------------------------------------------
+  var aigBand = 1;                 // 0=far, 1=mid, 2=near (default = current detail)
+  var _lastDagArgs = null;         // [studies, chainsBySlug] for re-render on band change
+
+  // -------------------------------------------------------------------------
   // Generic modal helpers
   // -------------------------------------------------------------------------
 
@@ -5641,6 +5647,11 @@
   // VERTICAL flow: y = topological depth (top = roots), x = within-depth slot.
   // Cards as absolute-positioned <div>s; edges as SVG cubic-Bezier paths.
   function _renderInvestigationDag(studies, chainsBySlug) {
+    _lastDagArgs = [studies, chainsBySlug];
+    var _opts = window._layoutOptsForBand(aigBand);
+    var shellEl = document.getElementById('investigation-dag-shell');
+    if (shellEl) { shellEl.classList.remove('aig-zoom-far','aig-zoom-mid','aig-zoom-near'); shellEl.classList.add(_opts.cls); }
+
     var nodesHost = document.getElementById('investigation-dag-nodes');
     var edgesSvg  = document.getElementById('investigation-dag-edges');
     nodesHost.innerHTML = '';
@@ -5694,8 +5705,8 @@
     // each card grows to fit its full text. We render once, measure each card,
     // then stack + center the columns by the measured heights (two passes) so
     // nothing is clipped.
-    var CARD_W = 210;
-    var X_GAP = 64, Y_GAP = 22;
+    var CARD_W = _opts.cardW;
+    var X_GAP = _opts.xGap, Y_GAP = 22;
     var PAD_X = 24, PAD_Y = 16;
     var svgNS = 'http://www.w3.org/2000/svg';
     var pos = {};
@@ -5781,22 +5792,42 @@
         '<div style="display:flex;align-items:flex-start;gap:6px">' +
           '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1.1;flex:none">' + ss.icon + '</span>' +
           '<strong style="font-size:0.85em;line-height:1.25;color:#1e293b;flex:1">' + _esc(prettyTitle) + '</strong>' +
-          '<span style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px">' + _esc(confidence) + '</span>' +
+          '<span class="aig-status-badge" role="button" tabindex="0" title="Why: open this study\'s finding & evidence" ' +
+            'style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px;cursor:pointer;text-decoration:underline dotted">' +
+            _esc(confidence) + '</span>' +
         '</div>' +
-        (asks
+        (_opts.asks && asks
           ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
               '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
           : '') +
-        '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
-          '<span style="font-weight:600;color:#475569">Finds:</span> ' +
-          (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
-        '</div>' +
-        (moreN ? '<div style="font-size:0.72em;margin-top:2px;color:#94a3b8">+' + moreN + ' more</div>' : '') +
-        followUpsChip +
-        ((chainsBySlug && typeof window._chainBlockHtml === 'function')
+        (_opts.finds
+          ? '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
+              '<span style="font-weight:600;color:#475569">Finds:</span> ' +
+              (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
+            '</div>'
+          : '') +
+        (_opts.finds && moreN ? '<div style="font-size:0.72em;margin-top:2px;color:#94a3b8">+' + moreN + ' more</div>' : '') +
+        (_opts.followups ? followUpsChip : '') +
+        (_opts.chain && chainsBySlug && typeof window._chainBlockHtml === 'function'
           ? window._chainBlockHtml(chainsBySlug[s.name]) : '');
       node._followUps = followUps;
       nodesHost.appendChild(node);
+      var _badge = node.querySelector('.aig-status-badge');
+      if (_badge) {
+        var _openReason = function (ev) {
+          ev.stopPropagation();
+          // Prefer the quick-look drawer opened to the finding/evidence; fall
+          // back to opening the full study. _openInvestigationDrawer renders the
+          // study's findings/evidence in the drawer body.
+          if (window._openInvestigationDrawer) window._openInvestigationDrawer('study', s);
+          else _openStudyInsideInvestigation(s.name);
+          var body = document.getElementById('investigation-detail-drawer-body');
+          var target = body && (body.querySelector('[data-section="findings"]') || body.querySelector('.aig-claim-row'));
+          if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
+        };
+        _badge.addEventListener('click', _openReason);
+        _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _openReason(ev); } });
+      }
       if (chainsBySlug && window._groupClaims && window._openInvestigationDrawer) {
         (function (study, chain) {
           var claims = window._groupClaims(chain);
@@ -5927,6 +5958,34 @@
     }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
+
+  function _setAigBand(b) {
+    var nb = Math.max(0, Math.min(2, b | 0));
+    var sl = document.getElementById('aig-zoom-slider');
+    if (sl && String(sl.value) !== String(nb)) sl.value = String(nb);
+    // No band change → keep the slider synced (above) but skip the re-render.
+    if (nb === aigBand) return;
+    aigBand = nb;
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1]);
+  }
+  window._setAigBand = _setAigBand;
+
+  // Wheel over the graph shell zooms bands (one notch per gesture, threshold +
+  // cooldown so a single scroll doesn't skip bands). preventDefault so the page
+  // doesn't scroll while zooming the graph.
+  (function _wireAigWheel() {
+    var lastWheel = 0;
+    document.addEventListener('wheel', function (ev) {
+      var shell = document.getElementById('investigation-dag-shell');
+      if (!shell || !shell.contains(ev.target)) return;   // only over the graph
+      ev.preventDefault();
+      var now = Date.now();
+      if (now - lastWheel < 220) return;                  // cooldown between steps
+      if (Math.abs(ev.deltaY) < 4) return;
+      lastWheel = now;
+      _setAigBand(aigBand + (ev.deltaY > 0 ? -1 : 1));    // scroll down = zoom out
+    }, { passive: false });
+  })();
 
   // ── DAG follow-ups popover ───────────────────────────────────────────────
   // Surfaced when phase=Decide. Lists each follow_up_studies entry with a
