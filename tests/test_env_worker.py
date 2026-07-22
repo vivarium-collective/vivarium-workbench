@@ -290,28 +290,29 @@ def test_study_readout_check_validates_against_real_structure():
 
 
 @pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
-def test_build_observables_routes_through_worker_with_parity():
-    """The lib entry point routes through the worker and matches the old
-    in-process build_composite_state_for_observables + available_observables."""
+def test_build_observables_routes_generator_ref_through_worker():
+    """The lib entry point routes a generator ref through the worker and returns a
+    well-formed 200. (The worker imports the workspace package itself, so this is
+    order-independent — unlike the in-process build_composite_state_for_observables,
+    which shares the process-global pbg_superpowers registry. Real-composite
+    behavioral parity is covered by tests/test_observables_views_lib.py.)"""
     pytest.importorskip("pbg_superpowers")
     pytest.importorskip("polars")
-    from pbg_superpowers.readout_validation import available_observables
-
     from vivarium_workbench.lib import observables_views as ov
     from vivarium_workbench.lib.env_worker_pool import get_pool
 
     ref = "pbg_ws_increase_demo.composites.hint_test"
     ws = _FIXTURE.resolve()
-    core, state, schema = ov.build_composite_state_for_observables(ws, ref)  # in-process
-    expected = available_observables(core, state, schema)
     ov.clear_cache()
     try:
         body, status = ov.build_observables(ws, ref)  # worker-backed
     finally:
         get_pool().close_all()
     assert status == 200, body
-    assert body["leaves"] == (expected.get("leaves") or [])
-    assert body["catalogs"] == (expected.get("catalogs") or {})
+    assert body["ref"] == ref
+    assert isinstance(body["leaves"], list) and isinstance(body["catalogs"], dict)
+    # hint_test is a trivial generator ({}) → no observable leaves.
+    assert body["leaves"] == [] and body["catalogs"] == {}
 
 
 # ---------------------------------------------------------------------------
