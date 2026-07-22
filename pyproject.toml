@@ -216,7 +216,6 @@ files = [
     "vivarium_workbench/lib/test_run_views.py",
     "vivarium_workbench/lib/comparative_runs.py",
     "vivarium_workbench/lib/run_unblocked_views.py",
-    "vivarium_workbench/lib/viz_core.py",
     "vivarium_workbench/lib/viz_preview_views.py",
     "vivarium_workbench/lib/viz_preview_instance_views.py",
     "vivarium_workbench/lib/install_views.py",

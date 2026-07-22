@@ -1,72 +1,30 @@
-"""Tests for ``lib.viz_preview_views.visualization_preview``.
+"""Tests for ``lib.viz_preview_views.visualization_preview`` — the HTTP-side
+orchestrator.
 
-Behaviour-preserving port of ``server.Handler._post_visualization_preview`` (the
-in-process viz-preview render).  Every test uses a FAKE Visualization class (a
-plain class with ``inputs()`` / ``update()`` / optional ``demo()`` + a ``config``
-attr) and monkeypatches the three ``viz_core`` helpers
-(``resolve_viz_class`` / ``demo_state_for`` / ``build_workspace_core``) so the
-in-process render runs WITHOUT a real viz library and never builds a real core.
+The class-touching render now runs in the env worker (``viz_preview``); this
+builder only validates the request, assembles the investigation ``inputs_store``
+HTTP-side, calls the worker, and maps its reply to a ``(body, status)`` tuple. So
+these tests stub the worker pool's ``.call`` and assert the *orchestration*:
 
-Covers: 400 (no address), 404 (class not registered), demo single-update happy,
-the streaming 12-step synth path (all-scalar inputs + empty demo state), the
-no-html ``<div>`` fallback, the demo-render EXCEPTION → 200 ``ok: False`` path,
-the investigation-source render path, and the investigation no-runs.db → demo
-fallback (with the note).  Only validation is non-200; a demo render that raises
-still returns 200.
+  * 400 on missing/blank address (no worker call);
+  * 404 when the worker reports ``{"status": "not_registered"}``;
+  * demo/streaming/error results pass through verbatim as 200;
+  * for an ``investigation:<name>`` source, that ``gather_emitter_outputs`` +
+    ``build_viz_composite`` run and the resulting ``inputs_store`` is forwarded to
+    the worker (with the worker-provided ``inputs_by_class`` mode);
+  * no-runs.db and assemble-exception record the fallback note (``note_prefix``)
+    and forward ``investigation_inputs_store=None`` so the worker renders demo;
+  * a worker that fails to start soft-degrades to a 200 error stub.
+
+The worker's render internals (demo single-update, streaming 12-step, no-html
+fallback div, exception → ok:False) are covered in ``test_env_worker_viz_preview.py``.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from vivarium_workbench.lib import viz_preview_views as views
-from vivarium_workbench.lib import investigations
 from vivarium_workbench.lib import study_spec
-
-
-# ---------------------------------------------------------------------------
-# FAKE Visualization classes (no real viz lib)
-# ---------------------------------------------------------------------------
-
-class FakeViz:
-    """List-input (non-streaming) viz: a single ``update()`` renders html."""
-
-    def __init__(self, config=None, core=None):
-        self.config = config or {}
-
-    def inputs(self):
-        # list types → NOT all-scalar → non-streaming single-update path.
-        return {"observable": "list[float]"}
-
-    def update(self, state):
-        return {"html": "<b>x</b>"}
-
-
-class FakeNoHtmlViz(FakeViz):
-    def update(self, state):
-        return {}  # no html → triggers the <div> fallback
-
-
-class FakeBoomViz(FakeViz):
-    def update(self, state):
-        raise ValueError("kaboom")
-
-
-class FakeStreamingViz:
-    """Scalar-input streaming viz: accumulates synth timesteps, renders at end."""
-
-    def __init__(self, config=None, core=None):
-        self.config = config or {}
-        self.seen = []
-
-    def inputs(self):
-        # all-scalar → streaming path (when demo state is empty).
-        return {"value": "float", "time": "float"}
-
-    def update(self, state):
-        self.seen.append(state)
-        return {"html": f"<svg>{len(self.seen)}</svg>"}
 
 
 def _make_ws(tmp_path: Path, *, name: str = "demo-ws") -> Path:
@@ -74,188 +32,194 @@ def _make_ws(tmp_path: Path, *, name: str = "demo-ws") -> Path:
     return tmp_path
 
 
-def _patch_resolve(monkeypatch, cls, key):
-    monkeypatch.setattr(views.viz_core, "resolve_viz_class",
-                        lambda ws_root, address: (cls, key))
+class _FakePool:
+    """Records the last ``.call`` and returns a canned reply (or raises)."""
+
+    def __init__(self, reply=None, exc=None):
+        self._reply = reply
+        self._exc = exc
+        self.calls = []
+
+    def call(self, ws_root, method, params=None):
+        self.calls.append((method, params))
+        if self._exc is not None:
+            raise self._exc
+        return self._reply
 
 
-def _patch_demo(monkeypatch, state):
-    monkeypatch.setattr(views.viz_core, "demo_state_for",
-                        lambda cls, class_key: dict(state))
+def _patch_pool(monkeypatch, pool):
+    import vivarium_workbench.lib.env_worker_pool as ewp
+    monkeypatch.setattr(ewp, "get_pool", lambda: pool)
 
 
 # ---------------------------------------------------------------------------
-# 400 / 404 validation
+# validation
 # ---------------------------------------------------------------------------
 
-def test_missing_address_400(tmp_path):
+def test_missing_address_400(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
+    pool = _FakePool(reply={"ok": True})
+    _patch_pool(monkeypatch, pool)
     body, status = views.visualization_preview(ws, {})
     assert status == 400
     assert body == {"error": "address is required"}
+    assert pool.calls == []  # never reached the worker
 
 
-def test_blank_address_400(tmp_path):
+def test_blank_address_400(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
+    pool = _FakePool(reply={"ok": True})
+    _patch_pool(monkeypatch, pool)
     body, status = views.visualization_preview(ws, {"address": "   "})
     assert status == 400
-    assert body == {"error": "address is required"}
+    assert pool.calls == []
 
+
+# ---------------------------------------------------------------------------
+# 404 / passthrough
+# ---------------------------------------------------------------------------
 
 def test_class_not_registered_404(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
-    monkeypatch.setattr(views.viz_core, "resolve_viz_class",
-                        lambda ws_root, address: (None, None))
+    _patch_pool(monkeypatch, _FakePool(reply={"status": "not_registered"}))
     body, status = views.visualization_preview(ws, {"address": "local:Nope"})
     assert status == 404
     assert body == {"error": "class not registered: local:Nope"}
 
 
-# ---------------------------------------------------------------------------
-# demo path: happy single-update / no-html fallback / exception
-# ---------------------------------------------------------------------------
-
-def test_demo_single_update_happy_200(tmp_path, monkeypatch):
+def test_demo_result_passes_through_200(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
-    _patch_resolve(monkeypatch, FakeViz, "FakeViz")
-    _patch_demo(monkeypatch, {"observable": [1.0, 2.0]})
-    body, status = views.visualization_preview(
-        ws, {"address": "local:FakeViz"})
+    reply = {"ok": True, "html": "<b>x</b>", "source_used": "demo", "notes": ""}
+    pool = _FakePool(reply=reply)
+    _patch_pool(monkeypatch, pool)
+    body, status = views.visualization_preview(ws, {"address": "local:FakeViz"})
     assert status == 200
-    assert body == {"ok": True, "html": "<b>x</b>",
-                    "source_used": "demo", "notes": ""}
+    assert body == reply
+    method, params = pool.calls[0]
+    assert method == "viz_preview"
+    assert params["address"] == "local:FakeViz"
+    assert params["source"] == "demo"
+    assert params["investigation_inputs_store"] is None
+    assert params["note_prefix"] == []
 
 
-def test_demo_no_html_fallback_div_200(tmp_path, monkeypatch):
+def test_ok_false_result_still_200(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
-    _patch_resolve(monkeypatch, FakeNoHtmlViz, "FakeNoHtmlViz")
-    _patch_demo(monkeypatch, {"observable": [1.0]})
-    body, status = views.visualization_preview(
-        ws, {"address": "local:FakeNoHtmlViz"})
+    reply = {"ok": False, "html": "<p>demo render failed: ValueError: kaboom</p>",
+             "source_used": "demo", "notes": ""}
+    _patch_pool(monkeypatch, _FakePool(reply=reply))
+    body, status = views.visualization_preview(ws, {"address": "local:Boom"})
     assert status == 200
-    assert body["ok"] is True
-    assert body["source_used"] == "demo"
-    assert "no demo state available" in body["html"]
-    assert "<strong>FakeNoHtmlViz</strong>" in body["html"]
+    assert body == reply
 
 
-def test_demo_render_exception_returns_200_ok_false(tmp_path, monkeypatch):
+def test_malformed_worker_reply_soft_degrades_200(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
-    _patch_resolve(monkeypatch, FakeBoomViz, "FakeBoomViz")
-    _patch_demo(monkeypatch, {"observable": [1.0]})
-    body, status = views.visualization_preview(
-        ws, {"address": "local:FakeBoomViz"})
-    assert status == 200  # NOT 500 — render failure still 200
+    _patch_pool(monkeypatch, _FakePool(reply="not a dict"))
+    body, status = views.visualization_preview(ws, {"address": "local:X"})
+    assert status == 200
+    assert body["ok"] is False
+    assert "malformed worker response" in body["html"]
+
+
+# ---------------------------------------------------------------------------
+# worker-unavailable soft-degrade
+# ---------------------------------------------------------------------------
+
+def test_worker_unavailable_soft_degrades_200(tmp_path, monkeypatch):
+    ws = _make_ws(tmp_path)
+    _patch_pool(monkeypatch, _FakePool(exc=RuntimeError("no venv")))
+    body, status = views.visualization_preview(ws, {"address": "local:X"})
+    assert status == 200
     assert body["ok"] is False
     assert body["source_used"] == "demo"
-    assert "demo render failed: ValueError: kaboom" in body["html"]
+    assert "preview unavailable" in body["html"]
+    assert "RuntimeError" in body["html"]
 
 
 # ---------------------------------------------------------------------------
-# demo streaming path: all-scalar inputs + empty demo → 12-step synth
+# investigation source: HTTP-side inputs_store assembly
 # ---------------------------------------------------------------------------
 
-def test_demo_streaming_synth_12_steps_200(tmp_path, monkeypatch):
-    ws = _make_ws(tmp_path)
-    _patch_resolve(monkeypatch, FakeStreamingViz, "FakeStreamingViz")
-    _patch_demo(monkeypatch, {})  # empty → streaming detection trips
-    # streaming path builds a workspace core; return a fake (None forces the
-    # allocate_core branch, but a fake keeps it hermetic).
-    monkeypatch.setattr(views.viz_core, "build_workspace_core",
-                        lambda ws_root: (object(), {}))
-    body, status = views.visualization_preview(
-        ws, {"address": "local:FakeStreamingViz"})
-    assert status == 200
-    assert body["ok"] is True
-    assert body["source_used"] == "demo"
-    # 12 synth timesteps → final render reflects 12 accumulated updates.
-    assert body["html"] == "<svg>12</svg>"
-
-
-# ---------------------------------------------------------------------------
-# investigation source path
-# ---------------------------------------------------------------------------
-
-def test_investigation_source_render_200(tmp_path, monkeypatch):
+def test_investigation_forwards_inputs_store(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
     inv = "inv-x"
     inv_dir = study_spec.study_dir(ws, inv)
     inv_dir.mkdir(parents=True, exist_ok=True)
     (inv_dir / "runs.db").write_text("", encoding="utf-8")  # just needs to exist
 
-    _patch_resolve(monkeypatch, FakeViz, "FakeViz")
+    from vivarium_workbench.lib import investigations, viz_render
     monkeypatch.setattr(investigations, "gather_emitter_outputs",
                         lambda db_path: {"gathered": True})
-    monkeypatch.setattr(investigations, "build_viz_composite",
-                        lambda viz_spec, gathered, registry: {
-                            "inputs_store": {"observable": [1.0, 2.0]}})
+    monkeypatch.setattr(viz_render, "viz_render_hooks",
+                        lambda ws_root: ({"FakeViz": {"observable": "list[float]"}}, None))
+
+    captured = {}
+
+    def _fake_build(viz_spec, gathered, registry, *, inputs_by_class=None):
+        captured["viz_spec"] = viz_spec
+        captured["gathered"] = gathered
+        captured["inputs_by_class"] = inputs_by_class
+        return {"inputs_store": {"observable": [1.0, 2.0]}}
+
+    monkeypatch.setattr(investigations, "build_viz_composite", _fake_build)
+
+    reply = {"ok": True, "html": "<b>x</b>",
+             "source_used": f"investigation:{inv}", "notes": ""}
+    pool = _FakePool(reply=reply)
+    _patch_pool(monkeypatch, pool)
 
     body, status = views.visualization_preview(
         ws, {"address": "local:FakeViz", "source": f"investigation:{inv}"})
     assert status == 200
-    assert body["ok"] is True
-    assert body["html"] == "<b>x</b>"
-    assert body["source_used"] == f"investigation:{inv}"
-    assert body["notes"] == ""
+    assert body == reply
+    # build_viz_composite ran in worker-provided (inputs_by_class) mode...
+    assert captured["inputs_by_class"] == {"FakeViz": {"observable": "list[float]"}}
+    assert captured["gathered"] == {"gathered": True}
+    # ...and its inputs_store was forwarded to the worker.
+    _method, params = pool.calls[0]
+    assert params["investigation_inputs_store"] == {"observable": [1.0, 2.0]}
+    assert params["source"] == f"investigation:{inv}"
 
 
-def test_investigation_no_runs_db_falls_back_to_demo(tmp_path, monkeypatch):
+def test_investigation_no_runs_db_records_note_and_no_store(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
-    inv = "inv-x"
-    # No runs.db created → fall back to demo with a note.
-    _patch_resolve(monkeypatch, FakeViz, "FakeViz")
-    _patch_demo(monkeypatch, {"observable": [1.0]})
+    inv = "inv-x"  # no runs.db created
+    pool = _FakePool(reply={"ok": True, "html": "<b>x</b>",
+                            "source_used": "demo", "notes": ""})
+    _patch_pool(monkeypatch, pool)
 
     body, status = views.visualization_preview(
         ws, {"address": "local:FakeViz", "source": f"investigation:{inv}"})
     assert status == 200
-    assert body["ok"] is True
-    assert body["source_used"] == "demo"
-    assert body["html"] == "<b>x</b>"
-    assert "has no runs.db; falling back to demo" in body["notes"]
+    _method, params = pool.calls[0]
+    assert params["investigation_inputs_store"] is None
+    assert any("has no runs.db; falling back to demo" in n
+               for n in params["note_prefix"])
 
 
-def test_investigation_empty_html_falls_back_to_demo(tmp_path, monkeypatch):
+def test_investigation_assemble_exception_records_note_and_no_store(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
     inv = "inv-x"
     inv_dir = study_spec.study_dir(ws, inv)
     inv_dir.mkdir(parents=True, exist_ok=True)
     (inv_dir / "runs.db").write_text("", encoding="utf-8")
 
-    _patch_resolve(monkeypatch, FakeNoHtmlViz, "FakeNoHtmlViz")
-    _patch_demo(monkeypatch, {"observable": [1.0]})
-    monkeypatch.setattr(investigations, "gather_emitter_outputs",
-                        lambda db_path: {})
-    monkeypatch.setattr(investigations, "build_viz_composite",
-                        lambda viz_spec, gathered, registry: {
-                            "inputs_store": {"observable": [1.0]}})
-
-    body, status = views.visualization_preview(
-        ws, {"address": "local:FakeNoHtmlViz", "source": f"investigation:{inv}"})
-    assert status == 200
-    # FakeNoHtmlViz.update() returns {} → empty html → demo fallback note.
-    assert body["source_used"] == "demo"
-    assert "empty html; falling back to demo" in body["notes"]
-
-
-def test_investigation_render_exception_falls_back_to_demo(tmp_path, monkeypatch):
-    ws = _make_ws(tmp_path)
-    inv = "inv-x"
-    inv_dir = study_spec.study_dir(ws, inv)
-    inv_dir.mkdir(parents=True, exist_ok=True)
-    (inv_dir / "runs.db").write_text("", encoding="utf-8")
-
-    _patch_resolve(monkeypatch, FakeViz, "FakeViz")
-    _patch_demo(monkeypatch, {"observable": [1.0]})
+    from vivarium_workbench.lib import investigations
 
     def _boom(db_path):
         raise RuntimeError("gather failed")
 
     monkeypatch.setattr(investigations, "gather_emitter_outputs", _boom)
 
+    pool = _FakePool(reply={"ok": True, "html": "<b>x</b>",
+                            "source_used": "demo", "notes": ""})
+    _patch_pool(monkeypatch, pool)
+
     body, status = views.visualization_preview(
         ws, {"address": "local:FakeViz", "source": f"investigation:{inv}"})
     assert status == 200
-    assert body["source_used"] == "demo"
-    assert body["html"] == "<b>x</b>"
-    assert "investigation render failed (RuntimeError: gather failed)" in body["notes"]
+    _method, params = pool.calls[0]
+    assert params["investigation_inputs_store"] is None
+    assert any("investigation render failed (RuntimeError: gather failed)" in n
+               for n in params["note_prefix"])

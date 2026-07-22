@@ -87,7 +87,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "viz_classes", "resolve_composite_state", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites",
-                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "report_core_snapshot", "reexport_map", "shutdown"]
+                 "validate_generated_visualization", "run_study_analyses", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -945,6 +945,204 @@ def _render_viz_doc(params: dict) -> dict:
     return {"html": html if isinstance(html, str) else ""}
 
 
+# Synthetic demo states for the 5 built-in pbg_superpowers Visualization classes
+# (byte-identical to lib.viz_core.BUILTIN_VIZ_DEMOS). Used when previewing a viz
+# without real run data, or as a fallback when investigation data is incompatible.
+_BUILTIN_VIZ_DEMOS: dict = {
+    "TimeSeriesPlot": {
+        "observable": [
+            [1.0, 1.4, 2.1, 3.0, 4.2, 5.7, 7.1, 8.0, 8.3, 8.4],
+            [2.0, 2.6, 3.5, 4.6, 5.9, 7.3, 8.5, 9.1, 9.3, 9.3],
+            [0.5, 0.7, 1.1, 1.7, 2.5, 3.5, 4.6, 5.5, 6.1, 6.4],
+        ],
+        "time": [
+            [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
+            [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
+            [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
+        ],
+        "_run_labels": ["rate=1.0", "rate=2.0", "rate=0.5"],
+    },
+    "ParamVsObservable": {
+        "sweep_param_values": [0.1, 0.5, 1.0, 2.0, 5.0],
+        "reduced_observable": [3.0, 7.5, 12.0, 17.5, 21.0],
+    },
+    "Distribution": {
+        "samples": [
+            10.0, 10.3, 10.1, 10.6, 10.4, 10.2, 10.5, 10.9, 10.7, 10.4,
+            10.8, 10.3, 10.5, 11.0, 10.6, 10.2, 10.4, 10.7, 10.5, 10.8,
+        ],
+    },
+    "PhaseSpace": {
+        "x": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0],
+        "y": [0.0, 0.8, 1.5, 1.8, 1.5, 0.8, 0.0, -0.8, -1.5, -0.8],
+    },
+    "Heatmap": {
+        "x_params": [0.1, 0.5, 1.0, 2.0, 5.0],
+        "y_params": [10.0, 20.0, 30.0],
+        "z_values": [
+            [1.0, 2.0, 3.0, 4.0, 5.0],
+            [2.0, 4.0, 6.0, 8.0, 10.0],
+            [3.0, 6.0, 9.0, 12.0, 15.0],
+        ],
+    },
+}
+
+
+def _demo_state_for(cls, class_key: str) -> dict:
+    """Synthetic state dict for previewing ``cls`` (byte-identical to
+    lib.viz_core.demo_state_for). Priority: ``cls.demo()`` classmethod →
+    built-in demo map → empty dict."""
+    if hasattr(cls, "demo") and callable(getattr(cls, "demo")):
+        try:
+            state = cls.demo()
+            if isinstance(state, dict):
+                return state
+        except Exception:  # noqa: BLE001
+            pass
+    return dict(_BUILTIN_VIZ_DEMOS.get(class_key, {}))
+
+
+def _viz_preview(params: dict) -> dict:
+    """Render a Visualization class to preview HTML entirely in the worker (spec §11).
+
+    Faithful port of the class-touching half of ``viz_preview_views.visualization_preview``
+    + ``viz_core.resolve_viz_class``/``demo_state_for``: resolve the class off the cached
+    viz core, then render via a bare-instance ``.update()`` — demo (single update),
+    streaming (12 synthetic scalar timesteps), or investigation (an ``inputs_store``
+    already assembled HTTP-side by ``build_viz_composite``, since that is workbench code).
+
+    ``params``: ``{address, config, source, investigation_inputs_store?, note_prefix?}``.
+    Returns ``{"status": "not_registered"}`` (the workbench maps it to 404) OR
+    ``{"ok", "html", "source_used", "notes"}`` — mirroring the old in-process contract
+    where only validation is non-200 and every render outcome (including a raise) is a
+    200 body."""
+    p = params or {}
+    address = p.get("address") or ""
+    config = p.get("config") or {}
+    source = p.get("source") or "demo"
+    inv_inputs_store = p.get("investigation_inputs_store")
+    notes = list(p.get("note_prefix") or [])
+
+    # Resolve the class off the cached viz core (pbg_superpowers builtins + the
+    # workspace Visualization subclass tree). Presence in the registry == registered.
+    core, registry = _build_viz_core()
+    raw_key = address.split(":", 1)[1] if ":" in address else address
+    short = raw_key.rsplit(".", 1)[-1]
+    cls = None
+    for key in (raw_key, short):
+        cls = registry.get(key)
+        if cls is not None:
+            break
+    if cls is None:
+        return {"status": "not_registered"}
+    class_key = short  # match viz_core.resolve_viz_class's returned short name
+
+    # Investigation source first (its inputs_store is built HTTP-side).
+    if source.startswith("investigation:") and inv_inputs_store is not None:
+        inv_name = source.split(":", 1)[1].strip()
+        try:
+            inst = cls.__new__(cls)
+            inst.config = config or {}
+            html = inst.update(dict(inv_inputs_store)).get("html", "")
+            if html:
+                return {"ok": True, "html": html,
+                        "source_used": f"investigation:{inv_name}",
+                        "notes": "; ".join(notes)}
+            notes.append("investigation render produced empty html; falling back to demo")
+        except Exception as e:  # noqa: BLE001
+            notes.append(f"investigation render failed ({type(e).__name__}: {e}); falling back to demo")
+
+    # Demo path (default or fallback).
+    try:
+        state = _demo_state_for(cls, class_key)
+
+        # Streaming-style viz (all inputs scalar) get N synthetic timesteps fed
+        # through the accumulator; list-input classes render in one update().
+        scalar_types = {"float", "integer", "string", "boolean"}
+        probe = cls.__new__(cls)
+        try:
+            probe.config = config or {}
+        except Exception:  # noqa: BLE001
+            pass
+        declared: dict = {}
+        try:
+            declared = probe.inputs() or {}
+        except Exception:  # noqa: BLE001
+            pass
+        is_streaming = (
+            bool(declared)
+            and all(t in scalar_types for t in declared.values())
+            and not state
+        )
+
+        inst = None
+        if is_streaming:
+            # Streaming viz usually need __init__ to build accumulator buffers;
+            # try a real constructor with the workspace core, else allocate_core,
+            # else a bare instance.
+            ctor_core = core
+            if ctor_core is None:
+                try:
+                    from bigraph_schema import allocate_core
+                    ctor_core = allocate_core()
+                except Exception:  # noqa: BLE001
+                    ctor_core = None
+            for ctor_args in (
+                {"config": config or {}, "core": ctor_core},
+                {"config": config or {}},
+            ):
+                try:
+                    inst = cls(**ctor_args)
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
+        if inst is None:
+            inst = cls.__new__(cls)
+            try:
+                inst.config = config or {}
+            except Exception:  # noqa: BLE001
+                pass
+
+        if is_streaming:
+            import math
+            html = ""
+            for step in range(12):
+                synth: dict = {}
+                for port, port_type in declared.items():
+                    if port_type == "float":
+                        if port in ("time", "t"):
+                            synth[port] = float(step) * 0.5
+                        else:
+                            phase = (hash(port) & 0xff) / 40.0
+                            synth[port] = 1.0 + 0.5 * math.sin(step * 0.6 + phase) + step * 0.1
+                    elif port_type == "integer":
+                        synth[port] = int(50 + step * 7)
+                    elif port_type == "boolean":
+                        synth[port] = step % 2 == 0
+                    else:
+                        synth[port] = f"step-{step}"
+                result = inst.update(synth) or {}
+                html = result.get("html", "") or html
+        else:
+            html = inst.update(state).get("html", "")
+
+        if not html:
+            html = (
+                f'<div style="padding:20px;font-family:system-ui">'
+                f'<p><strong>{class_key}</strong>: no demo state available.</p>'
+                f'<p style="color:#666">Add a <code>demo()</code> classmethod to '
+                f'the viz class, or register an instance in workspace.yaml and '
+                f'use the Preview button on the instance row to render against '
+                f'real emitter data.</p></div>'
+            )
+        return {"ok": True, "html": html, "source_used": "demo",
+                "notes": "; ".join(notes)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False,
+                "html": f'<p style="color:#991b1b">demo render failed: {type(e).__name__}: {e}</p>',
+                "source_used": "demo", "notes": "; ".join(notes)}
+
+
 def _report_core_snapshot(params: dict) -> dict:
     """Registry snapshot (process/type names) + the workspace document for the
     report render (spec §11) — imports ``<pkg>.core`` (registry_snapshot) +
@@ -1117,6 +1315,8 @@ def _handle(method: str, params: dict) -> dict:
         return _viz_class_inputs()
     if method == "render_viz_doc":
         return _render_viz_doc(params)
+    if method == "viz_preview":
+        return _viz_preview(params)
     if method == "report_core_snapshot":
         return _report_core_snapshot(params)
     if method == "reexport_map":
