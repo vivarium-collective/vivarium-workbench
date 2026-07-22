@@ -14,10 +14,6 @@ Call ``clear_registry_cache()`` to invalidate it on workspace changes
 
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
-import textwrap
 import time
 from pathlib import Path
 
@@ -435,206 +431,16 @@ def build_registry(ws_root: Path, *, bypass_cache: bool = False) -> dict:
 
         ws_yaml = ws_root / "workspace.yaml"
         ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8"))
-        slug = ws_data.get("name", "")
-        # Support explicit package_path in workspace.yaml (most reliable).
-        package_name = ws_data.get("package_path") or ("pbg_" + slug.replace("-", "_"))
-
-        # Build the set of top-level package names that this workspace
-        # explicitly owns or imports. Used inside the subprocess to tag
-        # each discovered class.
-        #
-        # ``workspace.yaml.imports`` ships in two shapes across the
-        # ecosystem:
-        #   * dict (older convention, keyed by catalog name):
-        #       imports:
-        #         pbg-oxidizeme:
-        #           package: pbg_oxidizeme
-        #           source:  https://github.com/.../pbg-oxidizeme
-        #   * list of dicts (v2ecoli + newer pbg-template workspaces):
-        #       imports:
-        #         - name:    pbg_oxidizeme
-        #           source:  https://github.com/.../pbg-oxidizeme
-        #
-        # Normalize both into the loop so the registry endpoint doesn't
-        # crash with "'list' object has no attribute 'items'" when the
-        # workspace uses the list form.
-        imports_raw = ws_data.get("imports") or []
-        _ws_import_pkgs: list[str] = []
-        if isinstance(imports_raw, dict):
-            for cat_name, imp_val in imports_raw.items():
-                if isinstance(imp_val, dict):
-                    pkg = imp_val.get("package") or cat_name.replace("-", "_")
-                else:
-                    pkg = cat_name.replace("-", "_")
-                _ws_import_pkgs.append(pkg.split(".")[0])
-        elif isinstance(imports_raw, list):
-            for entry in imports_raw:
-                if isinstance(entry, dict):
-                    # name is the catalog identity; package is the
-                    # importable Python package name (defaults to name
-                    # with dashes → underscores).
-                    cat_name = entry.get("name") or ""
-                    pkg = entry.get("package") or cat_name.replace("-", "_")
-                elif isinstance(entry, str):
-                    pkg = entry.replace("-", "_")
-                else:
-                    continue
-                if pkg:
-                    _ws_import_pkgs.append(pkg.split(".")[0])
-        # Any other shape (e.g. None) yields no imports — registry just
-        # shows the workspace's own package + framework classes.
-        # The workspace's own package is always "in_workspace".
-        _ws_import_pkgs.append(package_name.split(".")[0])
-        # Dedupe while preserving insertion order.
-        _workspace_pkgs_repr = repr(list(dict.fromkeys(_ws_import_pkgs)))
-
-        py = sys.executable
-        script = textwrap.dedent(f"""
-import json, sys
-try:
-    from {package_name}.core import build_core
-    core = build_core()
-
-    import inspect as _inspect
-    import process_bigraph as _pb
-    EMITTER_CLS = getattr(_pb, 'Emitter', None)
-    try:
-        from pbg_superpowers.visualization import Visualization as VISUALIZATION_CLS
-    except ImportError:
-        VISUALIZATION_CLS = None
-
-    # Packages declared in this workspace (own package + workspace.yaml imports).
-    _WORKSPACE_PKGS = set({_workspace_pkgs_repr})
-    # Framework infrastructure packages — always shown, never "environment_only".
-    _FRAMEWORK_PKGS = {{
-        'process_bigraph', 'bigraph_schema', 'bigraph_viz',
-        'pbg_superpowers', 'vivarium_workbench', 'pbg_emitters',
-    }}
-
-    def _classify_source(cls):
-        try:
-            top_pkg = cls.__module__.split('.')[0]
-        except Exception:
-            return 'environment_only'
-        if top_pkg in _WORKSPACE_PKGS:
-            return 'in_workspace'
-        if top_pkg in _FRAMEWORK_PKGS:
-            return 'framework'
-        return 'environment_only'
-
-    # Processes (and other linkable components) live in core.link_registry,
-    # a dict keyed by both short names ('Composite') and fully-qualified
-    # names ('process_bigraph.composite.Composite'). Dedupe by class identity
-    # and prefer the short name.
-    processes = []
-    seen_classes = {{}}
-    link_reg = getattr(core, 'link_registry', {{}}) or {{}}
-    for name, cls in link_reg.items():
-        cls_id = id(cls)
-        is_qualified = '.' in name
-        if cls_id in seen_classes:
-            # already saw this class; only update if current name is shorter (preferred)
-            existing = seen_classes[cls_id]
-            if not is_qualified and '.' in processes[existing]['name']:
-                processes[existing]['aliases'].append(processes[existing]['name'])
-                processes[existing]['name'] = name
-            else:
-                processes[existing]['aliases'].append(name)
-            continue
-        try:
-            addr = f"{{cls.__module__}}.{{cls.__qualname__}}"
-        except Exception:
-            addr = str(cls)
-        # Categorize by ancestry
-        kind = "other"
-        if isinstance(cls, type):
-            if EMITTER_CLS is not None and issubclass(cls, EMITTER_CLS) and cls is not EMITTER_CLS:
-                kind = "emitter"
-            elif VISUALIZATION_CLS is not None and issubclass(cls, VISUALIZATION_CLS) and cls is not VISUALIZATION_CLS:
-                kind = "visualization"
-            elif hasattr(cls, '__mro__'):
-                for ancestor in cls.__mro__:
-                    if ancestor.__name__ in ('Process', 'ProcessEnsemble'):
-                        kind = "process"
-                        break
-                    if ancestor.__name__ == 'Step':
-                        kind = "step"
-                        break
-        schema_preview = ""
-        if hasattr(cls, 'config_schema'):
-            try:
-                schema_preview = json.dumps(cls.config_schema, default=str)[:400]
-            except Exception:
-                schema_preview = "<unserializable>"
-        source = _classify_source(cls)
-        # Framework hygiene: hide process_bigraph's OWN built-in toy/base/protocol
-        # processes (examples, parameter_scan, math_expression, growth_division,
-        # minimal_gillespie, the composite base classes, ray/parallel/rest
-        # protocols) from every workspace's registry — they are framework
-        # infrastructure, not workspace content. Emitters + visualizations are
-        # kept (useful framework components a workspace wires in).
-        _topmod = (getattr(cls, '__module__', '') or '').split('.')[0]
-        if _topmod == 'process_bigraph' and kind in ('process', 'step', 'other'):
-            continue
-        # Hide abstract base classes (e.g. pbg_emitters' BufferedEmitter) — they
-        # are intermediate bases not meant to be used directly, not registry
-        # content.
-        try:
-            if isinstance(cls, type) and _inspect.isabstract(cls):
-                continue
-        except Exception:
-            pass
-        seen_classes[cls_id] = len(processes)
-        processes.append({{
-            "name": name,
-            "address": addr,
-            "kind": kind,
-            "schema_preview": schema_preview,
-            "aliases": [],
-            "source": source,
-        }})
-    # Re-sort by name so output is deterministic; promote short names.
-    # Within each source group: in_workspace first, then framework, then environment_only.
-    _source_order = {{"in_workspace": 0, "framework": 1, "environment_only": 2}}
-    processes.sort(key=lambda p: (_source_order.get(p.get('source', 'environment_only'), 2), '.' in p['name'], p['name']))
-
-    # Types: core.registry is a dict of registered type schemas.
-    types = []
-    type_reg = getattr(core, 'registry', {{}}) or {{}}
-    for name in sorted(type_reg.keys()):
-        try:
-            td = core.access(name)
-            preview = str(td)[:200] if td is not None else ""
-        except Exception as e:
-            preview = f"<error: {{e}}>"
-        types.append({{"name": name, "schema_preview": preview}})
-
-    print(json.dumps({{"processes": processes, "types": types, "workspace_pkgs": list(_WORKSPACE_PKGS)}}))
-except ImportError as e:
-    print(json.dumps({{"error": f"could not import {package_name}.core: {{e}}", "processes": [], "types": []}}))
-except Exception as e:
-    print(json.dumps({{"error": f"build_core() failed: {{e}}", "processes": [], "types": []}}))
-""")
-        result = subprocess.run(
-            [py, "-c", script],
-            cwd=ws_root, capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            data: dict = {
-                "error": f"subprocess failed: {(result.stderr or '').strip()[:300]}",
-                "processes": [],
-                "types": [],
-            }
-        else:
-            try:
-                last_line = result.stdout.strip().split("\n")[-1]
-                data = json.loads(last_line)
-            except (json.JSONDecodeError, IndexError):
-                data = {
-                    "error": f"invalid output: {result.stdout[:300]}",
-                    "processes": [],
-                    "types": [],
-                }
+        # Query the pooled env worker for the raw {processes, types, workspace_pkgs}.
+        # This was an embedded ``sys.executable`` subprocess running build_core +
+        # introspection on EVERY call (15s timeout). The same introspection now lives
+        # in ``env_worker._registry_catalog`` (ported verbatim, verified byte-equivalent
+        # in #502) and runs in a WARM pooled worker — so build_core is amortized
+        # (measured 8s cold -> 0s warm on v2ecoli) instead of paid per request. Same
+        # interpreter (sys.executable) as the old subprocess; the per-workspace venv
+        # interpreter arrives with EnvironmentResolver.
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        data = get_pool().call(ws_root, "registry_catalog")
 
         # Annotate emitter entries with is_workspace_default per
         # workspace.yaml::runtime.default_emitter. ws_data was loaded above;

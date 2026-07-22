@@ -139,4 +139,8 @@ def get_pool() -> WorkerPool:
         with _pool_lock:
             if _pool is None:
                 _pool = WorkerPool()
+                # Graceful shutdown on process exit. (Workers also self-terminate
+                # when the parent's socket EOFs, so a hard kill still leaks nothing.)
+                import atexit
+                atexit.register(_pool.close_all)
     return _pool
