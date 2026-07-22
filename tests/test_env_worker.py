@@ -169,3 +169,31 @@ def test_registry_catalog_matches_build_registry(monkeypatch):
 
     assert _core(got["processes"]) == _core(expected["processes"])
     assert [t["name"] for t in got["types"]] == [t["name"] for t in expected["types"]]
+
+
+# ---------------------------------------------------------------------------
+# Opt-in real-workspace check: run the worker against a real v2ecoli checkout
+# on ITS OWN venv interpreter. Skips unless ../v2ecoli/.venv exists (build it
+# with `cd ../v2ecoli && uv sync`). This is the e2e that the minimal fixture
+# can't give: a heavy workspace, its own 3.12.12 interpreter, real generators.
+# ---------------------------------------------------------------------------
+_V2ECOLI = Path(__file__).resolve().parent.parent.parent / "v2ecoli"
+_V2ECOLI_VENV = _V2ECOLI / ".venv" / "bin" / "python"
+
+
+@pytest.mark.skipif(not _V2ECOLI_VENV.is_file(),
+                    reason="no ../v2ecoli/.venv (build with `cd ../v2ecoli && uv sync`)")
+def test_env_worker_against_real_v2ecoli():
+    with EnvWorker(_V2ECOLI, interpreter=str(_V2ECOLI_VENV), timeout=600) as w:
+        info = w.call("initialize")
+        assert info["python"].startswith("3.12"), info["python"]  # the venv's, not the workbench's
+
+        gens = w.call("list_generators")["generators"]
+        assert "v2ecoli.composites.baseline" in gens
+        assert len(gens) > 10   # a real, heavy workspace
+
+        cat = w.call("registry_catalog")
+        assert not cat.get("error"), cat.get("error")
+        assert len(cat["processes"]) > 50 and len(cat["types"]) > 20
+        assert "v2ecoli" in cat["workspace_pkgs"]
+        assert any(p["source"] == "in_workspace" for p in cat["processes"])
