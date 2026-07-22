@@ -74,10 +74,15 @@
   // switch (can't spawn by name).
   function _openEntry(entry) {
     if (!entry) return;
+    // Honor the deployment base path (e.g. "/workbench" behind the ALB). The
+    // global fetch/XHR shim prefixes /api/… itself, but does NOT patch
+    // window.open, and "/?workspace=" wouldn't match its prefix list anyway — so
+    // build the spawn URL with __BASE_PATH__ here. Empty in local/root hosting.
+    var BP = window.__BASE_PATH__ || "";
     if (entry.simulator_id != null) {
-      window.open("/?build=" + encodeURIComponent(entry.simulator_id), "_blank");
+      window.open(BP + "/?build=" + encodeURIComponent(entry.simulator_id), "_blank");
     } else if (entry.name) {
-      window.open("/?workspace=" + encodeURIComponent(entry.name), "_blank");
+      window.open(BP + "/?workspace=" + encodeURIComponent(entry.name), "_blank");
     } else if (entry.path) {
       _switchLocal(entry.path);   // name-less catalog entry → in-place fallback
     }
