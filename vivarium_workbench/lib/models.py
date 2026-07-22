@@ -2033,15 +2033,19 @@ class JobStatusPayload(BaseModel):
 
 
 class SourceSwitchRequest(BaseModel):
-    """POST /api/source/switch request body — ``{"path": <workspace dir>}``.
+    """POST /api/source/switch request body.
 
-    The path must resolve to a registered workspace-catalog entry; arbitrary
-    paths are rejected with HTTP 400 by the route's lib builder.
+    Target a registered workspace-catalog entry by ``path`` (legacy) or by
+    ``name`` (the session-per-tab spawn: a tab opens ``/?workspace=<name>`` and its
+    bootstrap POSTs ``{"name": <catalog name>}`` — no filesystem path in the URL).
+    ``path`` wins when both are set. Either must resolve to a registered entry;
+    arbitrary paths / unknown names are rejected with HTTP 400 by the lib builder.
     """
 
     model_config = ConfigDict(extra="allow")
 
     path: str = ""
+    name: str = ""
 
 
 class SourceSwitchResponse(BaseModel):

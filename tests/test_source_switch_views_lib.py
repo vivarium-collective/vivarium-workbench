@@ -43,6 +43,65 @@ def test_unregistered_path_400(tmp_path, monkeypatch):
     assert body == {"error": f"{p!r} is not a registered workspace"}
 
 
+def test_switch_by_name_resolves(tmp_path, monkeypatch):
+    """The session-per-tab spawn: {"name": <catalog name>} resolves to that entry
+    (no filesystem path in the request)."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    from pbg_superpowers import workspace_catalog
+
+    monkeypatch.setattr(
+        workspace_catalog, "list_workspaces",
+        lambda: [{"path": str(ws), "name": "increase-demo"}],
+    )
+    body, status = source_switch_views.source_switch(
+        {"name": "increase-demo"}, switch_active=False)
+    assert status == 200
+    assert body == {"ok": True, "source": {"path": str(ws), "name": "increase-demo"}}
+
+
+def test_switch_by_unknown_name_400(monkeypatch):
+    from pbg_superpowers import workspace_catalog
+
+    monkeypatch.setattr(
+        workspace_catalog, "list_workspaces",
+        lambda: [{"path": "/x", "name": "other"}],
+    )
+    body, status = source_switch_views.source_switch(
+        {"name": "nope"}, switch_active=False)
+    assert status == 400
+    assert body == {"error": "'nope' is not a registered workspace"}
+
+
+def test_switch_by_ambiguous_name_400(monkeypatch):
+    from pbg_superpowers import workspace_catalog
+
+    monkeypatch.setattr(
+        workspace_catalog, "list_workspaces",
+        lambda: [{"path": "/a", "name": "dup"}, {"path": "/b", "name": "dup"}],
+    )
+    body, status = source_switch_views.source_switch(
+        {"name": "dup"}, switch_active=False)
+    assert status == 400
+    assert "ambiguous" in body["error"]
+
+
+def test_path_wins_when_both_given(tmp_path, monkeypatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    from pbg_superpowers import workspace_catalog
+
+    monkeypatch.setattr(
+        workspace_catalog, "list_workspaces",
+        lambda: [{"path": str(ws), "name": "by-path"}],
+    )
+    # name is bogus but path is valid → resolves by path.
+    body, status = source_switch_views.source_switch(
+        {"path": str(ws), "name": "does-not-exist"}, switch_active=False)
+    assert status == 200
+    assert body["source"]["name"] == "by-path"
+
+
 def test_happy_path_repoints_and_invalidates(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     ws.mkdir()

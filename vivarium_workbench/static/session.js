@@ -105,6 +105,50 @@
     target.__vivFetchPatched = true;
   }
 
+  // Spawn bootstrap (session-per-tab slice 3). Opening a workspace in a new tab is
+  // window.open('/?workspace=<catalog-name>'). When THIS tab loads with that param
+  // it must (a) take its OWN session — never the id a sibling tab's sessionStorage
+  // was copied into when the browser cloned it — so we force-mint fresh; (b) bind
+  // that session to the workspace by name; (c) strip the param so a reload is a
+  // plain load of this now-bound session; (d) reload once bound, so the server
+  // re-renders GET / for the bound workspace (the first paint was the default).
+  function bootstrapWorkspaceParam() {
+    var loc = window.location || {};
+    var params;
+    try { params = new URLSearchParams(loc.search || ""); } catch (e) { return null; }
+    var ws = params.get("workspace");
+    if (!ws) return null;
+
+    clearId();          // discard any inherited (copied) id
+    ensureId();         // mint this tab's own fresh id — race-free, before the bind
+
+    function stripParam() {
+      try {
+        params.delete("workspace");
+        var qs = params.toString();
+        var clean = (loc.pathname || "/") + (qs ? "?" + qs : "") + (loc.hash || "");
+        window.history.replaceState(null, "", clean);
+      } catch (e) { /* history unavailable — harmless */ }
+    }
+
+    return window.fetch("/api/source/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: ws }),
+    }).then(function (r) {
+      stripParam();
+      // Reload the (now clean) URL so GET / re-renders for the bound workspace.
+      if (r && r.ok && window.location && typeof window.location.reload === "function") {
+        window.location.reload();
+      }
+      return r;
+    }).catch(function () {
+      // Bind failed — leave the app on its default workspace. A later slice adds
+      // spawn-error UI; for now just clean the URL.
+      stripParam();
+    });
+  }
+
   var api = {
     HEADER: HEADER,
     STORAGE_KEY: KEY,
@@ -114,14 +158,17 @@
     mintId: mintId,
     ensureId: ensureId,
     installFetch: installFetch,
+    bootstrapWorkspaceParam: bootstrapWorkspaceParam,
     _sameOrigin: _sameOrigin,
   };
 
-  // Browser: install immediately + expose on window. Node (tests): export the
-  // factory bits without touching a real window.
+  // Browser: install immediately + expose on window, then run the spawn bootstrap
+  // (a no-op unless ?workspace= is present). Node (tests): export the factory bits
+  // without touching a real window or auto-binding.
   if (typeof window !== "undefined") {
     installFetch(window);
     window.vivSession = api;
+    bootstrapWorkspaceParam();
   }
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;
