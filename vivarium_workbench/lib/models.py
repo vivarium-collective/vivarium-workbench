@@ -2114,6 +2114,19 @@ class SwitchBuildRequest(BaseModel):
     simulator_id: Optional[int] = None
 
 
+class MaterializeRepoRequest(BaseModel):
+    """POST /api/source/materialize-repo request body — ``{"repo", "ref"}``.
+
+    Kicks off async materialization of a managed ``(repo, ref)`` source (clone +
+    ``uv sync``). Missing ``repo``/``ref`` are rejected with HTTP 400 by the route.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    repo: Optional[str] = None
+    ref: Optional[str] = None
+
+
 class RemoteRunStartRequest(BaseModel):
     """POST /api/remote-run-start request body.
 

@@ -262,6 +262,7 @@ from vivarium_workbench.lib.models import (
     # C-state-3b: source build-remote / switch-build (sms-api network routes)
     BuildRemoteRequest,
     BuildRemoteResponse,
+    MaterializeRepoRequest,
     SwitchBuildRequest,
     # C-state-3c: remote-run submit (manager.submit pipeline job)
     RemoteRunStartRequest,
@@ -4873,6 +4874,40 @@ def create_app() -> FastAPI:
             # The downloaded build workspace is on disk → in-place (§2a) today.
             body["materialization"] = session_env.prepare(session_key, source_path)
         return SourceSwitchResponse.model_validate(body)
+
+    @app.post(
+        "/api/source/materialize-repo",
+        tags=["Workspaces & sources"],
+        summary="Materialize a managed (repo, ref) — clone + uv sync, async",
+        response_model=None,  # returns a dynamic status dict or a JSONResponse error
+    )
+    def source_materialize_repo(
+        req: MaterializeRepoRequest,
+        request: Request,
+    ) -> Union[dict, JSONResponse]:
+        """Kick off async materialization of a managed ``(repo, ref)`` source
+        (materialization-lifecycle §2/§9c): clone the repo (bare-mirror cache) +
+        `uv sync` its venv, out-of-band (both can be minutes, §1). Returns the
+        initial ``materialization`` status; poll `GET /api/source/materialization`
+        (`cloning → syncing → ready | failed`) until terminal.
+
+        This provisions + caches the environment; it does **not** switch the
+        session's active workspace to the staged checkout (a deferred binding
+        decision — see docs/materialization-lifecycle.md §11). Requires a session
+        (a browser cookie); a cookie-less caller gets 400.
+
+        Status codes:
+          - 400  missing ``repo``/``ref`` or no session
+          - 200  ``{materialization: {status, phase, ...}}``
+        """
+        repo = (req.repo or "").strip()
+        ref = (req.ref or "").strip()
+        if not repo or not ref:
+            return JSONResponse(status_code=400, content={"error": "repo and ref are required"})
+        session_key = _session_key_of(request)
+        if not session_key:
+            return JSONResponse(status_code=400, content={"error": "no session"})
+        return {"materialization": session_env.prepare_managed(session_key, repo, ref)}
 
     @app.get(
         "/api/source/materialization",

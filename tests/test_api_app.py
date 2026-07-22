@@ -6521,3 +6521,31 @@ def test_materialization_endpoint_in_openapi(client):
     paths = client.get("/openapi.json").json()["paths"]
     assert "/api/source/materialization" in paths
     assert "get" in paths["/api/source/materialization"]
+
+
+def test_materialize_repo_starts_job_and_returns_status(client, monkeypatch):
+    """POST /api/source/materialize-repo kicks off a managed job and returns the
+    materialization envelope for the calling session."""
+    from vivarium_workbench.lib import session_env
+    monkeypatch.setattr(
+        session_env, "prepare_managed",
+        lambda key, repo, ref, **k: {"managed": True, "repo": repo, "ref": ref,
+                                     "status": "materializing", "phase": "cloning"})
+    r = client.post("/api/source/materialize-repo",
+                    json={"repo": "https://x/r.git", "ref": "main"})
+    assert r.status_code == 200, r.text
+    mat = r.json()["materialization"]
+    assert mat["status"] == "materializing"
+    assert mat["repo"] == "https://x/r.git" and mat["ref"] == "main"
+
+
+def test_materialize_repo_requires_repo_and_ref(client):
+    assert client.post("/api/source/materialize-repo", json={"ref": "main"}).status_code == 400
+    assert client.post("/api/source/materialize-repo", json={"repo": "r"}).status_code == 400
+    assert client.post("/api/source/materialize-repo", json={}).status_code == 400
+
+
+def test_materialize_repo_in_openapi(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/api/source/materialize-repo" in paths
+    assert "post" in paths["/api/source/materialize-repo"]
