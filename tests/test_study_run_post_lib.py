@@ -340,21 +340,24 @@ def test_render_study_visualizations_no_viz_is_noop(tmp_path, monkeypatch):
     assert out == ([], [])
 
 
-def test_render_study_visualizations_happy_writes_and_reads_ws_root(tmp_path, monkeypatch):
-    _quiet_discover(monkeypatch)
-    _install_fake_core(monkeypatch)
-
+def test_render_study_visualizations_happy_writes_and_passes_effective_spec(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     _write_workspace_yaml(ws)
     study_dir = tmp_path / "study"
     (study_dir / "viz").mkdir(parents=True)
 
-    # The lib function takes ws_root explicitly (no WORKSPACE global). Success +
-    # the ws-on-sys.path assertion below prove it reads the passed ws_root.
+    # The default-viz discovery + the core/render hooks now come from the env
+    # worker — stub both seams (no worker spawned, no in-process build_core).
+    import vivarium_workbench.lib.composite_lookup as cl
+    import vivarium_workbench.lib.viz_render as vr
+    monkeypatch.setattr(cl, "_discover_generators_via_worker", lambda ws_root: {})
+    monkeypatch.setattr(vr, "viz_render_hooks",
+                        lambda ws_root: ({}, lambda doc, _r=None: "<html>"))
+
     captured = {}
 
-    def fake_render_visualizations(effective_spec, sd, name, core_registry=None,
-                                   build_and_run=None):
+    def fake_render_visualizations(effective_spec, sd, name, inputs_by_class=None,
+                                   core_registry=None, build_and_run=None):
         captured["spec"] = effective_spec
         captured["name"] = name
         p = sd / "viz" / "v1.html"
@@ -372,8 +375,6 @@ def test_render_study_visualizations_happy_writes_and_reads_ws_root(tmp_path, mo
     assert written == ["viz/v1.html"]
     assert (study_dir / "viz" / "v1.html").exists()
     assert captured["name"] == "study-x"
-    # ws_root was added to sys.path.
-    assert str(ws) in sys.path
 
 
 def test_run_post_run_scripts_detects_write_with_stale_mtime(tmp_path, monkeypatch):

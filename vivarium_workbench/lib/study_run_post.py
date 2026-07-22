@@ -254,18 +254,13 @@ def render_study_visualizations(ws_root, study_dir, spec, spec_id):
     ``{error: <msg>}`` for global failures (per-viz failures are handled
     inside ``render_visualizations`` and surface as error-stub HTML).
     """
-    try:
-        from pbg_superpowers.composite_generator import (
-            _REGISTRY, discover_generators,
-        )
-        from vivarium_workbench.lib.investigations import render_visualizations
-    except ImportError as e:
-        return [], [{"error": f"viz render deps missing: {e}"}]
+    from vivarium_workbench.lib.investigations import render_visualizations
 
-    if not _REGISTRY:
-        discover_generators()
-    entry = _REGISTRY.get(spec_id)
-    default_viz = list(getattr(entry, "visualizations", []) or []) if entry else []
+    # The composite generator's default visualizations come from the env worker's
+    # generator discovery (composite_lookup), not an in-process _REGISTRY import.
+    from vivarium_workbench.lib.composite_lookup import _discover_generators_via_worker
+    gen_entry = _discover_generators_via_worker(ws_root).get(spec_id)
+    default_viz = list((gen_entry or {}).get("visualizations") or [])
     study_viz = list(spec.get("visualizations") or [])
     by_name: dict[str, dict] = {}
     for v in default_viz + study_viz:
@@ -298,83 +293,20 @@ def render_study_visualizations(ws_root, study_dir, spec, spec_id):
     effective_spec = dict(spec)
     effective_spec["visualizations"] = merged
 
-    # Build core + viz registry + build_and_run hook — render_visualizations
-    # refuses to operate without a build_and_run callable, and bigraph-schema's
-    # `local:<name>` address resolution goes through `core.link_registry`, so
-    # viz classes must be registered onto the core itself (not just our local
-    # dict). Mirrors the legacy /api/investigation-run wiring.
-    #
-    # Make the workspace's own Python package(s) importable (replicated inline
-    # from server._ws_add_to_sys_path to avoid a lib→server edge).
-    _ws = str(ws_root)
-    if _ws not in sys.path:
-        sys.path.insert(0, _ws)
-    try:
-        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
-        pkg_name = ws_data.get("package_path") or (
-            "pbg_" + ws_data.get("name", "").replace("-", "_"))
-        core_module = __import__(f"{pkg_name}.core", fromlist=["build_core"])
-        core = core_module.build_core()
-        registry = dict(core.link_registry)
-    except Exception as e:  # noqa: BLE001
-        return [], [{"error": f"failed to build core for viz: {e}"}]
-
-    # pbg-superpowers default Visualization classes.
-    try:
-        from pbg_superpowers.visualizations import (
-            TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
-        )
-        for cls in (TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap):
-            core.register_link(cls.__name__, cls)
-            registry[cls.__name__] = cls
-    except ImportError:
-        pass
-
-    # Discover every Visualization subclass loaded in the process (e.g.
-    # v2ecoli's WorkflowVisualization / NetworkVisualization / ColonyVisualization,
-    # plus any future wrapper-shipped viz). Walks the __subclasses__ tree
-    # so classes only loaded transitively still register.
-    try:
-        from pbg_superpowers.visualization import Visualization
-        import importlib
-        # Force-load workspace + every installed bigraph-schema-dependent
-        # package so their @Visualization classes appear in the subclass tree.
-        from pbg_superpowers.composite_generator import discover_generators
-        discover_generators()  # imports the same packages composite discovery walks
-
-        def _walk(cls):
-            for sub in cls.__subclasses__():
-                yield sub
-                yield from _walk(sub)
-        for sub in _walk(Visualization):
-            if sub.__name__ in registry:
-                continue
-            try:
-                core.register_link(sub.__name__, sub)
-                registry[sub.__name__] = sub
-            except Exception:
-                pass
-    except Exception:  # noqa: BLE001 — discovery is best-effort
-        pass
-
-    def build_and_run(viz_doc, registry_arg):
-        """Hook for render_visualizations: build composite, run 1 step,
-        return the output_store html string."""
-        from process_bigraph import Composite
-        composite = Composite({'state': viz_doc}, core=core)
-        composite.run(1)
-        state = composite.state
-        html = state.get('output_store')
-        if isinstance(html, dict):
-            html = html.get('value') or html.get('_value') or ''
-        return html if isinstance(html, str) else ''
+    # The core build + viz-class registration + the per-viz Composite.run all
+    # happen in the env worker (live viz classes + core, kept out of the HTTP
+    # process). `viz_render_hooks` gives render_visualizations the two seams it
+    # needs: an inputs-by-class map (so build_viz_composite needs no live class)
+    # and a worker-backed build_and_run.
+    from vivarium_workbench.lib.viz_render import viz_render_hooks
+    inputs_by_class, build_and_run = viz_render_hooks(ws_root)
 
     try:
         paths = render_visualizations(
             effective_spec,
             study_dir,
             spec.get("name", ""),
-            core_registry=registry,
+            inputs_by_class=inputs_by_class,
             build_and_run=build_and_run,
         )
         written = [str(Path(p).relative_to(study_dir)) for p in paths]
