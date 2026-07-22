@@ -16,13 +16,15 @@ Status: **in progress.** Transport + lifecycle and the `initialize` / `ping` /
 (`vivarium_workbench/env_worker.py`, warm-pooled via `lib/env_worker_pool.py`);
 `registry.build_registry`, `visualization_classes.list_visualization_classes`,
 `composite_state_views.build_composite_state` (generator branch), and
-`observables_views.build_observables` / `build_study_observable_check` route
-through the worker today. Each `observables`-family method takes a generator
-`ref` OR an inline resolved `{state, schema}` document (the workbench owns the
-spec-file resolution, §13). The remaining methods (`composite_document`,
-`declared_emit_paths`), the static-fallback / spec-file branches' in-process
-`attach_process_docs`, and `readouts_views`'s in-process
-`build_composite_state_for_observables` are still in-process pending their slices.
+`observables_views.build_observables` / `build_study_observable_check`, and
+`readouts_views.build_study_readouts` route through the worker today. Each
+`observables`-family method takes a generator `ref` OR an inline resolved
+`{state, schema}` document (the workbench owns the spec-file resolution, §13).
+The remaining methods (`composite_document`, `declared_emit_paths`) and the
+composite-state static-fallback / spec-file branches' in-process
+`attach_process_docs` are still in-process pending their slices.
+(`observables_views.build_composite_state_for_observables` remains as a public
+in-process builder, now used only by tests — no request path calls it.)
 
 ---
 
