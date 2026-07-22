@@ -3496,7 +3496,10 @@
       : fetch('/api/investigations').then(function(r) { return r.json(); })
     ).catch(function() { return {investigations: []}; });
     var p2 = hasIsetUI
-      ? fetch('/api/investigation-summaries').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; })
+      ? (window.DataSource && window.DataSource.loadIsetList
+          ? window.DataSource.loadIsetList()
+          : fetch('/api/investigation-summaries').then(function(r) { return r.json(); })
+        ).catch(function() { return {investigations: []}; })
       : Promise.resolve({investigations: []});
     Promise.all([p1, p2]).then(function(arr) {
       window._investigations = arr[0].investigations || [];
