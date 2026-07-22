@@ -178,10 +178,14 @@ the worker services them serially, §8). `id`s are workbench-assigned, monotonic
 
 ## 7. Lifecycle
 
+0. **Precondition — materialization.** The worker is spawned only once the
+   session's venv is **ready**. Cloning the source + `uv sync` is a minutes-scale,
+   asynchronous, out-of-band step with its own long timeout and a `MATERIALIZING`
+   session state — NOT a query under the 60 s socket timeout below. See
+   [`materialization-lifecycle.md`](materialization-lifecycle.md).
 1. **Spawn.** The `WorkspaceContext` (owning the session) asks
-   `EnvironmentResolver` to start a worker for its `WorkspaceHandle`. The
-   resolver materializes/locates the venv (clone + `uv sync`, §2A.7) and spawns
-   the worker on `<venv>/bin/python` with the socketpair fd.
+   `EnvironmentResolver` to start a worker for its `WorkspaceHandle`, on the
+   already-materialized `<venv>/bin/python`, with the socketpair fd.
 2. **Initialize.** Workbench sends `initialize`. The worker runs `build_core()`
    and primes the registry, then replies with the handshake (§11 `initialize`):
    `{ protocol_version, workspace_id, source_version, python, packages,
