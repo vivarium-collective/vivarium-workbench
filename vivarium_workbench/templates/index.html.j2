@@ -1310,12 +1310,17 @@ window.addEventListener('pageshow', function (e) {
 
   <div id="ce-main" style="display:none">
 
-    <!-- Metadata header -->
-    <div class="panel">
-      <h3 id="ce-name"></h3>
-      <p id="ce-description" class="muted"></p>
-      <p><strong>ID:</strong> <code id="ce-id"></code></p>
-      <p><strong>Module:</strong> <code id="ce-module"></code> <span id="ce-kind" class="kind-badge"></span></p>
+    <!-- Metadata header — compact single card so the loom iframe below fills the
+         viewport (was ~4 lines tall). ce-module kept (JS sets it) but folded into
+         the id line's title; ce-description trimmed to one muted line. -->
+    <div class="panel" id="ce-meta" style="flex:none;padding:9px 14px">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <h3 id="ce-name" style="margin:0;font-size:1.1em"></h3>
+        <span id="ce-kind" class="kind-badge"></span>
+        <code id="ce-id" style="font-size:0.82em;color:#64748b"></code>
+        <span id="ce-description" class="muted" style="font-size:0.86em;flex:1;min-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      </div>
+      <code id="ce-module" style="display:none"></code>
     </div>
 
     <!-- Loom explorer: bigraph-loom iframe (Setup & Run tab lives inside) -->
@@ -1326,7 +1331,7 @@ window.addEventListener('pageshow', function (e) {
       <iframe id="composite-explore-frame"
               src="/bigraph-loom/index.html"
               title="Composite Explorer"
-              style="width:100%;height:calc(100vh - 200px);min-height:640px;border:1px solid #ddd;background:#fff"></iframe>
+              style="width:100%;height:calc(100vh - 120px);min-height:520px;border:1px solid #ddd;background:#fff"></iframe>
     </div>
 
   </div>
