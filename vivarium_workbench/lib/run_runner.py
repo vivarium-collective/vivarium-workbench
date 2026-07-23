@@ -9,6 +9,7 @@ is loaded from that file, never from argv, which structurally eliminates the
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import traceback
@@ -577,6 +578,21 @@ def execute(request_path: Path) -> int:
 
     if str(req.workspace) not in sys.path:
         sys.path.insert(0, str(req.workspace))
+
+    # Tell the composite where THIS run lives. A composite that only emits
+    # through the injected emitter needs none of this, but one that produces its
+    # own on-disk artifacts (a workflow-driving composite writing a parquet
+    # sweep, analysis HTML, exports) otherwise has no way to learn the run it is
+    # part of — so it writes to a fixed path in the workspace, every run
+    # overwrites the last, and the run's own viewers find nothing where they
+    # look. SWEEP_DIR is deliberately the exact path _render_canonical_viz hands
+    # ParquetAnalysisView, so artifacts written there are the ones the run
+    # renders. Read them with os.environ.get(...) and fall back to your own
+    # default: they are absent when the composite is built outside a run.
+    os.environ["VIVARIUM_WORKBENCH_RUN_ID"] = str(req.run_id)
+    os.environ["VIVARIUM_WORKBENCH_RUN_DIR"] = str(run_dir)
+    os.environ["VIVARIUM_WORKBENCH_SWEEP_DIR"] = str(
+        Path(run_dir) / "parquet" / req.run_id)
 
     # SP-D2: a 'deployment'-target run dispatches to sms-api /compose/v1 instead of
     # running the composite in this local subprocess. Same detached-runner model,
