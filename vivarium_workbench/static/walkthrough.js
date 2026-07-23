@@ -12128,16 +12128,68 @@
         + '</div>';
     }
 
+    // Live study-search filter (the #viv-rail-study-search input). Token-AND
+    // over a broad per-study haystack (name/title/objective/tags + the group
+    // title), so e.g. "basal simulation" finds the `basal` study in the
+    // v2ecoli-vEcoli comparison investigation. While searching, non-matching
+    // groups are hidden and matching groups are force-expanded so hits show.
+    var q = (window._railStudyQuery || '').trim().toLowerCase();
+    var tokens = q ? q.split(/\s+/) : [];
+    var searching = tokens.length > 0;
+
+    // AND-first, OR-fallback. Prefer studies matching EVERY token (precise); but
+    // if nothing matches all tokens, fall back to matching ANY token so a natural
+    // phrase like "basal simulation" still surfaces the `basal` study even when
+    // "simulation" appears in none of its fields.
+    var requireAll = searching && ordered.some(function(g) {
+      return g.studies.some(function(s) { return _studyMatchesQuery(s, g.title, tokens, true); });
+    });
+
     var html = ordered.map(function(g, i) {
-      // With no active investigation, open the first group so the rail isn't
+      var studies = g.studies;
+      if (searching) {
+        studies = g.studies.filter(function(s) {
+          return _studyMatchesQuery(s, g.title, tokens, requireAll);
+        });
+        if (!studies.length) return '';   // hide groups with no match
+        g = { name: g.name, title: g.title, studies: studies, _ungrouped: g._ungrouped };
+      }
+      // While searching, force groups open so matches are visible. Otherwise:
+      // with no active investigation, open the first group so the rail isn't
       // entirely collapsed on load.
-      return _railGroupHtml(g, !hasActive && i === 0);
+      return _railGroupHtml(g, searching || (!hasActive && i === 0));
     }).join('');
+
+    if (!html && searching) {
+      html = '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
+           + 'padding:6px 14px;font-style:italic">No studies match “' + _esc(q) + '”.</div>';
+    }
 
     host.innerHTML = html
       || '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
        + 'padding:6px 14px;font-style:italic">No studies yet.</div>';
   }
+
+  // A study matches the rail search when EVERY whitespace-delimited token of the
+  // query is a substring of its combined searchable text (study fields + the
+  // investigation/group title it's rendered under). Broad + forgiving on purpose.
+  function _studyMatchesQuery(s, groupTitle, tokens, requireAll) {
+    if (!tokens || !tokens.length) return true;
+    var hay = [
+      s.name, s.title, s.slug, s.objective, s.question, s.description,
+      s.summary, s.status, groupTitle,
+      Array.isArray(s.tags) ? s.tags.join(' ') : ''
+    ].filter(Boolean).join(' ').toLowerCase();
+    return requireAll
+      ? tokens.every(function(t) { return hay.indexOf(t) !== -1; })
+      : tokens.some(function(t) { return hay.indexOf(t) !== -1; });
+  }
+
+  // Study-search input handler: store the query and re-render the rail groups.
+  window._filterRailStudies = function(value) {
+    window._railStudyQuery = String(value || '');
+    _renderRailInvestigationGroups();
+  };
 
   // Per-workspace localStorage key for the remembered investigation. The URL
   // path differs per hosted workspace (base-path), so it namespaces cleanly.
@@ -14862,12 +14914,38 @@
     var studyVal = studySel ? studySel.value : '';
     var emitterVal = emitterSel ? emitterSel.value : '';
 
+    // Dropdown filters first (Investigation / Study / Emitter).
     var visible = rows.filter(function (r) {
       if (invVal && _simInvestigation(r) !== invVal) return false;
       if (studyVal && _simStudy(r) !== studyVal) return false;
       if (emitterVal && (r.emitter_type || 'SQLite') !== emitterVal) return false;
       return true;
     });
+
+    // Free-text search (#sim-text-filter) over each run's searchable fields
+    // (study, investigation, run name/label/id, spec, status, emitter, origin),
+    // combined with the dropdowns above. AND-first, OR-fallback: prefer runs
+    // matching EVERY token; if none do, match ANY token so a natural phrase
+    // still surfaces relevant runs.
+    var textEl = document.getElementById('sim-text-filter');
+    var textTokens = textEl && textEl.value.trim()
+      ? textEl.value.trim().toLowerCase().split(/\s+/) : [];
+    if (textTokens.length) {
+      var _simHay = function (r) {
+        return [
+          _simStudy(r), _simInvestigation(r), r.status, r.emitter_type,
+          _simOriginLabel(r), r.sim_name, r.label, r.run_id, r.spec_id
+        ].filter(Boolean).join(' ').toLowerCase();
+      };
+      var andRows = visible.filter(function (r) {
+        var h = _simHay(r);
+        return textTokens.every(function (t) { return h.indexOf(t) !== -1; });
+      });
+      visible = andRows.length ? andRows : visible.filter(function (r) {
+        var h = _simHay(r);
+        return textTokens.some(function (t) { return h.indexOf(t) !== -1; });
+      });
+    }
 
     visible = _sortSimRows(visible, _simSortState.key, _simSortState.dir);
 
@@ -14903,6 +14981,9 @@
       }
     }
   }
+
+  // Exposed for the #sim-text-filter input's inline oninput handler.
+  window._applySimFilter = _applySimFilter;
 
   // Rebuild the Study + Emitter <select> option lists from the current data.
   function _populateSimFilters() {

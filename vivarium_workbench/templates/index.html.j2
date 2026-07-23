@@ -560,6 +560,14 @@ window.addEventListener('pageshow', function (e) {
     <!-- Studies of the active investigation, dependency-ordered. -->
     <div class="viv-rail-section" id="viv-rail-studies-section">
       <div class="viv-rail-section-label">Studies</div>
+      <!-- Live study search: filters the grouped-by-investigation list below.
+           Lives OUTSIDE #viv-rail-investigations (which is re-rendered on every
+           keystroke) so the input keeps focus. -->
+      <input id="viv-rail-study-search" type="search" placeholder="Search studies…"
+             autocomplete="off" spellcheck="false" aria-label="Search studies"
+             oninput="window._filterRailStudies && window._filterRailStudies(this.value)"
+             style="width:calc(100% - 24px);margin:2px 12px 6px;padding:4px 8px;font-size:0.82em;
+                    color:#374151;border:1px solid #e5e7eb;border-radius:4px;background:#fff;box-sizing:border-box;" />
       <div id="viv-rail-investigations">
         <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
       </div>
@@ -1113,6 +1121,11 @@ window.addEventListener('pageshow', function (e) {
   </p>
 
   <div style="margin: 8px 0 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+    <input id="sim-text-filter" type="search" placeholder="Search runs…"
+           autocomplete="off" spellcheck="false" aria-label="Search simulations"
+           oninput="window._applySimFilter && window._applySimFilter()"
+           style="padding:5px 10px; font-size:13px; border:1px solid #d1d5db;
+                  border-radius:4px; min-width:180px; flex:1 1 220px; max-width:340px;" />
     <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
       Investigation
       <select id="sim-inv-filter" style="padding:4px 8px; font-size:13px;
