@@ -10,7 +10,8 @@ import { toPng, toSvg } from 'html-to-image';
 import ProcessNode from './nodes/ProcessNode';
 import StoreNode from './nodes/StoreNode';
 import FloatingStoreEdge from './edges/FloatingStoreEdge';
-import { applyLayout } from './layout';
+import { useLayoutMode } from './hooks/useLayoutMode';
+import { LAYOUT_MODES } from './layouts/registry';
 import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
@@ -30,7 +31,8 @@ import {
 } from './api';
 import type { ExploreInspectMsg, ParameterDecl } from './api';
 
-// applyLayout(nodes, edges) → Node[] (returns nodes array directly)
+// Layout runs go through the mode registry (see hooks/useLayoutMode): a mode's
+// run() returns { nodes, bands? }, so call sites destructure `nodes`.
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 const EDGE_TYPES = { floating: FloatingStoreEdge };
 
@@ -84,6 +86,10 @@ export default function App() {
   const [emitSet, setEmitSet] = useState<Set<string>>(
     () => initialEmitSet(decodeUrlComposite()),
   );
+  // Which layout mode arranges the graph, and the dispatcher that runs it.
+  // Only 'hierarchy' is registered today; adding a mode to layouts/registry
+  // makes it selectable from the toolbar with no change here.
+  const layoutMode = useLayoutMode();
   const [tab, setTab] = useState<TabId>('setup');
   const [compositeId, setCompositeId] = useState<string | null>(() => {
     // Bootstrap from URL query if present (for popups deep-linked with ?id=)
@@ -207,10 +213,15 @@ export default function App() {
   // Debounced save of current node positions to localStorage. Built once;
   // stable across re-renders. The callback closes over `compositeId` via the
   // effect below that reads the latest nodes.
-  const debouncedPersistRef = useRef<((id: string, positions: ReturnType<typeof positionsFromNodes>) => void) | null>(null);
+  // Positions are scoped to the active layout mode, so switching modes doesn't
+  // overwrite the arrangement the user built in the other one.
+  const debouncedPersistRef = useRef<
+    ((id: string, positions: ReturnType<typeof positionsFromNodes>, modeId: string) => void) | null
+  >(null);
   if (!debouncedPersistRef.current) {
     debouncedPersistRef.current = debounce(
-      (id: string, positions: ReturnType<typeof positionsFromNodes>) => saveLayout(id, positions),
+      (id: string, positions: ReturnType<typeof positionsFromNodes>, modeId: string) =>
+        saveLayout(id, positions, modeId),
       250,
     );
   }
@@ -260,9 +271,11 @@ export default function App() {
     const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
 
     (async () => {
-      const saved = loadLayout(compositeId);
-      const laid = await applyLayout(visibleNodes as any, visibleEdges as any);
-      const withSaved = applySavedPositions(laid as any, saved) as any[];
+      const saved = loadLayout(compositeId, layoutMode.modeId);
+      const { nodes: laidOut } = await layoutMode.runLayout(
+        visibleNodes as any, visibleEdges as any, compositeId, 'mid',
+      );
+      const withSaved = applySavedPositions(laidOut as any, saved) as any[];
       if (cancelled) return;
       // Apply the CURRENT hidden set to the freshly-rebuilt nodes + edges (read
       // via ref, not a dep). Without this, rebuilding edges here would drop the
@@ -291,7 +304,10 @@ export default function App() {
     })();
 
     return () => { cancelled = true; };
-  }, [state, raw, collapsed, compositeId, setNodes, setEdges]);
+    // layoutMode.modeId / runLayout: switching layout mode re-runs the layout.
+    // `hidden` is deliberately NOT a dep — see hiddenRef above.
+  }, [state, raw, collapsed, compositeId, setNodes, setEdges,
+      layoutMode.modeId, layoutMode.runLayout]);
 
   // Toggle the `hidden` CSS flag on existing nodes/edges WITHOUT relayout or
   // remount. O(changed nodes): only nodes/edges whose hidden state actually
@@ -317,12 +333,12 @@ export default function App() {
   // time a composite renders. Subsequent drags update the same store.
   useEffect(() => {
     if (!compositeId || nodes.length === 0) return;
-    debouncedPersistRef.current?.(compositeId, positionsFromNodes(nodes as any));
-  }, [nodes, compositeId]);
+    debouncedPersistRef.current?.(compositeId, positionsFromNodes(nodes as any), layoutMode.modeId);
+  }, [nodes, compositeId, layoutMode.modeId]);
 
   const handleResetLayout = useCallback(() => {
     if (!compositeId) return;
-    clearLayout(compositeId);
+    clearLayout(compositeId, layoutMode.modeId);
     // Force a re-layout by bumping a dependency. Simplest: clear nodes so the
     // layout effect sees `!state` is false but `nodes.length === 0`, then on
     // the next state-driven tick it lays out fresh. Cleaner: just toggle
@@ -344,7 +360,10 @@ export default function App() {
         );
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
-      const laid = await applyLayout(visibleNodes as any, visibleEdges as any) as any[];
+      const { nodes: laidOut } = await layoutMode.runLayout(
+        visibleNodes as any, visibleEdges as any, compositeId, 'mid',
+      );
+      const laid = laidOut as any[];
       // Reuse unchanged node objects so consolidating the layout doesn't remount
       // nodes that kept their position + hidden state.
       setNodes((prev: any[]) => {
@@ -385,7 +404,8 @@ export default function App() {
         }
       }, 60);
     })();
-  }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges]);
+  }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges,
+      layoutMode.modeId, layoutMode.runLayout]);
 
   // ---- Saved views ---------------------------------------------------------
   // A "view" snapshots the current arrangement + visibility. Capturing reads the
@@ -395,18 +415,24 @@ export default function App() {
     positions: positionsFromNodes(nodes as any),
     collapsed: [...collapsed],
     hidden: [...hidden],
-  }), [nodes, collapsed, hidden]);
+    // Record the mode the arrangement was captured in, so applying the view
+    // restores the layout it was built for.
+    mode: layoutMode.modeId,
+  }), [nodes, collapsed, hidden, layoutMode.modeId]);
 
   // Applying a view pins its positions (via the layout store, which the layout
   // effect reads) and sets collapsed/hidden — the existing effects re-lay-out
   // and toggle visibility. Then re-fit so the saved arrangement is framed.
   const applyView = useCallback((view: View) => {
     if (!compositeId || !view) return;
-    saveLayout(compositeId, view.positions || {});
+    // Legacy views carry no mode; normalizeView defaults them to 'hierarchy'.
+    const viewMode = view.mode || layoutMode.modeId;
+    saveLayout(compositeId, view.positions || {}, viewMode);
+    if (viewMode !== layoutMode.modeId) layoutMode.setModeId(viewMode);
     setCollapsed(new Set(view.collapsed || []));
     setHidden(new Set(view.hidden || []));
     window.setTimeout(() => rfRef.current?.fitView?.({ padding: 0.15, duration: 400 }), 240);
-  }, [compositeId]);
+  }, [compositeId, layoutMode.modeId, layoutMode.setModeId]);
 
   // On open, apply a startup view ONCE per composite, in priority order:
   //   1. ?view=<encoded>   (ad-hoc shareable link)
@@ -646,6 +672,21 @@ export default function App() {
                     captureCurrentView={captureCurrentView}
                     applyView={applyView}
                   />
+                  <select
+                    className="loom-mode-select"
+                    value={layoutMode.modeId}
+                    onChange={(e) => layoutMode.setModeId(e.target.value)}
+                    title="Layout mode"
+                    style={{
+                      padding: '4px 6px', fontSize: 12,
+                      background: '#fff', border: '1px solid #d1d5db',
+                      borderRadius: 4, cursor: 'pointer', color: '#374151',
+                    }}
+                  >
+                    {LAYOUT_MODES.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
                   <button
                     onClick={handleResetLayout}
                     title="Re-run auto-layout on the currently visible nodes and fit the view"

@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
 import App from '../App';
+import { LAYOUT_MODES, DEFAULT_MODE_ID } from '../layouts/registry';
 
 // React Flow relies on ResizeObserver, which jsdom doesn't provide.
 beforeAll(() => {
@@ -62,6 +63,18 @@ describe('App static mode initial tab', () => {
     expect((await screen.findAllByText((t) => t.includes('seed'))).length).toBeGreaterThan(0);
     const input = await screen.findByLabelText(/seed/i) as HTMLInputElement;
     expect(input.value).toBe('7');
+  });
+});
+
+describe('App layout-mode switcher', () => {
+  afterEach(() => { cleanup(); });
+
+  it('renders one option per registered layout mode, defaulting to hierarchy', () => {
+    render(<App />);
+    postCompositeLoad({ id: 'test.composites.demo', name: 'demo' });
+    const select = screen.getByTitle('Layout mode') as HTMLSelectElement;
+    expect(select.value).toBe(DEFAULT_MODE_ID);
+    expect([...select.options].map((o) => o.value)).toEqual(LAYOUT_MODES.map((m) => m.id));
   });
 });
 
