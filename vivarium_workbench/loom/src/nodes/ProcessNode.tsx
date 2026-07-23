@@ -22,8 +22,8 @@ function _classifyStep(address: string | undefined, label: string | undefined): 
 function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   const inputPorts = data.inputPorts ?? [];
   const outputPorts = data.outputPorts ?? [];
-  const portSchema = (data as any).inputPortsSchema ?? {};
-  const outSchema = (data as any).outputPortsSchema ?? {};
+  const portSchema = data.inputPortsSchema ?? {};
+  const outSchema = data.outputPortsSchema ?? {};
   const stepKind = _classifyStep((data as any).address, data.label);
 
   return (

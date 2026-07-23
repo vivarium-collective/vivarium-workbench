@@ -18,6 +18,9 @@ export interface ProcessNodeData {
   inputPorts: string[];
   outputPorts: string[];
   description?: string;
+  /** port -> dotted wire target, relative to the process's parent store. */
+  inputPortsSchema?: Record<string, string>;
+  outputPortsSchema?: Record<string, string>;
 }
 
 export type BigraphNodeData = StoreNodeData | ProcessNodeData;
