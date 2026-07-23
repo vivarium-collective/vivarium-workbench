@@ -117,8 +117,40 @@ def _committed_default_state(ws_root, spec_id: str) -> "dict | None":
     return state if isinstance(state, dict) else None
 
 
+def _live_generator_state(ws_root, spec_id: str) -> "dict | None":
+    """Last-resort default state: BUILD the generator instead of reading a file.
+
+    ``spec.default_state()`` only yields state for a generator that declares a
+    ``default_state_ref``, and :func:`_committed_default_state` only yields it
+    for one whose artifact was regenerated and committed. A generator that has
+    neither — every brand-new one — had no path to wiring at all here, even
+    though ``GET /api/composite-state`` builds it happily via the env worker.
+    That divergence is what made a new composite render "not generated yet" in
+    the Explorer while its loom pop-out worked.
+
+    Routes to the same seam (warm, workspace-interpreter, TTL-cached, so a
+    pop-out and an Explorer open share one build). Returns the bare store
+    mapping — unwrapping the ``{"state": {...}}`` document envelope the builder
+    returns — or None when the build fails or no worker is available (in which
+    case the caller's honest "unavailable" notice still stands).
+    """
+    try:
+        from vivarium_workbench.lib.composite_state_views import build_composite_state
+        body, status = build_composite_state(Path(ws_root), spec_id)
+    except Exception:  # noqa: BLE001 — a failed build must never break resolve
+        return None
+    if status != 200 or not isinstance(body, dict):
+        return None
+    doc = body.get("state")
+    if (isinstance(doc, dict) and isinstance(doc.get("state"), dict)
+            and set(doc) <= {"state", "schema", "composition", "bridge", "interface"}):
+        doc = doc["state"]
+    return doc if isinstance(doc, dict) and doc else None
+
+
 def resolve_composite(
-    ws_root: Path, spec_id: str, overrides: "dict | None" = None
+    ws_root: Path, spec_id: str, overrides: "dict | None" = None,
+    *, allow_build: bool = True,
 ) -> "dict | None":
     """Return the resolve payload dict for a single composite, or ``None`` on miss.
 
@@ -127,9 +159,12 @@ def resolve_composite(
     live handler.  Used by ``publish.build_bundle`` (via the server.py forwarder)
     to pre-build ``api/composite-state/<id>.json`` files.
 
-    A generator whose default-state artifact is missing returns a 200 payload
-    with ``wiring_status:"unavailable"`` and an honest ``notice``.  Only a
-    genuinely-unregistered id returns ``None`` (→ 404).
+    State is sourced in order: the spec's declared ``default_state_ref``, the
+    regen script's committed ``reports/composite-state/<id>.json`` artifact,
+    then — for a generator with neither — a live build via the env worker
+    (:func:`_live_generator_state`).  Only when all three miss does the payload
+    come back 200 with ``wiring_status:"unavailable"`` and an honest ``notice``.
+    Only a genuinely-unregistered id returns ``None`` (→ 404).
 
     Parameters
     ----------
@@ -142,6 +177,10 @@ def resolve_composite(
         Optional parameter overrides (preserved in signature for callers;
         parameter substitution is applied by CompositeSpec.to_document at
         run-time; default_state returns the canonical stored state).
+    allow_build:
+        When False, skip the live-build fallback and report "unavailable"
+        purely from declared/committed state — for callers that must stay
+        file-only (tests, and any path that cannot afford a generator build).
 
     Returns
     -------
@@ -178,11 +217,15 @@ def resolve_composite(
             # artifact from the regen script (reports/composite-state/<id>.json) —
             # serve it so the wiring renders instead of "not generated yet".
             state = _committed_default_state(ws_root, spec_id)
+        if state is None and allow_build and getattr(spec, "kind", None) == "generator":
+            # Neither declared nor committed: build it (see _live_generator_state).
+            state = _live_generator_state(ws_root, spec_id)
         wiring_status = "ready" if state is not None else "unavailable"
         notice = None
         if wiring_status == "unavailable":
             if spec.kind == "generator":
-                notice = (f"default state for generator '{spec.name}' is not generated yet — "
+                built = " (a live build was attempted and failed)" if allow_build else ""
+                notice = (f"default state for generator '{spec.name}' is not generated yet{built} — "
                           f"run it, or regenerate its default-state artifact to see the wiring.")
             else:
                 notice = (f"static composite '{spec.name}' has no inline state to display.")
