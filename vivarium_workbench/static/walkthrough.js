@@ -245,6 +245,39 @@
   }
   window._studyHref = _studyHref;
 
+  // Size an embedded study iframe to the space actually left below it, instead
+  // of the hardcoded calc(100vh - 220px) guess at how tall the chrome above is.
+  // That guess was ~150px short on a 1000px viewport: an 850px porthole onto a
+  // 2100px report, so the report's scrollbar sat inside the page's scrollbar
+  // with a strip of dead space under it. These embeds keep their OWN scroll
+  // context on purpose (the study's .study-tabs are position:sticky and stick to
+  // the iframe's top), so the fix is to make the porthole reach the bottom of
+  // the window — not to auto-grow the iframe, which would strand the tabs.
+  // `panel` is the embed's wrapper (header + iframe). Measuring the header
+  // WITHIN the panel keeps this independent of scroll position — reading the
+  // frame's viewport top instead would race the smooth scrollIntoView that
+  // opens the embed and, mid-flight, compute a negative height that clamps to
+  // the minimum (the bug this replaced).
+  function _fitEmbedToViewport(frame, panel, minH) {
+    if (!frame) return;
+    var fit = function () {
+      if (!frame.isConnected) return;
+      var chrome = 0;
+      if (panel) {
+        var pr = panel.getBoundingClientRect(), fr = frame.getBoundingClientRect();
+        chrome = Math.max(0, Math.round(fr.top - pr.top));   // the embed's own header
+      }
+      var h = Math.max(minH || 480, Math.round(window.innerHeight - chrome - 24));
+      frame.style.height = h + 'px';
+    };
+    fit();
+    if (!frame._fitBound) {
+      window.addEventListener('resize', fit);
+      frame._fitBound = true;
+    }
+  }
+  window._fitEmbedToViewport = _fitEmbedToViewport;
+
   function _openStudyEmbedded(name) {
     if (!name) return;
     var frame = document.getElementById('study-detail-frame');
@@ -263,6 +296,7 @@
     if (nameEl) nameEl.textContent = name;
     window._studyDetailCurrent = name;
     panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+    _fitEmbedToViewport(frame, panel, 560);
   }
   window._openStudyEmbedded = _openStudyEmbedded;
 
@@ -775,8 +809,13 @@
       var bibId = 'bibtex-' + (key || Math.random().toString(36).slice(2));
       bibBlock = '<details style="margin-top:6px">' +
         '<summary style="cursor:pointer;font-size:0.82em;color:#475569">BibTeX</summary>' +
+        // Wrap instead of scroll: a BibTeX entry's `title = {…}` line runs
+        // 200-400px past the panel, and overflow:auto turned every reference
+        // into its own horizontal scrollbar. Wrapping costs a line and removes
+        // the scrollbar entirely.
         '<pre id="' + _esc(bibId) + '" style="background:#f8fafc;border:1px solid #e2e8f0;' +
-        'border-radius:4px;padding:8px;font-size:0.78em;overflow:auto;margin:6px 0">' +
+        'border-radius:4px;padding:8px;font-size:0.78em;margin:6px 0;' +
+        'white-space:pre-wrap;overflow-wrap:anywhere">' +
         _esc(bibtex) + '</pre>' +
         '<button class="action-btn" style="font-size:0.78em;padding:1px 8px" ' +
         'onclick="_copyBibtex(\'' + _esc(bibId) + '\', this)">Copy BibTeX</button>' +
@@ -6307,6 +6346,7 @@
     if (nameEl) nameEl.textContent = name;
     panel.style.display = '';
     panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+    _fitEmbedToViewport(frame, panel, 600);
   }
   window._openStudyInsideInvestigation = _openStudyInsideInvestigation;
 

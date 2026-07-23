@@ -316,6 +316,23 @@ body.focus-mode .viv-content{
 }
 body.focus-mode .page.active{ display:block !important; min-height:0 !important }
 
+/* …except for pages whose whole content is ONE fill-the-viewport app (the loom
+ * iframe). The rules above force .viv-content to display:block, which breaks the
+ * flex chain those pages size themselves with — and an iframe with height:auto
+ * in a block container falls back to its intrinsic 150px, so the Composite
+ * Explorer opened via ?focus=composite-explore rendered a ~150px letterbox with
+ * its own scrollbar inside a page of empty space. Restore the flex column (and
+ * the single-scrollbar contract) for exactly those pages. */
+body.focus-mode.focus-composite-explore .viv-content{
+  display:flex !important; flex-direction:column !important;
+  overflow:hidden !important;
+  padding:8px 12px !important;
+}
+body.focus-mode.focus-composite-explore .page.active{
+  display:flex !important; flex-direction:column !important;
+  flex:1 1 auto !important; min-height:0 !important;
+}
+
 /* ── Composite explorer diagram (v0.5.1.6) ─────────────────────────────
  * Server preserves graphviz's natural pt dimensions; CSS only shrinks
  * the SVG if the container is narrower. For wider containers, the SVG
@@ -572,6 +589,11 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
 }
 .investigation-card .ic-title{
   font-weight:600; font-size:1.02em; color:#111827;
+  /* A flex item's min-width defaults to its CONTENT width, so a long unbroken
+     slug ("colonies-03-wcm-rss-leak") refused to shrink and shoved the
+     flex:none status pill past the card's right edge — 16px of page-wide
+     horizontal scrollbar on the Studies grid, from one card. */
+  min-width:0; overflow-wrap:anywhere;
 }
 .investigation-card .ic-status{
   flex:none;
