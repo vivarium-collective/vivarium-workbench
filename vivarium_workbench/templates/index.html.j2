@@ -755,12 +755,15 @@ window.addEventListener('pageshow', function (e) {
 
 <!-- ===== PAGE: STUDIES ===== -->
 <section id="page-investigations" class="page" data-page="investigations">
-  <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px">
-    <div style="display:flex;gap:8px;align-items:center">
-      <input id="investigations-filter" type="search" placeholder="Filter investigations…"
-             aria-label="Filter investigations" oninput="_filterInvestigations()"
-             style="padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.9em;min-width:220px">
-    </div>
+  <!-- Prominent unified search: matches investigations AND their studies (same
+       engine as the side-rail studies search — see _filterInvestigations). -->
+  <div style="margin:0 0 16px">
+    <input id="investigations-filter" type="search"
+           placeholder="Search investigations and studies…"
+           aria-label="Search investigations and studies" oninput="_filterInvestigations()"
+           style="width:100%;box-sizing:border-box;padding:11px 16px;border:1px solid #d1d5db;
+                  border-radius:10px;font-size:1.05em;background:#fff;
+                  box-shadow:0 1px 2px rgba(0,0,0,0.04);">
   </div>
 
   <!-- List view: grouped investigation cards (Active / Closed). The grid lives on
