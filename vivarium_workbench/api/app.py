@@ -5041,29 +5041,38 @@ def create_app() -> FastAPI:
 
     @app.post("/api/run-delete", tags=["Runs"], summary="Delete a run (row + artifacts)")
     def run_delete(req: RunDeleteRequest, ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """Delete a composite run row from the SQLite store and remove its artifacts.
+        """Fully delete a run: every DB table it lives in, its run dir, study
+        refs, AND a JSONL tombstone.
 
-        Body: ``{"run_id", "db_path"?}`` —
-        ``db_path`` defaults to ``<workspace>/.pbg/composite-runs.db`` when omitted.
-        Only ``run_id`` is required; returns 400 if missing.
+        Delegates to ``lib.simulations_index.delete_simulation`` (same as
+        ``/api/simulation-run``). The previous implementation called
+        ``composite_runs.delete_run``, which cleared only ``runs_meta`` and the
+        run dir — leaving orphaned ``history`` / ``simulations`` rows and, after
+        the pure-JSONL refactor (#554), no tombstone. Without the tombstone the
+        next Sim-DB fold re-synthesised the run from its surviving ``started``
+        event: the Composite Explorer's Delete button appeared to work but the
+        run reappeared as an undeletable "running" phantom.
 
-        Status codes:
-          - 400  ``run_id`` not provided
-          - 200  ``{"deleted": bool}``
+        Body: ``{"run_id", "db_path"?}`` (``db_path`` is now ignored — the run's
+        DB is located by workspace scan). Only ``run_id`` is required.
+
+        Status codes: 400 (no run_id); 404 (run not found); 500 (delete failed);
+        200 the delete summary, with ``deleted`` kept for back-compat with the
+        prior ``{"deleted": bool}`` shape the frontend reads.
         """
-        import shutil
-        if not req.run_id:
+        run_id = (req.run_id or "").strip()
+        if not run_id:
             return JSONResponse(status_code=400, content={"error": "run_id required"})
-        db_path = req.db_path or str(ws / ".pbg" / "composite-runs.db")
-        conn = _composite_runs.connect(db_path)
         try:
-            deleted = _composite_runs.delete_run(conn, run_id=req.run_id)
-        finally:
-            conn.close()
-        art = ws / ".pbg" / "runs" / req.run_id
-        if art.is_dir():
-            shutil.rmtree(art, ignore_errors=True)
-        return JSONResponse(status_code=200, content={"deleted": deleted})
+            summary = _simulations_index.delete_simulation(ws, run_id)
+        except _simulations_index.RunNotFound:
+            return JSONResponse(status_code=404, content={"error": "run not found"})
+        except Exception as e:  # noqa: BLE001 — surface the failure, don't crash
+            return JSONResponse(status_code=500,
+                                content={"error": f"delete failed: {e}"})
+        return JSONResponse(
+            status_code=200,
+            content={"deleted": bool(summary.get("deleted_rows")), **summary})
 
     @app.post(
         "/api/study-tests-run",

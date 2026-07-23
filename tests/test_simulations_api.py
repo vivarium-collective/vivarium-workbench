@@ -177,15 +177,31 @@ def test_delete_simulation_run_removes_everything(server):
     _poll_until_terminal(base, run_id)
 
     # The lib "removes everything" contract: the runs_meta row, its history
-    # rows, and the run's artifact dir are all gone; no per-file errors. (The
-    # SQLiteEmitter's own `simulations` table is intentionally not touched by
-    # this function, so we assert the documented summary rather than the live
-    # server's merged listing.)
+    # rows, the SQLiteEmitter's own `simulations` index row, and the run's
+    # artifact dir are all gone; no per-file errors.
     summary = delete_simulation(ws, run_id)
     assert summary["deleted_rows"] == 1
     assert summary["deleted_history"] >= 1
     assert summary["removed_dir"] is True
     assert summary["errors"] == []
+    # The `simulations` row is gone too — leaving it orphaned re-surfaced the
+    # run as a phantom "running" entry the Sim-DB fold could not shake. (Read the
+    # DB by its known path: _find_db_for_run locates a DB *by* the run, so it
+    # returns None once the rows are gone.)
+    import sqlite3
+    db_path = Path(ws) / ".pbg" / "composite-runs.db"
+    if db_path.is_file():
+        conn = sqlite3.connect(str(db_path))
+        try:
+            has_sims = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='simulations'").fetchone()
+            if has_sims:
+                assert conn.execute(
+                    "SELECT count(*) FROM simulations WHERE simulation_id=?",
+                    (run_id,)).fetchone()[0] == 0
+        finally:
+            conn.close()
 
 
 def test_delete_simulation_run_404_unknown(server):

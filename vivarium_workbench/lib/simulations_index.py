@@ -873,25 +873,39 @@ def _find_db_for_run(workspace: Path, run_id: str) -> tuple[Path, str] | None:
 
 
 def _delete_db_rows(db_path: Path, run_id: str) -> tuple[int, int]:
-    """Delete runs_meta + history rows for ``run_id``. Single transaction.
+    """Delete a run's rows across EVERY table it may live in. One transaction.
 
-    Returns (rows_deleted, history_rows_deleted).
+    Three tables can hold rows for one run: ``runs_meta`` (the run's metadata),
+    ``history`` (the SQLiteEmitter's per-step trajectory, keyed
+    ``simulation_id``), and ``simulations`` (the SQLiteEmitter's own run index,
+    also keyed ``simulation_id``). Clearing only the first two left orphaned
+    ``simulations`` rows that the Sim-DB fold re-surfaced as phantom "running"
+    entries a user could not delete — the exact reappearance this delete path is
+    meant to prevent. Each table is dropped only if present (a run may predate
+    one, or use a different emitter).
+
+    Returns (rows_deleted, history_rows_deleted); the ``simulations`` count is
+    folded into neither — it is bookkeeping the caller's summary doesn't expose.
     """
+    def _has_table(conn, name: str) -> bool:
+        return conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (name,),
+        ).fetchone() is not None
+
     conn = cr.connect(db_path)
     try:
-        has_history = conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name='history'"
-        ).fetchone()
-        if has_history:
-            cur = conn.execute(
-                "DELETE FROM history WHERE simulation_id=?", (run_id,))
-            history_rows = cur.rowcount or 0
-        else:
-            history_rows = 0
-        cur = conn.execute(
-            "DELETE FROM runs_meta WHERE run_id=?", (run_id,))
-        meta_rows = cur.rowcount or 0
+        history_rows = 0
+        if _has_table(conn, "history"):
+            history_rows = conn.execute(
+                "DELETE FROM history WHERE simulation_id=?", (run_id,)
+            ).rowcount or 0
+        if _has_table(conn, "simulations"):
+            conn.execute(
+                "DELETE FROM simulations WHERE simulation_id=?", (run_id,))
+        meta_rows = conn.execute(
+            "DELETE FROM runs_meta WHERE run_id=?", (run_id,)
+        ).rowcount or 0
         conn.commit()
         return meta_rows, history_rows
     finally:
