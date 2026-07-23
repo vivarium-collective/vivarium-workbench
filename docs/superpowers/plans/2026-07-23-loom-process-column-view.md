@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give bigraph-loom a pluggable layout-mode registry, then use it to add a process-column view with store-affinity clustering, focus-driven edge culling, a searchable rail, and semantic-zoom process cards — so the v2ecoli baseline composite becomes readable.
+**Goal:** Give bigraph-loom a pluggable layout-mode registry, then use it to add a process-column view with store-affinity clustering, focus-driven edge culling, a searchable rail, and five-tier semantic zoom across processes, stores, and edges — so the v2ecoli baseline composite becomes readable.
 
-**Architecture:** A `LayoutMode` registry replaces the single hardcoded `applyLayout` import. The existing ELK layout moves into the registry unchanged as `hierarchy`. A second mode, `process-column`, stacks processes in one clustered column left of the stores. Clustering is a pure module deriving groups from wiring. Focus state culls edges. Zoom tiers change card content, and because the column is one-dimensional, a tier change is a prefix-sum reflow rather than a graph re-layout.
+**Architecture:** A `LayoutMode` registry replaces the single hardcoded `applyLayout` import. The existing ELK layout moves into the registry unchanged as `hierarchy`. A second mode, `process-column`, stacks processes in one clustered column left of the stores. Clustering is a pure module deriving groups from wiring. Focus state culls edges. The zoom tier is a property of the **view**, so one `ZoomTierId` drives process cards, store circles, and edge labels together; because the column is one-dimensional, a tier change is a prefix-sum reflow rather than a graph re-layout.
+
+**Companion plan:** `docs/superpowers/plans/2026-07-23-process-contract-and-config.md` implements spec §5's `ProcessContract` in process-bigraph and §7's config fixes in v2ecoli and the workbench. This plan does not depend on it — contracts are derived from docstrings and rows with no data are omitted — but the `contract` and `full` tiers get materially richer once it lands.
 
 **Tech Stack:** React 18, TypeScript 5.6, `@xyflow/react` 12.4 (React Flow), `elkjs` 0.11, Vite 6, Vitest 3, `@testing-library/react` 16.
 
@@ -38,9 +40,11 @@
 | `src/hooks/useLayoutMode.ts` | Owns mode selection, registry dispatch, positions, bands |
 | `src/hooks/useFocus.ts` | Owns hover/selection/pin state, derives visible edges |
 | `src/panels/ProcessRail.tsx` | Searchable clustered rail with granularity slider and scroll-sync |
+| `src/contract.ts` | Pure: contract derivation from docstring, type abbreviation, completeness |
+| `src/storeFacts.ts` | Pure: reader/writer derivation from the wire graph |
 | `src/__tests__/fixtures/v2ecoli-baseline.json` | Real composite state, the clustering-quality fixture |
 
-**Modified:** `src/App.tsx`, `src/nodes/ProcessNode.tsx`, `src/layoutStore.ts`, `src/viewStore.ts`, `src/types.ts`, `src/App.css`, `src/layout.ts` (becomes a re-export shim).
+**Modified:** `src/App.tsx`, `src/nodes/ProcessNode.tsx`, `src/nodes/StoreNode.tsx`, `src/edges/FloatingStoreEdge.tsx`, `src/convert.ts`, `src/layoutStore.ts`, `src/viewStore.ts`, `src/types.ts`, `src/App.css`, `src/layout.ts` (becomes a re-export shim).
 
 ---
 
@@ -1569,58 +1573,430 @@ git commit -m "feat(loom): searchable clustered process rail with granularity co
 
 ---
 
-## Task 8: Semantic zoom on process cards
+## Task 8: Type abbreviation and contract derivation
 
 **Files:**
-- Modify: `src/nodes/ProcessNode.tsx`, `src/App.tsx`, `src/App.css`
-- Test: `src/__tests__/semanticZoom.test.tsx`
+- Create: `src/contract.ts`
+- Modify: `src/types.ts`
+- Test: `src/__tests__/contract.test.ts`, `src/__tests__/typeAbbrev.test.ts`
 
 **Interfaces:**
-- Consumes: `TIERS` (Task 5); `ZoomTierId` (Task 1)
-- Produces: `tierForZoom(zoom: number, current?: ZoomTierId): ZoomTierId` exported from `src/layouts/processColumn.ts`
+- Consumes: `ProcessNodeData` (Task 3)
+- Produces: from `src/contract.ts` — `abbreviateType(type: string): string`, `deriveContract(data: ProcessNodeData): ProcessContract | null`, `contractCompleteness(c: ProcessContract | null, data: ProcessNodeData): { documented: number; total: number; unknownPorts: string[] }`; `ProcessContract` interface
 
-**Design constraint.** Font sizes are **identical across all three tiers**. Legibility at low zoom comes from dropping content, never from shrinking text — the same discipline the workbench's investigation graph follows (`static/aig-graph.js:91-99`). Do not add `transform: scale()` to card contents.
+**Why this is its own task.** Both helpers are pure string/object functions with no React involvement, so they are cheap to test exhaustively and the rendering task (Task 9) stays about layout rather than parsing.
 
-- [ ] **Step 1: Write the failing tier-selection test**
+- [ ] **Step 1: Write the failing type-abbreviation test**
 
-```tsx
-// src/__tests__/semanticZoom.test.tsx
+```ts
+// src/__tests__/typeAbbrev.test.ts
 import { describe, it, expect } from 'vitest';
-import { tierForZoom } from '../layouts/processColumn';
+import { abbreviateType } from '../contract';
 
-describe('tierForZoom', () => {
-  it('maps zoom onto the three tiers', () => {
-    expect(tierForZoom(0.1)).toBe('far');
-    expect(tierForZoom(0.5)).toBe('mid');
-    expect(tierForZoom(1.2)).toBe('near');
+describe('abbreviateType', () => {
+  it('collapses a long structured type to a field count', () => {
+    const t = 'unique_array[TU_index:integer|transcript_length:integer|is_mRNA:boolean]';
+    expect(abbreviateType(t)).toBe('unique_array[3 fields]');
   });
 
-  it('holds the current tier inside the hysteresis margin', () => {
-    // Sitting just below the mid->near edge while already at 'near' must
-    // not flip back, or cards flicker as the user scrolls across it.
-    expect(tierForZoom(0.84, 'near')).toBe('near');
-    expect(tierForZoom(0.80, 'near')).toBe('mid');
+  it('leaves short scalar types alone', () => {
+    expect(abbreviateType('string')).toBe('string');
+    expect(abbreviateType('bulk_array')).toBe('bulk_array');
+    expect(abbreviateType('quantity[g/L]')).toBe('quantity[g/L]');
   });
 
-  it('is stable when no current tier is supplied', () => {
-    expect(tierForZoom(0.84)).toBe('mid');
+  it('keeps a single-field structured type readable rather than counting it', () => {
+    expect(abbreviateType('map[float]')).toBe('map[float]');
+  });
+
+  it('handles the real 17-field transcript type', () => {
+    const fields = Array.from({ length: 17 }, (_, i) => `f${i}:integer`).join('|');
+    expect(abbreviateType(`unique_array[${fields}]`)).toBe('unique_array[17 fields]');
+  });
+
+  it('is a no-op on empty or non-string input', () => {
+    expect(abbreviateType('')).toBe('');
+    expect(abbreviateType(undefined as unknown as string)).toBe('');
   });
 });
 ```
 
 - [ ] **Step 2: Run and confirm failure**
 
+Run: `npm test -- typeAbbrev`
+Expected: FAIL — cannot resolve `../contract`.
+
+- [ ] **Step 3: Write the failing contract-derivation test**
+
+```ts
+// src/__tests__/contract.test.ts
+import { describe, it, expect } from 'vitest';
+import { deriveContract, contractCompleteness } from '../contract';
+import type { ProcessNodeData } from '../types';
+
+const DOC = `TranscriptInitiation — distributes activated RNAPs across TUs by weighted multinomial sampling.
+
+    n_to_activate = round(f_active · n_total_RNAP) - n_active
+    p_i = max(0, basal_prob_i + ∑_j delta_prob[i,j] · bound_TF_j)
+    initiations ~ Multinomial(n_to_activate, p_i / ∑_i p_i)
+  f_active: media-dependent active RNAP fraction.`;
+
+function data(over: Partial<ProcessNodeData> = {}): ProcessNodeData {
+  return {
+    label: 'ecoli-transcript-initiation', nodeType: 'process', processType: 'step',
+    address: 'local:X', config: {}, path: ['a'], inputPorts: ['bulk', 'RNAs'],
+    outputPorts: ['bulk'], ...over,
+  } as ProcessNodeData;
+}
+
+describe('deriveContract', () => {
+  it('takes the first line as the summary', () => {
+    const c = deriveContract(data({ description: DOC }))!;
+    expect(c.summary).toMatch(/distributes activated RNAPs/);
+    expect(c.summary).not.toContain('\n');
+  });
+
+  it('extracts equation lines as math', () => {
+    const c = deriveContract(data({ description: DOC }))!;
+    expect(c.math).toHaveLength(3);
+    expect(c.math[0]).toContain('n_to_activate =');
+    expect(c.math[2]).toContain('Multinomial');
+  });
+
+  it('keeps remaining prose as the description', () => {
+    const c = deriveContract(data({ description: DOC }))!;
+    expect(c.description).toContain('media-dependent active RNAP fraction');
+    expect(c.description).not.toContain('n_to_activate =');
+  });
+
+  it('prefers a declared contract over the docstring', () => {
+    const declared = { summary: 'declared', math: ['x = 1'], inputs: { bulk: 'reads counts' } };
+    const c = deriveContract(data({ description: DOC, contract: declared } as any))!;
+    expect(c.summary).toBe('declared');
+    expect(c.inputs.bulk).toBe('reads counts');
+  });
+
+  it('returns null when there is nothing to derive from', () => {
+    expect(deriveContract(data({ description: undefined }))).toBeNull();
+  });
+
+  it('yields a summary-only contract for a doc with no math', () => {
+    const c = deriveContract(data({ description: 'Just a plain description.' }))!;
+    expect(c.summary).toBe('Just a plain description.');
+    expect(c.math).toEqual([]);
+  });
+});
+
+describe('contractCompleteness', () => {
+  it('counts documented ports against the real port list', () => {
+    const c = { summary: 's', description: '', math: [], symbols: {},
+      inputs: { bulk: 'reads' }, outputs: {}, config: {}, assumptions: [], references: [] };
+    const r = contractCompleteness(c, data());
+    expect(r.documented).toBe(1);
+    expect(r.total).toBe(3);   // bulk + RNAs in, bulk out
+  });
+
+  it('flags a contract entry naming a port that does not exist', () => {
+    const c = { summary: 's', description: '', math: [], symbols: {},
+      inputs: { ghost: 'gone' }, outputs: {}, config: {}, assumptions: [], references: [] };
+    expect(contractCompleteness(c, data()).unknownPorts).toEqual(['ghost']);
+  });
+
+  it('reports zero documented for a null contract', () => {
+    expect(contractCompleteness(null, data()).documented).toBe(0);
+  });
+});
+```
+
+- [ ] **Step 4: Run and confirm failure**
+
+Run: `npm test -- contract`
+Expected: FAIL — cannot resolve `../contract`.
+
+- [ ] **Step 5: Implement `src/contract.ts`**
+
+```ts
+// src/contract.ts — what a process advertises about itself.
+//
+// A process may declare a structured contract (serialized as `_contract`).
+// When it does not, one is derived from its docstring: 45 of 46 v2ecoli
+// baseline processes have a doc, and 14 already carry equations in the
+// indented-block convention this parser reads. Derivation means the view
+// works on day one and processes upgrade incrementally.
+
+import type { ProcessNodeData } from './types';
+
+export interface ProcessContract {
+  summary: string;
+  description: string;
+  inputs: Record<string, string>;
+  outputs: Record<string, string>;
+  config: Record<string, string>;
+  math: string[];
+  symbols: Record<string, string>;
+  assumptions: string[];
+  references: string[];
+}
+
+/** Markers that make a docstring line an equation rather than prose. */
+const MATH_RE = /[=~∑∏≈←≥≤]|\b(Multinomial|Binomial|Poisson|Normal|Gamma|Exponential)\s*\(/;
+
+/** Structured types run past 300 chars; a card shows the shape, not the fields. */
+export function abbreviateType(type: string): string {
+  if (!type || typeof type !== 'string') return '';
+  const m = type.match(/^([A-Za-z0-9_]+)\[(.*)\]$/s);
+  if (!m) return type;
+  const [, base, inner] = m;
+  const fields = inner.split('|');
+  // One "field" means it is a container like map[float] — keep it literal.
+  if (fields.length < 2) return type;
+  return `${base}[${fields.length} fields]`;
+}
+
+function emptyContract(): ProcessContract {
+  return { summary: '', description: '', inputs: {}, outputs: {},
+    config: {}, math: [], symbols: {}, assumptions: [], references: [] };
+}
+
+function fromDocstring(doc: string): ProcessContract {
+  const c = emptyContract();
+  const lines = doc.split('\n');
+  const prose: string[] = [];
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (!c.summary) { c.summary = line; continue; }
+    if (MATH_RE.test(line)) c.math.push(line);
+    else prose.push(line);
+  }
+  c.description = prose.join(' ');
+  return c;
+}
+
+/** The process's contract: declared if present, else derived from its doc. */
+export function deriveContract(data: ProcessNodeData): ProcessContract | null {
+  const declared = (data as unknown as { contract?: Partial<ProcessContract> }).contract;
+  if (declared && typeof declared === 'object') {
+    return { ...emptyContract(), ...declared };
+  }
+  const doc = data.description;
+  if (!doc || !doc.trim()) return null;
+  return fromDocstring(doc);
+}
+
+export interface Completeness {
+  documented: number;
+  total: number;
+  /** Contract entries naming a port the process no longer has. */
+  unknownPorts: string[];
+}
+
+export function contractCompleteness(
+  c: ProcessContract | null,
+  data: ProcessNodeData,
+): Completeness {
+  const inPorts = new Set(data.inputPorts ?? []);
+  const outPorts = new Set(data.outputPorts ?? []);
+  const total = inPorts.size + outPorts.size;
+  if (!c) return { documented: 0, total, unknownPorts: [] };
+
+  let documented = 0;
+  const unknownPorts: string[] = [];
+  for (const [port, text] of Object.entries(c.inputs)) {
+    if (inPorts.has(port)) { if (text) documented++; } else unknownPorts.push(port);
+  }
+  for (const [port, text] of Object.entries(c.outputs)) {
+    if (outPorts.has(port)) { if (text) documented++; } else unknownPorts.push(port);
+  }
+  return { documented, total, unknownPorts: unknownPorts.sort() };
+}
+```
+
+- [ ] **Step 6: Declare the contract field in `src/types.ts`**
+
+Add to `ProcessNodeData`, beside the schema fields added in Task 3:
+
+```ts
+  /** Structured contract, serialized as `_contract`. Absent means derive
+   *  it from `description` (the process docstring). */
+  contract?: Record<string, unknown>;
+```
+
+- [ ] **Step 7: Surface `_contract` in `convert.ts`**
+
+`convert.ts:282-287` already maps `doc` → `description` and `_inputs`/`_outputs` → schemas. Add one line beside them, inside the same `data` object:
+
+```ts
+          contract: node._contract ?? undefined,
+```
+
+- [ ] **Step 8: Run both suites to verify they pass**
+
+Run: `npm test -- contract typeAbbrev`
+Expected: PASS, all cases.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/contract.ts src/types.ts src/convert.ts src/__tests__/contract.test.ts src/__tests__/typeAbbrev.test.ts
+git commit -m "feat(loom): process contract derivation and port-type abbreviation"
+```
+
+---
+
+## Task 9: Five-tier semantic zoom on process cards
+
+**Files:**
+- Modify: `src/nodes/ProcessNode.tsx`, `src/layouts/processColumn.ts`, `src/App.tsx`, `src/App.css`
+- Test: `src/__tests__/semanticZoom.test.tsx`
+
+**Interfaces:**
+- Consumes: `TIERS` (Task 5); `ZoomTierId` (Task 1); `deriveContract`, `abbreviateType`, `contractCompleteness` (Task 8)
+- Produces: `tierForZoom(zoom: number, current?: ZoomTierId): ZoomTierId` from `src/layouts/processColumn.ts`
+
+**Design constraints.**
+1. Font sizes are **identical across all five tiers**. Legibility at low zoom comes from dropping content, never from shrinking text — the discipline the workbench's investigation graph follows (`static/aig-graph.js:91-99`). Do not add `transform: scale()` to card contents.
+2. **A row with no data is omitted, never rendered empty.** Config is absent on 45/46 processes until the separate config plan lands, and contracts carry port semantics only once authored. An empty box reads as a bug.
+
+- [ ] **Step 1: Replace the three-tier table in `src/layouts/processColumn.ts`**
+
+The `TIERS` constant from Task 5 Step 3 becomes five entries. `cardHeight` is the *minimum*; real height is content-driven, and the column's prefix sum uses the value returned by `cardHeightFor` below.
+
+```ts
+export const TIERS: ZoomTier[] = [
+  { id: 'glyph',    minZoom: 0,    cardWidth: 180, cardHeight: 56 },
+  { id: 'ports',    minZoom: 0.25, cardWidth: 220, cardHeight: 96 },
+  { id: 'types',    minZoom: 0.5,  cardWidth: 300, cardHeight: 150 },
+  { id: 'contract', minZoom: 0.9,  cardWidth: 380, cardHeight: 240 },
+  { id: 'full',     minZoom: 1.6,  cardWidth: 460, cardHeight: 320 },
+];
+```
+
+Update `ZoomTierId` in `src/layouts/types.ts` to match:
+
+```ts
+export type ZoomTierId = 'glyph' | 'ports' | 'types' | 'contract' | 'full';
+```
+
+Every earlier reference to `'mid'` becomes `'ports'`, and `'far'`/`'near'` become `'glyph'`/`'full'`. The affected sites are `useLayoutMode.runLayout`'s default in `App.tsx` (Task 2 Step 10), and the `ctx` literals in `src/__tests__/processColumn.test.ts` (Task 5 Step 1).
+
+- [ ] **Step 2: Write the failing tier tests**
+
+```tsx
+// src/__tests__/semanticZoom.test.tsx
+import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { ReactFlowProvider } from '@xyflow/react';
+import { tierForZoom } from '../layouts/processColumn';
+import ProcessNode from '../nodes/ProcessNode';
+
+describe('tierForZoom', () => {
+  it('maps zoom onto the five tiers', () => {
+    expect(tierForZoom(0.1)).toBe('glyph');
+    expect(tierForZoom(0.3)).toBe('ports');
+    expect(tierForZoom(0.7)).toBe('types');
+    expect(tierForZoom(1.2)).toBe('contract');
+    expect(tierForZoom(2.0)).toBe('full');
+  });
+
+  it('holds the current tier inside the hysteresis margin', () => {
+    expect(tierForZoom(0.88, 'contract')).toBe('contract');
+    expect(tierForZoom(0.80, 'contract')).toBe('types');
+  });
+
+  it('is stable when no current tier is supplied', () => {
+    expect(tierForZoom(0.88)).toBe('types');
+  });
+});
+
+const DOC = `Distributes activated RNAPs across TUs.
+
+    p_i = max(0, basal_i + ∑_j dp[i,j] · TF_j)`;
+
+const data = {
+  label: 'ecoli-transcript-initiation', nodeType: 'process', processType: 'step',
+  address: 'local:v2ecoli.processes.transcript_initiation.TranscriptInitiation',
+  config: {}, interval: 2, path: ['agents', '0', 'ecoli-transcript-initiation'],
+  inputPorts: ['bulk', 'RNAs'], outputPorts: ['bulk'],
+  inputPortsSchema: { bulk: 'bulk', RNAs: 'unique.RNA' },
+  outputPortsSchema: { bulk: 'bulk' },
+  inputSchema: { bulk: 'bulk_array', RNAs: 'unique_array[a:integer|b:float|c:boolean]' },
+  outputSchema: { bulk: 'bulk_array' },
+  description: DOC,
+} as any;
+
+function renderAt(tier: string, over: Record<string, unknown> = {}) {
+  render(
+    <ReactFlowProvider>
+      <ProcessNode id="p" type="process" selected={false} zIndex={0}
+        isConnectable={false} dragging={false}
+        data={{ ...data, ...over, _tier: tier }} {...({} as any)} />
+    </ReactFlowProvider>,
+  );
+}
+
+describe('ProcessNode tiers', () => {
+  it('glyph shows only the name', () => {
+    renderAt('glyph');
+    expect(screen.getByText('ecoli-transcript-initiation')).toBeTruthy();
+    expect(screen.queryByText(/2 in \/ 1 out/)).toBeNull();
+  });
+
+  it('ports adds port counts and port names', () => {
+    renderAt('ports');
+    expect(screen.getByText(/2 in \/ 1 out/)).toBeTruthy();
+    expect(screen.getByText('RNAs')).toBeTruthy();
+    expect(screen.queryByText(/3 fields/)).toBeNull();
+  });
+
+  it('types adds abbreviated port types and the address', () => {
+    renderAt('types');
+    expect(screen.getByText('unique_array[3 fields]')).toBeTruthy();
+    expect(screen.getByText(/TranscriptInitiation/)).toBeTruthy();
+    expect(screen.queryByText(/p_i = max/)).toBeNull();
+  });
+
+  it('contract adds the math lines', () => {
+    renderAt('contract');
+    expect(screen.getByText(/p_i = max/)).toBeTruthy();
+  });
+
+  it('full adds the completeness indicator', () => {
+    renderAt('full');
+    expect(screen.getByText(/0\/3 ports documented/)).toBeTruthy();
+  });
+
+  it('omits the config row entirely when config is empty', () => {
+    renderAt('full');
+    expect(screen.queryByText(/^config$/i)).toBeNull();
+  });
+
+  it('renders the config row when config is present', () => {
+    renderAt('full', { config: { width_um: 1.1 } });
+    expect(screen.getByText('width_um')).toBeTruthy();
+  });
+
+  it('pinned-open renders full detail regardless of tier', () => {
+    renderAt('glyph', { _pinnedOpen: true });
+    expect(screen.getByText(/p_i = max/)).toBeTruthy();
+  });
+});
+```
+
+- [ ] **Step 3: Run and confirm failure**
+
 Run: `npm test -- semanticZoom`
 Expected: FAIL — `tierForZoom is not a function`.
 
-- [ ] **Step 3: Implement `tierForZoom`**
+- [ ] **Step 4: Implement `tierForZoom`**
 
 Append to `src/layouts/processColumn.ts`:
 
 ```ts
-/** Zoom overlap that a tier keeps once entered, so scrolling across a
- *  threshold does not flicker cards between two tiers. */
-export const TIER_HYSTERESIS = 0.03;
+/** Zoom overlap a tier keeps once entered, so scrolling across a threshold
+ *  does not flicker cards between two tiers. */
+export const TIER_HYSTERESIS = 0.05;
 
 export function tierForZoom(zoom: number, current?: ZoomTierId): ZoomTierId {
   let next: ZoomTierId = TIERS[0].id;
@@ -1628,132 +2004,140 @@ export function tierForZoom(zoom: number, current?: ZoomTierId): ZoomTierId {
   if (!current || current === next) return next;
 
   // Only resist leaving the current tier, and only just inside its edge.
-  const currentTier = TIERS.find((t) => t.id === current);
-  if (currentTier && zoom >= currentTier.minZoom - TIER_HYSTERESIS) return current;
+  const cur = TIERS.find((t) => t.id === current);
+  if (cur && zoom >= cur.minZoom - TIER_HYSTERESIS) return current;
   return next;
 }
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [ ] **Step 5: Rewrite the card body in `src/nodes/ProcessNode.tsx`**
 
-Run: `npm test -- semanticZoom`
-Expected: PASS.
+Keep `_classifyStep` and the `process-node-${stepKind}` class untouched, and keep the existing `<Handle>` / `.port-label` block at the end unchanged — the wires still attach to it at every tier.
 
-- [ ] **Step 5: Write the failing card-content test**
-
-Append to `src/__tests__/semanticZoom.test.tsx`:
+Add above the return:
 
 ```tsx
-import { render, screen } from '@testing-library/react';
-import { ReactFlowProvider } from '@xyflow/react';
-import ProcessNode from '../nodes/ProcessNode';
+  const tier = ((data as any)._tier ?? 'ports') as
+    'glyph' | 'ports' | 'types' | 'contract' | 'full';
+  const t = (data as any)._pinnedOpen ? 'full' : tier;
 
-const data = {
-  label: 'ecoli-transcript-initiation', nodeType: 'process', processType: 'step',
-  address: 'local:EcoliTranscriptInitiation', config: { a: 1, b: 2 }, interval: 2,
-  path: ['agents', '0', 'ecoli-transcript-initiation'],
-  inputPorts: ['bulk', 'listeners'], outputPorts: ['bulk'],
-  inputPortsSchema: { bulk: 'bulk', listeners: 'listeners' },
-  outputPortsSchema: { bulk: 'bulk' },
-  description: 'Initiates transcription',
-} as any;
+  const show = {
+    ports:    t !== 'glyph',
+    types:    t === 'types' || t === 'contract' || t === 'full',
+    contract: t === 'contract' || t === 'full',
+    full:     t === 'full',
+  };
 
-function renderAt(tier: string) {
-  render(
-    <ReactFlowProvider>
-      <ProcessNode data={{ ...data, _tier: tier }} id="p" type="process"
-        selected={false} zIndex={0} isConnectable={false}
-        xPos={0} yPos={0} dragging={false} {...({} as any)} />
-    </ReactFlowProvider>,
-  );
-}
+  const contract = show.contract ? deriveContract(data) : null;
+  const completeness = show.full ? contractCompleteness(contract, data) : null;
+  const inTypes = (data as any).inputSchema ?? {};
+  const outTypes = (data as any).outputSchema ?? {};
+  const configEntries = Object.entries(data.config ?? {});
 
-describe('ProcessNode semantic zoom', () => {
-  it('far tier shows only the name', () => {
-    renderAt('far');
-    expect(screen.getByText('ecoli-transcript-initiation')).toBeTruthy();
-    expect(screen.queryByText(/2 in \/ 1 out/)).toBeNull();
-  });
-
-  it('mid tier adds the port counts', () => {
-    renderAt('mid');
-    expect(screen.getByText(/2 in \/ 1 out/)).toBeTruthy();
-    expect(screen.queryByText('local:EcoliTranscriptInitiation')).toBeNull();
-  });
-
-  it('near tier adds the address and port targets', () => {
-    renderAt('near');
-    expect(screen.getByText('local:EcoliTranscriptInitiation')).toBeTruthy();
-    expect(screen.getAllByText(/bulk/).length).toBeGreaterThan(0);
-  });
-});
+  const portRow = (port: string, types: Record<string, unknown>, isOut: boolean) => {
+    const raw = typeof types[port] === 'string' ? (types[port] as string) : '';
+    const semantic = isOut ? contract?.outputs?.[port] : contract?.inputs?.[port];
+    return (
+      <div key={`${isOut ? 'o' : 'i'}-${port}`}
+           className={`process-node-port-row${isOut ? ' is-out' : ''}`}>
+        <span className="process-node-port-name">{port}</span>
+        {show.types && raw && (
+          <span className="process-node-port-type" title={raw}>{abbreviateType(raw)}</span>
+        )}
+        {show.contract && semantic && (
+          <span className="process-node-port-semantic">{semantic}</span>
+        )}
+      </div>
+    );
+  };
 ```
 
-- [ ] **Step 6: Run and confirm failure**
-
-Run: `npm test -- semanticZoom`
-Expected: FAIL — the card renders full detail at every tier.
-
-- [ ] **Step 7: Add tiers to `ProcessNode.tsx`**
-
-Read the tier off `data._tier` (stamped by `App.tsx` in Step 8) so the component stays a pure function of its props and remains testable without a React Flow viewport. Keep the existing `_classifyStep` call and the `process-node-${stepKind}` class exactly as they are.
-
-Inside the component, after the existing `stepKind` line:
-
-```tsx
-  const tier = ((data as any)._tier ?? 'mid') as 'far' | 'mid' | 'near';
-  const pinnedOpen = Boolean((data as any)._pinnedOpen);
-  const t = pinnedOpen ? 'near' : tier;
-```
-
-Wrap the existing port-rendering block so it only runs at `near`, and add the tier-specific rows. The outer `<div>` becomes:
+Then the card body, before the existing handle block:
 
 ```tsx
     <div className={`process-node process-node-${stepKind} process-node-${t}`}>
       <div className="process-node-title">{data.label}</div>
 
-      {t !== 'far' && (
-        <div className="process-node-meta">
-          {inputPorts.length} in / {outputPorts.length} out
-          {data.interval != null && <span> · every {data.interval}</span>}
-        </div>
-      )}
-
-      {t === 'near' && (
+      {show.ports && (
         <>
-          <div className="process-node-address">{(data as any).address}</div>
+          <div className="process-node-meta">
+            {data.processType} · {inputPorts.length} in / {outputPorts.length} out
+            {data.interval != null && <span> · every {data.interval}</span>}
+          </div>
           <div className="process-node-ports">
-            {inputPorts.map((p) => (
-              <div key={`pi-${p}`} className="process-node-port-row">
-                <span>{p}</span><span>{portSchema[p] ?? ''}</span>
-              </div>
-            ))}
-            {outputPorts.map((p) => (
-              <div key={`po-${p}`} className="process-node-port-row is-out">
-                <span>{p}</span><span>{outSchema[p] ?? ''}</span>
-              </div>
-            ))}
+            {inputPorts.map((p) => portRow(p, inTypes, false))}
+            {outputPorts.map((p) => portRow(p, outTypes, true))}
           </div>
         </>
       )}
 
-      {/* existing Handle + .port-label rendering, unchanged */}
+      {show.types && (data as any).address && (
+        <div className="process-node-address">{(data as any).address}</div>
+      )}
+
+      {show.types && configEntries.length > 0 && (
+        <div className="process-node-config">
+          {configEntries.map(([k, v]) => (
+            <div key={k} className="process-node-config-row">
+              <span>{k}</span>
+              {show.contract && <span>{String(v).slice(0, 40)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {show.contract && contract?.summary && (
+        <div className="process-node-summary">{contract.summary}</div>
+      )}
+
+      {show.contract && contract && contract.math.length > 0 && (
+        <div className="process-node-math">
+          {contract.math.map((m, i) => <div key={i}>{m}</div>)}
+        </div>
+      )}
+
+      {show.full && contract && Object.keys(contract.symbols).length > 0 && (
+        <div className="process-node-symbols">
+          {Object.entries(contract.symbols).map(([s, meaning]) => (
+            <div key={s}><em>{s}</em> — {meaning}</div>
+          ))}
+        </div>
+      )}
+
+      {show.full && contract?.description && (
+        <div className="process-node-description">{contract.description}</div>
+      )}
+
+      {show.full && completeness && completeness.total > 0 && (
+        <div className="process-node-completeness">
+          {completeness.documented}/{completeness.total} ports documented
+          {completeness.unknownPorts.length > 0 && (
+            <span className="is-warn"> · unknown: {completeness.unknownPorts.join(', ')}</span>
+          )}
+        </div>
+      )}
+
+      {/* existing Handle + .port-label block, unchanged */}
     </div>
 ```
 
-- [ ] **Step 8: Stamp the tier from the live viewport in `App.tsx`**
+Add the imports at the top of the file:
 
-Track zoom and stamp each process node's `data._tier` and `data._pinnedOpen`. Debounce so a scroll gesture does not thrash React:
+```tsx
+import { deriveContract, abbreviateType, contractCompleteness } from '../contract';
+```
+
+- [ ] **Step 6: Stamp the tier from the live viewport in `App.tsx`**
 
 ```ts
-const [tier, setTier] = useState<ZoomTierId>('mid');
+const [tier, setTier] = useState<ZoomTierId>('ports');
 
 const onMove = useCallback((_: unknown, vp: { zoom: number }) => {
   setTier((cur) => tierForZoom(vp.zoom, cur));
 }, []);
 ```
 
-Pass `onMove={onMove}` to `<ReactFlow>`. Where display nodes are derived, stamp the tier — this must **create new data objects only when the tier or pin set actually changes**, or the identity-preservation guarantee at `App.tsx:273-286` is defeated:
+Pass `onMove={onMove}` to `<ReactFlow>`. Stamp the tier onto process nodes, creating new data objects **only when the tier or pin set actually changes** — otherwise the identity-preservation guarantee at `App.tsx:273-286` is defeated and the whole graph remounts on every pan:
 
 ```ts
 const tieredNodes = useMemo(
@@ -1765,74 +2149,497 @@ const tieredNodes = useMemo(
 );
 ```
 
-Re-run layout when the tier changes, since card heights drive the column's prefix sum. Add `tier` to the layout effect's dependency array.
+Use `tieredNodes` as `<ReactFlow nodes={...}>`, and add `tier` to the layout effect's dependency array so the column re-flows when card heights change.
 
-- [ ] **Step 9: Style the tiers**
+- [ ] **Step 7: Style the tiers**
 
-Append to `src/App.css`. Font sizes are deliberately identical across tiers:
+Append to `src/App.css`. Font sizes are deliberately constant across tiers:
 
 ```css
 /* Semantic zoom: tiers change WHICH rows exist, never their font size. */
-.process-node-far  { width: 180px; min-height: 56px; }
-.process-node-mid  { width: 220px; min-height: 92px; }
-.process-node-near { width: 320px; min-height: 120px; }
+.process-node-glyph    { width: 180px; min-height: 56px; }
+.process-node-ports    { width: 220px; min-height: 96px; }
+.process-node-types    { width: 300px; min-height: 150px; }
+.process-node-contract { width: 380px; min-height: 240px; }
+.process-node-full     { width: 460px; min-height: 320px; }
 
-.process-node-title   { font-size: 12px; font-weight: 600; color: #1e293b; line-height: 1.25; }
-.process-node-meta    { font-size: 11px; color: #64748b; margin-top: 3px; }
-.process-node-address { font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace;
-                        margin-top: 4px; overflow-wrap: anywhere; }
-.process-node-ports   { margin-top: 5px; border-top: 1px dashed #e5e7eb; padding-top: 4px; }
+.process-node-title { font-size: 12px; font-weight: 600; color: #1e293b; line-height: 1.25; }
+.process-node-meta  { font-size: 11px; color: #64748b; margin-top: 3px; }
+.process-node-address {
+  font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace;
+  margin-top: 4px; overflow-wrap: anywhere;
+}
+.process-node-ports { margin-top: 5px; border-top: 1px dashed #e5e7eb; padding-top: 4px; }
 .process-node-port-row {
-  display: flex; justify-content: space-between; gap: 8px;
+  display: flex; gap: 8px; justify-content: space-between;
   font-size: 11px; color: #475569; line-height: 1.4;
 }
 .process-node-port-row.is-out { color: #0d9488; }
+.process-node-port-name { font-weight: 600; }
+.process-node-port-type { font-family: ui-monospace, monospace; color: #94a3b8; }
+.process-node-port-semantic { color: #64748b; flex: 1 1 auto; text-align: right; }
+
+.process-node-config { margin-top: 5px; border-top: 1px dashed #e5e7eb; padding-top: 4px; }
+.process-node-config-row {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 11px; color: #475569; font-family: ui-monospace, monospace;
+}
+
+.process-node-summary { font-size: 11px; color: #334155; margin-top: 6px; line-height: 1.4; }
+.process-node-math {
+  margin-top: 5px; padding: 4px 6px; background: #f8fafc;
+  border-left: 2px solid #cbd5e1; border-radius: 3px;
+  font-family: ui-monospace, monospace; font-size: 11px; color: #1e293b;
+  line-height: 1.5; overflow-x: auto;
+}
+.process-node-symbols     { font-size: 11px; color: #64748b; margin-top: 5px; line-height: 1.4; }
+.process-node-description { font-size: 11px; color: #64748b; margin-top: 5px; line-height: 1.4; }
+.process-node-completeness {
+  font-size: 10px; color: #94a3b8; margin-top: 6px;
+  border-top: 1px solid #f1f5f9; padding-top: 3px;
+}
+.process-node-completeness .is-warn { color: #b45309; }
 ```
 
-- [ ] **Step 10: Run to verify pass**
+- [ ] **Step 8: Run to verify pass**
 
 Run: `npm test -- semanticZoom`
-Expected: PASS, all six cases.
+Expected: PASS, all eleven cases.
 
-- [ ] **Step 11: Full suite, typecheck, build**
+- [ ] **Step 9: Full suite, typecheck, build**
 
 Run: `npm test && npx tsc -b --noEmit && npm run build`
-Expected: all PASS, no type errors, build emits `_dist/`.
+Expected: all PASS. If `processColumn.test.ts` fails on a `'mid'` literal, update it to `'ports'` per Step 1.
 
-- [ ] **Step 12: Verify the whole feature against the real composite**
+- [ ] **Step 10: Verify against the real composite**
 
 ```bash
 npm run dev
 ```
 
-Switch to Process column and confirm all five success criteria from the spec:
-1. Under 20 edges visible by default (was roughly 400).
-2. Cluster labels read as transcription, translation, replication, regulation, environment, bulk chemistry.
-3. Any process findable in about two seconds via rail search.
-4. Switching back to Hierarchy reproduces today's arrangement exactly.
-5. Zooming through tier boundaries is smooth, with no card flicker at the thresholds.
+Switch to Process column and zoom slowly from far out to fully in on `ecoli-transcript-initiation`. Confirm all five criteria:
+1. Each zoom step adds exactly one new kind of information, no jumps.
+2. Port types read as `unique_array[17 fields]`, never a 300-character string; hovering shows the full type.
+3. The math block appears at the `contract` tier with the multinomial equations.
+4. No empty rows anywhere — config is absent on this composite until the config plan lands, so the config row should simply not appear.
+5. No card flicker when scrolling back and forth across a tier threshold.
 
-- [ ] **Step 13: Rebuild the vendored bundle the workbench serves**
+- [ ] **Step 11: Rebuild the vendored bundle the workbench serves**
 
 ```bash
 cd /Users/eranagmon/code/vivarium-dashboard && ./scripts/build_loom.sh
 ```
 
-Then confirm in the workbench itself: `vivarium-workbench serve --workspace /Users/eranagmon/code/v2ecoli`, open the baseline in Composite Explorer, and check the Wiring tab.
+Then confirm in the workbench: `vivarium-workbench serve --workspace /Users/eranagmon/code/v2ecoli`, open the baseline in Composite Explorer, Wiring tab.
 
-- [ ] **Step 14: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
-git add src/nodes/ProcessNode.tsx src/layouts/processColumn.ts src/App.tsx src/App.css src/__tests__/semanticZoom.test.tsx
-git commit -m "feat(loom): semantic-zoom tiers for process cards"
+git add src/nodes/ProcessNode.tsx src/layouts/processColumn.ts src/layouts/types.ts src/App.tsx src/App.css src/__tests__
+git commit -m "feat(loom): five-tier semantic zoom with contract math and abbreviated port types"
 ```
 
 ---
+## Task 10: Semantic zoom on stores and edges
 
+**Files:**
+- Create: `src/storeFacts.ts`
+- Modify: `src/nodes/StoreNode.tsx`, `src/edges/FloatingStoreEdge.tsx`, `src/App.tsx`, `src/App.css`
+- Test: `src/__tests__/storeTiers.test.tsx`, `src/__tests__/edgeTiers.test.tsx`
+
+**Interfaces:**
+- Consumes: `ZoomTierId` (Task 1); `abbreviateType`, `deriveContract` (Task 8); `tierForZoom` (Task 9)
+- Produces: from `src/storeFacts.ts` — `readersAndWriters(storeId: string, edges: Edge[]): { readers: string[]; writers: string[] }`
+
+**Why stores and edges too.** The tier is a property of the **view**, not of the process card. If only process cards tiered, the canvas would reveal detail unevenly — dense typed cards floating among bare circles. Edge tiering is additionally a performance lever: labelling ~400 edges at low zoom costs text layout for glyphs nobody can read.
+
+- [ ] **Step 1: Write the failing reader/writer test**
+
+Direction comes free from the existing edge model: `convert.ts` emits `edgeType: 'input'` for store→process (the process *reads*) and `'output'` for process→store (the process *writes*).
+
+```ts
+// src/__tests__/storeTiers.test.tsx
+import { describe, it, expect } from 'vitest';
+import type { Edge } from '@xyflow/react';
+import { readersAndWriters } from '../storeFacts';
+
+const edges = [
+  { id: 'e1', source: 'unique.RNA', target: 'transcript-init', data: { edgeType: 'input' } },
+  { id: 'e2', source: 'unique.RNA', target: 'rna-degradation', data: { edgeType: 'input' } },
+  { id: 'e3', source: 'transcript-init', target: 'unique.RNA', data: { edgeType: 'output' } },
+  { id: 'e4', source: 'other', target: 'bulk', data: { edgeType: 'output' } },
+  { id: 'e5', source: 'unique', target: 'unique.RNA', data: { edgeType: 'place' } },
+] as unknown as Edge[];
+
+describe('readersAndWriters', () => {
+  it('lists processes that read the store', () => {
+    expect(readersAndWriters('unique.RNA', edges).readers.sort())
+      .toEqual(['rna-degradation', 'transcript-init']);
+  });
+
+  it('lists processes that write the store', () => {
+    expect(readersAndWriters('unique.RNA', edges).writers).toEqual(['transcript-init']);
+  });
+
+  it('ignores structural place edges', () => {
+    const r = readersAndWriters('unique.RNA', edges);
+    expect(r.readers).not.toContain('unique');
+    expect(r.writers).not.toContain('unique');
+  });
+
+  it('deduplicates a process wired through several ports', () => {
+    const many = [
+      { id: 'a', source: 'S', target: 'p', data: { edgeType: 'input' } },
+      { id: 'b', source: 'S', target: 'p', data: { edgeType: 'input' } },
+    ] as unknown as Edge[];
+    expect(readersAndWriters('S', many).readers).toEqual(['p']);
+  });
+
+  it('returns empty lists for an unwired store', () => {
+    expect(readersAndWriters('nope', edges)).toEqual({ readers: [], writers: [] });
+  });
+});
+```
+
+- [ ] **Step 2: Run and confirm failure**
+
+Run: `npm test -- storeTiers`
+Expected: FAIL — cannot resolve `../storeFacts`.
+
+- [ ] **Step 3: Implement `src/storeFacts.ts`**
+
+```ts
+// src/storeFacts.ts — facts about a store derived from the wire graph.
+//
+// The store-side counterpart of the process contract: a process declares
+// what it does with a port, and a store can report who touches it. Both
+// come from data already in the document.
+
+import type { Edge } from '@xyflow/react';
+
+export interface StoreFacts {
+  /** Processes that read this store (store -> process, edgeType 'input'). */
+  readers: string[];
+  /** Processes that write this store (process -> store, edgeType 'output'). */
+  writers: string[];
+}
+
+export function readersAndWriters(storeId: string, edges: Edge[]): StoreFacts {
+  const readers = new Set<string>();
+  const writers = new Set<string>();
+  for (const e of edges) {
+    const kind = (e.data as { edgeType?: string } | undefined)?.edgeType;
+    if (kind === 'input' && e.source === storeId) readers.add(e.target);
+    else if (kind === 'output' && e.target === storeId) writers.add(e.source);
+  }
+  return { readers: [...readers].sort(), writers: [...writers].sort() };
+}
+```
+
+- [ ] **Step 4: Run to verify pass**
+
+Run: `npm test -- storeTiers`
+Expected: PASS, all five cases.
+
+- [ ] **Step 5: Write the failing store-render test**
+
+Append to `src/__tests__/storeTiers.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import { ReactFlowProvider } from '@xyflow/react';
+import StoreNode from '../nodes/StoreNode';
+
+const storeData = {
+  label: 'RNA', nodeType: 'store', path: ['agents', '0', 'unique', 'RNA'],
+  value: 'Array(8)', valueType: 'unique_array[a:integer|b:float|c:boolean]',
+  isGroup: false,
+} as any;
+
+function renderStore(tier: string, over: Record<string, unknown> = {}) {
+  render(
+    <ReactFlowProvider>
+      <StoreNode id="unique.RNA" type="store" selected={false} zIndex={0}
+        isConnectable={false} dragging={false}
+        data={{ ...storeData, ...over, _tier: tier }} {...({} as any)} />
+    </ReactFlowProvider>,
+  );
+}
+
+describe('StoreNode tiers', () => {
+  it('glyph shows only the name', () => {
+    renderStore('glyph');
+    expect(screen.getByText('RNA')).toBeTruthy();
+    expect(screen.queryByText('Array(8)')).toBeNull();
+  });
+
+  it('ports adds the value summary', () => {
+    renderStore('ports');
+    expect(screen.getByText('Array(8)')).toBeTruthy();
+    expect(screen.queryByText(/3 fields/)).toBeNull();
+  });
+
+  it('types adds the abbreviated declared type', () => {
+    renderStore('types');
+    expect(screen.getByText('unique_array[3 fields]')).toBeTruthy();
+  });
+
+  it('contract adds the reader/writer summary', () => {
+    renderStore('contract', { _readers: ['a', 'b'], _writers: ['a'] });
+    expect(screen.getByText(/2 read/)).toBeTruthy();
+    expect(screen.getByText(/1 write/)).toBeTruthy();
+  });
+
+  it('omits the reader/writer row when the store is unwired', () => {
+    renderStore('contract', { _readers: [], _writers: [] });
+    expect(screen.queryByText(/read/)).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 6: Run and confirm failure**
+
+Run: `npm test -- storeTiers`
+Expected: FAIL — the store renders the same content at every tier.
+
+- [ ] **Step 7: Add tiers to `src/nodes/StoreNode.tsx`**
+
+Keep the four existing `<Handle>` elements (`top-place`, `left-out`, `right-in`, `bottom-place`) and the `▶/▼` group indicator exactly as they are — collapse behavior and edge attachment depend on them.
+
+Add above the return:
+
+```tsx
+  const tier = ((data as any)._tier ?? 'ports') as
+    'glyph' | 'ports' | 'types' | 'contract' | 'full';
+  const readers: string[] = (data as any)._readers ?? [];
+  const writers: string[] = (data as any)._writers ?? [];
+  const rawType = typeof (data as any).valueType === 'string' ? (data as any).valueType : '';
+
+  const show = {
+    value:   tier !== 'glyph',
+    type:    tier === 'types' || tier === 'contract' || tier === 'full',
+    wiring:  tier === 'contract' || tier === 'full',
+    full:    tier === 'full',
+  };
+```
+
+Inside the circle body, after the existing label element:
+
+```tsx
+      {show.value && data.value != null && (
+        <div className="store-node-value">{String(data.value)}</div>
+      )}
+      {show.type && rawType && (
+        <div className="store-node-type" title={rawType}>{abbreviateType(rawType)}</div>
+      )}
+      {show.wiring && (readers.length > 0 || writers.length > 0) && (
+        <div className="store-node-wiring">
+          {readers.length > 0 && <span>{readers.length} read</span>}
+          {readers.length > 0 && writers.length > 0 && <span> · </span>}
+          {writers.length > 0 && <span>{writers.length} write</span>}
+        </div>
+      )}
+      {show.full && (data as any)._emitted && (
+        <div className="store-node-emit">emitted</div>
+      )}
+```
+
+Import at the top:
+
+```tsx
+import { abbreviateType } from '../contract';
+```
+
+- [ ] **Step 8: Write the failing edge-tier test**
+
+```tsx
+// src/__tests__/edgeTiers.test.tsx
+import { describe, it, expect } from 'vitest';
+import { edgeLabelFor } from '../edges/FloatingStoreEdge';
+
+const base = { port: 'RNAs', portType: 'unique_array[a:integer|b:float]',
+  semantic: 'appends newly initiated transcripts' };
+
+describe('edgeLabelFor', () => {
+  it('renders nothing at glyph', () => {
+    expect(edgeLabelFor('glyph', base)).toBe('');
+  });
+
+  it('renders the port name at ports', () => {
+    expect(edgeLabelFor('ports', base)).toBe('RNAs');
+  });
+
+  it('adds the abbreviated type at types', () => {
+    expect(edgeLabelFor('types', base)).toBe('RNAs: unique_array[2 fields]');
+  });
+
+  it('adds the contract semantic at contract', () => {
+    expect(edgeLabelFor('contract', base))
+      .toBe('RNAs: unique_array[2 fields] — appends newly initiated transcripts');
+  });
+
+  it('degrades when the contract has no semantic for the port', () => {
+    expect(edgeLabelFor('contract', { ...base, semantic: undefined }))
+      .toBe('RNAs: unique_array[2 fields]');
+  });
+
+  it('degrades when no type is known', () => {
+    expect(edgeLabelFor('types', { port: 'x' })).toBe('x');
+  });
+});
+```
+
+- [ ] **Step 9: Run and confirm failure**
+
+Run: `npm test -- edgeTiers`
+Expected: FAIL — `edgeLabelFor is not exported`.
+
+- [ ] **Step 10: Implement `edgeLabelFor` and use it in the edge renderer**
+
+Add to `src/edges/FloatingStoreEdge.tsx`, exported so it is testable without rendering an SVG:
+
+```tsx
+import { abbreviateType } from '../contract';
+import type { ZoomTierId } from '../layouts/types';
+
+export interface EdgeLabelParts {
+  port: string;
+  portType?: string;
+  semantic?: string;
+}
+
+/** What a wire says about itself at a given tier. Empty string means no
+ *  label at all — which is also the perf path, since ~400 edges labelled
+ *  at low zoom costs text layout for glyphs nobody can read. */
+export function edgeLabelFor(tier: ZoomTierId, parts: EdgeLabelParts): string {
+  if (tier === 'glyph') return '';
+  let label = parts.port;
+  if (tier === 'ports') return label;
+  if (parts.portType) label += `: ${abbreviateType(parts.portType)}`;
+  if ((tier === 'contract' || tier === 'full') && parts.semantic) {
+    label += ` — ${parts.semantic}`;
+  }
+  return label;
+}
+```
+
+In the component body, replace the current unconditional label render with:
+
+```tsx
+  const tier = ((data as any)?._tier ?? 'ports') as ZoomTierId;
+  const label = edgeLabelFor(tier, {
+    port: (data as any)?.port ?? '',
+    portType: (data as any)?._portType,
+    semantic: (data as any)?._semantic,
+  });
+```
+
+and render the label element only when `label` is non-empty.
+
+- [ ] **Step 11: Run to verify pass**
+
+Run: `npm test -- edgeTiers`
+Expected: PASS, all six cases.
+
+- [ ] **Step 12: Stamp tier and derived facts in `App.tsx`**
+
+Extend the `tieredNodes` memo from Task 9 Step 6 to cover stores, and add an equivalent for edges. Keep both memos keyed so new objects are created **only** when the tier actually changes — the identity guarantee at `App.tsx:273-286` depends on it.
+
+```ts
+const tieredNodes = useMemo(
+  () => displayNodes.map((n) => {
+    if (n.type === 'process') {
+      return { ...n, data: { ...n.data, _tier: tier, _pinnedOpen: focus.ctx.pinned.has(n.id) } };
+    }
+    // Reader/writer facts are only needed from the 'contract' tier up;
+    // computing them for every store at every tier would be wasted work.
+    const wiring = (tier === 'contract' || tier === 'full')
+      ? readersAndWriters(n.id, rawEdges) : { readers: [], writers: [] };
+    return { ...n, data: { ...n.data, _tier: tier,
+      _readers: wiring.readers, _writers: wiring.writers } };
+  }),
+  [displayNodes, rawEdges, tier, focus.ctx.pinned],
+);
+
+const tieredEdges = useMemo(() => {
+  if (tier === 'glyph') return visibleEdges;   // no labels, nothing to stamp
+  return visibleEdges.map((e) => {
+    const proc = nodeById.get(
+      (e.data as any)?.edgeType === 'input' ? e.target : e.source);
+    const pdata = proc?.data as ProcessNodeData | undefined;
+    const port = (e.data as any)?.port ?? '';
+    const isOut = (e.data as any)?.edgeType === 'output';
+    const types = (pdata as any)?.[isOut ? 'outputSchema' : 'inputSchema'] ?? {};
+    const contract = pdata ? deriveContract(pdata) : null;
+    return { ...e, data: { ...e.data, _tier: tier,
+      _portType: typeof types[port] === 'string' ? types[port] : undefined,
+      _semantic: isOut ? contract?.outputs?.[port] : contract?.inputs?.[port] } };
+  });
+}, [visibleEdges, nodeById, tier]);
+```
+
+Add a `nodeById` memo beside them if one does not already exist:
+
+```ts
+const nodeById = useMemo(() => new Map(displayNodes.map((n) => [n.id, n])), [displayNodes]);
+```
+
+Pass `nodes={tieredNodes}` and `edges={tieredEdges}` to `<ReactFlow>`.
+
+- [ ] **Step 13: Style the store and edge tiers**
+
+Append to `src/App.css`. Font sizes stay constant across tiers, as with the process card:
+
+```css
+.store-node-value  { font-size: 10px; color: #64748b; line-height: 1.3; }
+.store-node-type   { font-size: 10px; color: #94a3b8; font-family: ui-monospace, monospace; }
+.store-node-wiring { font-size: 10px; color: #475569; }
+.store-node-emit   { font-size: 9px; color: #0d9488; font-weight: 600; }
+
+/* A store circle grows to fit its tier's content rather than clipping it. */
+.store-node.store-node-types,
+.store-node.store-node-contract,
+.store-node.store-node-full { width: auto; min-width: 80px; padding: 6px 10px; border-radius: 12px; }
+```
+
+- [ ] **Step 14: Full suite, typecheck, build**
+
+Run: `npm test && npx tsc -b --noEmit && npm run build`
+Expected: all PASS, no type errors.
+
+- [ ] **Step 15: Verify against the real composite**
+
+```bash
+npm run dev
+```
+
+Switch to Process column and zoom slowly through all five tiers. Confirm:
+1. Processes, stores, and edges reveal detail **together** — no element kind races ahead or lags.
+2. At `glyph`, no edge labels render at all, and panning is noticeably smoother than at `contract`.
+3. At `types`, both port types and store types read as `…[N fields]`, never raw.
+4. At `contract`, hovering a focused process shows wires labelled with the port semantic where the contract supplies one, and just `port: type` where it does not.
+5. Stores show plausible reader/writer counts — `bulk` should report many readers, a private store few.
+
+- [ ] **Step 16: Rebuild the vendored bundle**
+
+```bash
+cd /Users/eranagmon/code/vivarium-dashboard && ./scripts/build_loom.sh
+```
+
+- [ ] **Step 17: Commit**
+
+```bash
+git add src/storeFacts.ts src/nodes/StoreNode.tsx src/edges/FloatingStoreEdge.tsx src/App.tsx src/App.css src/__tests__
+git commit -m "feat(loom): semantic zoom on stores and edges, matching the process tiers"
+```
+
+---
 ## Self-Review Notes
 
-**Spec coverage.** §1 registry → Tasks 1–2. §2 clustering → Tasks 3–4. §3 column layout → Task 5. §4 focus/edges → Task 6. §5 semantic zoom → Task 8. §6 persistence → Task 2 (steps 3–8). §7 module boundaries → `useLayoutMode` (Task 2), `useFocus` (Task 6). §9 testing → every task's test file, plus the fixture in Task 3.
+**Spec coverage.** §1 registry → Tasks 1–2. §2 clustering → Tasks 3–4. §3 column layout → Task 5. §4 focus/edges → Task 6. §5 process contract → Task 8 (loom-side derivation and rendering; the process-bigraph `ProcessContract` itself is the companion plan). §6 semantic zoom → Tasks 9 (processes) and 10 (stores, edges). §7 config → the companion plan, out of scope here. §8 persistence → Task 2 steps 3–8. §9 module boundaries → `useLayoutMode` (Task 2), `useFocus` (Task 6), `contract.ts` (Task 8), `storeFacts.ts` (Task 10). §11 testing → every task's test file, plus the fixture in Task 3.
 
-**Known gap, deliberately deferred.** The spec's §6 says `View` gains `mode` and `pins`, and Task 2 adds both to the type and to `normalizeView`. But `captureCurrentView` (`App.tsx:393-398`) and `applyView` (`App.tsx:403-409`) are not updated to read or write them — saved views will round-trip the fields as defaults rather than live state. This is a small follow-up, called out here so it is not mistaken for done. It does not block any task, since `normalizeView` guarantees old views keep working.
+**Companion plan.** `docs/superpowers/plans/2026-07-23-process-contract-and-config.md` covers spec §5's `ProcessContract` dataclass and §7's config fixes. Those span process-bigraph and v2ecoli, not loom, and are independently useful. This plan's Tasks 8–10 degrade gracefully without them: a contract is derived from the docstring, and rows with no data are omitted rather than rendered empty.
 
-**Type consistency check.** `ZoomTierId` is used in `LayoutContext` (Task 1), `useLayoutMode.runLayout` (Task 2), and `tierForZoom` (Task 8) — same import from `layouts/types.ts` throughout. `granularity` is a `number` in `LayoutContext`, `useLayoutMode`, `hubFractionFor`, and `ProcessRail` props. `Cluster.processIds` (Task 4) feeds `GroupBand.nodeIds` (Task 5), both `string[]`. `AffinityOptions.hubFraction` is the only clustering knob the layout passes through, and `hubFractionFor` is its sole producer.
+**Known gap, deliberately deferred.** `captureCurrentView` (`App.tsx:393-398`) and `applyView` (`App.tsx:403-409`) are not updated to read or write the new `mode`/`pins` fields, so saved views round-trip them as defaults rather than live state. Called out so it is not mistaken for done. Nothing blocks on it, since `normalizeView` guarantees old views keep working.
+
+**Type consistency check.** `ZoomTierId` is `'glyph' | 'ports' | 'types' | 'contract' | 'full'` from Task 9 Step 1 onward; Tasks 1, 2, and 5 are written against the earlier three-value form and Task 9 Step 1 explicitly lists every site to update (`App.tsx` default, `processColumn.test.ts` ctx literals). `abbreviateType` is defined once in Task 8 and consumed by Tasks 9 and 10. `deriveContract` returns `ProcessContract | null`, and every consumer null-checks. `readersAndWriters` (Task 10) returns sorted, deduplicated arrays.
