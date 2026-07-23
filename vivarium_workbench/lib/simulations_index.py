@@ -55,20 +55,44 @@ def _iter_all_study_dirs(workspace: Path):
         (investigation_slug ``<inv>``, rel_prefix
         ``investigations/<inv>/studies/<slug>``)
 
-    De-dupes by study slug with root taking precedence. The Simulations DB
-    MUST scan both: nested-layout investigations (colonies, ketchup-baseline-
-    comparison, v2ecoli-pdmp, …) keep their ``runs.db`` / ``parquet-runs`` /
-    ``study.yaml`` runs under ``investigations/<inv>/studies/<slug>/``, so a
-    root-only walk made every one of their runs invisible.
+    De-dupes by study slug, choosing the BEST candidate per slug: root layout
+    beats nested, and within a layer a dir that actually holds runs (runs.db /
+    parquet / zarr) beats a bare study.yaml, which beats an empty dir (skipped).
+    So a stale placeholder like ``investigations/inv/studies/basal`` (no runs.db,
+    no study.yaml) never shadows the real ``investigations/<inv>/studies/basal``
+    that holds the run — the bug that made basal / colonies invisible. The
+    Simulations DB MUST scan both layouts: nested-layout investigations keep
+    their ``runs.db`` / ``parquet-runs`` / ``study.yaml`` runs under
+    ``investigations/<inv>/studies/<slug>/``.
     """
     wp = WorkspacePaths.load(workspace)
-    seen: set[str] = set()
+
+    def _score(sdir: Path) -> int:
+        """0 = not a real study dir (skip); higher = more authoritative."""
+        return (
+            (4 if (sdir / "runs.db").exists() else 0)
+            + (2 if ((sdir / "parquet-runs").exists() or any(sdir.glob("*.zarr"))) else 0)
+            + (1 if (sdir / "study.yaml").exists() else 0)
+        )
+
+    # slug -> (score, sdir, inv_name, rel); keep the highest-scoring candidate.
+    best: dict[str, tuple] = {}
+
+    def _consider(sdir: Path, inv_name, rel: str, layer_bonus: int) -> None:
+        if not sdir.is_dir():
+            return
+        score = _score(sdir)
+        if score == 0:
+            return  # empty placeholder / not a study — never yield or claim the slug
+        score += layer_bonus
+        prev = best.get(sdir.name)
+        if prev is None or score > prev[0]:
+            best[sdir.name] = (score, sdir, inv_name, rel)
+
     root = wp.studies
     if root.is_dir():
         for sdir in sorted(root.iterdir()):
-            if sdir.is_dir() and sdir.name not in seen:
-                seen.add(sdir.name)
-                yield sdir, None, f"studies/{sdir.name}"
+            _consider(sdir, None, f"studies/{sdir.name}", layer_bonus=8)  # root precedence
     invs = wp.investigations
     if invs.is_dir():
         for inv in sorted(invs.iterdir()):
@@ -76,9 +100,12 @@ def _iter_all_study_dirs(workspace: Path):
             if not (inv.is_dir() and nested.is_dir()):
                 continue
             for sdir in sorted(nested.iterdir()):
-                if sdir.is_dir() and sdir.name not in seen:
-                    seen.add(sdir.name)
-                    yield sdir, inv.name, f"investigations/{inv.name}/studies/{sdir.name}"
+                _consider(sdir, inv.name,
+                          f"investigations/{inv.name}/studies/{sdir.name}", layer_bonus=0)
+
+    for slug in sorted(best):
+        _, sdir, inv_name, rel = best[slug]
+        yield sdir, inv_name, rel
 
 
 def _discover_dbs(workspace: Path) -> list[tuple[Path, str]]:
@@ -293,9 +320,12 @@ def _study_yaml_run_ids(yaml_path: Path) -> list[str]:
             out.append(entry)
         elif isinstance(entry, dict):
             # run_id is the canonical key; fall back to `name` (emitter-less
-            # workspaces — e.g. numpy investigations — record runs as {name: ...}).
-            rid = entry.get("run_id") or entry.get("name")
-            if isinstance(rid, str):
+            # workspaces — e.g. numpy investigations — record runs as {name: ...}),
+            # then `simulation_id`/`simulation` (multigen study.yaml runs, e.g.
+            # mbp-*, whose entries are {simulation: <name>, simulation_id: <uuid>}).
+            rid = (entry.get("run_id") or entry.get("name")
+                   or entry.get("simulation_id") or entry.get("simulation"))
+            if isinstance(rid, str) and rid:
                 out.append(rid)
     return out
 
@@ -327,14 +357,17 @@ def _read_study_yaml_runs(workspace: Path) -> list[dict]:
         for entry in runs:
             if not isinstance(entry, dict):
                 continue
-            rid = str(entry.get("run_id") or entry.get("name") or "").strip()
+            rid = str(entry.get("run_id") or entry.get("name")
+                      or entry.get("simulation_id") or entry.get("simulation")
+                      or "").strip()
             if not rid:
                 continue
+            _name = entry.get("name") or entry.get("simulation")
             out.append({
                 "run_id": rid,
                 "spec_id": entry.get("composite"),
-                "sim_name": entry.get("name") or rid,
-                "label": entry.get("name") or rid,
+                "sim_name": _name or rid,
+                "label": _name or rid,
                 "status": entry.get("status") or "completed",
                 "n_steps": entry.get("n_steps"),
                 "progress_step": entry.get("n_steps") or 0,
