@@ -393,6 +393,72 @@ def test_delete_full_pass(tmp_path):
     assert not (ws / ".pbg" / "runs" / "r-1").exists()
 
 
+def _write_simulations_row(db_file, simulation_id):
+    """Seed one row in the SQLiteEmitter-owned `simulations` index table."""
+    import sqlite3
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS simulations "
+        "(simulation_id TEXT, name TEXT, started_at TEXT, completed_at TEXT, "
+        "elapsed_seconds REAL, composite_config TEXT, metadata TEXT)")
+    conn.execute(
+        "INSERT INTO simulations (simulation_id, name) VALUES (?, '')",
+        (simulation_id,))
+    conn.commit()
+    conn.close()
+
+
+def test_delete_clears_the_sqlite_simulations_index_row(tmp_path):
+    """A run's row in the SQLiteEmitter's own `simulations` table must go too.
+
+    Leaving it orphaned re-surfaced the run as a phantom "running" entry the
+    Sim-DB fold could not shake (the reappearance this delete path prevents).
+    """
+    import sqlite3
+    ws = tmp_path / "ws"
+    (ws / ".pbg").mkdir(parents=True)
+    db = ws / ".pbg" / "composite-runs.db"
+    _seed_run(db, spec_id="pkg.x", run_id="r-1", started_at=1.0)
+    _write_history_row(db, "r-1", 0)
+    _write_simulations_row(db, "r-1")
+    # A second run's rows must survive untouched.
+    _seed_run(db, spec_id="pkg.x", run_id="r-keep", started_at=2.0)
+    _write_simulations_row(db, "r-keep")
+
+    delete_simulation(ws, "r-1")
+
+    conn = sqlite3.connect(str(db))
+    try:
+        assert conn.execute(
+            "SELECT count(*) FROM simulations WHERE simulation_id='r-1'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT count(*) FROM simulations WHERE simulation_id='r-keep'"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_delete_tombstones_so_the_run_does_not_reappear(tmp_path):
+    """After delete, the run must not re-synthesise from its `started` event.
+
+    #554 folds the Sim-DB from the append-only JSONL log; delete_simulation
+    tombstones the run so the next fold skips it. list_simulations backfills
+    surviving DB rows into the log, so without the DB-row clear AND the
+    tombstone the run comes back.
+    """
+    ws = tmp_path / "ws"
+    (ws / ".pbg").mkdir(parents=True)
+    db = ws / ".pbg" / "composite-runs.db"
+    _seed_run(db, spec_id="pkg.x", run_id="r-ghost", started_at=1.0)
+    assert any(r.get("run_id") == "r-ghost" for r in list_simulations(ws))
+
+    delete_simulation(ws, "r-ghost")
+
+    # A fresh fold (list_simulations backfills + folds) must not resurrect it.
+    assert not any(r.get("run_id") == "r-ghost" for r in list_simulations(ws))
+
+
 def test_delete_unknown_raises(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
