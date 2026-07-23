@@ -222,7 +222,39 @@ Card height is content-driven at every tier; the widths above are fixed.
 
 **Type strings must be abbreviated.** A real port type runs past 300 characters — `unique_array[TU_index:integer|transcript_length:integer|is_mRNA:boolean|…]`. The `types` tier renders `unique_array[17 fields]`, with the full string on hover and in the Inspector. Rendering them raw would defeat the entire purpose of the view.
 
-Following the investigation graph's discipline: **font sizes are identical across all five tiers**. Legibility at low zoom comes from dropping content, never from shrinking text. Thresholds keep effective rendered type at or above roughly 9 CSS px. Full detail remains reachable at any tier via the existing Inspector.
+### Stores and edges zoom too
+
+The tier is a property of **the view**, not of the process card. One `ZoomTierId` drives all three element kinds, so the whole canvas reveals detail in step rather than one element type racing ahead.
+
+**Stores:**
+
+| Tier | Adds |
+|---|---|
+| **glyph** | circle, name |
+| **ports** | value summary (`Array(8)`, scalar value) |
+| **types** | the store's declared `_type`, abbreviated the same way port types are |
+| **contract** | default value; **who writes and who reads it**, derived from the wire edges |
+| **full** | full type expansion (the field list the process cards abbreviate), emit status from `_declared_emit_paths` |
+
+The reader/writer summary is the store-side counterpart of the process contract, and it comes free — the edges already encode direction via `edgeType: 'input' | 'output'`.
+
+**Edges:**
+
+| Tier | Adds |
+|---|---|
+| **glyph** | thin line, no label |
+| **ports** | port-name label |
+| **types** | abbreviated type on the wire |
+| **contract** | the contract's semantic for that port — e.g. *appends newly initiated transcripts, one per multinomial draw* |
+| **full** | unchanged from `contract` (the card carries the rest) |
+
+Edge tiering is also a **performance lever**, not only a legibility one: labelling 400 edges at low zoom costs layout work for text nobody can read. Gating labels by tier removes that cost exactly when the canvas is most crowded.
+
+This is where the contract earns its keep — §5's port semantics stop being inspector trivia and annotate the wire itself.
+
+Following the investigation graph's discipline: **font sizes are identical across all five tiers**, for every element kind. Legibility at low zoom comes from dropping content, never from shrinking text. Thresholds keep effective rendered type at or above roughly 9 CSS px. Full detail remains reachable at any tier via the existing Inspector.
+
+**A row with no data is omitted, never rendered empty.** Config is absent on 45/46 processes until §7 lands, and port semantics exist only once authored. An empty box reads as a bug.
 
 Additions:
 - A per-card **⤢ pin-expanded** toggle holds one card at `near` regardless of zoom, so details stay readable while zoomed out.
@@ -290,7 +322,7 @@ The work is large enough that it should land in reviewable increments, each inde
 - **P3 — column layout.** `processColumn.ts` registered as the second mode, fixed-size cards, all edges drawn. First visible result.
 - **P4 — focus and edge culling.** `useFocus()`, aggregate edges, dimming, pins. This is where legibility actually arrives.
 - **P5 — rail.** `ProcessRail.tsx`, search, scroll-sync, granularity slider.
-- **P6 — semantic zoom.** The five tiers in `ProcessNode.tsx`, prefix-sum reflow, type abbreviation, hysteresis, pin-expanded.
+- **P6 — semantic zoom.** The five tiers across all three element kinds: `ProcessNode.tsx`, `StoreNode.tsx`, and the edge renderer. Prefix-sum reflow, type abbreviation, hysteresis, pin-expanded.
 
 Three phases live **outside loom** and unblock the richer tiers. They touch different repos and can run in parallel with P1–P5:
 
@@ -306,7 +338,9 @@ P1 and P2 are independent and can proceed in parallel. P3 depends on both. P6 re
 - `processColumn.test.ts` — column geometry, no card overlap at any tier, band y-ranges, prefix-sum reflow correctness.
 - `hierarchy.test.ts` — the existing `layout.test.ts`, import path only, as the no-change gate.
 - `registry.test.ts` — every registered mode satisfies the interface.
-- `semanticZoom.test.tsx` — the five tier thresholds, hysteresis, pin-expanded override, and that each tier renders exactly the rows it owns.
+- `semanticZoom.test.tsx` — the five tier thresholds, hysteresis, pin-expanded override, and that each tier renders exactly the rows it owns, for processes, stores, and edges alike.
+- `storeTiers.test.tsx` — store value/type/reader-writer rows appear at their tiers; the reader/writer summary is derived correctly from edge direction.
+- `edgeTiers.test.tsx` — labels absent at `glyph`, port name at `ports`, abbreviated type at `types`, contract semantic at `contract`.
 - `ProcessRail.test.tsx` — search filtering, click-to-focus, selection scroll-sync, granularity slider.
 - `viewStore.test.ts` — a saved view lacking `mode` normalizes to `hierarchy`.
 - `contract.test.ts` (loom) — docstring-derived fallback extracts summary, math lines, and description; a declared `_contract` wins over the fallback; completeness counts documented ports against real `_inputs`/`_outputs` keys; a contract naming a nonexistent port is flagged.
@@ -323,6 +357,6 @@ P1 and P2 are independent and can proceed in parallel. P3 depends on both. P6 re
 3. Any process is locatable within about two seconds via rail search.
 4. Hierarchy mode output is byte-identical to today.
 5. Tier changes and mode switches stay visually smooth at 345 nodes.
-6. Zooming into a process card walks the full ladder — name, ports, port types, contract math, symbols — with no row showing an empty placeholder.
+6. Zooming walks the full ladder for processes, stores, and edges together — name, ports, types, contract math, symbols — with no row showing an empty placeholder.
 7. Config is non-empty on substantially all baseline processes, not 1 of 46.
 8. Every process with a docstring renders a contract without anyone authoring one; processes that declare a structured contract render port and config semantics on top.
