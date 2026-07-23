@@ -48,6 +48,33 @@ def append_deleted_event(workspace: Path, run_id: str) -> None:
     append_run_event(workspace, {"run_id": run_id, "event": "deleted"})
 
 
+def tombstoned_run_ids(workspace: Path) -> set:
+    """run_ids whose LATEST event is a deletion.
+
+    Complements :func:`fold_runs_jsonl` (which simply omits tombstoned runs):
+    lets a caller tell "deleted" apart from "never logged" — e.g. the sqlite
+    backfill must not resurrect a run the user deleted. A later ``started`` for
+    the same id un-tombstones it, matching the fold's revive semantics.
+    """
+    path = _log_path(workspace)
+    if not path.exists():
+        return set()
+    last: dict[str, str] = {}
+    with path.open("r", encoding="utf-8") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                ev = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            rid = ev.get("run_id")
+            if rid:
+                last[rid] = ev.get("event")
+    return {rid for rid, event in last.items() if event == "deleted"}
+
+
 def fold_runs_jsonl(workspace: Path) -> dict[str, dict]:
     """Fold the log to the latest record per run_id (later events merge over earlier).
 

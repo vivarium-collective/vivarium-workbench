@@ -716,3 +716,42 @@ def test_list_local_run_has_null_remote_origin(tmp_path):
     sims = list_simulations(ws)
     assert len(sims) == 1
     assert sims[0]["remote_origin"] is None
+
+
+def test_empty_placeholder_dir_does_not_shadow_real_study(tmp_path):
+    """A stale, empty ``investigations/<x>/studies/<slug>`` (no study.yaml /
+    runs.db) must NOT shadow the real copy that holds the runs.db — the bug that
+    made `basal` / `colonies-*` invisible in the Simulations DB."""
+    ws = tmp_path / "ws"
+    # Stale placeholder, iterated FIRST (alphabetically) — would win under the
+    # old first-seen dedup.
+    (ws / "investigations" / "aaa-stale" / "studies" / "basal").mkdir(parents=True)
+    # Real copy with the actual runs.db.
+    real = ws / "investigations" / "zzz-real" / "studies" / "basal"
+    real.mkdir(parents=True)
+    _seed_run(real / "runs.db", spec_id="s", run_id="basal-1", started_at=1.0)
+
+    sims = {s["run_id"]: s for s in list_simulations(ws)}
+    assert "basal-1" in sims                                   # real run discovered
+    assert sims["basal-1"]["study_slug"] == "basal"
+    # Scanned the real copy that holds the runs.db, not the stale placeholder.
+    assert sims["basal-1"]["db_path"] == "investigations/zzz-real/studies/basal/runs.db"
+
+
+def test_study_yaml_runs_with_simulation_id_keys_surface(tmp_path):
+    """study.yaml runs recorded as ``{simulation, simulation_id}`` (multigen
+    studies like mbp-*) must appear — not just the ``{name}`` / ``{run_id}`` forms."""
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "mbp-01"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(
+        "name: mbp-01\n"
+        "runs:\n"
+        "  - simulation: static-env-baseline\n"
+        "    simulation_id: abc-123\n"
+        "    seed: 0\n"
+    )
+    sims = {s["run_id"]: s for s in list_simulations(ws)}
+    assert "abc-123" in sims                       # keyed by simulation_id
+    assert sims["abc-123"]["sim_name"] == "static-env-baseline"
+    assert sims["abc-123"]["study_slug"] == "mbp-01"
