@@ -992,6 +992,107 @@ def _append_remote_simulations(sims: list, ws_root: Path) -> list:
     return list(sims) + remote if remote else sims
 
 
+# Shared emitter-kind -> display-label map (one place to add a kind's label).
+_EMITTER_LABEL = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
+                  "ram": "RAM", "none": "—"}
+
+
+def backfill_index_into_jsonl(ws_root: Path) -> int:
+    """Idempotently migrate every run discoverable in the LEGACY stores (sqlite
+    ``runs.db``, ``study.yaml`` runs, parquet/zarr hives) into the append-only
+    JSONL run log, so the Simulations DB can be built from JSONL alone.
+
+    Reuses :func:`list_simulations`, which already resolves ``store_path`` /
+    ``db_path`` / ``emitter`` uniformly for EVERY emitter type — so the log ends
+    up carrying each run's data-store location and retrieval keeps working
+    across SQLite / XArray / Parquet / remote. Appends a ``backfill`` event when
+    a run is absent from the fold, OR when the folded row lacks any data-store
+    location (``store_path`` and ``db_path``) that the legacy store can supply
+    (this self-heals JSONL-native ``started`` events logged before the store
+    existed). Returns the number of events appended.
+    """
+    try:
+        rows = list_simulations(ws_root)
+    except Exception:
+        return 0
+    folded = run_log.fold_runs_jsonl(Path(ws_root))
+    tombstoned = run_log.tombstoned_run_ids(Path(ws_root))
+    appended = 0
+    for row in rows:
+        rid = row.get("run_id")
+        if not rid or rid in tombstoned:
+            continue  # never resurrect a deleted run from its lingering sqlite row
+        prev = folded.get(rid)
+        has_store = bool(row.get("store_path") or row.get("db_path"))
+        prev_has_store = bool(prev and (prev.get("store_path") or prev.get("db_path")))
+        # Skip when already represented AND its store location is known (or the
+        # legacy store has none to add) — keeps this idempotent across builds.
+        if prev is not None and (prev_has_store or not has_store):
+            continue
+        ev = {"run_id": rid, "event": "backfill"}
+        for k in ("spec_id", "sim_name", "label", "status", "n_steps",
+                  "progress_step", "started_at", "completed_at", "db_path",
+                  "store_path", "emitter", "study_slug", "investigation_slug",
+                  "remote_origin"):
+            v = row.get(k)
+            if v is not None:
+                ev[k] = v
+        run_log.append_run_event(Path(ws_root), ev)
+        appended += 1
+    return appended
+
+
+def _rec_to_simrow(run_id: str, rec: dict) -> dict:
+    """Turn one folded JSONL record into a validated SimRow dict.
+
+    Classifies ``emitter_type`` from the recorded emitter kind, falling back to
+    the store path's extension (``.zarr`` -> XArray, ``.parquet`` -> Parquet,
+    runs.db -> SQLite) so every emitter is labelled correctly; an
+    emitter-less/store-less row shows ``—``.
+    """
+    from vivarium_workbench.lib.runs_index import emitter_type_of
+
+    row: dict = {"run_id": run_id}
+    for k in ("spec_id", "sim_name", "label", "status", "n_steps",
+              "progress_step", "started_at", "completed_at", "db_path",
+              "store_path", "study_slug", "investigation_slug"):
+        if rec.get(k) is not None:
+            row[k] = rec[k]
+
+    emitter = rec.get("emitter")
+    tag = _emitter_tag(emitter)
+    if tag:
+        row["emitter"] = tag
+        # Fall back to the raw tag (not a title-cased variant) for unknown kinds,
+        # matching the pre-JSONL classifier's pill text.
+        row["emitter_type"] = _EMITTER_LABEL.get(tag, tag)
+    else:
+        path = rec.get("store_path") or rec.get("db_path")
+        row["emitter_type"] = emitter_type_of(path) if path else "—"
+
+    # remote_origin: a genuine RemoteOrigin mapping (never the "local" origin
+    # string save_metadata stamps — that fails SimRow validation and 500s).
+    ro = rec.get("remote_origin")
+    if not (isinstance(ro, dict) and ro):
+        origin = rec.get("origin")
+        ro = origin if isinstance(origin, dict) and origin else None
+    if ro:
+        row["remote_origin"] = ro
+
+    try:
+        dumped = SimRow.model_validate(row).model_dump()
+    except ValidationError as e:
+        warnings.warn(
+            f"simulations_index: JSONL row {run_id!r} failed SimRow validation: {e}"
+        )
+        return row
+    # Preserve the raw remote_origin mapping — SimRow's RemoteOrigin model would
+    # otherwise pad it with None fields, changing its shape for JS consumers.
+    if ro:
+        dumped["remote_origin"] = ro
+    return dumped
+
+
 def build_simulations_data(ws_root: Path) -> dict:
     """Data builder for GET /api/simulations — the ``list_simulations`` rows
     enriched with emitter_type labels + active remote build runs + current slug.
@@ -1005,77 +1106,24 @@ def build_simulations_data(ws_root: Path) -> dict:
     import sys as _sys
     if ws not in _sys.path:
         _sys.path.insert(0, ws)
+
+    # Pure-JSONL Simulations DB: migrate any runs still living only in the legacy
+    # stores (sqlite runs.db / study.yaml / parquet-zarr hives) into the
+    # append-only JSONL run log (idempotent), then build every row from the log
+    # fold alone. The append-only log is the single source of truth; each row
+    # carries its data-store location so retrieval works across all emitters.
     try:
-        sims = list_simulations(ws_root)
+        backfill_index_into_jsonl(Path(ws_root))
     except Exception:
-        return {"simulations": [], "current": None}
-
-    # Shared emitter-kind -> display-label map, used by both the JSONL merge
-    # below and the sqlite/db_path fallback pass that follows it. Defined
-    # once here (rather than duplicated per-block) so there's a single place
-    # to add a kind's label -- e.g. "ram", needed by the JSONL branch.
-    _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
-                       "ram": "RAM", "none": "—"}  # no step emitter (summary-only run)
-
-    # Fold the workspace's append-only JSONL run log (Task 1/2) and merge it
-    # with the sqlite-gathered `sims` rows above. JSONL is the source of
-    # truth for a run_id's fields when present (it's written on every
-    # save/complete, including emitter-less/in-progress runs the sqlite
-    # gather can miss); legacy-sqlite-only rows pass through untouched.
+        pass
     try:
         folded = run_log.fold_runs_jsonl(Path(ws_root))
-        by_id = {s.get("run_id"): s for s in sims}
-        for rid, rec in folded.items():
-            row = by_id.get(rid)
-            is_new_row = row is None
-            if is_new_row:
-                row = {"run_id": rid}
-                sims.append(row)
-                by_id[rid] = row
-            # JSONL is the source of truth for these fields when present.
-            for k in ("spec_id", "label", "status", "n_steps", "started_at",
-                      "completed_at", "study_slug", "investigation_slug"):
-                if rec.get(k) is not None:
-                    row[k] = rec[k]
-            if rec.get("emitter"):
-                row["emitter"] = rec["emitter"]
-                row["emitter_type"] = _emitter_label.get(rec["emitter"], rec["emitter"])
-            elif is_new_row:
-                # JSONL-only row with no emitter recorded -- don't let it
-                # fall through to the SQLite-classification pass below,
-                # which would default an unknown/empty emitter to "SQLite"
-                # via emitter_type_of(None).
-                row["emitter_type"] = "—"
-            # `origin` in the JSONL is a *kind* string ("local" for every run
-            # save_metadata logs). `remote_origin` is a RemoteOrigin mapping
-            # ({deployment, simulation_id, ...}) -- assigning the string here
-            # fails SimRow validation and 500s /api/simulations, and because
-            # the log is append-only a single run would brick the page for
-            # good. Only propagate a genuine remote mapping.
-            origin = rec.get("origin")
-            if isinstance(origin, dict) and origin:
-                row["remote_origin"] = origin
     except Exception:
-        pass
+        folded = {}
+    sims = [_rec_to_simrow(rid, rec) for rid, rec in folded.items()]
 
-    try:
-        from vivarium_workbench.lib.runs_index import emitter_type_of
-        for s in sims:
-            if s.get("emitter_type"):
-                continue  # already labeled by the JSONL merge above
-            s["emitter_type"] = _emitter_label.get(
-                _emitter_tag(s.get("emitter"))) or emitter_type_of(s.get("db_path"))
-    except Exception:
-        pass
-
-    # Re-sort newest-first: the JSONL merge above appends any JSONL-only
-    # run_ids (e.g. a fresh Composite-Explorer parquet run recorded only in
-    # the run log) onto the END of `sims`, so without this they'd sink to
-    # the bottom of the newest-first table instead of surfacing at the top.
-    # Prefers completed_at over started_at (a completed run's "newest"
-    # instant is its completion), matching the existing sqlite-path sort key
-    # used by the frontend/backend elsewhere; missing timestamps sort last
-    # rather than raising.
+    # Newest-first. Prefers completed_at over started_at (a completed run's
+    # "newest" instant is its completion); missing timestamps sort last.
     sims.sort(key=lambda r: (r.get("completed_at") or r.get("started_at") or 0),
               reverse=True)
 
