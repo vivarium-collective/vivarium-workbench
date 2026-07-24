@@ -74,11 +74,33 @@ export function storeKeysForProcess(node: Node, keyDepth = 2): Map<string, numbe
 }
 
 export interface AffinityOptions {
-  /** A store touched by >= hubFraction * n processes cannot be a cluster key. */
+  /**
+   * A store cannot be a cluster key once it is touched by at least
+   * `Math.max(3, Math.round(hubFraction * n))` processes — NOT the raw
+   * `hubFraction * n` the name suggests. The `Math.round` means the true
+   * cutoff can sit up to half a process below the nominal fraction (at
+   * n=27, hubFraction=0.30 asks for df >= 8.1 but rounds the cut down to 8),
+   * and the `Math.max(3, …)` floor keeps tiny graphs from being unable to
+   * form a hub at all. This is intentional and matches a validated
+   * prototype — do not "fix" the rounding (switching to `Math.ceil` was
+   * measured to reshuffle the real fixture's clustering substantially,
+   * dropping `unique.active_RNAP` as a cluster entirely). On the real
+   * v2ecoli baseline (n=27) `unique.RNA` sits at df=8 — one process below
+   * the naive 30% threshold — so it becomes a hub only because of the
+   * rounding; the grouping is genuinely sensitive to this boundary.
+   */
   hubFraction?: number;
   /** A process touching more than this many distinct non-hub keys is
    *  cross-cutting and is not forced into any one cluster. */
   hubProcessKeyLimit?: number;
+  /**
+   * How many leading path segments identify a store (default 2, e.g.
+   * `unique.RNA` rather than `unique.RNA.foo`). Aliasing hazard: a
+   * depth-1 store name (e.g. `unique`, if that ever existed as a store in
+   * its own right) is indistinguishable from the depth-`keyDepth`
+   * truncation of any deeper path rooted at the same first segment — both
+   * collapse to the same string key and are counted as one store.
+   */
   keyDepth?: number;
 }
 

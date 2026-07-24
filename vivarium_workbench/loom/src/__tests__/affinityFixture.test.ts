@@ -21,6 +21,17 @@ describe('affinity clustering on the real v2ecoli baseline', () => {
     expect(result.hubs).toEqual(expect.arrayContaining(['bulk', 'listeners']));
   });
 
+  it('pins the exact hub set — guards the hubFraction rounding boundary', () => {
+    // `unique.RNA` sits at df=8 of n=27 (29.6%), one process below the
+    // nominal 30% cut, and is a hub only because `hubCut` rounds
+    // `0.30 * 27 = 8.1` DOWN to 8 (see AffinityOptions.hubFraction's doc
+    // comment). That makes this boundary fragile: a change to the rounding,
+    // the floor, or hubFraction's default would silently reshuffle the
+    // fixture's clustering rather than fail loudly. Pin the exact set so any
+    // such change is caught here.
+    expect(result.hubs).toEqual(['bulk', 'environment', 'listeners', 'unique.RNA']);
+  });
+
   it('produces a readable number of clusters, not singleton soup', () => {
     expect(result.clusters.length).toBeGreaterThanOrEqual(5);
     expect(result.clusters.length).toBeLessThanOrEqual(14);

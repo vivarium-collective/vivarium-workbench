@@ -228,10 +228,15 @@ describe('clusterProcesses', () => {
   });
 
   it('routes hub-only processes to a labeled terminal bucket', () => {
-    // NOTE: four processes, not the three in the task brief. `hubCut` has a
-    // hard floor of 3 processes (a store touched by fewer than 3 of them is
-    // never a hub, whatever hubFraction says), so a 3-process graph cannot
-    // produce a hub at all and the bucket would never form.
+    // NOTE: four processes, not three. "A 3-process graph cannot produce a
+    // hub" is not true in general — 3 processes all touching one store gives
+    // that store df=3, which already meets `hubCut`'s floor of 3. What's
+    // true here is narrower: with only 3 of these processes (drop `d`),
+    // `bulk` would still clear the floor, but `unique.RNA` would be touched
+    // by just `c` — a singleton, not the shared `unique.RNA` cluster the
+    // assertion below checks for. The 4th process is there so `unique.RNA`
+    // groups two processes together, giving both buckets something real to
+    // assert on.
     const nodes = [
       proc('a', { h: ['bulk'] }),
       proc('b', { h: ['bulk'] }),
@@ -288,10 +293,89 @@ describe('clusterProcesses', () => {
     expect(clusterProcesses([])).toEqual({ clusters: [], hubs: [] });
   });
 
-  it('is deterministic across runs', () => {
-    const nodes = ['a', 'b', 'c'].map((n) => proc(n, { s: ['unique', 'RNA'], t: ['bulk'] }));
-    expect(JSON.stringify(clusterProcesses(nodes)))
-      .toBe(JSON.stringify(clusterProcesses(nodes)));
+  it('routes an all-noise graph to a hub-only bucket labeled "ungrouped"', () => {
+    // Real fixture case: `global_clock` wires only to `global_time`/`timestep`,
+    // both filtered as noise. When EVERY process is like this, `hubs` is
+    // empty (nothing ever reached the floor — there were no keys to count at
+    // all), so the `~hub-only` bucket's label falls through to the
+    // `hubs.length` guard's else-branch, 'ungrouped', rather than naming any
+    // store. That branch has no other coverage.
+    const nodes = [
+      proc('clock1', { t: ['global_time'] }, { s: ['timestep'] }),
+      proc('clock2', { t: ['global_time'] }, { s: ['timestep'] }),
+    ];
+    const { clusters, hubs } = clusterProcesses(nodes);
+    expect(hubs).toEqual([]);
+    expect(clusters).toEqual([
+      { key: '~hub-only', label: 'ungrouped', processIds: pids('clock1', 'clock2') },
+    ]);
+  });
+
+  it('breaks a shared-count tie on path depth, not just lexically', () => {
+    // Mutation-tested: deleting the `depth(b[0]) - depth(a[0])` term from the
+    // comparator in clusterProcesses leaves every other test in this file
+    // green — only this test catches it. `p` touches both `boundary` (depth
+    // 1) and `unique.active_ribosome` (depth 2), each shared by exactly 4
+    // processes (df tied at 4, kept below `hubCut` by a high hubFraction so
+    // neither becomes a hub). Without the depth term the lexical fallback
+    // alone would pick `boundary` (`'boundary' < 'unique.active_ribosome'`);
+    // WITH it, the deeper — more specific — key wins, per the doc comment
+    // on clusterProcesses.
+    const nodes = [
+      proc('a1', { s: ['boundary'] }),
+      proc('a2', { s: ['boundary'] }),
+      proc('a3', { s: ['boundary'] }),
+      proc('b1', { s: ['unique', 'active_ribosome'] }),
+      proc('b2', { s: ['unique', 'active_ribosome'] }),
+      proc('b3', { s: ['unique', 'active_ribosome'] }),
+      proc('p', { x: ['boundary'], y: ['unique', 'active_ribosome'] }),
+    ];
+    const { clusters } = clusterProcesses(nodes, { hubFraction: 0.9 });
+    const byKey = Object.fromEntries(clusters.map((c) => [c.key, c.processIds]));
+    expect(byKey['unique.active_ribosome']).toEqual(pids('b1', 'b2', 'b3', 'p'));
+    expect(byKey['boundary']).toEqual(pids('a1', 'a2', 'a3'));
+  });
+
+  it('is deterministic across runs and invariant under input reordering', () => {
+    // Enough processes to produce several differently-sized clusters,
+    // including a genuine SIZE TIE (unique.RNA and unique.promoter both land
+    // 3 processes), plus both terminal buckets populated — unlike the old
+    // version of this test, which fed 3 processes at default hubFraction and
+    // collapsed both candidate stores into a single `~hub-only` bucket,
+    // exercising no cluster-ordering or tiebreak logic at all.
+    const spread: Record<string, string[]> = {};
+    for (let i = 0; i < 11; i++) spread[`k${i}`] = ['unique', `s${i}`];
+    const nodes = [
+      proc('rna1', { s: ['unique', 'RNA'], h: ['bulk'] }),
+      proc('rna2', { s: ['unique', 'RNA'], h: ['bulk'] }),
+      proc('rna3', { s: ['unique', 'RNA'], h: ['bulk'] }),
+      proc('prom1', { s: ['unique', 'promoter'], h: ['bulk'] }),
+      proc('prom2', { s: ['unique', 'promoter'], h: ['bulk'] }),
+      proc('prom3', { s: ['unique', 'promoter'], h: ['bulk'] }),
+      proc('bnd1', { s: ['boundary'], h: ['bulk'] }),
+      proc('bnd2', { s: ['boundary'], h: ['bulk'] }),
+      proc('hub1', { h: ['bulk'] }),
+      proc('hub2', { h: ['bulk'] }),
+      proc('hub3', { h: ['bulk'] }),
+      proc('spread', { ...spread, h: ['bulk'] }),
+    ];
+    const result = clusterProcesses(nodes);
+    expect(result.clusters.map((c) => c.key)).toEqual([
+      'unique.promoter', 'unique.RNA', 'boundary', '~cross-cutting', '~hub-only',
+    ]);
+    // The tie: two differently-keyed clusters of equal size, ordered lexically.
+    expect(result.clusters[0].processIds).toHaveLength(3);
+    expect(result.clusters[1].processIds).toHaveLength(3);
+    // `~cross-cutting` sorts before `~hub-only` — nothing else covers this.
+    const keyIndex = (k: string) => result.clusters.findIndex((c) => c.key === k);
+    expect(keyIndex('~cross-cutting')).toBeLessThan(keyIndex('~hub-only'));
+
+    const again = clusterProcesses(nodes);
+    expect(JSON.stringify(again)).toBe(JSON.stringify(result));
+
+    const reversedInput = [...nodes].reverse();
+    const reversedResult = clusterProcesses(reversedInput);
+    expect(JSON.stringify(reversedResult)).toBe(JSON.stringify(result));
   });
 
   it('orders clusters largest-first with the terminal buckets last', () => {
