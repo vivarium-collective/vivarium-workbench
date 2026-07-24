@@ -1,8 +1,13 @@
 // src/layouts/affinity.ts — group processes by the stores they wire into.
 //
-// Reads inputPortsSchema/outputPortsSchema off process nodes (attached by
-// convert.ts), which are already wire paths relative to the process's
-// parent store. Pure: no React, no DOM, no React Flow beyond the Node type.
+// Reads inputPortsTarget/outputPortsTarget off process nodes (attached by
+// convert.ts): the RESOLVED ABSOLUTE store path each port wires to, with
+// relative `.`/`..` navigation already applied by convert.ts's resolveWirePath.
+// The sibling inputPortsSchema/outputPortsSchema fields are the RAW targets
+// joined with '.', which is lossy and un-parseable (`['..','bulk']` joins to
+// `'...bulk'`, `['a','..','b']` to `'a....b'`) — they are display strings and
+// must never be used here.
+// Pure: no React, no DOM, no React Flow beyond the Node type.
 
 import type { Node } from '@xyflow/react';
 import type { ProcessNodeData } from '../types';
@@ -28,41 +33,42 @@ export function isBookkeepingProcess(label: string): boolean {
 }
 
 /**
- * Extracts the leading run of REAL (non-navigation) path segments from a wire
- * target, up to `keyDepth` of them. Leading empty / `'.'` / `'..'` segments —
- * the relative-scope navigation prefix — are discarded first, because
- * `Array.join('.')` (convert.ts's lossy encoding of a wire path array) mixes
- * navigation and real segments into one dot-delimited string with no
- * separator between them: `['..','bulk'].join('.')` is `'...bulk'`, and a
- * naive `split('.').slice(0, keyDepth)` counts the empty navigation segments
- * against the depth budget, truncating away the real segment entirely (real
- * fixture cases: `division`'s `agents` port wires to `['..']`; ordinary
- * sibling/boundary wiring like `['..','boundary','external']` has the same
- * shape). Returns `[]` when nothing real remains (bare `'.'`, `'..'`,
- * `'../..'`, or `''`) — such a target carries no local store identity and
- * must be skipped by the caller, not turned into a key.
+ * Re-expresses a RESOLVED ABSOLUTE store path relative to `parentPath`, the
+ * process's own parent store — the scope its wiring is written against.
+ *
+ * Returns `null` when the target does not lie strictly under that parent, i.e.
+ * the wire navigated out of the process's own scope (`['..']` → the parent's
+ * parent) or landed on the parent store itself (`['bulk','..']` → the parent).
+ * Neither carries a local store identity, so the caller must SKIP such a port
+ * rather than invent a key for it — the real fixture case is v2ecoli-baseline's
+ * `division` process, whose `agents` port wires to `['..']`.
  */
-function realPathSegments(target: string, keyDepth: number): string[] {
-  const segments = target.split('.').filter((seg) => seg !== '' && seg !== '.' && seg !== '..');
-  return segments.slice(0, keyDepth);
+function segmentsUnderParent(parentPath: string[], absolute: string): string[] | null {
+  const abs = absolute.split('.').filter((seg) => seg !== '');
+  if (abs.length <= parentPath.length) return null;      // the parent itself, or above it
+  for (let i = 0; i < parentPath.length; i++) {
+    if (abs[i] !== parentPath[i]) return null;           // a sibling branch, not ours
+  }
+  return abs.slice(parentPath.length);
 }
 
 /** Store keys this process touches -> number of ports wired to each. */
 export function storeKeysForProcess(node: Node, keyDepth = 2): Map<string, number> {
   const data = node.data as unknown as ProcessNodeData;
+  // data.path includes the process's own name; its wiring scope is the parent.
+  const parentPath = (data.path ?? []).slice(0, -1);
   const out = new Map<string, number>();
-  const add = (schema: Record<string, string> | undefined) => {
-    for (const target of Object.values(schema ?? {})) {
-      if (!target) continue;
-      const raw = String(target);
-      const segments = realPathSegments(raw, keyDepth);
-      if (segments.length === 0) continue;
-      const key = segments.join('.');
+  const add = (targets: Record<string, string> | undefined) => {
+    for (const absolute of Object.values(targets ?? {})) {
+      if (absolute == null) continue;
+      const segments = segmentsUnderParent(parentPath, String(absolute));
+      if (!segments || segments.length === 0) continue;
+      const key = segments.slice(0, keyDepth).join('.');
       if (!key || isNoiseKey(key)) continue;
       out.set(key, (out.get(key) ?? 0) + 1);
     }
   };
-  add(data.inputPortsSchema);
-  add(data.outputPortsSchema);
+  add(data.inputPortsTarget);
+  add(data.outputPortsTarget);
   return out;
 }

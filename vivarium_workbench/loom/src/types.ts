@@ -18,9 +18,17 @@ export interface ProcessNodeData {
   inputPorts: string[];
   outputPorts: string[];
   description?: string;
-  /** port -> dotted wire target, relative to the process's parent store. */
+  /** port -> RAW wire target joined with '.', exactly as authored and relative
+   *  to the process's parent store. Display only (port tooltips, Inspector):
+   *  the join is lossy — `['..','bulk']` becomes `'...bulk'` — so this string
+   *  must never be re-split to recover the path. Use `*PortsTarget` for that. */
   inputPortsSchema?: Record<string, string>;
   outputPortsSchema?: Record<string, string>;
+  /** port -> RESOLVED ABSOLUTE dotted store path (relative `.`/`..` navigation
+   *  already applied with push/pop semantics). `''` is the composite root.
+   *  This is the unambiguous form; use it for any path reasoning. */
+  inputPortsTarget?: Record<string, string>;
+  outputPortsTarget?: Record<string, string>;
 }
 
 export type BigraphNodeData = StoreNodeData | ProcessNodeData;
