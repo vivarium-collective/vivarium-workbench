@@ -70,6 +70,31 @@ describe('storeKeysForProcess — relative-navigation wire targets', () => {
     expect(keys.get('bulk')).toBe(1);
     expect([...keys.keys()]).toEqual(['bulk']);
   });
+
+  it('strips a leading ".." before keying an up-then-into-a-store target', () => {
+    // ['..', 'bulk'].join('.') === '...bulk' — ordinary sibling wiring, not
+    // pure navigation, but truncation alone still degenerates it to '.'.
+    const keys = storeKeysForProcess(proc('p', {}, { a: '...bulk' }));
+    expect(keys.has('.')).toBe(false);
+    expect(keys.get('bulk')).toBe(1);
+    expect([...keys.keys()]).toEqual(['bulk']);
+  });
+
+  it('strips a leading ".." before keying a multi-segment boundary target', () => {
+    // ['..', 'boundary', 'external'].join('.') === '...boundary.external'
+    const keys = storeKeysForProcess(proc('p', {}, { a: '...boundary.external' }));
+    expect(keys.has('.')).toBe(false);
+    expect(keys.get('boundary.external')).toBe(1);
+    expect([...keys.keys()]).toEqual(['boundary.external']);
+  });
+
+  it('strips a leading "." before keying a same-scope target', () => {
+    // ['.', 'bulk'].join('.') === '..bulk'
+    const keys = storeKeysForProcess(proc('p', {}, { a: '..bulk' }));
+    expect(keys.has('.')).toBe(false);
+    expect(keys.get('bulk')).toBe(1);
+    expect([...keys.keys()]).toEqual(['bulk']);
+  });
 });
 
 describe('isBookkeepingProcess', () => {

@@ -28,19 +28,23 @@ export function isBookkeepingProcess(label: string): boolean {
 }
 
 /**
- * True when a wire target is pure relative-scope navigation — `'.'`, `'..'`,
- * or any dot-joined chain of those (e.g. `'../..'`, or the `'..'`-only string
- * convert.ts produces by `Array.join('.')`-ing a `['..']` target) — with no
- * real store name in it. Such a target carries no local store identity, so it
- * must never become a cluster key (real fixture case: `division`'s `agents`
- * port wires to `['..']`, which truncation alone turns into the meaningless
- * key `'.'`). Checked on the RAW target, before truncation, because
- * truncation is what manufactures the bogus non-empty `'.'` key in the first
- * place — by the time a key exists it looks superficially like a normal
- * short key, not obviously noise the way `isNoiseKey`'s prefix list is.
+ * Extracts the leading run of REAL (non-navigation) path segments from a wire
+ * target, up to `keyDepth` of them. Leading empty / `'.'` / `'..'` segments —
+ * the relative-scope navigation prefix — are discarded first, because
+ * `Array.join('.')` (convert.ts's lossy encoding of a wire path array) mixes
+ * navigation and real segments into one dot-delimited string with no
+ * separator between them: `['..','bulk'].join('.')` is `'...bulk'`, and a
+ * naive `split('.').slice(0, keyDepth)` counts the empty navigation segments
+ * against the depth budget, truncating away the real segment entirely (real
+ * fixture cases: `division`'s `agents` port wires to `['..']`; ordinary
+ * sibling/boundary wiring like `['..','boundary','external']` has the same
+ * shape). Returns `[]` when nothing real remains (bare `'.'`, `'..'`,
+ * `'../..'`, or `''`) — such a target carries no local store identity and
+ * must be skipped by the caller, not turned into a key.
  */
-function isPureNavigationTarget(target: string): boolean {
-  return target.split('.').every((seg) => seg === '' || seg === '.' || seg === '..');
+function realPathSegments(target: string, keyDepth: number): string[] {
+  const segments = target.split('.').filter((seg) => seg !== '' && seg !== '.' && seg !== '..');
+  return segments.slice(0, keyDepth);
 }
 
 /** Store keys this process touches -> number of ports wired to each. */
@@ -51,8 +55,9 @@ export function storeKeysForProcess(node: Node, keyDepth = 2): Map<string, numbe
     for (const target of Object.values(schema ?? {})) {
       if (!target) continue;
       const raw = String(target);
-      if (isPureNavigationTarget(raw)) continue;
-      const key = raw.split('.').slice(0, keyDepth).join('.');
+      const segments = realPathSegments(raw, keyDepth);
+      if (segments.length === 0) continue;
+      const key = segments.join('.');
       if (!key || isNoiseKey(key)) continue;
       out.set(key, (out.get(key) ?? 0) + 1);
     }
