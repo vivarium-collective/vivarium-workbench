@@ -23,6 +23,7 @@ import { isHiddenByAncestor, retargetEdgesToVisible, hiddenNodeIds } from './pan
 import ViewsMenu from './panels/ViewsMenu';
 import { getDefaultView, decodeView, fetchView, type View } from './viewStore';
 import { Sidebar } from './panels/Sidebar';
+import { ProcessRail } from './panels/ProcessRail';
 import { SetupRunPanel } from './panels/SetupRunPanel';
 import { ResultsPanel } from './panels/ResultsPanel';
 import { VisualizationsPanel } from './panels/VisualizationsPanel';
@@ -598,6 +599,28 @@ export default function App() {
   // the clean, structure-only view.
   const handlePaneClick = useCallback(() => focus.select(null), [focus.select]);
 
+  // Changing granularity re-clusters, but the layout effect's
+  // applySavedPositions would immediately overwrite the recomputed positions
+  // with the persisted ones (App saves positions after every layout), so the
+  // slider would recompute clusters WITHOUT moving anything until "Re-layout".
+  // Clear this mode's saved positions first, so the fresh layout — re-run
+  // because `runLayout`'s identity changes with granularity — actually lands.
+  const handleGranularityChange = useCallback((g: number) => {
+    if (compositeId) clearLayout(compositeId, layoutMode.modeId);
+    layoutMode.setGranularity(g);
+  }, [compositeId, layoutMode.modeId, layoutMode.setGranularity]);
+
+  // Jump the canvas to a process picked in the rail, matching handleResetLayout's
+  // deterministic setCenter (with a clamped zoom). setCenter frames the node so
+  // the edge-culling reveal of its wiring is actually on screen.
+  const handleRailNavigate = useCallback((id: string) => {
+    const n = nodes.find((x) => x.id === id);
+    const inst = rfRef.current;
+    if (!n || !inst) return;
+    const zoom = Math.max(0.05, Math.min(1.2, inst.getZoom?.() ?? 1));
+    inst.setCenter?.(n.position.x + 110, n.position.y + 30, { zoom, duration: 300 });
+  }, [nodes]);
+
   const handleNodeDoubleClick = useCallback((_: any, node: any) => {
     // Only group stores (synthesized container nodes) can be collapsed.
     if (!(node.data as any)?.isGroup) return;
@@ -745,6 +768,21 @@ export default function App() {
             flexDirection: 'row',
           }}>
             <EmitContext.Provider value={emitSet}>
+              {/* Cluster rail — only in process-column mode, left of the canvas.
+                  Names the bands the canvas draws as bare clusters and drives the
+                  same focus state, so selecting here reveals wiring on the canvas.
+                  Absent in hierarchy mode, which is left entirely untouched. */}
+              {layoutMode.modeId === 'process-column' && (
+                <ProcessRail
+                  bands={layoutMode.bands}
+                  nodes={allNodes}
+                  focus={focus}
+                  granularity={layoutMode.granularity}
+                  onGranularityChange={handleGranularityChange}
+                  onNavigate={handleRailNavigate}
+                  hiddenIds={hidden}
+                />
+              )}
               {/* Canvas column — flex:1. Holds the Re-layout button + ReactFlow. */}
               <div
                 ref={canvasWrapRef}

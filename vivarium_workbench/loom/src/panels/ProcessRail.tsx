@@ -109,9 +109,9 @@ export function ProcessRail({
             || (overrides[band.key] ?? !isDefaultCollapsed(band));
           const collapsible = isDefaultCollapsed(band);
           return (
-            <div key={band.key} className="loom-cluster-band loom-rail-cluster">
+            <div key={band.key} className="loom-rail-cluster">
               <div
-                className={`loom-rail-cluster-label${collapsible ? ' is-collapsible' : ''}`}
+                className={`loom-cluster-band loom-rail-cluster-label${collapsible ? ' is-collapsible' : ''}`}
                 onClick={collapsible
                   ? () => setOverrides((o) => ({ ...o, [band.key]: !expanded }))
                   : undefined}

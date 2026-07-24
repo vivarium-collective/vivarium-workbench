@@ -1036,11 +1036,53 @@ textarea.sr-input {
    sibling rail column that must not be reachable by the canvas's overlays. */
 .loom-canvas { isolation: isolate; }
 
-/* Reserved for Task 7 (the cluster rail) — not yet assigned to any element. */
+/* The cluster label at the head of each rail group (Task 7). */
 .loom-cluster-band {
   font-size: 11px; font-weight: 600; color: #475569;
   text-transform: lowercase; letter-spacing: 0.02em;
 }
+
+/* ---- Process rail (Task 7) ------------------------------------------------
+   The browsable half of process-column mode: a fixed-width column left of the
+   canvas that names the clusters and lists their processes, searchable. */
+.loom-process-rail {
+  width: 240px; flex: 0 0 240px; display: flex; flex-direction: column;
+  gap: 8px; padding: 10px; overflow: hidden;
+  border-right: 1px solid #e2e8f0; background: #fafafa; font-size: 12px;
+}
+.loom-rail-search {
+  padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px;
+}
+.loom-rail-granularity {
+  display: flex; align-items: center; gap: 6px; color: #64748b; font-size: 11px;
+}
+.loom-rail-granularity input { flex: 1; accent-color: #2563eb; }
+.loom-rail-list { overflow-y: auto; flex: 1; }
+.loom-rail-cluster { margin-bottom: 10px; }
+.loom-rail-cluster-label {
+  padding: 2px 4px; margin-bottom: 3px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex; align-items: center; gap: 4px;
+}
+.loom-rail-cluster-label.is-collapsible { cursor: pointer; user-select: none; }
+.loom-rail-caret { color: #94a3b8; font-size: 9px; }
+.loom-rail-hidden-note {
+  padding: 3px 6px; color: #94a3b8; font-size: 11px; font-style: italic;
+}
+.loom-rail-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer;
+}
+.loom-rail-row:hover { background: rgba(0, 0, 0, 0.05); }
+.loom-rail-row.is-active { background: #dbeafe; font-weight: 600; }
+.loom-rail-row.is-hidden .loom-rail-row-label { color: #b0b7c3; font-style: italic; }
+.loom-rail-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loom-rail-pin {
+  border: 0; background: none; cursor: pointer; opacity: 0.25; font-size: 11px;
+  line-height: 1; padding: 0 2px;
+}
+.loom-rail-pin.is-pinned, .loom-rail-pin:hover { opacity: 1; }
+.loom-rail-empty { color: #94a3b8; padding: 8px 4px; }
 
 /* One-line explanation of the empty-by-default canvas in edge-culling modes.
    Sits top-LEFT: the toolbar owns top-right and React Flow's Controls own

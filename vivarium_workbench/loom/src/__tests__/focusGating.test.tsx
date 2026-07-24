@@ -8,8 +8,14 @@
 //      gets explicitly hidden is pruned from the pin set (Finding 2).
 import { Profiler } from 'react';
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react';
 import App from '../App';
+
+// In process-column mode the ProcessRail lists each process by the same label
+// the canvas node shows, so a bare screen.getByText('p1') is ambiguous. These
+// tests are about the CANVAS node's focus behavior, so scope the query to the
+// canvas column (the rail is a sibling, outside .loom-canvas).
+const canvas = () => within(document.querySelector('.loom-canvas') as HTMLElement);
 
 beforeAll(() => {
   if (!('ResizeObserver' in globalThis)) {
@@ -81,16 +87,16 @@ describe('focus-driven edge culling — App wiring', () => {
     const label = await loadOntoWiringTab({ id: 'test.composites.hover-b', name: 'hover-b' });
     const select = screen.getByTitle('Layout mode') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'process-column' } });
-    await screen.findByText('p1');
+    await canvas().findByText('p1');
 
     expect(document.querySelector('.loom-focus-hint')?.textContent)
       .toMatch(/hover to reveal wiring/i);
 
-    fireEvent.mouseEnter(screen.getByText('p1'));
+    fireEvent.mouseEnter(canvas().getByText('p1'));
     expect(document.querySelector('.loom-focus-hint')?.textContent)
       .toMatch(/showing wiring for 1 node/i);
 
-    fireEvent.mouseLeave(screen.getByText('p1'));
+    fireEvent.mouseLeave(canvas().getByText('p1'));
     expect(document.querySelector('.loom-focus-hint')?.textContent)
       .toMatch(/hover to reveal wiring/i);
     void label;
@@ -100,9 +106,9 @@ describe('focus-driven edge culling — App wiring', () => {
     await loadOntoWiringTab({ id: 'test.composites.pin-a', name: 'pin-a' });
     const select = screen.getByTitle('Layout mode') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'process-column' } });
-    await screen.findByText('p1');
+    await canvas().findByText('p1');
 
-    fireEvent.click(screen.getByText('p1'), { shiftKey: true });
+    fireEvent.click(canvas().getByText('p1'), { shiftKey: true });
     expect(document.querySelector('.loom-focus-hint')?.textContent)
       .toMatch(/1 pinned/);
 
@@ -124,9 +130,9 @@ describe('focus-driven edge culling — App wiring', () => {
     await loadOntoWiringTab({ id: 'test.composites.pin-b', name: 'pin-b' });
     const select = screen.getByTitle('Layout mode') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'process-column' } });
-    await screen.findByText('p1');
+    await canvas().findByText('p1');
 
-    fireEvent.click(screen.getByText('p1'), { shiftKey: true });
+    fireEvent.click(canvas().getByText('p1'), { shiftKey: true });
     expect(document.querySelector('.loom-focus-hint')?.textContent)
       .toMatch(/1 pinned/);
 
