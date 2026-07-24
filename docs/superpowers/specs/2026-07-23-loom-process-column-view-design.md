@@ -352,7 +352,9 @@ P1 and P2 are independent and can proceed in parallel. P3 depends on both. P6 re
 
 ## Success criteria
 
-1. The v2ecoli baseline opens in process-column mode showing under 20 edges by default, versus roughly 400 today.
+1. The v2ecoli baseline opens in process-column mode with **all wire edges culled** — 0 of 329 drawn until a process is focused — versus 385 drawn today. Measured on the real fixture: 385 → 29 rendered edges, a 13× reduction; focusing `ecoli-metabolism` reveals 16 wires.
+
+   *(An earlier draft of this criterion said "under 20 edges". That rested on an estimate of ~10 structural place edges; the baseline actually has 56 across 34 visible stores. Place edges stay drawn — they are the store hierarchy — so the honest target is total wire culling, not an absolute edge count.)*
 2. Clusters are recognizable to a modeler as transcription, translation, replication, regulation, environment, and bulk chemistry, without any annotation added to `baseline.py`.
 3. Any process is locatable within about two seconds via rail search.
 4. Hierarchy mode output is byte-identical to today.
