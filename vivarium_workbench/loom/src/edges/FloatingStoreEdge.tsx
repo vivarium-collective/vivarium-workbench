@@ -5,12 +5,34 @@
 // nearest that port, instead of a fixed left/right handle.
 import { memo } from 'react';
 import {
-  BaseEdge, getBezierPath, useInternalNode, Position,
+  BaseEdge, EdgeLabelRenderer, getBezierPath, useInternalNode, Position,
   type EdgeProps,
 } from '@xyflow/react';
 import { circleAnchor, dominantSide, type Point, type Side } from './geometry';
+import { abbreviateType } from '../contract';
+import type { ZoomTierId } from '../layouts/types';
 
 type RFInternalNode = NonNullable<ReturnType<typeof useInternalNode>>;
+
+export interface EdgeLabelParts {
+  port: string;
+  portType?: string;
+  semantic?: string;
+}
+
+/** What a wire says about itself at a given tier. Empty string means no
+ *  label at all — which is also the perf path, since ~400 edges labelled
+ *  at low zoom costs text layout for glyphs nobody can read. */
+export function edgeLabelFor(tier: ZoomTierId, parts: EdgeLabelParts): string {
+  if (tier === 'glyph') return '';
+  let label = parts.port;
+  if (tier === 'ports') return label;
+  if (parts.portType) label += `: ${abbreviateType(parts.portType)}`;
+  if ((tier === 'contract' || tier === 'full') && parts.semantic) {
+    label += ` — ${parts.semantic}`;
+  }
+  return label;
+}
 
 const SIDE_TO_POSITION: Record<Side, Position> = {
   left: Position.Left,
@@ -67,7 +89,7 @@ function FloatingStoreEdge({
   // Input ports sit on the process's left; output ports on its right.
   const procPosition = storeIsSource ? Position.Left : Position.Right;
 
-  const [path] = getBezierPath({
+  const [path, labelX, labelY] = getBezierPath({
     sourceX: storeIsSource ? storePoint.x : procPoint.x,
     sourceY: storeIsSource ? storePoint.y : procPoint.y,
     sourcePosition: storeIsSource ? storePosition : procPosition,
@@ -76,7 +98,37 @@ function FloatingStoreEdge({
     targetPosition: storeIsSource ? procPosition : storePosition,
   });
 
-  return <BaseEdge path={path} markerEnd={markerEnd} style={style} />;
+  // Semantic zoom is opt-in: only process-column mode stamps `_tier` onto the
+  // edge data. Absent it (hierarchy mode, or the glyph tier which App leaves
+  // unstamped), draw NO label at all — no EdgeLabelRenderer node, so there is
+  // genuinely no text layout to pay for when the canvas is most crowded.
+  const stampedTier = (data as { _tier?: ZoomTierId } | undefined)?._tier;
+  const label = stampedTier
+    ? edgeLabelFor(stampedTier, {
+        port: (data as { port?: string } | undefined)?.port ?? '',
+        portType: (data as { _portType?: string } | undefined)?._portType,
+        semantic: (data as { _semantic?: string } | undefined)?._semantic,
+      })
+    : '';
+
+  return (
+    <>
+      <BaseEdge path={path} markerEnd={markerEnd} style={style} />
+      {label && (
+        <EdgeLabelRenderer>
+          <div
+            className="loom-edge-label nodrag nopan"
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            }}
+          >
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
 }
 
 export default memo(FloatingStoreEdge);
