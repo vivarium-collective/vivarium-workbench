@@ -1029,9 +1029,14 @@ textarea.sr-input {
 .inspector-section .inspector-caret { display: inline-block; transition: transform 0.12s ease; }
 .inspector-section[open] > summary .inspector-caret { transform: rotate(90deg); }
 
-/* Process-column mode: non-focused wires stay present but recede, so the
-   graph reads as one focused path rather than a hairball. */
-.loom-mode-process-column .react-flow__edge.loom-edge-dim { opacity: 0.08; }
+/* Own stacking context for the wiring canvas column: it hosts several
+   absolutely-positioned, z-indexed overlays (toolbar, focus hint) on top of
+   React Flow's own layered panes. `isolation: isolate` scopes those z-indexes
+   to this box so they can never leak past it — relevant once Task 7 adds a
+   sibling rail column that must not be reachable by the canvas's overlays. */
+.loom-canvas { isolation: isolate; }
+
+/* Reserved for Task 7 (the cluster rail) — not yet assigned to any element. */
 .loom-cluster-band {
   font-size: 11px; font-weight: 600; color: #475569;
   text-transform: lowercase; letter-spacing: 0.02em;

@@ -64,4 +64,37 @@ describe('useFocus', () => {
     act(() => result.current.hover('p1'));
     expect(result.current.ctx).toBe(first);
   });
+
+  describe('prunePins', () => {
+    it('drops pins isLive rejects, keeps the rest', () => {
+      const { result } = renderHook(() => useFocus());
+      act(() => {
+        result.current.togglePin('p1');
+        result.current.togglePin('p2');
+      });
+      act(() => result.current.prunePins((id) => id !== 'p1'));
+      expect([...result.current.ctx.pinned]).toEqual(['p2']);
+    });
+
+    it('is a no-op — same Set identity — when nothing needed pruning', () => {
+      const { result } = renderHook(() => useFocus());
+      act(() => result.current.togglePin('p1'));
+      const before = result.current.pinned;
+      act(() => result.current.prunePins(() => true));
+      expect(result.current.pinned).toBe(before);
+    });
+
+    it('does not touch hover or selection', () => {
+      const { result } = renderHook(() => useFocus());
+      act(() => {
+        result.current.hover('h1');
+        result.current.select('s1');
+        result.current.togglePin('p1');
+      });
+      act(() => result.current.prunePins(() => false));
+      expect(result.current.ctx.pinned.size).toBe(0);
+      expect(result.current.ctx.focused.has('h1')).toBe(true);
+      expect(result.current.ctx.focused.has('s1')).toBe(true);
+    });
+  });
 });

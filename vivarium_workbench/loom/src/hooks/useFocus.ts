@@ -20,6 +20,9 @@ export interface UseFocus {
   select: (id: string | null) => void;
   togglePin: (id: string) => void;
   clear: () => void;
+  /** Drop any pin `isLive` rejects (e.g. a pinned node just got hidden). A
+   *  no-op — same Set identity — when nothing needed pruning. */
+  prunePins: (isLive: (id: string) => boolean) => void;
   ctx: FocusContext;
 }
 
@@ -42,6 +45,18 @@ export function useFocus(): UseFocus {
     setPinned((prev) => (prev.size === 0 ? prev : new Set()));
   }, []);
 
+  const prunePins = useCallback((isLive: (id: string) => boolean) => {
+    setPinned((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (isLive(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
   const ctx = useMemo<FocusContext>(() => {
     const focused = new Set<string>();
     if (hovered) focused.add(hovered);
@@ -52,6 +67,6 @@ export function useFocus(): UseFocus {
   return {
     hovered, selected, pinned,
     hover: setHovered, select: setSelected,
-    togglePin, clear, ctx,
+    togglePin, clear, prunePins, ctx,
   };
 }

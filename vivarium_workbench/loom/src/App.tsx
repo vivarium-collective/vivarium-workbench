@@ -13,6 +13,7 @@ import FloatingStoreEdge from './edges/FloatingStoreEdge';
 import { useLayoutMode } from './hooks/useLayoutMode';
 import { useFocus } from './hooks/useFocus';
 import { LAYOUT_MODES, getMode } from './layouts/registry';
+import { pickDrawnEdges } from './layouts/pickDrawnEdges';
 import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
@@ -95,6 +96,12 @@ export default function App() {
   // implement `edgeVisibility` use this to cull wires; modes that don't
   // (hierarchy) ignore it entirely and keep drawing every edge.
   const focus = useFocus();
+  // Whether the ACTIVE mode culls edges by focus. `layoutMode.mode` is a
+  // module-level singleton from the registry, so this is stable between
+  // renders that don't switch modes. In hierarchy mode (no edgeVisibility)
+  // focus is entirely inert, so hover tracking + pin pruning are gated on
+  // this to keep hierarchy mode paying nothing for a feature it never uses.
+  const culls = !!layoutMode.mode.edgeVisibility;
   const [tab, setTab] = useState<TabId>('setup');
   const [compositeId, setCompositeId] = useState<string | null>(() => {
     // Bootstrap from URL query if present (for popups deep-linked with ?id=)
@@ -151,6 +158,10 @@ export default function App() {
       setState(msg.state);
       setCollapsed(defaultCollapsedIds(msg.state));  // light overview by default
       setHidden(defaultHiddenIds(msg.state));   // re-seed the noisy-process hide
+      // Node ids are dotted paths, so a same-named path in the NEXT composite
+      // would otherwise silently inherit whatever hover/selection/pins were
+      // left over from this one — drop all three on every new composite.
+      focus.clear();
       // Seed from the composite's declared emit-all paths when present, else
       // every top-level store, and broadcast so the dashboard's run-emit
       // selection stays in sync.
@@ -339,6 +350,17 @@ export default function App() {
     }));
   }, [hidden, raw, setNodes, setEdges]);
 
+  // A pinned node that then gets explicitly hidden (sidebar Processes/Nodes
+  // toggle) would otherwise be unreachable — nothing on screen to shift-click
+  // to un-pin it, so the focus hint keeps asserting "N pinned" over an empty
+  // canvas. Prune any pin the current hidden set swallows. Gated on `culls`:
+  // in hierarchy mode pins are inert, so there is nothing worth pruning.
+  useEffect(() => {
+    if (!culls) return;
+    const hiddenIds = hiddenNodeIds(raw.nodes as any[], hidden);
+    focus.prunePins((id) => !hiddenIds.has(id));
+  }, [culls, hidden, raw, focus.prunePins]);
+
   // What actually gets drawn: the edge state, minus whatever the active layout
   // mode culls for the current focus. Hierarchy mode declares no
   // `edgeVisibility`, so it short-circuits to `edges` — same array identity,
@@ -352,11 +374,11 @@ export default function App() {
   // passed through for the seam's signature but the shipped modes don't read
   // it, so it is deliberately NOT a dependency — including it would re-filter
   // on every frame of a node drag for no change in output.
-  const drawnEdges = useMemo(() => {
-    const cull = layoutMode.mode.edgeVisibility;
-    return cull ? cull(edges as any[], focus.ctx, nodesRef.current as any[]) : edges;
+  const drawnEdges = useMemo(
+    () => pickDrawnEdges(layoutMode.mode, edges as any[], focus.ctx, nodesRef.current as any[]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edges, focus.ctx, layoutMode.mode]);
+    [edges, focus.ctx, layoutMode.mode],
+  );
 
   /** Distinct nodes whose wiring is currently drawn (hover/selection ∪ pins). */
   const activeFocusCount = useMemo(
@@ -732,13 +754,13 @@ export default function App() {
                 {/* Modes that cull edges start with NO wires drawn, which without
                     a word of explanation reads as a broken canvas rather than a
                     deliberate clean slate. One line, only in those modes. */}
-                {layoutMode.mode.edgeVisibility && (
+                {culls && (
                   <div className="loom-focus-hint">
                     {activeFocusCount
                       ? `showing wiring for ${activeFocusCount} node`
                         + `${activeFocusCount === 1 ? '' : 's'}`
                         + (focus.ctx.pinned.size ? ` (${focus.ctx.pinned.size} pinned)` : '')
-                      : 'hover a process to reveal its wiring · click to keep · shift-click to pin'}
+                      : 'hover to reveal wiring · click to keep · shift-click to pin'}
                   </div>
                 )}
                 {/* Top-right toolbar: Re-layout + Download (current layout, white bg). */}
@@ -825,8 +847,12 @@ export default function App() {
                   edgeTypes={EDGE_TYPES}
                   onNodeClick={handleNodeClick}
                   onNodeDoubleClick={handleNodeDoubleClick}
-                  onNodeMouseEnter={handleNodeMouseEnter}
-                  onNodeMouseLeave={handleNodeMouseLeave}
+                  // Only wired up in modes that actually cull edges by focus
+                  // (hierarchy mode's focus is inert): otherwise every node the
+                  // pointer crosses sets state and re-renders App — which, on
+                  // the wiring tab, re-renders the whole non-memoized Sidebar.
+                  onNodeMouseEnter={culls ? handleNodeMouseEnter : undefined}
+                  onNodeMouseLeave={culls ? handleNodeMouseLeave : undefined}
                   onPaneClick={handlePaneClick}
                   fitView
                   fitViewOptions={{ padding: 0.2 }}
