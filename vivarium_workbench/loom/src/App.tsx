@@ -14,6 +14,8 @@ import { useLayoutMode } from './hooks/useLayoutMode';
 import { useFocus } from './hooks/useFocus';
 import { LAYOUT_MODES, getMode } from './layouts/registry';
 import { pickDrawnEdges } from './layouts/pickDrawnEdges';
+import { tierForZoom } from './layouts/processColumn';
+import type { ZoomTierId } from './layouts/types';
 import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
@@ -151,6 +153,25 @@ export default function App() {
   // a brand-new edges array — on each of those frames for an identical result.
   const nodesRef = useRef<any[]>([]);
   nodesRef.current = nodes;
+
+  // Semantic-zoom tier, driven by the live viewport zoom (process-column mode
+  // only). The tier decides how much detail each process card shows AND how
+  // tall it is, so the column must re-flow when it changes. `tierForZoom`'s
+  // hysteresis keeps cards from flickering when the user scrolls back and forth
+  // across a tier boundary.
+  const [tier, setTier] = useState<ZoomTierId>('ports');
+  const onMove = useCallback((_: unknown, vp: { zoom: number }) => {
+    // Only process-column mode has tiers; leaving hierarchy's tier untouched
+    // keeps its layout effect from re-running ELK on every zoom step.
+    if (layoutMode.modeId !== 'process-column') return;
+    setTier((cur) => tierForZoom(vp.zoom, cur));
+  }, [layoutMode.modeId]);
+  // Last tier the column was laid out at. A tier change re-stacks the column
+  // (card heights changed); the persisted per-node positions would otherwise
+  // pin the old spacing and cards would overlap — so the layout effect wipes
+  // this mode's saved layout on a genuine tier change, mirroring the
+  // granularity handler. Seeded to the initial tier so mount does not clear.
+  const prevTierRef = useRef<ZoomTierId>(tier);
 
   // Wire postMessage protocol. Use a ref guard so StrictMode's double-effect
   // doesn't fire `explore:ready` twice during dev.
@@ -293,10 +314,20 @@ export default function App() {
     // (so a process still shows a wire to the branch it connects into).
     const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
 
+    // A genuine tier change re-stacks the process column for the new card
+    // heights; wipe this mode's persisted spacing first so applySavedPositions
+    // below cannot pin the old, now-overlapping layout (same tactic as the
+    // granularity handler). Guarded so ordinary re-runs (collapse, hide, state)
+    // keep the user's drags.
+    if (layoutMode.modeId === 'process-column' && prevTierRef.current !== tier) {
+      clearLayout(compositeId, layoutMode.modeId);
+    }
+    prevTierRef.current = tier;
+
     (async () => {
       const saved = loadLayout(compositeId, layoutMode.modeId);
       const { nodes: laidOut } = await layoutMode.runLayout(
-        visibleNodes as any, visibleEdges as any, compositeId, 'ports',
+        visibleNodes as any, visibleEdges as any, compositeId, tier,
       );
       const withSaved = applySavedPositions(laidOut as any, saved) as any[];
       if (cancelled) return;
@@ -328,9 +359,10 @@ export default function App() {
 
     return () => { cancelled = true; };
     // layoutMode.modeId / runLayout: switching layout mode re-runs the layout.
+    // `tier`: a zoom-tier change re-flows the column (card heights change).
     // `hidden` is deliberately NOT a dep — see hiddenRef above.
   }, [state, raw, collapsed, compositeId, setNodes, setEdges,
-      layoutMode.modeId, layoutMode.runLayout]);
+      layoutMode.modeId, layoutMode.runLayout, tier]);
 
   // Toggle the `hidden` CSS flag on existing nodes/edges WITHOUT relayout or
   // remount. O(changed nodes): only nodes/edges whose hidden state actually
@@ -387,6 +419,21 @@ export default function App() {
     [focus.ctx],
   );
 
+  // Stamp the current semantic-zoom tier (and pinned-open flag) onto each
+  // process node's data so ProcessNode can gate its rows. Only in process-column
+  // mode — hierarchy nodes are left un-stamped, so ProcessNode renders its
+  // legacy fixed card and that mode is entirely unaffected. New data objects are
+  // minted only when `nodes`, `tier`, or the pin set changes (useMemo), so a
+  // plain re-render or a pan within a tier does not defeat the identity guarantee
+  // the layout effect's setNodes reducers rely on to avoid remounting the graph.
+  const tieredNodes = useMemo(() => {
+    if (layoutMode.modeId !== 'process-column') return nodes;
+    return (nodes as any[]).map((n) => (n.type !== 'process' ? n : {
+      ...n,
+      data: { ...n.data, _tier: tier, _pinnedOpen: focus.ctx.pinned.has(n.id) },
+    }));
+  }, [nodes, tier, focus.ctx.pinned, layoutMode.modeId]);
+
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
   // time a composite renders. Subsequent drags update the same store.
@@ -420,7 +467,7 @@ export default function App() {
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
       const { nodes: laidOut } = await layoutMode.runLayout(
-        visibleNodes as any, visibleEdges as any, compositeId, 'ports',
+        visibleNodes as any, visibleEdges as any, compositeId, tier,
       );
       const laid = laidOut as any[];
       // Reuse unchanged node objects so consolidating the layout doesn't remount
@@ -464,7 +511,7 @@ export default function App() {
       }, 60);
     })();
   }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges,
-      layoutMode.modeId, layoutMode.runLayout]);
+      layoutMode.modeId, layoutMode.runLayout, tier]);
 
   // ---- Saved views ---------------------------------------------------------
   // A "view" snapshots the current arrangement + visibility. Capturing reads the
@@ -876,9 +923,10 @@ export default function App() {
                   </div>
                 </div>
                 <ReactFlow
-                  nodes={nodes}
+                  nodes={tieredNodes}
                   edges={drawnEdges}
                   onInit={(inst) => { rfRef.current = inst; }}
+                  onMove={onMove}
                   onNodesChange={onNodesChange}
                   onEdgesChange={onEdgesChange}
                   nodeTypes={NODE_TYPES}
