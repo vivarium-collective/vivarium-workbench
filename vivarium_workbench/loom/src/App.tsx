@@ -476,7 +476,13 @@ export default function App() {
     try {
       const el = canvasWrapRef.current?.querySelector('.react-flow__viewport') as HTMLElement | null;
       if (!el) return;
-      const bounds = getNodesBounds(nodes as any);
+      // Frame the VISIBLE nodes only. getNodesBounds does not honour the
+      // `hidden` flag (fitView does), so exporting the raw node list padded the
+      // image with the empty rectangle of whatever is toggled off — e.g. in
+      // process-column mode the hidden bookkeeping band's ~2,096px tail. Fall
+      // back to everything if the user hid literally the whole graph.
+      const framed = (nodes as any[]).filter((n) => !n.hidden);
+      const bounds = getNodesBounds((framed.length ? framed : nodes) as any);
       const PAD = 60, MAX = 6000;
       const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
       const scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));

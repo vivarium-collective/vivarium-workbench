@@ -11,9 +11,10 @@ import type { Node } from '@xyflow/react';
 import { stateToReactFlow } from '../convert';
 import {
   processColumnMode, TIERS, CARD_GAP, CLUSTER_GAP, GUTTER, UNCLUSTERED_KEY,
+  DEFAULT_GRANULARITY, hubFractionFor, STORE_W, STORE_H,
 } from '../layouts/processColumn';
 import { HUB_ONLY_KEY, CROSS_CUTTING_KEY } from '../layouts/affinity';
-import type { LayoutContext } from '../layouts/types';
+import type { LayoutContext, ZoomTier } from '../layouts/types';
 import fixture from './fixtures/v2ecoli-baseline.json';
 
 /**
@@ -46,11 +47,33 @@ function build(procs: Record<string, string>, stores: string[]): Node[] {
   return nodes as unknown as Node[];
 }
 
-const ctx: LayoutContext = { compositeId: 'c', tier: 'mid', granularity: 0.30 };
+// Runs the DEFAULT app path: useLayoutMode seeds granularity to exactly this,
+// and hubFractionFor anchors it on the validated hubFraction (see I-2 below).
+const ctx: LayoutContext = { compositeId: 'c', tier: 'mid', granularity: DEFAULT_GRANULARITY };
 const MID = TIERS.find((t) => t.id === 'mid')!;
 
 const procId = (label: string) => `agents.0.${label}`;
 const storeId = (dotted: string) => `agents.0.${dotted}`;
+
+/** Bounding box of a laid-out graph, using the mode's own card/store sizes
+ *  (React Flow measures the DOM; jsdom does not, so size them here). */
+function boundsOf(out: Node[], tier: ZoomTier) {
+  const size = (n: Node) => (n.type === 'process'
+    ? { w: tier.cardWidth, h: tier.cardHeight } : { w: STORE_W, h: STORE_H });
+  const xs = out.map((n) => n.position.x);
+  const ys = out.map((n) => n.position.y);
+  const x2 = out.map((n) => n.position.x + size(n).w);
+  const y2 = out.map((n) => n.position.y + size(n).h);
+  const width = Math.max(...x2) - Math.min(...xs);
+  const height = Math.max(...y2) - Math.min(...ys);
+  return { width, height };
+}
+
+/** The zoom React Flow's fitView settles on — `getViewportForBounds` picks the
+ *  smaller of the two axis fits, padded. App passes `padding: 0.2`. */
+function fitZoom(b: { width: number; height: number }, vw = 1400, vh = 900, pad = 0.2) {
+  return Math.min(vw / (b.width * (1 + pad)), vh / (b.height * (1 + pad)));
+}
 
 describe('processColumnMode', () => {
   it('places every process in a single column at one x', async () => {
@@ -146,6 +169,26 @@ describe('processColumnMode', () => {
     expect(rna.keyStoreId).toBe(storeId('unique.RNA'));
   });
 
+  it('never resolves a key store from an unrelated branch', async () => {
+    // `agents.0` holds the processes but has NO `unique.RNA` store of its own
+    // (collapsed subtree, or simply absent); `agents.1` does. A unique-suffix
+    // scan matches exactly one store and would hand back the WRONG branch's;
+    // the parent-anchored lookup reports none.
+    const { nodes } = stateToReactFlow({
+      agents: {
+        '0': {
+          a: { _type: 'process', address: 'local:X', config: {}, inputs: { s: ['unique', 'RNA'] }, outputs: {} },
+          b: { _type: 'process', address: 'local:X', config: {}, inputs: { s: ['unique', 'RNA'] }, outputs: {} },
+        },
+        '1': { unique: { RNA: {} } },
+      },
+    });
+    const { bands } = await processColumnMode.run(nodes as unknown as Node[], [], ctx);
+    const rna = bands!.find((b) => b.key === 'unique.RNA')!;
+    expect(rna).toBeDefined();
+    expect(rna.keyStoreId).toBeNull();
+  });
+
   it('re-flows the column for a coarser zoom tier', async () => {
     const nodes = build(
       { a: 'unique.RNA', b: 'unique.RNA', c: 'unique.promoter' },
@@ -211,5 +254,82 @@ describe('processColumnMode on the real v2ecoli baseline', () => {
       if (b.key.startsWith('~')) expect(b.keyStoreId).toBeNull();
       else expect(b.keyStoreId).toBe(`agents.0.${b.key}`);
     }
+  });
+
+  // ---- I-2: the SHIPPED default must be the VALIDATED clustering -----------
+  it('runs the app default at the hubFraction affinityFixture.test.ts validates', () => {
+    // affinityFixture.test.ts measures the grouping at hubFraction 0.30 and
+    // documents that the boundary is fragile. useLayoutMode seeds granularity
+    // to DEFAULT_GRANULARITY, so this is the app's real path — it must land on
+    // 0.30 EXACTLY, not merely near it (0.275 and 0.30 give hubCut 7 vs 8 and
+    // coincide on this fixture only because no store sits at df=7).
+    expect(hubFractionFor(DEFAULT_GRANULARITY)).toBe(0.30);
+  });
+
+  it('pins the exact bands the default path produces', async () => {
+    // Band count/coverage/ordering are asserted above; this pins the actual
+    // GROUPING. Without it a drift in the granularity map, the default, or
+    // hubCut reshuffles which processes share a band while every other
+    // assertion stays green.
+    const { bands } = await processColumnMode.run(
+      nodes as unknown as Node[], edges as unknown as any[], ctx,
+    );
+    expect(bands!.map((b) => `${b.key} (${b.nodeIds.length})`)).toEqual([
+      'unique.active_ribosome (5)',
+      'boundary (4)',
+      'unique.promoter (4)',
+      'unique.active_RNAP (2)',
+      'unique.full_chromosome (2)',
+      'listeners.mass (1)',
+      'ppgpp_state (1)',
+      'unique.DnaA_box (1)',
+      '~cross-cutting (1)',
+      '~hub-only (6)',
+      '~unclustered (19)',
+    ]);
+  });
+
+  // ---- I-1: the mode must be READABLE in its default framing ---------------
+  it('frames readably: near-square bounds, not a 22:1 sliver', async () => {
+    // Regression guard. The store side used to reuse hierarchy mode's ELK pass,
+    // which rows every sibling set out: 37,980 x 1,680 for the store block,
+    // 38,380 x 5,392 overall — fitView at 1400x900 landed at zoom 0.030, i.e.
+    // the process column rendered ~8px wide. packStoreTree shelf-packs instead:
+    // store block 2,600 x 4,420, overall 3,000 x 5,392, zoom 0.139 at the mid
+    // tier and 0.170 once the column re-flows at the far tier it settles into.
+    for (const tier of [MID, TIERS.find((t) => t.id === 'far')!]) {
+      const { nodes: out } = await processColumnMode.run(
+        nodes as unknown as Node[], edges as unknown as any[], { ...ctx, tier: tier.id },
+      );
+      const b = boundsOf(out, tier);
+      expect(Math.max(b.width / b.height, b.height / b.width)).toBeLessThanOrEqual(4);
+      expect(fitZoom(b)).toBeGreaterThan(0.12);
+    }
+    // The far tier is where the app settles (any zoom < 0.35 selects it), and
+    // there the whole graph must be genuinely readable.
+    const far = TIERS.find((t) => t.id === 'far')!;
+    const { nodes: outFar } = await processColumnMode.run(
+      nodes as unknown as Node[], edges as unknown as any[], { ...ctx, tier: 'far' },
+    );
+    expect(fitZoom(boundsOf(outFar, far))).toBeGreaterThanOrEqual(0.15);
+  });
+
+  it('keeps every store above its own children in the packed block', async () => {
+    // Compactness must not cost the nesting cue: a parent store still sits
+    // strictly above (and never overlapping) the block holding its children.
+    const { nodes: out } = await processColumnMode.run(
+      nodes as unknown as Node[], edges as unknown as any[], ctx,
+    );
+    const stores = out.filter((n) => n.type === 'store');
+    const byPath = new Map(stores.map((n) => [(n.data as any).path.join('.'), n]));
+    let checked = 0;
+    for (const n of stores) {
+      const path = (n.data as any).path as string[];
+      const parent = path.length > 1 ? byPath.get(path.slice(0, -1).join('.')) : undefined;
+      if (!parent) continue;
+      checked++;
+      expect(n.position.y).toBeGreaterThanOrEqual(parent.position.y + STORE_H);
+    }
+    expect(checked).toBeGreaterThan(250);   // the fixture's 305 stores, less roots
   });
 });

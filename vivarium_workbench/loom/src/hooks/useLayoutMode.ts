@@ -4,6 +4,7 @@
 import { useCallback, useState } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 import { getMode, DEFAULT_MODE_ID } from '../layouts/registry';
+import { DEFAULT_GRANULARITY } from '../layouts/processColumn';
 import type { GroupBand, LayoutResult, ZoomTierId } from '../layouts/types';
 
 export interface UseLayoutMode {
@@ -24,7 +25,10 @@ export interface UseLayoutMode {
 export function useLayoutMode(initialModeId = DEFAULT_MODE_ID): UseLayoutMode {
   const [modeId, setModeId] = useState(initialModeId);
   const [bands, setBands] = useState<GroupBand[]>([]);
-  const [granularity, setGranularity] = useState(0.30);
+  // Anchored default: hubFractionFor(DEFAULT_GRANULARITY) is exactly the
+  // hubFraction affinityFixture.test.ts validates. Do not hardcode a number
+  // here — the app's default clustering must be the tested one.
+  const [granularity, setGranularity] = useState(DEFAULT_GRANULARITY);
   const mode = getMode(modeId);
 
   const runLayout = useCallback(

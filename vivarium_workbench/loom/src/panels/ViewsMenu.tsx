@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   listViews, getDefaultName, getView, saveView, deleteView, setDefault,
-  shareableUrl, type View,
+  shareableUrl, normalizeView, type View,
 } from '../viewStore';
 
 export default function ViewsMenu(props: {
@@ -95,7 +95,12 @@ export default function ViewsMenu(props: {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const v = JSON.parse(String(reader.result)) as View;
+        // A hand-edited or foreign file is arbitrary JSON. Coerce it the same
+        // way every other entry point does (?view=, ?viewUrl=, localStorage all
+        // go through normalizeView) so applyView only ever sees a well-formed
+        // View — junk positions/collapsed/hidden are dropped instead of being
+        // written into the layout store.
+        const v = normalizeView(JSON.parse(String(reader.result))) as View;
         applyView(v);
         flash(`Loaded ${file.name}`);
       } catch {
