@@ -72,3 +72,110 @@ export function storeKeysForProcess(node: Node, keyDepth = 2): Map<string, numbe
   add(data.outputPortsTarget);
   return out;
 }
+
+export interface AffinityOptions {
+  /** A store touched by >= hubFraction * n processes cannot be a cluster key. */
+  hubFraction?: number;
+  /** A process touching more than this many distinct non-hub keys is
+   *  cross-cutting and is not forced into any one cluster. */
+  hubProcessKeyLimit?: number;
+  keyDepth?: number;
+}
+
+export interface Cluster {
+  key: string;
+  label: string;
+  processIds: string[];
+}
+
+export interface AffinityResult {
+  clusters: Cluster[];
+  hubs: string[];
+}
+
+/** Terminal bucket for processes whose every store is a hub (or which touch no
+ *  store at all, e.g. a clock wired only to `global_time`/`timestep`). */
+export const HUB_ONLY_KEY = '~hub-only';
+/** Terminal bucket for processes spread across so many stores that no single
+ *  one identifies them. */
+export const CROSS_CUTTING_KEY = '~cross-cutting';
+
+/**
+ * Group processes into named clusters by the stores they wire into.
+ *
+ * The rule: **each process joins the most widely SHARED non-hub store it
+ * touches.** Hubs (stores nearly everything touches — `bulk`, `listeners`) are
+ * excluded as keys because they group nothing; rare stores are excluded by
+ * construction because "most widely shared" prefers the popular one.
+ *
+ * Two alternatives were prototyped against the real v2ecoli baseline and
+ * rejected on measured results, so do not swap this rule out casually:
+ *  - TF-IDF distinctiveness (`ports × log(n/df)`): 36 clusters for 46
+ *    processes, 27 singletons keyed on junk like `_layer_token_7`. Rare stores
+ *    are process-PRIVATE, not distinctive.
+ *  - Jaccard agglomerative clustering: 12-14 clusters, 7-8 singletons, and its
+ *    largest cluster shared no distinctive store so it could not be labeled.
+ *
+ * Deterministic: every tie is broken to a total order, and both the cluster
+ * list and each member list are sorted.
+ */
+export function clusterProcesses(nodes: Node[], opts: AffinityOptions = {}): AffinityResult {
+  const { hubFraction = 0.30, hubProcessKeyLimit = 8, keyDepth = 2 } = opts;
+
+  const procs = nodes.filter(
+    (n) => n.type === 'process'
+      && !isBookkeepingProcess(String((n.data as { label?: unknown })?.label ?? '')),
+  );
+  const n = procs.length;
+  if (n === 0) return { clusters: [], hubs: [] };
+
+  // Per-process key maps, plus document frequency (how many processes touch each key).
+  const touches = new Map<string, Map<string, number>>();
+  const df = new Map<string, number>();
+  for (const p of procs) {
+    const keys = storeKeysForProcess(p, keyDepth);
+    touches.set(p.id, keys);
+    for (const k of keys.keys()) df.set(k, (df.get(k) ?? 0) + 1);
+  }
+
+  // Floor of 3: in a tiny graph "most processes" is a couple of processes, and
+  // calling that a hub would erase the only groupings there are.
+  const hubCut = Math.max(3, Math.round(hubFraction * n));
+  const hubs = [...df.entries()].filter(([, c]) => c >= hubCut).map(([k]) => k).sort();
+  const hubSet = new Set(hubs);
+
+  const grouped = new Map<string, string[]>();
+  const push = (key: string, id: string) => {
+    const list = grouped.get(key);
+    if (list) list.push(id); else grouped.set(key, [id]);
+  };
+
+  for (const p of procs) {
+    const keys = touches.get(p.id)!;
+    const candidates = [...keys.entries()].filter(([k]) => !hubSet.has(k));
+    // No non-hub key at all — including the no-key-whatsoever case.
+    if (candidates.length === 0) { push(HUB_ONLY_KEY, p.id); continue; }
+    if (candidates.length > hubProcessKeyLimit) { push(CROSS_CUTTING_KEY, p.id); continue; }
+    // Most widely SHARED non-hub key wins; ties break on port multiplicity,
+    // then lexically so the result is stable.
+    candidates.sort((a, b) =>
+      (df.get(b[0])! - df.get(a[0])!) || (b[1] - a[1]) || a[0].localeCompare(b[0]));
+    push(candidates[0][0], p.id);
+  }
+
+  const hubLabel = hubs.length ? `${hubs.slice(0, 3).join(' · ')} only` : 'ungrouped';
+  const clusters: Cluster[] = [...grouped.entries()]
+    .map(([key, ids]) => ({
+      key,
+      label: key === HUB_ONLY_KEY ? hubLabel : key === CROSS_CUTTING_KEY ? 'cross-cutting' : key,
+      processIds: ids.sort(),
+    }))
+    .sort((a, b) => {
+      const rank = (k: string) => (k === CROSS_CUTTING_KEY ? 1 : k === HUB_ONLY_KEY ? 2 : 0);
+      return (rank(a.key) - rank(b.key))
+        || (b.processIds.length - a.processIds.length)
+        || a.key.localeCompare(b.key);
+    });
+
+  return { clusters, hubs };
+}

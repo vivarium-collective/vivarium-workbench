@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { Node } from '@xyflow/react';
-import { isNoiseKey, storeKeysForProcess, isBookkeepingProcess } from '../layouts/affinity';
+import {
+  isNoiseKey,
+  storeKeysForProcess,
+  isBookkeepingProcess,
+  clusterProcesses,
+} from '../layouts/affinity';
 import { stateToReactFlow } from '../convert';
 
 /**
@@ -191,5 +196,115 @@ describe('isBookkeepingProcess', () => {
     expect(isBookkeepingProcess('allocator_2')).toBe(true);
     expect(isBookkeepingProcess('rnap_data_listener')).toBe(true);
     expect(isBookkeepingProcess('ecoli-transcript-initiation')).toBe(false);
+  });
+});
+
+// `proc` places every process at `agents.0.<label>`, so React Flow node ids —
+// which are what clusterProcesses reports — carry that prefix.
+const pid = (label: string) => `agents.0.${label}`;
+const pids = (...labels: string[]) => labels.map(pid).sort();
+
+describe('clusterProcesses', () => {
+  it('groups processes sharing a mid-frequency store', () => {
+    const nodes = [
+      proc('a', { x: ['unique', 'RNA'], h: ['bulk'] }),
+      proc('b', { x: ['unique', 'RNA'], h: ['bulk'] }),
+      proc('c', { y: ['unique', 'promoter'], h: ['bulk'] }),
+      proc('d', { y: ['unique', 'promoter'], h: ['bulk'] }),
+    ];
+    const { clusters } = clusterProcesses(nodes, { hubFraction: 0.9 });
+    const byKey = Object.fromEntries(clusters.map((c) => [c.key, [...c.processIds].sort()]));
+    expect(byKey['unique.RNA']).toEqual(pids('a', 'b'));
+    expect(byKey['unique.promoter']).toEqual(pids('c', 'd'));
+  });
+
+  it('excludes hub stores as cluster keys', () => {
+    const nodes = ['a', 'b', 'c', 'd'].map((n) =>
+      proc(n, { h: ['bulk'], s: n === 'd' ? ['unique', 'oriC'] : ['unique', 'RNA'] }));
+    const { hubs, clusters } = clusterProcesses(nodes, { hubFraction: 0.75 });
+    expect(hubs).toContain('bulk');
+    expect(hubs).not.toContain('unique.oriC');
+    expect(clusters.map((c) => c.key)).not.toContain('bulk');
+  });
+
+  it('routes hub-only processes to a labeled terminal bucket', () => {
+    // NOTE: four processes, not the three in the task brief. `hubCut` has a
+    // hard floor of 3 processes (a store touched by fewer than 3 of them is
+    // never a hub, whatever hubFraction says), so a 3-process graph cannot
+    // produce a hub at all and the bucket would never form.
+    const nodes = [
+      proc('a', { h: ['bulk'] }),
+      proc('b', { h: ['bulk'] }),
+      proc('c', { h: ['bulk'], s: ['unique', 'RNA'] }),
+      proc('d', { h: ['bulk'], s: ['unique', 'RNA'] }),
+    ];
+    const { clusters } = clusterProcesses(nodes, { hubFraction: 0.6 });
+    const bucket = clusters.find((c) => c.key === '~hub-only');
+    expect(bucket?.processIds).toEqual(pids('a', 'b'));
+    expect(bucket?.label).toMatch(/bulk/);
+    expect(clusters.find((c) => c.key === 'unique.RNA')?.processIds).toEqual(pids('c', 'd'));
+  });
+
+  it('routes a process with NO store keys at all to the hub-only bucket', () => {
+    // Real fixture case: `global_clock` wires only to `global_time` and
+    // `timestep`, both filtered as noise, so its key map is empty. It must
+    // still be assigned — never dropped, never crash on an absent first key.
+    const nodes = [
+      proc('global_clock', { t: ['global_time'] }, { s: ['timestep'] }),
+      proc('a', { h: ['bulk'] }),
+      proc('b', { h: ['bulk'] }),
+      proc('c', { h: ['bulk'] }),
+    ];
+    const { clusters } = clusterProcesses(nodes, { hubFraction: 0.6 });
+    const bucket = clusters.find((c) => c.key === '~hub-only');
+    expect(bucket?.processIds).toContain(pid('global_clock'));
+    // and it is assigned exactly once, to exactly one cluster
+    const owning = clusters.filter((c) => c.processIds.includes(pid('global_clock')));
+    expect(owning).toHaveLength(1);
+  });
+
+  it('diverts processes touching too many distinct keys to cross-cutting', () => {
+    const many: Record<string, string[]> = {};
+    for (let i = 0; i < 11; i++) many[`p${i}`] = ['unique', `s${i}`];
+    const nodes = [
+      proc('hub', many),
+      proc('a', { s: ['unique', 's0'] }),
+      proc('b', { s: ['unique', 's0'] }),
+    ];
+    const { clusters } = clusterProcesses(nodes, { hubFraction: 0.9, hubProcessKeyLimit: 8 });
+    expect(clusters.find((c) => c.key === '~cross-cutting')?.processIds).toEqual([pid('hub')]);
+  });
+
+  it('excludes bookkeeping processes entirely', () => {
+    const nodes = [
+      proc('unique_update_1', { s: ['unique', 'RNA'] }),
+      proc('real', { s: ['unique', 'RNA'] }),
+    ];
+    const ids = clusterProcesses(nodes, { hubFraction: 0.9 }).clusters.flatMap((c) => c.processIds);
+    expect(ids).toEqual([pid('real')]);
+  });
+
+  it('returns an empty result for a graph with no processes', () => {
+    expect(clusterProcesses([])).toEqual({ clusters: [], hubs: [] });
+  });
+
+  it('is deterministic across runs', () => {
+    const nodes = ['a', 'b', 'c'].map((n) => proc(n, { s: ['unique', 'RNA'], t: ['bulk'] }));
+    expect(JSON.stringify(clusterProcesses(nodes)))
+      .toBe(JSON.stringify(clusterProcesses(nodes)));
+  });
+
+  it('orders clusters largest-first with the terminal buckets last', () => {
+    const nodes = [
+      proc('a', { s: ['unique', 'RNA'], h: ['bulk'] }),
+      proc('b', { s: ['unique', 'RNA'], h: ['bulk'] }),
+      proc('c', { s: ['unique', 'RNA'], h: ['bulk'] }),
+      proc('d', { s: ['unique', 'promoter'], h: ['bulk'] }),
+      proc('e', { s: ['unique', 'promoter'], h: ['bulk'] }),
+      proc('f', { h: ['bulk'] }),
+    ];
+    const { clusters } = clusterProcesses(nodes, { hubFraction: 0.8 });
+    expect(clusters.map((c) => c.key))
+      .toEqual(['unique.RNA', 'unique.promoter', '~hub-only']);
   });
 });
