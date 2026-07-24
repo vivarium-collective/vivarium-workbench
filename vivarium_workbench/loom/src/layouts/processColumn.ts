@@ -23,9 +23,11 @@ import type {
 } from './types';
 
 export const TIERS: ZoomTier[] = [
-  { id: 'far',  minZoom: 0,    cardWidth: 180, cardHeight: 56 },
-  { id: 'mid',  minZoom: 0.35, cardWidth: 220, cardHeight: 92 },
-  { id: 'near', minZoom: 0.85, cardWidth: 320, cardHeight: 120 },
+  { id: 'glyph',    minZoom: 0,    cardWidth: 180, cardHeight: 56 },
+  { id: 'ports',    minZoom: 0.25, cardWidth: 220, cardHeight: 96 },
+  { id: 'types',    minZoom: 0.5,  cardWidth: 300, cardHeight: 150 },
+  { id: 'contract', minZoom: 0.9,  cardWidth: 380, cardHeight: 240 },
+  { id: 'full',     minZoom: 1.6,  cardWidth: 460, cardHeight: 320 },
 ];
 
 export const CARD_GAP = 16;

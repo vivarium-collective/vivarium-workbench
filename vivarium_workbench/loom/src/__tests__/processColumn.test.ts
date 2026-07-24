@@ -49,8 +49,8 @@ function build(procs: Record<string, string>, stores: string[]): Node[] {
 
 // Runs the DEFAULT app path: useLayoutMode seeds granularity to exactly this,
 // and hubFractionFor anchors it on the validated hubFraction (see I-2 below).
-const ctx: LayoutContext = { compositeId: 'c', tier: 'mid', granularity: DEFAULT_GRANULARITY };
-const MID = TIERS.find((t) => t.id === 'mid')!;
+const ctx: LayoutContext = { compositeId: 'c', tier: 'ports', granularity: DEFAULT_GRANULARITY };
+const MID = TIERS.find((t) => t.id === 'ports')!;
 
 const procId = (label: string) => `agents.0.${label}`;
 const storeId = (dotted: string) => `agents.0.${dotted}`;
@@ -194,8 +194,8 @@ describe('processColumnMode', () => {
       { a: 'unique.RNA', b: 'unique.RNA', c: 'unique.promoter' },
       ['unique.RNA', 'unique.promoter'],
     );
-    const far = TIERS.find((t) => t.id === 'far')!;
-    const { nodes: out } = await processColumnMode.run(nodes, [], { ...ctx, tier: 'far' });
+    const far = TIERS.find((t) => t.id === 'glyph')!;
+    const { nodes: out } = await processColumnMode.run(nodes, [], { ...ctx, tier: 'glyph' });
     const ys = out.filter((n) => n.type === 'process')
       .map((n) => n.position.y).sort((p, q) => p - q);
     expect(ys[1] - ys[0]).toBe(far.cardHeight + CARD_GAP);
@@ -297,7 +297,7 @@ describe('processColumnMode on the real v2ecoli baseline', () => {
     // the process column rendered ~8px wide. packStoreTree shelf-packs instead:
     // store block 2,600 x 4,420, overall 3,000 x 5,392, zoom 0.139 at the mid
     // tier and 0.170 once the column re-flows at the far tier it settles into.
-    for (const tier of [MID, TIERS.find((t) => t.id === 'far')!]) {
+    for (const tier of [MID, TIERS.find((t) => t.id === 'glyph')!]) {
       const { nodes: out } = await processColumnMode.run(
         nodes as unknown as Node[], edges as unknown as any[], { ...ctx, tier: tier.id },
       );
@@ -307,9 +307,9 @@ describe('processColumnMode on the real v2ecoli baseline', () => {
     }
     // The far tier is where the app settles (any zoom < 0.35 selects it), and
     // there the whole graph must be genuinely readable.
-    const far = TIERS.find((t) => t.id === 'far')!;
+    const far = TIERS.find((t) => t.id === 'glyph')!;
     const { nodes: outFar } = await processColumnMode.run(
-      nodes as unknown as Node[], edges as unknown as any[], { ...ctx, tier: 'far' },
+      nodes as unknown as Node[], edges as unknown as any[], { ...ctx, tier: 'glyph' },
     );
     expect(fitZoom(boundsOf(outFar, far))).toBeGreaterThanOrEqual(0.15);
   });

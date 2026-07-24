@@ -296,7 +296,7 @@ export default function App() {
     (async () => {
       const saved = loadLayout(compositeId, layoutMode.modeId);
       const { nodes: laidOut } = await layoutMode.runLayout(
-        visibleNodes as any, visibleEdges as any, compositeId, 'mid',
+        visibleNodes as any, visibleEdges as any, compositeId, 'ports',
       );
       const withSaved = applySavedPositions(laidOut as any, saved) as any[];
       if (cancelled) return;
@@ -420,7 +420,7 @@ export default function App() {
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
       const { nodes: laidOut } = await layoutMode.runLayout(
-        visibleNodes as any, visibleEdges as any, compositeId, 'mid',
+        visibleNodes as any, visibleEdges as any, compositeId, 'ports',
       );
       const laid = laidOut as any[];
       // Reuse unchanged node objects so consolidating the layout doesn't remount
