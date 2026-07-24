@@ -11,6 +11,7 @@ import ProcessNode from './nodes/ProcessNode';
 import StoreNode from './nodes/StoreNode';
 import FloatingStoreEdge from './edges/FloatingStoreEdge';
 import { useLayoutMode } from './hooks/useLayoutMode';
+import { useFocus } from './hooks/useFocus';
 import { LAYOUT_MODES, getMode } from './layouts/registry';
 import {
   loadLayout, saveLayout, clearLayout,
@@ -90,6 +91,10 @@ export default function App() {
   // Adding a mode to layouts/registry makes it selectable from the toolbar
   // with no change here.
   const layoutMode = useLayoutMode();
+  // Which processes are "active" (hovered / selected / pinned). Modes that
+  // implement `edgeVisibility` use this to cull wires; modes that don't
+  // (hierarchy) ignore it entirely and keep drawing every edge.
+  const focus = useFocus();
   const [tab, setTab] = useState<TabId>('setup');
   const [compositeId, setCompositeId] = useState<string | null>(() => {
     // Bootstrap from URL query if present (for popups deep-linked with ?id=)
@@ -132,6 +137,12 @@ export default function App() {
   // to the auto-layout output.
   const [nodes, setNodes, onNodesChange] = useNodesState<any>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
+  // Mirror `nodes` for the edge-visibility seam below (same reason hiddenRef
+  // exists): dragging a node rewrites `nodes` on every animation frame, and a
+  // filter that took `nodes` as a dependency would re-run — and hand React Flow
+  // a brand-new edges array — on each of those frames for an identical result.
+  const nodesRef = useRef<any[]>([]);
+  nodesRef.current = nodes;
 
   // Wire postMessage protocol. Use a ref guard so StrictMode's double-effect
   // doesn't fire `explore:ready` twice during dev.
@@ -328,6 +339,31 @@ export default function App() {
     }));
   }, [hidden, raw, setNodes, setEdges]);
 
+  // What actually gets drawn: the edge state, minus whatever the active layout
+  // mode culls for the current focus. Hierarchy mode declares no
+  // `edgeVisibility`, so it short-circuits to `edges` — same array identity,
+  // same rendering as before this existed. Process-column mode drops every wire
+  // that doesn't touch a focused/pinned node, leaving just the store hierarchy
+  // until the user hovers something.
+  //
+  // Deps are all identity-stable between real changes: `focus.ctx` is memoized
+  // inside useFocus, `layoutMode.mode` is a module-level singleton from the
+  // registry, and the filter itself is O(edges) with no node scan. `nodes` is
+  // passed through for the seam's signature but the shipped modes don't read
+  // it, so it is deliberately NOT a dependency — including it would re-filter
+  // on every frame of a node drag for no change in output.
+  const drawnEdges = useMemo(() => {
+    const cull = layoutMode.mode.edgeVisibility;
+    return cull ? cull(edges as any[], focus.ctx, nodesRef.current as any[]) : edges;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edges, focus.ctx, layoutMode.mode]);
+
+  /** Distinct nodes whose wiring is currently drawn (hover/selection ∪ pins). */
+  const activeFocusCount = useMemo(
+    () => new Set([...focus.ctx.focused, ...focus.ctx.pinned]).size,
+    [focus.ctx],
+  );
+
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
   // time a composite renders. Subsequent drags update the same store.
@@ -516,7 +552,7 @@ export default function App() {
     }
   }, [nodes, name, compositeId]);
 
-  const handleNodeClick = useCallback((_: any, node: any) => {
+  const handleNodeClick = useCallback((ev: any, node: any) => {
     const payload = {
       path: node.data?.path ?? [],
       kind: node.type as 'store' | 'process',
@@ -524,7 +560,21 @@ export default function App() {
     };
     setSelection(payload);
     postInspect(payload);
-  }, []);
+    // Shift/⌘-click PINS, so two processes' wiring can be held on screen and
+    // compared; a plain click selects, which keeps one process's wires up after
+    // the pointer leaves it.
+    if (ev?.shiftKey || ev?.metaKey) focus.togglePin(node.id);
+    else focus.select(node.id);
+  }, [focus.select, focus.togglePin]);
+
+  // Hovering reveals a node's wiring in modes that cull edges; leaving hides it
+  // again unless the node is also selected or pinned.
+  const handleNodeMouseEnter = useCallback(
+    (_: any, node: any) => focus.hover(node.id), [focus.hover]);
+  const handleNodeMouseLeave = useCallback(() => focus.hover(null), [focus.hover]);
+  // Clicking empty canvas drops the selection (pins survive) — the way back to
+  // the clean, structure-only view.
+  const handlePaneClick = useCallback(() => focus.select(null), [focus.select]);
 
   const handleNodeDoubleClick = useCallback((_: any, node: any) => {
     // Only group stores (synthesized container nodes) can be collapsed.
@@ -674,7 +724,23 @@ export default function App() {
           }}>
             <EmitContext.Provider value={emitSet}>
               {/* Canvas column — flex:1. Holds the Re-layout button + ReactFlow. */}
-              <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+              <div
+                ref={canvasWrapRef}
+                className={`loom-canvas loom-mode-${layoutMode.modeId}`}
+                style={{ flex: 1, position: 'relative', minWidth: 0 }}
+              >
+                {/* Modes that cull edges start with NO wires drawn, which without
+                    a word of explanation reads as a broken canvas rather than a
+                    deliberate clean slate. One line, only in those modes. */}
+                {layoutMode.mode.edgeVisibility && (
+                  <div className="loom-focus-hint">
+                    {activeFocusCount
+                      ? `showing wiring for ${activeFocusCount} node`
+                        + `${activeFocusCount === 1 ? '' : 's'}`
+                        + (focus.ctx.pinned.size ? ` (${focus.ctx.pinned.size} pinned)` : '')
+                      : 'hover a process to reveal its wiring · click to keep · shift-click to pin'}
+                  </div>
+                )}
                 {/* Top-right toolbar: Re-layout + Download (current layout, white bg). */}
                 <div style={{
                   position: 'absolute', top: 8, right: 8, zIndex: 10,
@@ -751,7 +817,7 @@ export default function App() {
                 </div>
                 <ReactFlow
                   nodes={nodes}
-                  edges={edges}
+                  edges={drawnEdges}
                   onInit={(inst) => { rfRef.current = inst; }}
                   onNodesChange={onNodesChange}
                   onEdgesChange={onEdgesChange}
@@ -759,6 +825,9 @@ export default function App() {
                   edgeTypes={EDGE_TYPES}
                   onNodeClick={handleNodeClick}
                   onNodeDoubleClick={handleNodeDoubleClick}
+                  onNodeMouseEnter={handleNodeMouseEnter}
+                  onNodeMouseLeave={handleNodeMouseLeave}
+                  onPaneClick={handlePaneClick}
                   fitView
                   fitViewOptions={{ padding: 0.2 }}
                   /* Big composites have hundreds of nodes + custom floating edges;

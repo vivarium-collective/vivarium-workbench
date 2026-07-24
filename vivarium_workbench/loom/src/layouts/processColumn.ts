@@ -18,7 +18,9 @@
 
 import type { Node, Edge } from '@xyflow/react';
 import { clusterProcesses } from './affinity';
-import type { LayoutMode, LayoutResult, LayoutContext, GroupBand, ZoomTier } from './types';
+import type {
+  LayoutMode, LayoutResult, LayoutContext, FocusContext, GroupBand, ZoomTier,
+} from './types';
 
 export const TIERS: ZoomTier[] = [
   { id: 'far',  minZoom: 0,    cardWidth: 180, cardHeight: 56 },
@@ -270,5 +272,34 @@ export const processColumnMode: LayoutMode = {
     });
 
     return { nodes: out, bands };
+  },
+
+  /**
+   * Cull wires down to the focused processes' own wiring. This is the point of
+   * the mode: the v2ecoli baseline emits ~400 wire edges, which as a single
+   * drawing is a hairball no reader can trace. Drawing only the store hierarchy
+   * until a process is hovered/selected/pinned turns the canvas into "one
+   * process's neighbourhood at a time".
+   *
+   * Focus ids are node ids, so this also works when the hovered node is a
+   * STORE: every wire into or out of that store is revealed, which is the
+   * natural read of "what touches this store".
+   *
+   * O(edges) with a Set membership test per edge — no node scan — because it
+   * re-runs on every hover. `nodes` is part of the seam (other modes may need
+   * it) but is deliberately unused here so a node drag cannot make this work
+   * grow. Returns the INPUT array identity when nothing is culled, so
+   * pass-through cases don't force React Flow to re-derive its edge store.
+   */
+  edgeVisibility(edges: Edge[], focus: FocusContext, _nodes: Node[]): Edge[] {
+    const active = new Set<string>([...focus.focused, ...focus.pinned]);
+    const out = edges.filter((e) => {
+      const kind = (e.data as { edgeType?: string } | undefined)?.edgeType;
+      // Place edges are the store hierarchy: structural, few, always drawn.
+      if (kind === 'place') return true;
+      if (active.size === 0) return false;
+      return active.has(e.source) || active.has(e.target);
+    });
+    return out.length === edges.length ? edges : out;
   },
 };

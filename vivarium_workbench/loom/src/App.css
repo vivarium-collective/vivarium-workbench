@@ -1028,3 +1028,23 @@ textarea.sr-input {
 .inspector-section > summary::marker { content: ""; }
 .inspector-section .inspector-caret { display: inline-block; transition: transform 0.12s ease; }
 .inspector-section[open] > summary .inspector-caret { transform: rotate(90deg); }
+
+/* Process-column mode: non-focused wires stay present but recede, so the
+   graph reads as one focused path rather than a hairball. */
+.loom-mode-process-column .react-flow__edge.loom-edge-dim { opacity: 0.08; }
+.loom-cluster-band {
+  font-size: 11px; font-weight: 600; color: #475569;
+  text-transform: lowercase; letter-spacing: 0.02em;
+}
+
+/* One-line explanation of the empty-by-default canvas in edge-culling modes.
+   Sits top-LEFT: the toolbar owns top-right and React Flow's Controls own
+   bottom-left. pointer-events:none so it never eats a pane click. */
+.loom-focus-hint {
+  position: absolute; top: 10px; left: 10px; z-index: 10;
+  padding: 3px 8px;
+  font-size: 11px; color: #64748b;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid #e2e8f0; border-radius: 4px;
+  pointer-events: none; user-select: none;
+}
