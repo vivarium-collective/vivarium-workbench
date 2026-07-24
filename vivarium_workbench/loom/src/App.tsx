@@ -11,7 +11,7 @@ import ProcessNode from './nodes/ProcessNode';
 import StoreNode from './nodes/StoreNode';
 import FloatingStoreEdge from './edges/FloatingStoreEdge';
 import { useLayoutMode } from './hooks/useLayoutMode';
-import { LAYOUT_MODES } from './layouts/registry';
+import { LAYOUT_MODES, getMode } from './layouts/registry';
 import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
@@ -87,8 +87,8 @@ export default function App() {
     () => initialEmitSet(decodeUrlComposite()),
   );
   // Which layout mode arranges the graph, and the dispatcher that runs it.
-  // Only 'hierarchy' is registered today; adding a mode to layouts/registry
-  // makes it selectable from the toolbar with no change here.
+  // Adding a mode to layouts/registry makes it selectable from the toolbar
+  // with no change here.
   const layoutMode = useLayoutMode();
   const [tab, setTab] = useState<TabId>('setup');
   const [compositeId, setCompositeId] = useState<string | null>(() => {
@@ -425,8 +425,15 @@ export default function App() {
   // and toggle visibility. Then re-fit so the saved arrangement is framed.
   const applyView = useCallback((view: View) => {
     if (!compositeId || !view) return;
-    // Legacy views carry no mode; normalizeView defaults them to 'hierarchy'.
-    const viewMode = view.mode || layoutMode.modeId;
+    // Legacy views carry no mode and resolve to the default, 'hierarchy' —
+    // which is the arrangement they were captured in.
+    // A view can also name a mode THIS build does not register — a `?view=`
+    // link or a `.view.json` file made by a newer build, neither of which is
+    // validated on the way in (normalizeView only checks it is a string). Run
+    // it through the registry so an unknown id falls back to the default
+    // instead of desyncing the mode <select> from state and persisting
+    // positions under a phantom localStorage key.
+    const viewMode = getMode(view.mode).id;
     saveLayout(compositeId, view.positions || {}, viewMode);
     if (viewMode !== layoutMode.modeId) layoutMode.setModeId(viewMode);
     setCollapsed(new Set(view.collapsed || []));

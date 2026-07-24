@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
 import App from '../App';
 import { LAYOUT_MODES, DEFAULT_MODE_ID } from '../layouts/registry';
+import { encodeView } from '../viewStore';
 
 // React Flow relies on ResizeObserver, which jsdom doesn't provide.
 beforeAll(() => {
@@ -66,8 +67,29 @@ describe('App static mode initial tab', () => {
   });
 });
 
+/** jsdom's localStorage here is partial (no clear(), not enumerable); install a
+ *  Map-backed one and hand the map back so a test can inspect what was written. */
+function installStorage(): Map<string, string> {
+  const m = new Map<string, string>();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (k: string) => (m.has(k) ? (m.get(k) as string) : null),
+      setItem: (k: string, v: string) => { m.set(k, String(v)); },
+      removeItem: (k: string) => { m.delete(k); },
+      clear: () => { m.clear(); },
+      key: (i: number) => [...m.keys()][i] ?? null,
+      get length() { return m.size; },
+    } as Storage,
+  });
+  return m;
+}
+
 describe('App layout-mode switcher', () => {
-  afterEach(() => { cleanup(); });
+  afterEach(() => {
+    cleanup();
+    window.history.pushState({}, '', '/');
+  });
 
   it('renders one option per registered layout mode, defaulting to hierarchy', () => {
     render(<App />);
@@ -75,6 +97,38 @@ describe('App layout-mode switcher', () => {
     const select = screen.getByTitle('Layout mode') as HTMLSelectElement;
     expect(select.value).toBe(DEFAULT_MODE_ID);
     expect([...select.options].map((o) => o.value)).toEqual(LAYOUT_MODES.map((m) => m.id));
+  });
+
+  it('a view naming an unregistered mode falls back to the default', async () => {
+    // A ?view= link or .view.json from a build that had a mode this one does
+    // not. `normalizeView` only checks the field is a string, so the id reaches
+    // `applyView` unvalidated; the registry is what must reject it. Otherwise
+    // state holds a phantom id, the <select> silently shows something else,
+    // and positions persist under a localStorage key nothing ever reads back.
+    const stored = installStorage();
+    const encoded = encodeView({
+      v: 1, positions: { x: { x: 1, y: 2 } }, collapsed: [], hidden: [],
+      mode: 'mode-from-the-future', pins: [],
+    } as any);
+    window.history.pushState({}, '', `?view=${encoded}`);
+    render(<App />);
+    postCompositeLoad({ id: 'test.composites.demo', name: 'demo' });
+    await act(async () => { await Promise.resolve(); });
+
+    // The layout key is the observable proof of which mode state settled on:
+    // the view's positions must land under the DEFAULT mode's (un-suffixed)
+    // key, and no key may name the phantom mode. Asserting the whole set at
+    // once also shows the view really WAS applied, so this can't pass vacuously.
+    expect([...stored.keys()].filter((k) => k.startsWith('bigraph-loom:layout:')))
+      .toEqual(['bigraph-loom:layout:test.composites.demo']);
+    expect(stored.get('bigraph-loom:layout:test.composites.demo')).toContain('"x"');
+
+    // The <select> agrees with state. On its own this assertion could NOT
+    // catch the bug: React's controlled-select update leaves the previously
+    // selected option selected when no option matches the value, so a phantom
+    // modeId reads back as 'hierarchy' here while state holds the phantom.
+    const select = screen.getByTitle('Layout mode') as HTMLSelectElement;
+    expect(select.value).toBe(DEFAULT_MODE_ID);
   });
 });
 
