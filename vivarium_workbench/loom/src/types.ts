@@ -29,6 +29,9 @@ export interface ProcessNodeData {
    *  This is the unambiguous form; use it for any path reasoning. */
   inputPortsTarget?: Record<string, string>;
   outputPortsTarget?: Record<string, string>;
+  /** Structured contract, serialized as `_contract`. Absent means derive
+   *  it from `description` (the process docstring). */
+  contract?: Record<string, unknown>;
 }
 
 export type BigraphNodeData = StoreNodeData | ProcessNodeData;

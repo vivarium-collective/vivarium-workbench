@@ -298,6 +298,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           // (inputPortsSchema/outputPortsSchema = where each port connects).
           inputSchema: node._inputs ?? undefined,
           outputSchema: node._outputs ?? undefined,
+          contract: node._contract ?? undefined,
           // Extra schema data consumed by ProcessNode (as any cast in the component)
           ...(Object.keys(inputPortsSchema).length ? { inputPortsSchema, inputPortsTarget } : {}),
           ...(Object.keys(outputPortsSchema).length ? { outputPortsSchema, outputPortsTarget } : {}),
