@@ -48,30 +48,15 @@ describe('affinity clustering on the real v2ecoli baseline', () => {
     result.clusters.find((c) => c.processIds.some((id) => id.endsWith(suffix)))?.key;
 
   it('keeps requester/evolver partition pairs together', () => {
-    // `polypeptide-elongation` is deliberately absent here — see the
-    // characterization test below for the measured reason.
-    for (const stem of ['transcript-elongation', 'rna-degradation']) {
+    // Path-depth tiebreak (preferred over port multiplicity — see
+    // affinity.ts's clusterProcesses doc comment) reunites
+    // `polypeptide-elongation`'s pair under `unique.active_ribosome`
+    // alongside the rest of the translation cluster, so all three
+    // requester/evolver stems now hold the property outright.
+    for (const stem of ['transcript-elongation', 'polypeptide-elongation', 'rna-degradation']) {
       const req = ownerOf(`${stem}_requester`);
       expect(req).toBeDefined();
       expect(ownerOf(`${stem}_evolver`)).toBe(req);
     }
-  });
-
-  it('CHARACTERIZES: the port-multiplicity tiebreak splits the polypeptide-elongation pair', () => {
-    // Measured behavior of the specified rule, recorded rather than papered over.
-    // Both halves touch exactly {environment, boundary, listeners,
-    // unique.active_ribosome, bulk}; `boundary` and `unique.active_ribosome`
-    // tie at df=6, so the tiebreak decides — and the requester, which only
-    // READS the ribosome (1 port) while the evolver reads AND writes it
-    // (2 ports), falls through to the lexical tiebreak and lands on `boundary`.
-    // The 1-vs-2 port difference is an artifact of the requester/evolver split
-    // itself, not biology, so this split is undesirable but is what the
-    // prescribed scoring rule produces. Changing the tiebreak (e.g. preferring
-    // the deeper store path) reunites the pair under `unique.active_ribosome`
-    // at the same 10-cluster / 4-singleton quality — a deliberate decision to
-    // be made upstream, not silently here. If you change the tiebreak, delete
-    // this test rather than editing it.
-    expect(ownerOf('ecoli-polypeptide-elongation_requester')).toBe('boundary');
-    expect(ownerOf('ecoli-polypeptide-elongation_evolver')).toBe('unique.active_ribosome');
   });
 });

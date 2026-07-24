@@ -116,6 +116,20 @@ export const CROSS_CUTTING_KEY = '~cross-cutting';
  *  - Jaccard agglomerative clustering: 12-14 clusters, 7-8 singletons, and its
  *    largest cluster shared no distinctive store so it could not be labeled.
  *
+ * On a tie in shared count, prefer the DEEPER store path (more dot-separated
+ * segments), then break remaining ties lexically. A deeper key names a more
+ * specific store, and specificity is what makes a cluster meaningful —
+ * `unique.active_ribosome` says more about what a process does than
+ * `boundary`. Port multiplicity (how many ports a process wires to a
+ * candidate key) was tried first and rejected: it split the
+ * `polypeptide-elongation` requester/evolver pair apart (`boundary` vs
+ * `unique.active_ribosome`, tied at df=6) purely because the requester only
+ * READS the ribosome store (1 port) while the evolver reads AND writes it (2
+ * ports) — an artifact of the requester/evolver partition scheme, not
+ * biology. Depth reunites that pair (and the other partition pairs) at
+ * identical cluster quality (10 clusters / 4 singletons on the real
+ * fixture). Do not restore port multiplicity as the second tiebreak.
+ *
  * Deterministic: every tie is broken to a total order, and both the cluster
  * list and each member list are sorted.
  */
@@ -156,10 +170,12 @@ export function clusterProcesses(nodes: Node[], opts: AffinityOptions = {}): Aff
     // No non-hub key at all — including the no-key-whatsoever case.
     if (candidates.length === 0) { push(HUB_ONLY_KEY, p.id); continue; }
     if (candidates.length > hubProcessKeyLimit) { push(CROSS_CUTTING_KEY, p.id); continue; }
-    // Most widely SHARED non-hub key wins; ties break on port multiplicity,
-    // then lexically so the result is stable.
+    // Most widely SHARED non-hub key wins; ties break on path depth (deeper
+    // — more dot-separated segments — is more specific), then lexically so
+    // the result is stable.
+    const depth = (key: string) => key.split('.').length;
     candidates.sort((a, b) =>
-      (df.get(b[0])! - df.get(a[0])!) || (b[1] - a[1]) || a[0].localeCompare(b[0]));
+      (df.get(b[0])! - df.get(a[0])!) || (depth(b[0]) - depth(a[0])) || a[0].localeCompare(b[0]));
     push(candidates[0][0], p.id);
   }
 
