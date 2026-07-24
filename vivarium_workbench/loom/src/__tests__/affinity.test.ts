@@ -51,6 +51,27 @@ describe('storeKeysForProcess', () => {
   });
 });
 
+describe('storeKeysForProcess — relative-navigation wire targets', () => {
+  it('never yields the meaningless "." key for a bare ".." (parent-scope) target', () => {
+    // Real fixture case: v2ecoli-baseline's `division` process wires its
+    // `agents` output port to `['..']`, which convert.ts joins to the
+    // string '..'. That must not surface as a cluster key at all.
+    const keys = storeKeysForProcess(proc('division', {}, { agents: '..' }));
+    expect(keys.has('.')).toBe(false);
+    expect(keys.size).toBe(0);
+  });
+
+  it('drops pure dot-navigation targets while keeping real keys from the same process', () => {
+    const keys = storeKeysForProcess(
+      proc('division', { bulk: 'bulk' }, { agents: '..', environment: '.' }),
+    );
+    expect(keys.has('.')).toBe(false);
+    expect(keys.has('')).toBe(false);
+    expect(keys.get('bulk')).toBe(1);
+    expect([...keys.keys()]).toEqual(['bulk']);
+  });
+});
+
 describe('isBookkeepingProcess', () => {
   it('matches what defaultHiddenIds already hides', () => {
     expect(isBookkeepingProcess('unique_update_4')).toBe(true);
