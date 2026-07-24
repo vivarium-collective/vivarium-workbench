@@ -20,6 +20,7 @@ import type { Node, Edge } from '@xyflow/react';
 import { clusterProcesses } from './affinity';
 import type {
   LayoutMode, LayoutResult, LayoutContext, FocusContext, GroupBand, ZoomTier,
+  ZoomTierId,
 } from './types';
 
 export const TIERS: ZoomTier[] = [
@@ -29,6 +30,21 @@ export const TIERS: ZoomTier[] = [
   { id: 'contract', minZoom: 0.9,  cardWidth: 380, cardHeight: 240 },
   { id: 'full',     minZoom: 1.6,  cardWidth: 460, cardHeight: 320 },
 ];
+
+/** Zoom overlap a tier keeps once entered, so scrolling across a threshold
+ *  does not flicker cards between two tiers. */
+export const TIER_HYSTERESIS = 0.05;
+
+export function tierForZoom(zoom: number, current?: ZoomTierId): ZoomTierId {
+  let next: ZoomTierId = TIERS[0].id;
+  for (const t of TIERS) if (zoom >= t.minZoom) next = t.id;
+  if (!current || current === next) return next;
+
+  // Only resist leaving the current tier, and only just inside its edge.
+  const cur = TIERS.find((t) => t.id === current);
+  if (cur && zoom >= cur.minZoom - TIER_HYSTERESIS) return current;
+  return next;
+}
 
 export const CARD_GAP = 16;
 export const CLUSTER_GAP = 44;
