@@ -22,6 +22,11 @@ describe('abbreviateType', () => {
     expect(abbreviateType(`unique_array[${fields}]`)).toBe('unique_array[17 fields]');
   });
 
+  it('counts only top-level fields, not pipes nested in brackets', () => {
+    // A '|' inside a nested field type is part of that field, not a separator.
+    expect(abbreviateType('map[a:union[x|y|z]|b:float]')).toBe('map[2 fields]');
+  });
+
   it('is a no-op on empty or non-string input', () => {
     expect(abbreviateType('')).toBe('');
     expect(abbreviateType(undefined as unknown as string)).toBe('');

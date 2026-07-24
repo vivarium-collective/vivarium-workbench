@@ -29,10 +29,19 @@ export function abbreviateType(type: string): string {
   const m = type.match(/^([A-Za-z0-9_]+)\[(.*)\]$/s);
   if (!m) return type;
   const [, base, inner] = m;
-  const fields = inner.split('|');
+  // Count TOP-LEVEL fields: a '|' nested inside brackets (e.g. a union-typed
+  // field) belongs to one field, not a separator, so track bracket depth
+  // rather than splitting the string naively.
+  let depth = 0;
+  let fields = 1;
+  for (const ch of inner) {
+    if (ch === '[') depth++;
+    else if (ch === ']') depth--;
+    else if (ch === '|' && depth === 0) fields++;
+  }
   // One "field" means it is a container like map[float] — keep it literal.
-  if (fields.length < 2) return type;
-  return `${base}[${fields.length} fields]`;
+  if (fields < 2) return type;
+  return `${base}[${fields} fields]`;
 }
 
 function emptyContract(): ProcessContract {

@@ -44,7 +44,7 @@ const data = {
 } as any;
 
 function renderAt(tier: string, over: Record<string, unknown> = {}) {
-  render(
+  return render(
     <ReactFlowProvider>
       <ProcessNode id="p" type="process" selected={false} zIndex={0}
         isConnectable={false} dragging={false}
@@ -97,5 +97,42 @@ describe('ProcessNode tiers', () => {
   it('pinned-open renders full detail regardless of tier', () => {
     renderAt('glyph', { _pinnedOpen: true });
     expect(screen.getByText(/p_i = max/)).toBeTruthy();
+  });
+
+  it('keeps the port handles at every tier so wires still attach', () => {
+    // Edges connect to handles by port id (convert.ts writes targetHandle=port);
+    // dropping them would break focused-process wiring. Even the glyph tier,
+    // which shows no port labels, must keep every input+output handle.
+    for (const t of ['glyph', 'ports', 'types', 'contract', 'full']) {
+      const { container } = renderAt(t);
+      const ids = Array.from(container.querySelectorAll('[data-handleid]'))
+        .map((el) => el.getAttribute('data-handleid'))
+        .sort();
+      // inputs bulk, RNAs + output bulk (one handle per port slot).
+      expect(ids).toEqual(['RNAs', 'bulk', 'bulk']);
+      cleanup();
+    }
+  });
+});
+
+// Hierarchy mode never stamps a tier; ProcessNode must then render its legacy
+// fixed card unchanged, so that mode is entirely unaffected by semantic zoom.
+describe('ProcessNode without a tier (hierarchy mode)', () => {
+  it('renders the legacy body, not the tiered one', () => {
+    const { container } = render(
+      <ReactFlowProvider>
+        <ProcessNode id="p" type="process" selected={false} zIndex={0}
+          isConnectable={false} dragging={false}
+          data={{ ...data }} {...({} as any)} />
+      </ReactFlowProvider>,
+    );
+    expect(container.querySelector('.process-label')?.textContent)
+      .toBe('ecoli-transcript-initiation');
+    expect(container.querySelector('.process-type')?.textContent).toBe('step');
+    // The tiered rows must be absent entirely.
+    expect(container.querySelector('.process-node-title')).toBeNull();
+    expect(container.querySelector('.process-node-meta')).toBeNull();
+    // Handles still present for wiring.
+    expect(container.querySelectorAll('[data-handleid]').length).toBe(3);
   });
 });
