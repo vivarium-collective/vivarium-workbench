@@ -36,14 +36,27 @@ export const TIERS: ZoomTier[] = [
 export const TIER_HYSTERESIS = 0.05;
 
 export function tierForZoom(zoom: number, current?: ZoomTierId): ZoomTierId {
-  let next: ZoomTierId = TIERS[0].id;
-  for (const t of TIERS) if (zoom >= t.minZoom) next = t.id;
-  if (!current || current === next) return next;
+  // Raw tier for this zoom: the highest tier (TIERS is ascending by minZoom)
+  // whose lower edge the zoom has reached.
+  let rawIdx = 0;
+  for (let i = 0; i < TIERS.length; i++) if (zoom >= TIERS[i].minZoom) rawIdx = i;
+  const raw = TIERS[rawIdx].id;
+  if (!current) return raw;
 
-  // Only resist leaving the current tier, and only just inside its edge.
-  const cur = TIERS.find((t) => t.id === current);
-  if (cur && zoom >= cur.minZoom - TIER_HYSTERESIS) return current;
-  return next;
+  const curIdx = TIERS.findIndex((t) => t.id === current);
+  if (curIdx < 0 || raw === current) return raw;
+
+  // Zooming IN (raw is a higher tier): advance immediately — by definition of
+  // the raw tier, `zoom` has already passed the target tier's minZoom. Applying
+  // hysteresis here is what stalled every upward transition.
+  if (rawIdx > curIdx) return raw;
+
+  // Zooming OUT (raw is a lower tier): hold the current tier until `zoom` dips a
+  // full TIER_HYSTERESIS below the current tier's lower edge, so a small wobble
+  // across the threshold does not flicker a tier. The margin (0.05) is smaller
+  // than every gap between adjacent minZooms (>=0.25), so no tier is skipped.
+  if (zoom >= TIERS[curIdx].minZoom - TIER_HYSTERESIS) return current;
+  return raw;
 }
 
 export const CARD_GAP = 16;

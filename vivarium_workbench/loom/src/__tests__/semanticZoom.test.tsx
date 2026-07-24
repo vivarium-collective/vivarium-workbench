@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { tierForZoom } from '../layouts/processColumn';
+import type { ZoomTierId } from '../layouts/types';
 import ProcessNode from '../nodes/ProcessNode';
 
 // No `globals: true` in vitest config, so testing-library's auto-cleanup is not
@@ -24,6 +25,42 @@ describe('tierForZoom', () => {
 
   it('is stable when no current tier is supplied', () => {
     expect(tierForZoom(0.88)).toBe('types');
+  });
+
+  // ---- UPWARD transitions (zoom-in) — the direction that was broken ---------
+  // The old hysteresis guard only modelled resisting a DOWNWARD departure, so
+  // with a `current` tier every zoom-in unconditionally returned `current` and
+  // the tier never advanced. These cover the reverse direction, which had zero
+  // coverage. The single-step assertions below FAIL against the buggy impl
+  // (e.g. tierForZoom(0.5, 'glyph') returned 'glyph' instead of 'types').
+  it('advances upward as soon as the target tier threshold is reached', () => {
+    expect(tierForZoom(0.25, 'glyph')).toBe('ports');
+    expect(tierForZoom(0.5, 'glyph')).toBe('types');
+    expect(tierForZoom(0.9, 'ports')).toBe('contract');
+    expect(tierForZoom(1.6, 'types')).toBe('full');
+  });
+
+  it('steps through every tier on a rising zoom sweep from glyph', () => {
+    // Thread the returned tier back in as `current`, exactly as onMove does.
+    const sweep = [0.1, 0.25, 0.35, 0.5, 0.7, 0.9, 1.2, 1.6, 2.0];
+    let cur: ZoomTierId = 'glyph';
+    const seen: ZoomTierId[] = [];
+    for (const z of sweep) { cur = tierForZoom(z, cur); seen.push(cur); }
+    expect(seen).toEqual([
+      'glyph', 'ports', 'ports', 'types', 'types',
+      'contract', 'contract', 'full', 'full',
+    ]);
+    // Every one of the five tiers must be reachable on the way up.
+    expect(new Set(seen)).toEqual(new Set(['glyph', 'ports', 'types', 'contract', 'full']));
+  });
+
+  it('steps down through tiers on a falling zoom sweep from full', () => {
+    const sweep = [1.5, 1.0, 0.7, 0.4, 0.2, 0.1];
+    let cur: ZoomTierId = 'full';
+    const seen: ZoomTierId[] = [];
+    for (const z of sweep) { cur = tierForZoom(z, cur); seen.push(cur); }
+    // 0.2 holds at 'ports' (== ports.minZoom - hysteresis), then drops at 0.1.
+    expect(seen).toEqual(['contract', 'contract', 'types', 'ports', 'ports', 'glyph']);
   });
 });
 
@@ -84,13 +121,17 @@ describe('ProcessNode tiers', () => {
     expect(screen.getByText(/0\/3 ports documented/)).toBeTruthy();
   });
 
-  it('omits the config row entirely when config is empty', () => {
-    renderAt('full');
-    expect(screen.queryByText(/^config$/i)).toBeNull();
+  it('omits the config container entirely when config is empty', () => {
+    // The component renders key names, never a literal "config" label, so the
+    // old queryByText(/config/) check passed vacuously. Assert the container
+    // element itself is absent (the `.length > 0` guard in ProcessNode).
+    const { container } = renderAt('full');
+    expect(container.querySelector('.process-node-config')).toBeNull();
   });
 
   it('renders the config row when config is present', () => {
-    renderAt('full', { config: { width_um: 1.1 } });
+    const { container } = renderAt('full', { config: { width_um: 1.1 } });
+    expect(container.querySelector('.process-node-config')).not.toBeNull();
     expect(screen.getByText('width_um')).toBeTruthy();
   });
 

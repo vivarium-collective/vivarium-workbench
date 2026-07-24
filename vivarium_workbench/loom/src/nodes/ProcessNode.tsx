@@ -172,7 +172,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
             {data.processType} · {inputPorts.length} in / {outputPorts.length} out
             {data.interval != null && <span> · every {data.interval}</span>}
           </div>
-          <div className="process-node-ports">
+          <div className="process-node-portlist">
             {inputPorts.map((p) => portRow(p, inTypes, false))}
             {outputPorts.map((p) => portRow(p, outTypes, true))}
           </div>
