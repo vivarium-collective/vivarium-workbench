@@ -94,9 +94,26 @@ describe('view encode/decode', () => {
   });
 
   it('normalizeView fills gaps and drops junk', () => {
-    expect(normalizeView({})).toEqual({ v: 1, positions: {}, collapsed: [], hidden: [] });
-    expect(normalizeView({ collapsed: ['x'], extra: 'nope' })).toEqual({
-      v: 1, positions: {}, collapsed: ['x'], hidden: [],
+    expect(normalizeView({})).toEqual({
+      v: 1, positions: {}, collapsed: [], hidden: [], mode: 'hierarchy', pins: [],
     });
+    expect(normalizeView({ collapsed: ['x'], extra: 'nope' })).toEqual({
+      v: 1, positions: {}, collapsed: ['x'], hidden: [], mode: 'hierarchy', pins: [],
+    });
+  });
+
+  it('normalizes a legacy view with no mode to hierarchy', () => {
+    const v = normalizeView({ positions: {}, collapsed: [], hidden: [] } as any);
+    expect(v.mode).toBe('hierarchy');
+    expect(v.pins).toEqual([]);
+  });
+
+  it('preserves an explicit mode and pins', () => {
+    const v = normalizeView({
+      positions: {}, collapsed: [], hidden: [],
+      mode: 'process-column', pins: ['p1'],
+    } as any);
+    expect(v.mode).toBe('process-column');
+    expect(v.pins).toEqual(['p1']);
   });
 });

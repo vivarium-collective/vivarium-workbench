@@ -173,6 +173,36 @@ body {
   color: #94a3b8;
 }
 
+/* ── Store semantic-zoom tiers (process-column mode) ──────────────────────
+   Font sizes stay constant across tiers, as with the process card: detail is
+   revealed by adding rows, never by scaling text. */
+.store-node-value  { font-size: 10px; color: #64748b; line-height: 1.3; }
+.store-node-type   { font-size: 10px; color: #94a3b8; font-family: ui-monospace, monospace; }
+.store-node-wiring { font-size: 10px; color: #475569; }
+.store-node-emit   { font-size: 9px; color: #0d9488; font-weight: 600; }
+
+/* A store grows to fit its tier's content rather than clipping it to a circle. */
+.store-node.store-node-types,
+.store-node.store-node-contract,
+.store-node.store-node-full {
+  width: auto;
+  height: auto;
+  min-width: 80px;
+  padding: 6px 10px;
+  border-radius: 12px;
+}
+
+/* ── Edge labels (process-column semantic zoom) ─────────────────────────── */
+.loom-edge-label {
+  font-size: 10px;
+  color: #475569;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 1px 4px;
+  border-radius: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 /* ── Process nodes ───────────────────────────────────────────────────── */
 
 .process-node {
@@ -262,6 +292,61 @@ body {
 .port-label-left .port-label-tooltip { right: calc(100% + 6px); }
 .port-label-right .port-label-tooltip { left: calc(100% + 6px); }
 .port-label:hover .port-label-tooltip { display: block; }
+
+/* ── Semantic-zoom process cards (process-column mode) ───────────────────
+   Tiers change WHICH rows exist, never their font size. Legibility at low
+   zoom comes from dropping content, not shrinking text. */
+.process-node-glyph,
+.process-node-ports,
+.process-node-types,
+.process-node-contract,
+.process-node-full {
+  padding: 8px 12px;
+  text-align: left;
+  min-width: 0;
+}
+.process-node-glyph    { width: 180px; min-height: 56px; }
+.process-node-ports    { width: 220px; min-height: 96px; }
+.process-node-types    { width: 300px; min-height: 150px; }
+.process-node-contract { width: 380px; min-height: 240px; }
+.process-node-full     { width: 460px; min-height: 320px; }
+
+.process-node-title { font-size: 12px; font-weight: 600; color: #1e293b; line-height: 1.25; }
+.process-node-meta  { font-size: 11px; color: #64748b; margin-top: 3px; }
+.process-node-address {
+  font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace;
+  margin-top: 4px; overflow-wrap: anywhere;
+}
+.process-node-portlist { margin-top: 5px; border-top: 1px dashed #e5e7eb; padding-top: 4px; }
+.process-node-port-row {
+  display: flex; gap: 8px; justify-content: space-between;
+  font-size: 11px; color: #475569; line-height: 1.4;
+}
+.process-node-port-row.is-out { color: #0d9488; }
+.process-node-port-name { font-weight: 600; }
+.process-node-port-type { font-family: ui-monospace, monospace; color: #94a3b8; }
+.process-node-port-semantic { color: #64748b; flex: 1 1 auto; text-align: right; }
+
+.process-node-config { margin-top: 5px; border-top: 1px dashed #e5e7eb; padding-top: 4px; }
+.process-node-config-row {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 11px; color: #475569; font-family: ui-monospace, monospace;
+}
+
+.process-node-summary { font-size: 11px; color: #334155; margin-top: 6px; line-height: 1.4; }
+.process-node-math {
+  margin-top: 5px; padding: 4px 6px; background: #f8fafc;
+  border-left: 2px solid #cbd5e1; border-radius: 3px;
+  font-family: ui-monospace, monospace; font-size: 11px; color: #1e293b;
+  line-height: 1.5; overflow-x: auto;
+}
+.process-node-symbols     { font-size: 11px; color: #64748b; margin-top: 5px; line-height: 1.4; }
+.process-node-description { font-size: 11px; color: #64748b; margin-top: 5px; line-height: 1.4; }
+.process-node-completeness {
+  font-size: 10px; color: #94a3b8; margin-top: 6px;
+  border-top: 1px solid #f1f5f9; padding-top: 3px;
+}
+.process-node-completeness .is-warn { color: #b45309; }
 
 /* ── Inspector panel ─────────────────────────────────────────────────── */
 
@@ -1028,3 +1113,70 @@ textarea.sr-input {
 .inspector-section > summary::marker { content: ""; }
 .inspector-section .inspector-caret { display: inline-block; transition: transform 0.12s ease; }
 .inspector-section[open] > summary .inspector-caret { transform: rotate(90deg); }
+
+/* Own stacking context for the wiring canvas column: it hosts several
+   absolutely-positioned, z-indexed overlays (toolbar, focus hint) on top of
+   React Flow's own layered panes. `isolation: isolate` scopes those z-indexes
+   to this box so they can never leak past it — relevant once Task 7 adds a
+   sibling rail column that must not be reachable by the canvas's overlays. */
+.loom-canvas { isolation: isolate; }
+
+/* The cluster label at the head of each rail group (Task 7). */
+.loom-cluster-band {
+  font-size: 11px; font-weight: 600; color: #475569;
+  text-transform: lowercase; letter-spacing: 0.02em;
+}
+
+/* ---- Process rail (Task 7) ------------------------------------------------
+   The browsable half of process-column mode: a fixed-width column left of the
+   canvas that names the clusters and lists their processes, searchable. */
+.loom-process-rail {
+  width: 240px; flex: 0 0 240px; display: flex; flex-direction: column;
+  gap: 8px; padding: 10px; overflow: hidden;
+  border-right: 1px solid #e2e8f0; background: #fafafa; font-size: 12px;
+}
+.loom-rail-search {
+  padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px;
+}
+.loom-rail-granularity {
+  display: flex; align-items: center; gap: 6px; color: #64748b; font-size: 11px;
+}
+.loom-rail-granularity input { flex: 1; accent-color: #2563eb; }
+.loom-rail-list { overflow-y: auto; flex: 1; }
+.loom-rail-cluster { margin-bottom: 10px; }
+.loom-rail-cluster-label {
+  padding: 2px 4px; margin-bottom: 3px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex; align-items: center; gap: 4px;
+}
+.loom-rail-cluster-label.is-collapsible { cursor: pointer; user-select: none; }
+.loom-rail-caret { color: #94a3b8; font-size: 9px; }
+.loom-rail-hidden-note {
+  padding: 3px 6px; color: #94a3b8; font-size: 11px; font-style: italic;
+}
+.loom-rail-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer;
+}
+.loom-rail-row:hover { background: rgba(0, 0, 0, 0.05); }
+.loom-rail-row.is-active { background: #dbeafe; font-weight: 600; }
+.loom-rail-row.is-hidden .loom-rail-row-label { color: #b0b7c3; font-style: italic; }
+.loom-rail-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loom-rail-pin {
+  border: 0; background: none; cursor: pointer; opacity: 0.25; font-size: 11px;
+  line-height: 1; padding: 0 2px;
+}
+.loom-rail-pin.is-pinned, .loom-rail-pin:hover { opacity: 1; }
+.loom-rail-empty { color: #94a3b8; padding: 8px 4px; }
+
+/* One-line explanation of the empty-by-default canvas in edge-culling modes.
+   Sits top-LEFT: the toolbar owns top-right and React Flow's Controls own
+   bottom-left. pointer-events:none so it never eats a pane click. */
+.loom-focus-hint {
+  position: absolute; top: 10px; left: 10px; z-index: 10;
+  padding: 3px 8px;
+  font-size: 11px; color: #64748b;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid #e2e8f0; border-radius: 4px;
+  pointer-events: none; user-select: none;
+}

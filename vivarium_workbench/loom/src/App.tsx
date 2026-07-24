@@ -10,7 +10,15 @@ import { toPng, toSvg } from 'html-to-image';
 import ProcessNode from './nodes/ProcessNode';
 import StoreNode from './nodes/StoreNode';
 import FloatingStoreEdge from './edges/FloatingStoreEdge';
-import { applyLayout } from './layout';
+import { useLayoutMode } from './hooks/useLayoutMode';
+import { useFocus } from './hooks/useFocus';
+import { LAYOUT_MODES, getMode } from './layouts/registry';
+import { pickDrawnEdges } from './layouts/pickDrawnEdges';
+import { tierForZoom } from './layouts/processColumn';
+import type { ZoomTierId } from './layouts/types';
+import type { ProcessNodeData } from './types';
+import { readersAndWriters } from './storeFacts';
+import { deriveContract } from './contract';
 import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
@@ -20,6 +28,7 @@ import { isHiddenByAncestor, retargetEdgesToVisible, hiddenNodeIds } from './pan
 import ViewsMenu from './panels/ViewsMenu';
 import { getDefaultView, decodeView, fetchView, type View } from './viewStore';
 import { Sidebar } from './panels/Sidebar';
+import { ProcessRail } from './panels/ProcessRail';
 import { SetupRunPanel } from './panels/SetupRunPanel';
 import { ResultsPanel } from './panels/ResultsPanel';
 import { VisualizationsPanel } from './panels/VisualizationsPanel';
@@ -30,7 +39,8 @@ import {
 } from './api';
 import type { ExploreInspectMsg, ParameterDecl } from './api';
 
-// applyLayout(nodes, edges) → Node[] (returns nodes array directly)
+// Layout runs go through the mode registry (see hooks/useLayoutMode): a mode's
+// run() returns { nodes, bands? }, so call sites destructure `nodes`.
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 const EDGE_TYPES = { floating: FloatingStoreEdge };
 
@@ -84,6 +94,20 @@ export default function App() {
   const [emitSet, setEmitSet] = useState<Set<string>>(
     () => initialEmitSet(decodeUrlComposite()),
   );
+  // Which layout mode arranges the graph, and the dispatcher that runs it.
+  // Adding a mode to layouts/registry makes it selectable from the toolbar
+  // with no change here.
+  const layoutMode = useLayoutMode();
+  // Which processes are "active" (hovered / selected / pinned). Modes that
+  // implement `edgeVisibility` use this to cull wires; modes that don't
+  // (hierarchy) ignore it entirely and keep drawing every edge.
+  const focus = useFocus();
+  // Whether the ACTIVE mode culls edges by focus. `layoutMode.mode` is a
+  // module-level singleton from the registry, so this is stable between
+  // renders that don't switch modes. In hierarchy mode (no edgeVisibility)
+  // focus is entirely inert, so hover tracking + pin pruning are gated on
+  // this to keep hierarchy mode paying nothing for a feature it never uses.
+  const culls = !!layoutMode.mode.edgeVisibility;
   const [tab, setTab] = useState<TabId>('setup');
   const [compositeId, setCompositeId] = useState<string | null>(() => {
     // Bootstrap from URL query if present (for popups deep-linked with ?id=)
@@ -126,6 +150,31 @@ export default function App() {
   // to the auto-layout output.
   const [nodes, setNodes, onNodesChange] = useNodesState<any>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
+  // Mirror `nodes` for the edge-visibility seam below (same reason hiddenRef
+  // exists): dragging a node rewrites `nodes` on every animation frame, and a
+  // filter that took `nodes` as a dependency would re-run — and hand React Flow
+  // a brand-new edges array — on each of those frames for an identical result.
+  const nodesRef = useRef<any[]>([]);
+  nodesRef.current = nodes;
+
+  // Semantic-zoom tier, driven by the live viewport zoom (process-column mode
+  // only). The tier decides how much detail each process card shows AND how
+  // tall it is, so the column must re-flow when it changes. `tierForZoom`'s
+  // hysteresis keeps cards from flickering when the user scrolls back and forth
+  // across a tier boundary.
+  const [tier, setTier] = useState<ZoomTierId>('ports');
+  const onMove = useCallback((_: unknown, vp: { zoom: number }) => {
+    // Only process-column mode has tiers; leaving hierarchy's tier untouched
+    // keeps its layout effect from re-running ELK on every zoom step.
+    if (layoutMode.modeId !== 'process-column') return;
+    setTier((cur) => tierForZoom(vp.zoom, cur));
+  }, [layoutMode.modeId]);
+  // Last tier the column was laid out at. A tier change re-stacks the column
+  // (card heights changed); the persisted per-node positions would otherwise
+  // pin the old spacing and cards would overlap — so the layout effect wipes
+  // this mode's saved layout on a genuine tier change, mirroring the
+  // granularity handler. Seeded to the initial tier so mount does not clear.
+  const prevTierRef = useRef<ZoomTierId>(tier);
 
   // Wire postMessage protocol. Use a ref guard so StrictMode's double-effect
   // doesn't fire `explore:ready` twice during dev.
@@ -134,6 +183,10 @@ export default function App() {
       setState(msg.state);
       setCollapsed(defaultCollapsedIds(msg.state));  // light overview by default
       setHidden(defaultHiddenIds(msg.state));   // re-seed the noisy-process hide
+      // Node ids are dotted paths, so a same-named path in the NEXT composite
+      // would otherwise silently inherit whatever hover/selection/pins were
+      // left over from this one — drop all three on every new composite.
+      focus.clear();
       // Seed from the composite's declared emit-all paths when present, else
       // every top-level store, and broadcast so the dashboard's run-emit
       // selection stays in sync.
@@ -207,10 +260,15 @@ export default function App() {
   // Debounced save of current node positions to localStorage. Built once;
   // stable across re-renders. The callback closes over `compositeId` via the
   // effect below that reads the latest nodes.
-  const debouncedPersistRef = useRef<((id: string, positions: ReturnType<typeof positionsFromNodes>) => void) | null>(null);
+  // Positions are scoped to the active layout mode, so switching modes doesn't
+  // overwrite the arrangement the user built in the other one.
+  const debouncedPersistRef = useRef<
+    ((id: string, positions: ReturnType<typeof positionsFromNodes>, modeId: string) => void) | null
+  >(null);
   if (!debouncedPersistRef.current) {
     debouncedPersistRef.current = debounce(
-      (id: string, positions: ReturnType<typeof positionsFromNodes>) => saveLayout(id, positions),
+      (id: string, positions: ReturnType<typeof positionsFromNodes>, modeId: string) =>
+        saveLayout(id, positions, modeId),
       250,
     );
   }
@@ -259,10 +317,22 @@ export default function App() {
     // (so a process still shows a wire to the branch it connects into).
     const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
 
+    // A genuine tier change re-stacks the process column for the new card
+    // heights; wipe this mode's persisted spacing first so applySavedPositions
+    // below cannot pin the old, now-overlapping layout (same tactic as the
+    // granularity handler). Guarded so ordinary re-runs (collapse, hide, state)
+    // keep the user's drags.
+    if (layoutMode.modeId === 'process-column' && prevTierRef.current !== tier) {
+      clearLayout(compositeId, layoutMode.modeId);
+    }
+    prevTierRef.current = tier;
+
     (async () => {
-      const saved = loadLayout(compositeId);
-      const laid = await applyLayout(visibleNodes as any, visibleEdges as any);
-      const withSaved = applySavedPositions(laid as any, saved) as any[];
+      const saved = loadLayout(compositeId, layoutMode.modeId);
+      const { nodes: laidOut } = await layoutMode.runLayout(
+        visibleNodes as any, visibleEdges as any, compositeId, tier,
+      );
+      const withSaved = applySavedPositions(laidOut as any, saved) as any[];
       if (cancelled) return;
       // Apply the CURRENT hidden set to the freshly-rebuilt nodes + edges (read
       // via ref, not a dep). Without this, rebuilding edges here would drop the
@@ -291,7 +361,11 @@ export default function App() {
     })();
 
     return () => { cancelled = true; };
-  }, [state, raw, collapsed, compositeId, setNodes, setEdges]);
+    // layoutMode.modeId / runLayout: switching layout mode re-runs the layout.
+    // `tier`: a zoom-tier change re-flows the column (card heights change).
+    // `hidden` is deliberately NOT a dep — see hiddenRef above.
+  }, [state, raw, collapsed, compositeId, setNodes, setEdges,
+      layoutMode.modeId, layoutMode.runLayout, tier]);
 
   // Toggle the `hidden` CSS flag on existing nodes/edges WITHOUT relayout or
   // remount. O(changed nodes): only nodes/edges whose hidden state actually
@@ -312,17 +386,119 @@ export default function App() {
     }));
   }, [hidden, raw, setNodes, setEdges]);
 
+  // A pinned node that then gets explicitly hidden (sidebar Processes/Nodes
+  // toggle) would otherwise be unreachable — nothing on screen to shift-click
+  // to un-pin it, so the focus hint keeps asserting "N pinned" over an empty
+  // canvas. Prune any pin the current hidden set swallows. Gated on `culls`:
+  // in hierarchy mode pins are inert, so there is nothing worth pruning.
+  useEffect(() => {
+    if (!culls) return;
+    const hiddenIds = hiddenNodeIds(raw.nodes as any[], hidden);
+    focus.prunePins((id) => !hiddenIds.has(id));
+  }, [culls, hidden, raw, focus.prunePins]);
+
+  // What actually gets drawn: the edge state, minus whatever the active layout
+  // mode culls for the current focus. Hierarchy mode declares no
+  // `edgeVisibility`, so it short-circuits to `edges` — same array identity,
+  // same rendering as before this existed. Process-column mode drops every wire
+  // that doesn't touch a focused/pinned node, leaving just the store hierarchy
+  // until the user hovers something.
+  //
+  // Deps are all identity-stable between real changes: `focus.ctx` is memoized
+  // inside useFocus, `layoutMode.mode` is a module-level singleton from the
+  // registry, and the filter itself is O(edges) with no node scan. `nodes` is
+  // passed through for the seam's signature but the shipped modes don't read
+  // it, so it is deliberately NOT a dependency — including it would re-filter
+  // on every frame of a node drag for no change in output.
+  const drawnEdges = useMemo(
+    () => pickDrawnEdges(layoutMode.mode, edges as any[], focus.ctx, nodesRef.current as any[]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [edges, focus.ctx, layoutMode.mode],
+  );
+
+  /** Distinct nodes whose wiring is currently drawn (hover/selection ∪ pins). */
+  const activeFocusCount = useMemo(
+    () => new Set([...focus.ctx.focused, ...focus.ctx.pinned]).size,
+    [focus.ctx],
+  );
+
+  // Stamp the current semantic-zoom tier (and pinned-open flag) onto each
+  // process node's data so ProcessNode can gate its rows. Only in process-column
+  // mode — hierarchy nodes are left un-stamped, so ProcessNode renders its
+  // legacy fixed card and that mode is entirely unaffected. New data objects are
+  // minted only when `nodes`, `tier`, or the pin set changes (useMemo), so a
+  // plain re-render or a pan within a tier does not defeat the identity guarantee
+  // the layout effect's setNodes reducers rely on to avoid remounting the graph.
+  const tieredNodes = useMemo(() => {
+    if (layoutMode.modeId !== 'process-column') return nodes;
+    // Reader/writer facts are only surfaced from the 'contract' tier up;
+    // computing them for every store at every tier would be wasted work.
+    const wiringTier = tier === 'contract' || tier === 'full';
+    return (nodes as any[]).map((n) => {
+      if (n.type === 'process') {
+        return {
+          ...n,
+          data: { ...n.data, _tier: tier, _pinnedOpen: focus.ctx.pinned.has(n.id) },
+        };
+      }
+      const wiring = wiringTier
+        ? readersAndWriters(n.id, edges as any[])
+        : { readers: [], writers: [] };
+      return {
+        ...n,
+        data: { ...n.data, _tier: tier, _readers: wiring.readers, _writers: wiring.writers },
+      };
+    });
+  }, [nodes, edges, tier, focus.ctx.pinned, layoutMode.modeId]);
+
+  // Map from node id to node, for the edge stamp below (which needs the process
+  // end's port-type schema and derived contract). Rebuilt only when `nodes`
+  // changes identity — stable across pans within a tier.
+  const nodeById = useMemo(
+    () => new Map((nodes as any[]).map((n) => [n.id, n])),
+    [nodes],
+  );
+
+  // Stamp the tier (and the derived port type + contract semantic) onto each
+  // DRAWN edge so FloatingStoreEdge can label the wire in step with the cards.
+  // At `glyph` (and in hierarchy mode) edges are left un-stamped, so the edge
+  // renderer draws no label at all — no EdgeLabelRenderer node, no text layout
+  // for the ~400 wires exactly when the canvas is most crowded. Place edges are
+  // never labelled. New objects are minted only when the drawn set, node map, or
+  // tier changes.
+  const tieredEdges = useMemo(() => {
+    if (layoutMode.modeId !== 'process-column' || tier === 'glyph') return drawnEdges;
+    return (drawnEdges as any[]).map((e) => {
+      const kind = (e.data as any)?.edgeType;
+      if (kind !== 'input' && kind !== 'output') return e;  // place edges: no label
+      const isOut = kind === 'output';
+      const pdata = nodeById.get(isOut ? e.source : e.target)?.data as
+        ProcessNodeData | undefined;
+      const port: string = (e.label as string) ?? (isOut ? e.sourceHandle : e.targetHandle) ?? '';
+      const types = ((pdata as any)?.[isOut ? 'outputSchema' : 'inputSchema']) ?? {};
+      const contract = pdata ? deriveContract(pdata) : null;
+      return {
+        ...e,
+        data: {
+          ...e.data, _tier: tier, port,
+          _portType: typeof types[port] === 'string' ? types[port] : undefined,
+          _semantic: isOut ? contract?.outputs?.[port] : contract?.inputs?.[port],
+        },
+      };
+    });
+  }, [drawnEdges, nodeById, tier, layoutMode.modeId]);
+
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
   // time a composite renders. Subsequent drags update the same store.
   useEffect(() => {
     if (!compositeId || nodes.length === 0) return;
-    debouncedPersistRef.current?.(compositeId, positionsFromNodes(nodes as any));
-  }, [nodes, compositeId]);
+    debouncedPersistRef.current?.(compositeId, positionsFromNodes(nodes as any), layoutMode.modeId);
+  }, [nodes, compositeId, layoutMode.modeId]);
 
   const handleResetLayout = useCallback(() => {
     if (!compositeId) return;
-    clearLayout(compositeId);
+    clearLayout(compositeId, layoutMode.modeId);
     // Force a re-layout by bumping a dependency. Simplest: clear nodes so the
     // layout effect sees `!state` is false but `nodes.length === 0`, then on
     // the next state-driven tick it lays out fresh. Cleaner: just toggle
@@ -344,7 +520,10 @@ export default function App() {
         );
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
-      const laid = await applyLayout(visibleNodes as any, visibleEdges as any) as any[];
+      const { nodes: laidOut } = await layoutMode.runLayout(
+        visibleNodes as any, visibleEdges as any, compositeId, tier,
+      );
+      const laid = laidOut as any[];
       // Reuse unchanged node objects so consolidating the layout doesn't remount
       // nodes that kept their position + hidden state.
       setNodes((prev: any[]) => {
@@ -385,7 +564,8 @@ export default function App() {
         }
       }, 60);
     })();
-  }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges]);
+  }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges,
+      layoutMode.modeId, layoutMode.runLayout, tier]);
 
   // ---- Saved views ---------------------------------------------------------
   // A "view" snapshots the current arrangement + visibility. Capturing reads the
@@ -395,18 +575,31 @@ export default function App() {
     positions: positionsFromNodes(nodes as any),
     collapsed: [...collapsed],
     hidden: [...hidden],
-  }), [nodes, collapsed, hidden]);
+    // Record the mode the arrangement was captured in, so applying the view
+    // restores the layout it was built for.
+    mode: layoutMode.modeId,
+  }), [nodes, collapsed, hidden, layoutMode.modeId]);
 
   // Applying a view pins its positions (via the layout store, which the layout
   // effect reads) and sets collapsed/hidden — the existing effects re-lay-out
   // and toggle visibility. Then re-fit so the saved arrangement is framed.
   const applyView = useCallback((view: View) => {
     if (!compositeId || !view) return;
-    saveLayout(compositeId, view.positions || {});
+    // Legacy views carry no mode and resolve to the default, 'hierarchy' —
+    // which is the arrangement they were captured in.
+    // A view can also name a mode THIS build does not register — a `?view=`
+    // link or a `.view.json` file made by a newer build, neither of which is
+    // validated on the way in (normalizeView only checks it is a string). Run
+    // it through the registry so an unknown id falls back to the default
+    // instead of desyncing the mode <select> from state and persisting
+    // positions under a phantom localStorage key.
+    const viewMode = getMode(view.mode).id;
+    saveLayout(compositeId, view.positions || {}, viewMode);
+    if (viewMode !== layoutMode.modeId) layoutMode.setModeId(viewMode);
     setCollapsed(new Set(view.collapsed || []));
     setHidden(new Set(view.hidden || []));
     window.setTimeout(() => rfRef.current?.fitView?.({ padding: 0.15, duration: 400 }), 240);
-  }, [compositeId]);
+  }, [compositeId, layoutMode.modeId, layoutMode.setModeId]);
 
   // On open, apply a startup view ONCE per composite, in priority order:
   //   1. ?view=<encoded>   (ad-hoc shareable link)
@@ -443,7 +636,13 @@ export default function App() {
     try {
       const el = canvasWrapRef.current?.querySelector('.react-flow__viewport') as HTMLElement | null;
       if (!el) return;
-      const bounds = getNodesBounds(nodes as any);
+      // Frame the VISIBLE nodes only. getNodesBounds does not honour the
+      // `hidden` flag (fitView does), so exporting the raw node list padded the
+      // image with the empty rectangle of whatever is toggled off — e.g. in
+      // process-column mode the hidden bookkeeping band's ~2,096px tail. Fall
+      // back to everything if the user hid literally the whole graph.
+      const framed = (nodes as any[]).filter((n) => !n.hidden);
+      const bounds = getNodesBounds((framed.length ? framed : nodes) as any);
       const PAD = 60, MAX = 6000;
       const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
       const scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));
@@ -477,7 +676,7 @@ export default function App() {
     }
   }, [nodes, name, compositeId]);
 
-  const handleNodeClick = useCallback((_: any, node: any) => {
+  const handleNodeClick = useCallback((ev: any, node: any) => {
     const payload = {
       path: node.data?.path ?? [],
       kind: node.type as 'store' | 'process',
@@ -485,7 +684,43 @@ export default function App() {
     };
     setSelection(payload);
     postInspect(payload);
-  }, []);
+    // Shift/⌘-click PINS, so two processes' wiring can be held on screen and
+    // compared; a plain click selects, which keeps one process's wires up after
+    // the pointer leaves it.
+    if (ev?.shiftKey || ev?.metaKey) focus.togglePin(node.id);
+    else focus.select(node.id);
+  }, [focus.select, focus.togglePin]);
+
+  // Hovering reveals a node's wiring in modes that cull edges; leaving hides it
+  // again unless the node is also selected or pinned.
+  const handleNodeMouseEnter = useCallback(
+    (_: any, node: any) => focus.hover(node.id), [focus.hover]);
+  const handleNodeMouseLeave = useCallback(() => focus.hover(null), [focus.hover]);
+  // Clicking empty canvas drops the selection (pins survive) — the way back to
+  // the clean, structure-only view.
+  const handlePaneClick = useCallback(() => focus.select(null), [focus.select]);
+
+  // Changing granularity re-clusters, but the layout effect's
+  // applySavedPositions would immediately overwrite the recomputed positions
+  // with the persisted ones (App saves positions after every layout), so the
+  // slider would recompute clusters WITHOUT moving anything until "Re-layout".
+  // Clear this mode's saved positions first, so the fresh layout — re-run
+  // because `runLayout`'s identity changes with granularity — actually lands.
+  const handleGranularityChange = useCallback((g: number) => {
+    if (compositeId) clearLayout(compositeId, layoutMode.modeId);
+    layoutMode.setGranularity(g);
+  }, [compositeId, layoutMode.modeId, layoutMode.setGranularity]);
+
+  // Jump the canvas to a process picked in the rail, matching handleResetLayout's
+  // deterministic setCenter (with a clamped zoom). setCenter frames the node so
+  // the edge-culling reveal of its wiring is actually on screen.
+  const handleRailNavigate = useCallback((id: string) => {
+    const n = nodes.find((x) => x.id === id);
+    const inst = rfRef.current;
+    if (!n || !inst) return;
+    const zoom = Math.max(0.05, Math.min(1.2, inst.getZoom?.() ?? 1));
+    inst.setCenter?.(n.position.x + 110, n.position.y + 30, { zoom, duration: 300 });
+  }, [nodes]);
 
   const handleNodeDoubleClick = useCallback((_: any, node: any) => {
     // Only group stores (synthesized container nodes) can be collapsed.
@@ -634,8 +869,39 @@ export default function App() {
             flexDirection: 'row',
           }}>
             <EmitContext.Provider value={emitSet}>
+              {/* Cluster rail — only in process-column mode, left of the canvas.
+                  Names the bands the canvas draws as bare clusters and drives the
+                  same focus state, so selecting here reveals wiring on the canvas.
+                  Absent in hierarchy mode, which is left entirely untouched. */}
+              {layoutMode.modeId === 'process-column' && (
+                <ProcessRail
+                  bands={layoutMode.bands}
+                  nodes={allNodes}
+                  focus={focus}
+                  granularity={layoutMode.granularity}
+                  onGranularityChange={handleGranularityChange}
+                  onNavigate={handleRailNavigate}
+                  hiddenIds={hidden}
+                />
+              )}
               {/* Canvas column — flex:1. Holds the Re-layout button + ReactFlow. */}
-              <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+              <div
+                ref={canvasWrapRef}
+                className={`loom-canvas loom-mode-${layoutMode.modeId}`}
+                style={{ flex: 1, position: 'relative', minWidth: 0 }}
+              >
+                {/* Modes that cull edges start with NO wires drawn, which without
+                    a word of explanation reads as a broken canvas rather than a
+                    deliberate clean slate. One line, only in those modes. */}
+                {culls && (
+                  <div className="loom-focus-hint">
+                    {activeFocusCount
+                      ? `showing wiring for ${activeFocusCount} node`
+                        + `${activeFocusCount === 1 ? '' : 's'}`
+                        + (focus.ctx.pinned.size ? ` (${focus.ctx.pinned.size} pinned)` : '')
+                      : 'hover to reveal wiring · click to keep · shift-click to pin'}
+                  </div>
+                )}
                 {/* Top-right toolbar: Re-layout + Download (current layout, white bg). */}
                 <div style={{
                   position: 'absolute', top: 8, right: 8, zIndex: 10,
@@ -646,6 +912,21 @@ export default function App() {
                     captureCurrentView={captureCurrentView}
                     applyView={applyView}
                   />
+                  <select
+                    className="loom-mode-select"
+                    value={layoutMode.modeId}
+                    onChange={(e) => layoutMode.setModeId(e.target.value)}
+                    title="Layout mode"
+                    style={{
+                      padding: '4px 6px', fontSize: 12,
+                      background: '#fff', border: '1px solid #d1d5db',
+                      borderRadius: 4, cursor: 'pointer', color: '#374151',
+                    }}
+                  >
+                    {LAYOUT_MODES.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
                   <button
                     onClick={handleResetLayout}
                     title="Re-run auto-layout on the currently visible nodes and fit the view"
@@ -696,15 +977,23 @@ export default function App() {
                   </div>
                 </div>
                 <ReactFlow
-                  nodes={nodes}
-                  edges={edges}
+                  nodes={tieredNodes}
+                  edges={tieredEdges}
                   onInit={(inst) => { rfRef.current = inst; }}
+                  onMove={onMove}
                   onNodesChange={onNodesChange}
                   onEdgesChange={onEdgesChange}
                   nodeTypes={NODE_TYPES}
                   edgeTypes={EDGE_TYPES}
                   onNodeClick={handleNodeClick}
                   onNodeDoubleClick={handleNodeDoubleClick}
+                  // Only wired up in modes that actually cull edges by focus
+                  // (hierarchy mode's focus is inert): otherwise every node the
+                  // pointer crosses sets state and re-renders App — which, on
+                  // the wiring tab, re-renders the whole non-memoized Sidebar.
+                  onNodeMouseEnter={culls ? handleNodeMouseEnter : undefined}
+                  onNodeMouseLeave={culls ? handleNodeMouseLeave : undefined}
+                  onPaneClick={handlePaneClick}
                   fitView
                   fitViewOptions={{ padding: 0.2 }}
                   /* Big composites have hundreds of nodes + custom floating edges;

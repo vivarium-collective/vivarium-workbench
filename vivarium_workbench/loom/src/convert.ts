@@ -256,14 +256,27 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
       const inputPorts = Object.keys(node.inputs ?? {});
       const outputPorts = Object.keys(node.outputs ?? {});
 
-      // Build inputPortsSchema / outputPortsSchema from wiring targets (informational)
+      // Build inputPortsSchema / outputPortsSchema from wiring targets (informational).
+      // These keep the RAW target joined verbatim — it is what the port hover
+      // tooltips and the Inspector display, so it must read exactly as authored.
+      // NOTE it is deliberately lossy and NOT parseable: `['..','bulk'].join('.')`
+      // is `'...bulk'`, indistinguishable from `['.','.','bulk']`. Anything that
+      // needs the actual store must use the resolved *PortsTarget fields below,
+      // never re-split these strings.
       const inputPortsSchema: Record<string, string> = {};
       const outputPortsSchema: Record<string, string> = {};
+      // ...and the RESOLVED absolute dotted store path per port (relative
+      // navigation applied via resolveWirePath's push/pop stack), which is what
+      // clustering/grouping consumes. `''` means the composite root.
+      const inputPortsTarget: Record<string, string> = {};
+      const outputPortsTarget: Record<string, string> = {};
       for (const [port, target] of Object.entries(node.inputs ?? {})) {
         inputPortsSchema[port] = Array.isArray(target) ? (target as string[]).join('.') : String(target);
+        inputPortsTarget[port] = resolveWirePath(parentPath, target).join('.');
       }
       for (const [port, target] of Object.entries(node.outputs ?? {})) {
         outputPortsSchema[port] = Array.isArray(target) ? (target as string[]).join('.') : String(target);
+        outputPortsTarget[port] = resolveWirePath(parentPath, target).join('.');
       }
 
       nodes.push({
@@ -285,9 +298,10 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           // (inputPortsSchema/outputPortsSchema = where each port connects).
           inputSchema: node._inputs ?? undefined,
           outputSchema: node._outputs ?? undefined,
+          contract: node._contract ?? undefined,
           // Extra schema data consumed by ProcessNode (as any cast in the component)
-          ...(Object.keys(inputPortsSchema).length ? { inputPortsSchema } : {}),
-          ...(Object.keys(outputPortsSchema).length ? { outputPortsSchema } : {}),
+          ...(Object.keys(inputPortsSchema).length ? { inputPortsSchema, inputPortsTarget } : {}),
+          ...(Object.keys(outputPortsSchema).length ? { outputPortsSchema, outputPortsTarget } : {}),
         } as ProcessNodeData,
         position: { x: 0, y: 0 },
       });

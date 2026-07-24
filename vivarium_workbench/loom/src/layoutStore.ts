@@ -18,14 +18,21 @@ const KEY_PREFIX = 'bigraph-loom:layout:';
 
 export type LayoutPositions = Record<string, { x: number; y: number }>;
 
-function keyFor(compositeId: string | null | undefined): string | null {
+function keyFor(compositeId: string | null | undefined, modeId = 'hierarchy'): string | null {
   if (!compositeId) return null;
-  return KEY_PREFIX + compositeId;
+  // 'hierarchy' keeps the original un-suffixed key so previously saved
+  // positions survive this change.
+  return modeId === 'hierarchy'
+    ? KEY_PREFIX + compositeId
+    : `${KEY_PREFIX}${compositeId}:${modeId}`;
 }
 
-/** Read saved positions for a composite. Returns {} if none or on parse error. */
-export function loadLayout(compositeId: string | null | undefined): LayoutPositions {
-  const k = keyFor(compositeId);
+/** Read saved positions for a composite (in one layout mode). Returns {} if none or on parse error. */
+export function loadLayout(
+  compositeId: string | null | undefined,
+  modeId?: string,
+): LayoutPositions {
+  const k = keyFor(compositeId, modeId);
   if (!k) return {};
   try {
     const raw = window.localStorage.getItem(k);
@@ -39,8 +46,12 @@ export function loadLayout(compositeId: string | null | undefined): LayoutPositi
 }
 
 /** Overwrite saved positions for a composite. */
-export function saveLayout(compositeId: string | null | undefined, positions: LayoutPositions): void {
-  const k = keyFor(compositeId);
+export function saveLayout(
+  compositeId: string | null | undefined,
+  positions: LayoutPositions,
+  modeId?: string,
+): void {
+  const k = keyFor(compositeId, modeId);
   if (!k) return;
   try {
     window.localStorage.setItem(k, JSON.stringify(positions));
@@ -50,8 +61,8 @@ export function saveLayout(compositeId: string | null | undefined, positions: La
 }
 
 /** Wipe the saved layout for one composite (used by the "Reset layout" button). */
-export function clearLayout(compositeId: string | null | undefined): void {
-  const k = keyFor(compositeId);
+export function clearLayout(compositeId: string | null | undefined, modeId?: string): void {
+  const k = keyFor(compositeId, modeId);
   if (!k) return;
   try {
     window.localStorage.removeItem(k);

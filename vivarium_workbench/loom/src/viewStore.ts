@@ -30,6 +30,10 @@ export type View = {
   positions: LayoutPositions;
   collapsed: string[];
   hidden: string[];
+  /** Layout mode this view was captured in. Absent means 'hierarchy'. */
+  mode?: string;
+  /** Pinned process node ids (process-column mode). */
+  pins?: string[];
 };
 
 export type ViewStore = {
@@ -141,6 +145,10 @@ export function normalizeView(v: any): View {
     positions: (v && typeof v.positions === 'object' && v.positions) ? v.positions : {},
     collapsed: Array.isArray(v?.collapsed) ? v.collapsed.map(String) : [],
     hidden: Array.isArray(v?.hidden) ? v.hidden.map(String) : [],
+    // A view saved before layout modes existed has no `mode` — it was captured
+    // in the hierarchy layout, so default there and keep old ?view= links working.
+    mode: typeof v?.mode === 'string' ? v.mode : 'hierarchy',
+    pins: Array.isArray(v?.pins) ? v.pins.filter((p: unknown) => typeof p === 'string') : [],
   };
 }
 
