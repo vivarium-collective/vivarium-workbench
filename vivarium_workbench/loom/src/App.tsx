@@ -16,6 +16,9 @@ import { LAYOUT_MODES, getMode } from './layouts/registry';
 import { pickDrawnEdges } from './layouts/pickDrawnEdges';
 import { tierForZoom } from './layouts/processColumn';
 import type { ZoomTierId } from './layouts/types';
+import type { ProcessNodeData } from './types';
+import { readersAndWriters } from './storeFacts';
+import { deriveContract } from './contract';
 import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
@@ -428,11 +431,62 @@ export default function App() {
   // the layout effect's setNodes reducers rely on to avoid remounting the graph.
   const tieredNodes = useMemo(() => {
     if (layoutMode.modeId !== 'process-column') return nodes;
-    return (nodes as any[]).map((n) => (n.type !== 'process' ? n : {
-      ...n,
-      data: { ...n.data, _tier: tier, _pinnedOpen: focus.ctx.pinned.has(n.id) },
-    }));
-  }, [nodes, tier, focus.ctx.pinned, layoutMode.modeId]);
+    // Reader/writer facts are only surfaced from the 'contract' tier up;
+    // computing them for every store at every tier would be wasted work.
+    const wiringTier = tier === 'contract' || tier === 'full';
+    return (nodes as any[]).map((n) => {
+      if (n.type === 'process') {
+        return {
+          ...n,
+          data: { ...n.data, _tier: tier, _pinnedOpen: focus.ctx.pinned.has(n.id) },
+        };
+      }
+      const wiring = wiringTier
+        ? readersAndWriters(n.id, edges as any[])
+        : { readers: [], writers: [] };
+      return {
+        ...n,
+        data: { ...n.data, _tier: tier, _readers: wiring.readers, _writers: wiring.writers },
+      };
+    });
+  }, [nodes, edges, tier, focus.ctx.pinned, layoutMode.modeId]);
+
+  // Map from node id to node, for the edge stamp below (which needs the process
+  // end's port-type schema and derived contract). Rebuilt only when `nodes`
+  // changes identity — stable across pans within a tier.
+  const nodeById = useMemo(
+    () => new Map((nodes as any[]).map((n) => [n.id, n])),
+    [nodes],
+  );
+
+  // Stamp the tier (and the derived port type + contract semantic) onto each
+  // DRAWN edge so FloatingStoreEdge can label the wire in step with the cards.
+  // At `glyph` (and in hierarchy mode) edges are left un-stamped, so the edge
+  // renderer draws no label at all — no EdgeLabelRenderer node, no text layout
+  // for the ~400 wires exactly when the canvas is most crowded. Place edges are
+  // never labelled. New objects are minted only when the drawn set, node map, or
+  // tier changes.
+  const tieredEdges = useMemo(() => {
+    if (layoutMode.modeId !== 'process-column' || tier === 'glyph') return drawnEdges;
+    return (drawnEdges as any[]).map((e) => {
+      const kind = (e.data as any)?.edgeType;
+      if (kind !== 'input' && kind !== 'output') return e;  // place edges: no label
+      const isOut = kind === 'output';
+      const pdata = nodeById.get(isOut ? e.source : e.target)?.data as
+        ProcessNodeData | undefined;
+      const port: string = (e.label as string) ?? (isOut ? e.sourceHandle : e.targetHandle) ?? '';
+      const types = ((pdata as any)?.[isOut ? 'outputSchema' : 'inputSchema']) ?? {};
+      const contract = pdata ? deriveContract(pdata) : null;
+      return {
+        ...e,
+        data: {
+          ...e.data, _tier: tier, port,
+          _portType: typeof types[port] === 'string' ? types[port] : undefined,
+          _semantic: isOut ? contract?.outputs?.[port] : contract?.inputs?.[port],
+        },
+      };
+    });
+  }, [drawnEdges, nodeById, tier, layoutMode.modeId]);
 
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
@@ -924,7 +978,7 @@ export default function App() {
                 </div>
                 <ReactFlow
                   nodes={tieredNodes}
-                  edges={drawnEdges}
+                  edges={tieredEdges}
                   onInit={(inst) => { rfRef.current = inst; }}
                   onMove={onMove}
                   onNodesChange={onNodesChange}
