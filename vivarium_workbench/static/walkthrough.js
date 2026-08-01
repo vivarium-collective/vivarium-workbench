@@ -6407,9 +6407,14 @@
   }
   function _marketRepoUrl(repo) {
     if (window._workspaceName && repo === _marketRepoNorm(window._workspaceName) && window._workspaceRepoUrl) {
-      return window._workspaceRepoUrl;
+      return String(window._workspaceRepoUrl).replace(/\.git$/, '');
     }
-    return 'https://github.com/vivarium-collective/' + repo;
+    // Only guess the org path for actual vivarium-ecosystem repos. Other dists
+    // (system/binary deps like open-mpi-4, lammps-importable, or legacy names
+    // like pbsim-common) are NOT vivarium-collective repos, so a guessed URL
+    // 404s — return no link and let the caller omit the GitHub button.
+    if (/^(pbg|viva)-/.test(repo)) return 'https://github.com/vivarium-collective/' + repo;
+    return '';
   }
   // Merge the catalog (repo universe) with loaded artifacts (fine per-type counts).
   function _marketRepoList() {
@@ -6428,7 +6433,7 @@
     // with no artifacts AND available-to-install repos not present locally).
     (window._marketCatalog || []).forEach(function (m) {
       var b = get(m.name || m.package); if (!b) return;
-      if (m.source && !b.url) b.url = String(m.source).replace(/\.git$/, '');
+      if (!b.url) b.url = m.homepage || (m.source ? String(m.source).replace(/\.git$/, '') : '');
       if (m.description && !b.desc) b.desc = m.description;
       if (m.installed === false) b.installed = false;
       if (!b.installName) b.installName = m.name || m.package || '';
@@ -6506,9 +6511,19 @@
   }
   // GitHub link + Install/Uninstall, shared by card + detail.
   function _repoActions(b) {
-    return '<span class="repo-actions">'
-      + '<a class="btn-mini repo-gh" href="' + _esc(b.url) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">GitHub ↗</a>'
-      + _repoInstallBtn(b) + _repoUninstallBtn(b) + '</span>';
+    // Only render the GitHub link when we have a real repo URL (see
+    // _marketRepoUrl): a guessed vivarium-collective URL for a non-vivarium dist
+    // 404s, so omit the button rather than ship a dead link.
+    var gh = b.url
+      ? '<a class="btn-mini repo-gh" href="' + _esc(b.url) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">GitHub ↗</a>'
+      : '';
+    return '<span class="repo-actions">' + gh + _repoInstallBtn(b) + _repoUninstallBtn(b) + '</span>';
+  }
+  // Repo name: a link when we have a real URL, else plain text (no dead link).
+  function _repoNameHtml(b) {
+    return b.url
+      ? '<a class="repo-name" href="' + _esc(b.url) + '" target="_blank" rel="noopener">' + _esc(b.repo) + '</a>'
+      : '<span class="repo-name">' + _esc(b.repo) + '</span>';
   }
   function _repoFoot(b) {
     var meta = [];
@@ -6521,7 +6536,7 @@
     return '<div class="market-card repo-card' + (b.isWorkspace ? ' repo-card-ws' : '') + '">'
       + '<div class="repo-card-head">'
       +   '<span class="repo-ico">📦</span>'
-      +   '<a class="repo-name" href="' + _esc(b.url) + '" target="_blank" rel="noopener">' + _esc(b.repo) + '</a>'
+      +   _repoNameHtml(b)
       +   _repoBadge(b)
       + '</div>'
       + (b.desc ? '<div class="repo-desc">' + _esc(b.desc) + '</div>' : '')
@@ -6533,7 +6548,7 @@
     return '<div class="market-card repo-card repo-card-detail' + (b.isWorkspace ? ' repo-card-ws' : '') + '">'
       + '<div class="repo-card-head">'
       +   '<span class="repo-ico">📦</span>'
-      +   '<a class="repo-name" href="' + _esc(b.url) + '" target="_blank" rel="noopener">' + _esc(b.repo) + '</a>'
+      +   _repoNameHtml(b)
       +   _repoBadge(b)
       + '</div>'
       + (b.desc ? '<div class="repo-desc repo-desc-full">' + _esc(b.desc) + '</div>' : '')

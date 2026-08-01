@@ -122,6 +122,31 @@
   // these stores). One store per run, so we surface a direct ⬇ per run plus a
   // one-click "download all" that triggers each run's download in turn.
   var _readoutsDownloadLoaded = false;
+  function _fmtBytes(n) {
+    if (n === null || n === undefined || isNaN(Number(n))) return '';
+    n = Number(n); var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return ' (' + (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + ' ' + u[i] + ')';
+  }
+  // Static, published artifact downloads (study.yaml `artifacts:` with an `href`
+  // staged into the bundle by publish.py). These work in the read-only snapshot,
+  // where the live `/api/simulation-run-download` endpoint below does not exist.
+  function _artifactsBlock(e) {
+    var arts = ((window._study && window._study.artifacts) || []).filter(
+      function (a) { return a && a.href; });
+    if (!arts.length) return '';
+    var items = arts.map(function (a) {
+      return '<li style="margin:3px 0"><a class="action-btn" download href="' + e(a.href) + '">⬇ '
+        + e(a.name || 'artifact') + '</a>'
+        + '<span class="muted" style="font-size:0.82em">' + e((a.kind ? ' ' + a.kind : '') + _fmtBytes(a.bytes)) + '</span>'
+        + (a.description ? '<div class="muted" style="font-size:0.8em;margin-left:2px">' + e(a.description) + '</div>' : '')
+        + '</li>';
+    }).join('');
+    return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;background:#f9fafb;margin-bottom:10px">'
+      + '<div style="margin-bottom:6px"><strong>Download artifacts</strong>'
+      + '<span class="muted" style="font-size:0.85em;margin-left:8px">outputs of this study’s composite (report, results archive)</span></div>'
+      + '<ul style="list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:14px">' + items + '</ul></div>';
+  }
   function _loadReadoutsDownload(force) {
     var host = document.getElementById('readouts-download');
     if (!host) return;
@@ -130,13 +155,16 @@
     var slug = studyName();
     if (!slug) { host.innerHTML = ''; return; }
     var e = window.SimTable ? window.SimTable.esc : function (s) { return s; };
+    // Render static artifacts first so they show even with no live backend.
+    var artBlock = _artifactsBlock(e);
+    host.innerHTML = artBlock;
     fetch('/api/simulations?study=' + encodeURIComponent(slug), { headers: { Accept: 'application/json' } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
         var sims = (j && j.simulations) || [];
         var withData = sims.filter(function (s) { return s.run_id && (s.store_path || s.db_path); });
         if (!withData.length) {
-          host.innerHTML = '<p class="muted" style="margin:0;font-size:0.9em">No raw simulation data to download yet — launch a run first.</p>';
+          if (!artBlock) host.innerHTML = '<p class="muted" style="margin:0;font-size:0.9em">No raw simulation data to download yet — launch a run first.</p>';
           return;
         }
         var links = withData.map(function (s) {
@@ -144,7 +172,7 @@
           return '<li style="margin:2px 0"><a class="action-btn" download href="' + url + '">⬇ '
             + e(s.sim_name || s.label || s.run_id) + '</a></li>';
         }).join('');
-        host.innerHTML =
+        host.innerHTML = artBlock +
           '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;background:#f9fafb">'
           + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px">'
           + '<strong>Download raw data</strong>'
@@ -152,7 +180,7 @@
           + '<span class="muted" style="font-size:0.85em">the raw emitter store for each run — every readout below is recorded in these files</span>'
           + '</div><ul style="list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px">' + links + '</ul></div>';
       })
-      .catch(function () { host.innerHTML = ''; });
+      .catch(function () { host.innerHTML = artBlock; });
   }
   window._loadReadoutsDownload = _loadReadoutsDownload;
 

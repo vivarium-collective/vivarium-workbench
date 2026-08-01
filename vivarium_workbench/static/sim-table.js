@@ -203,7 +203,13 @@
     var viz    = (completed && hasRun) ? _art("viz",    "📊 Viz",      "Open this run's visualizations (GIF + plots)", false) : "";
     var report = (completed && hasRun) ? _art("report", "📋 Report",   "Open this run's report card", false) : "";
     var analyses = (completed && hasRun) ? _art("analyses", "⬇ Analyses",   "Download this run's analyses (JSON)", true) : "";
-    var data = (row.run_id && (row.store_path || row.db_path))
+    // Prefer a static, published results artifact (works in the read-only
+    // snapshot — `download_url` is already base-path-prefixed by publish.py);
+    // fall back to the live raw-data endpoint otherwise.
+    var data = row.download_url
+      ? '<a class="action-btn" title="Download this run\'s results archive (.zip)" ' +
+        'href="' + esc(row.download_url) + '" download style="text-decoration:none;">⬇ Results</a>'
+      : (row.run_id && (row.store_path || row.db_path))
       ? '<a class="action-btn js-authoring" title="Download this run\'s results / raw emitter data (.zip)" ' +
         'href="' + BP + '/api/simulation-run-download?run_id=' + runIdEnc + '" download style="text-decoration:none;">⬇ Results</a>' : "";
     var analysis = "";
