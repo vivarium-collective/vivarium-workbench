@@ -37,6 +37,29 @@ def test_report_renders_acceptance_rollup_paragraph():
     assert "acceptance criteria" in _JS
 
 
+def test_verdict_badge_distinguishes_five_states():
+    # roll_up_verdict emits five states; the badge must render the three that
+    # used to collapse into one ⚠ distinctly (workbench#758).
+    # not_started renders neutral (never ⚠ — an unstarted study is not broken).
+    assert "'not_started'" in _JS or '"not_started"' in _JS
+    assert "not evaluated" in _JS
+    # needs_calibration gets a progress-shaped glyph, distinct from blocked's ⚠.
+    assert "needs_calibration" in _JS
+    assert "🔄" in _JS
+    # The legend enumerates all five states, not just three.
+    assert "◽ not evaluated" in _JS
+    assert "🔄 needs calibration" in _JS
+    assert "⚠ blocked" in _JS
+
+
+def test_verdict_badge_surfaces_derived_counts():
+    # The counts the verdict was derived from are shown, so needs_calibration
+    # reads as progress ("4 passed · 1 skipped") rather than a bare badge.
+    assert "_studyOutcomeCounts" in _JS
+    assert "_spineCountLabel" in _JS
+    assert "passed" in _JS and "skipped" in _JS
+
+
 def test_dag_reuses_existing_topological_ordering():
     # The DAG consumes the already-computed `ordered` / `depthMap` (not a new
     # second sort) — the helper references depthMap.

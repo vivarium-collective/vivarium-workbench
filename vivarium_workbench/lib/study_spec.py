@@ -799,10 +799,22 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         try:
             persisted_ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator")
             if isinstance(persisted_ge, dict) and persisted_ge.get("result"):
-                spec["computed_gate_verdict"] = dict(persisted_ge)
+                cgv = dict(persisted_ge)
             else:
                 from viva_superpowers.study_verdict import roll_up_verdict
-                spec["computed_gate_verdict"] = roll_up_verdict(spec)
+                cgv = roll_up_verdict(spec)
+            # Attach the per-test counts the verdict was derived from so the SPA
+            # can show "4 passed · 1 skipped" beside the badge (workbench#758) —
+            # distinguishing needs_calibration-with-progress from a bare skip.
+            # roll_up_verdict already carries `counts`; the persisted slot may
+            # predate it, so backfill render-time (never persisted → no churn).
+            if isinstance(cgv, dict) and "counts" not in cgv:
+                try:
+                    from viva_superpowers.study_status import count_test_outcomes
+                    cgv["counts"] = count_test_outcomes(spec, spec.get("runs"))
+                except Exception:  # noqa: BLE001
+                    pass
+            spec["computed_gate_verdict"] = cgv
         except Exception:  # noqa: BLE001
             pass
 

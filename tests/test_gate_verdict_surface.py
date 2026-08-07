@@ -106,6 +106,42 @@ def test_computed_gate_verdict_falls_back_when_no_persisted_slot(tmp_path):
     assert cgv["evaluated_by"] == "code"
 
 
+def test_computed_gate_verdict_carries_counts_on_persisted_path(
+        tmp_study_with_gate_evaluator):
+    """The persisted slot predates `counts`; the builder backfills it render-time
+    (workbench#758) so the SPA can show the derivation beside the badge."""
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
+    ws, name = tmp_study_with_gate_evaluator
+    cgv = load_study_detail_spec(ws, name)["computed_gate_verdict"]
+    assert cgv["counts"] == {"total": 1, "pass": 0, "fail": 1, "skip": 0,
+                             "pending": 0}
+
+
+def test_computed_gate_verdict_carries_counts_on_fallback_path(tmp_path):
+    """The roll_up_verdict fallback already carries `counts`; surface them.
+
+    Uses 4 passed + 1 skipped → needs_calibration, the #758 worked example: the
+    verdict alone can't distinguish it from a bare skip, but the counts can."""
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "cal-study"
+    sd.mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    spec = dict(
+        _V3_BASE, name="cal-study", objective="test", status="in_progress",
+        behavior_tests=[{"name": n} for n in ("t1", "t2", "t3", "t4", "t5")],
+        runs=[{"name": "r1", "status": "completed", "outcomes": {
+            "t1": {"result": "PASS"}, "t2": {"result": "PASS"},
+            "t3": {"result": "PASS"}, "t4": {"result": "PASS"},
+            "t5": {"result": "skip"}}}],
+    )
+    (sd / "study.yaml").write_text(yaml.safe_dump(spec))
+
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
+    cgv = load_study_detail_spec(ws, "cal-study")["computed_gate_verdict"]
+    assert cgv["result"] == "needs_calibration"
+    assert cgv["counts"]["pass"] == 4 and cgv["counts"]["skip"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Structural tests for the render layer (no JS harness — assert markup + data
 # references). The chip mirrors the param-enforcement banner.

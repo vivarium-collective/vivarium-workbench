@@ -12951,19 +12951,70 @@
     // spine-computed verdicts/acceptance (no recompute). Mirrors the
     // param-enforcement banner: surfaced, connected (nodes/criteria link to the
     // per-study sections), labeled code-computed.
+    // Per-test outcome counts for a study (pass/fail/skip/pending), read from
+    // the run that carries outcomes (canonical/grade), falling back to the
+    // authored tests[].status. Single-sourced with the control-panel clarity
+    // counter (_studyControlPanel) so the two never drift.
+    function _studyOutcomeCounts(s) {
+      var tests = _studyTests(s);
+      var latest = _runWithOutcomes((s && s.runs) || []);
+      var outc = (latest && latest.outcomes) || {};
+      var c = { pass: 0, fail: 0, skip: 0, pending: 0, total: tests.length };
+      tests.forEach(function (t) {
+        var o = outc[t.name];
+        var r = (((o && o.result) != null ? o.result : o) || '').toString().toLowerCase();
+        if (!r) r = (_testStatusToResult(t.status) || '').toLowerCase();
+        if (r === 'pass' || r === 'passed' || r === 'ok') c.pass++;
+        else if (r === 'fail' || r === 'failed' || r === 'error') c.fail++;
+        else if (r === 'skip' || r === 'skipped' || r === 'inconclusive' || r === 'partial') c.skip++;
+        else c.pending++;
+      });
+      return c;
+    }
+    // A compact "4 passed · 1 skipped" summary of the counts a verdict was
+    // derived from — the data already lives in the outcomes, so surface it so
+    // needs_calibration reads as progress, not a bare ⚠.
+    function _spineCountLabel(c) {
+      if (!c || !c.total) return '';
+      var bits = [];
+      if (c.pass) bits.push(c.pass + ' passed');
+      if (c.fail) bits.push(c.fail + ' failed');
+      if (c.skip) bits.push(c.skip + ' skipped');
+      if (c.pending) bits.push(c.pending + ' pending');
+      return bits.join(' · ');
+    }
+    // Map a study's code-computed gate verdict onto a badge. roll_up_verdict
+    // emits FIVE states (passed / failed / needs_calibration / blocked /
+    // not_started); render all five distinctly so partial progress is visible
+    // to a reader. In particular: ◽ neutral for not-yet-evaluated (never ⚠ —
+    // an unstarted study must not read as broken), 🔄 progress-shaped for
+    // needs_calibration, and ⚠ reserved for genuinely blocked.
     function _spineVerdictBadge(result, study) {
       var r = (result || '').toString().toLowerCase();
       // Descriptive/informational reference (not_applicable gate) → neutral
       // "reference" badge, NOT ⚠ "needs work".
       if (r === 'not_applicable' || r === 'n/a' || r === 'na' || r === 'informational'
           || r === 'descriptive' || (study && _isInformationalStudy(study))) {
-        return { glyph: '📄', cls: 'none', bd: '#94a3b8' };
+        return { glyph: '📄', cls: 'none', bd: '#94a3b8', label: 'reference' };
       }
-      if (r === 'passed' || r === 'pass') return { glyph: '✅', cls: 'pass', bd: '#16a34a' };
-      if (r === 'failed' || r === 'fail') return { glyph: '⛔', cls: 'fail', bd: '#dc2626' };
-      if (!r) return { glyph: '◽', cls: 'none', bd: '#cbd5e1' };
-      // needs_calibration / blocked / stale → needs work
-      return { glyph: '⚠', cls: 'warn', bd: '#f59e0b' };
+      if (r === 'passed' || r === 'pass') return { glyph: '✅', cls: 'pass', bd: '#16a34a', label: 'passed' };
+      if (r === 'failed' || r === 'fail') return { glyph: '⛔', cls: 'fail', bd: '#dc2626', label: 'failed' };
+      // Nothing recorded yet — no run, no outcomes. Neutral "not evaluated",
+      // matching the empty-result badge. Covers the explicit not_started
+      // constant from roll_up_verdict, which is a non-empty string and would
+      // otherwise fall through to the ⚠ catch-all below.
+      if (!r || r === 'not_started' || r === 'not started') {
+        return { glyph: '◽', cls: 'none', bd: '#cbd5e1', label: 'not evaluated' };
+      }
+      // Ran; some behaviors pass, some deferred/skipped → progress-shaped and
+      // distinct from both "broken" and "not started". Mirrors the 🔄 used for
+      // needs_calibration in the study control panel.
+      if (r === 'needs_calibration' || r === 'stale') {
+        return { glyph: '🔄', cls: 'cal', bd: '#0284c7',
+                 label: r === 'stale' ? 'stale' : 'needs calibration' };
+      }
+      // Ran, but a prerequisite is unmet — genuinely blocked. ⚠ reserved here.
+      return { glyph: '⚠', cls: 'warn', bd: '#f59e0b', label: 'blocked' };
     }
     function _verdictDagHtml() {
       if (!ordered.length) return '';
@@ -12985,11 +13036,21 @@
                 return '<a href="#study-' + _h(p) + '">' + _h(p) + '</a>';
               }).join(', ') + '</span>'
             : '';
+          // Show the counts the verdict was derived from, so needs_calibration
+          // (4 passed · 1 skipped) reads as progress, not a bare badge. Prefer
+          // the canonical counts the server attaches to computed_gate_verdict
+          // (from viva_superpowers roll_up_verdict); fall back to a client-side
+          // recompute when an older/snapshot payload lacks them.
+          var cgvCounts = (s.computed_gate_verdict || {}).counts;
+          var counts = _spineCountLabel(cgvCounts || _studyOutcomeCounts(s));
+          var countHtml = counts
+            ? ' <span class="sdag-counts muted small" style="color:#64748b">(' + _h(counts) + ')</span>'
+            : '';
           return '<li class="sdag-node sdag-' + b.cls + '" '
             + 'style="margin:3px 0;padding:2px 8px;border-left:3px solid ' + b.bd + '">'
-            + '<span class="sdag-badge" title="code-computed gate verdict">' + b.glyph + '</span> '
+            + '<span class="sdag-badge" title="code-computed gate verdict: ' + _h(b.label) + '">' + b.glyph + '</span> '
             + '<a href="#study-' + _h(s.name) + '"><strong>' + _h(s.name) + '</strong></a>'
-            + dep + '</li>';
+            + countHtml + dep + '</li>';
         }).join('');
         return '<div class="sdag-rank" style="margin:4px 0">'
           + (hasEdges ? '<span class="sdag-rank-lbl muted small" style="display:inline-block;min-width:64px">depth ' + d + '</span>' : '')
@@ -12998,7 +13059,7 @@
       return '<div class="study-verdict-dag" id="study-verdict-dag" '
         + 'style="margin:14px 0;padding:12px 16px;background:#f8fafc;border:1px solid #cbd5e1;border-left-width:5px;border-radius:6px">'
         + '<strong>Study verdict map</strong> '
-        + '<span class="muted small">code-computed gate verdicts (✅ passed · ⚠ needs work · ⛔ blocked)'
+        + '<span class="muted small">code-computed gate verdicts (✅ passed · ⛔ failed · 🔄 needs calibration · ⚠ blocked · ◽ not evaluated)'
         + (hasEdges ? '; edges = pipeline prerequisites (← depends on)' : '') + '</span>'
         + ranks + '</div>';
     }
