@@ -17,9 +17,10 @@ def test_launch_into_study_explicit_inputs_and_manifest(tmp_path, monkeypatch):
 
     seen = {}
 
-    def fake_invoke_run(ws_root, *, spec_id, config, db_path, label, n_steps, seed=None):
+    def fake_invoke_run(ws_root, *, spec_id, config, db_path, label, n_steps, seed=None,
+                        target=None):
         seen.update(spec_id=spec_id, config=config, db_path=db_path, n_steps=n_steps,
-                    seed=seed)
+                    seed=seed, target=target)
         class P:
             pass
         return P()
@@ -41,6 +42,11 @@ def test_launch_into_study_explicit_inputs_and_manifest(tmp_path, monkeypatch):
 
     assert "studies/s1/runs.db" in seen["db_path"].replace("\\", "/")
     assert seen["spec_id"] == "some.composite" and seen["config"].get("seed") == 3
+    # item 18: launch_into_study now resolves + threads the target explicitly
+    # (remote_pinned.resolve_run_target) rather than leaving invoke_run to
+    # fall back to its own .viv-build.json-only check — a plain tmp_path
+    # workspace (no .viv-build.json, pinned mode off) resolves "local".
+    assert seen["target"] == "local"
     # reproducible-rerun-spine Task 4: seed falls back to params["seed"] when
     # no explicit seed= kwarg is passed — first-class seed, not just a plain
     # generator param.
@@ -63,7 +69,8 @@ def test_launch_into_study_explicit_seed_wins_over_params(tmp_path, monkeypatch)
     same-named params key that could (in principle) differ."""
     (tmp_path / "studies" / "s1").mkdir(parents=True)
 
-    def fake_invoke_run(ws_root, *, spec_id, config, db_path, label, n_steps, seed=None):
+    def fake_invoke_run(ws_root, *, spec_id, config, db_path, label, n_steps, seed=None,
+                        target=None):
         return type("P", (), {"seed": seed})()
 
     monkeypatch.setattr(study_runs.run_core, "invoke_run", fake_invoke_run)
@@ -88,7 +95,8 @@ def test_launch_into_study_threads_reran_from(tmp_path, monkeypatch):
     verify_reproduction once this run's own result_fingerprint is stored."""
     (tmp_path / "studies" / "s1").mkdir(parents=True)
 
-    def fake_invoke_run(ws_root, *, spec_id, config, db_path, label, n_steps, seed=None):
+    def fake_invoke_run(ws_root, *, spec_id, config, db_path, label, n_steps, seed=None,
+                        target=None):
         return type("P", (), {})()
 
     monkeypatch.setattr(study_runs.run_core, "invoke_run", fake_invoke_run)
@@ -111,6 +119,31 @@ def test_launch_into_study_remote_build_guard_409(tmp_path, monkeypatch):
     mirrors run_study_baseline's existing 409 guard."""
     (tmp_path / "studies" / "s1").mkdir(parents=True)
     (tmp_path / ".viv-build.json").write_text("{}")
+
+    called = []
+    monkeypatch.setattr(
+        study_runs, "_launch_run_and_flush",
+        lambda *a, **k: called.append(1) or ({}, 200),
+        raising=False,
+    )
+
+    resp, status = study_runs.launch_into_study(
+        tmp_path, "s1", "some.composite", {}, 5)
+    assert status == 409
+    assert not called
+
+
+def test_launch_into_study_pinned_deployment_guard_409(tmp_path, monkeypatch):
+    """Item 18: a deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED), with
+    NO .viv-build.json in this workspace, must ALSO reject before any flush —
+    previously only the .viv-build.json case was caught here (invoke_run's own
+    run_target_for fallback), so a pinned deployment with a plain workspace
+    silently fell through to a local subprocess. Mirrors
+    test_launch_into_study_remote_build_guard_409 but for the pin condition."""
+    from vivarium_workbench.lib import remote_pinned
+    (tmp_path / "studies" / "s1").mkdir(parents=True)
+    assert not (tmp_path / ".viv-build.json").exists()  # the pin alone must be sufficient
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
 
     called = []
     monkeypatch.setattr(

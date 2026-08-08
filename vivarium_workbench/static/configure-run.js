@@ -162,13 +162,36 @@
     };
   }
 
+  // item 20a: mirrors study-detail.js's _dispatchRemotePinned — before a
+  // remote-pinned deployment dispatches to AWS Batch, fetch the server-
+  // resolved repo/branch/commit/simulator_id and require explicit
+  // confirmation, so a workspace-identity mismatch is caught here, before
+  // money gets spent, not discovered afterward via aws batch describe-jobs.
+  // A plain local-engine run (unchanged, pre-existing behavior) fires with no
+  // confirm, same as before this fix.
+  function _confirmRemoteDispatchMsg(cfg) {
+    return "Dispatch to AWS Batch:\n\n" +
+      "  repo:    " + (cfg.repo_url || "(unknown)") + "\n" +
+      "  branch:  " + (cfg.branch || "(unknown)") + "\n" +
+      "  commit:  " + ((cfg.commit || "(unknown)").slice(0, 12)) + "\n" +
+      "  simulator id: " + (cfg.simulator_id != null ? cfg.simulator_id : "(unknown)") + "\n\n" +
+      "Proceed?";
+  }
+
   function _runAdhoc(el, id, overrides, steps) {
     function _reenableBtn() { var b = el.querySelector(".cfg-run-btn"); if (b) b.disabled = false; }
-    _post(_api("/api/composite-test-run"), { id: id, overrides: overrides, steps: steps }).then(function (res) {
-      if (res.status !== 202 || !res.body.run_id) { _status(el, '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>'); _reenableBtn(); return; }
-      el._lastRunId = res.body.run_id;
-      _poll(el, _api("/api/composite-run/" + encodeURIComponent(res.body.run_id) + "/status"));
-    }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); _reenableBtn(); });
+    function _fire() {
+      _post(_api("/api/composite-test-run"), { id: id, overrides: overrides, steps: steps }).then(function (res) {
+        if (res.status !== 202 || !res.body.run_id) { _status(el, '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>'); _reenableBtn(); return; }
+        el._lastRunId = res.body.run_id;
+        _poll(el, _api("/api/composite-run/" + encodeURIComponent(res.body.run_id) + "/status"));
+      }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); _reenableBtn(); });
+    }
+    fetch(_api("/api/remote-run-config")).then(function (r) { return r.json(); }).catch(function () { return {}; }).then(function (cfg) {
+      cfg = cfg || {};
+      if (cfg.pinned && !confirm(_confirmRemoteDispatchMsg(cfg))) { _status(el, "Cancelled."); _reenableBtn(); return; }
+      _fire();
+    });
   }
 
   function _runStudy(el, overrides, steps) {

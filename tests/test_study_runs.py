@@ -21,6 +21,81 @@ def test_study_run_baseline_on_remote_build_409(tmp_path, monkeypatch):
     assert status == 409
 
 
+def test_study_run_baseline_on_pinned_deployment_409(tmp_path, monkeypatch):
+    """Item 18, the confirmed real bug (backlog items 18/20, 2026-08-04): a
+    deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED) with NO
+    .viv-build.json in this workspace must ALSO return 409 rather than
+    silently running the baseline on this pod's own local subprocess. Before
+    this fix, run_study_baseline only ever checked run_target_for's
+    .viv-build.json — the Composites tab's composite_test_run() already
+    checked remote_pinned.is_pinned_enabled() directly, so the two run
+    entrypoints disagreed on the exact same deployment. Mirrors
+    test_study_run_baseline_on_remote_build_409 but for the pin condition."""
+    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench.lib import study_runs
+    assert not (tmp_path / ".viv-build.json").exists()  # the pin alone must be sufficient
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
+    sd = tmp_path / "studies" / "demo"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text("name: demo\nbaseline:\n  - {name: core, composite: pkg.composites.cell}\n")
+    body, status = study_runs.run_study_baseline(tmp_path, {"study": "demo"})
+    assert status == 409
+
+
+def test_study_run_baseline_pinned_deployment_409_over_real_http(
+    tmp_path, dashboard_client, monkeypatch
+):
+    """End-to-end proof of the item-18 fix over the REAL server (no in-process
+    monkeypatching of the function under test): a spawned dashboard subprocess
+    with VIVARIUM_WORKBENCH_REMOTE_PINNED=1 in its OWN environment must answer
+    POST /api/study-run-baseline with a real 409 JSON response, not silently
+    run the composite locally and return 200 -- exercising the real FastAPI
+    route (api/app.py), the real CSRF/origin guard, and the real
+    lib.remote_pinned.resolve_run_target env-var resolution together, not just
+    the lib function called directly."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: pinned-http-ws\n")
+    (ws / ".pbg").mkdir()
+    sd = ws / "studies" / "demo"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(
+        "name: demo\nbaseline:\n  - {name: core, composite: pkg.composites.cell}\n")
+    assert not (ws / ".viv-build.json").exists()  # the pin alone must be sufficient
+
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
+    monkeypatch.setenv(
+        "VIVARIUM_WORKBENCH_REMOTE_REPO_URL",
+        "https://github.com/vivarium-collective/v2ecoli",
+    )
+    client = dashboard_client(ws)
+    res = client.post("/api/study-run-baseline", json={"study": "demo"})
+    assert res.status_code == 409, res.text
+    assert "not available" in res.json().get("error", "").lower()
+
+
+def test_study_run_baseline_local_unaffected_over_real_http(
+    tmp_path, dashboard_client, monkeypatch
+):
+    """Regression companion to the pinned test above: with pinned mode OFF
+    (plain local dev, the common case), the real server must still run the
+    dry-run path successfully — item 18's fix must not change local-only
+    behavior at all. Uses dry_run=True so no real composite/subprocess is
+    needed (mirrors the existing dry-run guard tests)."""
+    monkeypatch.delenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", raising=False)
+    monkeypatch.delenv("VIVARIUM_DASHBOARD_REMOTE_PINNED", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: local-http-ws\n")
+    (ws / ".pbg").mkdir()
+    sd = ws / "studies" / "demo"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(
+        "name: demo\nbaseline:\n  - {name: core, composite: pkg.composites.cell}\n")
+    client = dashboard_client(ws)
+    res = client.post(
+        "/api/study-run-baseline", json={"study": "demo", "dry_run": True})
+    assert res.status_code == 200, res.text
+    assert res.json().get("dry_run") is True
+
+
 @pytest.fixture
 def _study_ws(tmp_path, monkeypatch):
     """Workspace with one v3 study whose baseline is a real viva-munk composite."""

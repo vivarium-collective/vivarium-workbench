@@ -3210,6 +3210,32 @@
   }
   window._resetCompositeConfig = _resetCompositeConfig;
 
+  // item 20a: shared pre-dispatch gate for every live /api/composite-test-run
+  // launcher below (_runComposite's inline pcard Run bar, _ceTestRun's
+  // Composite Explorer Test Run panel) -- before a remote-pinned deployment
+  // dispatches to AWS Batch, fetch the server-resolved
+  // repo/branch/commit/simulator_id and require explicit confirmation
+  // (mirrors study-detail.js's _dispatchRemotePinned), so a workspace-
+  // identity mismatch is caught here, before money gets spent, not
+  // discovered afterward via aws batch describe-jobs. A plain local-engine
+  // run (unchanged, pre-existing behavior) fires with no confirm.
+  function _confirmRemoteDispatchThen(fireFn, cancelFn) {
+    fetch(_api('/api/remote-run-config')).then(function (r) { return r.json(); }).catch(function () { return {}; }).then(function (cfg) {
+      cfg = cfg || {};
+      if (cfg.pinned) {
+        var msg = 'Dispatch to AWS Batch:\n\n' +
+          '  repo:    ' + (cfg.repo_url || '(unknown)') + '\n' +
+          '  branch:  ' + (cfg.branch || '(unknown)') + '\n' +
+          '  commit:  ' + ((cfg.commit || '(unknown)').slice(0, 12)) + '\n' +
+          '  simulator id: ' + (cfg.simulator_id != null ? cfg.simulator_id : '(unknown)') + '\n\n' +
+          'Proceed?';
+        if (!confirm(msg)) { if (cancelFn) cancelFn(); return; }
+      }
+      fireFn();
+    });
+  }
+  window._confirmRemoteDispatchThen = _confirmRemoteDispatchThen;
+
   // Launch a composite run directly (no modal): POST /api/simulation with the
   // inline Time (t_end), the Configure params as overrides, and an auto name.
   // Detached run — feedback + a link to Runs; the "Configure & Run" modal is
@@ -3241,32 +3267,35 @@
         if (checked.length < obsCbs.length) payload.emit_paths = checked;
       }
     }
-    var orig = btn.textContent; btn.disabled = true; btn.textContent = 'Launching…';
-    if (status) { status.classList.remove('pcard-apply-err'); status.textContent = 'launching run…'; }
-    fetch(_api('/api/composite-test-run'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
-      .then(function (res) {
-        var rid = res.j && res.j.run_id;
-        if ((res.status === 202 || rid) && rid) {
-          // Keep the ▶ RUN button as a live "Running…" indicator until the poll
-          // resolves; the Outputs section auto-drops-down when results are READY
-          // (see _pollCompositeRun's completed / failed branches).
-          btn.disabled = true; btn.textContent = '⏳ Running…';
-          card._runBtn = btn; card._runBtnOrig = orig;
-          if (status) { status.classList.remove('pcard-apply-err'); status.innerHTML = '<span class="pcard-run-live">● running…</span>'; }
-          _pollCompositeRun(card, rid);
-        } else if (res.status === 202 || rid) {
-          btn.disabled = false; btn.textContent = orig;
-          if (status) { status.classList.remove('pcard-apply-err'); status.innerHTML = '✓ launched — tracking in Outputs'; }
-        } else if (res.status === 429) {
-          btn.disabled = false; btn.textContent = orig;
-          setErr('too many runs in progress — try again shortly');
-        } else {
-          btn.disabled = false; btn.textContent = orig;
-          setErr('✗ ' + ((res.j && res.j.error) || ('HTTP ' + res.status)));
-        }
-      })
-      .catch(function (e) { btn.disabled = false; btn.textContent = orig; setErr('network error: ' + String(e)); });
+    var orig = btn.textContent;
+    _confirmRemoteDispatchThen(function () {
+      btn.disabled = true; btn.textContent = 'Launching…';
+      if (status) { status.classList.remove('pcard-apply-err'); status.textContent = 'launching run…'; }
+      fetch(_api('/api/composite-test-run'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (res) {
+          var rid = res.j && res.j.run_id;
+          if ((res.status === 202 || rid) && rid) {
+            // Keep the ▶ RUN button as a live "Running…" indicator until the poll
+            // resolves; the Outputs section auto-drops-down when results are READY
+            // (see _pollCompositeRun's completed / failed branches).
+            btn.disabled = true; btn.textContent = '⏳ Running…';
+            card._runBtn = btn; card._runBtnOrig = orig;
+            if (status) { status.classList.remove('pcard-apply-err'); status.innerHTML = '<span class="pcard-run-live">● running…</span>'; }
+            _pollCompositeRun(card, rid);
+          } else if (res.status === 202 || rid) {
+            btn.disabled = false; btn.textContent = orig;
+            if (status) { status.classList.remove('pcard-apply-err'); status.innerHTML = '✓ launched — tracking in Outputs'; }
+          } else if (res.status === 429) {
+            btn.disabled = false; btn.textContent = orig;
+            setErr('too many runs in progress — try again shortly');
+          } else {
+            btn.disabled = false; btn.textContent = orig;
+            setErr('✗ ' + ((res.j && res.j.error) || ('HTTP ' + res.status)));
+          }
+        })
+        .catch(function (e) { btn.disabled = false; btn.textContent = orig; setErr('network error: ' + String(e)); });
+    }, function () { setErr('Cancelled.'); });
   }
   window._runComposite = _runComposite;
 
@@ -8885,55 +8914,57 @@
     var steps = parseInt(document.getElementById('ce-steps').value, 10) || 5;
     var overrides = _ceCollectOverrides();
     var resultsEl = document.getElementById('ce-test-results');
-    resultsEl.innerHTML = '<p class="empty-state">Starting run&hellip;</p>';
-    fetch(_api('/api/composite-test-run'), {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        id: window._ceCurrent.id,
-        overrides: overrides,
-        steps: steps,
-        emit_paths: window._explorerEmitPaths || [],
-      }),
-    })
-      .then(function(r) { return r.json().then(function(j) { return [r.status, j]; }); })
-      .then(function(parts) {
-        var code = parts[0], body = parts[1];
-        if (code !== 202) {
-          var errMsg = body && body.error
-            ? body.error
-            : ('HTTP ' + code);
-          resultsEl.innerHTML =
-            '<div style="color:#c00;"><strong>Could not start run:</strong> ' +
-            _esc(errMsg) + '</div>';
-          return;
-        }
-        // Successful 202 — server accepted the run, returned a run_id.
-        var run_id = body.run_id;
-        window._ceLastRunId = run_id;
-        // Bookmark the new run in the URL so refresh / share works.
-        try {
-          var url = new URL(window.location.href);
-          url.searchParams.set('run_id', run_id);
-          window.history.replaceState({}, '', url.toString());
-          if (window._ceCurrent) window._ceCurrent.run_id = run_id;
-        } catch (e) { /* non-critical */ }
-        // Invalidate the cached History list so the new run shows up the next
-        // time the Results tab is opened; refresh it now if it's already active.
-        window._ceHistoryLoaded = false;
-        var resultsPanel = document.querySelector('.ce-tab-panel[data-tab="results"]');
-        if (resultsPanel && resultsPanel.classList.contains('active')
-            && typeof _ceLoadHistory === 'function') {
-          _ceLoadHistory();
-        }
-        // Hand off to the shared loader — same render path as URL deep-link.
-        _ceLoadRunFromId(run_id);
+    _confirmRemoteDispatchThen(function () {
+      resultsEl.innerHTML = '<p class="empty-state">Starting run&hellip;</p>';
+      fetch(_api('/api/composite-test-run'), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          id: window._ceCurrent.id,
+          overrides: overrides,
+          steps: steps,
+          emit_paths: window._explorerEmitPaths || [],
+        }),
       })
-      .catch(function(err) {
-        resultsEl.innerHTML =
-          '<div style="color:#c00;"><strong>Network error:</strong> ' +
-          _esc(String(err)) + '</div>';
-      });
+        .then(function(r) { return r.json().then(function(j) { return [r.status, j]; }); })
+        .then(function(parts) {
+          var code = parts[0], body = parts[1];
+          if (code !== 202) {
+            var errMsg = body && body.error
+              ? body.error
+              : ('HTTP ' + code);
+            resultsEl.innerHTML =
+              '<div style="color:#c00;"><strong>Could not start run:</strong> ' +
+              _esc(errMsg) + '</div>';
+            return;
+          }
+          // Successful 202 — server accepted the run, returned a run_id.
+          var run_id = body.run_id;
+          window._ceLastRunId = run_id;
+          // Bookmark the new run in the URL so refresh / share works.
+          try {
+            var url = new URL(window.location.href);
+            url.searchParams.set('run_id', run_id);
+            window.history.replaceState({}, '', url.toString());
+            if (window._ceCurrent) window._ceCurrent.run_id = run_id;
+          } catch (e) { /* non-critical */ }
+          // Invalidate the cached History list so the new run shows up the next
+          // time the Results tab is opened; refresh it now if it's already active.
+          window._ceHistoryLoaded = false;
+          var resultsPanel = document.querySelector('.ce-tab-panel[data-tab="results"]');
+          if (resultsPanel && resultsPanel.classList.contains('active')
+              && typeof _ceLoadHistory === 'function') {
+            _ceLoadHistory();
+          }
+          // Hand off to the shared loader — same render path as URL deep-link.
+          _ceLoadRunFromId(run_id);
+        })
+        .catch(function(err) {
+          resultsEl.innerHTML =
+            '<div style="color:#c00;"><strong>Network error:</strong> ' +
+            _esc(String(err)) + '</div>';
+        });
+    }, function () { resultsEl.innerHTML = '<p class="empty-state">Cancelled.</p>'; });
   }
   window._ceTestRun = _ceTestRun;
 

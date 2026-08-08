@@ -1116,15 +1116,31 @@
   // under a new name. Remote-pinned deployments (VIVARIUM_WORKBENCH_REMOTE_PINNED,
   // e.g. the live smscdk prod deployment) dispatch to AWS Batch via
   // remote-run-submit; everything else keeps the existing local-engine path.
+  var _CANCELLED = { status: 0, body: { cancelled: true } };
+
   function _dispatchCurrentSpecBaseline() {
     return api('GET', '/api/remote-run-config').then(function(cfgRes) {
       var cfg = (cfgRes.status === 200 && cfgRes.body) || {};
       if (cfg.pinned && cfg.simulator_id) return _dispatchRemotePinned(cfg);
+      if (!confirm("Run this study's CURRENT baseline spec as a new run?")) return _CANCELLED;
       return api('POST', '/api/study-run-baseline', { study: studyName() });
     });
   }
 
+  // item 20: the resolved target (repo/branch/commit/simulator id) is fetched
+  // fresh via /api/remote-run-config immediately above -- never a stale
+  // client-rendered label -- but nothing surfaced it to a human before this
+  // function fired the actual AWS Batch dispatch. Show it and require an
+  // explicit confirm, so a workspace-identity mismatch is caught here, before
+  // money gets spent, not discovered afterward via aws batch describe-jobs.
   function _dispatchRemotePinned(cfg) {
+    var msg = 'Dispatch to AWS Batch:\n\n' +
+      '  repo:    ' + (cfg.repo_url || '(unknown)') + '\n' +
+      '  branch:  ' + (cfg.branch || '(unknown)') + '\n' +
+      '  commit:  ' + ((cfg.commit || '(unknown)').slice(0, 12)) + '\n' +
+      '  simulator id: ' + cfg.simulator_id + '\n\n' +
+      'Proceed?';
+    if (!confirm(msg)) return _CANCELLED;
     var baseline = (window._study && window._study.baseline) || [];
     var params = (baseline[0] && baseline[0].params) || {};
     return api('POST', '/api/remote-run-submit', {
@@ -1137,7 +1153,6 @@
   window._dispatchCurrentSpecBaseline = _dispatchCurrentSpecBaseline;
 
   bindAll('#study-run-current-spec', function(btn) {
-    if (!confirm("Run this study's CURRENT baseline spec as a new run?")) return;
     var orig = btn.textContent;
     btn.disabled = true;
     btn.textContent = '… running';
@@ -1145,6 +1160,7 @@
       .then(function(res) {
         btn.disabled = false;
         btn.textContent = orig;
+        if (res.body && res.body.cancelled) return;
         if (res.status === 200 || res.status === 202) {
           var runId = res.body && (res.body.run_id || res.body.simulation_id);
           var msg = 'Run launched' + (runId ? ' — new run ' + runId : '');
