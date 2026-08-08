@@ -9,7 +9,7 @@ serves an interactive UI over the workspace's registry, composites, studies,
 and reports.
 
 It's one codebase you run in three configurations — local authoring, a remote
-**sms-api** compute backend, or a public read-only published snapshot. They
+**viva-api** compute backend, or a public read-only published snapshot. They
 differ by *configuration* (env vars), not code. See
 [Running modes](#running-modes).
 
@@ -111,27 +111,31 @@ on the local engine, commit every action to a git branch.
 vivarium-workbench serve --workspace .
 ```
 
-### Remote compute — sms-api backend
+### Remote compute — viva-api backend
 
-Point the dashboard at an **sms-api** endpoint to build pinned `repo@commit`
+Point the dashboard at a **viva-api** endpoint to build pinned `repo@commit`
 simulator versions and run large batches on a remote backend (AWS GovCloud, or
 an HPC cluster) instead of the local engine:
 
 ```bash
-SMS_API_BASE=http://localhost:8080 vivarium-workbench serve --workspace .
+VIVA_API_BASE=http://localhost:8080 vivarium-workbench serve --workspace .
 ```
 
-- **Reaching a GovCloud sms-api:** it sits behind an internal load balancer, so
+(`SMS_API_BASE` also still works, as a fallback alias — same variable, either
+name is fine.)
+
+- **Reaching a GovCloud viva-api:** it sits behind an internal load balancer, so
   tunnel to it with an SSM port-forward (after `aws sso login`):
   ```bash
   AWS_PROFILE=stanford-sso AWS_DEFAULT_REGION=us-gov-west-1 \
     sms-cdk/scripts/ptools-proxy.sh -s smsvpctest      # forwards localhost:8080
   ```
-  Keep it running in its own terminal. `SMS_API_BASE` defaults to
+  Keep it running in its own terminal. `VIVA_API_BASE` defaults to
   `http://localhost:8080`.
-- **Using it:** the **Source** panel's **"sms-api builds"** scope lists the
-  simulator versions sms-api has built. Register/switch a `repo@commit` build
-  (sms-api builds it on demand), then submit runs — they execute remotely
+- **Using it:** the **Source** panel's **"sms-api builds"** scope (yes, still
+  labeled `sms-api` in the UI today — cosmetic only, same backend as
+  `viva-api`) lists the simulator versions viva-api has built. Register/switch
+  a `repo@commit` build (viva-api builds it on demand), then submit runs — they execute remotely
   (Ray → AWS Batch → zarr/parquet on S3) and land back as study runs you can
   browse, with status polled in the UI.
 

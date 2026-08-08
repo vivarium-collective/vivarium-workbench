@@ -2,7 +2,7 @@
 
 Design spec for the **`RunBackend`** port: how a simulation run is submitted,
 tracked, and landed — one interface over a detached local process and a remote
-(sms-api → Batch) job, replacing today's three divergent execution paths.
+(viva-api → Batch) job, replacing today's three divergent execution paths.
 
 Context: `docs/REFACTOR-PLAN.md` **§2A.1** (the `RunBackend` port), **§2A.2**
 (a run is a *binding*), **§5B Phase 2**. Neighbours: `EnvironmentResolver` (the
@@ -31,7 +31,7 @@ remote impls" liability:
    shells the sim out (`composite_subprocess`, `python -c`) but then renders viz
    and runs **v2ecoli analyses in the HTTP process** (`render_study_visualizations`,
    `run_study_analyses`).
-3. **Remote (sms-api) — in-process threaded polling (the fragile model).**
+3. **Remote (viva-api) — in-process threaded polling (the fragile model).**
    `remote_run.run_remote` exports a `.pbg`, `SmsApiClient.compose_submit`s it,
    and **polls in a daemon `threading.Thread`** (`remote_run_jobs` /
    `run_jobs`, an in-memory `_jobs` dict). The poll loop and its state are **lost
@@ -50,7 +50,7 @@ adapters.
   truth; in-process managers are only progress caches, reconciled at boot.
 - **Heavy analysis runs in the *job*, never the pod** (§2A.7 / env-worker §12):
   AWS Batch for cloud, the detached subprocess for local.
-- **One port, two adapters** — local (detached process) and cloud (sms-api →
+- **One port, two adapters** — local (detached process) and cloud (viva-api →
   Batch) — differing only in *where* the job runs, not in the contract.
 - Each adapter runs the job in the **right environment** (`EnvironmentResolver`):
   local = the per-workspace venv (not `sys.executable`); cloud = the
@@ -61,7 +61,7 @@ adapters.
   `outputs_uri`; `RunStore` reads it.
 - A general workflow/DAG engine — a run is one composite execution + its
   post-processing, not an arbitrary pipeline.
-- Per-run autoscaling policy — that's sms-api's / Batch's concern below the port.
+- Per-run autoscaling policy — that's viva-api's / Batch's concern below the port.
 
 ## 3. A run is a *binding* (§2A.2)
 
@@ -89,9 +89,9 @@ recorded durably: `{ RunSpec, run_id, status, outputs_uri, provenance }`. The
 ## 4. The port
 
 ```
-submit(spec: RunSpec) -> run_id            # detached local / sms-api submit; returns immediately
+submit(spec: RunSpec) -> run_id            # detached local / viva-api submit; returns immediately
 poll(run_id)          -> RunStatus         # from DURABLE state, never an in-mem thread
-cancel(run_id)        -> None              # kill local pid / sms-api cancel
+cancel(run_id)        -> None              # kill local pid / viva-api cancel
 list(workspace)       -> [RunStatus]       # the runs index
 ```
 
@@ -132,14 +132,14 @@ Engine A's model, extended and made the *only* local path:
   the detached job. **This retires Engine B** — the synchronous, 1800-s-blocking
   study path collapses onto submit-and-poll.
 
-## 7. Cloud adapter — sms-api → Ray → Batch, reconcilable
+## 7. Cloud adapter — viva-api → Ray → Batch, reconcilable
 
-- **Submit** = `SmsApiClient.compose_submit(pbg, env_coordinate)` → an sms-api
-  `sim_id`, stored in the run's durable row. sms-api dispatches to Ray → Batch;
+- **Submit** = `SmsApiClient.compose_submit(pbg, env_coordinate)` → a viva-api
+  `sim_id`, stored in the run's durable row. viva-api dispatches to Ray → Batch;
   heavy analysis runs **in the Batch job**.
 - **Poll is reconcilable, not a thread.** No daemon `threading.Thread`. A poller
-  (or on-demand `poll`) reads durable rows in a non-terminal sms-api phase and
-  **queries sms-api by the stored `sim_id`** — so it survives a restart (the
+  (or on-demand `poll`) reads durable rows in a non-terminal viva-api phase and
+  **queries viva-api by the stored `sim_id`** — so it survives a restart (the
   current in-process pipeline does not). **This retires the legacy threaded
   pipeline** (the plan's "R5").
 - **Land** results → `RunStore` (`outputs_uri` = the S3/artifact location).
@@ -152,7 +152,7 @@ Engine A's model, extended and made the *only* local path:
 - **Reconcile *all* run stores at boot**, not just `composite-runs.db`: every
   study `runs.db` too (today's gap). Local: a dead-pid `running` row → `orphaned`
   (the #479 orphan-mirror path, now applied study-wide). Cloud: a non-terminal
-  row with a `sim_id` → re-query sms-api → update. So a restart never strands a
+  row with a `sim_id` → re-query viva-api → update. So a restart never strands a
   run in a false `running`.
 - **Attribution:** a run is recorded with the submitting session's `Principal`
   (when auth lands); until then, anonymous. Runs are **workspace-scoped, not
@@ -162,7 +162,7 @@ Engine A's model, extended and made the *only* local path:
 
 - A **concurrency cap** on local detached runs (a shared backend can't spawn
   unbounded subprocesses); over-cap submits queue (a durable queue row, not an
-  in-memory one). Cloud concurrency is sms-api's/Batch's to bound.
+  in-memory one). Cloud concurrency is viva-api's/Batch's to bound.
 - **Scratch cleanup:** a run's request file + transient run dir are reclaimed on
   terminal status; orphaned scratch is swept at boot (pairs with WorkspaceStore's
   GC, but scoped to run scratch).
@@ -202,7 +202,7 @@ Each step is independently shippable and testable behind the port.
   Phase-3 refinement once the `ScientificContent` write core lands.
 - **The durable run queue** shape (over-cap local submits) and its fairness across
   workspaces on a shared backend.
-- **`cancel` semantics for a Batch job** (best-effort sms-api cancel; partial
+- **`cancel` semantics for a Batch job** (best-effort viva-api cancel; partial
   outputs?) vs. a local pid (clean kill + scratch sweep).
-- **Poller cadence / backpressure** against sms-api for many in-flight cloud runs
+- **Poller cadence / backpressure** against viva-api for many in-flight cloud runs
   (a single reconciling poller vs. per-run — avoid the old thread-per-run model).

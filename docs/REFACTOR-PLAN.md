@@ -49,7 +49,7 @@ sequences the work accordingly.
 
 **Goals**
 - Serve the workbench to remote users over the network, safely.
-- Support long-running simulations at cloud scale (reuse the existing `sms-api`
+- Support long-running simulations at cloud scale (reuse the existing `viva-api`
   remote-compute plane → Ray/AWS Batch).
 - Keep the git-backed audit trail and the YAML-as-source-of-truth model intact —
   they are the product's core value, not incidental.
@@ -104,7 +104,7 @@ door for A; add an in-app authz layer only when we do B.
 > **⚠ Superseded by §2B (2026-07-07).** Resolved: the demo uses a **private EBS
 > `gp3` PVC** (POSIX, for git/SQLite) — *not* FSx, *not* s3fs (which lacks the
 > locking/rename git & SQLite need). Sim results couple to services **only through
-> S3**; the S3-native store comes later via sms-api's `FileService`. See §2B.3.
+> S3**; the S3-native store comes later via viva-api's `FileService`. See §2B.3.
 
 Options: **(a)** EFS-mounted git working copy per instance (closest to today's
 model, works for A); **(b)** clone-on-start from a git remote + object storage
@@ -114,7 +114,7 @@ path for S3 now (see §6) so (b) is incremental.
 
 ### 2.4 Run execution backend
 
-The `sms-api` plane already submits pinned `repo@commit` builds to **Ray → AWS
+The `viva-api` plane already submits pinned `repo@commit` builds to **Ray → AWS
 Batch → zarr/parquet on S3** and lands results back as local runs. **Recommend
 making that the primary production run path** and retiring the local synchronous
 subprocess engine for hosted deployments (keep it for laptop use). This turns
@@ -149,11 +149,11 @@ The entire surface that differs between deployments is ~5 ports:
 | Port | Local adapter | Cloud adapter (later) | Replaces today |
 |---|---|---|---|
 | **AuthoredRecord** — versioned science system-of-record (write study/investigation/decision/reference/run-binding; `snapshot()→version_id`; history; diff) | local `git` | git-as-engine, durable remote in S3/CodeCommit | `work_state.active_branch_action`, `git_status` |
-| **EnvironmentResolver** — resolve an opaque env **coordinate** → a runnable environment | venv / `build_core()` | sms-api `repo@commit` image build | (implicit in the workspace repo today) |
-| **RunBackend** — submit / poll / land a run | detached subprocess | sms-api → Ray → Batch | Engine A + Engine B + 3 remote impls |
+| **EnvironmentResolver** — resolve an opaque env **coordinate** → a runnable environment | venv / `build_core()` | viva-api `repo@commit` image build | (implicit in the workspace repo today) |
+| **RunBackend** — submit / poll / land a run | detached subprocess | viva-api → Ray → Batch | Engine A + Engine B + 3 remote impls |
 | **RunStore** — read run outputs | SQLite/zarr on disk | zarr/parquet on S3 | `simulations_index`, `run_store`, emitters |
 | **Principal** — who is acting | anonymous / local | OIDC principal | (none; GitHub device-flow is separate) |
-| **WorkspaceStore** — lifecycle of working areas (`materialize(source)→handle`, `list`, `discard`, `persist→artifact`) | out-of-repo staging folder + git worktrees off a bare mirror | sms-api PVC + artifact store | `_root` global + manual `../other-repo` checkout |
+| **WorkspaceStore** — lifecycle of working areas (`materialize(source)→handle`, `list`, `discard`, `persist→artifact`) | out-of-repo staging folder + git worktrees off a bare mirror | viva-api PVC + artifact store | `_root` global + manual `../other-repo` checkout |
 | **WorkspaceContext** — per-request binding of a session → its workspace + ports | in-proc `SessionRegistry` | same (behind ALB) | `_WS_ROOT` global + global `invalidate()` |
 
 *(Naming: **AuthoredRecord** is the write/versioning **core** of the broader
@@ -196,7 +196,7 @@ snapshotted into the record as a spec** — you only need the environment to
 ### 2A.3 git-as-engine, S3-as-durable-host, interface abstracted to version-ids
 
 We keep **git as the engine** (its content-addressing gives the `repo@commit`
-reproducibility contract that sms-api and the sync round-trip already depend on —
+reproducibility contract that viva-api and the sync round-trip already depend on —
 too valuable and too cross-repo to reinvent). But the **AuthoredRecord interface
 leaks no git-isms** — callers see `version_id`/`snapshot`/`history`, never "SHA"
 or "push". So on AWS the *durable host* can become S3/CodeCommit (GitHub optional,
@@ -243,7 +243,7 @@ weakest → strongest:
   single-tenant needs no app auth (§2B.4); the `Principal` port is
   attribution/future-proofing, not security. Auth re-enters only at multi-tenant
   or exposure of a *live* instance outside the perimeter.
-- **Deployment & storage settled** (§2B) — EKS peer of sms-api; private EBS PVC;
+- **Deployment & storage settled** (§2B) — EKS peer of viva-api; private EBS PVC;
   results couple to services only through S3.
 - **Rollout settled** (§5C) — dev/prod split; continuous small PRs; guardrails
   first; agent-coded, dual-lens-reviewed increments on persistent EKS staging.
@@ -270,7 +270,7 @@ weakest → strongest:
   workspace-venv subprocess) answers *interactive* env queries
   (`list_generators` / `resolve_composite_state` / …) while the HTTP process
   imports no workspace Python — the `EnvironmentResolver` port made concrete.
-  **Local-first adapter** = clone + `uv sync` → venv (cloud = sms-api
+  **Local-first adapter** = clone + `uv sync` → venv (cloud = viva-api
   `(repo, commit)` image behind the same surface, later). **Heavy analysis (and
   eventually heavy viz) is a job output** (AWS Batch cloud / detached local),
   never in the pod — retiring the synchronous in-process study-run
@@ -328,8 +328,8 @@ lives + how it came to be* (lifecycle) and *the science content within it*
   out-of-repo staging folder (e.g. `~/.vivarium-workbench/workspaces/<id>`),
   materialized as a **git worktree off a bare mirror** — cheap per-version
   checkouts, not full clones, which matters at v2ecoli scale. **Cloud adapter:**
-  the **sms-api persistent volume**, materialized into a pod-mounted folder,
-  `persist` backed by sms-api's artifact store. This is the concrete form of the
+  the **viva-api persistent volume**, materialized into a pod-mounted folder,
+  `persist` backed by viva-api's artifact store. This is the concrete form of the
   `WorkspaceContext` port §2A.1 named, shaped by the deployment reality — and it
   collapses today's "hand-check-out `../other-repo` and point at it" into "the
   tool materializes a workspace from a source."
@@ -434,8 +434,8 @@ pre-design.
 `(repo, ref)` env coordinate → a runnable environment. **Local adapter first:**
 clone + `uv sync` → a per-workspace venv (materialized alongside the §2A.6
 `WorkspaceStore` staging area); the env worker runs `<venv>/bin/python`. **Cloud
-adapter later:** the sms-api-built **image for `(repo, commit)`** as the
-environment's source of truth, queried behind the *same* surface (RPC to sms-api,
+adapter later:** the viva-api-built **image for `(repo, commit)`** as the
+environment's source of truth, queried behind the *same* surface (RPC to viva-api,
 or the image itself run as the worker). Local-first keeps local integration
 simple and shrinks the cloud step to one adapter swap. Bonus: the workbench
 process stops importing the workspace env entirely, so **`v2ecoli` and the
@@ -453,26 +453,26 @@ simulate + analyze, retiring the synchronous engine — shared work with
 ## 2B. Deployment & storage (resolved 2026-07-07)
 
 Supersedes §2.2, §2.3, and the §3/§6 ECS/Fargate framing. Grounded in the
-existing infra (`../sms-api`, `../sms-cdk`): an **EKS cluster on GovCloud**,
+existing infra (`../viva-api`, `../sms-cdk`): an **EKS cluster on GovCloud**,
 services as Deployment+Service composed by **Kustomize** overlays, ALB via
 **`TargetGroupBinding`**, ghcr images, IRSA, and a shared internal ALB reached by
 tunnel.
 
-### 2B.1 Where it runs — a peer of sms-api on the existing EKS cluster
+### 2B.1 Where it runs — a peer of viva-api on the existing EKS cluster
 The workbench deploys as **another Deployment+Service in the existing EKS
 cluster**, not ECS/Fargate (which would duplicate the K8s stack). It reuses the
-sms-api pattern verbatim: a Kustomize `base` + per-env overlay
+viva-api pattern verbatim: a Kustomize `base` + per-env overlay
 (`vivarium-workbench-stanford` / `-test`), a pinned ghcr image, a
 `TargetGroupBinding` onto the existing internal ALB (reached via the same tunnel),
 sealed secrets. The **one new infra piece** is a target group + ALB listener rule
 for the workbench — a small `sms-cdk` addition.
 
-### 2B.2 sms-api is the workbench's only cloud backend — in-cluster
+### 2B.2 viva-api is the workbench's only cloud backend — in-cluster
 `SMS_API_BASE` points at the **in-cluster service DNS**
 (`http://api.<ns>.svc.cluster.local:8000`), not a `localhost:8080` tunnel — which
-removes the single most fragile thing in the run path. The workbench calls sms-api
+removes the single most fragile thing in the run path. The workbench calls viva-api
 over HTTP for builds, run submit/status, and result download, so it needs **no
-direct S3 access and no IRSA** — sms-api owns all S3/Batch credentials.
+direct S3 access and no IRSA** — viva-api owns all S3/Batch credentials.
 
 ### 2B.3 Storage — private POSIX volume now, S3-native later
 Resolved after ruling out two traps:
@@ -488,19 +488,19 @@ So:
   POSIX-safe, durable across restarts; single replica → global state / `os.chdir`
   is fine. (EFS is an acceptable temporary alternative if cross-AZ rescheduling
   matters; slower for SQLite, so EBS is the default.)
-- **Run outputs:** fetched from **S3 via sms-api's download** (the existing
+- **Run outputs:** fetched from **S3 via viva-api's download** (the existing
   `remote_run_landing` path) into the pod's private cache, then rendered. S3 is the
   only coupling; no code change.
 - **Target (post-demo):** S3-native via the `WorkspaceFs`/`RunStore` ports,
-  implemented with **sms-api's tested `common/storage/FileService`** (S3 /
+  implemented with **viva-api's tested `common/storage/FileService`** (S3 /
   Qumulo-S3 / GCS backends) — reused, not hand-rolled.
 
 ### 2B.4 Auth — deferred behind the existing perimeter
 Authentication, authorization, and perimeter are three different things. For
 single-tenant the **perimeter is already provided by AWS account isolation + VPC +
-tunnels** (the same way sms-api is reached), so the workbench runs **auth-free as a
-private peer of sms-api** — the accepted trade-off is flat trust inside the VPC,
-identical to sms-api's posture, with git history making destructive actions
+tunnels** (the same way viva-api is reached), so the workbench runs **auth-free as a
+private peer of viva-api** — the accepted trade-off is flat trust inside the VPC,
+identical to viva-api's posture, with git history making destructive actions
 revertible. **Authorization** (capabilities, read-only gradations) is a
 *multi-tenant* concern. **Read-only** is a capability posture; the truly-safe
 public artifact is the **static published bundle** (no server). The `Principal`
@@ -514,7 +514,7 @@ exposure of a *live* instance outside the perimeter.
 
 > **⚠ Superseded by §2B (2026-07-07).** The diagram below (ECS/Fargate + ALB+OIDC
 > front door) predates the decision to deploy on the **existing EKS cluster** as a
-> peer of sms-api with no app auth. Kept for history; the real target is §2B.
+> peer of viva-api with no app auth. Kept for history; the real target is §2B.
 
 ```
                     ┌─────────────────────────────────────────────┐
@@ -529,7 +529,7 @@ exposure of a *live* instance outside the perimeter.
              workspace files│                        │ run submit / status
                             ▼                        ▼
                     ┌──────────────┐        ┌──────────────────────┐
-                    │ git remote + │        │  sms-api control plane│
+                    │ git remote + │        │  viva-api control plane│
                     │ EFS/obj store│        │  → Ray → AWS Batch    │
                     │ (YAML+audit) │        │  → zarr/parquet on S3  │
                     └──────────────┘        └──────────┬───────────┘
@@ -539,7 +539,7 @@ exposure of a *live* instance outside the perimeter.
                                               │ S3 run outputs +      │
                                               │ runs_meta (SQLite→RDS)│
                                               └──────────────────────┘
-   Secrets: AWS Secrets Manager (GitHub app token, OIDC client secret, sms-api creds)
+   Secrets: AWS Secrets Manager (GitHub app token, OIDC client secret, viva-api creds)
    CI/CD:   GitHub Actions → ECR image → ECS deploy;  IaC: CDK/Terraform
 ```
 
@@ -578,7 +578,7 @@ Each is scoped so it can land as its own PR series. **P#** = audit risk number
 - **Problem:** two run engines; the durable study-run path is a synchronous,
   uncapped, restart-fatal `python -c` subprocess never reconciled on restart.
 - **Target:** one job abstraction. For hosted, route study runs through the
-  `sms-api` → Batch/Ray path (§2.4); for laptop, keep a *detached* (not
+  `viva-api` → Batch/Ray path (§2.4); for laptop, keep a *detached* (not
   in-request) local engine unified with Engine A's request-file model. Add
   restart reconciliation for study `runs.db` (not just `composite-runs.db`), a
   concurrency cap, and job cleanup. Collapse the three overlapping remote-run
@@ -589,7 +589,7 @@ Each is scoped so it can land as its own PR series. **P#** = audit risk number
 ### D. Cloud-native storage (audit §3, §7 of the deep-dive)
 - **Problem:** workspaces + `runs.db` + zarr/parquet live on one box's disk.
 - **Target:** git remote for the workspace YAML/audit trail; EFS (A) or
-  clone-on-start (B) for the working copy; S3 for run outputs (the sms-api
+  clone-on-start (B) for the working copy; S3 for run outputs (the viva-api
   landing path already produces S3-native stores); abstract `runs_meta` behind a
   repository interface (§2.5). Fix the `emitter_path` DDL drift and the three
   divergent `runs_meta` schemas while we're in there.
@@ -717,7 +717,7 @@ viewer seam into a real dogfooded example of the plugin story the ports generali
 |---|---|---|---|
 | **0. Boundary seed + guardrails** (see **§5A**) | Make the boundary real, safely | `AuthoredRecord` port + local git adapter; config-driven science-path allow-list (fused repo); import-linter rule; + companion guardrails (JS test harness; security stopgaps; pin `investigation-contracts`) | AuthoredRecord is the only writer to the science record; lint rule green; allow-list layout-driven; no behavior change |
 | **1. Identity + statelessness** | Make it hostable | Workstreams **A** + **B**; ALB+OIDC front door; per-request workspace context; kill `os.chdir` | One authenticated user reaches a hosted single-tenant instance; two workers don't cross-talk |
-| **2. Durable runs** | Make it scale | Workstream **C**; study runs via sms-api/Batch for hosted; restart reconciliation; collapse remote-run impls | A study run survives restart and runs on Batch |
+| **2. Durable runs** | Make it scale | Workstream **C**; study runs via viva-api/Batch for hosted; restart reconciliation; collapse remote-run impls | A study run survives restart and runs on Batch |
 | **3. Cloud storage** | Make it durable | Workstream **D**; git remote + S3 run outputs; `runs_meta` repository interface | Instance is cattle, not a pet |
 | **4. Hardening** | Make it maintainable | Workstreams **E** + **F** + **G**; god-file splits; typed contract; superpowers adapter; typed settings | No file > ~1.5k lines; client type-checks; config validated at boot |
 | **5. (optional) Multi-tenant** | Make it a service | §11 items: in-app authz, per-tenant isolation, metadata store swap, quotas | Many tenants on one fleet |
@@ -866,7 +866,7 @@ gets its own import-linter rule.** Phase 0 (§5A) built `AuthoredRecord`; the re
   liability is resolved.
 - **How (rough):** define the `RunBackend` port. **Local adapter** = unify both of
   today's engines onto Engine A's request-file/**detached** model and retire the
-  in-request `python -c` engine. **Cloud adapter** = the sms-api → Ray → Batch
+  in-request `python -c` engine. **Cloud adapter** = the viva-api → Ray → Batch
   thin-client path (delete the legacy threaded pipeline — the promised "R5").
   Add restart reconciliation for study `runs.db` (today only `composite-runs.db`
   is reconciled), a concurrency cap, and scratch cleanup.
@@ -882,7 +882,7 @@ gets its own import-linter rule.** Phase 0 (§5A) built `AuthoredRecord`; the re
 - **How (rough):** `AuthoredRecord` cloud adapter = **git-as-engine with the
   durable remote in S3/CodeCommit** (GitHub optional; interface still opaque
   version-ids). `RunStore` cloud adapter over S3; `EnvironmentResolver` cloud
-  adapter = sms-api build images. **Execute the science/environment split (Q2):**
+  adapter = viva-api build images. **Execute the science/environment split (Q2):**
   science record repo (workbench writes) vs. environment repo (read-only), with
   the **env coordinate** now a first-class field on run bindings. This is the
   phase that touches **pbg-template** (how `build_core()` discovery changes when
@@ -927,14 +927,14 @@ the internal demo, validated on a persistent Dev site.
 
 ### 5C.1 Demo track (Week 1 → internal demo) — additive only, no app-code surgery
 - **Day 0–1:** confirm the demo narrative; **prove the in-cluster integration
-  first** (workbench pod → in-cluster sms-api → land a run) — the single most
+  first** (workbench pod → in-cluster viva-api → land a run) — the single most
   likely thing to break.
 - **Week 1:** Dockerfile (workbench + the v2ecoli workspace deps, `linux/amd64` →
   ghcr); Kustomize base + Dev + Prod overlays (private EBS PVC, in-cluster
   `SMS_API_BASE`, `TargetGroupBinding`); the one `sms-cdk` target-group add; verify
   author→commit + remote-run end-to-end on **AWS Dev**. Static published bundle as
   a fallback.
-- **Steer the live demo to the remote (sms-api) run path**, away from the fragile
+- **Steer the live demo to the remote (viva-api) run path**, away from the fragile
   local synchronous engine; pre-seed runs so nothing time-sensitive can hang.
 - **Internal demo = a full dry run on Dev**, then **promote the validated image tag
   to Prod**.
@@ -955,7 +955,7 @@ each time**. Sequence:
 2. **`WorkspaceContext` + `AuthoredRecord`** — the per-request threading spine + the
    first port (resume `refactor/phase0-authored-record`).
 3. **Remaining ports incrementally** — `RunBackend` (unify the two engines), then
-   `RunStore`/`EnvironmentResolver` (S3-native via sms-api's `FileService`).
+   `RunStore`/`EnvironmentResolver` (S3-native via viva-api's `FileService`).
 4. **Larger structural lifts** — science/env split, run-engine unification,
    god-file/frontend decomposition — *after* the ports exist and are enforced.
 
@@ -978,7 +978,7 @@ each time**. Sequence:
 
 > **⚠ Superseded by §2B / §5C (2026-07-07).** The bullets below assume
 > ECS/Fargate + an ALB+OIDC front door + a `runs_meta`→RDS path. The resolved
-> target is an **EKS Deployment peer of sms-api** (Kustomize + `TargetGroupBinding`),
+> target is an **EKS Deployment peer of viva-api** (Kustomize + `TargetGroupBinding`),
 > a **private EBS PVC**, **no app auth** (perimeter), and **no direct S3/IRSA** in
 > the workbench. Still-valid bits (Secrets Manager, CloudWatch logging via the
 > existing structured logs, `/health` for the target group) carry over.
@@ -986,14 +986,14 @@ each time**. Sequence:
 - **Compute:** ECS/Fargate service (1 task/tenant for A). Container = the
   existing app image; SPA assets either in-container or pushed to S3+CloudFront.
 - **Auth:** ALB with an OIDC action (Cognito user pool, or the org's IdP).
-- **Runs:** existing sms-api control plane (Ray→AWS Batch); results land in S3.
+- **Runs:** existing viva-api control plane (Ray→AWS Batch); results land in S3.
   This is the strongest reason the refactor is tractable — the hard part
   (distributed sim execution) already exists and is well-factored.
 - **Workspace storage:** EFS access point per instance for the git working copy;
   git remote (GitHub) as the durable audit trail; S3 for run artifacts.
 - **State/metadata:** SQLite on EFS for A → RDS Postgres for B.
-- **Secrets:** AWS Secrets Manager (GitHub App token, OIDC client secret, sms-api
-  creds). Note: the sms-api client currently has **no auth** (relies on an SSM
+- **Secrets:** AWS Secrets Manager (GitHub App token, OIDC client secret, viva-api
+  creds). Note: the viva-api client currently has **no auth** (relies on an SSM
   tunnel) — hardening that boundary is a prerequisite for exposing it beyond the
   tunnel.
 - **IaC + CI/CD:** CDK or Terraform for the stack; GitHub Actions → ECR → ECS
@@ -1020,7 +1020,7 @@ each time**. Sequence:
   and the `os.chdir` removal can surface hidden CWD-relative assumptions. Mitigate
   with the import-linter gate and the layering test from Phase 0, and by landing
   it behind the existing single-workspace behavior first.
-- **sms-api coupling is folklore-driven** (response-shape sniffing, known-broken
+- **viva-api coupling is folklore-driven** (response-shape sniffing, known-broken
   filters, no version handshake). Making it the primary run path (Phase 2) means
   hardening that contract — budget for it.
 - **Auth in front of a tool that assumed no auth** can break the GitHub
@@ -1035,11 +1035,11 @@ each time**. Sequence:
 
 **Resolved since first draft** (see §2A.5, §2B, §5C): tenancy (single-tenant
 first), auth (deferred behind the perimeter), IaC (reuse `sms-cdk` — the workbench
-is a peer of sms-api), and the run path (hosted runs go through sms-api; steer the
+is a peer of viva-api), and the run path (hosted runs go through viva-api; steer the
 demo there). Remaining:
 
 1. **Demo narrative** — confirm the must-show (working assumption: author/adjust a
-   study → launch a remote sms-api run → results land & render, on AWS).
+   study → launch a remote viva-api run → results land & render, on AWS).
 2. **Owner of the one `sms-cdk` change** (workbench target group + ALB listener).
 3. **Science/environment *repo* split** (Q2) — when, and its pbg-template blast
    radius. (Post-demo.)
@@ -1051,7 +1051,7 @@ demo there). Remaining:
 
 ## 10. Immediate next steps
 - **Demo track (Week 1, §5C.1):** Dockerfile + Kustomize base/Dev/Prod overlays +
-  the `sms-cdk` target-group add; prove the in-cluster sms-api integration Day 1;
+  the `sms-cdk` target-group add; prove the in-cluster viva-api integration Day 1;
   deploy to AWS Dev; internal-demo dry run; promote to Prod.
 - **Land the doc PRs** (#454 audit → then #455 RFC) as the shared reference.
 - **Refactor track opens after the internal demo (§5C.3):** guardrails first, then
