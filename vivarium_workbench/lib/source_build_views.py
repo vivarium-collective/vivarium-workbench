@@ -130,8 +130,10 @@ def switch_build(body: dict, *, switch_active: bool = True, session_key: str | N
     # session bound to it can never dispatch (remote_run_views's push-based
     # "Run on remote" 409s with "no GitHub remote configured" — found live
     # trying to dispatch a pilot run from a switched sms-ecoli build). Runs on
-    # every switch, not just first materialize, since build-cache lives on the
-    # container's ephemeral filesystem and gets wiped+re-extracted on restart.
+    # every switch, not just first materialize — cheap (one stat) once `.git`
+    # already exists, and still self-heals wherever build-cache ISN'T on
+    # durable storage (see remote_build_source.build_cache_root's docstring for
+    # where it is / isn't in each deployment).
     ensure_git_workspace(Path(cache_dir), entry.get("repo_url", ""), entry.get("branch", ""), entry["commit"], sim_id)
     # Stamp build provenance into the cache dir so the rail chip can show
     # "<branch> @ <commit> · remote build #<id>" (a materialized build is not

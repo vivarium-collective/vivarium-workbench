@@ -54,7 +54,31 @@ def _stamp_build_meta(cache: Path, simulator_id: int, commit: str) -> None:
 
 
 def build_cache_root() -> Path:
-    """Root dir for materialized build workspaces (env-overridable for tests)."""
+    """Root dir for materialized build workspaces.
+
+    Overridable via ``VIVARIUM_WORKBENCH_BUILD_CACHE`` (``env_compat``'s
+    deprecated-alias-aware lookup) — tests point this at ``tmp_path``; the
+    Stanford/Stanford-test K8s deployments point it at ``/root/.pbg/build-cache``,
+    a SECOND mount (``subPath: build-cache``) of the SAME ``workbench-workspace``
+    EBS PVC already mounted at ``/workspace`` (see ``kustomize/base/workbench/
+    workbench.yaml`` in the ``viva-api`` repo — this repo's own kustomize manifests
+    were split out there; see ``deploy/README.md``). That mount is what makes this
+    default path durable in prod: even with the env var unset, ``Path.home() /
+    ".pbg" / "build-cache"`` IS ``/root/.pbg/build-cache`` (the container runs as
+    uid 0), so the default and the deployed mount point deliberately coincide —
+    belt-and-suspenders, not a coincidence to preserve carefully.
+
+    This was the original intent, never fully carried out: docs/REFACTOR-PLAN.md
+    §2B.3 already scoped the workbench's PVC to cover "workspace (git/YAML/SQLite)
+    + caches (venv, ParCa ~175 MB, `~/.pbg/build-cache`)" — only the workspace half
+    shipped. Backlog item 21's residual (this cache surviving a legitimate pod
+    restart/image bump/OOM-kill, not just the unrelated-deploy blast-radius PR #227
+    already fixed) is a deployment-manifest change, not a code change — check the
+    live Deployment's ``volumeMounts`` (``kubectl get deploy workbench -o
+    jsonpath='{.spec.template.spec.volumes}'``, the same check #227's own
+    kustomization.yaml comment used) before assuming this path is durable on any
+    given deployment; this function has no way to know from inside the process.
+    """
     from vivarium_workbench.lib.env_compat import get_env
     env = get_env("BUILD_CACHE")
     return Path(env) if env else Path.home() / ".pbg" / "build-cache"
@@ -152,6 +176,18 @@ def materialize_session_build(
 
     Idempotent per session (a session re-switching to the same build reuses
     its own existing clone, same as ``materialize_build``'s reuse-by-commit).
+
+    KNOWN FOLLOW-UP (not this function's job): nothing ever deletes a session's
+    clone once ``session_registry`` forgets that session (drop / in-memory-only
+    state lost on restart) — every switch is a net-new directory under
+    ``sessions/<key>/`` that outlives the binding that created it. On the old
+    ephemeral cache this was harmless (a pod restart wiped it anyway, a crude
+    accidental GC); once ``build_cache_root()`` is durable (see its docstring)
+    that accidental GC is gone, so orphaned per-session clones now accumulate
+    for real. Not fixed here — a real eviction policy (age? last-access? tied to
+    ``session_registry.drop``?) is its own scoped decision, not an improvised
+    TTL bolted on as a side effect of the storage-location fix. Worth watching
+    against the PVC's 20Gi request if usage grows.
     """
     session_key = _safe_session_key(session_key)
     commit = _safe_commit(commit)
@@ -200,11 +236,15 @@ def ensure_git_workspace(cache_dir: Path, repo_url: str, branch: str, commit: st
 
     Idempotent (no-ops if ``.git`` already exists) and best-effort (a failure
     here must never fail the switch itself — the build stays browsable even if
-    git-readiness setup fails; dispatch will just keep 409ing as before). Since
-    ``build_cache_root()`` lives on the container's ephemeral filesystem (not
-    the workbench's persistent EBS volume), this re-runs — and self-heals —
-    every time a session switches to the build, including after a pod restart
-    wipes the cache and it gets re-materialized from scratch.
+    git-readiness setup fails; dispatch will just keep 409ing as before). Runs
+    on every switch regardless — cheap when ``.git`` already exists (one stat),
+    and it must self-heal in the deployments/paths where ``build_cache_root()``
+    is NOT durable (local/dev, or a K8s deployment that hasn't wired the PVC
+    mount documented on ``build_cache_root()``): a pod restart wiping an
+    ephemeral cache re-materializes from scratch, and this re-establishes
+    ``.git`` on the fresh copy exactly as it would on a cold cache. Where the
+    mount IS wired (Stanford/Stanford-test), this simply no-ops after the first
+    run, same as any other idempotent setup step.
 
     Commits under a NEW local branch (``workbench/sim<id>-<commit>``), never
     the upstream ``branch`` itself, so a later push can never collide with or

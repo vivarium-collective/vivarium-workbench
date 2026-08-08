@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import tarfile
+import warnings
 from pathlib import Path
 
 import pytest
@@ -302,6 +303,75 @@ def test_materialize_session_build_symlinked_content_stays_isolated(_cache, tmp_
 
     (link_a / "data.txt").write_text("mutated-by-session-a\n")
     assert (link_b / "data.txt").read_text() == "original\n"  # untouched
+
+
+# ---------------------------------------------------------------------------
+# build_cache_root() durability — item 21: PVC-backed persistence
+#
+# The deployment-side fix (mounting the existing `workbench-workspace` EBS PVC
+# a second time at the container path `build_cache_root()` already defaults to
+# — see that function's docstring) lives in kustomize manifests, outside this
+# repo's test surface. What IS testable here is the property durability
+# actually depends on: given a directory that already exists on disk (modeling
+# "survived a restart because it's on a PVC now"), the materialize functions
+# must recognize and reuse it rather than assuming a cold/empty start. A fresh
+# `_FakeClient` with its own zeroed `downloads` counter stands in for a fresh
+# process after a pod restart — no in-memory state carries over, only whatever
+# is still on disk.
+# ---------------------------------------------------------------------------
+def test_build_cache_root_honors_new_prefix_env_var(tmp_path, monkeypatch):
+    """The actual production knob (`VIVARIUM_WORKBENCH_BUILD_CACHE` — the
+    kustomize env var the deployment-side fix sets) resolves correctly and
+    without the deprecated-alias warning. Every other test in this file only
+    ever exercises the OLD `VIVARIUM_DASHBOARD_BUILD_CACHE` alias via the
+    `_cache` fixture; this closes that gap directly."""
+    target = tmp_path / "durable-build-cache"
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BUILD_CACHE", str(target))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert rbs.build_cache_root() == target  # raises if the deprecated path fires
+
+
+def test_materialize_build_survives_simulated_pod_restart(tmp_path, monkeypatch):
+    """The shared base fetch, once on disk, is found by a process that has no
+    memory of having created it — the property that makes it safe to move
+    build_cache_root() onto durable storage."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BUILD_CACHE", str(tmp_path / "bc"))
+    tb = tmp_path / "src.tar.gz"
+    _make_tarball(tb)
+
+    first_process_client = _FakeClient(tb)
+    cache = rbs.materialize_build(first_process_client, 45, "32b901")
+    assert first_process_client.downloads == 1
+
+    # "restart": brand-new client, brand-new download counter, same disk.
+    second_process_client = _FakeClient(tb)
+    cache_again = rbs.materialize_build(second_process_client, 45, "32b901")
+
+    assert cache_again == cache
+    assert second_process_client.downloads == 0  # never re-fetched — found on disk
+    assert (cache_again / "workspace.yaml").read_text() == "name: built-ws\n"
+
+
+def test_materialize_session_build_survives_simulated_pod_restart(tmp_path, monkeypatch):
+    """A session's OWN clone — and any data it wrote into that clone — is
+    still there for a "new process" that resolves the same session_key. This
+    is what makes durable storage actually preserve in-progress session state
+    across a pod restart, instead of only avoiding the shared base re-download."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BUILD_CACHE", str(tmp_path / "bc"))
+    tb = tmp_path / "src.tar.gz"
+    _make_tarball(tb)
+
+    first_process_client = _FakeClient(tb)
+    session_dir = rbs.materialize_session_build(first_process_client, "session-aaaaaaaa", 45, "32b901")
+    (session_dir / "workspace.yaml").write_text("mutated-before-restart\n")
+
+    second_process_client = _FakeClient(tb)
+    session_dir_again = rbs.materialize_session_build(second_process_client, "session-aaaaaaaa", 45, "32b901")
+
+    assert session_dir_again == session_dir
+    assert second_process_client.downloads == 0  # neither the base fetch...
+    assert (session_dir_again / "workspace.yaml").read_text() == "mutated-before-restart\n"  # ...nor a re-clone
 
 
 def test_list_build_sources_maps_and_labels():
