@@ -5801,7 +5801,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/study-run-baseline",
         tags=["Studies"],
-        summary="Run a study's baseline composite (local engine)",
+        summary="Run a study's baseline composite (resolved local/deployment target)",
     )
     def study_run_baseline(
         req: StudyRunBaselineRequest,
@@ -5810,14 +5810,22 @@ def create_app() -> FastAPI:
         """Run a Study's baseline composite + post-run stages.
 
         Mirrors the stdlib ``POST /api/study-run-baseline``.  Body:
-        ``{"study", "composite"?, "steps"?}`` — resolves the study, builds/runs
-        the baseline composite subprocess, fires post-run side-effects (viz,
-        post-run scripts, analyses, outcome sync), returns the run result dict.
+        ``{"study", "composite"?, "steps"?}`` — resolves the study, then
+        resolves the execution target the SAME way every dashboard run
+        entrypoint does (``lib.remote_pinned.resolve_run_target`` — item 18):
+        a plain local workspace builds/runs the baseline composite as a local
+        subprocess; a remote-build workspace or a remote-pinned deployment
+        currently REFUSES (409) rather than silently running on this pod —
+        that execution path isn't converged onto deployment dispatch yet
+        (SP-D/G1). Fires post-run side-effects (viz, post-run scripts,
+        analyses, outcome sync) and returns the run result dict.
 
         Status codes (byte-identical to the legacy handler, via
         ``lib.study_runs.run_study_baseline``):
           - 400  missing study / baseline entry has no composite
           - 404  study not found / requested baseline composite not found
+          - 409  resolved target is "deployment" (remote-build workspace or a
+            remote-pinned deployment) — not available on this path yet
           - 200  run-result dict
         """
         body, status = _study_runs.run_study_baseline(ws, req.model_dump(exclude_none=True))
@@ -5875,6 +5883,8 @@ def create_app() -> FastAPI:
         ``lib.study_runs.run_study_variant``):
           - 400  missing study/variant / baseline entry has no composite
           - 404  study / variant / base_composite not found
+          - 409  resolved target is "deployment" (remote-build workspace or a
+            remote-pinned deployment, item 18) — not available on this path yet
           - 422  ensemble misconfiguration (n_seeds / sweep_over / sweep target)
           - 200  run-result dict
         """

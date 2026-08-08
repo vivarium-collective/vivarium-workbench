@@ -31,9 +31,14 @@ def test_composite_explore_calls_are_base_path_routed():
         "/api/composite-resolve",
         "/api/composite-runs?",
         "/api/composite-run/",
+        # item 20a: the pre-dispatch pinned-deployment confirm gate
+        # (_runAdhoc / _runComposite / _ceTestRun / _confirmRemoteDispatchThen)
+        # fetches this immediately before composite-test-run — same co-tenant
+        # ALB misroute risk applies to it identically.
+        "/api/remote-run-config",
     ]
     # Only inspect actual call expressions (fetch/_post/_poll), not comment prose.
-    call_re = re.compile(r"(?:fetch|_post|_poll)\([^\n]*?(/api/composite[-A-Za-z/?]*)")
+    call_re = re.compile(r"(?:fetch|_post|_poll)\([^\n]*?(/api/(?:composite|remote-run-config)[-A-Za-z/?]*)")
     for fname in ("walkthrough.js", "configure-run.js"):
         js = _txt(fname)
         for line in js.splitlines():

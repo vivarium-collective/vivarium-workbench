@@ -34,6 +34,7 @@ import yaml
 
 from vivarium_workbench.lib import composite_subprocess
 from vivarium_workbench.lib import lifecycle_mutations
+from vivarium_workbench.lib import remote_pinned
 from vivarium_workbench.lib import run_core
 from vivarium_workbench.lib import study_run_post
 from vivarium_workbench.lib import study_run_state
@@ -335,16 +336,24 @@ def launch_into_study(ws_root, study, spec_id, params, n_steps, *, seed=None,
     try:
         plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
                                    db_path=db_file, label=label, n_steps=n_steps,
-                                   seed=effective_seed)
+                                   seed=effective_seed,
+                                   target=remote_pinned.resolve_run_target(ws_root))
     except run_core.RunTargetUnavailable as e:
         return {"error": str(e)}, 409
-    # Remote-build guard. This 409 was previously produced by invoke_run raising
-    # RunTargetUnavailable; SP-D2 made the deployment target BUILT for the composite
-    # path, so invoke_run no longer raises and callers reject explicitly. The legacy
-    # study-baseline path is not yet converged onto remote_run (G1, Phase 4), so a
-    # remote-build workspace (.viv-build.json → target "deployment") still refuses
-    # here rather than falling through to a local subprocess. ``getattr`` guards a
-    # stubbed ``plan`` in tests that don't model ``.target``.
+    # Remote-build guard (item 18: unified with composite_test_run's target
+    # resolution via remote_pinned.resolve_run_target — a materialized session
+    # build (.viv-build.json) OR a deployment-wide pin (VIVARIUM_WORKBENCH_
+    # REMOTE_PINNED) now BOTH resolve to "deployment" here, matching the
+    # Composites tab; previously only the .viv-build.json case was caught, so
+    # a pinned deployment with no session build silently fell through to a
+    # local subprocess — the confirmed item-18 bug). This 409 was previously
+    # produced by invoke_run raising RunTargetUnavailable; SP-D2 made the
+    # deployment target BUILT for the composite path, so invoke_run no longer
+    # raises and callers reject explicitly. The legacy study-baseline path is
+    # not yet converged onto remote_run (G1, Phase 4), so a deployment target
+    # still refuses here rather than falling through to a local subprocess.
+    # ``getattr`` guards a stubbed ``plan`` in tests that don't model
+    # ``.target``.
     if getattr(plan, "target", None) == "deployment":
         return {"error": "Study baseline runs on a remote build are not available "
                          "on this path yet (SP-D/G1)."}, 409
@@ -624,11 +633,13 @@ def run_study_variant(ws_root, body):
         try:
             plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
                                        db_path=study_dir / "runs.db", label=variant_name,
-                                       n_steps=params_n_steps)
+                                       n_steps=params_n_steps,
+                                       target=remote_pinned.resolve_run_target(ws_root))
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
-        # Remote-build guard — same as the baseline path above (SP-D2/G1): a
-        # remote-build workspace must not fall through to a local subprocess.
+        # Remote-build guard — same as the baseline path above (SP-D2/G1, item
+        # 18): a remote-build workspace OR a deployment-wide pin must not fall
+        # through to a local subprocess.
         if plan.target == "deployment":
             return {"error": "Study variant runs on a remote build are not available "
                              "on this path yet (SP-D/G1)."}, 409
@@ -651,10 +662,11 @@ def run_study_variant(ws_root, body):
         db_file = str(study_dir / "runs.db")
         try:
             plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
-                                       db_path=db_file, label=variant_name, n_steps=params_n_steps)
+                                       db_path=db_file, label=variant_name, n_steps=params_n_steps,
+                                       target=remote_pinned.resolve_run_target(ws_root))
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
-        # Remote-build guard — same as the baseline path above (SP-D2/G1).
+        # Remote-build guard — same as the baseline path above (SP-D2/G1, item 18).
         if plan.target == "deployment":
             return {"error": "Study variant runs on a remote build are not available "
                              "on this path yet (SP-D/G1)."}, 409

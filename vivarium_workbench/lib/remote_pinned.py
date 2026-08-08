@@ -60,6 +60,46 @@ def is_pinned_enabled() -> bool:
     return pinned_config() is not None
 
 
+def resolve_run_target(ws_root: Path) -> str:
+    """Item 18: THE authoritative local-vs-deployment execution target for
+    every dashboard run entrypoint (Composites tab, Study tab, CLI, batch
+    worker, rerun, ...) — every one of them must resolve this the SAME way,
+    never by which button happened to be clicked.
+
+    Returns ``"deployment"`` when EITHER:
+      - this session has its own materialized remote build, stamped by the
+        workspace picker (``run_core.run_target_for``'s existing
+        ``.viv-build.json`` check), or
+      - the deployment itself is configured for pinned remote runs
+        (``VIVARIUM_WORKBENCH_REMOTE_PINNED`` — :func:`is_pinned_enabled`).
+    Returns ``"local"`` otherwise.
+
+    Real bug this closes (backlog item 18, confirmed from source 2026-08-04):
+    ``composite_test_run_views.composite_test_run`` special-cased the second
+    condition inline (``target = "deployment" if is_pinned_enabled() else
+    None``); ``study_runs.launch_into_study``/``run_study_variant`` only ever
+    saw the first (via ``invoke_run``'s own ``run_target_for`` fallback) — so
+    a deployment-wide pin with no session build silently fell through to a
+    local subprocess on the study-run path, while the Composites-tab path
+    correctly routed to the deployment. Every run entrypoint now resolves
+    through this one function and threads the result into
+    ``invoke_run(..., target=...)`` explicitly, so none of them can drift
+    apart again.
+
+    Deliberately NOT a change to ``run_core.run_target_for`` itself, which
+    stays ``.viv-build.json``-only: ``composite_resolve.
+    resolve_composite_for_request`` depends on that narrower meaning (a
+    composite PREVIEW needs a concrete ``simulator_id`` stamp, which a bare
+    deployment-wide pin doesn't provide) and must not be affected by this
+    broader run-DISPATCH resolution.
+    """
+    from vivarium_workbench.lib.run_core import run_target_for
+
+    if run_target_for(Path(ws_root)) == "deployment":
+        return "deployment"
+    return "deployment" if is_pinned_enabled() else "local"
+
+
 def resolved_from_session_build(ws_root: Path) -> dict | None:
     """This session's own switched build (WS3's ``.viv-build.json`` stamp,
     written by ``switch_build`` at ``lib/source_build_views.py``), shaped

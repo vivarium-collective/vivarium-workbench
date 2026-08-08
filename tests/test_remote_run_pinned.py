@@ -325,3 +325,57 @@ def test_remote_deployment_name_from_env(monkeypatch):
         rp_mod, "get_env", lambda k, d="": "smscdk" if k == "REMOTE_DEPLOYMENT" else d
     )
     assert rp_mod.remote_deployment_name() == "smscdk"
+
+
+# --------------------------------------------------------------------------- #
+# resolve_run_target (item 18) — the ONE local-vs-deployment resolution every
+# run entrypoint (composite_test_run, run_study_baseline, run_study_variant)
+# now calls, so none of them can drift apart again.
+# --------------------------------------------------------------------------- #
+
+
+def test_resolve_run_target_local_when_neither_condition_holds(tmp_path, monkeypatch):
+    monkeypatch.setattr(rp, "is_pinned_enabled", lambda: False)
+    assert rp.resolve_run_target(tmp_path) == "local"
+
+
+def test_resolve_run_target_deployment_when_pinned_with_no_session_build(
+    tmp_path, monkeypatch
+):
+    """The exact item-18 bug condition: pinned deployment, but this
+    workspace has no .viv-build.json (composite_test_run's own inline check
+    already got this right; run_study_baseline/run_study_variant didn't)."""
+    assert not (tmp_path / ".viv-build.json").exists()
+    monkeypatch.setattr(rp, "is_pinned_enabled", lambda: True)
+    assert rp.resolve_run_target(tmp_path) == "deployment"
+
+
+def test_resolve_run_target_deployment_when_session_build_with_pin_off(
+    tmp_path, monkeypatch
+):
+    """A materialized session build (.viv-build.json) alone is sufficient —
+    unchanged from run_core.run_target_for's pre-existing behavior."""
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+    monkeypatch.setattr(rp, "is_pinned_enabled", lambda: False)
+    assert rp.resolve_run_target(tmp_path) == "deployment"
+
+
+def test_resolve_run_target_deployment_when_both_conditions_hold(tmp_path, monkeypatch):
+    """Session build AND deployment pin both present — still resolves
+    cleanly to "deployment" (no conflict, no crash)."""
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+    monkeypatch.setattr(rp, "is_pinned_enabled", lambda: True)
+    assert rp.resolve_run_target(tmp_path) == "deployment"
+
+
+def test_resolve_run_target_short_circuits_before_checking_pin(tmp_path, monkeypatch):
+    """A materialized session build resolves "deployment" WITHOUT even
+    calling is_pinned_enabled() — the env-var check is pure overhead once
+    the .viv-build.json check alone already answers "deployment"."""
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+
+    def _boom():
+        raise AssertionError("is_pinned_enabled must not be called here")
+
+    monkeypatch.setattr(rp, "is_pinned_enabled", _boom)
+    assert rp.resolve_run_target(tmp_path) == "deployment"
