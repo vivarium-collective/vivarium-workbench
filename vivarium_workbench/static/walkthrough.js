@@ -9480,7 +9480,7 @@
         // browse+download surface.
         var acts =
           '<a href="#" style="' + lnk + '" title="Download this study\'s outputs (figures + embedded HTML reports) as a zip" ' +
-            'onclick="window._vivStudyFiguresFromCard(event,\'' + _esc(slug) + '\');return false;">↓ outputs</a>' +
+            'onclick="window._vivStudyFiguresFromCard(event,\'' + _esc(slug) + '\');return false;">↓ figures</a>' +
           '<a href="#" style="' + lnk + '" title="Download this study\'s own runnable notebook (composite + parameters + figures)" ' +
             'onclick="window._vivStudyNotebookFromCard(event,\'' + _esc(slug) + '\',\'' + _esc(iset.name) + '\');return false;">↓ notebook</a>';
         return '<div class="iset-study-row" style="padding:6px;border-radius:5px" ' +
@@ -11185,7 +11185,7 @@
     return '<div class="dag-download-controls" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">' +
       '<a href="#" title="Download this study\'s outputs (figures + embedded HTML reports) as a zip" ' +
         'onclick="window._vivStudyFiguresFromCard(event,\'' + _esc(slug) + '\');return false;" ' +
-        'style="' + lnk + '">↓ outputs</a>' +
+        'style="' + lnk + '">↓ figures</a>' +
       '<a href="#" title="Download this study\'s own runnable notebook (composite + parameters + figures)" ' +
         'onclick="window._vivStudyNotebookFromCard(event,\'' + _esc(slug) + '\',\'' + _esc(_dagInvSlug || '') + '\');return false;" ' +
         'style="' + lnk + '">↓ notebook</a>' +
@@ -12226,7 +12226,7 @@
     }
     fetch(url).then(function (r) {
       if (!r.ok) {
-        _notify('No downloadable outputs for "' + slug + '" '
+        _notify('No downloadable figures for "' + slug + '" '
           + '(no figures or embedded HTML reports).');
         return null;
       }
@@ -12235,11 +12235,11 @@
       if (!blob) return;
       var href = URL.createObjectURL(blob);
       var a = document.createElement('a');
-      a.href = href; a.download = slug + '-outputs.zip';
+      a.href = href; a.download = slug + '-figures.zip';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       window.setTimeout(function () { URL.revokeObjectURL(href); }, 1000);
     }).catch(function (e) {
-      _notify('Outputs download failed: ' + e);
+      _notify('Figures download failed: ' + e);
     });
   };
   // A study's ↓ notebook is its parent investigation's runnable notebook (there
