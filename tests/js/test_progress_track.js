@@ -84,4 +84,14 @@ const m2 = Object.assign({}, queuedModel, { soft: { startedAt: NOW - 400000, typ
 const sig = s => (s.match(/data-sig="([^"]*)"/) || [])[1];
 assert.strictEqual(sig(PT.html(m1, NOW)), sig(PT.html(m2, NOW)), 'signature is stable across soft-fill progress');
 
+// ── loadingHtml(): indeterminate spinner + label, no progressbar semantics ──
+const loadingDefault = PT.loadingHtml();
+assert(loadingDefault.indexOf('viv-loading-spin') !== -1, 'renders the spinner span');
+assert(loadingDefault.indexOf('Loading…') !== -1, 'defaults to "Loading…" with no message');
+assert(loadingDefault.indexOf('role="progressbar"') === -1, 'no progressbar role — no real fraction to claim');
+const loadingCustom = PT.loadingHtml('Loading studies…');
+assert(loadingCustom.indexOf('Loading studies…') !== -1, 'custom message passed through');
+const loadingEscaped = PT.loadingHtml('<script>x</script>');
+assert(loadingEscaped.indexOf('<script>') === -1, 'message is HTML-escaped');
+
 console.log('ok');
