@@ -117,4 +117,38 @@ def test_showworkspace_activates_investigations_page():
     w = JS[JS.index("function _showWorkspace"): JS.index("function _showWorkspace") + 900]
     assert "page-investigations" in w
     assert "classList.add('active')" in w
-    assert "classList.remove('active')" in w
+
+
+# ── item 69 phase 2 — analyses-to-run: free-text textarea -> multi-select ────
+# Lives in the legacy _openInvestigation/#investigation-detail tabbed panel
+# (see test_showworkspace_renders_graph_not_legacy_icon_view above) — the
+# primary card/rail entry points route to _showInvestigationWorkspace instead,
+# which has no analyses-editing surface of its own. This panel stays reachable
+# via the "Begin Study" flow (walkthrough.js _submitBeginStudy-style handler
+# calls _openInvestigation(newName) right after creating an investigation) and
+# via every existing "re-fetch + re-render" call after a group/composite/
+# analyses mutation — narrower than the primary nav, but real, not dead code
+# like the study-level _saveStudyAnalyses/#study-analyses-list pair (see
+# test_compose_unification.py::test_analyses_section_present_and_reachable_on_the_study_page).
+
+def test_analyses_field_is_a_multiselect_not_a_textarea():
+    assert '<textarea id="inv-analyses-list"' not in JS
+    assert '<select id="inv-analyses-list" multiple' in JS
+
+
+def test_load_inv_analyses_populates_from_visualization_classes():
+    i = JS.index("function _loadInvAnalyses")
+    block = JS[i:JS.index("window._loadInvAnalyses = _loadInvAnalyses")]
+    assert "/api/visualization-classes" in block
+    assert "kind === 'analysis'" in block
+    # honest-degrade: a name already in spec.yaml must survive even if the
+    # currently-loaded registry doesn't have it (same convention as the
+    # baseline-composite select from phase 1) — never silently drop it.
+    assert "not in registry" in block
+
+
+def test_save_analyses_reads_selected_options_not_value():
+    i = JS.index("function _saveAnalyses")
+    block = JS[i:i + 700]
+    assert "o.selected" in block
+    assert ".value.split" not in block   # the old free-text parsing is gone

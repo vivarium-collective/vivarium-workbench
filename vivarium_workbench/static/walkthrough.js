@@ -13192,12 +13192,13 @@
         '<button class="action-btn js-authoring" onclick="_saveObservables()">Save observables</button>' +
         '<div id="inv-observables-status" style="margin-top:8px;font-size:0.9em;color:#555"></div>' +
         '<hr style="margin:20px 0;border:none;border-top:1px solid #eee">' +
-        '<p class="panel-lead">Analyses to run at dispatch time — one <code>v2ecoli.workflow.analysis.' +
-          'ANALYSIS_REGISTRY</code> name per line (e.g. <code>doubling_time_distribution</code>). Translated ' +
+        '<p class="panel-lead">Analyses to run at dispatch time — select from the workspace\'s <code>v2ecoli.' +
+          'workflow.analysis.ANALYSIS_REGISTRY</code> (hold ⌘/Ctrl to select multiple). Translated ' +
           'into <code>analysis_options</code> for remote (sms-api) dispatch and the local post-run pipeline ' +
           'alike.</p>' +
-        '<textarea id="inv-analyses-list" rows="3" style="width:100%;font-family:monospace;font-size:0.9em" ' +
-          'placeholder="doubling_time_distribution"></textarea>' +
+        '<select id="inv-analyses-list" multiple size="6" style="width:100%;font-family:monospace;font-size:0.9em">' +
+          '<option value="" disabled>Loading analyses…</option>' +
+        '</select>' +
         '<button class="action-btn js-authoring" onclick="_saveAnalyses()">Save analyses</button>' +
         '<div id="inv-analyses-status" style="margin-top:8px;font-size:0.9em;color:#555"></div>' +
       '</div>' +
@@ -14403,8 +14404,10 @@
   function _loadInvAnalyses(invName) {
     // Pre-fill from the current spec.yaml.analyses[].name — same naive-scrape
     // approach _loadInvObservables already uses for observables, so this
-    // doesn't need a new read endpoint.
-    fetch('/investigations/' + encodeURIComponent(invName) + '/spec.yaml').then(function(r) {
+    // doesn't need a new read endpoint. Selectable options themselves come
+    // from the live /api/visualization-classes registry (item 69) rather
+    // than free text typed from memory.
+    var specNames = fetch('/investigations/' + encodeURIComponent(invName) + '/spec.yaml').then(function(r) {
       return r.ok ? r.text() : '';
     }).then(function(specText) {
       var names = [];
@@ -14415,8 +14418,31 @@
           if (p) names.push(p[1]);
         });
       }
+      return names;
+    });
+    var analysisClasses = fetch('/api/visualization-classes').then(function(r) { return r.json(); })
+      .then(function(data) { return (data && data.classes || []).filter(function(c) { return c.kind === 'analysis'; }); })
+      .catch(function() { return []; });
+
+    Promise.all([specNames, analysisClasses]).then(function(parts) {
+      var names = parts[0], classes = parts[1];
       var el = document.getElementById('inv-analyses-list');
-      if (el) el.value = names.join('\n');
+      if (!el) return;
+      var known = {};
+      var opts = classes.map(function(c) {
+        known[c.name] = true;
+        return '<option value="' + _esc(c.name) + '"' + (names.indexOf(c.name) >= 0 ? ' selected' : '') +
+          (c.doc ? ' title="' + _esc(c.doc) + '"' : '') + '>' + _esc(c.name) + '</option>';
+      });
+      // Never silently drop a name already declared in spec.yaml just
+      // because it's missing from the currently-loaded registry (e.g. a
+      // workspace/branch mismatch) — same honest-degrade convention as the
+      // baseline-composite select (item 69 phase 1).
+      names.forEach(function(n) {
+        if (!known[n]) opts.push('<option value="' + _esc(n) + '" selected>' + _esc(n) + ' (not in registry)</option>');
+      });
+      el.innerHTML = opts.length ? opts.join('') :
+        '<option value="" disabled>No analyses registered — install a workspace that provides ANALYSIS_REGISTRY entries</option>';
     });
   }
   window._loadInvAnalyses = _loadInvAnalyses;
@@ -14424,8 +14450,8 @@
   function _saveAnalyses() {
     var invName = window._currentInvestigation || '';
     var el = document.getElementById('inv-analyses-list');
-    var names = ((el && el.value) || '').split(/[\n,]/)
-      .map(function(s) { return s.trim(); }).filter(Boolean);
+    var names = el ? Array.prototype.filter.call(el.options, function(o) { return o.selected && o.value; })
+      .map(function(o) { return o.value; }) : [];
     var analyses = names.map(function(n) { return {name: n, params: {}}; });
     fetch('/api/study-set-analyses', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
