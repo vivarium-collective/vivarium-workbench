@@ -82,7 +82,9 @@ def test_prepare_managed_goes_materializing_then_ready(tmp_path, monkeypatch):
     assert "coordinate" in st
     release.set()
     assert _wait_ready("k")
-    assert se.status("k")["interpreter"] == "/built/bin/python"
+    st = se.status("k")
+    assert st is not None
+    assert st["interpreter"] == "/built/bin/python"
 
 
 def test_prepare_managed_failure_is_surfaced(tmp_path, monkeypatch):
@@ -96,9 +98,11 @@ def test_prepare_managed_failure_is_surfaced(tmp_path, monkeypatch):
     proj = _project(tmp_path / "p")
     se.prepare("k", proj, managed=True)
     end = time.monotonic() + 5
-    while time.monotonic() < end and se.status("k")["status"] != se.FAILED:
-        time.sleep(0.01)
     s = se.status("k")
+    while time.monotonic() < end and s and s["status"] != se.FAILED:
+        time.sleep(0.01)
+        s = se.status("k")
+    assert s is not None
     assert s["status"] == se.FAILED
     assert "environment build failed" in s["error"]
     assert "boom" in s["tail"]
@@ -114,7 +118,9 @@ def test_status_reflects_prepared_in_place(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     se.prepare("k", ws)
-    assert se.status("k")["status"] == se.READY
+    st = se.status("k")
+    assert st is not None
+    assert st["status"] == se.READY
 
 
 # -- managed (repo, ref) preparation -----------------------------------------
@@ -152,6 +158,7 @@ def test_prepare_managed_records_repo_ref_and_polls_to_ready(tmp_path, monkeypat
 
     assert _wait_ready("k")
     final = se.status("k")
+    assert final is not None
     assert final["interpreter"] == "/built/bin/python"
     assert final["path"] == str(tmp_path / "s")
     assert final["commit"] == "e" * 40
