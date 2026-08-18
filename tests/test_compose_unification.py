@@ -86,9 +86,18 @@ def test_analyses_section_present_and_reachable_on_the_study_page():
     # study setup ("what to compute"), not an export artifact — near
     # Conditions, so it now lives in #panel-compose. Task E4 later deleted
     # the Exports/data tab entirely (#panel-data no longer exists).
-    # The Analyses authoring box was removed from the Model tab (study-ui redesign).
-    assert 'id="study-analyses-list"' not in HTML
-    assert '{# Analyses' not in HTML
+    #
+    # PR #844 then removed the box itself as one incidental line inside an
+    # unrelated Overview-tab redesign (no standalone rationale given, and
+    # _saveStudyAnalyses/the backend endpoint were both left fully intact,
+    # not cleaned up) — leaving this test's own name ("present_and_reachable")
+    # asserting the opposite of what it says. item 69 (#3) restores it per
+    # this test's original intent: a real select (not the old free-text
+    # textarea, matching this session's dropdown-conversion theme), reusing
+    # the same live /api/visualization-classes registry + honest-degrade
+    # convention as the sibling per-investigation fix.
+    assert 'id="study-analyses-list"' in HTML
+    assert 'multiple' in HTML.split('id="study-analyses-list"', 1)[1][:40]
 
 
 def test_save_study_analyses_posts_to_the_working_endpoint():

@@ -767,6 +767,31 @@
     <p class="muted" style="font-size:0.85em;margin:0">Loading composite card(s)…</p>
   </div>
 
+  {# Analyses to run at dispatch time — which post-run analyses this study's
+     dispatch should trigger, translated into v2ecoli's analysis_options
+     (lib.study_run_post.build_analysis_options). Independent of `_has_build`,
+     same reasoning as model-composite-cards above: any runnable study can
+     declare analyses regardless of whether it has build-shaped fields.
+     Populated by _loadStudyAnalyses() (study-detail.js) from the live
+     /api/visualization-classes registry, preserving any name already declared
+     in this study's own spec even if the current registry doesn't have it —
+     same honest-degrade convention as the baseline-composite select above.
+     Saved via _saveStudyAnalyses(), which posts to /api/study-set-analyses
+     (metadata_mutations.set_investigation_analyses — already resolves this
+     study by name, flat studies/<name>/ preferred over legacy
+     investigations/<name>/, so no backend change was needed here). #}
+  <div class="overview-section" id="study-analyses-section">
+    <h3>Analyses to run <span class="muted" style="font-size:0.85em;font-weight:normal">— select from the workspace's <code>ANALYSIS_REGISTRY</code> (hold ⌘/Ctrl to select multiple)</span></h3>
+    <select id="study-analyses-list" multiple size="6" data-study="{{ study.name }}"
+            style="width:100%;font-family:monospace;font-size:0.9em;padding:4px;border:1px solid #cbd5e1;border-radius:3px">
+      <option value="" disabled>Loading analyses…</option>
+    </select>
+    <div style="margin-top:8px">
+      <button class="action-btn" type="button" onclick="_saveStudyAnalyses()">Save analyses</button>
+      <span id="study-analyses-status" style="margin-left:8px;font-size:0.9em;color:#555"></span>
+    </div>
+  </div>
+
   {# Build-block visibility mirrors the pre-merge panel-build guard exactly (model_change/impl_reqs/conditions/baseline) so non-v3 studies keep their Model + Conditions sections. #}
   {% set _has_build = study.model_change or study.implementation_requirements or study.conditions or study.baseline %}
   {% if _has_build %}

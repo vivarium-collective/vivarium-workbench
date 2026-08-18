@@ -1902,11 +1902,46 @@
   // which despite its name resolves any study by name via study_dir() — flat
   // studies/<name>/ preferred over legacy investigations/<name>/, so this works
   // for an ungrouped study exactly like a grouped one).
+  //
+  // item 69 (#3, folded in) — populate #study-analyses-list from the live
+  // /api/visualization-classes registry (filtered to kind === 'analysis'),
+  // preserving any name already declared in window._study.analyses[].name
+  // even if the current registry doesn't have it — same honest-degrade
+  // convention as _populateBaselineCompositeSelects above, and the identical
+  // fix item 69 phase 2 made for the legacy per-investigation panel
+  // (walkthrough.js _loadInvAnalyses). window._study is the parsed
+  // /api/study/{slug} payload (extra="allow" pass-through of spec.yaml), so
+  // analyses[] is read directly — no raw-file scrape needed here.
+  function _loadStudyAnalyses() {
+    var sel = document.getElementById('study-analyses-list');
+    if (!sel) return;
+    var declared = ((window._study || {}).analyses || [])
+      .map(function (a) { return a && a.name; }).filter(Boolean);
+    fetch('/api/visualization-classes').then(function (r) { return r.json(); })
+      .then(function (data) { return (data && data.classes || []).filter(function (c) { return c.kind === 'analysis'; }); })
+      .catch(function () { return []; })
+      .then(function (classes) {
+        var known = {};
+        var opts = classes.map(function (c) {
+          known[c.name] = true;
+          return '<option value="' + _esc(c.name) + '"' + (declared.indexOf(c.name) >= 0 ? ' selected' : '') +
+            (c.doc ? ' title="' + _esc(c.doc) + '"' : '') + '>' + _esc(c.name) + '</option>';
+        });
+        declared.forEach(function (n) {
+          if (!known[n]) opts.push('<option value="' + _esc(n) + '" selected>' + _esc(n) + ' (not in registry)</option>');
+        });
+        sel.innerHTML = opts.length ? opts.join('') :
+          '<option value="" disabled>No analyses registered — install a workspace that provides ANALYSIS_REGISTRY entries</option>';
+      });
+  }
+  window._loadStudyAnalyses = _loadStudyAnalyses;
+
   function _saveStudyAnalyses() {
     var el = document.getElementById('study-analyses-list');
     var status = document.getElementById('study-analyses-status');
     if (!el) return;
-    var names = el.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    var names = Array.prototype.filter.call(el.options, function (o) { return o.selected && o.value; })
+      .map(function (o) { return o.value; });
     var analyses = names.map(function (n) { return {name: n, params: {}}; });
     if (status) status.textContent = 'Saving…';
     api('POST', '/api/study-set-analyses', {investigation: studyName(), analyses: analyses})
@@ -4259,6 +4294,7 @@
     _renderReadinessPanel();
     _populateConclusionVerdictBadges();
     _populateBaselineCompositeSelects();
+    _loadStudyAnalyses();
     // Open the Overview tab on load — unless a ?tab=<kind> deep-link asks
     // for a specific tab. Needs-attention items link here with
     // ?tab=conclusions so a click lands on the verdict that triggered the alert.
