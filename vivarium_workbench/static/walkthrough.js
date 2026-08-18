@@ -8332,7 +8332,10 @@
 
   function _loadInvestigationSets() {
     var list = document.getElementById('investigations-list');
-    if (list) list.innerHTML = '<p class="empty-state">Loading…</p>';
+    if (list) {
+      if (window.ProgressTrack) window.ProgressTrack.loading(list);
+      else list.innerHTML = '<p class="empty-state">Loading…</p>';
+    }
     var _p = window.DataSource
       ? window.DataSource.loadIsetList()
       : fetch('/api/investigation-summaries', {headers: {Accept: 'application/json'}})
@@ -12369,7 +12372,12 @@
     if (!Array.isArray(window._investigations) || !window._investigations.length) {
       // No studies in memory yet → fall back to the legacy render until they arrive.
       if (typeof _renderRailInvestigationsLegacy === 'function') return _renderRailInvestigationsLegacy();
-      host.innerHTML = '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>';
+      if (window.ProgressTrack) {
+        window.ProgressTrack.loading(host);
+        host.firstElementChild.classList.add('viv-loading-compact');
+      } else {
+        host.innerHTML = '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>';
+      }
       if (typeof _loadInvestigations === 'function') _loadInvestigations();
       return;
     }
