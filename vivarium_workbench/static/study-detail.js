@@ -4258,6 +4258,7 @@
     _renderFeedbackTrackedPanel();
     _renderReadinessPanel();
     _populateConclusionVerdictBadges();
+    _populateBaselineCompositeSelects();
     // Open the Overview tab on load — unless a ?tab=<kind> deep-link asks
     // for a specific tab. Needs-attention items link here with
     // ?tab=conclusions so a click lands on the verdict that triggered the alert.
@@ -4267,6 +4268,32 @@
       if (_q && document.querySelector('.study-pillar[data-kind="' + _q + '"]')) _tab = _q;
     } catch (_e) { /* no URLSearchParams — keep overview */ }
     _setStudyTab(_tab);
+  }
+
+  // ── item 69 — baseline composite select: populate from the live registry,
+  //    preserving each row's currently-declared composite as the selected
+  //    option (including a ref that doesn't resolve — never silently drop the
+  //    user's declared value, same honest-degrade approach as the composite
+  //    explorer's own "not found in registry" handling). ────────────────────
+  function _populateBaselineCompositeSelects() {
+    var selects = document.querySelectorAll('select.baseline-composite-input');
+    if (!selects.length) return;
+    if (!window.DataSource) return;
+    window.DataSource.loadComposites().then(function (data) {
+      var composites = (data && data.composites) || [];
+      selects.forEach(function (sel) {
+        var current = sel.getAttribute('data-current') || '';
+        var known = composites.some(function (c) { return c.id === current; });
+        var opts = '<option value="">— select a composite —</option>';
+        if (current && !known) {
+          opts += '<option value="' + _esc(current) + '" selected>' + _esc(current) + ' (not in registry)</option>';
+        }
+        opts += composites.map(function (c) {
+          return '<option value="' + _esc(c.id) + '"' + (c.id === current ? ' selected' : '') + '>' + _esc(c.id) + '</option>';
+        }).join('');
+        sel.innerHTML = opts;
+      });
+    }).catch(function () { /* leave the pre-JS single-option selects as-is on network error */ });
   }
 
   // ── C2 — conclusion verdicts: read precomputed block from window._study.derived ─

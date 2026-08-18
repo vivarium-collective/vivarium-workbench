@@ -802,9 +802,17 @@
          (_submitBaselineAdd) was removed from this template, leaving its JS
          handler and the /api/study-baseline-add /-remove endpoints orphaned. #}
       <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-        <input type="text" class="baseline-composite-input" data-baseline-name="{{ b.name or 'baseline' }}"
-               value="{{ b.composite or '' }}" placeholder="pkg.composites.name"
-               style="flex:1;min-width:200px;font-family:monospace;font-size:0.82em;padding:3px 6px" />
+        {# Populated from the live composite registry by
+           _populateBaselineCompositeSelects() (study-detail.js) once
+           DataSource.loadComposites() resolves — this initial single option
+           (the currently-declared ref, resolved or not) is just the
+           pre-JS/first-paint state so the field is never empty. #}
+        <select class="baseline-composite-input" data-baseline-name="{{ b.name or 'baseline' }}"
+                data-current="{{ b.composite or '' }}"
+                style="flex:1;min-width:200px;font-family:monospace;font-size:0.82em;padding:3px 6px">
+          {% if b.composite %}<option value="{{ b.composite }}" selected>{{ b.composite }}</option>
+          {% else %}<option value="">— select a composite —</option>{% endif %}
+        </select>
         <button type="button" class="action-btn baseline-composite-set" style="font-size:0.8em"
                 data-baseline-name="{{ b.name or 'baseline' }}">Set composite</button>
       </div>
@@ -968,6 +976,17 @@
             <td>{{ e.type or '' }}</td>
             <td><code>{{ e.default }}</code></td>
             <td>
+              {% if e.options %}
+              {# A declared finite value set — select from it rather than typing
+                 a value that has to exactly match one of e.options from memory. #}
+              <select class="cond-ei-input"
+                      style="width:100%;padding:3px 6px;border:1px solid #cbd5e1;border-radius:3px;font:inherit">
+                {% if e.current is none or e.current == '' %}<option value="" selected disabled>(awaiting expert)</option>{% endif %}
+                {% for opt in e.options %}
+                <option value="{{ opt }}" {% if e.current is not none and e.current == opt %}selected{% endif %}>{{ opt }}</option>
+                {% endfor %}
+              </select>
+              {% else %}
               <input class="cond-ei-input"
                      type="{% if e.type == 'number' or e.type == 'integer' %}number{% else %}text{% endif %}"
                      value="{% if e.current is none %}{% else %}{{ e.current }}{% endif %}"
@@ -975,6 +994,7 @@
                      {% if e.range and e.range[0] is defined %}min="{{ e.range[0] }}" max="{{ e.range[1] }}"{% endif %}
                      step="{{ _step }}"
                      style="width:100%;padding:3px 6px;border:1px solid #cbd5e1;border-radius:3px;font:inherit">
+              {% endif %}
               {# Fable #14 — reuse the SAME required-before-run gate signal
                  the header badge above is computed from, inline per-row. #}
               {% if e.gate == 'required-before-run' and (e.current is none or e.current == '') %}
