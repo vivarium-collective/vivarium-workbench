@@ -139,6 +139,12 @@
 .viv-loading-compact { padding: 4px 12px; font-size: 0.85em; }
 .viv-loading-compact .viv-loading-spin { width: 11px; height: 11px; }
 
+/* Floating overlay wrapper for session-status.js's materialization progress
+ * panel — the .ptrack card inside already supplies its own themed
+ * background/border (light+dark, above); this only adds elevation since it
+ * floats fixed-position over page content instead of sitting in flow. */
+#viv-session-progress .ptrack { box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+
 /* Dark theme. Same token/hex idiom as style.css's :root[data-theme="dark"]
  * rules: var(--token) for neutral surfaces/text, explicit hex for the
  * saturated done/active/failed status colors (reusing the exact tints
