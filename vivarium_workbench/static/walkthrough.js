@@ -947,7 +947,7 @@
   function _loadInputs() {
     var el = document.getElementById('inputs-api-render');
     if (!el) return;
-    el.innerHTML = '<p class="muted" style="font-style:italic">Loading…</p>';
+    el.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading inputs…') : '<p class="muted" style="font-style:italic">Loading inputs…</p>';
     // Prefer the Sources-page picker selection over the git-branch-current slug.
     var _slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
     var _pInputs = window.DataSource
@@ -5169,7 +5169,7 @@
     if (window._marketLoading) return;
     window._marketLoading = true;
     var host = document.getElementById('market-results');
-    if (host) host.innerHTML = '<p class="empty-state">Loading&hellip;</p>';
+    if (host) host.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading&hellip;</p>';
     window._marketByType = { composite: [], study: [], investigation: [], process: [] };
     window._marketItems = [];
     var rebuild = function () {
@@ -5899,7 +5899,7 @@
     });
     if (!repos.length) {
       var loaded = (window._marketItems && window._marketItems.length) || (window._marketCatalog && window._marketCatalog.length);
-      return loaded ? '<p class="empty-state">No repositories match.</p>' : '<p class="empty-state">Loading&hellip;</p>';
+      return loaded ? '<p class="empty-state">No repositories match.</p>' : (window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading&hellip;</p>');
     }
     if (zoom === 'list') return _marketRepoTable(repos);
     var render = zoom === 'detail' ? _marketRepoDetail : _marketRepoCard;
@@ -6008,7 +6008,7 @@
     // within-category order (e.g. processes by use). So "All" reads as grouped.
     filtered.sort(function (a, b) { return _MARKET_CAT_ORDER[_marketCatOf(a)] - _MARKET_CAT_ORDER[_marketCatOf(b)]; });
     if (!filtered.length) {
-      host.innerHTML = items.length ? '<p class="empty-state">No matches.</p>' : '<p class="empty-state">Loading&hellip;</p>';
+      host.innerHTML = items.length ? '<p class="empty-state">No matches.</p>' : (window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading&hellip;</p>');
       return;
     }
     var html = '';
@@ -7614,7 +7614,7 @@
     var ids = Array.from(window._ceCompareSet);
     if (ids.length < 2) return;
     var body = document.getElementById('ce-compare-body');
-    body.innerHTML = '<p class="empty-state">Loading&hellip;</p>';
+    body.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading&hellip;</p>';
     Promise.all(ids.map(function(id) {
       return fetch(_api('/api/composite-run/' + encodeURIComponent(id)))
         .then(function(r) { return r.json(); });
@@ -12944,7 +12944,7 @@
     var detail = document.getElementById('investigation-detail');
     if (detail) {
       detail.style.display = '';
-      detail.innerHTML = '<p class="empty-state">Loading…</p>';
+      detail.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading…</p>';
     }
     // Switch the Investigations page into single-study focus mode: hide the
     // grid + toolbar + chips and let the detail panel take the full width.
@@ -13200,7 +13200,7 @@
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="interventions">' +
         '<div id="inv-interventions-host">' +
-          '<p class="empty-state">Loading interventions…</p>' +
+          (window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading interventions…') : '<p class="empty-state">Loading interventions…</p>') +
         '</div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="runs">' +
@@ -16141,7 +16141,7 @@
     _ceStopRunPoll();  // clear any prior interval
     var myToken = ++window._cePollToken;
     var el = document.getElementById('ce-test-results');
-    if (el) el.innerHTML = '<p class="empty-state">Loading run&hellip;</p>';
+    if (el) el.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading run…') : '<p class="empty-state">Loading run&hellip;</p>';
 
     function tick() {
       Promise.all([

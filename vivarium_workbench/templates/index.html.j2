@@ -977,7 +977,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
        Single source of truth for the datasets/references/expert-docs lists;
        the management panels below provide the add/edit actions + bib explorer. -->
   <div id="inputs-api-render" class="panel">
-    <p class="muted" style="font-style:italic">Loading…</p>
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading inputs…</span></div>
   </div>
 
 </section>
@@ -1204,8 +1204,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
 
-    <div class="registry-tab-panel active" data-kind="composite"     id="registry-composites-container"><p class="empty-state">Loading&hellip;</p></div>
-    <div class="registry-tab-panel"        data-kind="process"       id="registry-processes-container"><p class="empty-state">Loading&hellip;</p></div>
+    <div class="registry-tab-panel active" data-kind="composite"     id="registry-composites-container"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading&hellip;</span></div></div>
+    <div class="registry-tab-panel"        data-kind="process"       id="registry-processes-container"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading&hellip;</span></div></div>
     <div class="registry-tab-panel"        data-kind="emitter"       id="registry-emitters-container"></div>
     <div class="registry-tab-panel"        data-kind="visualization" id="registry-visualizations-container"></div>
     <div class="registry-tab-panel"        data-kind="analysis"      id="registry-analyses-container"></div>
