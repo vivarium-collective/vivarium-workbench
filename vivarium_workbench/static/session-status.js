@@ -7,7 +7,10 @@
 // from GET /api/source/materialization (materialization-lifecycle §4):
 //
 //   ready         → the workbench mark, plain title
-//   materializing → hourglass favicon + "⏳ <title>", and POLL until it settles
+//   materializing → hourglass favicon + "⏳ <title>", an in-page ProgressTrack
+//                   stages panel (item 70 ph.2 — real queued/cloning/syncing
+//                   phases from the poll's `phase` field, never fabricated),
+//                   and POLL until it settles
 //   failed        → red favicon + "⚠ <title>"
 //
 // A plain local workspace is `ready` at once (no poll). Managed/hosted sources
@@ -92,15 +95,69 @@
     if (p && p.parentNode) p.parentNode.removeChild(p);
   }
 
+  // ── Materialization progress panel (item 70 phase 2) ───────────────────────
+  // Wires ProgressTrack's `stages` mode to the REAL job phases already carried
+  // by GET /api/source/materialization's `phase` field (session_env._map_job
+  // passes the async job's queued/cloning/syncing phase straight through — no
+  // new backend surface needed). Driven only by real poll responses: no client
+  // timer, no interpolated/invented stage. Managed-source case only; a plain
+  // local switch is `ready` at once and this panel never appears for it.
+  var PROGRESS_ID = "viv-session-progress";
+  var MATERIALIZE_STAGES = [
+    { key: "queued", label: "Queued" },
+    { key: "cloning", label: "Cloning" },
+    { key: "syncing", label: "Installing" },
+  ];
+  var STAGE_ORDER = ["queued", "cloning", "syncing"];
+
+  // Pure: real phase string → {done, active} milestone arrays. An unrecognized
+  // or missing phase conservatively reports zero done stages with the first
+  // stage active — never invented partial credit.
+  function stageProgress(phase) {
+    var idx = STAGE_ORDER.indexOf(phase);
+    if (idx < 0) idx = 0;
+    return { done: STAGE_ORDER.slice(0, idx), active: STAGE_ORDER[idx] };
+  }
+
+  function clearProgress() {
+    var p = document.getElementById(PROGRESS_ID);
+    if (p && p.parentNode) p.parentNode.removeChild(p);
+  }
+
+  function _progressMount() {
+    var m = document.getElementById(PROGRESS_ID);
+    if (m) return m;
+    m = document.createElement("div");
+    m.id = PROGRESS_ID;
+    m.style.cssText = "position:fixed; right:16px; top:16px; z-index:2147483000;" +
+      " width:min(92vw,300px)";
+    (document.body || document.documentElement).appendChild(m);
+    return m;
+  }
+
+  // `.ptrack`'s own card (background/border, light+dark themed) is the only
+  // visual chrome — deliberately no second wrapper "card" here, just position.
+  function renderProgress(d) {
+    if (!d || d.status !== "materializing") { clearProgress(); return; }
+    if (typeof window === "undefined" || !window.ProgressTrack) return;
+    var sp = stageProgress(d.phase);
+    window.ProgressTrack.render(_progressMount(), {
+      mode: "stages", stages: MATERIALIZE_STAGES,
+      done: sp.done, active: sp.active,
+      note: "<strong>Preparing workspace…</strong>",
+    });
+  }
+
   function retry(d) {
     clearFailure();
     if (d && d.repo && d.ref) {
       apply("materializing");
+      renderProgress({ status: "materializing", phase: "queued" });
       fetch("/api/source/materialize-repo", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo: d.repo, ref: d.ref }),
       }).then(function () { setTimeout(poll, POLL_MS); })
-        .catch(function () { apply("failed"); });
+        .catch(function () { apply("failed"); clearProgress(); });
     } else if (typeof location !== "undefined" && location.reload) {
       location.reload();
     }
@@ -165,15 +222,18 @@
       .then(function (r) { return r && r.ok ? r.json() : null; })
       .then(function (d) {
         var state = apply((d && d.status) || "ready");
+        renderProgress(d || {});
         if (state === "failed") renderFailure(d || {});
         else clearFailure();
         if (state === "preparing") setTimeout(poll, POLL_MS);
       })
-      .catch(function () { apply("ready"); });
+      .catch(function () { apply("ready"); clearProgress(); });
   }
 
   var api = { apply: apply, poll: poll, renderFailure: renderFailure,
-              clearFailure: clearFailure, svgDataUri: svgDataUri, FAVICONS: FAVICONS };
+              clearFailure: clearFailure, svgDataUri: svgDataUri, FAVICONS: FAVICONS,
+              renderProgress: renderProgress, clearProgress: clearProgress,
+              stageProgress: stageProgress };
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;                 // Node (tests): no auto-run

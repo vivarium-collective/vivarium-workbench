@@ -3,6 +3,7 @@
 <meta charset="UTF-8"><title>{% if dashboard_name %}{{ dashboard_name }} dashboard{% else %}{{ workspace_name }}{% endif %}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <link rel="stylesheet" href="assets/snapshot-readonly.css">
+<link rel="stylesheet" href="assets/progress-track.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <!-- Apply the saved light/dark theme before first paint (no flash of light). -->
 <script>(function(){try{var t=localStorage.getItem('viv.theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <!-- Per-tab session identity (session-per-tab). Loaded FIRST, as a classic
@@ -690,6 +691,30 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 :root[data-theme="dark"] .viv-bs-busy { color: #93c5fd; background: rgba(59,130,246,0.16); border-color: rgba(59,130,246,0.4); }
 </style>
 </head><body>
+<script>
+(function () {
+  // Item 70 phase 3: a local in-place workspace switch (workspace-picker.js)
+  // sets this flag right before location.reload() — show the branded splash
+  // immediately, before any other script loads, so the reload's boot gap
+  // never shows a blank/unstyled page. progress-track.css (which styles
+  // .viv-switch-splash) is already linked above, so it's available by the
+  // time body starts rendering. Dismissed by walkthrough.js, not a timer.
+  try {
+    if (!sessionStorage.getItem('viv-switch-splash')) return;
+    sessionStorage.removeItem('viv-switch-splash');
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var el = document.createElement('div');
+    el.className = 'viv-switch-splash';
+    el.id = 'viv-switch-splash';
+    var img = document.createElement('img');
+    img.className = 'viv-switch-splash-logo';
+    img.alt = 'Vivarium';
+    img.src = 'assets/vivarium-logo' + (dark ? '-dark' : '') + '.png{% if asset_version %}?v={{ asset_version }}{% endif %}';
+    el.appendChild(img);
+    document.body.appendChild(el);
+  } catch (e) { /* sessionStorage unavailable (private mode) — skip the splash */ }
+})();
+</script>
 
 <div class="viv-layout">
 
@@ -893,7 +918,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                       color:#374151;border:1px solid #e5e7eb;border-radius:4px;background:#fff;box-sizing:border-box;" />
       </div>
       <div id="viv-rail-investigations">
-        <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
+        <div class="viv-loading viv-loading-compact"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading…</span></div>
       </div>
     </div>
 
@@ -952,7 +977,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
        Single source of truth for the datasets/references/expert-docs lists;
        the management panels below provide the add/edit actions + bib explorer. -->
   <div id="inputs-api-render" class="panel">
-    <p class="muted" style="font-style:italic">Loading inputs…</p>
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading inputs…</span></div>
   </div>
 
 </section>
@@ -1180,8 +1205,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
 
-    <div class="registry-tab-panel active" data-kind="composite"     id="registry-composites-container"><p class="empty-state">Loading&hellip;</p></div>
-    <div class="registry-tab-panel"        data-kind="process"       id="registry-processes-container"><p class="empty-state">Loading&hellip;</p></div>
+    <div class="registry-tab-panel active" data-kind="composite"     id="registry-composites-container"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading&hellip;</span></div></div>
+    <div class="registry-tab-panel"        data-kind="process"       id="registry-processes-container"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading&hellip;</span></div></div>
     <div class="registry-tab-panel"        data-kind="emitter"       id="registry-emitters-container"></div>
     <div class="registry-tab-panel"        data-kind="visualization" id="registry-visualizations-container"></div>
     <div class="registry-tab-panel"        data-kind="analysis"      id="registry-analyses-container"></div>
@@ -1261,7 +1286,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   <!-- List view: grouped investigation cards (Active / Closed). The grid lives on
        the per-group .investigations-grid wrappers built by _renderInvestigationSets. -->
   <div id="investigations-list">
-    <p class="empty-state">Loading…</p>
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading…</span></div>
   </div>
   </div>
 
@@ -1678,7 +1703,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <button id="sim-refresh" class="icon-btn" title="Refresh" aria-label="Refresh">&#8635;</button>
   </div>
 
-  <div id="sim-loading" style="color: #6b7280; padding: 12px;">Loading simulations…</div>
+  <div id="sim-loading" class="viv-loading" style="padding: 12px;"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading simulations…</span></div>
   <div id="sim-empty"   style="color: #6b7280; padding: 12px; display: none;">
     No simulation runs found.
   </div>
@@ -1844,7 +1869,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
 <!-- ===== PAGE: COMPOSITE EXPLORER ===== -->
 <section id="page-composite-explore" class="page" data-page="composite-explore">
-  <div id="ce-loading" class="empty-state">Loading composite&hellip;</div>
+  <div id="ce-loading" class="empty-state"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading composite&hellip;</span></div></div>
 
   <div id="ce-main" style="display:none">
 
@@ -2217,6 +2242,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/audit.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* audit view unavailable */"></script>
 <script src="assets/col-resize.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script src="assets/sim-table.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<script src="assets/progress-track.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <!-- composite-card.js: the shared composite-card renderer (extracted from
      walkthrough.js, study-spine-reorg Task 6) — MUST load before
      walkthrough.js, which now calls these functions as globals rather than

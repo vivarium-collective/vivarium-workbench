@@ -836,7 +836,7 @@
   function _loadInputs() {
     var el = document.getElementById('inputs-api-render');
     if (!el) return;
-    el.innerHTML = '<p class="muted" style="font-style:italic">Loading inputs…</p>';
+    el.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading inputs…') : '<p class="muted" style="font-style:italic">Loading inputs…</p>';
     // Prefer the Sources-page picker selection over the git-branch-current slug.
     var _slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
     var _pInputs = window.DataSource
@@ -5072,7 +5072,7 @@
     if (window._marketLoading) return;
     window._marketLoading = true;
     var host = document.getElementById('market-results');
-    if (host) host.innerHTML = '<p class="empty-state">Loading&hellip;</p>';
+    if (host) host.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading&hellip;</p>';
     window._marketByType = { composite: [], study: [], investigation: [], process: [] };
     window._marketItems = [];
     var rebuild = function () {
@@ -5802,7 +5802,7 @@
     });
     if (!repos.length) {
       var loaded = (window._marketItems && window._marketItems.length) || (window._marketCatalog && window._marketCatalog.length);
-      return loaded ? '<p class="empty-state">No repositories match.</p>' : '<p class="empty-state">Loading&hellip;</p>';
+      return loaded ? '<p class="empty-state">No repositories match.</p>' : (window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading&hellip;</p>');
     }
     if (zoom === 'list') return _marketRepoTable(repos);
     var render = zoom === 'detail' ? _marketRepoDetail : _marketRepoCard;
@@ -5911,7 +5911,7 @@
     // within-category order (e.g. processes by use). So "All" reads as grouped.
     filtered.sort(function (a, b) { return _MARKET_CAT_ORDER[_marketCatOf(a)] - _MARKET_CAT_ORDER[_marketCatOf(b)]; });
     if (!filtered.length) {
-      host.innerHTML = items.length ? '<p class="empty-state">No matches.</p>' : '<p class="empty-state">Loading&hellip;</p>';
+      host.innerHTML = items.length ? '<p class="empty-state">No matches.</p>' : (window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading&hellip;</p>');
       return;
     }
     var html = '';
@@ -6777,7 +6777,20 @@
     // no duplicate call needed here.
 
     // Populate the Investigations rail section (V4).
-    _vivRefreshInvestigationsRail();
+    var _railReady = _vivRefreshInvestigationsRail();
+
+    // Item 70 phase 3: dismiss the post-switch splash (index.html.j2's
+    // inline body script), if it was shown, the instant the rail's real
+    // fetch resolves — the first real post-reload content, not a fabricated
+    // timer. No-op on a normal load (the splash element never exists).
+    var _splash = document.getElementById('viv-switch-splash');
+    if (_splash) {
+      (function (splash, ready) {
+        var dismiss = function () { if (splash.parentNode) splash.parentNode.removeChild(splash); };
+        if (ready && typeof ready.then === 'function') ready.then(dismiss).catch(dismiss);
+        else dismiss();
+      })(_splash, _railReady);
+    }
 
     // (The GitHub Branches tab has been removed.)
   });
@@ -6910,7 +6923,10 @@
           : fetch('/api/investigation-summaries').then(function(r) { return r.json(); })
         ).catch(function() { return {investigations: []}; })
       : Promise.resolve({investigations: []});
-    Promise.all([p1, p2]).then(function(arr) {
+    // Returned (item 70 phase 3): this is the first real post-page-load
+    // fetch to settle, so the post-switch splash dismiss hook (below, in the
+    // DOMContentLoaded handler) can wait on it instead of a timer.
+    return Promise.all([p1, p2]).then(function(arr) {
       window._investigations = arr[0].investigations || [];
       window._isetIndex      = arr[1].investigations || [];
       if (hasIsetUI && window._isetIndex.length) {
@@ -7501,7 +7517,7 @@
     var ids = Array.from(window._ceCompareSet);
     if (ids.length < 2) return;
     var body = document.getElementById('ce-compare-body');
-    body.innerHTML = '<p class="empty-state">Loading&hellip;</p>';
+    body.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading&hellip;</p>';
     Promise.all(ids.map(function(id) {
       return fetch(_api('/api/composite-run/' + encodeURIComponent(id)))
         .then(function(r) { return r.json(); });
@@ -8235,7 +8251,10 @@
 
   function _loadInvestigationSets() {
     var list = document.getElementById('investigations-list');
-    if (list) list.innerHTML = '<p class="empty-state">Loading…</p>';
+    if (list) {
+      if (window.ProgressTrack) window.ProgressTrack.loading(list);
+      else list.innerHTML = '<p class="empty-state">Loading…</p>';
+    }
     var _p = window.DataSource
       ? window.DataSource.loadIsetList()
       : fetch('/api/investigation-summaries', {headers: {Accept: 'application/json'}})
@@ -12246,7 +12265,12 @@
     if (!Array.isArray(window._investigations) || !window._investigations.length) {
       // No studies in memory yet → fall back to the legacy render until they arrive.
       if (typeof _renderRailInvestigationsLegacy === 'function') return _renderRailInvestigationsLegacy();
-      host.innerHTML = '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>';
+      if (window.ProgressTrack) {
+        window.ProgressTrack.loading(host);
+        host.firstElementChild.classList.add('viv-loading-compact');
+      } else {
+        host.innerHTML = '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>';
+      }
       if (typeof _loadInvestigations === 'function') _loadInvestigations();
       return;
     }
@@ -12797,7 +12821,7 @@
     var detail = document.getElementById('investigation-detail');
     if (detail) {
       detail.style.display = '';
-      detail.innerHTML = '<p class="empty-state">Loading…</p>';
+      detail.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml() : '<p class="empty-state">Loading…</p>';
     }
     // Switch the Investigations page into single-study focus mode: hide the
     // grid + toolbar + chips and let the detail panel take the full width.
@@ -13053,7 +13077,7 @@
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="interventions">' +
         '<div id="inv-interventions-host">' +
-          '<p class="empty-state">Loading interventions…</p>' +
+          (window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading interventions…') : '<p class="empty-state">Loading interventions…</p>') +
         '</div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="runs">' +
@@ -15778,7 +15802,7 @@
     _ceStopRunPoll();  // clear any prior interval
     var myToken = ++window._cePollToken;
     var el = document.getElementById('ce-test-results');
-    if (el) el.innerHTML = '<p class="empty-state">Loading run&hellip;</p>';
+    if (el) el.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading run…') : '<p class="empty-state">Loading run&hellip;</p>';
 
     function tick() {
       Promise.all([

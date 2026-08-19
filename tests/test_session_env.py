@@ -35,6 +35,16 @@ def _wait_ready(key, timeout=5.0):
     return False
 
 
+def _wait_phase(key, phase, timeout=3.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        s = se.status(key)
+        if s and s.get("phase") == phase:
+            return True
+        time.sleep(0.01)
+    return False
+
+
 # -- in-place (the live path today) ------------------------------------------
 def test_prepare_in_place_is_ready_with_interpreter(tmp_path):
     ws = tmp_path / "ws"
@@ -72,7 +82,9 @@ def test_prepare_managed_goes_materializing_then_ready(tmp_path, monkeypatch):
     assert "coordinate" in st
     release.set()
     assert _wait_ready("k")
-    assert se.status("k")["interpreter"] == "/built/bin/python"
+    st = se.status("k")
+    assert st is not None
+    assert st["interpreter"] == "/built/bin/python"
 
 
 def test_prepare_managed_failure_is_surfaced(tmp_path, monkeypatch):
@@ -86,9 +98,11 @@ def test_prepare_managed_failure_is_surfaced(tmp_path, monkeypatch):
     proj = _project(tmp_path / "p")
     se.prepare("k", proj, managed=True)
     end = time.monotonic() + 5
-    while time.monotonic() < end and se.status("k")["status"] != se.FAILED:
-        time.sleep(0.01)
     s = se.status("k")
+    while time.monotonic() < end and s and s["status"] != se.FAILED:
+        time.sleep(0.01)
+        s = se.status("k")
+    assert s is not None
     assert s["status"] == se.FAILED
     assert "environment build failed" in s["error"]
     assert "boom" in s["tail"]
@@ -104,7 +118,9 @@ def test_status_reflects_prepared_in_place(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     se.prepare("k", ws)
-    assert se.status("k")["status"] == se.READY
+    st = se.status("k")
+    assert st is not None
+    assert st["status"] == se.READY
 
 
 # -- managed (repo, ref) preparation -----------------------------------------
@@ -118,18 +134,31 @@ def test_prepare_managed_records_repo_ref_and_polls_to_ready(tmp_path, monkeypat
     from vivarium_workbench.lib import repo_source
     reg = mj.MaterializationRegistry()
     monkeypatch.setattr(mj, "get_registry", lambda: reg)
-    go = threading.Event()
+    go_clone = threading.Event()
+    go_sync = threading.Event()
     monkeypatch.setattr(repo_source, "stage",
-                        lambda repo, ref, **k: (go.wait(3), _Staged(str(tmp_path / "s"), "e" * 40))[1])
-    monkeypatch.setattr(mj, "materialize", lambda s, **k: "/built/bin/python")
+                        lambda repo, ref, **k: (go_clone.wait(3), _Staged(str(tmp_path / "s"), "e" * 40))[1])
+    monkeypatch.setattr(mj, "materialize",
+                        lambda s, **k: (go_sync.wait(3), "/built/bin/python")[1])
 
     st = se.prepare_managed("k", "https://x/r.git", "main")
     assert st["managed"] is True
     assert st["repo"] == "https://x/r.git" and st["ref"] == "main"
     assert st["status"] == se.MATERIALIZING
-    go.set()
+
+    # `phase` (item 70 ph.2's exact dependency — GET /api/source/materialization
+    # drives the frontend's real-stage progress panel off this field) must carry
+    # the job's real fine-grained phase through the session-level view. Assert
+    # both real in-flight transitions, not just the coarse "materializing"
+    # status, so a rename/removal of this field is caught here.
+    assert _wait_phase("k", mj.CLONING)
+    go_clone.set()
+    assert _wait_phase("k", mj.SYNCING)
+    go_sync.set()
+
     assert _wait_ready("k")
     final = se.status("k")
+    assert final is not None
     assert final["interpreter"] == "/built/bin/python"
     assert final["path"] == str(tmp_path / "s")
     assert final["commit"] == "e" * 40

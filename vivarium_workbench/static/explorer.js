@@ -78,7 +78,7 @@
     // that publish.py pre-rendered. If those files are absent (older bundle), the
     // runs fetch resolves empty and we renderEmpty() gracefully.
     state.snapshot = !!opts.snapshot;
-    el.innerHTML = '<div class="explorer-loading">Loading runs…</div>';
+    el.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading runs…') : '<div class="explorer-loading">Loading runs…</div>';
     j(api("/runs")).then(function (d) {
       state.runs = (d && d.runs) || [];
       // snapshot bundles carry the snapshotted row indices per run; the step

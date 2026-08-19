@@ -173,7 +173,16 @@
       if (ws && ws.path) {
         fetch("/api/source/switch", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path: ws.path }) })
-          .then(function (r) { if (r.ok) location.reload(); else window.alert("Switch failed."); })
+          .then(function (r) {
+            if (r.ok) {
+              // Item 70 phase 3: flag the branded splash for the reload's
+              // first paint (index.html.j2's inline body script reads +
+              // clears this) — covers the boot gap a plain reload otherwise
+              // leaves blank while the SPA's own scripts load.
+              try { sessionStorage.setItem("viv-switch-splash", "1"); } catch (e) { /* private mode */ }
+              location.reload();
+            } else window.alert("Switch failed.");
+          })
           .catch(function () { window.alert("Switch failed (network)."); });
       } else if (ws && ws.name) {
         window.location.assign("/?workspace=" + encodeURIComponent(ws.name));
