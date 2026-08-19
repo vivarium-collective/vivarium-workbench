@@ -123,13 +123,19 @@ def test_showworkspace_activates_investigations_page():
 # Lives in the legacy _openInvestigation/#investigation-detail tabbed panel
 # (see test_showworkspace_renders_graph_not_legacy_icon_view above) — the
 # primary card/rail entry points route to _showInvestigationWorkspace instead,
-# which has no analyses-editing surface of its own. This panel stays reachable
-# via the "Begin Study" flow (walkthrough.js _submitBeginStudy-style handler
-# calls _openInvestigation(newName) right after creating an investigation) and
-# via every existing "re-fetch + re-render" call after a group/composite/
-# analyses mutation — narrower than the primary nav, but real, not dead code
-# like the study-level _saveStudyAnalyses/#study-analyses-list pair (see
-# test_compose_unification.py::test_analyses_section_present_and_reachable_on_the_study_page).
+# which has no analyses-editing surface of its own, and (live-verified,
+# corrected from an earlier assumption here) neither does the "Begin Study"
+# flow reach this panel: it creates the new studies/<auto>/spec.yaml shape via
+# /api/study-create-from-composite, so _openInvestigation 404s on it exactly
+# like it does for any other flat study (no investigation.yaml). This panel is
+# real for the workspace's grouped "investigations" only (real
+# investigation.yaml under the workspace.yaml layout: remap) — narrower than
+# the primary nav, but not the workspace's only reachable analyses surface
+# either: item 69 (#3) separately restored the study-level
+# _saveStudyAnalyses/#study-analyses-list pair (see
+# test_compose_unification.py::test_analyses_section_present_and_reachable_on_the_study_page
+# and test_study_overview_structure.py::test_analyses_box_restored_to_model_tab),
+# which is what actually covers flat studies.
 
 def test_analyses_field_is_a_multiselect_not_a_textarea():
     assert '<textarea id="inv-analyses-list"' not in JS
