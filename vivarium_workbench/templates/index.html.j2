@@ -691,6 +691,30 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 :root[data-theme="dark"] .viv-bs-busy { color: #93c5fd; background: rgba(59,130,246,0.16); border-color: rgba(59,130,246,0.4); }
 </style>
 </head><body>
+<script>
+(function () {
+  // Item 70 phase 3: a local in-place workspace switch (workspace-picker.js)
+  // sets this flag right before location.reload() — show the branded splash
+  // immediately, before any other script loads, so the reload's boot gap
+  // never shows a blank/unstyled page. progress-track.css (which styles
+  // .viv-switch-splash) is already linked above, so it's available by the
+  // time body starts rendering. Dismissed by walkthrough.js, not a timer.
+  try {
+    if (!sessionStorage.getItem('viv-switch-splash')) return;
+    sessionStorage.removeItem('viv-switch-splash');
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var el = document.createElement('div');
+    el.className = 'viv-switch-splash';
+    el.id = 'viv-switch-splash';
+    var img = document.createElement('img');
+    img.className = 'viv-switch-splash-logo';
+    img.alt = 'Vivarium';
+    img.src = 'assets/vivarium-logo' + (dark ? '-dark' : '') + '.png{% if asset_version %}?v={{ asset_version }}{% endif %}';
+    el.appendChild(img);
+    document.body.appendChild(el);
+  } catch (e) { /* sessionStorage unavailable (private mode) — skip the splash */ }
+})();
+</script>
 
 <div class="viv-layout">
 

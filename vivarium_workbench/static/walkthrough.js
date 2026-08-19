@@ -6874,7 +6874,20 @@
     // no duplicate call needed here.
 
     // Populate the Investigations rail section (V4).
-    _vivRefreshInvestigationsRail();
+    var _railReady = _vivRefreshInvestigationsRail();
+
+    // Item 70 phase 3: dismiss the post-switch splash (index.html.j2's
+    // inline body script), if it was shown, the instant the rail's real
+    // fetch resolves — the first real post-reload content, not a fabricated
+    // timer. No-op on a normal load (the splash element never exists).
+    var _splash = document.getElementById('viv-switch-splash');
+    if (_splash) {
+      (function (splash, ready) {
+        var dismiss = function () { if (splash.parentNode) splash.parentNode.removeChild(splash); };
+        if (ready && typeof ready.then === 'function') ready.then(dismiss).catch(dismiss);
+        else dismiss();
+      })(_splash, _railReady);
+    }
 
     // (The GitHub Branches tab has been removed.)
   });
@@ -7007,7 +7020,10 @@
           : fetch('/api/investigation-summaries').then(function(r) { return r.json(); })
         ).catch(function() { return {investigations: []}; })
       : Promise.resolve({investigations: []});
-    Promise.all([p1, p2]).then(function(arr) {
+    // Returned (item 70 phase 3): this is the first real post-page-load
+    // fetch to settle, so the post-switch splash dismiss hook (below, in the
+    // DOMContentLoaded handler) can wait on it instead of a timer.
+    return Promise.all([p1, p2]).then(function(arr) {
       window._investigations = arr[0].investigations || [];
       window._isetIndex      = arr[1].investigations || [];
       if (hasIsetUI && window._isetIndex.length) {
