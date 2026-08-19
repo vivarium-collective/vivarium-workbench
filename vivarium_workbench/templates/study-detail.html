@@ -781,11 +781,10 @@
      study by name, flat studies/<name>/ preferred over legacy
      investigations/<name>/, so no backend change was needed here). #}
   <div class="overview-section" id="study-analyses-section">
-    <h3>Analyses to run <span class="muted" style="font-size:0.85em;font-weight:normal">— select from the workspace's <code>ANALYSIS_REGISTRY</code> (hold ⌘/Ctrl to select multiple)</span></h3>
-    <select id="study-analyses-list" multiple size="6" data-study="{{ study.name }}"
-            style="width:100%;font-family:monospace;font-size:0.9em;padding:4px;border:1px solid #cbd5e1;border-radius:3px">
-      <option value="" disabled>Loading analyses…</option>
-    </select>
+    <h3>Analyses to run <span class="muted" style="font-size:0.85em;font-weight:normal">— which of the workspace's <code>ANALYSIS_REGISTRY</code> entries to compute on dispatch</span></h3>
+    <div id="study-analyses-list" data-study="{{ study.name }}">
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading analyses…</span></div>
+    </div>
     <div style="margin-top:8px">
       <button class="action-btn" type="button" onclick="_saveStudyAnalyses()">Save analyses</button>
       <span id="study-analyses-status" style="margin-left:8px;font-size:0.9em;color:#555"></span>
@@ -2305,6 +2304,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
      Model card stays stuck on "Resolving composite…". -->
 <script src="/loom-embed.js"></script>
 <script src="/composite-card.js"></script>
+<script src="/checklist-select.js"></script>
 <script src="/study-detail.js"></script>
 <script>
 // Re-assert the refresh-aware seed handlers AFTER study-detail.js (which

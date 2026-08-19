@@ -137,9 +137,13 @@ def test_showworkspace_activates_investigations_page():
 # and test_study_overview_structure.py::test_analyses_box_restored_to_model_tab),
 # which is what actually covers flat studies.
 
-def test_analyses_field_is_a_multiselect_not_a_textarea():
+def test_analyses_field_is_a_checklist_not_a_textarea():
+    # Real UX testing found the original <select multiple> unusable
+    # (undiscoverable Cmd/Ctrl+click, no selected-state feedback) — replaced
+    # with checklist-select.js's filterable checkbox list, a plain mount div.
     assert '<textarea id="inv-analyses-list"' not in JS
-    assert '<select id="inv-analyses-list" multiple' in JS
+    assert '<select id="inv-analyses-list"' not in JS
+    assert 'id="inv-analyses-list"' in JS
 
 
 def test_load_inv_analyses_populates_from_visualization_classes():
@@ -150,11 +154,13 @@ def test_load_inv_analyses_populates_from_visualization_classes():
     # honest-degrade: a name already in spec.yaml must survive even if the
     # currently-loaded registry doesn't have it (same convention as the
     # baseline-composite select from phase 1) — never silently drop it.
-    assert "not in registry" in block
+    assert "flagged: true" in block
+    assert "ChecklistSelect.render" in block
 
 
-def test_save_analyses_reads_selected_options_not_value():
+def test_save_analyses_reads_checklist_selection():
     i = JS.index("function _saveAnalyses")
     block = JS[i:i + 700]
-    assert "o.selected" in block
+    assert "ChecklistSelect.selected" in block
     assert ".value.split" not in block   # the old free-text parsing is gone
+    assert "o.selected" not in block     # the old <select>-options reading is gone

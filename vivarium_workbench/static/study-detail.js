@@ -1913,8 +1913,8 @@
   // /api/study/{slug} payload (extra="allow" pass-through of spec.yaml), so
   // analyses[] is read directly — no raw-file scrape needed here.
   function _loadStudyAnalyses() {
-    var sel = document.getElementById('study-analyses-list');
-    if (!sel) return;
+    var mount = document.getElementById('study-analyses-list');
+    if (!mount || !window.ChecklistSelect) return;
     var declared = ((window._study || {}).analyses || [])
       .map(function (a) { return a && a.name; }).filter(Boolean);
     fetch('/api/visualization-classes').then(function (r) { return r.json(); })
@@ -1922,26 +1922,27 @@
       .catch(function () { return []; })
       .then(function (classes) {
         var known = {};
-        var opts = classes.map(function (c) {
+        var items = classes.map(function (c) {
           known[c.name] = true;
-          return '<option value="' + _esc(c.name) + '"' + (declared.indexOf(c.name) >= 0 ? ' selected' : '') +
-            (c.doc ? ' title="' + _esc(c.doc) + '"' : '') + '>' + _esc(c.name) + '</option>';
+          return { value: c.name, label: c.name, selected: declared.indexOf(c.name) >= 0, title: c.doc };
         });
         declared.forEach(function (n) {
-          if (!known[n]) opts.push('<option value="' + _esc(n) + '" selected>' + _esc(n) + ' (not in registry)</option>');
+          if (!known[n]) items.push({ value: n, label: n, selected: true, flagged: true });
         });
-        sel.innerHTML = opts.length ? opts.join('') :
-          '<option value="" disabled>No analyses registered — install a workspace that provides ANALYSIS_REGISTRY entries</option>';
+        window.ChecklistSelect.render(mount, {
+          items: items,
+          filterPlaceholder: 'Filter analyses…',
+          emptyText: 'No analyses registered — install a workspace that provides ANALYSIS_REGISTRY entries.',
+        });
       });
   }
   window._loadStudyAnalyses = _loadStudyAnalyses;
 
   function _saveStudyAnalyses() {
-    var el = document.getElementById('study-analyses-list');
+    var mount = document.getElementById('study-analyses-list');
     var status = document.getElementById('study-analyses-status');
-    if (!el) return;
-    var names = Array.prototype.filter.call(el.options, function (o) { return o.selected && o.value; })
-      .map(function (o) { return o.value; });
+    if (!mount || !window.ChecklistSelect) return;
+    var names = window.ChecklistSelect.selected(mount);
     var analyses = names.map(function (n) { return {name: n, params: {}}; });
     if (status) status.textContent = 'Saving…';
     api('POST', '/api/study-set-analyses', {investigation: studyName(), analyses: analyses})

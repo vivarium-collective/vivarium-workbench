@@ -245,16 +245,19 @@ def test_no_baseline_renders_no_model_section(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# item 69 (#3, folded in) — analyses-to-run select, wired into study-detail.js's
+# item 69 (#3, folded in) — analyses-to-run checklist, wired into study-detail.js's
 # previously-dead _saveStudyAnalyses. Markup lives next to model-composite-cards,
 # independent of `_has_build` for the same reason that mount is (any runnable
-# study can declare analyses regardless of build-shaped fields).
+# study can declare analyses regardless of build-shaped fields). Rendered by
+# checklist-select.js (filterable checkbox list, not a native <select multiple>
+# — real UX testing found that unusable) into a plain mount div.
 # ---------------------------------------------------------------------------
 
-def test_analyses_field_is_a_multiselect_not_a_textarea(tmp_path):
+def test_analyses_field_is_a_checklist_not_a_textarea(tmp_path):
     html = _render(tmp_path, "analyses-study", _V4_SPEC)
     panel = _panel_compose(html)
-    assert '<select id="study-analyses-list" multiple' in panel
+    assert 'id="study-analyses-list"' in panel
+    assert '<select id="study-analyses-list"' not in panel
     assert '<textarea id="study-analyses-list"' not in panel
     assert 'onclick="_saveStudyAnalyses()"' in panel
     assert 'id="study-analyses-status"' in panel
@@ -267,4 +270,4 @@ def test_analyses_section_renders_even_with_no_baseline(tmp_path):
     html = _render(tmp_path, "no-model-study", {})
     panel = _panel_compose(html)
     assert 'id="study-analyses-section"' in panel
-    assert '<select id="study-analyses-list" multiple' in panel
+    assert 'id="study-analyses-list"' in panel

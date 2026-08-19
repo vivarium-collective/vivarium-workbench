@@ -92,12 +92,13 @@ def test_analyses_section_present_and_reachable_on_the_study_page():
     # _saveStudyAnalyses/the backend endpoint were both left fully intact,
     # not cleaned up) — leaving this test's own name ("present_and_reachable")
     # asserting the opposite of what it says. item 69 (#3) restores it per
-    # this test's original intent: a real select (not the old free-text
-    # textarea, matching this session's dropdown-conversion theme), reusing
-    # the same live /api/visualization-classes registry + honest-degrade
-    # convention as the sibling per-investigation fix.
+    # this test's original intent, reusing the same live
+    # /api/visualization-classes registry + honest-degrade convention as the
+    # sibling per-investigation fix. Rendered via checklist-select.js's
+    # filterable checkbox list (not a native <select multiple> — real
+    # visual/UX testing found that unusable: undiscoverable Cmd/Ctrl+click,
+    # no selected-state feedback) — this is a mount div, populated client-side.
     assert 'id="study-analyses-list"' in HTML
-    assert 'multiple' in HTML.split('id="study-analyses-list"', 1)[1][:40]
 
 
 def test_save_study_analyses_posts_to_the_working_endpoint():
