@@ -161,5 +161,33 @@
 :root[data-theme="dark"] .ptrack-label-failed{ color:#fca5a5; }
 :root[data-theme="dark"] .ptrack-meta{ color:var(--text-muted); }
 :root[data-theme="dark"] .ptrack-pct{ color:#93c5fd; }
+
+/* Local in-place workspace switch (Item 70 phase 3) — a full-page branded
+ * splash covering the post-reload boot gap. No real intermediate stages
+ * exist for an in-place switch (session_env.prepare returns ready
+ * immediately) — deliberately NOT a ProgressTrack stages view, just a
+ * subtle-pulse logo. Dismissed by walkthrough.js the instant the rail's
+ * first real post-reload fetch resolves, not a timer. */
+.viv-switch-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+.viv-switch-splash-logo {
+  width: 72px;
+  height: auto;
+  animation: viv-switch-pulse 1.6s ease-in-out infinite;
+}
+@keyframes viv-switch-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.97); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .viv-switch-splash-logo { animation: none; opacity: 0.9; }
+}
 :root[data-theme="dark"] .ptrack-steptext{ color:var(--text-muted); }
 :root[data-theme="dark"] .ptrack-detail{ color:var(--text-muted); }
