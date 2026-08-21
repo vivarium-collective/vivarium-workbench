@@ -609,6 +609,21 @@ def create_app() -> FastAPI:
         test harness) resolves to the process default workspace exactly as before —
         the header is preferred only when present. The id is *routing*, not auth — the
         existing CSRF/origin guard is untouched.
+
+        **Mint-if-absent only — never refresh a cookie that already exists** (item 78,
+        Arnab's report: switching to a remote build silently landed back on the local
+        workspace). An earlier version of this middleware re-stamped the cookie
+        whenever it disagreed with the header, on *every* request. Because the cookie
+        is a single browser-wide value (docs/session-binding.md §3 — this is exactly
+        why session identity moved to a per-tab header in the first place), that
+        turned it into a global "last writer wins" slot: ANY tab's incidental
+        header-carrying ``fetch()`` (a poll, a picker's list refresh) re-pointed the
+        shared cookie at ITS OWN session, silently stealing the next plain navigation
+        — reload, ``window.open`` first paint, a typed URL — in every OTHER tab. A
+        tab that explicitly switches workspace still gets the cookie aligned to it
+        immediately, via that endpoint's own ``response.set_cookie`` (see
+        ``source_switch`` / ``source_switch_build`` below) — scoped to that one
+        response, not a side effect of unrelated traffic.
         """
         from vivarium_workbench.lib import _root, workspace_context
         header_key = request.headers.get(session_registry.SESSION_HEADER)
@@ -629,16 +644,14 @@ def create_app() -> FastAPI:
         # capture it (whether it was minted now or carried only by the cookie).
         if not header_key:
             response.headers[session_registry.SESSION_HEADER] = session_key
-        # Refresh (not just mint-if-absent): a browser that already carries a
-        # STALE cookie from an earlier, different session (e.g. an unbound
-        # default-workspace session set before this tab bound to a remote
-        # build) would otherwise never converge — every fetch() call keeps
-        # correctly using the header, but any plain navigation (a link, an
-        # iframe src, a typed URL) has no header and falls back to that
-        # never-updated cookie, silently resolving to the wrong workspace.
-        # Re-stamping whenever the cookie disagrees with the effective key
-        # keeps the cookie following the header on every request that has one.
-        if cookie_key != session_key:
+        # Mint-if-absent ONLY (item 78) — never overwrite an existing cookie here.
+        # A cookie is browser-wide, not per-tab, so refreshing it to match whichever
+        # request's header last showed up would clobber every OTHER open tab's
+        # pending plain navigation (see the docstring above). A cookie-less client
+        # (first visit, curl, CLI) still gets one minted so it keeps resolving to the
+        # process default exactly as before; an explicit workspace switch aligns the
+        # cookie itself, scoped to its own response (source_switch / source_switch_build).
+        if not cookie_key:
             response.set_cookie(
                 session_registry.SESSION_COOKIE,
                 session_key,
@@ -6018,6 +6031,7 @@ def create_app() -> FastAPI:
     def source_switch_build(
         req: SwitchBuildRequest,
         request: Request,
+        response: Response,
     ) -> Union[SourceSwitchResponse, JSONResponse]:
         """Materialize a remote build's workspace (cached) and re-point to it.
 
@@ -6042,6 +6056,14 @@ def create_app() -> FastAPI:
         ``session_registry.rebind``. ``session_key`` is resolved BEFORE the call so
         ``switch_build`` can materialize this session's own clone rather than the
         shared base every session used to bind to directly.
+
+        **Aligns the cookie on this response (item 78)** — same as ``source_switch``
+        and for the same reason: the client's own ``window.location.reload()`` right
+        after this call carries no ``X-VW-Session`` header (a plain navigation, not a
+        ``fetch()``), so it resolves via the cookie. Scoped to *this* response only —
+        the middleware no longer refreshes the cookie on unrelated traffic (see
+        ``_session_workspace_mw``), so without this the reload would keep rendering
+        whatever workspace the cookie happened to already be on.
         """
         session_key = _session_key_of(request)
         body, status = _source_build_views.switch_build(
@@ -6051,6 +6073,11 @@ def create_app() -> FastAPI:
         source_path = (body.get("source") or {}).get("path")
         if session_key and source_path:
             session_registry.rebind(session_key, source_path)
+            response.set_cookie(
+                session_registry.SESSION_COOKIE, session_key,
+                httponly=True, samesite="lax",
+                secure=(request.url.scheme == "https"), path="/",
+            )
             # managed=True (item 63): the materialized build is a bare tarball
             # extraction with no `.venv` of its own — the in-place fast path
             # left `env_resolver.resolve_interpreter` falling through to
