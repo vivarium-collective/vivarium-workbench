@@ -750,6 +750,30 @@
     <p class="muted" style="font-size:0.85em;margin:0">Loading composite card(s)…</p>
   </div>
 
+  {# Analyses to run at dispatch time — which post-run analyses this study's
+     dispatch should trigger, translated into v2ecoli's analysis_options
+     (lib.study_run_post.build_analysis_options). Independent of `_has_build`,
+     same reasoning as model-composite-cards above: any runnable study can
+     declare analyses regardless of whether it has build-shaped fields.
+     Populated by _loadStudyAnalyses() (study-detail.js) from the live
+     /api/visualization-classes registry, preserving any name already declared
+     in this study's own spec even if the current registry doesn't have it —
+     same honest-degrade convention as the baseline-composite select above.
+     Saved via _saveStudyAnalyses(), which posts to /api/study-set-analyses
+     (metadata_mutations.set_investigation_analyses — already resolves this
+     study by name, flat studies/<name>/ preferred over legacy
+     investigations/<name>/, so no backend change was needed here). #}
+  <div class="overview-section" id="study-analyses-section">
+    <h3>Analyses to run <span class="muted" style="font-size:0.85em;font-weight:normal">— which of the workspace's <code>ANALYSIS_REGISTRY</code> entries to compute on dispatch</span></h3>
+    <div id="study-analyses-list" data-study="{{ study.name }}">
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading analyses…</span></div>
+    </div>
+    <div style="margin-top:8px">
+      <button class="action-btn" type="button" onclick="_saveStudyAnalyses()">Save analyses</button>
+      <span id="study-analyses-status" style="margin-left:8px;font-size:0.9em;color:#555"></span>
+    </div>
+  </div>
+
   {# Build-block visibility mirrors the pre-merge panel-build guard exactly (model_change/impl_reqs/conditions/baseline) so non-v3 studies keep their Model + Conditions sections. #}
   {% set _has_build = study.model_change or study.implementation_requirements or study.conditions or study.baseline %}
   {% if _has_build %}
@@ -785,9 +809,17 @@
          (_submitBaselineAdd) was removed from this template, leaving its JS
          handler and the /api/study-baseline-add /-remove endpoints orphaned. #}
       <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-        <input type="text" class="baseline-composite-input" data-baseline-name="{{ b.name or 'baseline' }}"
-               value="{{ b.composite or '' }}" placeholder="pkg.composites.name"
-               style="flex:1;min-width:200px;font-family:monospace;font-size:0.82em;padding:3px 6px" />
+        {# Populated from the live composite registry by
+           _populateBaselineCompositeSelects() (study-detail.js) once
+           DataSource.loadComposites() resolves — this initial single option
+           (the currently-declared ref, resolved or not) is just the
+           pre-JS/first-paint state so the field is never empty. #}
+        <select class="baseline-composite-input" data-baseline-name="{{ b.name or 'baseline' }}"
+                data-current="{{ b.composite or '' }}"
+                style="flex:1;min-width:200px;font-family:monospace;font-size:0.82em;padding:3px 6px">
+          {% if b.composite %}<option value="{{ b.composite }}" selected>{{ b.composite }}</option>
+          {% else %}<option value="">— select a composite —</option>{% endif %}
+        </select>
         <button type="button" class="action-btn baseline-composite-set" style="font-size:0.8em"
                 data-baseline-name="{{ b.name or 'baseline' }}">Set composite</button>
       </div>
@@ -951,6 +983,17 @@
             <td>{{ e.type or '' }}</td>
             <td><code>{{ e.default }}</code></td>
             <td>
+              {% if e.options %}
+              {# A declared finite value set — select from it rather than typing
+                 a value that has to exactly match one of e.options from memory. #}
+              <select class="cond-ei-input"
+                      style="width:100%;padding:3px 6px;border:1px solid #cbd5e1;border-radius:3px;font:inherit">
+                {% if e.current is none or e.current == '' %}<option value="" selected disabled>(awaiting expert)</option>{% endif %}
+                {% for opt in e.options %}
+                <option value="{{ opt }}" {% if e.current is not none and e.current == opt %}selected{% endif %}>{{ opt }}</option>
+                {% endfor %}
+              </select>
+              {% else %}
               <input class="cond-ei-input"
                      type="{% if e.type == 'number' or e.type == 'integer' %}number{% else %}text{% endif %}"
                      value="{% if e.current is none %}{% else %}{{ e.current }}{% endif %}"
@@ -958,6 +1001,7 @@
                      {% if e.range and e.range[0] is defined %}min="{{ e.range[0] }}" max="{{ e.range[1] }}"{% endif %}
                      step="{{ _step }}"
                      style="width:100%;padding:3px 6px;border:1px solid #cbd5e1;border-radius:3px;font:inherit">
+              {% endif %}
               {# Fable #14 — reuse the SAME required-before-run gate signal
                  the header badge above is computed from, inline per-row. #}
               {% if e.gate == 'required-before-run' and (e.current is none or e.current == '') %}
@@ -2243,6 +2287,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
      Model card stays stuck on "Resolving composite…". -->
 <script src="/loom-embed.js"></script>
 <script src="/composite-card.js"></script>
+<script src="/checklist-select.js"></script>
 <script src="/study-detail.js"></script>
 <script>
 // Re-assert the refresh-aware seed handlers AFTER study-detail.js (which

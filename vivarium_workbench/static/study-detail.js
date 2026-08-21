@@ -1487,11 +1487,47 @@
   // which despite its name resolves any study by name via study_dir() — flat
   // studies/<name>/ preferred over legacy investigations/<name>/, so this works
   // for an ungrouped study exactly like a grouped one).
+  //
+  // item 69 (#3, folded in) — populate #study-analyses-list from the live
+  // /api/visualization-classes registry (filtered to kind === 'analysis'),
+  // preserving any name already declared in window._study.analyses[].name
+  // even if the current registry doesn't have it — same honest-degrade
+  // convention as _populateBaselineCompositeSelects above, and the identical
+  // fix item 69 phase 2 made for the legacy per-investigation panel
+  // (walkthrough.js _loadInvAnalyses). window._study is the parsed
+  // /api/study/{slug} payload (extra="allow" pass-through of spec.yaml), so
+  // analyses[] is read directly — no raw-file scrape needed here.
+  function _loadStudyAnalyses() {
+    var mount = document.getElementById('study-analyses-list');
+    if (!mount || !window.ChecklistSelect) return;
+    var declared = ((window._study || {}).analyses || [])
+      .map(function (a) { return a && a.name; }).filter(Boolean);
+    fetch('/api/visualization-classes').then(function (r) { return r.json(); })
+      .then(function (data) { return (data && data.classes || []).filter(function (c) { return c.kind === 'analysis'; }); })
+      .catch(function () { return []; })
+      .then(function (classes) {
+        var known = {};
+        var items = classes.map(function (c) {
+          known[c.name] = true;
+          return { value: c.name, label: c.name, selected: declared.indexOf(c.name) >= 0, title: c.doc };
+        });
+        declared.forEach(function (n) {
+          if (!known[n]) items.push({ value: n, label: n, selected: true, flagged: true });
+        });
+        window.ChecklistSelect.render(mount, {
+          items: items,
+          filterPlaceholder: 'Filter analyses…',
+          emptyText: 'No analyses registered — install a workspace that provides ANALYSIS_REGISTRY entries.',
+        });
+      });
+  }
+  window._loadStudyAnalyses = _loadStudyAnalyses;
+
   function _saveStudyAnalyses() {
-    var el = document.getElementById('study-analyses-list');
+    var mount = document.getElementById('study-analyses-list');
     var status = document.getElementById('study-analyses-status');
-    if (!el) return;
-    var names = el.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!mount || !window.ChecklistSelect) return;
+    var names = window.ChecklistSelect.selected(mount);
     var analyses = names.map(function (n) { return {name: n, params: {}}; });
     if (status) status.textContent = 'Saving…';
     api('POST', '/api/study-set-analyses', {investigation: studyName(), analyses: analyses})
@@ -3333,6 +3369,8 @@
     _renderFeedbackTrackedPanel();
     _renderReadinessPanel();
     _populateConclusionVerdictBadges();
+    _populateBaselineCompositeSelects();
+    _loadStudyAnalyses();
     // Open the Overview tab on load — unless a ?tab=<kind> deep-link asks
     // for a specific tab. Needs-attention items link here with
     // ?tab=conclusions so a click lands on the verdict that triggered the alert.
@@ -3342,6 +3380,32 @@
       if (_q && document.querySelector('.study-pillar[data-kind="' + _q + '"]')) _tab = _q;
     } catch (_e) { /* no URLSearchParams — keep overview */ }
     _setStudyTab(_tab);
+  }
+
+  // ── item 69 — baseline composite select: populate from the live registry,
+  //    preserving each row's currently-declared composite as the selected
+  //    option (including a ref that doesn't resolve — never silently drop the
+  //    user's declared value, same honest-degrade approach as the composite
+  //    explorer's own "not found in registry" handling). ────────────────────
+  function _populateBaselineCompositeSelects() {
+    var selects = document.querySelectorAll('select.baseline-composite-input');
+    if (!selects.length) return;
+    if (!window.DataSource) return;
+    window.DataSource.loadComposites().then(function (data) {
+      var composites = (data && data.composites) || [];
+      selects.forEach(function (sel) {
+        var current = sel.getAttribute('data-current') || '';
+        var known = composites.some(function (c) { return c.id === current; });
+        var opts = '<option value="">— select a composite —</option>';
+        if (current && !known) {
+          opts += '<option value="' + _esc(current) + '" selected>' + _esc(current) + ' (not in registry)</option>';
+        }
+        opts += composites.map(function (c) {
+          return '<option value="' + _esc(c.id) + '"' + (c.id === current ? ' selected' : '') + '>' + _esc(c.id) + '</option>';
+        }).join('');
+        sel.innerHTML = opts;
+      });
+    }).catch(function () { /* leave the pre-JS single-option selects as-is on network error */ });
   }
 
   // ── C2 — conclusion verdicts: read precomputed block from window._study.derived ─
