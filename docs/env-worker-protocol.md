@@ -47,7 +47,7 @@ local), never worker calls — see §12.
 - The HTTP process imports **no** workspace Python; every environment fact comes
   through this protocol.
 - The **message schema is the contract**; the transport is an adapter. The same
-  messages ride a local socket (local adapter) or HTTP-to-sms-api (cloud
+  messages ride a local socket (local adapter) or HTTP-to-viva-api (cloud
   adapter) — so `EnvironmentResolver`'s local→cloud swap is a transport change,
   not a re-design.
 - A broken workspace (bad `build_core`, a generator that raises or hangs) is a
@@ -95,7 +95,7 @@ question owned by those packages.
  HTTP process (orchestration, no workspace imports)
    └─ EnvironmentResolver (port)
         ├─ LocalWorkerTransport ── socketpair fd ──▶ env worker  (<venv>/bin/python)
-        └─ SmsApiTransport ─────── HTTPS ──────────▶ sms-api ▶ container   (Phase 3)
+        └─ VivaApiTransport ─────── HTTPS ──────────▶ viva-api ▶ container   (Phase 3)
                     │
              same JSON-RPC messages (§6), same method catalog (§11)
 ```
@@ -107,11 +107,11 @@ The **message layer** (§§5–11) is fixed. Two **transports** implement it:
   (§5). No filesystem socket path, no port, no cleanup — the socket dies with the
   process pair.
 - **Cloud (Phase 3):** the same request/response objects tunneled as HTTPS
-  request bodies to an sms-api endpoint backed by the `(repo, commit)` image. The
+  request bodies to a viva-api endpoint backed by the `(repo, commit)` image. The
   method catalog is identical; only framing/addressing differ.
 
 Keeping the contract at the message layer is the whole point — it's what makes
-"local venv today, sms-api image later" one adapter swap (§2A.7).
+"local venv today, viva-api image later" one adapter swap (§2A.7).
 
 ## 4. Worker code provenance — shipped by the workbench, run by the venv
 
@@ -369,17 +369,17 @@ added, it re-materializes, it does not "reload."
 `initialize` returns `protocol_version` (semver). The workbench refuses a worker
 whose **major** it doesn't speak. For the local adapter worker code ships with
 the workbench, so this is always compatible; it earns its keep for the **cloud**
-adapter, where sms-api's worker may be a different build. New methods / optional
+adapter, where viva-api's worker may be a different build. New methods / optional
 params are **minor** bumps; a removed/changed method is **major**.
 
 ## 15. Security
 
 Local: `socketpair` is same-process-tree, no network surface. The worker
 executes the user's own workspace code (`build_core`, generators) — no new trust
-boundary is crossed locally; it's the user's own environment. Cloud: sms-api
+boundary is crossed locally; it's the user's own environment. Cloud: viva-api
 already sandboxes workspace code for runs; the query worker in the pod/container
 must inherit the **same** sandbox (it runs the same arbitrary workspace Python).
-Flag for the sms-api boundary owners when the cloud adapter lands.
+Flag for the viva-api boundary owners when the cloud adapter lands.
 
 ## 16. A worked exchange
 
@@ -457,6 +457,6 @@ unbounded, one worker persists); a shared pod sets `K` from its memory budget an
   inheritance, SIGKILL-to-restart) is the OS-touching part — it wants a test lane
   on each, not just the Ubuntu CI runner. Given macOS is a day-one demo host, a
   macOS transport smoke test belongs in the harness from the start.
-- **Cloud transport specifics** (Phase 3): the sms-api endpoint shape, auth, and
+- **Cloud transport specifics** (Phase 3): the viva-api endpoint shape, auth, and
   whether the container is one-per-session (warm) or request-routed — parked
   until the cloud adapter.

@@ -44,14 +44,14 @@ build workspace could diverge and cause a false 409 on a subsequent sync.
 ## Push — promote back (already built)
 
 1. Extend the synced workspace; commit; `git push` your branch.
-2. `POST /api/source/build-remote {repo, branch}` → sms-api builds `repo@commit`,
+2. `POST /api/source/build-remote {repo, branch}` → viva-api builds `repo@commit`,
    returns `simulator_id` + `commit`.
 3. `POST /api/source/switch-build {simulator_id}` → the remote dashboard
    materializes that build and switches to it.
 
 ## Symmetry
 
-`sync-to-local` is the inverse of `build-via-sms-api`: the former materializes a
+`sync-to-local` is the inverse of `build-via-viva-api`: the former materializes a
 workspace on your laptop from `repo@commit`; the latter materializes a build on
 the remote from `repo@commit`. Both consume the same manifest — `repo` +
 `branch` feed `build-remote`, `commit` + `lockfile` guarantee local fidelity.

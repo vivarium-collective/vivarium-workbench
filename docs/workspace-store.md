@@ -83,7 +83,7 @@ git objects (§6) and — read-only — the venv (§8).
 |---|---|---|
 | **managed-local** | git worktree off a per-repo **bare mirror**, under `~/.vivarium-workbench/workspaces/<id>` | Phase 1 |
 | **in-place-local** | the `--workspace` path itself; no clone, edit in place (§7) | Phase 1 |
-| **cloud** | a working tree on the **sms-api PVC**; `persist` via its artifact store | Phase 3 (§11) |
+| **cloud** | a working tree on the **viva-api PVC**; `persist` via its artifact store | Phase 3 (§11) |
 
 ## 6. Managed-local mechanics — one bare mirror, cheap worktrees
 
@@ -177,13 +177,13 @@ commit-all (model (a)) can't sweep in `pyproject.toml`. It **delegates the scien
 snapshot to `ScientificContent.snapshot()`** (the write core, decided (a)-until-
 Phase-3, §5A) and adds the provenance/artifact framing (parent = `source_version`,
 opaque `artifact_version` out). Local: a commit on the bare mirror → a new
-`version_id`. Cloud: a push to the sms-api artifact store (§11). Full design lands
+`version_id`. Cloud: a push to the viva-api artifact store (§11). Full design lands
 with the ScientificContent write core + Phase 3.
 
 ## 11. Cloud adapter — sketch (Phase 3)
 
-The working tree lives on the **sms-api persistent volume**; `materialize`
-checks out into a pod-mounted folder; `persist` writes to sms-api's artifact
+The working tree lives on the **viva-api persistent volume**; `materialize`
+checks out into a pod-mounted folder; `persist` writes to viva-api's artifact
 store. `EnvironmentResolver`'s cloud adapter supplies the environment as the
 `(repo, commit)` **image** instead of a venv (env-worker spec §3). Same
 `WorkspaceStore` interface; only the working-tree backing and `persist` target
