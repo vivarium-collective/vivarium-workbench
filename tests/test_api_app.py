@@ -87,17 +87,24 @@ def test_session_header_not_echoed_when_supplied(client):
     assert "x-vw-session" not in {k.lower() for k in r.headers.keys()}
 
 
-def test_stale_cookie_is_refreshed_to_match_header(client):
-    """A request carrying BOTH a header and a stale, different cookie must have
-    its cookie refreshed to the header's value — otherwise a later plain
-    navigation (no header, cookie-only, e.g. an iframe src or a typed URL)
-    would resolve to the stale session forever, even though every fetch()
-    call (which does carry the header) correctly used the new one."""
+def test_stale_cookie_is_not_refreshed_to_match_header(client):
+    """item 78 (Arnab's report): a request carrying BOTH a header and a
+    different, pre-existing cookie must NOT overwrite that cookie.
+
+    An earlier version of this middleware did overwrite it here — "refresh,
+    not just mint-if-absent" — reasoning that a plain navigation with no
+    header needs the cookie to track the header's session. That reasoning
+    only holds if the header-carrying request and the later plain navigation
+    are the SAME tab. They frequently aren't: the cookie is one browser-wide
+    value, so ANY tab's incidental fetch() (a poll, a picker's list refresh)
+    would silently repoint every OTHER open tab's next reload at its own
+    session — exactly the bug Arnab hit switching to a remote build. See
+    test_switching_tabs_does_not_steal_a_different_tabs_cookie below for the
+    full two-tab reproduction."""
     r = client.get("/health", headers={"X-VW-Session": "tab-fresh"},
                     cookies={"vw_session": "tab-stale"})
     assert r.status_code == 200
-    set_cookie = r.headers.get("set-cookie", "")
-    assert "vw_session=tab-fresh" in set_cookie
+    assert "set-cookie" not in {k.lower() for k in r.headers.keys()}
 
 
 def test_matching_cookie_is_not_reset(client):
@@ -107,6 +114,99 @@ def test_matching_cookie_is_not_reset(client):
                     cookies={"vw_session": "tab-same"})
     assert r.status_code == 200
     assert "set-cookie" not in {k.lower() for k in r.headers.keys()}
+
+
+def test_cookieless_first_visit_still_gets_a_cookie_minted(client):
+    """A brand-new, cookie-less client (no header either) still gets
+    ``vw_session`` minted — the one case mint-if-absent must still cover, so
+    a browser not yet running the fetch override (or a non-JS client relying
+    on the legacy cookie) keeps a session across requests."""
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert "vw_session=" in r.headers.get("set-cookie", "")
+
+
+def test_switching_tabs_does_not_steal_a_different_tabs_cookie(
+    client, tmp_path, monkeypatch
+):
+    """item 78 end-to-end regression: two tabs switch to two different local
+    workspaces; the first tab's incidental fetch (no switch involved, just an
+    ordinary GET carrying its own header — e.g. the workspace picker's list
+    refresh) must not steal the shared cookie away from the second tab.
+
+    Reproduces, at the HTTP layer, exactly what a live two-tab browser repro
+    showed against this branch before the fix: tab B switches workspace,
+    tab A's background fetch runs, and tab B's next plain (header-less)
+    navigation — which can only resolve via the cookie — silently rendered
+    tab A's workspace instead of its own."""
+    from viva_superpowers import workspace_catalog
+    from vivarium_workbench.lib import session_registry
+    session_registry.clear()
+
+    ws_a = tmp_path / "ws_a"; ws_a.mkdir()
+    (ws_a / "workspace.yaml").write_text("name: wa\n")
+    ws_b = tmp_path / "ws_b"; ws_b.mkdir()
+    (ws_b / "workspace.yaml").write_text("name: wb\n")
+    monkeypatch.setattr(
+        workspace_catalog, "list_workspaces",
+        lambda: [{"path": str(ws_a), "name": "wa"},
+                  {"path": str(ws_b), "name": "wb"}],
+    )
+
+    # Tab A switches to workspace A — its own cookie gets aligned to it.
+    r = client.post("/api/source/switch", json={"path": str(ws_a)},
+                     headers={"X-VW-Session": "tab-A"})
+    assert r.status_code == 200
+    assert "vw_session=tab-A" in r.headers.get("set-cookie", "")
+
+    # Tab B switches to workspace B — the (shared, browser-wide) cookie now
+    # tracks tab B, exactly as a real second tab's own switch would leave it.
+    r = client.post("/api/source/switch", json={"path": str(ws_b)},
+                     headers={"X-VW-Session": "tab-B"})
+    assert r.status_code == 200
+    assert "vw_session=tab-B" in r.headers.get("set-cookie", "")
+
+    # Tab A does something unrelated to switching — an ordinary fetch()
+    # carrying ITS OWN header (a poll, a list refresh). This must not touch
+    # the shared cookie at all.
+    r = client.get("/health", headers={"X-VW-Session": "tab-A"})
+    assert r.status_code == 200
+    assert "set-cookie" not in {k.lower() for k in r.headers.keys()}
+
+    # Tab B's own plain navigation (no header — a reload, a fresh window.open
+    # first paint, a typed URL) must still resolve to tab B's session, echoed
+    # back via X-VW-Session for a header-less request.
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.headers.get("X-VW-Session") == "tab-B"
+
+
+def test_switch_build_aligns_cookie_on_its_own_response(client, monkeypatch):
+    """item 78: /api/source/switch-build must align the cookie on ITS OWN
+    response, the same as /api/source/switch already does — this is what a
+    real browser's window.location.reload() (a plain navigation, no header)
+    depends on right after materializing a remote build. Bypasses the real
+    sms-api client via the same monkeypatch pattern other route tests use."""
+    from vivarium_workbench.lib import session_registry
+    session_registry.clear()
+
+    import vivarium_workbench.api.app as api_app
+    monkeypatch.setattr(
+        api_app._source_build_views, "switch_build",
+        lambda body, **kw: (
+            {"ok": True, "source": {"path": "/tmp/managed-build", "name": None}},
+            200,
+        ),
+    )
+    monkeypatch.setattr(
+        api_app.session_env, "prepare",
+        lambda *a, **kw: {"status": "ready"},
+    )
+
+    r = client.post("/api/source/switch-build", json={"simulator_id": 42},
+                     headers={"X-VW-Session": "tab-remote"})
+    assert r.status_code == 200
+    assert "vw_session=tab-remote" in r.headers.get("set-cookie", "")
 
 
 def test_session_header_takes_precedence_for_binding(client, tmp_path, monkeypatch):
