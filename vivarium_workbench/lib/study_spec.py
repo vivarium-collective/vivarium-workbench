@@ -41,6 +41,12 @@ import yaml
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib import study_derivations as _study_derivations
 
+# A real observable path's segments are plain identifiers (letters/digits/
+# underscores, e.g. "rRNA16S") — used by collect_study_observables to reject
+# a declared path/store_path authored as a whole expression instead of a bare
+# address (see that function's docstring).
+_OBSERVABLE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
 # Slug pattern shared by server.py and api/app.py (neither imports the other).
 # Study/investigation names are generated with underscores (e.g. derived from
 # composite names like ``monod_kinetics``), so the pattern allows ``_``
@@ -73,13 +79,32 @@ def collect_study_observables(spec: dict) -> list[str]:
     Paths come dot-joined ('agents.0.listeners.foo') or slash-joined
     ('agents/0/listeners/foo'); both normalise to slash-joined. Duplicates are
     dropped while preserving declaration order.
+
+    A declared ``path``/``store_path`` is occasionally authored as a whole
+    expression instead of a bare address — e.g. a ``kind: path`` measure
+    computing a ratio, ``"listeners.mass.protein_mass / listeners.mass.dry_mass"``,
+    when it should either be a single leaf path or use the sibling ``formula``
+    shape (as this same study's own ``doubling-time-in-band`` measure
+    correctly does) for a derived value. Blindly slash-joining such a string
+    silently produces a garbled, meaningless "observable" — confirmed live on
+    a real dispatch (item 80, 2026-08-21) where it corrupted the recorded
+    ``engine_process_reports``. Each ``/``-or-``.``-separated segment of a
+    real path is a plain identifier (letters/digits/underscores — including
+    real segments like ``rRNA16S``), so any segment containing whitespace or
+    an operator character reliably marks the whole value as not a bare path;
+    reject it (this function's own docstring already promises "tolerant"
+    best-effort handling — this is a stricter application of that same idea:
+    silently skip what cannot be a real path, rather than pass through
+    something that will not resolve to any real data).
     """
     def _norm(p: str) -> str | None:
         if not isinstance(p, str) or not p.strip():
             return None
         # Accept either separator; output is slash-joined.
         parts = [seg for seg in p.replace(".", "/").split("/") if seg]
-        return "/".join(parts) if parts else None
+        if not parts or not all(_OBSERVABLE_SEGMENT_RE.match(seg) for seg in parts):
+            return None
+        return "/".join(parts)
 
     out: list[str] = []
     seen: set[str] = set()

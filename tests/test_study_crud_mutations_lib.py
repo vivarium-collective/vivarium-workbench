@@ -263,6 +263,79 @@ class TestStudyBaselineRemove:
         assert "empty" in resp["error"].lower()
 
 
+@pytest.fixture
+def ws_v4(tmp_path):
+    """Workspace with one v4 conditions-based study (item 80/83 regression):
+    baseline is only ever defined under conditions.baseline — never a real,
+    on-disk baseline[] key. The frontend/API response sees a baseline[] entry
+    only because investigations._project_v4_redesign_to_legacy_view
+    synthesizes it in-memory, purely for display; it is never persisted."""
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    (ws_root / "workspace.yaml").write_text(
+        'schema_version: 2\nname: ws\ncreated: "2026-05-14"\n'
+        'plugin_version: 0.6.1\npackage_path: pkg\n'
+    )
+    sd = ws_root / "studies" / "s1"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 4, "name": "s1",
+        "conditions": {
+            "baseline": {
+                "composite": "pkg.composites.foo",
+                "params": {"n_seeds": 10, "n_generations": 5},
+            },
+        },
+        "runs": [], "visualizations": [], "interventions": [],
+        "comparisons": [],
+    }))
+    return ws_root
+
+
+class TestV4BaselineGuard:
+    """Regression coverage for item 80/83's live-found bug: editing a v4
+    conditions-based study's baseline params via the add-then-remove save
+    flow silently created a disconnected, orphaned baseline[] entry (the
+    add succeeded against an empty on-disk list; the follow-up remove then
+    404'd trying to delete an entry — the one the frontend displayed — that
+    had only ever existed as a synthesized, never-persisted view). Both
+    halves must now refuse cleanly instead."""
+
+    def test_add_refuses_on_unmaterialized_v4_baseline(self, ws_v4):
+        resp, code = scm.study_baseline_add(ws_v4, {
+            "study": "s1", "name": "s1-baseline-abc123",
+            "composite": "pkg.composites.foo", "params": {"n_seeds": 20},
+        })
+        assert code == 422
+        assert "conditions.baseline" in resp["error"]
+        # Must NOT have created a disconnected baseline[] key.
+        spec = yaml.safe_load((ws_v4 / "studies" / "s1" / "study.yaml").read_text())
+        assert "baseline" not in spec
+        assert spec["conditions"]["baseline"]["params"] == {"n_seeds": 10, "n_generations": 5}
+
+    def test_remove_refuses_on_unmaterialized_v4_baseline(self, ws_v4):
+        resp, code = scm.study_baseline_remove(ws_v4, {"study": "s1", "name": "s1"})
+        assert code == 422
+        assert "conditions.baseline" in resp["error"]
+
+    def test_v4_study_with_already_materialized_baseline_is_unaffected(self, ws_v4):
+        """A v4 study that already has a REAL, persisted baseline[] (e.g. an
+        older study from before this guard existed, or one a maintainer
+        deliberately materialized) must keep working exactly as a v3 study
+        does — the guard only fires when there is nothing real to edit."""
+        sf = ws_v4 / "studies" / "s1" / "study.yaml"
+        spec = yaml.safe_load(sf.read_text())
+        spec["baseline"] = [{"name": "s1", "composite": "pkg.composites.foo", "params": {}}]
+        sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        resp, code = scm.study_baseline_add(ws_v4, {
+            "study": "s1", "name": "alt", "composite": "pkg.composites.bar",
+        })
+        assert code == 200
+        resp, code = scm.study_baseline_remove(ws_v4, {"study": "s1", "name": "alt"})
+        assert code == 200
+
+
 class TestStudyInterventionAdd:
     def test_happy(self, ws):
         resp, code = scm.study_intervention_add(ws, {

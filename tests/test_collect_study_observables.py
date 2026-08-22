@@ -104,6 +104,37 @@ def test_deduplication_preserves_first_occurrence():
     assert paths == ["listeners/dnaA_binding/free_total"]
 
 
+def test_expression_valued_path_is_rejected_not_garbled():
+    """Regression (item 80/83, 2026-08-21): a real 'showcase' study's
+    mass-fraction behavior_test declared its measure as `kind: path` but
+    stored a whole division expression as the value —
+    "listeners.mass.protein_mass / listeners.mass.dry_mass" — instead of a
+    bare address (the sibling doubling-time-in-band measure correctly uses
+    `formula` for its own computed value). Blindly slash-joining this
+    silently produced a garbled "observable" that corrupted a real dispatch's
+    recorded engine_process_reports. Any segment containing whitespace or an
+    operator marks the whole value as not a real path — skip it entirely,
+    the same tolerant-skip behavior already used for other malformed input,
+    rather than pass through nonsense."""
+    spec = {
+        "behavior_tests": [
+            {"name": "mass-fraction-physiological",
+             "measure": {"kind": "path",
+                         "path": "listeners.mass.protein_mass / listeners.mass.dry_mass"}},
+            {"name": "doubling-time-in-band",
+             "measure": {"kind": "derived",
+                         "formula": "0.011552453009332421 / listeners.mass.instantaneous_growth_rate"}},
+            {"name": "real-one",
+             "measure": {"kind": "path", "path": "listeners.mass.real_leaf"}},
+        ],
+    }
+    paths = _collect_study_observables(spec)
+    # The malformed `path` value is skipped; `formula` was never read (by
+    # design — this function only recognises `path`/`store_path`/etc., never
+    # `formula`); the real, well-formed path is still collected.
+    assert paths == ["listeners/mass/real_leaf"]
+
+
 def test_dot_and_slash_separators_both_accepted():
     spec = {
         "readouts": [

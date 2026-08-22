@@ -38,6 +38,32 @@ def _study_name_from_body(body: dict) -> str:
     )
 
 
+def _v4_baseline_not_yet_materialized(spec: dict) -> bool:
+    """True when ``spec`` is a v4 conditions-based study whose ``baseline``
+    the frontend only ever sees as a synthesized, never-persisted view.
+
+    ``investigations._project_v4_redesign_to_legacy_view`` builds
+    ``out["baseline"]`` from ``conditions.baseline`` purely in-memory,
+    ONLY when the raw on-disk spec has no ``baseline`` key of its own
+    (``if bl.get("composite") and not out.get("baseline")``) — the
+    synthesized entry's ``name`` (the study's own name, or the literal
+    string ``"baseline"`` as a last-resort fallback) is never written back.
+    A caller here operates on ``spec`` freshly loaded straight from disk
+    (never through that projection), so it would see no ``baseline`` key at
+    all for such a study — `study_baseline_add` would then silently create
+    one, orphaned from `conditions.baseline` and never kept in sync, and any
+    later `study_baseline_remove` call for the "old" entry name the frontend
+    displayed would 404 (that name never existed as real data). Both
+    `study_baseline_add`/`study_baseline_remove` check this first and refuse
+    cleanly rather than let that happen.
+    """
+    if spec.get("schema_version") != 4 or not isinstance(spec.get("conditions"), dict):
+        return False
+    if spec.get("baseline"):
+        return False  # already materialized as real data — safe to edit directly
+    return bool((spec["conditions"].get("baseline") or {}).get("composite"))
+
+
 # ---------------------------------------------------------------------------
 # Variant builders
 # ---------------------------------------------------------------------------
@@ -173,6 +199,14 @@ def study_baseline_add(ws_root: Path, body: dict) -> tuple[dict, int]:
         return {"error": "study not found"}, 404
 
     spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    if _v4_baseline_not_yet_materialized(spec):
+        return {
+            "error": "This study's baseline is defined under conditions.baseline "
+                     "(v4 format) and has never been saved as a standalone "
+                     "baseline[] entry — adding one here would create a second, "
+                     "disconnected copy that never stays in sync. Edit "
+                     "conditions.baseline.params directly for now.",
+        }, 422
     baseline = spec.setdefault("baseline", [])
     if any(b.get("name") == entry_name for b in baseline if isinstance(b, dict)):
         return {"error": f"baseline entry {entry_name!r} already exists"}, 409
@@ -202,6 +236,14 @@ def study_baseline_remove(ws_root: Path, body: dict) -> tuple[dict, int]:
         return {"error": "study not found"}, 404
 
     spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    if _v4_baseline_not_yet_materialized(spec):
+        return {
+            "error": "This study's baseline is defined under conditions.baseline "
+                     "(v4 format) and has never been saved as a standalone "
+                     "baseline[] entry, so there is nothing real to remove — the "
+                     "name the frontend displayed was a synthesized, never-"
+                     "persisted view. Edit conditions.baseline.params directly.",
+        }, 422
     baseline = spec.get("baseline") or []
     remaining = [b for b in baseline
                  if not (isinstance(b, dict) and b.get("name") == entry_name)]
