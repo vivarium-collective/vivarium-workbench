@@ -8724,8 +8724,15 @@
     // skip their scroll-restore so they can't cancel the scroll-to-study below.
     var _HOLD_MS = 1800;
     window._embedLandingUntil = Date.now() + _HOLD_MS;
-    if (typeof _fitEmbedToContent === 'function') _fitEmbedToContent(frame, 560);
-    else if (typeof _fitEmbedToViewport === 'function') _fitEmbedToViewport(frame, panel, 560);
+    // Floor the study porthole at the scroll container's visible height so the
+    // study FILLS the view on open instead of sitting short under the (often
+    // tall) investigation graph. With a full-viewport porthole, landing on the
+    // study scrolls the graph fully off the top — scroll up to bring it back.
+    var _scroller = document.querySelector('.viv-content');
+    var _vh = (_scroller && _scroller.clientHeight) || window.innerHeight || 800;
+    var _floor = Math.max(560, _vh - 8);
+    if (typeof _fitEmbedToContent === 'function') _fitEmbedToContent(frame, _floor);
+    else if (typeof _fitEmbedToViewport === 'function') _fitEmbedToViewport(frame, panel, _floor);
     // Land on the study AND actively HOLD it there. A one-shot smooth scroll
     // wasn't enough: the investigation graph / About block re-renders (and the
     // iframe refits) AFTER the scroll, springing the view back up to the top.

@@ -1525,7 +1525,20 @@ export default function App() {
       const bounds = getNodesBounds((framed.length ? framed : nodes) as any);
       const PAD = 60, MAX = 6000;
       const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
-      const scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));
+      // Longest-side clamp (both formats).
+      let scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));
+      // Raster (png/pdf) additionally must fit the browser's canvas AREA limit.
+      // Safari caps a canvas at ~16.78M px² — far below Chrome — so at
+      // pixelRatio 2 a tall graph needs a 12000×N canvas that silently returns
+      // BLANK. That's why png + pdf (pdf rasterizes via png) broke here while svg
+      // (vector, no canvas) worked. Clamp so (w·pr)·(h·pr) stays Safari-safe.
+      const PIXEL_RATIO = 2;
+      if (format !== 'svg') {
+        const RASTER_AREA_CAP = 16_000_000;
+        const areaScale = Math.sqrt(
+          RASTER_AREA_CAP / Math.max(1, rawW * rawH * PIXEL_RATIO * PIXEL_RATIO));
+        scale = Math.min(scale, areaScale);
+      }
       const w = Math.max(1, Math.ceil(rawW * scale)), h = Math.max(1, Math.ceil(rawH * scale));
       const vp = getViewportForBounds(bounds, w, h, 0.02, 4, 0.08);
       const style = {
@@ -1559,7 +1572,7 @@ export default function App() {
         grab(blobUrl, 'svg');
         setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
       } else {
-        const png = await toPng(el, { backgroundColor: exportBg, width: w, height: h, style, pixelRatio: 2, fontEmbedCSS });
+        const png = await toPng(el, { backgroundColor: exportBg, width: w, height: h, style, pixelRatio: PIXEL_RATIO, fontEmbedCSS });
         if (format === 'png') { grab(png, 'png'); }
         else {
           const { jsPDF } = await import('jspdf');

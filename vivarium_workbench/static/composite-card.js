@@ -90,15 +90,38 @@
   window._compositeTierBadge = _compositeTierBadge;
   window._compositeFigure = _compositeFigure;
 
-  // A card header "pop out" control — opens the whole card (Explore/loom and
-  // all) in its own focused window. The onclick references _popoutCard,
-  // which is Modules-page-only (its ?popcard= handshake lives in
-  // walkthrough.js's own bootstrap) — inert elsewhere.
+  // A card header "pop out" control (⧉ = its own window) — opens the whole card
+  // (Explore/loom and all) in its own focused window. Routed through _cardPopout
+  // so it works on EVERY page, not just Modules.
   function _cardPopoutBtn(address, kind) {
     return '<button class="pcard-popout" type="button" title="Pop out this card into its own window" ' +
-      'onclick="event.stopPropagation();_popoutCard(\'' + _esc(address) + '\',\'' + _esc(kind) + '\')">⤢</button>';
+      'onclick="event.stopPropagation();_cardPopout(this,\'' + _esc(address) + '\',\'' + _esc(kind) + '\')">⧉</button>';
   }
   window._cardPopoutBtn = _cardPopoutBtn;
+
+  // Robust pop-out. On the Modules page walkthrough.js provides the rich
+  // ?popcard= handshake (_popoutCard). On any other page (Study→Model embed, a
+  // loom viewer) that function isn't loaded — and inside an embed IFRAME the
+  // ?popcard= reload targets the wrong document — so fall back to opening the
+  // composite's standalone loom in a new window. Either way, pop-out opens a
+  // window (that's its job); maximize (⛶) fills the pane in place.
+  function _cardPopout(btn, address, kind) {
+    var card = (btn && btn.closest) ? btn.closest('.registry-entry-full, .registry-card') : null;
+    var id = address || (card && card.getAttribute('data-address'));
+    var inIframe = !!(window.parent && window.parent !== window);
+    if (!inIframe && typeof window._popoutCard === 'function') {
+      window._popoutCard(id, kind || 'composite');
+      return;
+    }
+    if (!id) return;
+    var apiUrl = (window.DataSource && window.DataSource.apiUrl)
+      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
+    var url = apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id);
+    try { url = new URL(url, window.location.href).href; } catch (e) { /* keep relative */ }
+    window.open(url, '_blank',
+      'width=1180,height=940,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
+  }
+  window._cardPopout = _cardPopout;
 
   // "⛶" — maximize this card into the content area, in-place. Toggles again /
   // Esc to restore. Self-contained DOM/CSS manipulation — safe on any page.
@@ -129,20 +152,11 @@
   function _toggleCardMaximize(btn) {
     var card = btn.closest('.registry-entry-full');
     if (!card) return;
-    // In an embed IFRAME (Study→Model), maximizing in place can't cleanly fill
-    // the window, and expanding the iframe leaves layout residue on restore.
-    // Instead, open the composite in its OWN full-window loom (standalone) —
-    // truly full-screen, zero disruption to the study page behind it.
-    if (window.parent && window.parent !== window) {
-      var embed = card.querySelector('.ccard-loom-embed');
-      var id = card.getAttribute('data-address') || (embed && embed.getAttribute('data-id'));
-      if (id) {
-        var apiUrl = (window.DataSource && window.DataSource.apiUrl)
-          ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
-        window.open(apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id), '_blank');
-        return;
-      }
-    }
+    // Maximize in place so the card fills the content pane. The card goes
+    // position:fixed (see .pcard-maximized); inside an embed IFRAME (Study→Model)
+    // that's fixed to the iframe's viewport, which IS the pane the user sees, so
+    // it fills the pane there too (_positionMaximizedCard's inIframe branch drops
+    // the rail offset). To pop the composite into its OWN window, use ⧉ pop-out.
     var on = card.classList.toggle('pcard-maximized');
     document.body.classList.toggle('pcard-maximized', on);
     if (on) {
@@ -629,9 +643,9 @@
       '<button type="button" onclick="event.stopPropagation();_enterMaxcardMode(\'' + idA + '\',\'composite\')" ' +
         'title="Open maximized with the interactive bigraph (Explore) pinned at the top" ' +
         'style="height:26px;padding:0 11px;font-size:12px;font-weight:600;background:#2563eb;color:#fff;border:1px solid #2563eb;border-radius:5px;cursor:pointer">🔍 Explore</button>' +
-      '<button type="button" onclick="event.stopPropagation();_popoutCard(\'' + idA + '\',\'composite\')" ' +
+      '<button type="button" onclick="event.stopPropagation();_cardPopout(this,\'' + idA + '\',\'composite\')" ' +
         'title="Pop out into its own window" ' +
-        'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">⤢ Pop out</button>' +
+        'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">⧉ Pop out</button>' +
       '<button type="button" onclick="event.stopPropagation();_setRegistryZoom(\'full\')" ' +
         'title="Open the full card (Configure · Inputs · Run)" ' +
         'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">Full card</button>' +
@@ -720,7 +734,7 @@
             '<button class="pcard-explore-btn" type="button" onclick="event.stopPropagation();_toggleLoomCard(this)" title="Open the loom — Configure · graph · run · outputs">▶ Explore</button>' +
             '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + wsPill + roPill +
             '<code class="loom-addr">' + _esc(addr) + '</code>' +
-            '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⤢</button>' +
+            '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⌃</button>' +
             _shareCompositeBtn() +
             _compositeJsonBtn() +
             _cardMaximizeBtn() +
