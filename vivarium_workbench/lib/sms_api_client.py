@@ -529,14 +529,13 @@ class SmsApiClient:
             Filename reported in the multipart header (cosmetic).
         analysis_options:
             v2ecoli-shaped ``{scale: {name: params}}`` analyses to run
-            server-side (composite-auto-results Task 8), JSON-encoded into a
-            single ``analysis_options`` query param — this endpoint has no
-            JSON-body channel like ``run_simulation``'s. NOTE: as of this
-            writing the ``/compose/v1/simulation/run`` sms-api route does not
-            yet read this param server-side (unlike ``/api/v1/simulations``);
-            it is threaded through here so the client is ready the moment
-            sms-api adds support, but it is a no-op against a compose endpoint
-            that doesn't parse it.
+            server-side (composite-auto-results Task 8). Sent as a
+            JSON-encoded string in a multipart ``analysis_options`` form
+            field — NOT a query param. sms-api's ``/compose/v1/simulation/run``
+            route reads this via ``Form()`` + ``json.loads()``, not
+            ``Query()``; a query param there is silently dropped by FastAPI
+            and no analyses ever run (the bug behind #1022 being a silent
+            no-op). Omitted entirely (no field at all) when ``None``.
 
         Returns
         -------
@@ -544,19 +543,30 @@ class SmsApiClient:
             ``simulation_database_id`` from the response.
         """
         boundary = "----vivdash00boundary"
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="uploaded_file"; filename="{filename}"\r\n'
-            "Content-Type: application/octet-stream\r\n"
-            "\r\n"
-        ).encode() + pbg_bytes + f"\r\n--{boundary}--\r\n".encode()
+        parts = [
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="uploaded_file"; filename="{filename}"\r\n'
+                "Content-Type: application/octet-stream\r\n"
+                "\r\n"
+            ).encode() + pbg_bytes + b"\r\n"
+        ]
+        if analysis_options:
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    'Content-Disposition: form-data; name="analysis_options"\r\n'
+                    "\r\n"
+                    f"{json.dumps(analysis_options)}\r\n"
+                ).encode()
+            )
+        parts.append(f"--{boundary}--\r\n".encode())
+        body = b"".join(parts)
         content_type = f"multipart/form-data; boundary={boundary}"
 
         params: dict = {"interval_time": interval_time}
         if extra_pip_deps:
             params["extra_pip_deps"] = extra_pip_deps  # list → repeated key via doseq
-        if analysis_options:
-            params["analysis_options"] = json.dumps(analysis_options)
 
         url = self.base_url + "/compose/v1/simulation/run"
         if params:
@@ -599,18 +609,26 @@ class SmsApiClient:
         return [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
 
     def download_compose_results(self, sim_id: int, dest: Path, timeout: float | None = None) -> Path:
-        """GET /compose/v1/simulation/{id}/results — stream results.zip to dest.
+        """GET /compose/v1/simulation/{id}/results — stream results.tar.gz to dest.
+
+        The route is backend-aware server-side (compose-results-land-p0 T5a):
+        a Ray/Batch (GovCloud) simulation streams a gzip tarball of its S3
+        output prefix (mirroring the study path's ``download_data``), while a
+        SLURM simulation's SSH/SCP branch is unchanged. Both are served under
+        the same ``.tar.gz`` contract this client now expects, so
+        ``land_remote_run``/``fold_analyses`` (which already read ``.tar.gz``)
+        work unmodified once this lands.
 
         Returns
         -------
         Path
-            ``dest / "results.zip"``
+            ``dest / "results.tar.gz"``
         """
         dest = Path(dest)
         dest.mkdir(parents=True, exist_ok=True)
-        out_path = dest / "results.zip"
+        out_path = dest / "results.tar.gz"
         url = f"{self.base_url}/compose/v1/simulation/{sim_id}/results"
-        req = Request(url, method="GET", headers=self._headers("application/zip"))
+        req = Request(url, method="GET", headers=self._headers("application/gzip"))
         to = timeout if timeout is not None else DOWNLOAD_TIMEOUT
         try:
             with urlopen(req, timeout=to) as r, open(out_path, "wb") as f:  # noqa: S310

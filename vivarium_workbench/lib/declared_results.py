@@ -61,7 +61,7 @@ def run_declared_results(run_dir, spec: dict, *, ws_root, run_id: str,
         errors.extend(ana_errors)
         # analyses.json must be a JSON LIST -- it mirrors the shape the other
         # two writers of this same file use (composite_flush.run_flush's
-        # per-analysis dicts; remote_run_landing._fold_analyses's
+        # per-analysis dicts; remote_run_landing.fold_analyses's
         # {"name","written","errors"} entries), because the real consumer
         # (composite_run_views.py) derives has_analyses from
         # `content not in ("", "[]")`. A dict is never "[]", so it would

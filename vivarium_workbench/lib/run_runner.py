@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tarfile
+import tempfile
 import time
 import traceback
 from dataclasses import dataclass
@@ -859,20 +861,34 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
     """Dispatch a 'deployment'-target run to sms-api and land results. Returns 0/1.
 
     SP-D2: delegates to the already-built ``remote_run.run_remote`` (export .pbg →
-    ``/compose/v1`` submit → poll → download results.zip), writing the SAME
+    ``/compose/v1`` submit → poll → download results.tar.gz), writing the SAME
     ``composite-runs.db`` status rows the local path does so the browser's existing
-    ``/api/composite-run/<id>/status`` polling works unchanged. The landed
-    ``results.zip`` sits in ``run_dir``; unpacking it into a viewable emitter store
-    (viz/chart rendering) is a follow-on — this establishes the run lifecycle end
-    to end (running → completed/failed) on the deployment target.
+    ``/api/composite-run/<id>/status`` polling works unchanged. Unpacking the landed
+    tar.gz into a viewable emitter store (viz/chart rendering) is still a
+    follow-on; this run DOES fold any ``analyses/<name>/_manifest.json`` already
+    present in the tar into ``.pbg/runs/<run_id>/analyses.json`` (see below) —
+    establishing the run lifecycle end to end (running → completed/failed) on
+    the deployment target.
 
     Composite-auto-results Task 8: also injects ``analysis_options`` into the
     submit (see ``_remote_analysis_options``) — added to the call only when
     non-empty, so a caller/test double built against the pre-Task-8 3-kwarg
     ``run_remote`` signature (``dest``/``n_steps``/``overrides``) keeps working
     unchanged when there's nothing to inject.
+
+    compose-results-land-p0 T5c: once ``run_remote`` returns a landed
+    tar.gz path, extract it and fold any analysis manifest into
+    ``analyses.json`` via ``remote_run_landing.fold_analyses`` directly —
+    deliberately NOT via ``land_remote_run``, which is study-shaped and mints
+    its OWN ``run_id`` (would fork a second, disconnected run row vs
+    ``req.run_id`` and break the browser's status polling). This call is
+    unconditional (no separate ``auto_results`` check — the send-side gate in
+    ``_remote_analysis_options`` above already fully controls whether a
+    manifest exists at all; ``fold_analyses`` is a silent no-op when there are
+    no manifests) and best-effort (never fails an otherwise-completed run —
+    mirrors the local path's try/except in ``composite_flush.run_flush``).
     """
-    from vivarium_workbench.lib import remote_run
+    from vivarium_workbench.lib import remote_run, remote_run_landing
 
     conn = cr.connect(req.db_file)
     try:
@@ -883,7 +899,16 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
             )
             if analysis_options:
                 run_remote_kwargs["analysis_options"] = analysis_options
-            remote_run.run_remote(req.workspace, req.spec_id, **run_remote_kwargs)
+            results_path = remote_run.run_remote(req.workspace, req.spec_id, **run_remote_kwargs)
+            if results_path is not None:
+                try:
+                    with tempfile.TemporaryDirectory() as td:
+                        extract_root = Path(td)
+                        with tarfile.open(results_path, "r:gz") as tar:
+                            tar.extractall(extract_root, filter="data")
+                        remote_run_landing.fold_analyses(extract_root, req.workspace, req.run_id)
+                except Exception as fold_exc:  # noqa: BLE001 — best-effort, never fail a completed run
+                    _write_log(req, f"note: could not fold remote analyses into analyses.json: {fold_exc}")
         except Exception as exc:
             tb = traceback.format_exc()
             reason = _remote_failure_reason(exc)

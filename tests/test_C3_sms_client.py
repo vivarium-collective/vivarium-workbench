@@ -180,29 +180,52 @@ def test_compose_submit_raises_on_server_error(monkeypatch):
             c.compose_submit(b"pbg")
 
 
-def test_compose_submit_no_analysis_options_no_query_param(monkeypatch):
-    """compose_submit with no analysis_options sends no analysis_options param
-    (composite-auto-results Task 8 — must not regress the no-analyses case)."""
+def _multipart_field(body: bytes, field_name: str) -> "str | None":
+    """Extract a multipart/form-data field's raw value by name, or None if the
+    field is absent from the body entirely."""
+    text = body.decode("latin-1")
+    marker = f'name="{field_name}"'
+    idx = text.find(marker)
+    if idx == -1:
+        return None
+    start = text.index("\r\n\r\n", idx) + 4
+    end = text.index("\r\n--", start)
+    return text[start:end]
+
+
+def test_compose_submit_no_analysis_options_omits_field_entirely(monkeypatch):
+    """compose_submit with no analysis_options sends neither a query param NOR
+    a multipart body field (composite-auto-results Task 8 — must not regress
+    the no-analyses case, and must not send an empty field either)."""
     cap = {}
     with _patch_urlopen(monkeypatch, cap, {"simulation_database_id": 1}):
         c = SmsApiClient("http://h:8080")
         c.compose_submit(b"pbg", analysis_options=None)
     qs = parse_qs(urlsplit(cap["url"]).query)
     assert "analysis_options" not in qs
+    assert _multipart_field(cap["body"], "analysis_options") is None
 
 
-def test_compose_submit_encodes_analysis_options_as_json_query_param(monkeypatch):
-    """analysis_options (composite-auto-results Task 8) is JSON-encoded into a
-    single ?analysis_options= query param — this endpoint has no JSON-body
-    channel like run_simulation's, unlike the multipart-only /compose/v1 route."""
+def test_compose_submit_sends_analysis_options_as_json_multipart_body_field(monkeypatch):
+    """analysis_options (composite-auto-results Task 8) is sent as a JSON-encoded
+    string in the multipart BODY — never a query param. viva-api's
+    /compose/v1/simulation/run endpoint has no Query() binding for this field
+    (only a Form() field it json.loads()s), so a query param is silently
+    dropped by FastAPI and no analyses ever run (the exact bug behind
+    vivarium-workbench #1022 being a silent no-op)."""
     cap = {}
     options = {"multigeneration": {"ptools_rxns_multigeneration": {}}}
     with _patch_urlopen(monkeypatch, cap, {"simulation_database_id": 5}):
         c = SmsApiClient("http://h:8080")
         c.compose_submit(b"pbg-bytes", analysis_options=options)
     qs = parse_qs(urlsplit(cap["url"]).query)
-    assert "analysis_options" in qs, f"URL query: {urlsplit(cap['url']).query!r}"
-    assert json.loads(qs["analysis_options"][0]) == options
+    assert "analysis_options" not in qs, (
+        f"analysis_options must not be a query param — sms-api's Form()-based "
+        f"endpoint silently drops it there: {urlsplit(cap['url']).query!r}"
+    )
+    field = _multipart_field(cap["body"], "analysis_options")
+    assert field is not None, "analysis_options must be a multipart body field"
+    assert json.loads(field) == options
 
 
 # ---------------------------------------------------------------------------
@@ -244,19 +267,24 @@ def test_compose_status_raises_on_not_found(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_download_compose_results_streams_to_file(monkeypatch, tmp_path):
-    """download_compose_results streams the results.zip to dest/results.zip."""
+    """download_compose_results streams the results.tar.gz to dest/results.tar.gz
+    (T5b: compose's /results route is now backend-aware and Ray/Batch runs
+    serve a gzip tarball rather than a zip -- see the compose-results-land-p0
+    findings doc §3/§6 T5b)."""
     cap = {}
-    fake_zip = b"PK\x03\x04fake-zip-content"
+    fake_tar_gz = b"\x1f\x8b\x08fake-targz-content"
 
     def fake_urlopen(req, timeout=None):
         cap["url"] = req.full_url
         cap["method"] = req.get_method()
-        return _BinaryResp(fake_zip)
+        cap["headers"] = dict(req.headers)
+        return _BinaryResp(fake_tar_gz)
 
     monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     out = c.download_compose_results(42, tmp_path)
-    assert out == tmp_path / "results.zip"
-    assert out.read_bytes() == fake_zip
+    assert out == tmp_path / "results.tar.gz"
+    assert out.read_bytes() == fake_tar_gz
     assert cap["method"] == "GET"
     assert "/compose/v1/simulation/42/results" in cap["url"]
+    assert cap["headers"].get("Accept") == "application/gzip"

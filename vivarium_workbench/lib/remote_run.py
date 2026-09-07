@@ -104,7 +104,7 @@ def run_remote(
     expected_variant_count: "int | None" = None,
     analysis_options: "dict | None" = None,
 ) -> Path:
-    """Export a composite, submit to sms-api, poll, and land results.zip.
+    """Export a composite, submit to sms-api, poll, and land results.tar.gz.
 
     Parameters
     ----------
@@ -118,7 +118,7 @@ def run_remote(
     poll_interval:
         Seconds between status polls.
     dest:
-        Directory for the landed ``results.zip``.  Defaults to
+        Directory for the landed ``results.tar.gz``.  Defaults to
         ``<ws_root>/.pbg/remote-results/``.
     analysis_options:
         v2ecoli-shaped ``{scale: {name: params}}`` analyses to run server-side
@@ -143,7 +143,7 @@ def run_remote(
     Returns
     -------
     Path
-        Path to the downloaded ``results.zip``.
+        Path to the downloaded ``results.tar.gz``.
     """
     from vivarium_workbench.lib.sms_api_client import SmsApiClient as _SmsApiClient
     from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
@@ -235,7 +235,7 @@ def run_remote(
             f"Remote run {sim_id} ended with status '{status}': {status_data}"
         )
 
-    # Download results
+    # Download results (results.tar.gz — T5b)
     results_path = client.download_compose_results(sim_id, dest)
     print(f"Results landed at: {results_path}")
     return results_path
