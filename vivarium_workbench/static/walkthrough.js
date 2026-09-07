@@ -8492,12 +8492,6 @@
       // Keep the "done" vocabulary in sync with the backend roll-up
       // (_STUDY_STATUS_DONE_ROLLUP): complete/ran/passed/evaluated/decided are all
       // green "done" states, so a passed study never mislabels as "planned".
-      var _SD = { complete:['#16a34a','done'], ran:['#16a34a','done'], passed:['#16a34a','passed'],
-                  evaluated:['#16a34a','evaluated'], decided:['#16a34a','decided'],
-                  running:['#2563eb','running'], analyzing:['#2563eb','running'],
-                  in_progress:['#d97706','in progress'], failed:['#dc2626','failed'], invalid:['#dc2626','invalid'],
-                  planning:['#94a3b8','planned'] };
-      function _sMeta(st) { return _SD[st] || _SD[st === 'ran' ? 'complete' : 'planning'] || ['#94a3b8','planned']; }
       var studyObjs = _isetStudyObjs(iset);
       // Group the summary chips by the SAME canonical status the dots + graph use.
       var _stOrder = ['Accepted', 'Investigating', 'Blocked', 'Planned', 'Refuted'];
@@ -9047,17 +9041,10 @@
   window._submitBrowseCreate = _submitBrowseCreate;
 
   // Status dot vocab shared by the study cards + breakdowns.
-  var _STUDY_DOT = {
-    complete: ['#16a34a', 'done'], ran: ['#16a34a', 'done'],
-    running: ['#2563eb', 'running'], in_progress: ['#d97706', 'in progress'],
-    failed: ['#dc2626', 'failed'], planning: ['#94a3b8', 'planned'],
-    planned: ['#94a3b8', 'planned'],
-  };
-  function _studyDotMeta(st) { return _STUDY_DOT[st] || _STUDY_DOT.planned; }
 
   function _studyBrowseCardHtml(s, full) {
     var status = s.effective_status || s.status || 'planned';
-    var m = _studyDotMeta(status);
+    var m = _studyStatusMeta(s);  // unified status source (see _studyStatusMeta)
     var inv = _investigationForStudy(s.name);
     var q = s.question || s.objective || '';
     var qText = String(q).split('\n')[0];
@@ -9076,7 +9063,7 @@
       '<div style="display:flex;align-items:baseline;gap:6px 10px;flex-wrap:wrap;margin-bottom:6px;">' +
         '<strong style="font-size:1.02em;flex:1 1 100%">' + _esc(s.title || s.name) + '</strong>' +
         '<span style="font-size:0.72em;border-radius:9999px;padding:1px 9px;white-space:nowrap;' +
-          'background:' + m[0] + '22;color:' + m[0] + ';border:1px solid ' + m[0] + '55">' + _esc(m[1]) + '</span>' +
+          'background:' + m.color + '22;color:' + m.color + ';border:1px solid ' + m.color + '55">' + _esc(m.label) + '</span>' +
         _originBadge(s.origin_repo) +
       '</div>' +
       (inv ? '<div style="font-size:0.78em;color:#94a3b8;margin:0 0 6px"><span style="color:#cbd5e1">▪</span> ' + _esc(inv) + '</div>' : '') +
@@ -9183,7 +9170,7 @@
       var inv = _investigationForStudy(s.name) || '';
       var invTitle = _isetTitleForSlug(inv);
       var status = s.effective_status || s.status || 'planned';
-      var m = _studyDotMeta(status);
+      var m = _studyStatusMeta(s);  // unified status source (see _studyStatusMeta)
       var runs = runsOf(s);
       var rowText = (String(s.title || s.name) + ' ' + inv + ' ' + invTitle + ' ' + status + ' ' + (s.phase || '')).toLowerCase();
       return '<tr data-row-text="' + _esc(rowText) + '" onclick="_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\')" ' +
@@ -9191,7 +9178,7 @@
         'onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
         '<td style="padding:7px 10px;font-weight:600;color:#1e293b">' + _esc(s.title || s.name) + '</td>' +
         '<td style="padding:7px 10px;color:#64748b">' + _esc(invTitle) + '</td>' +
-        '<td style="padding:7px 10px;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + m[0] + ';margin-right:5px"></span>' + _esc(m[1]) + '</td>' +
+        '<td style="padding:7px 10px;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + m.color + ';margin-right:5px"></span>' + _esc(m.label) + '</td>' +
         '<td style="padding:7px 10px;color:#64748b">' + _esc(s.phase || '—') + '</td>' +
         '<td style="padding:7px 10px;text-align:right;color:' + (runs ? '#1e293b' : '#cbd5e1') + '">' + runs + '</td>' +
         '<td style="padding:7px 10px;color:#64748b;white-space:nowrap">' + _fmtStudyDate(s.last_run) + '</td>' +
@@ -12293,21 +12280,6 @@
   // Map a study's free-form status string to a small colored dot. Keeps the
   // rail rows readable: the study NAME gets the full row width, the dot is a
   // glanceable status, the full status text is shown in the title tooltip.
-  function _railStatusColor(status) {
-    var s = String(status || '').toLowerCase();
-    if (s.indexOf('fail') !== -1 || s.indexOf('invalid') !== -1 || s.indexOf('blocked') !== -1) return '#ef4444';   // red
-    if (s.indexOf('pending') !== -1 || s.indexOf('refresh') !== -1 || s.indexOf('needs') !== -1) return '#f59e0b';// amber
-    if (s.indexOf('inconclusive') !== -1 || s.indexOf('partial') !== -1) return '#d97706'; // dark amber
-    if (s.indexOf('running') === 0) return '#3b82f6';                                // blue
-    // 'pass' covers the gate verdict 'passed' as well as 'passing'/'passes'.
-    if (s.indexOf('done') === 0 || s.indexOf('ran') === 0 || s.indexOf('complete') !== -1
-        || s.indexOf('evaluated') !== -1 || s.indexOf('confirmed') !== -1 || s.indexOf('pass') !== -1
-        || s.indexOf('accept') !== -1 || s.indexOf('decided') !== -1
-        || s.indexOf('-wins') !== -1 || s.indexOf('in-band') !== -1) return '#16a34a'; // green
-    if (s.indexOf('evaluate') === 0) return '#6366f1';                               // indigo (mid-pass action)
-    return '#9ca3af';                                                                // gray (planned/unknown)
-  }
-
   // Pinned studies: a per-user convenience, kept in localStorage (no workspace
   // write). A pinned study is duplicated into a "Pinned" strip at the top of the
   // STUDIES rail for quick access while still appearing in its own group.
