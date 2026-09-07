@@ -609,18 +609,26 @@ class SmsApiClient:
         return [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
 
     def download_compose_results(self, sim_id: int, dest: Path, timeout: float | None = None) -> Path:
-        """GET /compose/v1/simulation/{id}/results — stream results.zip to dest.
+        """GET /compose/v1/simulation/{id}/results — stream results.tar.gz to dest.
+
+        The route is backend-aware server-side (compose-results-land-p0 T5a):
+        a Ray/Batch (GovCloud) simulation streams a gzip tarball of its S3
+        output prefix (mirroring the study path's ``download_data``), while a
+        SLURM simulation's SSH/SCP branch is unchanged. Both are served under
+        the same ``.tar.gz`` contract this client now expects, so
+        ``land_remote_run``/``fold_analyses`` (which already read ``.tar.gz``)
+        work unmodified once this lands.
 
         Returns
         -------
         Path
-            ``dest / "results.zip"``
+            ``dest / "results.tar.gz"``
         """
         dest = Path(dest)
         dest.mkdir(parents=True, exist_ok=True)
-        out_path = dest / "results.zip"
+        out_path = dest / "results.tar.gz"
         url = f"{self.base_url}/compose/v1/simulation/{sim_id}/results"
-        req = Request(url, method="GET", headers=self._headers("application/zip"))
+        req = Request(url, method="GET", headers=self._headers("application/gzip"))
         to = timeout if timeout is not None else DOWNLOAD_TIMEOUT
         try:
             with urlopen(req, timeout=to) as r, open(out_path, "wb") as f:  # noqa: S310

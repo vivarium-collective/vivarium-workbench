@@ -267,19 +267,24 @@ def test_compose_status_raises_on_not_found(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_download_compose_results_streams_to_file(monkeypatch, tmp_path):
-    """download_compose_results streams the results.zip to dest/results.zip."""
+    """download_compose_results streams the results.tar.gz to dest/results.tar.gz
+    (T5b: compose's /results route is now backend-aware and Ray/Batch runs
+    serve a gzip tarball rather than a zip -- see the compose-results-land-p0
+    findings doc §3/§6 T5b)."""
     cap = {}
-    fake_zip = b"PK\x03\x04fake-zip-content"
+    fake_tar_gz = b"\x1f\x8b\x08fake-targz-content"
 
     def fake_urlopen(req, timeout=None):
         cap["url"] = req.full_url
         cap["method"] = req.get_method()
-        return _BinaryResp(fake_zip)
+        cap["headers"] = dict(req.headers)
+        return _BinaryResp(fake_tar_gz)
 
     monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     out = c.download_compose_results(42, tmp_path)
-    assert out == tmp_path / "results.zip"
-    assert out.read_bytes() == fake_zip
+    assert out == tmp_path / "results.tar.gz"
+    assert out.read_bytes() == fake_tar_gz
     assert cap["method"] == "GET"
     assert "/compose/v1/simulation/42/results" in cap["url"]
+    assert cap["headers"].get("Accept") == "application/gzip"

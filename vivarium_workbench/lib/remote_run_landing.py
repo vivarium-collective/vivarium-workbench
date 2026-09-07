@@ -51,7 +51,7 @@ class RemoteRunSeedCountMismatch(RuntimeError):
     trustworthy run."""
 
 
-def _fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
+def fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
     """Fold any standalone-analysis output already present in the landed tar into
     ``.pbg/runs/<run_id>/analyses.json`` -- the same local artifact contract
     composite_flush.run_flush's local (non-remote) analyses dispatch already
@@ -63,6 +63,11 @@ def _fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
     rather than by polling sms-api. If the job hasn't finished by the time this
     run is landed, this is a no-op -- landing again later (once the analysis
     has actually completed) will pick it up.
+
+    Public (not module-private) since Task 5c gave it a second call site:
+    ``run_runner._execute_remote`` folds the composite deployment path's own
+    ``run_id`` directly, without going through the study-shaped
+    ``land_remote_run`` (which mints its own, unrelated run_id).
     """
     manifests = sorted(extract_root.glob("**/analyses/*/_manifest.json"))
     if not manifests:
@@ -269,7 +274,7 @@ def land_remote_run(
                 n_steps = _count_parquet_rows(dest)
 
         if ws_root is not None:
-            _fold_analyses(extract_root, ws_root, run_id)
+            fold_analyses(extract_root, ws_root, run_id)
 
     provenance["store_path"] = str(dest)
     resolved_n_steps = n_steps if n_steps is not None else 0

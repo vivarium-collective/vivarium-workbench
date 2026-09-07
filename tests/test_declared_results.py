@@ -42,7 +42,7 @@ def test_analyses_error_is_partial_real_run_study_analyses(tmp_path):
                for e in out["errors"])
 
     # analyses.json must be a JSON LIST (matching the other two writers of
-    # this file: composite_flush.run_flush, remote_run_landing._fold_analyses)
+    # this file: composite_flush.run_flush, remote_run_landing.fold_analyses)
     # -- and, since no files were actually produced, an EMPTY list, even
     # though there were errors. The real consumer (composite_run_views.py)
     # derives has_analyses from `content not in ("", "[]")`, so a pure-failure
