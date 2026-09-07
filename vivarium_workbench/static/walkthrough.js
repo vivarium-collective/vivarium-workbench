@@ -15,6 +15,47 @@
   // sibling scopes (tick / study-card / v4 renderers) — which threw
   // "ReferenceError: Can't find variable: _humanizeStudyName" and failed the
   // investigation report load (fixed 2026-06-10). Hoisted here = visible IIFE-wide.
+  // Canonical study status -> {color, icon, label, state}. ONE source of truth for
+  // the colored status shown in the spine sidebar dot, the investigation-graph card
+  // badge, and the graph legend, so those three can never drift apart. (They used
+  // to: the sidebar read the lifecycle `effective_status` while the card read the
+  // hand-set `confidence` field first — so a `blocked` study showed amber
+  // "Investigating" on its card while its sidebar dot was red.) Precedence, honoring
+  // the card code's own stated intent: the COMPUTED gate_status verdict wins, then
+  // the hand-set confidence, then the lifecycle status. `Blocked` is its own state —
+  // a study that could not run — distinct from `Refuted` (a hypothesis disproven).
+  var _STATUS_META = {
+    Accepted:      {color: '#16a34a', icon: '✓', label: 'Accepted'},      // ✓
+    Investigating: {color: '#ca8a04', icon: '◐', label: 'Investigating'}, // ◐
+    Planned:       {color: '#2563eb', icon: '○', label: 'Planned'},       // ○
+    Blocked:       {color: '#64748b', icon: '⊘', label: 'Blocked'},       // ⊘
+    Refuted:       {color: '#dc2626', icon: '✗', label: 'Refuted'},       // ✗
+  };
+  function _studyStatusState(s) {
+    s = s || {};
+    // 1. The COMPUTED gate_status verdict is the top authority.
+    var gate = String(s.gate_status || '').trim().toLowerCase();
+    if (gate === 'passed' || gate === 'pass' || gate === 'accepted') return 'Accepted';
+    if (gate === 'failed' || gate === 'failed_evaluation' || gate === 'refuted') return 'Refuted';
+    if (gate === 'blocked') return 'Blocked';
+    if (gate === 'partial' || gate === 'needs_calibration' || gate === 'in_progress') return 'Investigating';
+    // 2. A DEFINITIVE lifecycle state (server-computed effective_status/status folds
+    //    gate_status in) outranks the drift-prone hand-set confidence: a `blocked`
+    //    study must never read as its stale `confidence: Investigating`. This is what
+    //    lets the gate-less rail study objects agree with the gate-bearing graph cards.
+    var life = String(s.effective_status || s.status || '').trim().toLowerCase();
+    if (life.indexOf('blocked') !== -1) return 'Blocked';
+    if (life.indexOf('fail') !== -1 || life === 'invalid' || life === 'refuted') return 'Refuted';
+    // 3. Hand-set confidence, when no gate verdict and no definitive lifecycle.
+    var conf = String(s.confidence || '').trim();
+    if (_STATUS_META[conf]) return conf;
+    // 4. Remaining lifecycle states.
+    if (['complete', 'completed', 'ran', 'passed', 'evaluated', 'decided'].indexOf(life) >= 0) return 'Accepted';
+    if (['running', 'analyzing', 'in_progress'].indexOf(life) >= 0) return 'Investigating';
+    return 'Planned';
+  }
+  function _studyStatusMeta(s) { return _STATUS_META[_studyStatusState(s)] || _STATUS_META.Planned; }
+
   function _humanizeStudyName(slug) {
     var m = /^([a-z]+-\d+[a-z]*)-(.+)$/.exec(slug);
     if (!m) return {chip: '', title: String(slug).replace(/-/g, ' ')};
@@ -8458,18 +8499,20 @@
                   planning:['#94a3b8','planned'] };
       function _sMeta(st) { return _SD[st] || _SD[st === 'ran' ? 'complete' : 'planning'] || ['#94a3b8','planned']; }
       var studyObjs = _isetStudyObjs(iset);
+      // Group the summary chips by the SAME canonical status the dots + graph use.
+      var _stOrder = ['Accepted', 'Investigating', 'Blocked', 'Planned', 'Refuted'];
       var byStatus = {};
       studyObjs.forEach(function(s) {
-        var st = (s && (s.effective_status || s.status)) || 'planning';
-        byStatus[st] = (byStatus[st] || 0) + 1;
+        var meta = _studyStatusMeta(s);
+        (byStatus[meta.label] = byStatus[meta.label] || {n: 0, color: meta.color}).n++;
       });
       var breakdown = Object.keys(byStatus).sort(function(a, b) {
-        return (_statusRank[a] ?? 9) - (_statusRank[b] ?? 9);
-      }).map(function(st) {
-        var m = _sMeta(st);
+        return _stOrder.indexOf(a) - _stOrder.indexOf(b);
+      }).map(function(lab) {
+        var e = byStatus[lab];
         return '<span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap">' +
-          '<span style="width:8px;height:8px;border-radius:50%;background:' + m[0] + '"></span>' +
-          byStatus[st] + ' ' + _esc(m[1]) + '</span>';
+          '<span style="width:8px;height:8px;border-radius:50%;background:' + e.color + '"></span>' +
+          e.n + ' ' + _esc(lab) + '</span>';
       }).join('<span style="color:#cbd5e1">·</span>');
 
       // Expandable study list (revealed by clicking the studies count): each row
@@ -8477,7 +8520,7 @@
       // (↓ figures / ↓ notebook, all modes) and, live only, ▶ run / ↻ reproduce.
       var _isSnap = (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
       var studyRows = studyObjs.map(function(s) {
-        var m = _sMeta((s && (s.effective_status || s.status)) || 'planning');
+        var m = _studyStatusMeta(s);
         var slug = (s && s.name) || '';
         var title = (s && s.title) ? String(s.title) : '';
         var obj = (s && (s.objective || s.description)) ? String(s.objective || s.description) : '';
@@ -8495,11 +8538,11 @@
         return '<div class="iset-study-row" style="padding:6px;border-radius:5px" ' +
           'onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
           '<div style="display:flex;align-items:center;gap:8px">' +
-            '<span style="width:7px;height:7px;border-radius:50%;background:' + m[0] + '"></span>' +
+            '<span style="width:7px;height:7px;border-radius:50%;background:' + m.color + '"></span>' +
             '<a href="/studies/' + encodeURIComponent(slug) + '" onclick="event.stopPropagation()" style="text-decoration:none">' +
               '<code style="font-size:0.92em;color:#475569">' + _esc(slug) + '</code></a>' +
             (title ? '<span style="font-size:0.86em;color:#334155">' + _esc(title) + '</span>' : '') +
-            '<span style="margin-left:auto;color:#94a3b8;font-size:0.82em">' + _esc(m[1]) + '</span>' +
+            '<span style="margin-left:auto;color:#94a3b8;font-size:0.82em">' + _esc(m.label) + '</span>' +
           '</div>' +
           (objShort ? '<div style="font-size:0.8em;color:#64748b;margin:2px 0 0 15px;line-height:1.35">' + _esc(objShort) + '</div>' : '') +
           '<div style="display:flex;gap:14px;margin:4px 0 0 15px">' + acts + '</div>' +
@@ -10461,26 +10504,14 @@
     //    top TBD, append, measure --
     studies.forEach(function(s) {
       var liveStatus = s.effective_status || s.status || 'planned';
-      // Derive confidence from the spine's gate_status VERDICT first, so the badge
-      // tracks the computed verdict rather than the drift-prone hand-set `status`
-      // (a stale `status: in_progress` on a passed study used to mis-show
-      // "Investigating"). Fall back to lifecycle status only when no gate verdict.
-      var gateV = String(s.gate_status || '').trim().toLowerCase();
-      var confidence = s.confidence || (function() {
-        if (gateV === 'passed' || gateV === 'pass') return 'Accepted';
-        if (gateV === 'partial' || gateV === 'needs_calibration') return 'Investigating';
-        if (gateV === 'failed' || gateV === 'failed_evaluation' || gateV === 'refuted' || gateV === 'blocked') return 'Refuted';
-        if (liveStatus === 'completed' || liveStatus === 'complete' || liveStatus === 'ran') return 'Accepted';
-        if (liveStatus === 'in_progress' || liveStatus === 'running') return 'Investigating';
-        if (liveStatus === 'failed' || liveStatus === 'invalid') return 'Refuted';
-        return 'Planned';
-      })();
-      var ss = ({
-        Accepted:      {color: '#16a34a', icon: '✓'},
-        Investigating: {color: '#ca8a04', icon: '◐'},
-        Planned:       {color: '#2563eb', icon: '○'},
-        Refuted:       {color: '#dc2626', icon: '✗'},
-      })[confidence] || {color: '#9ca3af', icon: '○'};
+      // Unified status source (see _studyStatusMeta): gate_status VERDICT first, then
+      // the hand-set confidence, then lifecycle status -- the SAME derivation the
+      // spine sidebar dot and the legend use, so the card badge can never disagree
+      // with the sidebar. Fixes the prior bug where `s.confidence || derive(...)` let
+      // a drift-prone hand-set `confidence: Investigating` mask a `blocked` gate.
+      // `Blocked` renders as its own state (slate ⊘), not as Refuted (red ✗).
+      var ss = _studyStatusMeta(s);
+      var confidence = ss.label;
       var followUps = s.follow_up_studies || [];
 
       // Single display name everywhere: authored title:, else the shared
@@ -10778,6 +10809,7 @@
       legendHost.innerHTML =
         '<span style="font-weight:600;color:#475569;margin-right:10px">Confidence:</span>' +
         _lg('#16a34a', '✓', 'Accepted') + _lg('#ca8a04', '◐', 'Investigating') +
+        _lg('#64748b', '⊘', 'Blocked') +
         _lg('#2563eb', '○', 'Planned') + _lg('#dc2626', '✗', 'Refuted') +
         '<span style="flex-basis:100%;height:0"></span>' +
         '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Edges:</span>' +
@@ -12306,8 +12338,12 @@
   // study (stopPropagation). Used by the grouped, pinned, and ungrouped layouts.
   function _railStudyItem(s, opts) {
     opts = opts || {};
-    var status = s.status || 'planned';
-    var color = _railStatusColor(status);
+    // Unified status source (see _studyStatusMeta) so the rail dot agrees with the
+    // investigation-graph card + legend. Was _railStatusColor(s.status) — a separate
+    // 4th color map that showed `blocked` red while the card showed amber.
+    var _sm = _studyStatusMeta(s);
+    var status = _sm.label;
+    var color = _sm.color;
     var indent = opts.indent ? '28px' : '12px';
     var fontSize = opts.indent ? '0.85em' : '0.86em';
     var nameColor = opts.indent ? '#64748b' : '#374151';
