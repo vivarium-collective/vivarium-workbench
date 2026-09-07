@@ -24,6 +24,7 @@ import yaml
 
 from vivarium_workbench.lib.investigation_status import (
     compute_investigation_status,
+    _study_display_status,
     _STUDY_STATUS_FAILED,
     _STUDY_STATUS_COMPLETE,
     _STUDY_STATUS_RUNNING,
@@ -763,9 +764,17 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         n_runs_for_study = _count_runs_for_study(ws_root, study_spec["name"], study_spec)
         raw_status = study_spec.get("status", "planned")
         _active_run = _has_active_run_for_study(ws_root, study_spec["name"], study_spec)
-        _eff_status = _compute_study_effective_status(
-            raw_status, has_runs=n_runs_for_study > 0, has_active_run=_active_run,
-        )
+        # The graph node's effective status comes from the SAME canonical helper
+        # the flat /api/investigations index uses -- _study_display_status: the
+        # multi-axis truth (gate > evaluation > simulation > implementation >
+        # design > expert_review), with `running` gated on a real active run so a
+        # stale `status: running` is demoted. Was
+        # _compute_study_effective_status(raw `status`, ...), which read ONLY the
+        # legacy top-level `status:` field -- so an `evaluation_status: evaluated`
+        # study whose stale `status:` still said `planned` showed as "planned" in
+        # the graph card while the sidebar (multi-axis) showed it done. Sharing
+        # one helper makes the rail dot and the card badge agree by construction.
+        _eff_status = _study_display_status(ws_root, study_spec["name"], study_spec)
         # Safeguard: a study can carry a COMPLETED evaluation as committed
         # report-card verdicts (viz/report_card/*.verdict.json) yet be left at a
         # pre-eval status (e.g. `build`) with no local runs.db — its report cards

@@ -377,6 +377,21 @@ def build_investigations(ws_root: Path) -> dict:
             # active run, so a stale `status: running` doesn't mislabel a study
             # (mirrors the investigation-summary rule).
             "status": _study_display_status(ws_root, spec["name"], spec),
+            # Status AXES the client's unified _studyStatusMeta() reads: it prefers
+            # the gate_status VERDICT, then the effective_status/status lifecycle,
+            # then the hand-set `confidence`. The investigation-GRAPH nodes carry
+            # these off the resolved spec, but this flat per-study index used to
+            # drop gate_status + confidence -- so a study whose graph card read
+            # "Investigating" (from confidence) fell back to "Planned" (blue) in
+            # the left rail. `effective_status` mirrors the SAME running-aware,
+            # multi-axis display status as `status` above (via the one shared
+            # _study_display_status helper the graph node now uses too), so the two
+            # views derive an IDENTICAL state by construction.
+            "effective_status": _study_display_status(ws_root, spec["name"], spec),
+            "gate_status": spec.get("gate_status"),
+            "confidence": spec.get("confidence"),
+            "simulation_status": spec.get("simulation_status"),
+            "evaluation_status": spec.get("evaluation_status"),
             "phase": spec.get("phase"),
             "last_run": spec.get("last_run"),
             "n_simulations": n_runs,
@@ -465,6 +480,16 @@ def build_investigations(ws_root: Path) -> dict:
             "claim": spec.get("claim", ""),
             "tags": spec.get("tags") or [],
             "status": spec.get("status", "planned"),
+            # Same status axes as local rows so a federated study's rail dot and
+            # graph card agree (see the local-row comment above). Federated
+            # studies are remote -- no local run store to gate `running` on -- so
+            # effective_status echoes the donor's declared status rather than the
+            # active-run-aware _study_display_status used for local rows.
+            "effective_status": spec.get("status", "planned"),
+            "gate_status": spec.get("gate_status"),
+            "confidence": spec.get("confidence"),
+            "simulation_status": spec.get("simulation_status"),
+            "evaluation_status": spec.get("evaluation_status"),
             "phase": spec.get("phase"),
             "n_simulations": 0,
             "n_runs": 0,
