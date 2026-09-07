@@ -529,14 +529,13 @@ class SmsApiClient:
             Filename reported in the multipart header (cosmetic).
         analysis_options:
             v2ecoli-shaped ``{scale: {name: params}}`` analyses to run
-            server-side (composite-auto-results Task 8), JSON-encoded into a
-            single ``analysis_options`` query param — this endpoint has no
-            JSON-body channel like ``run_simulation``'s. NOTE: as of this
-            writing the ``/compose/v1/simulation/run`` sms-api route does not
-            yet read this param server-side (unlike ``/api/v1/simulations``);
-            it is threaded through here so the client is ready the moment
-            sms-api adds support, but it is a no-op against a compose endpoint
-            that doesn't parse it.
+            server-side (composite-auto-results Task 8). Sent as a
+            JSON-encoded string in a multipart ``analysis_options`` form
+            field — NOT a query param. sms-api's ``/compose/v1/simulation/run``
+            route reads this via ``Form()`` + ``json.loads()``, not
+            ``Query()``; a query param there is silently dropped by FastAPI
+            and no analyses ever run (the bug behind #1022 being a silent
+            no-op). Omitted entirely (no field at all) when ``None``.
 
         Returns
         -------
@@ -544,19 +543,30 @@ class SmsApiClient:
             ``simulation_database_id`` from the response.
         """
         boundary = "----vivdash00boundary"
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="uploaded_file"; filename="{filename}"\r\n'
-            "Content-Type: application/octet-stream\r\n"
-            "\r\n"
-        ).encode() + pbg_bytes + f"\r\n--{boundary}--\r\n".encode()
+        parts = [
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="uploaded_file"; filename="{filename}"\r\n'
+                "Content-Type: application/octet-stream\r\n"
+                "\r\n"
+            ).encode() + pbg_bytes + b"\r\n"
+        ]
+        if analysis_options:
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    'Content-Disposition: form-data; name="analysis_options"\r\n'
+                    "\r\n"
+                    f"{json.dumps(analysis_options)}\r\n"
+                ).encode()
+            )
+        parts.append(f"--{boundary}--\r\n".encode())
+        body = b"".join(parts)
         content_type = f"multipart/form-data; boundary={boundary}"
 
         params: dict = {"interval_time": interval_time}
         if extra_pip_deps:
             params["extra_pip_deps"] = extra_pip_deps  # list → repeated key via doseq
-        if analysis_options:
-            params["analysis_options"] = json.dumps(analysis_options)
 
         url = self.base_url + "/compose/v1/simulation/run"
         if params:
