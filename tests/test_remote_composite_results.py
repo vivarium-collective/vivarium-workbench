@@ -180,19 +180,20 @@ def test_composite_remote_calls_run_remote_without_analysis_options_kwarg_when_n
 # ---------------------------------------------------------------------------
 
 def _make_results_tar_with_manifest(tmp_path, analysis_name="analysis-exp-ab12"):
-    """A minimal fixture tar.gz containing just an analyses/<name>/_manifest.json
-    -- mirrors the manifest shape asserted by
-    test_remote_run_landing.py::test_land_folds_analysis_manifest_into_pbg_runs_analyses_json,
-    the exact shape remote_run_landing.fold_analyses reads."""
+    """A minimal fixture tar.gz containing an analyses/<name>/analysis.json (the
+    real file v2ecoli-analyze writes at its out_dir) plus its
+    viz/<name>__<group>.html output -- the exact shape
+    remote_run_landing.fold_analyses reads, mirroring
+    test_remote_run_landing.py::test_land_folds_analysis_manifest_into_pbg_runs_analyses_json."""
     staging = tmp_path / "tar-staging"
     analysis_dir = staging / "analyses" / analysis_name
-    analysis_dir.mkdir(parents=True)
-    (analysis_dir / "_manifest.json").write_text(json.dumps({
-        "analysis_name": analysis_name,
-        "modules": {"multiseed": {"doubling_time_distribution": {}}},
-        "written": [f"s3://bucket/exp/analyses/{analysis_name}/doubling_time_distribution.json"],
+    (analysis_dir / "viz").mkdir(parents=True)
+    (analysis_dir / "viz" / "doubling_time_line__all.html").write_text("<html></html>")
+    (analysis_dir / "analysis.json").write_text(json.dumps({
+        "multivariant": {"doubling_time_line": {"all": {"n_cells": 2}}},
+        "status": "OK",
+        "summary": {"multivariant": {"doubling_time_line": "ok"}},
         "errors": [],
-        "status": "done",
     }))
     tar_path = tmp_path / "results.tar.gz"
     with tarfile.open(tar_path, "w:gz") as tar:
@@ -201,8 +202,8 @@ def _make_results_tar_with_manifest(tmp_path, analysis_name="analysis-exp-ab12")
 
 
 def test_composite_remote_folds_analysis_manifest_under_req_run_id(tmp_path, monkeypatch):
-    """Once remote_run.run_remote lands a tar.gz containing an analysis
-    manifest, _execute_remote must fold it into
+    """Once remote_run.run_remote lands a tar.gz containing an analysis.json,
+    _execute_remote must fold it into
     .pbg/runs/<req.run_id>/analyses.json -- req.run_id, the SAME id the
     browser polls via /api/composite-run/<id>/status, NOT a fresh id
     land_remote_run would mint."""
@@ -222,14 +223,14 @@ def test_composite_remote_folds_analysis_manifest_under_req_run_id(tmp_path, mon
     assert analyses_path.is_file()
     entries = json.loads(analyses_path.read_text())
     assert entries == [{
-        "name": "analysis-exp-ab12",
-        "written": ["s3://bucket/exp/analyses/analysis-exp-ab12/doubling_time_distribution.json"],
+        "name": "doubling_time_line",
+        "written": ["analyses/analysis-exp-ab12/viz/doubling_time_line__all.html"],
         "errors": [],
     }]
 
 
 def test_composite_remote_fold_is_noop_without_manifest(tmp_path, monkeypatch):
-    """A landed tar.gz with no analyses/*/_manifest.json (analysis job hasn't
+    """A landed tar.gz with no analyses/*/analysis.json (analysis job hasn't
     finished yet, or auto_results was off at send time) must not write
     analyses.json -- fold_analyses's own silent no-op, unconditionally
     reached (no separate auto_results check on the land side)."""

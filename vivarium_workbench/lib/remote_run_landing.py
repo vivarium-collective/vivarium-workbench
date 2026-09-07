@@ -51,11 +51,68 @@ class RemoteRunSeedCountMismatch(RuntimeError):
     trustworthy run."""
 
 
+def _fold_one_analysis_json(analysis_json_path: Path, extract_root: Path) -> list[dict]:
+    """Map ONE ``v2ecoli-analyze`` ``analysis.json`` into per-analysis fold entries
+    ``{name, written, errors}`` -- the shape composite_flush's local dispatch
+    produces (``written`` is a list of output-file paths, NOT a bool).
+
+    ``analysis.json`` shape (written by v2ecoli.workflow.analysis_runner.main at
+    the config's ``out_dir``): the RESULTS are keyed ``<scale>/<name>/<group>``;
+    per-analysis status is ``summary[<scale>][<name>] = "ok"|"partial"|"error"|
+    "missing_column"``; structural errors (declared-but-unregistered analyses)
+    are a top-level ``errors`` list; a failed group is inline as
+    ``<scale>/<name>/<group> == {"error": "..."}``. There is NO ``written`` key
+    and NO ``_manifest.json`` -- v2ecoli never writes one (an earlier landing
+    globbed a phantom filename; only manual-flush runs ever produced it).
+
+    ``written`` is derived from the output files the analysis actually landed
+    next to ``analysis.json`` -- ``viz/<name>__*.html`` and ``ptools/<name>__*.tsv``
+    (the ``{name}__{group}`` filename convention) -- recorded relative to the
+    landed tree so the paths stay meaningful after the temp extract is cleaned up.
+    """
+    data = json.loads(analysis_json_path.read_text(encoding="utf-8"))
+    out_dir = analysis_json_path.parent
+    summary = data.get("summary")
+    top_errors = data.get("errors") or []
+    entries: list[dict] = []
+    if not isinstance(summary, dict):
+        return entries
+    for scale, name_status in summary.items():
+        if not isinstance(name_status, dict):
+            continue
+        scale_results = data.get(scale) if isinstance(data.get(scale), dict) else {}
+        for name in name_status:
+            written = []
+            for sub in ("viz", "ptools"):
+                subdir = out_dir / sub
+                if subdir.is_dir():
+                    written.extend(
+                        p.relative_to(extract_root).as_posix()
+                        for p in sorted(subdir.glob(f"{name}__*"))
+                        if p.is_file()
+                    )
+            # Structural errors naming this analysis, plus any inline failed group.
+            errors = [e for e in top_errors if isinstance(e, dict) and e.get("name") == name]
+            analysis_results = scale_results.get(name) if isinstance(scale_results, dict) else None
+            if isinstance(analysis_results, dict):
+                for group, payload in analysis_results.items():
+                    if isinstance(payload, dict) and "error" in payload:
+                        errors.append({"scale": scale, "name": name,
+                                       "group": group, "error": payload["error"]})
+            entries.append({"name": name, "written": written, "errors": errors})
+    return entries
+
+
 def fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
     """Fold any standalone-analysis output already present in the landed tar into
     ``.pbg/runs/<run_id>/analyses.json`` -- the same local artifact contract
     composite_flush.run_flush's local (non-remote) analyses dispatch already
     produces, so the existing Analyses button needs no changes to render it.
+
+    The real output ``v2ecoli-analyze`` lands at each analysis' ``out_dir`` is
+    ``analysis.json`` (see ``_fold_one_analysis_json``); this globs those, not
+    the phantom ``_manifest.json`` a prior version looked for (which v2ecoli
+    never writes).
 
     There is no status/poll endpoint for the K8s analysis job (see
     SmsApiClient.run_analysis), so completion is detected the same way the rest
@@ -69,19 +126,17 @@ def fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
     ``run_id`` directly, without going through the study-shaped
     ``land_remote_run`` (which mints its own, unrelated run_id).
     """
-    manifests = sorted(extract_root.glob("**/analyses/*/_manifest.json"))
-    if not manifests:
+    results = sorted(extract_root.glob("**/analyses/*/analysis.json"))
+    if not results:
         return
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
-    entries = []
-    for manifest_path in manifests:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        entries.append({
-            "name": manifest.get("analysis_name"),
-            "written": manifest.get("written", []),
-            "errors": manifest.get("errors", []),
-        })
+    entries: list[dict] = []
+    for result_path in results:
+        entries.extend(_fold_one_analysis_json(result_path, extract_root))
+    if not entries:
+        return
+    entries.sort(key=lambda e: str(e.get("name")))
     run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "analyses.json").write_text(json.dumps(entries, indent=2), encoding="utf-8")

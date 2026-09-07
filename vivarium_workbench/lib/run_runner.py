@@ -865,7 +865,7 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
     ``composite-runs.db`` status rows the local path does so the browser's existing
     ``/api/composite-run/<id>/status`` polling works unchanged. Unpacking the landed
     tar.gz into a viewable emitter store (viz/chart rendering) is still a
-    follow-on; this run DOES fold any ``analyses/<name>/_manifest.json`` already
+    follow-on; this run DOES fold any ``analyses/<name>/analysis.json`` already
     present in the tar into ``.pbg/runs/<run_id>/analyses.json`` (see below) —
     establishing the run lifecycle end to end (running → completed/failed) on
     the deployment target.
