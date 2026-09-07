@@ -33,18 +33,25 @@
   };
   function _studyStatusState(s) {
     s = s || {};
+    // 1. The COMPUTED gate_status verdict is the top authority.
     var gate = String(s.gate_status || '').trim().toLowerCase();
     if (gate === 'passed' || gate === 'pass' || gate === 'accepted') return 'Accepted';
     if (gate === 'failed' || gate === 'failed_evaluation' || gate === 'refuted') return 'Refuted';
     if (gate === 'blocked') return 'Blocked';
     if (gate === 'partial' || gate === 'needs_calibration' || gate === 'in_progress') return 'Investigating';
-    var conf = String(s.confidence || '').trim();
-    if (_STATUS_META[conf]) return conf;               // hand-set confidence fallback
+    // 2. A DEFINITIVE lifecycle state (server-computed effective_status/status folds
+    //    gate_status in) outranks the drift-prone hand-set confidence: a `blocked`
+    //    study must never read as its stale `confidence: Investigating`. This is what
+    //    lets the gate-less rail study objects agree with the gate-bearing graph cards.
     var life = String(s.effective_status || s.status || '').trim().toLowerCase();
+    if (life.indexOf('blocked') !== -1) return 'Blocked';
+    if (life.indexOf('fail') !== -1 || life === 'invalid' || life === 'refuted') return 'Refuted';
+    // 3. Hand-set confidence, when no gate verdict and no definitive lifecycle.
+    var conf = String(s.confidence || '').trim();
+    if (_STATUS_META[conf]) return conf;
+    // 4. Remaining lifecycle states.
     if (['complete', 'completed', 'ran', 'passed', 'evaluated', 'decided'].indexOf(life) >= 0) return 'Accepted';
-    if (life === 'blocked') return 'Blocked';
     if (['running', 'analyzing', 'in_progress'].indexOf(life) >= 0) return 'Investigating';
-    if (['failed', 'invalid', 'refuted'].indexOf(life) >= 0) return 'Refuted';
     return 'Planned';
   }
   function _studyStatusMeta(s) { return _STATUS_META[_studyStatusState(s)] || _STATUS_META.Planned; }
@@ -12331,8 +12338,12 @@
   // study (stopPropagation). Used by the grouped, pinned, and ungrouped layouts.
   function _railStudyItem(s, opts) {
     opts = opts || {};
-    var status = s.status || 'planned';
-    var color = _railStatusColor(status);
+    // Unified status source (see _studyStatusMeta) so the rail dot agrees with the
+    // investigation-graph card + legend. Was _railStatusColor(s.status) — a separate
+    // 4th color map that showed `blocked` red while the card showed amber.
+    var _sm = _studyStatusMeta(s);
+    var status = _sm.label;
+    var color = _sm.color;
     var indent = opts.indent ? '28px' : '12px';
     var fontSize = opts.indent ? '0.85em' : '0.86em';
     var nameColor = opts.indent ? '#64748b' : '#374151';
