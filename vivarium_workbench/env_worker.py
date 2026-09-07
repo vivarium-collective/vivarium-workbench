@@ -528,34 +528,52 @@ def _is_composite_process_class(cls) -> bool:
     return hasattr(cls, "inner_composite")
 
 
-def _inner_composite_of(inst):
-    """The inner ``Composite`` a live process instance wraps, or ``None``.
+def _inner_composite_of_verbose(inst):
+    """``(inner_composite_or_None, build_error_or_None)`` for a live process.
 
     Mirror of ``_is_composite_process_class`` on the instance side: the instance
     IS a ``Composite``, or exposes ``inner_composite()`` (builds it lazily —
-    e.g. ``EcoliWCM``), or holds one as an attribute. Used to drill one level."""
+    e.g. ``EcoliWCM``, or v2ecoli's ``BatchBaselineRunner`` which rebuilds a
+    representative cell from the ParCa cache), or holds one as an attribute.
+
+    Returns a second value, ``build_error``, that is set ONLY when the node IS a
+    composite process (it declares ``inner_composite()``) but *building* the
+    inner composite raised — e.g. a ``StaleCacheError`` when the ParCa cache is
+    missing/stale. The drill uses it to report the real, actionable reason
+    (\"rebuild the cache\") instead of the misleading \"not a composite process\",
+    which is what a swallowed exception used to produce."""
     if inst is None:
-        return None
+        return None, None
     try:
         from process_bigraph import Composite
     except Exception:  # noqa: BLE001
-        return None
+        return None, None
     if isinstance(inst, Composite):
-        return inst
+        return inst, None
     fn = getattr(inst, "inner_composite", None)
     if callable(fn):
         try:
             got = fn()
-        except Exception:  # noqa: BLE001
-            return None
-        return got if isinstance(got, Composite) else None
+        except Exception as e:  # noqa: BLE001
+            # IS a composite process (declares inner_composite) — the build, not
+            # the drill, failed. Surface the reason rather than hiding it as None.
+            return None, str(e)
+        return (got if isinstance(got, Composite) else None), None
     try:
         for v in vars(inst).values():
             if isinstance(v, Composite):
-                return v
+                return v, None
     except Exception:  # noqa: BLE001
         pass
-    return None
+    return None, None
+
+
+def _inner_composite_of(inst):
+    """The inner ``Composite`` a live process instance wraps, or ``None``.
+
+    Back-compat wrapper over :func:`_inner_composite_of_verbose` for callers that
+    only need the composite (a raised inner build reads as ``None``)."""
+    return _inner_composite_of_verbose(inst)[0]
 
 
 def _nav_state(state_tree, segs):
@@ -1161,8 +1179,14 @@ def _resolve_inner_composite_state(params: dict) -> dict:
             node = _nav_state(cur.state, hop)
             if not isinstance(node, dict):
                 return {"__error__": f"path not found: {hop}"}
-            inner = _inner_composite_of(node.get("instance"))
+            inner, build_err = _inner_composite_of_verbose(node.get("instance"))
             if inner is None:
+                # A composite process whose inner build RAISED (e.g. a stale
+                # ParCa cache) is reported with its real reason so the loom can
+                # show something actionable ("rebuild the cache") instead of a
+                # misleading "not a composite process" + a futile retry.
+                if build_err is not None:
+                    return {"__build_error__": build_err}
                 return {"__error__": f"not a composite process: {hop}"}
             crumbs.append(hop[-1] if hop else "?")
             cur = inner

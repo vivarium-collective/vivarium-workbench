@@ -583,3 +583,39 @@ def test_analysis_registry_lookups_import_the_analyses_package_first():
         f"ANALYSIS_REGISTRY imported without a preceding "
         f"`import v2ecoli.workflow.analyses` at source lines "
         f"{[u + 1 for u in unguarded]} — ported analyses will look up as unknown")
+
+
+def test_inner_composite_of_verbose_surfaces_build_error():
+    """A composite-process node whose inner build RAISES (e.g. a stale ParCa
+    cache) must surface the real reason, not be swallowed to a bare None -- so
+    the loom shows an actionable message instead of 'not a composite process'
+    with a futile retry. Regression for the batch-runner inner-preview report."""
+    from vivarium_workbench.env_worker import (
+        _inner_composite_of,
+        _inner_composite_of_verbose,
+    )
+
+    class _RaisingCompositeProcess:
+        def inner_composite(self):
+            raise RuntimeError("Cache at 'out/cache' is stale; rebuild it")
+
+    inst = _RaisingCompositeProcess()
+    inner, err = _inner_composite_of_verbose(inst)
+    assert inner is None
+    assert err is not None and "stale" in err
+    # back-compat wrapper still collapses a raised build to None
+    assert _inner_composite_of(inst) is None
+
+
+def test_inner_composite_of_verbose_plain_node_is_not_an_error():
+    """A genuine non-composite node (no inner_composite, not a Composite) yields
+    (None, None) -- distinct from the build-error case above, so the drill can
+    keep reporting 'not a composite process' only when that is actually true."""
+    from vivarium_workbench.env_worker import _inner_composite_of_verbose
+
+    class _PlainProcess:
+        pass
+
+    inner, err = _inner_composite_of_verbose(_PlainProcess())
+    assert inner is None
+    assert err is None
