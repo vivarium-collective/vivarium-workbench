@@ -388,20 +388,39 @@
 
     // Actions
     var actions = _el("div", "viv-bs-actions");
-    var switchBtn = _el("button", "viv-bs-action", "Open"); switchBtn.id = "viv-bs-switch";
-    switchBtn.title = "Open this source in a new tab";
-    switchBtn.addEventListener("click", function () {
+    // Switch HERE — re-point THIS tab to the selected source in place. A remote
+    // build downloads its workspace the first time (a few minutes; cached builds
+    // are instant); a local workspace switches in-process. Distinct from "Open in
+    // new tab" (which leaves this tab untouched).
+    var switchHereBtn = _el("button", "viv-bs-action", "Switch here"); switchHereBtn.id = "viv-bs-switch-here";
+    switchHereBtn.title = "Switch THIS tab to the selected source. A remote build downloads its "
+      + "workspace the first time (a few minutes; cached builds are instant); a local workspace "
+      + "switches in place. Use “Open in new tab” to keep this tab as it is.";
+    switchHereBtn.addEventListener("click", function () {
       var s = state.selected || {};
-      // Pinned-for-life: open the selection in a new tab (build → /?build=,
-      // workspace → /?workspace=). Path-first fallback so a misread scope can
-      // never leave the button doing nothing.
+      if (s.simulator_id != null) _switchRemote(s.simulator_id, switchHereBtn);
+      else if (s.path) _switchLocal(s.path);
+      else if (s.name) _openEntry(s);   // catalog workspace with no local path → spawn by name (new tab)
+      else alert("Nothing to switch to — pick a repo/branch with a build or workspace.");
+    });
+    actions.appendChild(switchHereBtn);
+
+    var openBtn = _el("button", "viv-bs-action", "Open in new tab"); openBtn.id = "viv-bs-open";
+    openBtn.title = "Open the selected source in a NEW browser tab, leaving this tab unchanged "
+      + "(each tab stays bound to its own source).";
+    openBtn.addEventListener("click", function () {
+      var s = state.selected || {};
+      // build → /?build=, catalog workspace → /?workspace=, path-only → in-place fallback.
       if (s.path || s.name || s.simulator_id != null) _openEntry(s);
       else alert("Nothing to open — pick a repo/branch with a build or workspace.");
     });
-    actions.appendChild(switchBtn);
+    actions.appendChild(openBtn);
 
     var pushBtn = _el("button", "viv-bs-action", "Commit + Push"); pushBtn.id = "viv-bs-push";
     pushBtn.disabled = state.scope !== "local";
+    pushBtn.title = pushBtn.disabled
+      ? "Only for a Local workspace — commit its changes and push the git branch to GitHub."
+      : "Commit all changes on this local workspace’s branch and push it to GitHub.";
     if (RO) pushBtn.style.display = "none";   // local git write — gone in remote-only
     pushBtn.addEventListener("click", function () {
       if (pushBtn.disabled) return;
@@ -435,7 +454,8 @@
     buildBtn.disabled = !(state.scope === "remote" && repoUrlForBuild && effectiveBranch);
     buildBtn.title = buildBtn.disabled
       ? "Select a Remote repo and branch (or type a new branch name) to register a build"
-      : "";
+      : "Register this repo@branch’s current HEAD as a build on sms-api (GovCloud) so it can "
+        + "be run remotely. Resolves the live HEAD server-side; no local checkout needed.";
     buildBtn.addEventListener("click", function () {
       var repo = repoUrlForBuild, branch = effectiveBranch;
       if (!repo || !branch) { alert("Pick a repo and branch first"); return; }
@@ -459,8 +479,10 @@
     });
     actions.appendChild(buildBtn);
 
-    var syncBtn = _el("button", "viv-bs-action", "Sync to local"); syncBtn.id = "viv-bs-sync";
-    syncBtn.title = "Materialize this exact repo@commit workspace on your machine";
+    var syncBtn = _el("button", "viv-bs-action", "Reproduce locally"); syncBtn.id = "viv-bs-sync";
+    syncBtn.title = "Get a copy of this exact source on YOUR machine: pops a "
+      + "‘vivarium-workbench sync <url>’ command that materializes this repo@commit workspace "
+      + "(pinned by its uv.lock) locally. Copy-and-run it in a terminal — it does not change this tab.";
     syncBtn.addEventListener("click", function () {
       fetch("/api/source/manifest").then(function (r) { return r.json(); }).then(function (m) {
         var base = window.location.origin;
