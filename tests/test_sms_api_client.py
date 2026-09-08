@@ -69,6 +69,35 @@ def test_non_200_raises(monkeypatch):
             c.simulation_status(999)
 
 
+def _http_error(status, body):
+    from urllib.error import HTTPError
+    return HTTPError("http://h:8080/x", status, "err", {}, io.BytesIO(body))
+
+
+def test_http_error_detail_summarises_html_gateway_page():
+    """A 502/504 from a proxy is an HTML page, not JSON — summarise it to its
+    <title> instead of echoing the whole markup into the user's alert/logs."""
+    from vivarium_workbench.lib.sms_api_client import _http_error_detail
+    html = (b"<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n"
+            b"<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n</body>\r\n</html>")
+    out = _http_error_detail(_http_error(502, html))
+    assert out == ": 502 Bad Gateway"
+    assert "<html" not in out and "<h1>" not in out
+
+
+def test_http_error_detail_keeps_json_detail():
+    """A FastAPI {"detail": ...} body still surfaces the useful message."""
+    from vivarium_workbench.lib.sms_api_client import _http_error_detail
+    out = _http_error_detail(_http_error(422, b'{"detail": "missing field foo"}'))
+    assert out == ": missing field foo"
+
+
+def test_http_error_detail_caps_length():
+    from vivarium_workbench.lib.sms_api_client import _http_error_detail
+    out = _http_error_detail(_http_error(500, b"x" * 5000))
+    assert len(out) <= 210 and out.endswith("…")
+
+
 def test_run_simulation_query_and_repeated_observables(monkeypatch):
     cap = {}
     with _patch_urlopen(monkeypatch, cap, {"database_id": 50}):
