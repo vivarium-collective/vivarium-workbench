@@ -1513,7 +1513,13 @@ def _append_remote_simulations(sims: list, ws_root: Path) -> list:
         remote = list_remote_simulations(ws_root)
     except Exception:
         remote = []
-    return list(sims) + remote if remote else sims
+    if not remote:
+        return sims
+    # Dedup: a landed remote run is already a local row (same run_id/experiment_id)
+    # — don't list it twice. Keep the local (richer, has store/analyses) copy.
+    have = {s.get("run_id") for s in sims if isinstance(s, dict)}
+    extra = [r for r in remote if r.get("run_id") not in have]
+    return list(sims) + extra if extra else sims
 
 
 # Shared emitter-kind -> display-label map (one place to add a kind's label).

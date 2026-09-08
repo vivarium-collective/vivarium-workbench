@@ -60,6 +60,26 @@ def _short(c) -> str:
     return (str(c or ""))[:7]
 
 
+def _repo_key(url) -> str:
+    """Trailing ``owner/repo`` (lower-cased, no ``.git``) so a build's full
+    ``https://github.com/Owner/Repo`` URL and a workspace remote in any form
+    (ssh, https, ``owner/repo``) compare equal."""
+    u = (str(url or "")).strip().rstrip("/")
+    if u.lower().endswith(".git"):
+        u = u[: -len(".git")]
+    parts = [p for p in u.replace(":", "/").split("/") if p]
+    return "/".join(parts[-2:]).lower() if len(parts) >= 2 else u.lower()
+
+
+def _deployment_name() -> str:
+    """The deployment a remote run targets — the truthful Origin label."""
+    try:
+        from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+        return remote_deployment_name()
+    except Exception:
+        return "remote"
+
+
 def _to_epoch(s):
     """Parse an sms-api timestamp ('YYYY-MM-DD HH:MM:SS.ffffff' or ISO) to epoch
     seconds; None on failure."""
@@ -107,9 +127,12 @@ def _normalize(rec: dict) -> dict:
         "study_slug": None,
         "investigation_slug": None,            # remote builds aren't investigation-organized
         "remote_origin": {
-            "deployment": f"build #{sid}",
+            # Where it ran — the deployment name (e.g. the GovCloud stack), not
+            # the internal build number. The build is kept for the tooltip.
+            "deployment": _deployment_name(),
             "simulation_id": db_id,
             "experiment_id": experiment_id,
+            "build": sid,
             "backend": (cfg.get("aws") or {}).get("batch_queue") or "aws",
             "s3_uri": out_uri,
         },
@@ -127,51 +150,79 @@ def _read_build_meta(ws_root: Path) -> dict | None:
         return None
 
 
-def list_remote_simulations(ws_root: Path, base_url: str | None = None) -> list[dict]:
-    """Remote runs for the active build's (repo, commit), or ``[]``.
-
-    Returns ``[]`` when the workspace is not a materialized remote build, or
-    when sms-api is unreachable — never raises, so a down tunnel can't break the
-    local Simulations DB listing.
-    """
-    bm = _read_build_meta(ws_root)
-    if not bm:
-        return []
-    active_id = bm.get("simulator_id")
-    if active_id is None:
-        return []
+def _workspace_repo_key(ws_root: Path) -> str | None:
+    """The workspace's origin repo as an ``owner/repo`` key, or ``None``."""
     try:
-        from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+        from vivarium_workbench.lib.git_status import remote_repo_url
+        url = remote_repo_url(Path(ws_root))
+    except Exception:
+        url = None
+    return _repo_key(url) if url else None
+
+
+def _scope_build_ids(ws_root: Path, bm, builds) -> "tuple[set, object] | tuple[None, None]":
+    """Which remote build ids this workspace should surface runs for, plus one
+    seed id to list against. Two modes:
+
+      * Materialized remote build (``.viv-build.json``): the active build's
+        (repo, commit) — the exact source this tab runs.
+      * Local checkout: every build of the workspace's *repo* (any commit), so
+        all of the project's remote runs show up — this is what makes remote
+        runs visible in a plain local workspace, not just a switched-in build.
+    """
+    by_id = {_build_id(b): b for b in builds}
+    if bm and bm.get("simulator_id") is not None:
+        active_id = bm.get("simulator_id")
+        active = by_id.get(active_id)
+        repo = (active or {}).get("git_repo_url") if active else None
+        commit = _short((active or {}).get("git_commit_hash") if active else bm.get("commit"))
+        if not commit:
+            return None, None
+        matching = {
+            _build_id(b) for b in builds
+            if _short(b.get("git_commit_hash")) == commit
+            and (repo is None or _repo_key(b.get("git_repo_url")) == _repo_key(repo))
+        }
+        matching.add(active_id)
+        return matching, active_id
+    key = _workspace_repo_key(ws_root)
+    if not key:
+        return None, None
+    matching = {_build_id(b) for b in builds if _repo_key(b.get("git_repo_url")) == key}
+    if not matching:
+        return None, None
+    return matching, next(iter(matching))
+
+
+def list_remote_simulations(ws_root: Path, base_url: str | None = None,
+                            limit: int = 200) -> list[dict]:
+    """Remote sms-api runs to surface in the Simulations DB, or ``[]``.
+
+    For a materialized remote build, that's the active build's (repo, commit).
+    For a plain local checkout, it's every remote run of the workspace's repo,
+    so the project's GovCloud runs appear alongside local ones — capped to the
+    ``limit`` most recent. Returns ``[]`` when the repo can't be resolved or
+    sms-api is unreachable — never raises, so a down tunnel can't break the
+    local listing.
+    """
+    try:
+        from vivarium_workbench.lib.sms_api_client import SmsApiClient
     except ImportError:
         return []
     client = SmsApiClient(base_url or _sms_api_base())
     try:
         builds = _builds_list(client.list_simulators())
-    except SmsApiError:
-        return []
     except Exception:
         return []
 
-    # Resolve the active build's (repo, commit), then the set of builds sharing
-    # it (a commit may be built more than once). Fall back to the build-meta's
-    # own commit if the active id isn't in the versions list.
-    by_id = {_build_id(b): b for b in builds}
-    active = by_id.get(active_id)
-    repo = (active or {}).get("git_repo_url") if active else None
-    commit = _short((active or {}).get("git_commit_hash") if active else bm.get("commit"))
-    if not commit:
+    matching, seed = _scope_build_ids(ws_root, _read_build_meta(ws_root), builds)
+    if not matching or seed is None:
         return []
-    matching = {
-        _build_id(b) for b in builds
-        if _short(b.get("git_commit_hash")) == commit
-        and (repo is None or b.get("git_repo_url") == repo)
-    }
-    matching.add(active_id)
 
     try:
-        sims = client.list_build_simulations(active_id)
-    except SmsApiError:
-        return []
+        # The list endpoint ignores its simulator_id filter and returns every
+        # recorded sim, so any build id seeds it; we filter client-side.
+        sims = client.list_build_simulations(seed)
     except Exception:
         return []
     if not isinstance(sims, list):
@@ -180,4 +231,4 @@ def list_remote_simulations(ws_root: Path, base_url: str | None = None) -> list[
     rows = [_normalize(rec) for rec in sims
             if isinstance(rec, dict) and rec.get("simulator_id") in matching]
     rows.sort(key=lambda r: r.get("started_at") or 0.0, reverse=True)
-    return rows
+    return rows[:limit] if limit and limit > 0 else rows
