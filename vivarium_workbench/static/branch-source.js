@@ -58,6 +58,25 @@
     return m.label;
   }
 
+  // A small, subtle per-row action button (matches the health-row's inline
+  // styling convention in this file). `variant === "primary"` tints Switch here.
+  function _rowBtn(text, title, variant) {
+    var b = _el("button", "viv-bs-rowbtn", text);
+    if (title) b.title = title;
+    var primary = variant === "primary";
+    b.style.cssText = "font-size:11px; line-height:1.4; padding:2px 8px; border-radius:5px; "
+      + "cursor:pointer; white-space:nowrap; "
+      + (primary
+        ? "border:1px solid #b7c6ea; background:#eef3fd; color:#2f57b5;"
+        : "border:1px solid #d5dbe4; background:#fff; color:#3a4657;");
+    return b;
+  }
+  function _rowTag(text) {
+    var t = _el("span", "viv-bs-rowtag", text);
+    t.style.cssText = "font-size:11px; color:#41a06a; white-space:nowrap; padding:0 2px";
+    return t;
+  }
+
   async function _switchLocal(path) {
     var r = await fetch("/api/source/switch", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -567,17 +586,64 @@
       var truncated = !f && !state.showAllBuilds && total > BUILD_LIST_LIMIT;
       var shown = truncated ? rows.slice(0, BUILD_LIST_LIMIT) : rows;
       shown.forEach(function (m) {
+        var isRemote = m.simulator_id != null;
         var li = _el("li", "viv-bs-list-row" + (m.current ? " current" : ""));
-        var lbl = _el("span", "viv-bs-list-label", _entryText(m));
-        lbl.style.cursor = "pointer";
-        lbl.title = "Open this source in a new tab";
-        lbl.addEventListener("click", function () { _openEntry(m); });
-        li.appendChild(lbl);
-        if (state.scope === "local" && !m.current && m.path) {
-          var x = _el("button", "viv-bs-forget", "✕"); x.title = "Forget";
-          x.addEventListener("click", function (e) { e.stopPropagation(); _forget(m.path, li); });
-          li.appendChild(x);
+        li.style.cssText = "display:flex; align-items:center; gap:10px; padding:6px 2px";
+
+        // Label — a bold primary line (repo@sha, or the workspace label) over a
+        // muted meta line (branch · date · build#, or the path), so each source
+        // in a long history is legible at a glance instead of one dense string.
+        var labelWrap = _el("div", "viv-bs-list-label");
+        labelWrap.style.cssText = "flex:1 1 auto; min-width:0";
+        var primary = isRemote ? (m.repo + " @ " + _short(m.commit)) : (m.label || m.name || "workspace");
+        var pEl = _el("div", "viv-bs-row-primary", primary);
+        pEl.style.cssText = "font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis";
+        labelWrap.appendChild(pEl);
+        var metaBits = [];
+        if (isRemote) {
+          if (m.branch) metaBits.push(m.branch);
+          if (m.created_at) metaBits.push(String(m.created_at).slice(0, 10));
+          metaBits.push("build #" + m.simulator_id);
+        } else if (m.path) {
+          metaBits.push(m.path);
         }
+        if (metaBits.length) {
+          var mEl = _el("div", "viv-bs-row-meta", metaBits.join("  ·  "));
+          mEl.style.cssText = "font-size:11px; color:#93a1b5; white-space:nowrap; overflow:hidden; text-overflow:ellipsis";
+          labelWrap.appendChild(mEl);
+        }
+        li.appendChild(labelWrap);
+
+        // Per-row actions — the SAME two verbs as the top bar, scoped to THIS
+        // row: "Switch here" re-points this tab in place; "Open ↗" spawns a new
+        // tab. Every source in the history is thus directly actionable without
+        // re-selecting it in the pickers above. The current source shows a badge
+        // instead of Switch (you're already on it).
+        var acts = _el("div", "viv-bs-row-actions");
+        acts.style.cssText = "flex:0 0 auto; display:flex; align-items:center; gap:6px";
+        if (m.current) {
+          acts.appendChild(_rowTag("current ✓"));
+        } else {
+          var sw = _rowBtn("Switch here", "Switch THIS tab to this source in place"
+            + (isRemote ? " — downloads its workspace the first time (cached builds are instant)" : ""),
+            "primary");
+          sw.addEventListener("click", function (e) {
+            e.stopPropagation();
+            if (isRemote) _switchRemote(m.simulator_id, sw);
+            else if (m.path) _switchLocal(m.path);
+            else if (m.name) _openEntry(m);   // catalog workspace, no local path → new tab
+          });
+          acts.appendChild(sw);
+        }
+        var op = _rowBtn("Open ↗", "Open this source in a NEW tab, leaving this one unchanged");
+        op.addEventListener("click", function (e) { e.stopPropagation(); _openEntry(m); });
+        acts.appendChild(op);
+        if (state.scope === "local" && !m.current && m.path) {
+          var x = _el("button", "viv-bs-forget", "✕"); x.title = "Forget this workspace";
+          x.addEventListener("click", function (e) { e.stopPropagation(); _forget(m.path, li); });
+          acts.appendChild(x);
+        }
+        li.appendChild(acts);
         list.appendChild(li);
       });
       // "no matches" only while actively filtering — never as idle noise when
