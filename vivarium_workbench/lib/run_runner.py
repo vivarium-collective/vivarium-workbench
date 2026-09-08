@@ -907,8 +907,11 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
                         with tarfile.open(results_path, "r:gz") as tar:
                             tar.extractall(extract_root, filter="data")
                         remote_run_landing.fold_analyses(extract_root, req.workspace, req.run_id)
+                        # Persist PTools TSV exports locally so the Omics Viewer
+                        # discovers this (e.g. GovCloud) run like a local study's.
+                        remote_run_landing.land_ptools_tsvs(extract_root, req.workspace, req.run_id)
                 except Exception as fold_exc:  # noqa: BLE001 — best-effort, never fail a completed run
-                    _write_log(req, f"note: could not fold remote analyses into analyses.json: {fold_exc}")
+                    _write_log(req, f"note: could not fold remote analyses/ptools for this run: {fold_exc}")
         except Exception as exc:
             tb = traceback.format_exc()
             reason = _remote_failure_reason(exc)

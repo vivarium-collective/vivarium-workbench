@@ -142,6 +142,35 @@ def fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
     (run_dir / "analyses.json").write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
 
+def land_ptools_tsvs(extract_root: Path, ws_root: Path, run_id: str) -> int:
+    """Copy any PTools TSV exports (``**/ptools/*.tsv``) out of a landed remote-run
+    tar into ``<ws>/.pbg/runs/<run_id>/ptools/``, so the PTools Omics Viewer
+    discovers this run the same way it discovers a local study's exports
+    (v2ecoli.workbench_viewers._ptools_targets globs ``**/ptools/*.tsv``). Without
+    this, a GovCloud run's ptools TSVs — present in the tar our backend-aware
+    ``/results`` route streams — would be extracted to a temp dir and discarded
+    with everything but ``analyses.json``.
+
+    Returns the number of TSVs landed. Best-effort / idempotent (overwrites); the
+    caller wraps it so a copy failure never fails an otherwise-completed run.
+    """
+    tsvs = sorted(extract_root.glob("**/ptools/*.tsv"))
+    if not tsvs:
+        return 0
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+    dest = WorkspacePaths.load(ws_root).pbg / "runs" / run_id / "ptools"
+    dest.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for src in tsvs:
+        try:
+            shutil.copy2(src, dest / src.name)
+            n += 1
+        except OSError:
+            continue
+    return n
+
+
 def _detect_and_locate_all(extract_root: Path) -> tuple[str, list[Path]]:
     """Find every native store under an extracted tar. Returns (kind, source_paths):
     one entry per lineage/seed for zarr, or a single entry for parquet.
@@ -330,6 +359,7 @@ def land_remote_run(
 
         if ws_root is not None:
             fold_analyses(extract_root, ws_root, run_id)
+            land_ptools_tsvs(extract_root, ws_root, run_id)
 
     provenance["store_path"] = str(dest)
     resolved_n_steps = n_steps if n_steps is not None else 0

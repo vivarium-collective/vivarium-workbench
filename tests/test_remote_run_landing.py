@@ -6,6 +6,7 @@ from pathlib import Path
 from vivarium_workbench.lib.remote_run_landing import (
     RemoteRunSeedCountMismatch,
     _count_parquet_rows,
+    land_ptools_tsvs,
     land_remote_run,
 )
 
@@ -555,3 +556,39 @@ def test_land_without_expected_seeds_skips_the_check(tmp_path: Path):
         commit="c", tar_path=tar,
     )
     assert run_id  # lands without raising
+
+
+def test_land_ptools_tsvs_copies_exports_into_run_dir(tmp_path: Path):
+    """A landed remote-run tar's PTools TSV exports (**/ptools/*.tsv, e.g. from a
+    GovCloud compose analysis) must be copied into .pbg/runs/<run_id>/ptools/ so
+    the Omics Viewer discovers this run like a local study's exports."""
+    extract_root = tmp_path / "extract"
+    pt = extract_root / "cd2ms_k4" / "analyses" / "ptools_overview_multigeneration" / "ptools"
+    pt.mkdir(parents=True)
+    (pt / "ptools_overview_multigeneration__variant=0_seed=0.tsv").write_text("gene\tvalue\nb0001\t1.0\n")
+    (pt / "ptools_overview_multigeneration__variant=0_seed=1.tsv").write_text("gene\tvalue\nb0001\t2.0\n")
+
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+
+    n = land_ptools_tsvs(extract_root, ws_root, "r1")
+
+    assert n == 2
+    dest = ws_root / ".pbg" / "runs" / "r1" / "ptools"
+    landed = sorted(p.name for p in dest.glob("*.tsv"))
+    assert landed == [
+        "ptools_overview_multigeneration__variant=0_seed=0.tsv",
+        "ptools_overview_multigeneration__variant=0_seed=1.tsv",
+    ]
+    assert "b0001" in (dest / landed[0]).read_text()
+
+
+def test_land_ptools_tsvs_noop_when_none_present(tmp_path: Path):
+    """No ptools/ exports in the tar → nothing written, count 0 (not an error)."""
+    extract_root = tmp_path / "extract"
+    (extract_root / "seed_00" / "store.zarr").mkdir(parents=True)
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+
+    assert land_ptools_tsvs(extract_root, ws_root, "r2") == 0
+    assert not (ws_root / ".pbg" / "runs" / "r2" / "ptools").exists()
