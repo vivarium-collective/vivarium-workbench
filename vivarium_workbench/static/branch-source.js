@@ -216,10 +216,15 @@
         state.error = db.error;
       } else {
         state.error = null;
+        var curC = state.currentCommit ? _short(state.currentCommit) : "";
         state.entries = (db.builds || []).map(function (b) {
           return { repo: b.repo, repo_url: b.repo_url, branch: b.branch || "", commit: b.commit || "",
                    created_at: b.created_at || "", label: b.label, simulator_id: b.simulator_id,
-                   current: b.simulator_id === state.currentSimId };
+                   // `current` = THIS build is the tab's active source (a materialized
+                   // build). `matchesWorkspace` = a build of the commit the workspace
+                   // is on (may be several; shown when not the exact active build).
+                   current: b.simulator_id === state.currentSimId,
+                   matchesWorkspace: !!curC && _short(b.commit) === curC };
         });
       }
     }
@@ -572,14 +577,20 @@
         });
       }
       // Newest-first (remote builds carry a monotonic simulator_id), with the
-      // current source floated to the very top. sms-api accumulates a build per
-      // register/upload and has no delete, so this history gets long — hence the
-      // sort + the collapse-to-recent-N below.
+      // active source floated to the very top, then any build of the commit the
+      // workspace is on. sms-api accumulates a build per register/upload and has
+      // no delete, so this history gets long — hence the sort + collapse below.
       rows = rows.slice().sort(function (a, b) {
-        var ac = a.current ? 1 : 0, bc = b.current ? 1 : 0;
+        var ac = a.current ? 2 : (a.matchesWorkspace ? 1 : 0);
+        var bc = b.current ? 2 : (b.matchesWorkspace ? 1 : 0);
         if (ac !== bc) return bc - ac;
         return (Number(b.simulator_id) || 0) - (Number(a.simulator_id) || 0);
       });
+      // The single newest build (highest id) — tagged "latest" so it's obvious
+      // which row is the branch HEAD without reading build numbers.
+      var latestId = rows.reduce(function (mx, r) {
+        var v = Number(r.simulator_id) || 0; return v > mx ? v : mx;
+      }, 0);
       var total = rows.length;
       // Collapse a long history to the recent N — but never while filtering (a
       // search should reach every match), and not once "show all" is expanded.
@@ -596,8 +607,27 @@
         var labelWrap = _el("div", "viv-bs-list-label");
         labelWrap.style.cssText = "flex:1 1 auto; min-width:0";
         var primary = isRemote ? (m.repo + " @ " + _short(m.commit)) : (m.label || m.name || "workspace");
-        var pEl = _el("div", "viv-bs-row-primary", primary);
-        pEl.style.cssText = "font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis";
+        var pEl = _el("div", "viv-bs-row-primary");
+        pEl.style.cssText = "display:flex; align-items:center; gap:8px; min-width:0";
+        var pText = _el("span", null, primary);
+        pText.style.cssText = "font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis";
+        pEl.appendChild(pText);
+        // Status chip — which source the workspace is on, and which is newest.
+        var chip = null;
+        if (m.current || m.matchesWorkspace) {
+          chip = _el("span", null, m.current ? "in workspace ✓" : "workspace commit");
+          chip.style.cssText = "flex:0 0 auto; font-size:10px; font-weight:600; color:#1f7a44; "
+            + "background:#e7f6ec; border:1px solid #b7e2c6; border-radius:10px; padding:1px 7px";
+          chip.title = m.current
+            ? "This build is the source loaded in this tab"
+            : "A build of the commit your workspace is currently on";
+        } else if (isRemote && m.simulator_id === latestId) {
+          chip = _el("span", null, "latest");
+          chip.style.cssText = "flex:0 0 auto; font-size:10px; font-weight:600; color:#2f57b5; "
+            + "background:#eef3fd; border:1px solid #b7c6ea; border-radius:10px; padding:1px 7px";
+          chip.title = "Newest build of " + (m.branch || "this branch");
+        }
+        if (chip) pEl.appendChild(chip);
         labelWrap.appendChild(pEl);
         var metaBits = [];
         if (isRemote) {
@@ -875,6 +905,14 @@
     // A materialized remote build lives at .../build-cache/sim<id>-<commit>.
     var bm = curPath.match(/build-cache\/sim(\d+)-/);
     state.currentSimId = bm ? Number(bm[1]) : null;
+    // The workspace's checked-out commit — lets us flag which remote build(s)
+    // correspond to what's live in the workspace even when it's a LOCAL checkout
+    // (no materialized-build id to match on). Short-sha compared, since builds
+    // and git-status report shas at differing lengths. `current` carries only
+    // {name, path}; the commit lives on the matching workspaces-list entry.
+    var curEntry = (wsData.workspaces || []).filter(function (w) { return w.path === curPath; })[0] || null;
+    state.currentCommit = (curEntry && curEntry.commit) ? String(curEntry.commit)
+                        : ((cur && cur.commit) ? String(cur.commit) : null);
     // On first load, reflect the ACTIVE source's scope (so switching to a remote
     // build and reloading lands on Remote, not back on Local). Later refreshes
     // honor the user's explicit scope toggle.

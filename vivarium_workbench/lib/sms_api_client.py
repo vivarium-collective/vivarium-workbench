@@ -8,6 +8,7 @@ base_url (the SSM tunnel, default http://localhost:8080).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -45,7 +46,7 @@ _GET_RETRIES = 3
 _RETRY_BACKOFF = 0.5
 
 
-def _http_error_detail(e: HTTPError, limit: int = 4000) -> str:
+def _http_error_detail(e: HTTPError, limit: int = 200) -> str:
     """Best-effort extraction of the server's error body for diagnostics.
 
     Without this, a FastAPI 422/500 with a JSON ``{"detail": ...}`` body reaches
@@ -53,9 +54,13 @@ def _http_error_detail(e: HTTPError, limit: int = 4000) -> str:
     ``HTTPError.read()`` is never called. Returns a string like
     ``": missing field 'foo'"`` ready to append to the summary message, or
     ``""`` if the body couldn't be read/decoded (never raises — surfacing a
-    better error must not itself produce a worse one). Truncated so a stray
-    HTML error page (e.g. from a proxy in front of sms-api) can't blow up log
-    lines.
+    better error must not itself produce a worse one).
+
+    A gateway/proxy in front of sms-api (the SSM tunnel, an ALB) answers a
+    502/503/504 with a full **HTML error page**, not JSON. Dumping that page
+    into the message put a wall of ``<html>…`` markup into the user's alert
+    (and the logs). So an HTML body is summarised to its ``<title>`` (e.g.
+    ``502 Bad Gateway``) rather than echoed, and every body is capped short.
     """
     try:
         raw = e.read()
@@ -67,13 +72,18 @@ def _http_error_detail(e: HTTPError, limit: int = 4000) -> str:
     try:
         parsed = json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        pass
-    else:
-        if isinstance(parsed, dict) and "detail" in parsed:
-            detail = parsed["detail"]
-            text = detail if isinstance(detail, str) else json.dumps(detail)
+        parsed = None
+    if isinstance(parsed, dict) and "detail" in parsed:
+        detail = parsed["detail"]
+        text = detail if isinstance(detail, str) else json.dumps(detail)
+    elif text[:1] == "<" or "<html" in text[:256].lower():
+        # HTML error page from a proxy/gateway (e.g. a 502/504 while the tunnel
+        # or upstream is down) — summarise, never echo the markup.
+        m = re.search(r"<title>\s*(.*?)\s*</title>", text, re.IGNORECASE | re.DOTALL)
+        title = re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
+        text = title or "gateway error page"
     if len(text) > limit:
-        text = text[:limit] + "... [truncated]"
+        text = text[:limit] + "…"
     return f": {text}" if text else ""
 
 
