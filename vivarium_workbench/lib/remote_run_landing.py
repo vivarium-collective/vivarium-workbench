@@ -171,6 +171,39 @@ def land_ptools_tsvs(extract_root: Path, ws_root: Path, run_id: str) -> int:
     return n
 
 
+def land_remote_simulation_artifacts(ws_root: Path, simulation_id: int, run_id: str,
+                                     client) -> dict:
+    """Land a remote run's analyses + PTools exports into ``.pbg/runs/<run_id>/``
+    WITHOUT a study — the study-less path for a Runs-table remote row (a GovCloud
+    run that isn't investigation-organized). Downloads the sim's result tar from
+    sms-api, extracts it, folds ``analyses.json`` and copies ``ptools/*.tsv`` via
+    the same helpers the study-shaped and composite paths use.
+
+    This is the "land on demand" backend: after it runs, the Analyses artifact
+    (``.pbg/runs/<run_id>/analyses.json``) resolves and the run appears in the
+    PTools Omics Viewer's run menu (``_ptools_targets`` globs ``.pbg/runs/*``).
+    Idempotent (overwrites). Returns ``{run_id, analyses: bool, ptools: int}``;
+    raises SmsApiError / OSError on a failed download/extract so the caller can
+    shape the HTTP status.
+    """
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+    with tempfile.TemporaryDirectory() as td:
+        tar_path = client.download_data(int(simulation_id), Path(td))
+        extract_root = Path(td) / "extract"
+        extract_root.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(extract_root, filter="data")
+        fold_analyses(extract_root, ws_root, run_id)
+        ptools_n = land_ptools_tsvs(extract_root, ws_root, run_id)
+    run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
+    return {
+        "run_id": run_id,
+        "analyses": (run_dir / "analyses.json").is_file(),
+        "ptools": ptools_n,
+    }
+
+
 def _detect_and_locate_all(extract_root: Path) -> tuple[str, list[Path]]:
     """Find every native store under an extracted tar. Returns (kind, source_paths):
     one entry per lineage/seed for zarr, or a single entry for parquet.

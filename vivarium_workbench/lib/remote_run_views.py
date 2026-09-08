@@ -557,6 +557,36 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
     return response, 200
 
 
+def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Land a remote run's analyses + PTools exports WITHOUT a study — the
+    study-less counterpart of ``remote_run_land`` for a Runs-table remote row
+    (a GovCloud run that isn't investigation-organized, so it has no study spec
+    to land into). Downloads the sim's result tar and folds ``analyses.json`` +
+    copies ``ptools/*.tsv`` into ``.pbg/runs/<run_id>/``, so the Analyses button
+    resolves and the run shows in the PTools Omics Viewer's run menu.
+
+    This is the "land on demand" endpoint the Runs-table remote-row actions call.
+    Body: ``{simulation_id, run_id}``. Idempotent.
+    """
+    body = body or {}
+    if not _run_auth_ok():
+        return {"error": "not authenticated"}, 401
+    sim_id = body.get("simulation_id")
+    run_id = (body.get("run_id") or "").strip()
+    if not sim_id or not run_id:
+        return {"error": "simulation_id and run_id are required"}, 400
+    from vivarium_workbench.lib.remote_run_landing import land_remote_simulation_artifacts
+
+    client = SmsApiClient(_sms_api_base())
+    try:
+        result = land_remote_simulation_artifacts(ws_root, int(sim_id), run_id, client=client)
+    except SmsApiError as e:
+        return {"error": f"land failed: sms-api unavailable: {e}"}, 502
+    except Exception as e:  # noqa: BLE001 — surface a shaped error, never a 500 traceback page
+        return {"error": f"land failed: {type(e).__name__}: {e}"}, 500
+    return result, 200
+
+
 def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Fire the analysis phase on an EXISTING, already-completed simulation.
 

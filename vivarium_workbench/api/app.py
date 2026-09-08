@@ -7038,6 +7038,19 @@ def create_app() -> FastAPI:
         body, status = _remote_run_views.remote_run_land(ws, req or {})
         return JSONResponse(status_code=status, content=body)
 
+    @app.post("/api/remote-run-land-artifacts", tags=["Runs"], status_code=200,
+              summary="Land a remote run's analyses + PTools exports (study-less, on demand)")
+    def remote_run_land_artifacts(
+        req: Union[dict, None] = Body(default=None),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Study-less landing for a Runs-table remote row: download the sim's
+        results and fold analyses.json + copy ptools/*.tsv into
+        .pbg/runs/<run_id>/, so the Analyses button and PTools viewer work.
+        Body: {simulation_id, run_id}."""
+        body, status = _remote_run_views.remote_run_land_artifacts(ws, req or {})
+        return JSONResponse(status_code=status, content=body)
+
     @app.post("/api/remote-run-analysis", tags=["Runs"], status_code=202,
               summary="Fire the analysis phase on an existing completed simulation")
     def remote_run_analysis(
