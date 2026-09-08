@@ -1456,6 +1456,71 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 <!-- GitHub: in-UI sign-in + (future) org picker. The github-login.js widget
      activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
 <section id="page-github" class="page" data-page="github">
+  <!-- Self-explanatory intro: what the two cards below are for and how the
+       verbs work. Collapsible (native <details>), open by default; the small
+       script at the end of the section remembers the collapsed state. -->
+  <style>
+    .viv-source-help { border:1px solid #e5e9ef; border-radius:12px; background:#f7f9fc;
+      padding:0 16px; margin:0 0 16px; font-size:13px; color:#374151 }
+    .viv-source-help > summary { cursor:pointer; list-style:none; padding:12px 2px;
+      font-weight:650; color:#1f2937; display:flex; align-items:center; gap:8px }
+    .viv-source-help > summary::-webkit-details-marker { display:none }
+    .viv-source-help > summary::before { content:"▸"; color:#93a1b5; transition:transform .15s }
+    .viv-source-help[open] > summary::before { transform:rotate(90deg) }
+    .viv-source-help-body { padding:0 2px 14px }
+    .viv-source-help-body > p { margin:0 0 12px; color:#4b5563 }
+    .viv-help-cols { display:grid; grid-template-columns:1fr 1fr; gap:24px }
+    @media (max-width:720px) { .viv-help-cols { grid-template-columns:1fr } }
+    .viv-help-cols h4 { margin:0 0 6px; font-size:12px; text-transform:uppercase;
+      letter-spacing:.05em; color:#6b7280 }
+    .viv-help-cols ul { margin:0; padding-left:16px }
+    .viv-help-cols li { margin:0 0 6px; line-height:1.5; color:#4b5563 }
+    .viv-help-cols code, .viv-source-help code { background:#eef1f5; border-radius:4px; padding:0 4px; font-size:.92em }
+    :root[data-theme="dark"] .viv-source-help { background:var(--panel-2,#1c2230); border-color:var(--border) }
+    :root[data-theme="dark"] .viv-source-help,
+    :root[data-theme="dark"] .viv-source-help-body > p,
+    :root[data-theme="dark"] .viv-help-cols li { color:var(--text-muted) }
+    :root[data-theme="dark"] .viv-source-help > summary { color:var(--text) }
+    :root[data-theme="dark"] .viv-help-cols code, :root[data-theme="dark"] .viv-source-help code { background:var(--field) }
+  </style>
+  <details id="viv-source-help" class="viv-source-help" open>
+    <summary>How this page works</summary>
+    <div class="viv-source-help-body">
+      <p>This page controls <strong>where this browser tab runs</strong> and how your work <strong>syncs with GitHub</strong> — two separate jobs, one per card below.</p>
+      <div class="viv-help-cols">
+        <div>
+          <h4>Source — where this tab runs</h4>
+          <ul>
+            <li><strong>Local</strong> is a workspace checked out on this machine; <strong>Remote</strong> is a build registered on the GovCloud sms-api server.</li>
+            <li>Pick a <strong>Repo / Branch / Commit</strong> (or build), then <strong>Switch here</strong> to re-point <em>this</em> tab to it, or <strong>Open ↗</strong> to open it in a new tab. A remote build downloads its workspace the first time (a minute or two); cached builds are instant.</li>
+            <li><strong>Build via sms-api</strong> registers a branch's current HEAD as a new remote build. <strong>Reproduce locally</strong> gives you a command to recreate this exact source on your own machine.</li>
+            <li>In the build list, chips flag which build is <strong>in workspace ✓</strong>, on your <strong>workspace commit</strong>, or the <strong>latest</strong>.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>GitHub — sync &amp; collaborate</h4>
+          <ul>
+            <li><strong>Account</strong> — the GitHub identity used to push (your <code>gh</code> session, or a pasted token).</li>
+            <li><strong>Branch &amp; sync</strong> — the workspace's git state: the branch vs its base, uncommitted <strong>Changes</strong> + push state, and any open pull request.</li>
+            <li><strong>Commit + Push</strong> commits every change on the branch and pushes it; <strong>Open PR</strong> starts a pull request from it.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </details>
+  <script>
+    (function () {
+      try {
+        var d = document.getElementById('viv-source-help');
+        if (!d) return;
+        if (localStorage.getItem('viv-source-help-collapsed') === '1') d.open = false;
+        d.addEventListener('toggle', function () {
+          try { localStorage.setItem('viv-source-help-collapsed', d.open ? '0' : '1'); } catch (e) {}
+        });
+      } catch (e) {}
+    })();
+  </script>
+
   <div id="viv-branch-source" class="viv-branch-source"></div>
 
   <!-- Settings-style single panel: three sections (Account, Workspace
