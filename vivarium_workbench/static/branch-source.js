@@ -288,7 +288,24 @@
     }));
 
     var inRepo = state.entries.filter(function (e) { return e.repo === state.repo; });
-    var branches = _distinct(inRepo, "branch");
+    // Order the branch list for usefulness, not alphabetically (clearer remote
+    // selection): `main` first, then most-recently-built branch first (recency =
+    // the branch's highest sms-api build id). Local scope has no build ids, so it
+    // falls back to main-first + the alphabetical order _distinct already gives.
+    function _branchRecency(br) {
+      var t = 0;
+      inRepo.forEach(function (e) {
+        if (e.branch !== br) return;
+        var v = e.simulator_id != null ? Number(e.simulator_id) : 0;
+        if (v > t) t = v;
+      });
+      return t;
+    }
+    var branches = _distinct(inRepo, "branch").sort(function (a, b) {
+      if (a === "main" && b !== "main") return -1;
+      if (b === "main" && a !== "main") return 1;
+      return _branchRecency(b) - _branchRecency(a);
+    });
     // Remote scope: `branches` only ever covers branches with an existing sms-api
     // build (state.entries is sourced from /api/source/builds) — registering a
     // brand-new branch's build already works server-side (/api/source/build-remote
@@ -298,7 +315,10 @@
     var branchOptions = branches.slice();
     if (state.scope === "remote" && state.repo) branchOptions.push(NEW_BRANCH_SENTINEL);
     if (state.branch == null || (branches.indexOf(state.branch) < 0 && state.branch !== NEW_BRANCH_SENTINEL)) {
-      state.branch = branches[0] || null;
+      // Default to `main` when it exists (clearer remote selection) so the picker
+      // opens on the mainline HEAD, not an arbitrary alphabetically-first feature
+      // branch; otherwise the most-recent branch (branches[0] after the sort above).
+      state.branch = (branches.indexOf("main") >= 0 ? "main" : (branches[0] || null));
     }
     host.appendChild(_selectRow("Branch", "viv-bs-branch", branchOptions, state.branch, function (v) {
       state.branch = v; _render();
@@ -344,15 +364,22 @@
       if (c.current) commitRow.appendChild(_el("span", "viv-bs-current", "current ✓"));
       state.selected = c;
     } else {
+      // Multiple builds for this branch (e.g. many `main` builds as it advanced):
+      // list newest-first and default to the current build if loaded, else the
+      // newest — so picking `main` means the LATEST main, not the oldest registered.
+      var ordered = matches.slice().sort(function (a, b) {
+        return (Number(b.simulator_id) || 0) - (Number(a.simulator_id) || 0);
+      });
       var sel = _el("select", "viv-bs-commit-select");
-      matches.forEach(function (m) {
-        var o = _el("option", null, _short(m.commit) + _dateSuffix(m.created_at) + (m.current ? " (current)" : ""));
+      ordered.forEach(function (m, i) {
+        var tag = m.current ? " (current)" : (i === 0 ? " (latest)" : "");
+        var o = _el("option", null, _short(m.commit) + _dateSuffix(m.created_at) + tag);
         o.value = m.commit; sel.appendChild(o);
       });
       sel.addEventListener("change", function () {
-        state.selected = matches.filter(function (m) { return m.commit === sel.value; })[0];
+        state.selected = ordered.filter(function (m) { return m.commit === sel.value; })[0];
       });
-      var cur = matches.filter(function (m) { return m.current; })[0] || matches[0];
+      var cur = ordered.filter(function (m) { return m.current; })[0] || ordered[0];
       state.selected = cur;
       sel.value = cur.commit;
       commitRow.appendChild(sel);
