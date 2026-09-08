@@ -31,7 +31,8 @@ def test_branch_source_js_present_and_wired():
     js = (_PKG_DIR / "static" / "branch-source.js").read_text()
     for needle in ("/api/workspaces", "/api/source/builds", "/api/source/switch",
                    "/api/source/switch-build", "/api/workspaces/forget",
-                   "viv-bs-switch", "Local", "Remote"):
+                   "viv-bs-switch-here", "viv-bs-open", "Switch here", "Open in new tab",
+                   "Local", "Remote"):
         assert needle in js, needle
 
 
