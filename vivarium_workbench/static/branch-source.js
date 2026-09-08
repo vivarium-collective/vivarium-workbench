@@ -271,6 +271,11 @@
     if (!host) return;
     host.innerHTML = "";
     host.appendChild(_el("h3", "viv-bs-title", "Source"));
+    // One-line scope cue so the two cards read as distinct jobs: this card is
+    // "where the tab runs"; the GitHub card below is "sync & collaborate".
+    var _sub = _el("div", "viv-bs-subtitle", "Where this tab runs — pick a local workspace or a remote build.");
+    _sub.style.cssText = "color:#93a1b5; font-size:12px; margin:-4px 0 12px";
+    host.appendChild(_sub);
 
     // Read-only (remote-server) mode: the switchable sources are the workspaces
     // checked out ON the server — these are the "local" workspace-catalog entries
@@ -441,32 +446,8 @@
     });
     actions.appendChild(openBtn);
 
-    var pushBtn = _el("button", "viv-bs-action", "Commit + Push"); pushBtn.id = "viv-bs-push";
-    pushBtn.disabled = state.scope !== "local";
-    pushBtn.title = pushBtn.disabled
-      ? "Only for a Local workspace — commit its changes and push the git branch to GitHub."
-      : "Commit all changes on this local workspace’s branch and push it to GitHub.";
-    if (RO) pushBtn.style.display = "none";   // local git write — gone in remote-only
-    pushBtn.addEventListener("click", function () {
-      if (pushBtn.disabled) return;
-      var msg = window.prompt("Commit message for push:", "dashboard commit");
-      if (msg == null) return;
-      pushBtn.disabled = true; pushBtn.textContent = "Pushing…";
-      fetch("/api/branch/push", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg }),
-      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-        .then(function (res) {
-          pushBtn.disabled = false; pushBtn.textContent = "Commit + Push";
-          if (res.ok) alert("Pushed " + (res.d.branch || "") + " @ " + (res.d.commit || "").slice(0, 7));
-          else alert("Push failed: " + (res.d.error || "error"));
-        })
-        .catch(function () {
-          pushBtn.disabled = false; pushBtn.textContent = "Commit + Push";
-          alert("Push failed: network error");
-        });
-    });
-    actions.appendChild(pushBtn);
+    // Commit + Push moved to the GitHub card below (that card owns git sync;
+    // this card owns "where the tab runs"). See index.html.j2 #viv-git-actions.
 
     var buildBtn = _el("button", "viv-bs-action", "Build via sms-api"); buildBtn.id = "viv-bs-build";
     // repo_url comes from the REPO (any entry for it carries the same repo_url),

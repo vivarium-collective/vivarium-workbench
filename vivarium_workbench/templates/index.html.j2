@@ -1487,6 +1487,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       :root[data-theme="dark"] .github-settings input.gh-input { border-color:var(--border-2); background:var(--field); color:var(--text) }
     </style>
 
+    <h3 class="gh-panel-title" style="margin:0 0 3px;font-size:15px;font-weight:650">GitHub</h3>
+    <div class="gh-panel-lead" style="color:#93a1b5;font-size:12px;margin:0 0 6px">Sync this workspace with GitHub — sign in, commit &amp; push, open a PR.</div>
+
     <!-- ── Account ──────────────────────────────────────────────── -->
     <div class="gh-section">
       <h3 class="gh-section-title">Account</h3>
@@ -1536,32 +1539,20 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
 
-    <!-- ── Workspace repository — one row per fact, settings-style ── -->
+    <!-- ── Branch & sync — the workspace's git state. Repo/branch are CHOSEN in
+         the Source card above (local/remote); this card is about committing,
+         pushing, and PRs, so it shows git STATE, not the repo/branch selectors
+         again (that duplication was the confusing part). ── -->
     <div class="gh-section">
-      <h3 class="gh-section-title">Workspace repository</h3>
-
-      <div class="gh-row" id="viv-gh-row-repo">
-        <div class="gh-label">Repository</div>
-        <div class="gh-value" id="viv-gh-repo"><span class="muted">loading…</span></div>
-      </div>
+      <h3 class="gh-section-title">Branch &amp; sync</h3>
 
       <div class="gh-row" id="viv-gh-row-branch">
         <div class="gh-label">Branch</div>
         <div class="gh-value" id="viv-gh-branch"><span class="muted">loading…</span></div>
       </div>
 
-      <div class="gh-row" id="viv-gh-row-push-state">
-        <div class="gh-label">Push state</div>
-        <div class="gh-value" id="viv-gh-push-state"><span class="muted">loading…</span></div>
-      </div>
-
-      <div class="gh-row" id="viv-gh-row-ahead">
-        <div class="gh-label">Ahead of base</div>
-        <div class="gh-value" id="viv-gh-ahead"><span class="muted">—</span></div>
-      </div>
-
       <div class="gh-row" id="viv-gh-row-dirty">
-        <div class="gh-label">Working tree</div>
+        <div class="gh-label">Changes</div>
         <div class="gh-value" id="viv-gh-dirty"><span class="muted">—</span></div>
       </div>
 
@@ -1580,8 +1571,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <h3 class="gh-section-title">Actions</h3>
 
       <div class="gh-row">
-        <div class="gh-label">Repo &amp; branch</div>
+        <div class="gh-label">Sync</div>
         <div class="gh-value gh-action-row" id="viv-git-actions">
+          <button id="btn-commit-push" class="action-btn" onclick="_commitAndPush()" title="Commit all changes on this branch and push it to GitHub">Commit + Push</button>
           <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">Open PR ↗</button>
         </div>
       </div>
