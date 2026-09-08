@@ -1741,9 +1741,9 @@
           ? '<a class="btn-mini" href="' + _esc(_openHref) + '" target="_blank" rel="noopener">Open ↗</a>'
           : (_isSnapshot
           ? '<span class="muted" style="font-size:0.8em">Launch from the local workbench</span>'
-          : '<button class="btn-mini" onclick="_launchViewer(\'' + _esc(v.uid) + '\',\'' + _esc(t.study) + '\')">Launch</button>');
+          : '<button class="btn-mini" onclick="_launchViewer(\'' + _esc(v.uid) + '\',\'' + _esc(t.study || '') + '\',\'' + _esc(t.run || '') + '\')">Launch</button>');
         return '<div class="picker-row">' +
-          '<div class="picker-row-main"><strong>' + _esc(t.label || t.study) + '</strong>' +
+          '<div class="picker-row-main"><strong>' + _esc(t.label || t.study || t.run) + '</strong>' +
             (t.detail ? ' <span class="muted" style="font-size:0.82em">' + _esc(t.detail) + '</span>' : '') + '</div>' +
           '<div class="picker-row-actions">' + action + '</div>' +
         '</div>';
@@ -1760,7 +1760,7 @@
     return html;
   }
 
-  function _launchViewer(uid, study) {
+  function _launchViewer(uid, study, run) {
     // The read-only snapshot has no launch backend to call. Bail with a clear
     // message rather than fetch a 404 HTML page and throw a JSON-parse error.
     if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') {
@@ -1768,8 +1768,11 @@
             'when running the workbench locally.');
       return;
     }
-    var url = '/api/analysis-viewer/' + encodeURIComponent(uid) + '/launch' +
-      (study ? '?study=' + encodeURIComponent(study) : '');
+    // A target is keyed by `study` (a local study's exports) or `run` (a landed
+    // run's exports, e.g. a GovCloud compose analysis) — forward whichever is set.
+    var q = study ? '?study=' + encodeURIComponent(study)
+          : (run ? '?run=' + encodeURIComponent(run) : '');
+    var url = '/api/analysis-viewer/' + encodeURIComponent(uid) + '/launch' + q;
     fetch(url).then(function(r) {
       return r.text().then(function(t) {
         var d = {};

@@ -67,7 +67,7 @@ def test_list_action_returns_public_specs(monkeypatch):
     demo = specs["fakeviz_pkg::demo"]
     assert demo["title"] == "Demo"
     assert demo["kind"] == "launcher"
-    assert demo["targets"] == [{"study": "s1", "label": "S1", "detail": ""}]
+    assert demo["targets"] == [{"study": "s1", "run": None, "label": "S1", "detail": ""}]
     assert demo["assets"] is None  # launcher, no assets → None
     # `requires` capability tags are forwarded so the analysis-tools matcher can
     # pair a contributed viewer with compatible runs (per-run links).
@@ -77,6 +77,32 @@ def test_list_action_returns_public_specs(monkeypatch):
     assert embed["requires"] == []  # absent → empty (not run-matched)
     # public spec is JSON-safe: no callables leak.
     assert "launch" not in demo and "applies" not in demo
+
+
+def test_resolve_targets_forwards_run_keyed_rows():
+    # A viewer's targets callable may return study-keyed rows (a local study's
+    # exports) and/or run-keyed rows (a landed run, e.g. a GovCloud compose
+    # analysis whose PTools TSVs the workbench copied into .pbg/runs/<id>/).
+    # Both must survive resolution — dropping run rows hides every landed run
+    # from the viewer menu.
+    viewer = {"targets": lambda ws: [
+        {"study": "s1", "label": "S1", "detail": "2 TSVs"},
+        {"run": "r1", "label": "R1", "detail": "3 TSVs · run"},
+        {"study": None, "run": None},  # neither key → dropped
+        "not-a-dict",                   # non-dict → dropped
+    ]}
+    out = env_worker._av_resolve_targets(viewer, Path("/ws"))
+    assert out == [
+        {"study": "s1", "run": None, "label": "S1", "detail": "2 TSVs"},
+        {"study": None, "run": "r1", "label": "R1", "detail": "3 TSVs · run"},
+    ]
+
+
+def test_resolve_targets_labels_run_from_run_id_when_unlabeled():
+    viewer = {"targets": lambda ws: [{"run": "cd2_run1_k4"}]}
+    out = env_worker._av_resolve_targets(viewer, Path("/ws"))
+    assert out == [{"study": None, "run": "cd2_run1_k4",
+                    "label": "cd2_run1_k4", "detail": ""}]
 
 
 def test_launch_action_invokes_callable(monkeypatch):
