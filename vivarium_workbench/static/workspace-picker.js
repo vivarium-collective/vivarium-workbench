@@ -271,6 +271,33 @@
           e.stopPropagation(); _wsTogglePin(ws.path); render();
         });
         li.appendChild(pin);
+        // Remove (Forget) — drop an unwanted/stale local workspace from the
+        // global catalog (~/.pbg/workspaces.json), so the dropdown itself lets you
+        // prune it. Not for the current workspace or remote sms-api builds (those
+        // are not catalog entries). Uses the existing /api/workspaces/forget.
+        if (!isCur && !isRemote && ws.path) {
+          var forget = document.createElement("button");
+          forget.type = "button";
+          forget.className = "viv-wsp-forget";
+          forget.textContent = "✕";
+          forget.title = "Remove from this list (forget " + (ws.label || ws.name || "workspace") + ")";
+          forget.setAttribute("aria-label", "Remove " + (ws.label || ws.name || "workspace"));
+          forget.style.cssText = "background:none;border:0;cursor:pointer;opacity:0.35;font-size:12px;padding:0 4px";
+          forget.addEventListener("mouseenter", function () { this.style.opacity = "0.9"; });
+          forget.addEventListener("mouseleave", function () { this.style.opacity = "0.35"; });
+          forget.addEventListener("click", function (e) {
+            e.stopPropagation();
+            forget.disabled = true;
+            fetch("/api/workspaces/forget", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ path: ws.path }),
+            }).then(function (r) { return r.ok; }).then(function (ok) {
+              if (ok) { all = all.filter(function (w) { return w.path !== ws.path; }); render(); }
+              else { forget.disabled = false; }
+            }).catch(function () { forget.disabled = false; });
+          });
+          li.appendChild(forget);
+        }
         listEl.appendChild(li);
       });
       activeIdx = -1;
