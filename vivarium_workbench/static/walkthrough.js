@@ -16324,51 +16324,79 @@
     val.innerHTML = html + (hint ? '<div class="gh-value-hint">' + hint + '</div>' : '');
   }
 
-  function _renderGitStatusRows(s) {
-    if (!document.getElementById('viv-gh-row-repo')) return;  // page not present
-    if (s == null) {
-      _setRow('repo', '<span class="muted">not a git workspace</span>');
-      ['branch', 'push-state', 'ahead', 'dirty', 'pr'].forEach(function (id) { _setRow(id, ''); });
+  // Commit + Push — commit all changes on the workspace's branch and push it.
+  // Moved here from the Source card (this card owns git sync). Wired to
+  // #btn-commit-push in index.html.j2.
+  function _commitAndPush() {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') {
+      alert('Commit + Push needs the live workbench — a read-only snapshot has no git backend.');
       return;
     }
-    // Repository
-    _setRow('repo', s.upstream_repo
-      ? '<a href="' + s.repo_url + '" target="_blank" rel="noopener">' + _esc(s.upstream_repo) + '</a> ↗'
-      : '<span class="muted">no upstream remote configured</span>');
-    // Branch
-    _setRow('branch', s.branch
+    var msg = window.prompt('Commit message for push:', 'dashboard commit');
+    if (msg == null) return;
+    var btn = document.getElementById('btn-commit-push');
+    if (btn) { btn.disabled = true; btn.textContent = 'Pushing…'; }
+    function _reset() { if (btn) { btn.disabled = false; btn.textContent = 'Commit + Push'; } }
+    fetch('/api/branch/push', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg }),
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        _reset();
+        if (res.ok) {
+          var m = 'Pushed ' + (res.d.branch || '') + ' @ ' + (res.d.commit || '').slice(0, 7);
+          if (typeof _showToast === 'function') _showToast(m); else alert(m);
+          _refreshGitStatus();
+        } else {
+          alert('Push failed: ' + (res.d.error || 'error'));
+        }
+      })
+      .catch(function () { _reset(); alert('Push failed: network error'); });
+  }
+  window._commitAndPush = _commitAndPush;
+
+  function _renderGitStatusRows(s) {
+    if (!document.getElementById('viv-gh-row-branch')) return;  // page not present
+    if (s == null) {
+      ['branch', 'dirty', 'pr'].forEach(function (id) { _setRow(id, ''); });
+      _setRow('branch', '<span class="muted">not a git workspace</span>');
+      return;
+    }
+    // Branch → base: the branch name, then how far ahead of its base it is (the
+    // PR-relevant comparison). Repo is NOT shown here — it's chosen in the Source
+    // card above; duplicating it was the confusing overlap this layout removes.
+    var branchName = s.branch
       ? (s.branch_url
-          ? '<a href="' + s.branch_url + '" target="_blank" rel="noopener"><code>' + _esc(s.branch) + '</code></a> ↗'
+          ? '<a href="' + s.branch_url + '" target="_blank" rel="noopener"><code>' + _esc(s.branch) + '</code></a>'
           : '<code>' + _esc(s.branch) + '</code>')
-      : '<span class="muted">no branch</span>');
-    // Push state
-    var stateMap = {
+      : '<span class="muted">no branch</span>';
+    var vsBase = '';
+    if (s.base) {
+      if (s.ahead_of_base > 0) {
+        var n = s.ahead_of_base + ' commit' + (s.ahead_of_base === 1 ? '' : 's')
+          + ' ahead of <code>' + _esc(s.base) + '</code>';
+        vsBase = ' → ' + (s.compare_url
+          ? '<a href="' + s.compare_url + '" target="_blank" rel="noopener">' + n + ' ↗</a>'
+          : n);
+      } else {
+        vsBase = ' → <span class="muted">up to date with <code>' + _esc(s.base) + '</code></span>';
+      }
+    }
+    _setRow('branch', branchName + vsBase);
+    // Changes: how the branch sits vs its REMOTE (push state) + the working tree.
+    var pushMap = {
       pushed:   '<span class="git-badge git-badge-ok">✓ pushed</span>',
-      ahead:    '<span class="git-badge git-badge-ahead">↑ ' + s.ahead + ' ahead of remote</span>',
+      ahead:    '<span class="git-badge git-badge-ahead">↑ ' + s.ahead + ' to push</span>',
       behind:   '<span class="git-badge git-badge-behind">↓ ' + s.behind + ' behind remote</span>',
       diverged: '<span class="git-badge git-badge-warn">! diverged from remote</span>',
     };
-    _setRow('push-state', stateMap[s.push_state] || '<span class="git-badge git-badge-warn">⊘ no origin</span>');
-    // Ahead of base
-    if (s.ahead_of_base > 0) {
-      var aheadHtml = s.compare_url
-        ? '<a href="' + s.compare_url + '" target="_blank" rel="noopener">' + s.ahead_of_base + ' commits ahead of <code>' + _esc(s.base) + '</code></a> ↗'
-        : s.ahead_of_base + ' commits ahead of <code>' + _esc(s.base) + '</code>';
-      _setRow('ahead', aheadHtml);
-    } else {
-      _setRow('ahead', s.base
-        ? '<span class="muted">up to date with <code>' + _esc(s.base) + '</code></span>'
-        : '');
-    }
-    // Working tree
-    if (s.dirty_count > 0) {
-      _setRow('dirty',
-        '<a href="#" onclick="event.preventDefault();_toggleDirtyPanel();return false">'
-        + s.dirty_count + ' uncommitted file' + (s.dirty_count === 1 ? '' : 's') + '</a>',
-        'Click to view + stage');
-    } else {
-      _setRow('dirty', '<span class="muted">clean</span>');
-    }
+    var pushBadge = pushMap[s.push_state] || '<span class="git-badge git-badge-warn">⊘ no remote</span>';
+    var treePart = (s.dirty_count > 0)
+      ? '<a href="#" onclick="event.preventDefault();_toggleDirtyPanel();return false">'
+        + s.dirty_count + ' uncommitted file' + (s.dirty_count === 1 ? '' : 's') + '</a>'
+      : '<span class="muted">clean</span>';
+    _setRow('dirty', pushBadge + ' &nbsp;·&nbsp; ' + treePart,
+      s.dirty_count > 0 ? 'Click the count to view + stage' : '');
     // Pull request
     if (s.pr_url) {
       var prState = (s.pr_state || 'open').toLowerCase();
