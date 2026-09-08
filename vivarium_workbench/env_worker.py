@@ -2759,20 +2759,31 @@ def _av_resolve_targets(viewer: dict, ws_root) -> list:
         return []
     out: list = []
     for item in t:
-        if isinstance(item, dict) and item.get("study"):
-            entry = {
-                "study": str(item["study"]),
-                "label": str(item.get("label") or item["study"]),
-                "detail": str(item.get("detail") or ""),
-            }
-            # Preserve a self-contained static ``href`` (a viewer that IS a
-            # standalone page, e.g. a study's viz/.../index.html). It lets a
-            # matched-tool chip deep-link the static viewer in the read-only
-            # snapshot, where the /api/.../launch endpoint has no live server.
-            href = item.get("href")
-            if isinstance(href, str) and href:
-                entry["href"] = href
-            out.append(entry)
+        if not isinstance(item, dict):
+            continue
+        # A target is keyed by ``study`` (a local study's exports) or by ``run``
+        # (a landed run's exports, e.g. a GovCloud compose analysis whose PTools
+        # TSVs the workbench copied into ``.pbg/runs/<id>/ptools/``). Forward
+        # both — dropping run-keyed rows silently hides every landed run from
+        # the viewer menu.
+        study = item.get("study")
+        run = item.get("run")
+        if not (study or run):
+            continue
+        entry = {
+            "study": str(study) if study else None,
+            "run": str(run) if run else None,
+            "label": str(item.get("label") or study or run),
+            "detail": str(item.get("detail") or ""),
+        }
+        # Preserve a self-contained static ``href`` (a viewer that IS a
+        # standalone page, e.g. a study's viz/.../index.html). It lets a
+        # matched-tool chip deep-link the static viewer in the read-only
+        # snapshot, where the /api/.../launch endpoint has no live server.
+        href = item.get("href")
+        if isinstance(href, str) and href:
+            entry["href"] = href
+        out.append(entry)
     return out
 
 
