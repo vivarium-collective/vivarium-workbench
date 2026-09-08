@@ -270,6 +270,16 @@
       ? '<button type="button" class="action-btn js-authoring run-analysis-btn" ' +
         'title="Re-run this simulation\'s analysis phase (cd1_*/ptools_*) on the remote deployment">' +
         '🧪 Analysis</button>' : "";
+    // "Land" — land-on-demand for a REMOTE run that lives only on the deployment
+    // (S3): pull its results here (fold analyses.json + copy ptools/*.tsv into
+    // .pbg/runs/<run_id>/) so the ⬇ Analyses artifact resolves and the run shows
+    // in the PTools Omics Viewer's run menu. Idempotent; refreshes the table on
+    // success. simulation_id + run_id are read from the enclosing <tr> (same
+    // idiom as 🧪 Analysis / ↻ Rerun), never interpolated into markup.
+    var land = (remoteSimId != null && completed && !isSnapshot)
+      ? '<button type="button" class="action-btn js-authoring land-remote-btn" ' +
+        'title="Pull this remote run\'s results here (analyses + PTools exports) so Analyses and the PTools viewer work locally">' +
+        '⬇ Land</button>' : "";
     // Rerun — REPRODUCES this run (replays its recorded manifest verbatim —
     // params/seed/emitter/emit_paths/runtime exactly as launched, ignoring
     // whatever the study's spec currently says) via POST /api/study-reproduce
@@ -289,7 +299,7 @@
     var rerun = (row.run_id && !isSnapshot)
       ? '<button type="button" class="action-btn js-authoring rerun-btn" ' +
         'title="Reproduce this run — replays its recorded manifest exactly, as a brand-new run">↻ Rerun</button>' : "";
-    var parts = [viz, report, analyses, data, analysis, rerun].filter(function (h) { return !!h; });
+    var parts = [viz, report, analyses, data, land, analysis, rerun].filter(function (h) { return !!h; });
     return parts.join(" ");
   }
 
@@ -368,6 +378,54 @@
     _rerunSim(runId, btn, studySlug);
   }
   document.addEventListener("click", _onRerunButtonClick, true);
+
+  // Land-on-demand for a remote run: POST /api/remote-run-land-artifacts (fold
+  // analyses.json + copy ptools/*.tsv into .pbg/runs/<run_id>/), then refresh so
+  // ⬇ Analyses resolves and the run appears in the PTools viewer. Same delegated,
+  // capture-phase, read-id-from-<tr> idiom as ↻ Rerun above.
+  function _landRemote(runId, simId, btn) {
+    if (!runId || simId == null || simId === "") return;
+    var orig = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "… landing"; }
+    function _reset() { if (btn) { btn.disabled = false; btn.textContent = orig || "⬇ Land"; } }
+    fetch("/api/remote-run-land-artifacts", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ simulation_id: Number(simId), run_id: runId }),
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
+        .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
+    }).then(function (res) {
+      _reset();
+      var b = res.body || {};
+      if (!res.ok) {
+        var em = "Land failed: " + (b.error || res.status);
+        if (typeof _showToast === "function") _showToast(em); else alert(em);
+        return;
+      }
+      var n = b.ptools || 0;
+      var msg = "Landed " + runId + " — " + n + " PTools file" + (n === 1 ? "" : "s")
+        + (b.analyses ? " + analyses" : "") + ". Analyses + PTools viewer now available.";
+      if (typeof _showToast === "function") _showToast(msg); else alert(msg);
+      if (typeof window._initSimulations === "function") window._initSimulations(true);
+      if (typeof window._loadStudySims === "function") window._loadStudySims(true);
+    }).catch(function (err) {
+      _reset();
+      var nm = "Land failed: network error — " + err;
+      if (typeof _showToast === "function") _showToast(nm); else alert(nm);
+    });
+  }
+  window._landRemote = _landRemote;
+
+  function _onLandButtonClick(e) {
+    var btn = e.target.closest(".land-remote-btn");
+    if (!btn) return;
+    e.stopPropagation();
+    var tr = btn.closest("tr[data-run-id]");
+    var runId = tr ? tr.getAttribute("data-run-id") : "";
+    var simId = tr ? tr.getAttribute("data-remote-sim-id") : "";
+    _landRemote(runId, simId, btn);
+  }
+  document.addEventListener("click", _onLandButtonClick, true);
 
   // One-click analysis re-run for a completed REMOTE simulation:
   // POST /api/remote-run-analysis -> viva-api POST /simulations/{id}/analysis.
