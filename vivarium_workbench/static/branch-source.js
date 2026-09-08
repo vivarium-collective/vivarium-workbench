@@ -4,7 +4,8 @@
 (function () {
   "use strict";
 
-  var state = { scope: "local", repo: null, branch: null, entries: [], current: null, health: null, newBranch: "" };
+  var state = { scope: "local", repo: null, branch: null, entries: [], current: null, health: null, newBranch: "", showAllBuilds: false };
+  var BUILD_LIST_LIMIT = 12;   // collapse a long remote build history to the recent N
   var NEW_BRANCH_SENTINEL = "__new_branch__";
   var pollTimer = null;
 
@@ -266,7 +267,7 @@
         ? (s === "local" ? "Workspaces" : "sms-api builds")
         : (s === "local" ? "Local" : "Remote");
       var b = _el("button", "viv-bs-toggle" + (state.scope === s ? " active" : ""), label);
-      b.addEventListener("click", function () { state.scope = s; state.repo = null; state.branch = null; state.newBranch = ""; refresh(); });
+      b.addEventListener("click", function () { state.scope = s; state.repo = null; state.branch = null; state.newBranch = ""; state.showAllBuilds = false; refresh(); });
       scopeGroup.appendChild(b);
     });
     scopeRow.appendChild(scopeGroup);
@@ -284,7 +285,7 @@
     }
 
     host.appendChild(_selectRow("Repo", "viv-bs-repo", repos, state.repo, function (v) {
-      state.repo = v; state.branch = null; state.newBranch = ""; _render();
+      state.repo = v; state.branch = null; state.newBranch = ""; state.showAllBuilds = false; _render();
     }));
 
     var inRepo = state.entries.filter(function (e) { return e.repo === state.repo; });
@@ -321,7 +322,7 @@
       state.branch = (branches.indexOf("main") >= 0 ? "main" : (branches[0] || null));
     }
     host.appendChild(_selectRow("Branch", "viv-bs-branch", branchOptions, state.branch, function (v) {
-      state.branch = v; _render();
+      state.branch = v; state.showAllBuilds = false; _render();
     }, function (v) { return v === NEW_BRANCH_SENTINEL ? "+ New branch…" : (v || "—"); }));
 
     if (state.branch === NEW_BRANCH_SENTINEL) {
@@ -529,7 +530,21 @@
             .join(" ").toLowerCase().indexOf(f) >= 0;
         });
       }
-      rows.forEach(function (m) {
+      // Newest-first (remote builds carry a monotonic simulator_id), with the
+      // current source floated to the very top. sms-api accumulates a build per
+      // register/upload and has no delete, so this history gets long — hence the
+      // sort + the collapse-to-recent-N below.
+      rows = rows.slice().sort(function (a, b) {
+        var ac = a.current ? 1 : 0, bc = b.current ? 1 : 0;
+        if (ac !== bc) return bc - ac;
+        return (Number(b.simulator_id) || 0) - (Number(a.simulator_id) || 0);
+      });
+      var total = rows.length;
+      // Collapse a long history to the recent N — but never while filtering (a
+      // search should reach every match), and not once "show all" is expanded.
+      var truncated = !f && !state.showAllBuilds && total > BUILD_LIST_LIMIT;
+      var shown = truncated ? rows.slice(0, BUILD_LIST_LIMIT) : rows;
+      shown.forEach(function (m) {
         var li = _el("li", "viv-bs-list-row" + (m.current ? " current" : ""));
         var lbl = _el("span", "viv-bs-list-label", _entryText(m));
         lbl.style.cursor = "pointer";
@@ -545,7 +560,15 @@
       });
       // "no matches" only while actively filtering — never as idle noise when
       // there's simply nothing else to switch to.
-      if (!rows.length && f) list.appendChild(_el("li", "viv-bs-list-empty", "no matches"));
+      if (!shown.length && f) list.appendChild(_el("li", "viv-bs-list-empty", "no matches"));
+      if (truncated) {
+        var more = _el("li", "viv-bs-list-more");
+        var moreBtn = _el("button", "viv-bs-toggle", "Show all " + total + " builds  ▾");
+        moreBtn.title = "Showing the " + BUILD_LIST_LIMIT + " most recent — click to list every build";
+        moreBtn.addEventListener("click", function () { state.showAllBuilds = true; _fillList(); });
+        more.appendChild(moreBtn);
+        list.appendChild(more);
+      }
     }
     if (search) search.addEventListener("input", function () { state.filter = search.value; _fillList(); });
     _fillList();
