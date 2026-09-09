@@ -159,8 +159,11 @@
     if (!host) return;
     var slug = host.getAttribute('data-study') || studyName();
     if (!slug) return;
-    fetch('/api/study-readouts?study=' + encodeURIComponent(slug),
-          {headers: {Accept: 'application/json'}})
+    var _DS = window.DataSource;
+    var _readoutsUrl = (_DS && _DS.readoutsUrl)
+      ? _DS.apiUrl(_DS.readoutsUrl(slug))
+      : '/api/study-readouts?study=' + encodeURIComponent(slug);
+    fetch(_readoutsUrl, {headers: {Accept: 'application/json'}})
       .then(function(r) { return r.ok || r.status === 422 || r.status === 501 ? r.json() : null; })
       .then(function(j) {
         if (emitterHost) emitterHost.innerHTML = _renderEmitterBlock(j && j.emitter);

@@ -1288,6 +1288,25 @@ def _do_build(
             continue
         _write_json(results_api_dir / f"{slug}.json", payload)
 
+    # api/study-readouts/<slug>.json — the Readouts tab's design-time emit
+    # contract: the emitter & config block (always computable from the workspace
+    # default_emitter), the emitted store-leaf paths, and their output shapes.
+    # byte-parity with GET /api/study-readouts?study=<slug>. Without this the
+    # snapshot SPA has no readouts and the tab reads "No emitter configuration
+    # declared." build_study_readouts always attaches the emitter block and
+    # degrades to authored-only rows (422) when the composite can't build, so the
+    # emitter always renders. Guard per study; never abort the publish.
+    from vivarium_workbench.lib.readouts_views import build_study_readouts
+    readouts_api_dir = api_dir / "study-readouts"
+    readouts_api_dir.mkdir(parents=True, exist_ok=True)
+    for slug in studies:
+        try:
+            payload, _status = build_study_readouts(ws_root, slug)
+        except Exception as exc:  # noqa: BLE001 — never abort a publish on one study
+            print(f"  warn: study-readouts export failed for {slug!r}: {exc}")
+            continue
+        _write_json(readouts_api_dir / f"{slug}.json", payload)
+
     # api/study-{rigor,audit,test-audit,loop-state}/<slug>.json — the Assurance
     # Audit + Build tabs fetch these per-study endpoints live (viva_superpowers
     # rigor / audit / test_audit / loop_state). A snapshot has no live backend, so

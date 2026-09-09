@@ -72,6 +72,15 @@
       : "/api/study-results?study=" + encodeURIComponent(slug);
   }
 
+  // Study Readouts (design-time emit contract). Snapshot mode reads the baked
+  // per-study file (publish.py); live keeps the ?study= query. Same split as
+  // resultsUrl / simulationsUrl.
+  function readoutsUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/study-readouts/" + encodeURIComponent(slug) + ".json"
+      : "/api/study-readouts?study=" + encodeURIComponent(slug);
+  }
+
   async function _get(url) {
     // GitHub Pages / Fastly returns 429 (occasionally 503) under per-IP rate
     // limiting when the hosted snapshot fires its burst of parallel /api/*.json
@@ -236,6 +245,9 @@
 
     /** Study Results preview URL (snapshot: baked per-study file; live: ?study=). */
     resultsUrl: resultsUrl,
+
+    /** Study Readouts URL (snapshot: baked per-study file; live: ?study=). */
+    readoutsUrl: readoutsUrl,
 
     /**
      * Return the URL for the saved-visualizations payload (Analyses gallery).
