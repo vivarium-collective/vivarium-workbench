@@ -763,8 +763,13 @@
     if (_resultsPreviewLoaded && !force) return;
     _resultsPreviewLoaded = true;
     var slug = studyName();
-    var path = '/api/study-results?study=' + encodeURIComponent(slug);
-    var url = (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(path) : path;
+    var DS = window.DataSource;
+    // Snapshot mode: DataSource.resultsUrl maps to the baked per-study JSON
+    // (publish.py). Live mode: the ?study= query endpoint. Fall back to the
+    // raw path only if DataSource is somehow unavailable.
+    var url = (DS && DS.resultsUrl)
+      ? DS.apiUrl(DS.resultsUrl(slug))
+      : '/api/study-results?study=' + encodeURIComponent(slug);
     fetch(url).then(function (r) { return r.text(); }).then(function (t) {
       var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {}
       if (!d.present) {

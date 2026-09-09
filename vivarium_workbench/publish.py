@@ -1271,6 +1271,23 @@ def _do_build(
         _inline_declared_iframe_figures(payload, ws_root)
         _write_json(charts_api_dir / f"{slug}.json", payload)
 
+    # api/study-results/<slug>.json — the Results tab's per-store PREVIEW of the
+    # study's latest persisted run (sparkline + first/last/min/max), byte-parity
+    # with GET /api/study-results?study=<slug>. Without this the snapshot SPA has
+    # no results to show and the tab reads "No run data to preview yet." Reads the
+    # study's runs.db committed in the workspace; graceful-empty when absent. One
+    # study's read failure must not abort the publish, so guard per study.
+    from vivarium_workbench.lib.results_views import build_study_results
+    results_api_dir = api_dir / "study-results"
+    results_api_dir.mkdir(parents=True, exist_ok=True)
+    for slug in studies:
+        try:
+            payload, _status = build_study_results(ws_root, slug)
+        except Exception as exc:  # noqa: BLE001 — never abort a publish on one study
+            print(f"  warn: study-results export failed for {slug!r}: {exc}")
+            continue
+        _write_json(results_api_dir / f"{slug}.json", payload)
+
     # api/study-{rigor,audit,test-audit,loop-state}/<slug>.json — the Assurance
     # Audit + Build tabs fetch these per-study endpoints live (viva_superpowers
     # rigor / audit / test_audit / loop_state). A snapshot has no live backend, so
