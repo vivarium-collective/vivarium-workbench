@@ -159,8 +159,11 @@
     if (!host) return;
     var slug = host.getAttribute('data-study') || studyName();
     if (!slug) return;
-    fetch('/api/study-readouts?study=' + encodeURIComponent(slug),
-          {headers: {Accept: 'application/json'}})
+    var _DS = window.DataSource;
+    var _readoutsUrl = (_DS && _DS.readoutsUrl)
+      ? _DS.apiUrl(_DS.readoutsUrl(slug))
+      : '/api/study-readouts?study=' + encodeURIComponent(slug);
+    fetch(_readoutsUrl, {headers: {Accept: 'application/json'}})
       .then(function(r) { return r.ok || r.status === 422 || r.status === 501 ? r.json() : null; })
       .then(function(j) {
         if (emitterHost) emitterHost.innerHTML = _renderEmitterBlock(j && j.emitter);
@@ -763,8 +766,13 @@
     if (_resultsPreviewLoaded && !force) return;
     _resultsPreviewLoaded = true;
     var slug = studyName();
-    var path = '/api/study-results?study=' + encodeURIComponent(slug);
-    var url = (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(path) : path;
+    var DS = window.DataSource;
+    // Snapshot mode: DataSource.resultsUrl maps to the baked per-study JSON
+    // (publish.py). Live mode: the ?study= query endpoint. Fall back to the
+    // raw path only if DataSource is somehow unavailable.
+    var url = (DS && DS.resultsUrl)
+      ? DS.apiUrl(DS.resultsUrl(slug))
+      : '/api/study-results?study=' + encodeURIComponent(slug);
     fetch(url).then(function (r) { return r.text(); }).then(function (t) {
       var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {}
       if (!d.present) {

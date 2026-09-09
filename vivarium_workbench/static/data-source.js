@@ -61,6 +61,26 @@
     return (rows || []).filter(function (r) { return r && r.study_slug === slug; });
   }
 
+  // Study Results preview. Snapshot mode has no query-filtered endpoint —
+  // publish.py bakes each study's preview to /api/study-results/<slug>.json —
+  // so callers fetch the static file. Live keeps the server-side ?study= query.
+  // (The generic apiUrl() can't do this: it only prefixes the base path, so
+  // `/api/study-results?study=X` 404s on a static host.)
+  function resultsUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/study-results/" + encodeURIComponent(slug) + ".json"
+      : "/api/study-results?study=" + encodeURIComponent(slug);
+  }
+
+  // Study Readouts (design-time emit contract). Snapshot mode reads the baked
+  // per-study file (publish.py); live keeps the ?study= query. Same split as
+  // resultsUrl / simulationsUrl.
+  function readoutsUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/study-readouts/" + encodeURIComponent(slug) + ".json"
+      : "/api/study-readouts?study=" + encodeURIComponent(slug);
+  }
+
   async function _get(url) {
     // GitHub Pages / Fastly returns 429 (occasionally 503) under per-IP rate
     // limiting when the hosted snapshot fires its burst of parallel /api/*.json
@@ -222,6 +242,12 @@
     simulationsUrl: simulationsUrl,
     /** Keep only a study's runs (snapshot returns the whole workspace). */
     simulationsFilter: simulationsFilter,
+
+    /** Study Results preview URL (snapshot: baked per-study file; live: ?study=). */
+    resultsUrl: resultsUrl,
+
+    /** Study Readouts URL (snapshot: baked per-study file; live: ?study=). */
+    readoutsUrl: readoutsUrl,
 
     /**
      * Return the URL for the saved-visualizations payload (Analyses gallery).
