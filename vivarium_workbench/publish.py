@@ -950,6 +950,19 @@ def _do_build(
         try:
             data = resolve_composite(ws_root, cid)
             if data is not None:
+                # Attach each process/step node's ``doc`` (description) + structured
+                # ``_contract`` (per-port meanings) so the read-only loom shows them
+                # the same way the live Composite Explorer does. Routed through the
+                # env worker with the composite ref so bare registry-name addresses
+                # (``local:TumorCellProcess``) resolve against the workspace core.
+                # Best-effort: on failure the undecorated state is still baked.
+                try:
+                    from vivarium_workbench.lib.process_docs import (
+                        attach_process_docs_via_worker,
+                    )
+                    data = attach_process_docs_via_worker(ws_root, data, cid)
+                except Exception:
+                    pass
                 # The write itself can also fail (e.g. a resolved state that
                 # carries non-finite floats like inf/nan, which strict JSON
                 # rejects).  Treat that the same as an unresolvable composite:

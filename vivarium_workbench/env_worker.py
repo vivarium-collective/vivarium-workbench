@@ -846,7 +846,18 @@ def _attach_process_docs(doc, get_core=None):
                 addr = node.get("address", "")
                 if "doc" not in node:
                     if addr not in _cache:
-                        _cache[addr] = _pd_doc_for_address(addr)
+                        d = _pd_doc_for_address(addr)
+                        # Bare registry-name address (local:TumorCellProcess) —
+                        # not importable by path; resolve it via the composite's
+                        # core so registry-linked processes still get their
+                        # description, matching the _contract path below.
+                        if not d and get_core is not None:
+                            try:
+                                cls = _class_for_address(addr, get_core())
+                                d = _pd_describe_class(cls) if cls is not None else ""
+                            except Exception:  # noqa: BLE001
+                                d = ""
+                        _cache[addr] = d
                     d = _cache[addr]
                     if d:
                         node["doc"] = d
