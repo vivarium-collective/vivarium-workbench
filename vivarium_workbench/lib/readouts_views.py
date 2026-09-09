@@ -345,6 +345,41 @@ def _merge_readouts(spec: dict, available: dict, *, plan_available: bool = True,
     return rows
 
 
+def _run_store_available(ws_root: Path, slug: str) -> "dict | None":
+    """Fallback emit surface: the scalar leaf paths the study's LATEST persisted
+    run actually saved, shaped like ``_available_observables_for_ref``'s
+    ``{leaves, catalogs}`` so ``_merge_readouts`` can consume it directly.
+
+    Used when the design-time emit plan is empty or the composite can't be built
+    (e.g. a snapshot publish, or a composite that declares no in-document emitter
+    but whose runs persist observables). Reuses the SAME store readers the
+    Results tab uses (``results_views._pick_latest_run`` +
+    ``explorer_data.list_observables``). Returns ``None`` (never raises) when
+    there is no run, no on-disk store, or the store can't be read — the caller
+    then keeps the empty plan.
+    """
+    try:
+        from . import results_views as _rv
+        from . import explorer_data as _ed
+        row = _rv._pick_latest_run(ws_root, slug)
+        if not row:
+            return None
+        db_path = row.get("store_path") or row.get("db_path")
+        if not db_path:
+            return None
+        obs = _ed.list_observables(str(db_path), run_id=row.get("run_id"), workspace=ws_root)
+        # list_observables returns {"categories": {cat: [leaf, ...]}} — unwrap it
+        # the same way results_views does before flattening to scalar leaves.
+        leaves = _rv._scalar_leaf_paths(obs.get("categories") or {})
+        if not leaves:
+            return None
+        return {"leaves": leaves, "catalogs": {},
+                "run_id": row.get("run_id"),
+                "run_label": row.get("sim_name") or row.get("label") or row.get("run_id")}
+    except Exception:  # noqa: BLE001 — a fallback must never break the panel
+        return None
+
+
 def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
     """Worker for ``GET /api/study-readouts?study=<slug>`` → ``(payload, status)``.
 
@@ -417,6 +452,20 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
     except _ValidatorUnavailable as e:
         return {"error": f"readout_validation unavailable: {e}", "emitter": emitter_block}, 501
     except Exception as e:  # noqa: BLE001
+        # The design-time emit plan couldn't be built (e.g. a snapshot publish
+        # with no live env worker). Fall back to what the study's latest run
+        # actually persisted, so the Readouts table still shows real emitted
+        # paths + shapes instead of going empty.
+        fb = _run_store_available(ws_root, slug)
+        if fb:
+            n_steps = _declared_n_steps(spec)
+            rows = _merge_readouts(spec, fb, n_steps=n_steps)
+            note = ("Emit plan not built; showing the store-leaf paths from this "
+                    "study's latest persisted run "
+                    f"({fb.get('run_label') or fb.get('run_id')}).")
+            return {"composite": ref, "rows": rows, "excluded": [],
+                    "excluded_state": "unavailable", "emitter": emitter_block,
+                    "readouts_source": "run-store", "note": note, "degraded": True}, 200
         rows = _merge_readouts(spec, {"leaves": []}, plan_available=False)
         reason = f"composite {ref!r} could not be built: {e}"
         # On a remote build (a materialized repo@commit, marked by .viv-build.json)
@@ -436,8 +485,22 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
                 "note": f"composite {ref!r} could not be built — rows unverified: {e}"}, 422
 
     n_steps = _declared_n_steps(spec)
+    # The composite built but declared no emit leaves (e.g. a composite whose
+    # runs persist observables via an out-of-document emitter). Fall back to the
+    # latest run's store-leaf paths so the table isn't empty.
+    readouts_source = None
+    if not (available.get("leaves")):
+        fb = _run_store_available(ws_root, slug)
+        if fb:
+            available = fb
+            readouts_source = "run-store"
     payload = {"composite": ref, "rows": _merge_readouts(spec, available, n_steps=n_steps),
                "excluded": [], "note": "", "emitter": emitter_block}
+    if readouts_source:
+        payload["readouts_source"] = readouts_source
+        payload["note"] = ("Composite declares no in-document emit plan; showing "
+                           "the store-leaf paths from this study's latest persisted run "
+                           f"({available.get('run_label') or available.get('run_id')}).")
     try:
         payload.update(_compute_excluded(spec, available))
     except Exception as e:  # noqa: BLE001 — degrade, never 500
