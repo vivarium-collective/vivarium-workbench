@@ -15500,7 +15500,7 @@
     // the grips a single time; stored widths persist across filters/reloads.
     if (table && window.ColResize && !table._colResizeWired) {
       table._colResizeWired = true;
-      window.ColResize.apply(table, 'sim-global');
+      window.ColResize.apply(table, 'sim-global-v2');
     }
 
     var note = document.getElementById('sim-scope-note');

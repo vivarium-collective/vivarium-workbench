@@ -8,6 +8,18 @@
 (function () {
   "use strict";
 
+  // Close any open row-action "⋯" menu when clicking elsewhere (native
+  // <details> otherwise stays open). Wired once at module load.
+  if (typeof document !== "undefined" && !document._simActionMenuWired) {
+    document._simActionMenuWired = true;
+    document.addEventListener("click", function (e) {
+      var openMenus = document.querySelectorAll("details.sim-action-menu[open]");
+      for (var i = 0; i < openMenus.length; i++) {
+        if (!openMenus[i].contains(e.target)) openMenus[i].removeAttribute("open");
+      }
+    });
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -228,7 +240,7 @@
   }
   document.addEventListener("click", _onToolLaunchClick, true);
 
-  function _actions(row) {
+  function _actionList(row) {
     var runIdEnc = encodeURIComponent(row.run_id || "");
     var studySlug = study(row);
     // Per-run output retrieval — Visualizations / Report card / Analyses /
@@ -299,8 +311,31 @@
     var rerun = (row.run_id && !isSnapshot)
       ? '<button type="button" class="action-btn js-authoring rerun-btn" ' +
         'title="Reproduce this run — replays its recorded manifest exactly, as a brand-new run">↻ Rerun</button>' : "";
-    var parts = [viz, report, analyses, data, land, analysis, rerun].filter(function (h) { return !!h; });
-    return parts.join(" ");
+    return [viz, report, analyses, data, land, analysis, rerun].filter(function (h) { return !!h; });
+  }
+
+  // Legacy inline actions (study-detail Simulations tab): every button in a row.
+  function _actions(row) { return _actionList(row).join(" "); }
+
+  // Global Runs page: one primary action (the first available — Viz for a
+  // completed run) plus a "⋯" overflow menu holding the rest, so the Actions
+  // column stops wrapping into a crowded 7-button block. The menu is a native
+  // <details> (no toggle JS); its <summary>/items are .action-btn, which the
+  // row's click-to-open handler already ignores.
+  function _globalActions(row) {
+    var list = _actionList(row);
+    if (!list.length) return '<span style="color:#9ca3af;">—</span>';
+    var primary = list[0];
+    var more = list.slice(1);
+    if (!more.length) return primary;
+    var items = more.map(function (h) {
+      return '<div class="sim-action-menu-item">' + h + '</div>';
+    }).join("");
+    return primary +
+      '<details class="sim-action-menu">' +
+        '<summary class="action-btn" title="More actions" aria-label="More actions">⋯</summary>' +
+        '<div class="sim-action-menu-list" role="menu">' + items + '</div>' +
+      '</details>';
   }
 
   // Global handler for the ⬇/↻ action buttons rendered above (sim-table.js is
@@ -511,9 +546,55 @@
   // STUDY_COLS cells that were determined dead across the whole table; global
   // Sim-DB callers that build rows via renderRow() directly (not renderTable())
   // never pass it, so their columns are unaffected.
+  // Global Runs page row (6-column redesign): Run (name + study·investigation·
+  // composite subtext) · Config · Kind (origin+emitter) · Time · Status ·
+  // Actions (primary + ⋯ menu). Source moves to the run-name tooltip; Location/
+  // Tools fold away. The per-study Simulations tab keeps the legacy wide layout
+  // (renderRow's studyScope branch below) since it drops Study/Investigation.
+  function _renderGlobalRow(row) {
+    var runId = row.run_id || "";
+    var runLabel = row.sim_name || row.label || runId;
+    var st = study(row), inv = investigation(row);
+    var sep = ' <span style="color:#d1d5db;">·</span> ';
+    var subBits = [];
+    if (st) subBits.push('<span style="color:#4b5563;">' + esc(st) + "</span>");
+    if (inv) subBits.push('<span style="color:#9ca3af;">' + esc(inv) + "</span>");
+    var comp = composite(row);
+    var sub = subBits.join(sep);
+    if (comp) sub += (sub ? sep : "") + comp;
+    var titleTip = runId + (row.db_path ? "\n" + row.db_path : "");
+    var runCell =
+      '<div style="min-width:0;">' +
+        '<div style="font-size:12px;color:#111827;font-weight:500;overflow:hidden;' +
+          'text-overflow:ellipsis;white-space:nowrap;" title="' + esc(titleTip) + '">' +
+          esc(runLabel) + "</div>" +
+        '<div style="font-size:11px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;' +
+          'white-space:nowrap;margin-top:2px;">' + (sub || "") + "</div>" +
+      "</div>";
+    var kindCell =
+      '<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">' +
+        originPill(row) + emitterPill(row.emitter_type) + "</div>";
+    var td = function (h, extra) {
+      return '<td style="padding:8px;' + (extra || "") + '">' + h + "</td>";
+    };
+    var cells =
+      td(runCell, "overflow:hidden;") +
+      td(config(row), "overflow:hidden;") +
+      td(kindCell) +
+      td(esc(fmtTime(row.completed_at || row.started_at)), "color:#6b7280;white-space:nowrap;") +
+      td('<span class="run-status-live">' + statusChip(row.status) + "</span>") +
+      td('<div class="run-actions">' + _globalActions(row) + "</div>", "vertical-align:middle;");
+    var remoteSimId = row.remote_origin && row.remote_origin.simulation_id;
+    var remoteAttr = remoteSimId != null ? ' data-remote-sim-id="' + esc(remoteSimId) + '"' : "";
+    return '<tr data-run-id="' + esc(runId) + '" data-study="' + esc(study(row)) + '"' + remoteAttr +
+      ' style="border-bottom:1px solid #f3f4f6;cursor:pointer;" ' +
+      'title="Click to open this run">' + cells + "</tr>";
+  }
+
   function renderRow(row, opts) {
     opts = opts || {};
     var studyScope = opts.scope === "study";
+    if (!studyScope) return _renderGlobalRow(row);
     var dropIds = opts.dropIds || null;
     var keep = function (id) { return !dropIds || dropIds.indexOf(id) === -1; };
     var runId = row.run_id || "";

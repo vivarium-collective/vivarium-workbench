@@ -18,6 +18,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 import warnings
 from pathlib import Path
 from urllib.parse import quote as _urlquote
@@ -1866,6 +1867,32 @@ def _attach_matched_tools(rows: list[dict], ws_root: Path) -> None:
             row["matched_tools"] = matched
         except Exception:  # noqa: BLE001 — one bad row must not blank the rest
             row["matched_tools"] = []
+
+
+# Short-TTL cache for the whole index build. The local build is ~seconds
+# (backfill re-scan + per-row tool-matching) and the Runs tab re-derives it on
+# every load/filter/auto-refresh; caching keeps repeat interactions instant. A
+# short TTL bounds staleness (a new local run appears within it); the Runs-tab
+# refresh button passes ?refresh=true, which clears this via clear_build_cache().
+_BUILD_CACHE: dict = {}
+_BUILD_CACHE_TTL = 15.0
+
+
+def clear_build_cache() -> None:
+    _BUILD_CACHE.clear()
+
+
+def build_simulations_data_cached(ws_root: Path, include_remote: bool = True,
+                                  ttl: float = _BUILD_CACHE_TTL) -> dict:
+    """TTL-cached :func:`build_simulations_data` for the live-serving path."""
+    key = (str(ws_root), bool(include_remote))
+    now = time.time()
+    hit = _BUILD_CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    data = build_simulations_data(ws_root, include_remote=include_remote)
+    _BUILD_CACHE[key] = (now + ttl, data)
+    return data
 
 
 def build_simulations_data(ws_root: Path, include_remote: bool = True) -> dict:
