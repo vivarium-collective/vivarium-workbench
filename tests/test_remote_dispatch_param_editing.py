@@ -208,6 +208,43 @@ def test_remote_run_submit_forwards_correct_values_over_real_http(
     assert query["num_generations"] == ["7"]
     assert query["num_seeds"] == ["3"]
     assert query["simulator_id"] == ["66"]
+    # No silent-default gap here (unlike n_generations/n_seeds above, this one
+    # is genuinely optional): a caller with no opinion on config_filename gets
+    # exactly the request this repo has always sent — sms-api applies its own
+    # server-side default. See the dedicated test below for the explicit case.
+    assert "simulation_config_filename" not in query
+
+
+def test_remote_run_submit_forwards_config_filename_over_real_http(
+    tmp_path, dashboard_client, monkeypatch, fake_sms_api
+):
+    """Real regression test for the config_filename gap: sms-api's own
+    default (api_simulation_default.json) only exists in the public
+    vEcoli-lineage repos, so any repo without it (confirmed for sms-ecoli via
+    GitHub code search: zero hits, the file has never existed there) 404s on
+    every dispatch unless the caller supplies a real filename explicitly —
+    GET /api/v1/simulations/discovery lists the pinned commit's real options.
+    Proves the literal bytes reach the wire as `simulation_config_filename`
+    (sms-api's own real query-param name, confirmed against
+    viva_api/api/routers/sms.py), not merely that SmsApiClient's own params
+    dict looks right in isolation."""
+    base_url, handler = fake_sms_api
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
+    monkeypatch.setenv(
+        "VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/vivarium-collective/v2ecoli")
+    monkeypatch.setenv("VIVA_API_BASE", base_url)
+    ws = _make_ws(tmp_path, ws_name="config-filename-ws")
+    client = dashboard_client(ws)
+
+    res = client.post("/api/remote-run-submit", json={
+        "study": "demo", "simulator_id": 66, "num_generations": 7, "num_seeds": 3,
+        "config_filename": "mecillinam_wellmixed.json",
+    })
+    assert res.status_code == 202, res.text
+
+    assert handler.captured is not None
+    query = handler.captured["query"]
+    assert query["simulation_config_filename"] == ["mecillinam_wellmixed.json"]
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +256,23 @@ def test_remote_run_submit_forwards_correct_values_over_real_http(
 
 def _js_text() -> str:
     return (Path(vivarium_workbench.__file__).parent / "static" / "study-detail.js").read_text(encoding="utf-8")
+
+
+def _dispatch_remote_composite_block(js: str) -> str:
+    i = js.index("function _dispatchRemoteComposite()")
+    j = js.index("window._dispatchRemoteComposite = _dispatchRemoteComposite;", i)
+    return js[i:j]
+
+
+def test_dispatch_remote_composite_reads_and_forwards_config_filename():
+    """Source-level check for the same config_filename gap the two real
+    end-to-end tests above close — mirrors this repo's own established
+    convention for testing static JS with no bundler/test runner (see module
+    docstring). Confirms the advanced panel's new field is actually wired
+    into the request, not just present as inert markup."""
+    block = _dispatch_remote_composite_block(_js_text())
+    assert "cp-config-filename" in block
+    assert "config_filename: configFilename" in block
 
 
 def _dispatch_remote_pinned_block(js: str) -> str:

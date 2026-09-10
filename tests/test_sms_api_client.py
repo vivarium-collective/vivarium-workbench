@@ -147,6 +147,39 @@ def test_run_simulation_omits_json_body_when_no_analysis_options(monkeypatch):
     assert cap["body"] is None
 
 
+def test_run_simulation_sends_config_filename_query_param(monkeypatch):
+    """sms-api's own Query() default (api_simulation_default.json) only
+    exists in the public vEcoli-lineage repos — a repo without it (e.g.
+    sms-ecoli) 404s unless the caller supplies a real filename explicitly.
+    Real name confirmed against sms-api's own route: `simulation_config_filename`
+    (viva_api/api/routers/sms.py), a query param like every other scalar
+    run_simulation() field, never a JSON-body key."""
+    cap = {}
+    with _patch_urlopen(monkeypatch, cap, {"database_id": 53}):
+        c = SmsApiClient("http://h:8080")
+        c.run_simulation(
+            simulator_id=15, num_generations=1, num_seeds=1, run_parca=True,
+            observables=["mass"], config_filename="mecillinam_wellmixed.json",
+        )
+    qs = parse_qs(urlsplit(cap["url"]).query)
+    assert qs["simulation_config_filename"] == ["mecillinam_wellmixed.json"]
+
+
+def test_run_simulation_omits_config_filename_when_absent(monkeypatch):
+    """Unset by default — a caller with no opinion gets exactly the same
+    request as before this field existed (sms-api's own default still
+    applies server-side for repos that do have it)."""
+    cap = {}
+    with _patch_urlopen(monkeypatch, cap, {"database_id": 54}):
+        c = SmsApiClient("http://h:8080")
+        c.run_simulation(
+            simulator_id=15, num_generations=1, num_seeds=1, run_parca=True,
+            observables=["mass"],
+        )
+    qs = parse_qs(urlsplit(cap["url"]).query)
+    assert "simulation_config_filename" not in qs
+
+
 def test_get_simulation_returns_full_record(monkeypatch):
     """GET /api/v1/simulations/{id} -- the full record (config, simulator_id,
     num_seeds), used by P1-11's execution-provenance lookup. Distinct from

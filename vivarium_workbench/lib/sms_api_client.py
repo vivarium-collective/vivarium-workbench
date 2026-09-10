@@ -453,6 +453,7 @@ class SmsApiClient:
         observables: list[str],
         experiment_id: str | None = None,
         description: str | None = None,
+        config_filename: str | None = None,
         analysis_options: dict | None = None,
         extra_params: dict | None = None,
     ) -> dict:
@@ -466,6 +467,13 @@ class SmsApiClient:
             params["experiment_id"] = experiment_id
         if description is not None:
             params["description"] = description
+        if config_filename is not None:
+            # sms-api's own Query() default (api_simulation_default.json) only
+            # exists in the public vEcoli-lineage repos — sms-ecoli has never
+            # had that file (confirmed via GitHub code search), so any sms-ecoli
+            # dispatch that omits this 404s. GET /api/v1/simulations/discovery
+            # on sms-api lists real, valid values for the pinned commit.
+            params["simulation_config_filename"] = config_filename
         if observables:
             params["observables"] = observables  # list → repeated key via doseq
         # analysis_options/extra_params are both nested-dict-shaped bodies with no
