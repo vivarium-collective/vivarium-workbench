@@ -63,6 +63,37 @@ def _ws_add_to_sys_path(ws_root: Path) -> None:
         sys.path.insert(0, ws)
 
 
+def _append_investigation_member(ws_root: Path, investigation: str, study_name: str) -> None:
+    """Add ``study_name`` to ``investigation``'s own member list.
+
+    Real bug found live-testing Vignette-1 (docs/deliverable/cd2/README.md
+    §5): the UI's own study-creation dialog already sends ``investigation``
+    in its POST body (``walkthrough.js``'s ``post('/api/study-create',
+    {name, investigation, ...})``), but nothing on this side ever read it —
+    a new study silently landed "Ungrouped" regardless of the dropdown's
+    selected value.
+
+    Preserves whichever key the target ``investigation.yaml`` already uses —
+    ``studies:`` (legacy) if non-empty, else ``members:`` (current) — mirroring
+    :func:`investigation_members.investigation_member_slugs`'s own read-side
+    priority exactly, so a newly-added member is never appended to a key
+    nothing reads (confirmed live: a real investigation.yaml in this
+    workspace, ``whole-cell-model-comparison``, already uses ``members:``,
+    with its own comment noting the dashboard reads member studies from
+    exactly that key). Idempotent: a slug already present is not duplicated.
+    """
+    from vivarium_workbench.lib.atomic_io import atomic_write_text
+    from vivarium_workbench.lib.investigation_members import investigation_member_slugs
+
+    inv_yaml = WorkspacePaths.load(ws_root).investigations / investigation / "investigation.yaml"
+    data = yaml.safe_load(inv_yaml.read_text(encoding="utf-8")) or {}
+    key = "studies" if data.get("studies") else "members"
+    current = investigation_member_slugs(data)
+    if study_name not in current:
+        data[key] = [*current, study_name]
+        atomic_write_text(inv_yaml, yaml.safe_dump(data, sort_keys=False))
+
+
 def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
     """Scaffold a new study directory.
 
@@ -72,10 +103,17 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
     legacy ``composite`` field is accepted but ignored when ``source`` is
     provided.
 
+    ``investigation`` (optional): slug of an existing investigation to add
+    this study to as a member (see :func:`_append_investigation_member`).
+    Validated up front — an unknown investigation is a 404, same as every
+    other pre-flight check here, rather than silently creating an
+    unassociated study.
+
     Returns ``(response_dict, status_code)``.
     """
     name = (body.get("name") or "").strip()
     source = (body.get("source") or "").strip()
+    investigation = (body.get("investigation") or "").strip()
     if not name:
         return {"error": "name is required"}, 400
     if not re.match(r"^[a-zA-Z0-9_-]+$", name):
@@ -84,6 +122,11 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
     inv_dir = WorkspacePaths.load(ws_root).studies / name
     if inv_dir.exists() or (WorkspacePaths.load(ws_root).investigations / name).exists():
         return {"error": f"investigation '{name}' already exists"}, 409
+
+    if investigation:
+        target_inv_yaml = WorkspacePaths.load(ws_root).investigations / investigation / "investigation.yaml"
+        if not target_inv_yaml.is_file():
+            return {"error": f"investigation {investigation!r} not found"}, 404
 
     # Resolve source composite if provided. YAML refs land in the
     # legacy v2-shape with a copied sidecar; @composite_generator refs
@@ -167,6 +210,9 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
             from vivarium_workbench.lib.scaffold_yaml import v4_study_scaffold
             body_yaml = v4_study_scaffold(name)
             (inv_dir / "study.yaml").write_text(body_yaml, encoding="utf-8")
+
+        if investigation:
+            _append_investigation_member(ws_root, investigation, name)
 
     # Deferred commit: the live handler wraps ``action`` in
     # ``_active_branch_action(commit_msg, action)`` (commit-on-active-branch).
