@@ -41,13 +41,17 @@ from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 # sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
 # deletes). The thin client maps a raw sms-api status into a UI phase.
-# "partial" was added defensively for viva-api#609's then-planned PARTIAL
-# status; #609 dropped that status before merging (Postgres enum-migration
-# cost, no consumer ever branched on it), so this value can never actually
-# arrive. Left in place rather than reverted -- costs nothing in a set, and
-# re-adding a real partial-run status later is one line if it ever returns.
+#
+# These mirror sms-api's ACTUAL JobStatus vocabulary, which is
+# COMPLETED / FAILED / CANCELLED plus the non-terminal states. A "partial"
+# entry was added defensively in #1045 for viva-api#609's then-planned PARTIAL
+# status and kept in #1046 on the grounds that it cost nothing; it is removed
+# here because viva-api dropped that status before merging, so the value can
+# never arrive, and a set that lists states the API cannot produce invites the
+# reader to believe it can. If a partial-run status ever genuinely lands, add
+# it back together with the sms-api change that produces it.
 _TERMINAL_OK = {"completed", "done", "succeeded"}
-_TERMINAL_BAD = {"failed", "cancelled", "error", "partial"}
+_TERMINAL_BAD = {"failed", "cancelled", "error"}
 
 # Real completion signal now exists (GET /analyses/{id}/status, S3-exists
 # probe server-side) for Ray-backend triggers -- poll it instead of blindly

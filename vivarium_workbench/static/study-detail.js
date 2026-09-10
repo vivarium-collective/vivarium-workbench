@@ -1888,6 +1888,7 @@
       + '<select id="cp-mechanism" style="width:100%;box-sizing:border-box;margin-top:2px">'
       + '<option value="multi_node_dispatch">multi_node_dispatch (lineage_ray_batch, etc.)</option>'
       + '<option value="mbp_dispatch">mbp_dispatch (run_mbp_tracked.py, e.g. reactor_bird_coupled)</option>'
+      + '<option value="nextflow_dispatch">nextflow_dispatch (workflow_nf: Nextflow head, one Batch task per lineage)</option>'
       + '</select></label>'
       + '<div id="cp-mnp-fields">'
       + '<label style="display:block;margin-top:6px">composite_id'
@@ -1908,10 +1909,51 @@
       + '<label style="flex:1">seed<input type="number" id="cp-mbp-seed" min="0" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
       + '</div>'
       + '</div>'
+      // nextflow_dispatch (viva-api's third dispatch path, docs/plan-nextflow-dispatch.md):
+      // the field set mirrors `atlantis composite nextflow` (app/cli.py
+      // _nf_dispatch_payload/_nf_generator_params) -- composite_id/executor/
+      // launch sit flat on nextflow_dispatch; seeds/generations/cache_uri/
+      // include_analysis/independent_founders live under nextflow_dispatch.params
+      // (the workflow_nf generator's own parameters); task_env is the
+      // per-task environment passthrough (viva-api#568). The two tri-state
+      // selects exist because the CLI OMITS an unset option rather than
+      // sending null (a null would override a deployment-derived default), and
+      // a checkbox cannot express "unset".
+      + '<div id="cp-nf-fields" style="display:none">'
+      + '<label style="display:block;margin-top:6px">composite_id'
+      + '<input type="text" id="cp-nf-composite-id" value="v2ecoli.composites.workflow_nf.workflow_nf" '
+      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<div style="display:flex;gap:8px;margin-top:6px">'
+      + '<label style="flex:1">n_seeds<input type="number" id="cp-nf-n-seeds" min="1" value="1" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<label style="flex:1">n_generations<input type="number" id="cp-nf-n-generations" min="1" value="1" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<label style="flex:1">executor<input type="text" id="cp-nf-executor" value="awsbatch" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '</div>'
+      + '<label style="display:block;margin-top:6px">cache_uri (optional — an s3:// ParCa cache prefix to fetch instead of running ParCa, '
+      + 'e.g. a staged founder or genotype cache)'
+      + '<input type="text" id="cp-nf-cache-uri" placeholder="s3://<bucket>/ray-parca-cache/<commit>/" '
+      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<div style="display:flex;gap:8px;margin-top:6px">'
+      + '<label style="flex:1">include_analysis<select id="cp-nf-include-analysis" style="width:100%;box-sizing:border-box;margin-top:2px">'
+      + '<option value="">(unset)</option><option value="true">true</option><option value="false">false</option></select></label>'
+      + '<label style="flex:1">independent_founders<select id="cp-nf-independent-founders" style="width:100%;box-sizing:border-box;margin-top:2px">'
+      + '<option value="">(unset)</option><option value="true">true</option><option value="false">false</option></select></label>'
+      + '<label style="flex:1;align-self:flex-end"><input type="checkbox" id="cp-nf-launch" checked> launch</label>'
+      + '</div>'
+      + '<label style="display:block;margin-top:6px">task_env (optional — NAME=VALUE, one per line; set in every Batch task, '
+      + 'e.g. V2ECOLI_SKIP_CACHE_VERIFY=1 for a cache built at another commit)'
+      + '<textarea id="cp-nf-task-env" rows="2" placeholder="V2ECOLI_SKIP_CACHE_VERIFY=1" '
+      + 'style="width:100%;box-sizing:border-box;margin-top:2px;font-family:monospace;font-size:11px"></textarea></label>'
+      + '</div>'
+      + '<div id="cp-cache-variant-wrap">'
       + '<label style="display:block;margin-top:6px">cache_variant (optional — a pre-staged ParCa cache variant; '
       + 'blank uses the plain per-commit cache)'
       + '<input type="text" id="cp-cache-variant" placeholder="e.g. cd2-run1-k4-candidate-v1-lambda050" '
       + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '</div>'
+      // config_filename sits OUTSIDE cp-cache-variant-wrap: it selects the
+      // simulation config for every mechanism, including nextflow_dispatch,
+      // whereas cache_variant is meaningless on the Nextflow path and is
+      // hidden with the wrap (#1044 added this field; the wrap is this PR's).
       + '<label style="display:block;margin-top:6px">config_filename (optional — a real filename under '
       + 'vEcoli/configs/ in the pinned repo; sms-api 404s without one on repos with no '
       + 'api_simulation_default.json — GET /api/v1/simulations/discovery?simulator_id=&lt;id&gt; lists the '
@@ -1945,21 +1987,42 @@
   // _submit_mbp_tracked_dispatch's real contract), unlike multi_node_dispatch's
   // params-wrapped shape, so the two raw-JSON boxes genuinely merge into
   // different places and the label needs to say so, not just the field set.
+  //
+  // nextflow_dispatch is the third shape: composite_id/executor/launch/
+  // resources/work_dir/nextflow_args/task_env sit FLAT on nextflow_dispatch,
+  // while the generator's own knobs (n_seeds/n_generations/cache_uri/
+  // include_analysis/analysis_options/independent_founders/variants/
+  // emit_paths...) live under nextflow_dispatch.params -- so its raw-JSON box
+  // merges flat onto nextflow_dispatch EXCEPT a `params` key, which merges
+  // into nextflow_dispatch.params (see _dispatchRemoteComposite). It has no
+  // cache_variant (the Nextflow path fetches a `cache_uri` instead), so that
+  // shared field is hidden for it rather than silently ignored.
   function _updateCompositePanelMechanism() {
     var sel = document.getElementById('cp-mechanism');
-    var isMnp = !sel || sel.value !== 'mbp_dispatch';
+    var mechanism = (sel && sel.value) || 'multi_node_dispatch';
+    var isMnp = mechanism === 'multi_node_dispatch';
+    var isMbp = mechanism === 'mbp_dispatch';
+    var isNf = mechanism === 'nextflow_dispatch';
     var mnpFields = document.getElementById('cp-mnp-fields');
     var mbpFields = document.getElementById('cp-mbp-fields');
+    var nfFields = document.getElementById('cp-nf-fields');
+    var cacheVariantWrap = document.getElementById('cp-cache-variant-wrap');
     var desc = document.getElementById('cp-params-desc');
     if (mnpFields) mnpFields.style.display = isMnp ? '' : 'none';
-    if (mbpFields) mbpFields.style.display = isMnp ? 'none' : '';
+    if (mbpFields) mbpFields.style.display = isMbp ? '' : 'none';
+    if (nfFields) nfFields.style.display = isNf ? '' : 'none';
+    if (cacheVariantWrap) cacheVariantWrap.style.display = isNf ? 'none' : '';
     if (desc) {
       desc.textContent = isMnp
         ? 'extra params (raw JSON, merged into multi_node_dispatch.params — '
           + 'e.g. injected_processes/variants/config_overrides/emitter_arg/cache_dir/out_dir/media)'
-        : 'extra params (raw JSON, merged directly onto mbp_dispatch — e.g. duration_sec/chunk/'
+        : isMbp
+        ? 'extra params (raw JSON, merged directly onto mbp_dispatch — e.g. duration_sec/chunk/'
           + 'emitter/single_daughters/carbon_exhaustion_arrest/cells_per_agent/initial_glucose_mM/'
-          + 'initial_ammonium_mM/injected_processes/reactor_config/aeration_schedule)';
+          + 'initial_ammonium_mM/injected_processes/reactor_config/aeration_schedule)'
+        : 'extra params (raw JSON, merged directly onto nextflow_dispatch — e.g. resources/'
+          + 'work_dir/nextflow_args/resume/resume_from; a "params" key merges into '
+          + 'nextflow_dispatch.params — e.g. variants/injected_processes/analysis_options/emit_paths)';
     }
   }
 
@@ -1993,7 +2056,89 @@
 
     var numGenerations, numSeeds, dispatchExtraParams, confirmLines;
 
-    if (mechanism === 'mbp_dispatch') {
+    if (mechanism === 'nextflow_dispatch') {
+      var nfCompositeId = (document.getElementById('cp-nf-composite-id').value || '').trim();
+      if (!nfCompositeId) { _cpError('composite_id is required.'); return; }
+      var nfExecutor = (document.getElementById('cp-nf-executor').value || '').trim() || 'awsbatch';
+      numSeeds = parseInt(document.getElementById('cp-nf-n-seeds').value, 10);
+      numGenerations = parseInt(document.getElementById('cp-nf-n-generations').value, 10);
+      if (!(numSeeds > 0)) { _cpError('n_seeds must be a positive integer.'); return; }
+      if (!(numGenerations > 0)) { _cpError('n_generations must be a positive integer.'); return; }
+      var nfCacheUri = (document.getElementById('cp-nf-cache-uri').value || '').trim();
+      var nfIncludeAnalysis = document.getElementById('cp-nf-include-analysis').value;
+      var nfIndependentFounders = document.getElementById('cp-nf-independent-founders').value;
+      var nfLaunch = !!document.getElementById('cp-nf-launch').checked;
+      // task_env: NAME=VALUE per line, split on the FIRST '=' (a value may
+      // contain one) -- the same rule as the CLI's _parse_task_env. Refused
+      // here rather than after the round trip so the message names the line.
+      var nfTaskEnv = null;
+      var taskEnvRaw = (document.getElementById('cp-nf-task-env').value || '').trim();
+      if (taskEnvRaw) {
+        nfTaskEnv = {};
+        var envLines = taskEnvRaw.split(/\r?\n/);
+        for (var li = 0; li < envLines.length; li++) {
+          var envLine = envLines[li].trim();
+          if (!envLine) continue;
+          var eq = envLine.indexOf('=');
+          if (eq <= 0) { _cpError('task_env line ' + (li + 1) + ' must be NAME=VALUE: ' + envLine); return; }
+          nfTaskEnv[envLine.slice(0, eq)] = envLine.slice(eq + 1);
+        }
+      }
+      // The Nextflow path has no cache_variant: it fetches a cache_uri. A
+      // stray cache_variant in the raw JSON (copy-pasted from an MNP dispatch)
+      // would be ignored server-side and the run would silently build/fetch the
+      // plain per-commit cache, which is the exact silent-fallback class #1041
+      // fixed for MNP -- so refuse it instead of dropping it.
+      if ('cache_variant' in extraParams) {
+        _cpError('nextflow_dispatch has no cache_variant; pass the staged cache as cache_uri instead.');
+        return;
+      }
+      // Raw JSON merges FLAT onto nextflow_dispatch, except its `params` key,
+      // which merges INTO nextflow_dispatch.params (the generator's own
+      // parameters) -- never replacing the object the dedicated fields built.
+      // Dedicated fields win over a duplicate inside raw params, mirroring the
+      // cache_variant rule above.
+      var rawParams = null;
+      if ('params' in extraParams) {
+        rawParams = extraParams.params;
+        if (typeof rawParams !== 'object' || rawParams === null || Array.isArray(rawParams)) {
+          _cpError('extra params "params" must be a JSON object (the workflow_nf generator parameters).');
+          return;
+        }
+        extraParams = Object.assign({}, extraParams);
+        delete extraParams.params;
+      }
+      var nfParams = Object.assign({}, rawParams || {}, { n_seeds: numSeeds, n_generations: numGenerations });
+      if (nfCacheUri) nfParams.cache_uri = nfCacheUri;
+      if (nfIncludeAnalysis !== '') nfParams.include_analysis = (nfIncludeAnalysis === 'true');
+      if (nfIndependentFounders !== '') nfParams.independent_founders = (nfIndependentFounders === 'true');
+      // Absent options are OMITTED, never sent as null: viva-api's
+      // nextflow_dispatch is a passthrough, and a null would override a
+      // deployment-derived default (work_dir, resources) with nothing.
+      var nfDispatch = Object.assign({}, extraParams, {
+        composite_id: nfCompositeId,
+        executor: nfExecutor,
+        launch: nfLaunch,
+        params: nfParams,
+      });
+      if (nfTaskEnv) nfDispatch.task_env = nfTaskEnv;
+      dispatchExtraParams = { nextflow_dispatch: nfDispatch };
+      // num_generations/num_seeds: the workbench route hard-requires both (see
+      // the mbp comment below), and viva-api records them on the simulation
+      // row; the Nextflow path itself sizes the campaign from
+      // nextflow_dispatch.params.n_seeds/n_generations. Same numbers, sent to
+      // both places on purpose -- the row's metadata and the generator agree.
+      confirmLines = '  mechanism:    nextflow_dispatch\n'
+        + '  composite_id: ' + nfCompositeId + '\n'
+        + '  executor:     ' + nfExecutor + (nfLaunch ? '' : '  (launch=false: render only)') + '\n'
+        + '  n_seeds:      ' + numSeeds + '\n'
+        + '  n_generations:' + numGenerations + '\n'
+        + (nfCacheUri ? '  cache_uri:    ' + nfCacheUri + '\n' : '')
+        + (nfIncludeAnalysis !== '' ? '  include_analysis: ' + nfIncludeAnalysis + '\n' : '')
+        + (nfIndependentFounders !== '' ? '  independent_founders: ' + nfIndependentFounders + '\n' : '')
+        + (nfTaskEnv ? '  task_env:     ' + JSON.stringify(nfTaskEnv) + '\n' : '')
+        + (rawJson ? '  extra params: ' + rawJson + '\n' : '');
+    } else if (mechanism === 'mbp_dispatch') {
       var variant = (document.getElementById('cp-mbp-variant').value || '').trim();
       if (!variant) { _cpError('variant is required.'); return; }
       var maxGenerations = parseInt(document.getElementById('cp-mbp-max-generations').value, 10);

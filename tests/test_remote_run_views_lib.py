@@ -920,13 +920,22 @@ def test_status_run_running_maps_to_running(monkeypatch):
     assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "running"
 
 
-def test_status_run_partial_maps_to_failed_not_running(monkeypatch):
-    # Defensive regression: "partial" was added for viva-api#609's
-    # then-planned PARTIAL status, which #609 dropped before merging (see
-    # remote_run_views.py's own comment on _TERMINAL_BAD) -- this value can
-    # never actually arrive, but the mapping is still correct if it ever does.
-    _bind_status_client(monkeypatch, sim_status={"status": "partial"})
-    assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "failed"
+def test_the_terminal_sets_match_sms_apis_real_status_vocabulary():
+    """Pin the vocabulary, since that is what actually drifted.
+
+    A ``"partial"`` entry was added defensively in #1045 for viva-api#609's
+    then-planned PARTIAL status and kept in #1046; viva-api dropped that status
+    before merging, so it is removed here. Listing a state the API cannot
+    produce invites a reader to believe it can.
+
+    Note the deliberate asymmetry this pins: anything NOT in either set falls
+    through to ``"running"`` (see ``remote_run_status``). That is right for the
+    non-terminal states, which are not enumerated -- but it also means a future
+    TERMINAL status would read as permanently running until it is added here.
+    So this set has to be updated together with sms-api's, not after it.
+    """
+    assert rrv._TERMINAL_OK == {"completed", "done", "succeeded"}
+    assert rrv._TERMINAL_BAD == {"failed", "cancelled", "error"}
 
 
 def test_status_run_queued_maps_to_queued(monkeypatch):
