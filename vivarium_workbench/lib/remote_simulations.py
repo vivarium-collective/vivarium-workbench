@@ -241,7 +241,7 @@ def _scope_build_ids(ws_root: Path, bm, builds) -> "tuple[set, object] | tuple[N
 
 
 def list_remote_simulations(ws_root: Path, base_url: str | None = None,
-                            limit: int = 200) -> list[dict]:
+                            limit: int = 2000) -> list[dict]:
     """Remote sms-api runs to surface in the Simulations DB, or ``[]``.
 
     For a materialized remote build, that's the active build's (repo, commit).

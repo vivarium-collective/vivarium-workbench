@@ -88,14 +88,44 @@ def _iter_study_dirs(ws_root: Path):
 # Run counting (ws_root-parameterized)
 # ---------------------------------------------------------------------------
 
+def _remote_study_run_counts(ws_root: Path) -> dict:
+    """``study_slug -> count`` of remote (GovCloud) runs tagged to each study.
+
+    A remote run lives in the Simulations index (its store is an ``s3://`` uri,
+    so it has no local ``runs.db``/``study.yaml`` entry). Without this the study
+    card's ``n_runs`` stays 0 even when the study's runs completed remotely and
+    are already study-tagged (via the workspace ``remote_run_study_map``). Gated
+    on that map so only workspaces that opted into remote-run association pay the
+    sms-api fetch; best-effort, never raises or blocks the index.
+
+    Cost note: this fetch is the same (~seconds) round-trip the Simulations index
+    makes; a shared TTL cache would let the two pages share it (follow-up).
+    """
+    try:
+        from vivarium_workbench.lib.remote_simulations import (
+            _load_remote_study_map, list_remote_simulations)
+        if not _load_remote_study_map(ws_root):
+            return {}
+        rows = list_remote_simulations(ws_root)
+    except Exception:
+        return {}
+    counts: dict = {}
+    for r in rows:
+        slug = r.get("study_slug") if isinstance(r, dict) else None
+        if slug:
+            counts[slug] = counts.get(slug, 0) + 1
+    return counts
+
+
 def _count_runs_for_study(
-    ws_root: Path, name: str, spec: Optional[dict] = None
+    ws_root: Path, name: str, spec: Optional[dict] = None, remote_count: int = 0
 ) -> int:
     """Count runs for a study, parameterized by ws_root.
 
     Checks the study's runs.db for row counts in runs_meta; falls back
-    to ``len(spec.runs)``.  Returns the larger of the two so the dashboard
-    never undercounts.  Never raises.
+    to ``len(spec.runs)``; and includes ``remote_count`` (study-tagged remote
+    runs, see :func:`_remote_study_run_counts`).  Returns the largest so the
+    dashboard never undercounts.  Never raises.
     """
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
@@ -133,7 +163,7 @@ def _count_runs_for_study(
     spec_count = 0
     if spec is not None:
         spec_count = len(spec.get("runs") or [])
-    return max(db_count, spec_count)
+    return max(db_count, spec_count, remote_count or 0)
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +341,11 @@ def build_investigations(ws_root: Path) -> dict:
         s["name"]: s for _, s in loaded if not s.get("__invalid__")
     }
 
+    # Fetch study-tagged remote-run counts once (best-effort; empty unless the
+    # workspace declares a remote_run_study_map) so a study card reflects its
+    # GovCloud runs without a per-study sms-api round-trip.
+    remote_counts = _remote_study_run_counts(ws_root)
+
     out = []
     for d, spec in loaded:
         if spec.get("__invalid__"):
@@ -319,13 +354,14 @@ def build_investigations(ws_root: Path) -> dict:
             )
             continue
 
+        rc = remote_counts.get(spec["name"], 0)
         composites = spec.get("composites") or []
         if composites:
             composite_summary = ", ".join(c.get("name", "") for c in composites)
-            n_runs = _count_runs_for_study(ws_root, spec["name"], spec)
+            n_runs = _count_runs_for_study(ws_root, spec["name"], spec, rc)
         else:
             composite_summary = spec.get("composite", "")
-            n_runs = _count_runs_for_study(ws_root, spec["name"], spec)
+            n_runs = _count_runs_for_study(ws_root, spec["name"], spec, rc)
             if n_runs == 0:
                 n_runs = len(spec.get("simulations") or [])
 
