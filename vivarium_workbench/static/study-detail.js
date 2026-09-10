@@ -1912,6 +1912,12 @@
       + 'blank uses the plain per-commit cache)'
       + '<input type="text" id="cp-cache-variant" placeholder="e.g. cd2-run1-k4-candidate-v1-lambda050" '
       + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<label style="display:block;margin-top:6px">config_filename (optional — a real filename under '
+      + 'vEcoli/configs/ in the pinned repo; sms-api 404s without one on repos with no '
+      + 'api_simulation_default.json — GET /api/v1/simulations/discovery?simulator_id=&lt;id&gt; lists the '
+      + 'pinned commit’s real options)'
+      + '<input type="text" id="cp-config-filename" placeholder="e.g. mecillinam_wellmixed.json" '
+      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
       + '<label style="display:block;margin-top:6px"><span id="cp-params-desc">extra params (raw JSON, merged into multi_node_dispatch.params — '
       + 'e.g. injected_processes/variants/config_overrides/emitter_arg/cache_dir/out_dir/media)</span>'
       + '<textarea id="cp-params-json" rows="5" placeholder="{}" '
@@ -1969,6 +1975,7 @@
     var mechSel = document.getElementById('cp-mechanism');
     var mechanism = (mechSel && mechSel.value) || 'multi_node_dispatch';
     var cacheVariant = (document.getElementById('cp-cache-variant').value || '').trim();
+    var configFilename = (document.getElementById('cp-config-filename').value || '').trim();
     var rawJson = (document.getElementById('cp-params-json').value || '').trim();
     var extraParams = {};
     if (rawJson) {
@@ -2078,6 +2085,7 @@
       var msg = 'Dispatch composite to AWS Batch:\n\n'
         + '  simulator id: ' + cfg.simulator_id + '\n'
         + confirmLines
+        + (configFilename ? '  config_filename: ' + configFilename + '\n' : '')
         + '\nProceed?';
       if (!confirm(msg)) return _CANCELLED;
       var panel = document.getElementById('study-composite-panel');
@@ -2087,6 +2095,7 @@
         simulator_id: cfg.simulator_id,
         num_generations: numGenerations,
         num_seeds: numSeeds,
+        config_filename: configFilename || undefined,
         extra_params: dispatchExtraParams,
       });
     });

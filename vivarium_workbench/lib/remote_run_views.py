@@ -349,7 +349,16 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     ``remote_run_build_start`` already returns before a build finishes).
     The JS panel polls ``GET /api/remote-run-poll?simulation_id=<id>`` (->
     :func:`remote_run_status`) for real progress, exactly like every other
-    phase in this module."""
+    phase in this module.
+
+    ``config_filename`` (optional): a real filename under ``configs/`` in the
+    pinned repo (``GET /api/v1/simulations/discovery?simulator_id=<id>`` on
+    sms-api lists the pinned commit's real options). sms-api's own default
+    (``api_simulation_default.json``) only exists in the public vEcoli-lineage
+    repos -- omitting this 404s on any repo (e.g. sms-ecoli) that has never had
+    that file. Threaded straight through to
+    :meth:`SmsApiClient.run_simulation`; unset when absent/blank, matching
+    every other optional field here."""
     body = body or {}
     if not _run_auth_ok():
         return {"error": "not authenticated"}, 401
@@ -398,6 +407,7 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
             num_seeds=int(num_seeds),
             run_parca=bool(body.get("run_parca", True)),
             observables=observables,
+            config_filename=(body.get("config_filename") or "").strip() or None,
             analysis_options=analysis_options or None,
             extra_params=body.get("extra_params") or None,
         )
