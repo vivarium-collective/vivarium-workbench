@@ -46,6 +46,9 @@ export interface SimRow {
 export interface SimulationsPayload {
   simulations: SimRow[];
   current: string | null;
+  total: number | null;
+  offset: number;
+  limit: number | null;
 }
 
 export interface RemoteRunStep {

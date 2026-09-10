@@ -740,7 +740,11 @@ def create_app() -> FastAPI:
         summary="Workspace-wide simulations index (all runs)",
     )
     def simulations(ws: Path = Depends(get_workspace),
-                    study: str | None = None) -> SimulationsPayload:
+                    study: str | None = None,
+                    limit: int | None = None,
+                    offset: int = 0,
+                    refresh: bool = False,
+                    include_remote: bool = True) -> SimulationsPayload:
         """Workspace-wide simulations index (mirrors the stdlib /api/simulations).
 
         Fully library-backed via ``lib.simulations_index.build_simulations_data``,
@@ -751,18 +755,34 @@ def create_app() -> FastAPI:
         the study when its ``study_slug`` equals the slug or the slug is among
         its ``studies``). The study-detail Simulations tab uses this to render
         the same Sim-DB table filtered to the study, instead of a bespoke one.
+
+        Pagination: ``?limit=<n>&offset=<m>`` returns one page (most-recent
+        first) and ``total`` reports the full count for the current view, so the
+        client can show "N runs" and load chunks instead of the whole index.
+        Omitting ``limit`` returns every row (``total`` still populated).
+        ``?refresh=true`` bypasses the remote-runs cache for a fresh sms-api pull.
         """
-        from vivarium_workbench.lib.simulations_index import build_simulations_data
+        from vivarium_workbench.lib.simulations_index import (
+            build_simulations_data_cached, clear_build_cache)
         from vivarium_workbench.lib.composite_lookup import (
             known_composite_ids,
             annotate_composite_registered,
         )
-        data = build_simulations_data(ws)
+        if refresh:
+            from vivarium_workbench.lib import remote_simulations as _rs
+            _rs._REMOTE_CACHE.clear()
+            clear_build_cache()
+        data = build_simulations_data_cached(ws, include_remote=include_remote)
         sims = data.get("simulations", [])
         if study:
             sims = [s for s in sims
                     if s.get("study_slug") == study
                     or study in (s.get("studies") or [])]
+        total = len(sims)
+        if offset:
+            sims = sims[offset:]
+        if limit is not None and limit >= 0:
+            sims = sims[:limit]
         # Enforcement: annotate whether each run maps to exactly one registered
         # composite. ALIAS-TOLERANT (short slug / doubled id resolve to the
         # dotted registered composite) — see annotate_composite_registered.
@@ -772,7 +792,8 @@ def create_app() -> FastAPI:
             _known = set()
         annotate_composite_registered(sims, _known)
         rows = [SimRow.model_validate(r) for r in sims]
-        return SimulationsPayload(simulations=rows, current=data.get("current"))
+        return SimulationsPayload(simulations=rows, current=data.get("current"),
+                                  total=total, offset=offset, limit=limit)
 
     @app.get(
         "/api/workspace-manifest",

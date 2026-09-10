@@ -24,11 +24,68 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import re
+import time
 from pathlib import Path
+
+
+# Short-TTL cache for the remote fetch. The sms-api list round-trip (+ per-record
+# normalize) is the dominant cost of the Simulations index, and every call that
+# re-derives the index (the Runs tab, its filters/refresh, the study cards'
+# remote counts) would otherwise re-pay it. Remote (GovCloud) runs don't change
+# second-to-second, so a brief cache keeps paging/filtering snappy; pass
+# use_cache=False to force a fresh fetch (the Runs-tab refresh button).
+_REMOTE_CACHE: dict = {}
+_REMOTE_CACHE_TTL = 60.0
 
 
 # emitter tag -> capitalized label the UI pills key on (mirrors server.py).
 _EMITTER_LABEL = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray", "none": "—"}
+
+
+def _load_remote_study_map(ws_root: Path) -> list:
+    """Workspace-declared experiment_id -> study_slug rules for remote runs.
+
+    Reads ``remote_run_study_map`` from the workspace config (``workspace.yaml``):
+    an ordered list of ``{pattern: <regex>, study: <slug>}`` entries, first match
+    wins. Returns a list of ``(compiled_regex, study_slug)``.
+
+    Why this exists: a remote (GovCloud) run is surfaced with ``db_path=None``
+    (its store is an ``s3://`` uri), so the local index's study-slug-from-db_path
+    inference cannot fire and every remote run lands orphaned
+    (``study_slug=None``). This lets a workspace declare how its remote runs'
+    ``experiment_id``s map to its studies so they show under the right study.
+
+    INTERIM (stopgap). The durable fix is stamping ``study_slug`` + the
+    RunIdentity record into the run at dispatch (viva-api#590), after which
+    remote runs carry their own study association and this heuristic is moot.
+    """
+    cfg = Path(ws_root) / "workspace.yaml"
+    if not cfg.is_file():
+        return []
+    try:
+        import yaml
+        doc = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    rules = doc.get("remote_run_study_map") or []
+    out = []
+    for r in rules:
+        if isinstance(r, dict) and r.get("pattern") and r.get("study"):
+            try:
+                out.append((re.compile(str(r["pattern"]), re.I), str(r["study"])))
+            except re.error:
+                continue
+    return out
+
+
+def _infer_study_slug(experiment_id: str, rules: list) -> "str | None":
+    """First workspace rule whose pattern matches ``experiment_id`` (or None)."""
+    e = experiment_id or ""
+    for pat, slug in rules:
+        if pat.search(e):
+            return slug
+    return None
 
 
 def _sms_api_base() -> str:
@@ -195,8 +252,27 @@ def _scope_build_ids(ws_root: Path, bm, builds) -> "tuple[set, object] | tuple[N
 
 
 def list_remote_simulations(ws_root: Path, base_url: str | None = None,
-                            limit: int = 200) -> list[dict]:
+                            limit: int = 2000, use_cache: bool = True) -> list[dict]:
     """Remote sms-api runs to surface in the Simulations DB, or ``[]``.
+
+    Cached for ``_REMOTE_CACHE_TTL`` seconds (see the module cache) so repeated
+    index derivations don't re-hit sms-api; ``use_cache=False`` forces a fresh
+    fetch. Thin wrapper over :func:`_fetch_remote_simulations`.
+    """
+    key = (str(ws_root), base_url or "", int(limit))
+    now = time.time()
+    if use_cache:
+        hit = _REMOTE_CACHE.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+    rows = _fetch_remote_simulations(ws_root, base_url, limit)
+    _REMOTE_CACHE[key] = (now + _REMOTE_CACHE_TTL, rows)
+    return rows
+
+
+def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
+                              limit: int = 2000) -> list[dict]:
+    """Uncached remote fetch — see :func:`list_remote_simulations`.
 
     For a materialized remote build, that's the active build's (repo, commit).
     For a plain local checkout, it's every remote run of the workspace's repo,
@@ -230,5 +306,15 @@ def list_remote_simulations(ws_root: Path, base_url: str | None = None,
 
     rows = [_normalize(rec) for rec in sims
             if isinstance(rec, dict) and rec.get("simulator_id") in matching]
+    # Associate each remote run with its study via the workspace's declared
+    # experiment_id -> study_slug rules (remote runs have no db_path, so the
+    # local study-slug-from-path inference in simulations_index can't fire).
+    study_rules = _load_remote_study_map(ws_root)
+    if study_rules:
+        for r in rows:
+            slug = _infer_study_slug(r.get("run_id", ""), study_rules)
+            if slug:
+                r["study_slug"] = slug
+                r["studies"] = [slug]
     rows.sort(key=lambda r: r.get("started_at") or 0.0, reverse=True)
     return rows[:limit] if limit and limit > 0 else rows

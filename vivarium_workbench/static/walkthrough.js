@@ -15451,10 +15451,18 @@
 
     visible = _sortSimRows(visible, _simSortState.key, _simSortState.dir);
 
+    // Chunked display: render only the first _simShown rows (page-size selector
+    // + "Show more"), so a large index (hundreds of runs) paints a small slice
+    // fast instead of the whole table. Count reflects the full filtered set.
+    var pageSize = window._simPageSize || 50;
+    if (!window._simShown || window._simShown < pageSize) window._simShown = pageSize;
+    var shown = visible.slice(0, window._simShown);
+
     var tbody = document.getElementById('sim-tbody');
     var table = document.getElementById('sim-table');
     var empty = document.getElementById('sim-empty');
-    if (tbody) tbody.innerHTML = visible.map(_renderSimRow).join('');
+    if (tbody) tbody.innerHTML = shown.map(_renderSimRow).join('');
+    _updateSimCount(shown.length, visible.length, (window._simRows || []).length);
     // Row click opens the run (delegated once, survives re-renders); the
     // download links/buttons keep their own behaviour.
     if (tbody && !tbody._simClickWired) {
@@ -15492,7 +15500,7 @@
     // the grips a single time; stored widths persist across filters/reloads.
     if (table && window.ColResize && !table._colResizeWired) {
       table._colResizeWired = true;
-      window.ColResize.apply(table, 'sim-global');
+      window.ColResize.apply(table, 'sim-global-v2');
     }
 
     var note = document.getElementById('sim-scope-note');
@@ -15569,7 +15577,12 @@
       if (table)   table.style.display = 'none';
     }
 
-    window.DataSource.loadSimulations()
+    // Phase 1 — local-first: fetch the fast local index (include_remote=false)
+    // so the table + count paint in ~seconds instead of blocking on the slow
+    // (~tens-of-seconds) remote (GovCloud) fetch. Snapshot mode has no live
+    // backend, so its baked list is already complete — load it in one call.
+    var snapshot = (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
+    window.DataSource.loadSimulations(snapshot ? undefined : { includeRemote: false })
       .then(function (data) {
         if (data.error) {
           if (quiet) return;
@@ -15590,6 +15603,8 @@
         _populateSimFilters();
         _applySimFilter();
         _pollNonTerminalRemoteRuns();
+        // Phase 2 — merge in the remote runs (slow) in the background.
+        if (!snapshot) _loadRemoteSimsAsync();
       })
       .catch(function (err) {
         if (quiet) return;
@@ -15599,6 +15614,62 @@
       });
   }
   window._initSimulations = _initSimulations;
+
+  // Phase 2 of the Runs load: fetch local+remote (the second call includes the
+  // GovCloud runs, deduped server-side) and merge into the table. Best-effort:
+  // a down tunnel leaves the local-only view in place.
+  function _loadRemoteSimsAsync() {
+    _setSimRemoteStatus('loading');
+    window.DataSource.loadSimulations({ includeRemote: true })
+      .then(function (data) {
+        if (!data || data.error) { _setSimRemoteStatus('error'); return; }
+        var all = data.simulations || [];
+        if (all.length >= (window._simRows || []).length) window._simRows = all;
+        _setSimRemoteStatus('done');
+        _populateSimFilters();
+        _applySimFilter();
+        _pollNonTerminalRemoteRuns();
+      })
+      .catch(function () { _setSimRemoteStatus('error'); });
+  }
+
+  function _setSimRemoteStatus(state) {
+    var el = document.getElementById('sim-remote-status');
+    if (!el) return;
+    el.textContent = state === 'loading' ? '· loading GovCloud runs…'
+      : state === 'error' ? '· GovCloud runs unavailable'
+      : '';
+  }
+
+  // Count line + "Show more" visibility. shown = rows rendered; visible = rows
+  // matching the current filters; total = all loaded runs.
+  function _updateSimCount(shown, visible, total) {
+    var countEl = document.getElementById('sim-count');
+    var ctrls = document.getElementById('sim-controls');
+    var more = document.getElementById('sim-more');
+    if (ctrls) ctrls.style.display = total ? 'flex' : 'none';
+    if (countEl) {
+      countEl.textContent = (visible === total)
+        ? (total + ' run' + (total === 1 ? '' : 's'))
+        : (visible + ' of ' + total + ' runs');
+    }
+    if (more) more.style.display = (shown < visible) ? '' : 'none';
+  }
+
+  function _onSimPageSizeChange() {
+    var sel = document.getElementById('sim-page-size');
+    window._simPageSize = sel ? (parseInt(sel.value, 10) || 50) : 50;
+    window._simShown = window._simPageSize;  // reset to first page
+    _applySimFilter();
+  }
+  window._onSimPageSizeChange = _onSimPageSizeChange;
+
+  function _simShowMore() {
+    window._simShown = (window._simShown || (window._simPageSize || 50))
+      + (window._simPageSize || 50);
+    _applySimFilter();
+  }
+  window._simShowMore = _simShowMore;
 
   // Backlog item 84: a UI-dispatched remote run's row shows "running" from
   // the moment PR #922's pending-dispatch placeholder lands until someone

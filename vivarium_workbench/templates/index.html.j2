@@ -1035,7 +1035,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 <section id="page-visualizations" class="page" data-page="visualizations">
   <div class="panel">
     <div id="analyses-gallery" class="analyses-gallery">
-      <p class="empty-state">Loading saved visualizations&hellip;</p>
+      <p class="empty-state">Loading workspace analysis tools&hellip;</p>
     </div>
   </div>
 
@@ -1739,6 +1739,23 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     No simulation runs found.
   </div>
 
+  <div id="sim-controls" style="display:none; align-items:center; gap:10px;
+       padding:6px 2px; color:#6b7280; font-size:13px;">
+    <span id="sim-count">0 runs</span>
+    <span id="sim-remote-status" style="color:#9ca3af;"></span>
+    <span style="margin-left:auto;">
+      Show
+      <select id="sim-page-size" onchange="_onSimPageSizeChange()"
+              style="padding:2px 6px; font-size:13px;">
+        <option value="20">20</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="500">500</option>
+      </select>
+      at a time
+    </span>
+  </div>
+
   <style>
     #sim-table th[data-sort-key]:hover { background:#e5e7eb; }
     :root[data-theme="dark"] #sim-table th[data-sort-key]:hover { background:var(--hover); }
@@ -1746,8 +1763,24 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     #sim-table th[data-sort-dir="desc"]::after { content:" \25BC"; }
     /* Actions cell: let the run-action buttons wrap within a roomy column
        instead of overflowing off the right edge. */
-    #sim-table .run-actions { display:flex; flex-wrap:wrap; gap:4px; align-items:center; justify-content:flex-start; }
+    #sim-table .run-actions { display:flex; flex-wrap:nowrap; gap:4px; align-items:center; justify-content:flex-start; }
     #sim-table .run-actions .action-btn { font-size:11px; padding:2px 7px; white-space:nowrap; }
+    /* Row-action overflow "⋯" menu (native <details>, no toggle JS). */
+    .sim-action-menu { position:relative; display:inline-block; }
+    .sim-action-menu > summary { list-style:none; cursor:pointer; padding:2px 7px;
+      line-height:1; font-weight:600; }
+    .sim-action-menu > summary::-webkit-details-marker { display:none; }
+    .sim-action-menu > summary::marker { content:""; }
+    .sim-action-menu[open] > summary { background:#e5e7eb; }
+    .sim-action-menu-list { position:absolute; right:0; top:calc(100% + 4px); z-index:60;
+      background:#fff; border:1px solid #e5e7eb; border-radius:8px;
+      box-shadow:0 8px 24px rgba(0,0,0,0.14); padding:6px; min-width:158px;
+      display:flex; flex-direction:column; gap:3px; }
+    .sim-action-menu-item .action-btn { display:block; width:100%; box-sizing:border-box;
+      text-align:left; }
+    :root[data-theme="dark"] .sim-action-menu-list { background:var(--card,#1f2937);
+      border-color:var(--border,#374151); }
+    :root[data-theme="dark"] .sim-action-menu[open] > summary { background:var(--hover,#374151); }
     /* Drag-to-resize grip on each column's right edge (ColResize). Invisible
        until the header row is hovered, then a faint divider hints the handle. */
     .col-resize-grip::after { content:""; position:absolute; top:20%; right:2px; width:2px; height:60%;
@@ -1757,26 +1790,22 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   </style>
 
   <div style="overflow-x:auto; width:100%;">
-  <table id="sim-table" style="width:100%; min-width:1240px; table-layout:fixed; border-collapse: collapse; font-size: 13px; display: none;">
+  <table id="sim-table" style="width:100%; min-width:760px; table-layout:fixed; border-collapse: collapse; font-size: 13px; display: none;">
     <thead>
       <tr style="background:#f3f4f6;">
-        <th data-sort-key="investigation" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:108px; cursor:pointer;">Investigation</th>
-        <th data-sort-key="study" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:100px; cursor:pointer;">Study</th>
-        <th data-sort-key="run" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; cursor:pointer;">Run</th>
-        <th data-sort-key="composite" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:130px; cursor:pointer;">Composite</th>
-        <th data-sort-key="source" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:120px; cursor:pointer;" title="Repository + commit the run launched from">Source</th>
-        <th data-sort-key="config" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:140px; cursor:pointer;">Config</th>
-        <th data-sort-key="location" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:110px; cursor:pointer;">Location</th>
-        <th data-sort-key="origin" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:66px; cursor:pointer;">Origin</th>
-        <th data-sort-key="emitter_type" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:74px; cursor:pointer;">Emitter</th>
-        <th data-sort-key="time" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:98px; cursor:pointer;">Time</th>
-        <th data-sort-key="status" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:80px; cursor:pointer;">Status</th>
-        <th data-sort-key="tools" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:6px 8px; width:104px; cursor:pointer;">Tools</th>
-        <th style="text-align:left; padding:6px 8px; width:220px;">Actions</th>
+        <th data-sort-key="run" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:8px; cursor:pointer;" title="Run — with its study · investigation · composite">Run</th>
+        <th data-sort-key="config" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:8px; width:190px; cursor:pointer;">Config</th>
+        <th data-sort-key="origin" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:8px; width:96px; cursor:pointer;" title="Origin (local / remote) + emitter">Kind</th>
+        <th data-sort-key="time" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:8px; width:104px; cursor:pointer;">Time</th>
+        <th data-sort-key="status" onclick="_onSimHeaderClick(this)" style="text-align:left; padding:8px; width:96px; cursor:pointer;">Status</th>
+        <th style="text-align:left; padding:8px; width:118px;">Actions</th>
       </tr>
     </thead>
     <tbody id="sim-tbody"></tbody>
   </table>
+  <div id="sim-more" style="display:none; padding:12px 0; text-align:center;">
+    <button class="action-btn" onclick="_simShowMore()">Show more runs</button>
+  </div>
   </div>
 
   <!-- Confirmation dialog for full simulation delete -->

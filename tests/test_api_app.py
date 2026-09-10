@@ -233,7 +233,8 @@ def test_simulations_empty_workspace(client):
     """An empty workspace yields the typed empty payload, not a 500."""
     r = client.get("/api/simulations")
     assert r.status_code == 200
-    assert r.json() == {"simulations": [], "current": None}
+    assert r.json() == {"simulations": [], "current": None,
+                        "total": 0, "offset": 0, "limit": None}
 
 
 def test_simulations_returns_typed_rows(client, monkeypatch):
