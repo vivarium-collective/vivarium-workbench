@@ -25,7 +25,18 @@ import datetime as _dt
 import json
 import os
 import re
+import time
 from pathlib import Path
+
+
+# Short-TTL cache for the remote fetch. The sms-api list round-trip (+ per-record
+# normalize) is the dominant cost of the Simulations index, and every call that
+# re-derives the index (the Runs tab, its filters/refresh, the study cards'
+# remote counts) would otherwise re-pay it. Remote (GovCloud) runs don't change
+# second-to-second, so a brief cache keeps paging/filtering snappy; pass
+# use_cache=False to force a fresh fetch (the Runs-tab refresh button).
+_REMOTE_CACHE: dict = {}
+_REMOTE_CACHE_TTL = 60.0
 
 
 # emitter tag -> capitalized label the UI pills key on (mirrors server.py).
@@ -241,8 +252,27 @@ def _scope_build_ids(ws_root: Path, bm, builds) -> "tuple[set, object] | tuple[N
 
 
 def list_remote_simulations(ws_root: Path, base_url: str | None = None,
-                            limit: int = 2000) -> list[dict]:
+                            limit: int = 2000, use_cache: bool = True) -> list[dict]:
     """Remote sms-api runs to surface in the Simulations DB, or ``[]``.
+
+    Cached for ``_REMOTE_CACHE_TTL`` seconds (see the module cache) so repeated
+    index derivations don't re-hit sms-api; ``use_cache=False`` forces a fresh
+    fetch. Thin wrapper over :func:`_fetch_remote_simulations`.
+    """
+    key = (str(ws_root), base_url or "", int(limit))
+    now = time.time()
+    if use_cache:
+        hit = _REMOTE_CACHE.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+    rows = _fetch_remote_simulations(ws_root, base_url, limit)
+    _REMOTE_CACHE[key] = (now + _REMOTE_CACHE_TTL, rows)
+    return rows
+
+
+def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
+                              limit: int = 2000) -> list[dict]:
+    """Uncached remote fetch — see :func:`list_remote_simulations`.
 
     For a materialized remote build, that's the active build's (repo, commit).
     For a plain local checkout, it's every remote run of the workspace's repo,

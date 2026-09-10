@@ -198,10 +198,14 @@
       : "/api/composite-resolve?id=" + encodeURIComponent(id);
   }
 
-  function _simulationsUrl() {
-    return cfg().mode === "snapshot"
-      ? _base() + "/api/simulations.json"
-      : "/api/simulations";
+  function _simulationsUrl(opts) {
+    if (cfg().mode === "snapshot") return _base() + "/api/simulations.json";
+    var qs = [];
+    // Local-first load: fetch the fast local index first (include_remote=false),
+    // then a second call merges in the slow remote (GovCloud) runs.
+    if (opts && opts.includeRemote === false) qs.push("include_remote=false");
+    if (opts && opts.refresh) qs.push("refresh=true");
+    return "/api/simulations" + (qs.length ? "?" + qs.join("&") : "");
   }
 
   function _visualizationClassesUrl() {
@@ -410,8 +414,8 @@
      * Local mode:    fetches GET /api/simulations
      * Snapshot mode: fetches /api/simulations.json from the static bundle
      */
-    async loadSimulations() {
-      return _get(_simulationsUrl());
+    async loadSimulations(opts) {
+      return _get(_simulationsUrl(opts));
     },
 
     /**

@@ -1868,7 +1868,7 @@ def _attach_matched_tools(rows: list[dict], ws_root: Path) -> None:
             row["matched_tools"] = []
 
 
-def build_simulations_data(ws_root: Path) -> dict:
+def build_simulations_data(ws_root: Path, include_remote: bool = True) -> dict:
     """Data builder for GET /api/simulations — the ``list_simulations`` rows
     enriched with emitter_type labels + active remote build runs + current slug.
 
@@ -1876,6 +1876,10 @@ def build_simulations_data(ws_root: Path) -> dict:
     missing DB / import errors → returns an empty list.  Relocated verbatim from
     the retired ``server._simulations_data`` so publish.build_bundle and the
     ``/api/simulations`` seam share one implementation.
+
+    ``include_remote=False`` skips the (slow, ~tens-of-seconds) sms-api fetch of
+    remote runs so the local index returns fast — the Runs tab loads local runs
+    first, then fetches remote in a second call to merge them in.
     """
     ws = str(ws_root)
     import sys as _sys
@@ -1910,7 +1914,8 @@ def build_simulations_data(ws_root: Path) -> dict:
     sims.sort(key=lambda r: (r.get("completed_at") or r.get("started_at") or 0),
               reverse=True)
 
-    sims = _append_remote_simulations(sims, ws_root)
+    if include_remote:
+        sims = _append_remote_simulations(sims, ws_root)
 
     # Capability-matched analysis tools + their launch URLs, per row (Simulations
     # DB "launch into tool" affordance). Best-effort at every layer already

@@ -118,6 +118,13 @@ class SimulationsPayload(BaseModel):
 
     simulations: list[SimRow]
     current: Optional[str] = None     # current branch slug
+    # Pagination (all optional / back-compatible: omitting ``limit`` returns
+    # every row, ``total is None``). ``total`` is the row count for the current
+    # view (after any ``?study=`` filter, before the page slice) so the client
+    # can show "N runs" and drive a pager.
+    total: Optional[int] = None
+    offset: int = 0
+    limit: Optional[int] = None
 
 
 class RemoteRunStep(BaseModel):

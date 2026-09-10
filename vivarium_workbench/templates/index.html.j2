@@ -1739,6 +1739,23 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     No simulation runs found.
   </div>
 
+  <div id="sim-controls" style="display:none; align-items:center; gap:10px;
+       padding:6px 2px; color:#6b7280; font-size:13px;">
+    <span id="sim-count">0 runs</span>
+    <span id="sim-remote-status" style="color:#9ca3af;"></span>
+    <span style="margin-left:auto;">
+      Show
+      <select id="sim-page-size" onchange="_onSimPageSizeChange()"
+              style="padding:2px 6px; font-size:13px;">
+        <option value="20">20</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="500">500</option>
+      </select>
+      at a time
+    </span>
+  </div>
+
   <style>
     #sim-table th[data-sort-key]:hover { background:#e5e7eb; }
     :root[data-theme="dark"] #sim-table th[data-sort-key]:hover { background:var(--hover); }
@@ -1777,6 +1794,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     </thead>
     <tbody id="sim-tbody"></tbody>
   </table>
+  <div id="sim-more" style="display:none; padding:12px 0; text-align:center;">
+    <button class="action-btn" onclick="_simShowMore()">Show more runs</button>
+  </div>
   </div>
 
   <!-- Confirmation dialog for full simulation delete -->
