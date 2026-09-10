@@ -920,6 +920,14 @@ def test_status_run_running_maps_to_running(monkeypatch):
     assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "running"
 
 
+def test_status_run_partial_maps_to_failed_not_running(monkeypatch):
+    # viva-api#609's new PARTIAL status is terminal (some generations emitted
+    # before the run stopped short) -- it must not fall through into the
+    # "running" bucket and look permanently stuck in the UI.
+    _bind_status_client(monkeypatch, sim_status={"status": "partial"})
+    assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "failed"
+
+
 def test_status_run_queued_maps_to_queued(monkeypatch):
     _bind_status_client(monkeypatch, sim_status={"status": "queued"})
     assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "queued"

@@ -41,8 +41,12 @@ from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 # sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
 # deletes). The thin client maps a raw sms-api status into a UI phase.
+# "partial" (viva-api#609's new head-poller status: some real generations
+# emitted before the run stopped short) is terminal, not a clean success —
+# bucketed with the bad set so it surfaces for attention instead of silently
+# reading as "running" forever.
 _TERMINAL_OK = {"completed", "done", "succeeded"}
-_TERMINAL_BAD = {"failed", "cancelled", "error"}
+_TERMINAL_BAD = {"failed", "cancelled", "error", "partial"}
 
 # Real completion signal now exists (GET /analyses/{id}/status, S3-exists
 # probe server-side) for Ray-backend triggers -- poll it instead of blindly
