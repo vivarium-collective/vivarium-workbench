@@ -30,8 +30,15 @@ def test_sim_table_js_renders_matched_tools_chips(dashboard_client, tmp_path):
     assert "toolsCell" in r.text
 
 
-def test_index_html_has_tools_column(dashboard_client, tmp_path):
+def test_index_html_has_redesigned_run_columns(dashboard_client, tmp_path):
+    # The global Runs table was decluttered from 13 columns to 6
+    # (Run · Config · Kind · Time · Status · Actions). The standalone Tools
+    # column was dropped from the GLOBAL grid — matched-tool launchers remain in
+    # the per-study Simulations tab (legacy layout) and the Analysis tab — so the
+    # header no longer carries it.
     client = dashboard_client(workspace=_ws_copy(tmp_path))
     r = client.get("/")
     assert r.status_code == 200
-    assert ">Tools</th>" in r.text
+    assert ">Run</th>" in r.text
+    assert ">Kind</th>" in r.text
+    assert ">Tools</th>" not in r.text
