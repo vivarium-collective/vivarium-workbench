@@ -24,11 +24,57 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import re
 from pathlib import Path
 
 
 # emitter tag -> capitalized label the UI pills key on (mirrors server.py).
 _EMITTER_LABEL = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray", "none": "—"}
+
+
+def _load_remote_study_map(ws_root: Path) -> list:
+    """Workspace-declared experiment_id -> study_slug rules for remote runs.
+
+    Reads ``remote_run_study_map`` from the workspace config (``workspace.yaml``):
+    an ordered list of ``{pattern: <regex>, study: <slug>}`` entries, first match
+    wins. Returns a list of ``(compiled_regex, study_slug)``.
+
+    Why this exists: a remote (GovCloud) run is surfaced with ``db_path=None``
+    (its store is an ``s3://`` uri), so the local index's study-slug-from-db_path
+    inference cannot fire and every remote run lands orphaned
+    (``study_slug=None``). This lets a workspace declare how its remote runs'
+    ``experiment_id``s map to its studies so they show under the right study.
+
+    INTERIM (stopgap). The durable fix is stamping ``study_slug`` + the
+    RunIdentity record into the run at dispatch (viva-api#590), after which
+    remote runs carry their own study association and this heuristic is moot.
+    """
+    cfg = Path(ws_root) / "workspace.yaml"
+    if not cfg.is_file():
+        return []
+    try:
+        import yaml
+        doc = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    rules = doc.get("remote_run_study_map") or []
+    out = []
+    for r in rules:
+        if isinstance(r, dict) and r.get("pattern") and r.get("study"):
+            try:
+                out.append((re.compile(str(r["pattern"]), re.I), str(r["study"])))
+            except re.error:
+                continue
+    return out
+
+
+def _infer_study_slug(experiment_id: str, rules: list) -> "str | None":
+    """First workspace rule whose pattern matches ``experiment_id`` (or None)."""
+    e = experiment_id or ""
+    for pat, slug in rules:
+        if pat.search(e):
+            return slug
+    return None
 
 
 def _sms_api_base() -> str:
@@ -230,5 +276,15 @@ def list_remote_simulations(ws_root: Path, base_url: str | None = None,
 
     rows = [_normalize(rec) for rec in sims
             if isinstance(rec, dict) and rec.get("simulator_id") in matching]
+    # Associate each remote run with its study via the workspace's declared
+    # experiment_id -> study_slug rules (remote runs have no db_path, so the
+    # local study-slug-from-path inference in simulations_index can't fire).
+    study_rules = _load_remote_study_map(ws_root)
+    if study_rules:
+        for r in rows:
+            slug = _infer_study_slug(r.get("run_id", ""), study_rules)
+            if slug:
+                r["study_slug"] = slug
+                r["studies"] = [slug]
     rows.sort(key=lambda r: r.get("started_at") or 0.0, reverse=True)
     return rows[:limit] if limit and limit > 0 else rows
