@@ -1847,6 +1847,252 @@
   }
   window._dispatchCurrentSpecBaseline = _dispatchCurrentSpecBaseline;
 
+  // ─── item 110: dispatch an arbitrary process-bigraph composite_id (e.g.
+  // pbg-native's v2ecoli.composites.lineage_ray_batch, item 101/109) to the
+  // remote compute backend -- independent of this study's own pinned
+  // baseline composite. Mirrors `atlantis composite run`'s already-proven
+  // parameter surface (viva-api PR #382) exactly: named fields for the
+  // common params + a raw-JSON escape hatch for anything else
+  // (injected_processes/variants/config_overrides/emitter_arg/cache_dir/
+  // media/...), rather than inventing a new shape. Fully additive: a new
+  // button, a new panel, a new function -- `_dispatchRemotePinned` and the
+  // default "Run current spec" flow above are untouched.
+  //
+  // Reaches viva-api through the SAME endpoint `_dispatchRemotePinned`
+  // already uses (`POST /api/remote-run-submit`), which already accepts a
+  // top-level `extra_params` field verbatim (`remote_run_views.
+  // remote_run_submit`: `extra_params=body.get("extra_params") or None` ->
+  // `SmsApiClient.run_simulation(extra_params=...)` -> the real
+  // `POST /api/v1/simulations` JSON body's own `extra_params` key) -- the
+  // exact field name/shape every real pbg-native dispatch this session
+  // fired (database_id 253/255/282/283/288) used. No new server-side code
+  // needed; confirmed directly against current source before building this,
+  // not assumed from the earlier gap report alone (which cited a different,
+  // more complex passthrough in study_runs.py that this simpler, more
+  // direct field makes unnecessary for this feature).
+  function _compositePanelEl() {
+    var el = document.getElementById('study-composite-panel');
+    if (el) return el;
+    var btn = document.getElementById('study-run-composite');
+    var host = btn && btn.parentNode;
+    if (!host) return null;
+    el = document.createElement('div');
+    el.id = 'study-composite-panel';
+    el.style.cssText = 'display:none;position:absolute;z-index:20;margin-top:6px;padding:12px;'
+      + 'background:var(--panel-bg,#fff);border:1px solid var(--border,#e2e8f0);border-radius:6px;'
+      + 'box-shadow:0 4px 16px rgba(0,0,0,0.12);font:12px/1.5 system-ui,-apple-system,sans-serif;'
+      + 'width:360px;right:0;top:100%';
+    el.innerHTML =
+      '<div style="font-weight:600;margin-bottom:8px">Dispatch composite (advanced)</div>'
+      + '<label style="display:block;margin-top:6px">mechanism'
+      + '<select id="cp-mechanism" style="width:100%;box-sizing:border-box;margin-top:2px">'
+      + '<option value="multi_node_dispatch">multi_node_dispatch (lineage_ray_batch, etc.)</option>'
+      + '<option value="mbp_dispatch">mbp_dispatch (run_mbp_tracked.py, e.g. reactor_bird_coupled)</option>'
+      + '</select></label>'
+      + '<div id="cp-mnp-fields">'
+      + '<label style="display:block;margin-top:6px">composite_id'
+      + '<input type="text" id="cp-composite-id" placeholder="v2ecoli.composites.lineage_ray_batch.lineage_ray_batch" '
+      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<div style="display:flex;gap:8px;margin-top:6px">'
+      + '<label style="flex:1">num_nodes<input type="number" id="cp-num-nodes" min="1" value="2" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<label style="flex:1">n_seeds<input type="number" id="cp-n-seeds" min="1" value="2" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<label style="flex:1">n_generations<input type="number" id="cp-n-generations" min="1" value="1" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '</div>'
+      + '</div>'
+      + '<div id="cp-mbp-fields" style="display:none">'
+      + '<label style="display:block;margin-top:6px">variant'
+      + '<input type="text" id="cp-mbp-variant" placeholder="reactor_bird_coupled" '
+      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<div style="display:flex;gap:8px;margin-top:6px">'
+      + '<label style="flex:1">max_generations<input type="number" id="cp-mbp-max-generations" min="1" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<label style="flex:1">seed<input type="number" id="cp-mbp-seed" min="0" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '</div>'
+      + '</div>'
+      + '<label style="display:block;margin-top:6px">cache_variant (optional — a pre-staged ParCa cache variant; '
+      + 'blank uses the plain per-commit cache)'
+      + '<input type="text" id="cp-cache-variant" placeholder="e.g. cd2-run1-k4-candidate-v1-lambda050" '
+      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
+      + '<label style="display:block;margin-top:6px"><span id="cp-params-desc">extra params (raw JSON, merged into multi_node_dispatch.params — '
+      + 'e.g. injected_processes/variants/config_overrides/emitter_arg/cache_dir/out_dir/media)</span>'
+      + '<textarea id="cp-params-json" rows="5" placeholder="{}" '
+      + 'style="width:100%;box-sizing:border-box;margin-top:2px;font-family:monospace;font-size:11px"></textarea></label>'
+      + '<div id="cp-error" style="color:#dc2626;margin-top:4px;display:none"></div>'
+      + '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'
+      + '<button type="button" id="cp-cancel" class="btn-mini">Cancel</button>'
+      + '<button type="button" id="cp-dispatch" class="btn-mini">Dispatch</button>'
+      + '</div>';
+    host.style.position = host.style.position || 'relative';
+    host.appendChild(el);
+    el.querySelector('#cp-cancel').addEventListener('click', function () { el.style.display = 'none'; });
+    el.querySelector('#cp-mechanism').addEventListener('change', _updateCompositePanelMechanism);
+    _updateCompositePanelMechanism();
+    // #cp-dispatch's own click is handled by ONE delegated document-level
+    // listener (below, near the other header-button bindings) so the
+    // disable/toast/refresh wrapping lives in exactly one place — binding it
+    // here too would fire _dispatchRemoteComposite twice per click.
+    return el;
+  }
+
+  // Toggles the panel's mechanism-specific field groups and the raw-JSON
+  // description to match -- mbp_dispatch has no nested "params" sub-object
+  // server-side (every field sits flat on mbp_dispatch itself, per
+  // _submit_mbp_tracked_dispatch's real contract), unlike multi_node_dispatch's
+  // params-wrapped shape, so the two raw-JSON boxes genuinely merge into
+  // different places and the label needs to say so, not just the field set.
+  function _updateCompositePanelMechanism() {
+    var sel = document.getElementById('cp-mechanism');
+    var isMnp = !sel || sel.value !== 'mbp_dispatch';
+    var mnpFields = document.getElementById('cp-mnp-fields');
+    var mbpFields = document.getElementById('cp-mbp-fields');
+    var desc = document.getElementById('cp-params-desc');
+    if (mnpFields) mnpFields.style.display = isMnp ? '' : 'none';
+    if (mbpFields) mbpFields.style.display = isMnp ? 'none' : '';
+    if (desc) {
+      desc.textContent = isMnp
+        ? 'extra params (raw JSON, merged into multi_node_dispatch.params — '
+          + 'e.g. injected_processes/variants/config_overrides/emitter_arg/cache_dir/out_dir/media)'
+        : 'extra params (raw JSON, merged directly onto mbp_dispatch — e.g. duration_sec/chunk/'
+          + 'emitter/single_daughters/carbon_exhaustion_arrest/cells_per_agent/initial_glucose_mM/'
+          + 'initial_ammonium_mM/injected_processes/reactor_config/aeration_schedule)';
+    }
+  }
+
+  function _cpError(msg) {
+    var e = document.getElementById('cp-error');
+    if (!e) return;
+    if (!msg) { e.style.display = 'none'; e.textContent = ''; return; }
+    e.style.display = ''; e.textContent = msg;
+  }
+
+  function _dispatchRemoteComposite() {
+    _cpError(null);
+    var mechSel = document.getElementById('cp-mechanism');
+    var mechanism = (mechSel && mechSel.value) || 'multi_node_dispatch';
+    var cacheVariant = (document.getElementById('cp-cache-variant').value || '').trim();
+    var rawJson = (document.getElementById('cp-params-json').value || '').trim();
+    var extraParams = {};
+    if (rawJson) {
+      try {
+        extraParams = JSON.parse(rawJson);
+      } catch (e) {
+        _cpError('extra params is not valid JSON: ' + e.message);
+        return;
+      }
+      if (typeof extraParams !== 'object' || extraParams === null || Array.isArray(extraParams)) {
+        _cpError('extra params must be a JSON object, e.g. {"injected_processes": {...}}.');
+        return;
+      }
+    }
+
+    var numGenerations, numSeeds, dispatchExtraParams, confirmLines;
+
+    if (mechanism === 'mbp_dispatch') {
+      var variant = (document.getElementById('cp-mbp-variant').value || '').trim();
+      if (!variant) { _cpError('variant is required.'); return; }
+      var maxGenerations = parseInt(document.getElementById('cp-mbp-max-generations').value, 10);
+      if (!(maxGenerations > 0)) { _cpError('max_generations must be a positive integer.'); return; }
+      var seedRaw = document.getElementById('cp-mbp-seed').value;
+      var seed = seedRaw === '' ? null : parseInt(seedRaw, 10);
+      // cache_variant pulled out of extraParams (whichever way the caller
+      // supplied it) so a value left over in the raw-JSON box from an older
+      // dispatch can never silently diverge from the dedicated field --
+      // the dedicated field wins when both are set.
+      var extraCacheVariant = extraParams.cache_variant;
+      if ('cache_variant' in extraParams) {
+        extraParams = Object.assign({}, extraParams);
+        delete extraParams.cache_variant;
+      }
+      var effectiveCacheVariant = cacheVariant || extraCacheVariant;
+      // mbp_dispatch is a single-container job -- one dispatch = one lineage,
+      // not a seed sweep, so it has no n_seeds concept of its own. The
+      // workbench's own /api/remote-run-submit route hard-requires
+      // num_generations/num_seeds regardless of mechanism (never silently
+      // defaulted -- see _dispatchRemotePinned's own comment above); neither
+      // is read by _submit_mbp_tracked_dispatch itself, which sizes the run
+      // from mbp_dispatch.max_generations/.seed directly, so
+      // num_generations reuses max_generations (the same concept under a
+      // different name server-side) and num_seeds is a fixed 1.
+      numGenerations = maxGenerations;
+      numSeeds = 1;
+      var mbpDispatch = Object.assign({ variant: variant, max_generations: maxGenerations }, extraParams);
+      if (effectiveCacheVariant) mbpDispatch.cache_variant = effectiveCacheVariant;
+      if (seed !== null && !isNaN(seed)) mbpDispatch.seed = seed;
+      dispatchExtraParams = { mbp_dispatch: mbpDispatch };
+      confirmLines = '  mechanism:    mbp_dispatch\n'
+        + '  variant:      ' + variant + '\n'
+        + '  max_generations: ' + maxGenerations + '\n'
+        + (seed !== null && !isNaN(seed) ? '  seed:         ' + seed + '\n' : '')
+        + (effectiveCacheVariant ? '  cache_variant: ' + effectiveCacheVariant + '\n' : '')
+        + (rawJson ? '  extra params: ' + rawJson + '\n' : '');
+    } else {
+      var compositeId = (document.getElementById('cp-composite-id').value || '').trim();
+      if (!compositeId) { _cpError('composite_id is required.'); return; }
+      var numNodes = parseInt(document.getElementById('cp-num-nodes').value, 10);
+      numSeeds = parseInt(document.getElementById('cp-n-seeds').value, 10);
+      numGenerations = parseInt(document.getElementById('cp-n-generations').value, 10);
+      if (!(numNodes > 0)) { _cpError('num_nodes must be a positive integer.'); return; }
+      if (!(numSeeds > 0)) { _cpError('n_seeds must be a positive integer.'); return; }
+      if (!(numGenerations > 0)) { _cpError('n_generations must be a positive integer.'); return; }
+      // cache_variant AND require_clean_chain must both land as siblings of
+      // `params`, never nested inside it -- viva-api reads both directly off
+      // mnp_dispatch (simulation_service_ray.py:3285/:3289 --
+      // mnp_dispatch.get("cache_variant")/mnp_dispatch.get("require_clean_chain"),
+      // never mnp_dispatch["params"].get(...)). Pulled out of extraParams here
+      // (whichever the caller supplied it through -- the raw-JSON box, old
+      // habit or a copy-pasted dispatch body) BEFORE the params merge below,
+      // exactly the bug this fix addresses; the dedicated cache_variant field
+      // wins if both it and the raw JSON set one.
+      var extraCacheVariant = extraParams.cache_variant;
+      var extraRequireCleanChain = extraParams.require_clean_chain;
+      if ('cache_variant' in extraParams || 'require_clean_chain' in extraParams) {
+        extraParams = Object.assign({}, extraParams);
+        delete extraParams.cache_variant;
+        delete extraParams.require_clean_chain;
+      }
+      var effectiveCacheVariant = cacheVariant || extraCacheVariant;
+      var params = Object.assign({ n_seeds: numSeeds, n_generations: numGenerations }, extraParams);
+      var mnpDispatch = {
+        composite_id: compositeId,
+        num_nodes: numNodes,
+        params: params,
+      };
+      if (effectiveCacheVariant) mnpDispatch.cache_variant = effectiveCacheVariant;
+      if (extraRequireCleanChain !== undefined) mnpDispatch.require_clean_chain = extraRequireCleanChain;
+      dispatchExtraParams = { multi_node_dispatch: mnpDispatch };
+      confirmLines = '  mechanism:    multi_node_dispatch\n'
+        + '  composite_id: ' + compositeId + '\n'
+        + '  num_nodes:    ' + numNodes + '\n'
+        + '  n_seeds:      ' + numSeeds + '\n'
+        + '  n_generations:' + numGenerations + '\n'
+        + (effectiveCacheVariant ? '  cache_variant: ' + effectiveCacheVariant + '\n' : '')
+        + (rawJson ? '  extra params: ' + rawJson + '\n' : '');
+    }
+
+    var slug = studyName();
+    return api('GET', '/api/remote-run-config').then(function (cfgRes) {
+      var cfg = (cfgRes.status === 200 && cfgRes.body) || {};
+      if (!cfg.pinned || !cfg.simulator_id) {
+        _cpError('This deployment is not remote-pinned — composite dispatch needs a pinned simulator_id.');
+        return _CANCELLED;
+      }
+      var msg = 'Dispatch composite to AWS Batch:\n\n'
+        + '  simulator id: ' + cfg.simulator_id + '\n'
+        + confirmLines
+        + '\nProceed?';
+      if (!confirm(msg)) return _CANCELLED;
+      var panel = document.getElementById('study-composite-panel');
+      if (panel) panel.style.display = 'none';
+      return api('POST', '/api/remote-run-submit', {
+        study: slug,
+        simulator_id: cfg.simulator_id,
+        num_generations: numGenerations,
+        num_seeds: numSeeds,
+        extra_params: dispatchExtraParams,
+      });
+    });
+  }
+  window._dispatchRemoteComposite = _dispatchRemoteComposite;
+
   // ─── item 6: real dispatch progress, polling not SSE ───────────────────
   // Alex, 2026-08-17: dispatch a sim, get a toast, then total silence -- the
   // only way to know a campaign is alive was querying AWS Batch directly.
@@ -1936,6 +2182,55 @@
         alert('Run failed: network error — ' + err);
       });
   });
+
+  // "⚙ Dispatch composite" (item 110) — toggles the advanced panel open/closed;
+  // the actual dispatch is wired to the panel's own #cp-dispatch button
+  // (_compositePanelEl, above). A toast + Runs-tab refresh on success mirrors
+  // the two handlers above; unlike them this button itself never disables —
+  // the panel's own Dispatch button owns that during a real in-flight POST.
+  bindAll('#study-run-composite', function (btn) {
+    var panel = _compositePanelEl();
+    if (!panel) return;
+    panel.style.display = (panel.style.display === 'none') ? '' : 'none';
+  });
+
+  // #cp-dispatch's own click (rendered dynamically inside _compositePanelEl,
+  // so bound here via delegation rather than at panel-creation time) with the
+  // same disabled/toast/refresh convention the other two header buttons use.
+  document.addEventListener('click', function (ev) {
+    if (!ev.target || ev.target.id !== 'cp-dispatch') return;
+    var btn = ev.target;
+    if (btn.disabled) return;
+    var orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '… dispatching';
+    var result = _dispatchRemoteComposite();
+    if (!result || typeof result.then !== 'function') {
+      // Validation failed synchronously (_cpError already shown) — nothing to await.
+      btn.disabled = false;
+      btn.textContent = orig;
+      return;
+    }
+    result
+      .then(function (res) {
+        btn.disabled = false;
+        btn.textContent = orig;
+        if (res.body && res.body.cancelled) return;
+        if (res.status === 200 || res.status === 202) {
+          var runId = res.body && (res.body.run_id || res.body.simulation_id);
+          var msg = 'Composite dispatch launched' + (runId ? ' — new run ' + runId : '');
+          if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
+          if (typeof _loadStudySims === 'function') _loadStudySims(true);
+        } else {
+          _cpError('Dispatch failed: ' + ((res.body && res.body.error) || res.status));
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = orig;
+        _cpError('Dispatch failed: network error — ' + err);
+      });
+  }, true);
 
   // "Reproduce" — replay this study's MOST RECENT run's recorded manifest
   // verbatim (POST /api/study-reproduce) rather than re-deriving from the
