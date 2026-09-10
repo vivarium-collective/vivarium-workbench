@@ -41,10 +41,11 @@ from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 # sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
 # deletes). The thin client maps a raw sms-api status into a UI phase.
-# "partial" (viva-api#609's new head-poller status: some real generations
-# emitted before the run stopped short) is terminal, not a clean success —
-# bucketed with the bad set so it surfaces for attention instead of silently
-# reading as "running" forever.
+# "partial" was added defensively for viva-api#609's then-planned PARTIAL
+# status; #609 dropped that status before merging (Postgres enum-migration
+# cost, no consumer ever branched on it), so this value can never actually
+# arrive. Left in place rather than reverted -- costs nothing in a set, and
+# re-adding a real partial-run status later is one line if it ever returns.
 _TERMINAL_OK = {"completed", "done", "succeeded"}
 _TERMINAL_BAD = {"failed", "cancelled", "error", "partial"}
 

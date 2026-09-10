@@ -921,9 +921,10 @@ def test_status_run_running_maps_to_running(monkeypatch):
 
 
 def test_status_run_partial_maps_to_failed_not_running(monkeypatch):
-    # viva-api#609's new PARTIAL status is terminal (some generations emitted
-    # before the run stopped short) -- it must not fall through into the
-    # "running" bucket and look permanently stuck in the UI.
+    # Defensive regression: "partial" was added for viva-api#609's
+    # then-planned PARTIAL status, which #609 dropped before merging (see
+    # remote_run_views.py's own comment on _TERMINAL_BAD) -- this value can
+    # never actually arrive, but the mapping is still correct if it ever does.
     _bind_status_client(monkeypatch, sim_status={"status": "partial"})
     assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "failed"
 
