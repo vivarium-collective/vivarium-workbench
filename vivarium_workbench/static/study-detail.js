@@ -2051,6 +2051,62 @@
     e.style.display = ''; e.textContent = msg;
   }
 
+  // item 20b: async, DOM-based replacement for window.confirm() ahead of a
+  // real AWS Batch dispatch. confirm()/alert()/prompt() are the only
+  // web-platform APIs that synchronously freeze the page's JS -- including
+  // whatever a browser-automation tool injects to read/screenshot the page --
+  // which made the dispatch-confirm dialog impossible to drive through
+  // Claude-in-Chrome during the 2026-09-11 CD2 Vignette-1 UI-verification
+  // push (three real attempts hung on this exact call). A plain DOM modal
+  // keeps item 20a's own safety property (a human must see the resolved
+  // simulator_id/mechanism/params and explicitly click before real spend
+  // happens) without ever blocking the event loop, since it's just elements
+  // in the page rather than a browser-chrome dialog.
+  function _confirmModal(message) {
+    return new Promise(function (resolve) {
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.35);'
+        + 'display:flex;align-items:center;justify-content:center';
+      var box = document.createElement('div');
+      box.style.cssText = 'background:var(--panel-bg,#fff);border:1px solid var(--border,#e2e8f0);'
+        + 'border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,0.25);padding:16px 20px;'
+        + 'max-width:520px;width:90%;font:12px/1.5 system-ui,-apple-system,sans-serif';
+      var text = document.createElement('div');
+      // textContent, not innerHTML -- message embeds form values the user
+      // typed (variant/config_filename/raw extra-params JSON); confirm()
+      // never interpreted those as markup and this modal must not either.
+      text.style.cssText = 'white-space:pre-wrap;margin-bottom:14px';
+      text.textContent = message;
+      var actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+      var cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'btn-mini';
+      cancelBtn.textContent = 'Cancel';
+      var okBtn = document.createElement('button');
+      okBtn.type = 'button';
+      okBtn.className = 'btn-mini';
+      okBtn.textContent = 'OK';
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      box.appendChild(text);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      function done(result) {
+        document.removeEventListener('keydown', onKey);
+        overlay.remove();
+        resolve(result);
+      }
+      function onKey(ev) { if (ev.key === 'Escape') done(false); }
+      cancelBtn.addEventListener('click', function () { done(false); });
+      okBtn.addEventListener('click', function () { done(true); });
+      overlay.addEventListener('click', function (ev) { if (ev.target === overlay) done(false); });
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(overlay);
+      okBtn.focus();
+    });
+  }
+
   function _dispatchRemoteComposite() {
     _cpError(null);
     var mechSel = document.getElementById('cp-mechanism');
@@ -2250,16 +2306,18 @@
         + confirmLines
         + (configFilename ? '  config_filename: ' + configFilename + '\n' : '')
         + '\nProceed?';
-      if (!confirm(msg)) return _CANCELLED;
-      var panel = document.getElementById('study-composite-panel');
-      if (panel) panel.style.display = 'none';
-      return api('POST', '/api/remote-run-submit', {
-        study: slug,
-        simulator_id: cfg.simulator_id,
-        num_generations: numGenerations,
-        num_seeds: numSeeds,
-        config_filename: configFilename || undefined,
-        extra_params: dispatchExtraParams,
+      return _confirmModal(msg).then(function (ok) {
+        if (!ok) return _CANCELLED;
+        var panel = document.getElementById('study-composite-panel');
+        if (panel) panel.style.display = 'none';
+        return api('POST', '/api/remote-run-submit', {
+          study: slug,
+          simulator_id: cfg.simulator_id,
+          num_generations: numGenerations,
+          num_seeds: numSeeds,
+          config_filename: configFilename || undefined,
+          extra_params: dispatchExtraParams,
+        });
       });
     });
   }
