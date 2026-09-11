@@ -102,6 +102,21 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     }
     if not spec_id:
         return {"error": "missing id"}, 400
+    # A scaffolded study.yaml carries ``composite: replace_me.composites.placeholder``
+    # (scaffold_yaml.py) as a sentinel the author is meant to REPLACE with a real
+    # composite id. It never names a runnable composite: dispatching it spawns a
+    # detached run that can only fail to build, and until it does the run shows as
+    # a phantom "running" row with no backing model (the placeholder-run bug).
+    # Refuse it here, at the entry point and BEFORE any runs_meta row is written,
+    # so a placeholder can never become a run at all.
+    if spec_id.startswith("replace_me."):
+        return {
+            "error": (
+                f"spec_id {spec_id!r} is the scaffold placeholder, not a real "
+                "composite -- replace it with a registered composite id before "
+                "running."
+            )
+        }, 400
 
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
     pkg = ws_data.get("package_path") or (

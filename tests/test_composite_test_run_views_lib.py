@@ -53,6 +53,63 @@ def test_blank_id_400(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 400 — scaffold placeholder spec_id (the phantom-run bug)
+# ---------------------------------------------------------------------------
+#
+# Regression: a dispatch was accepted with spec_id
+# "replace_me.composites.placeholder" -- the scaffold sentinel from
+# scaffold_yaml.py that the author is meant to replace with a real composite.
+# It never names a runnable composite, so the detached run could only fail to
+# build; until it did, it showed as a phantom "running" run with no backing
+# model. The entry point must refuse it BEFORE any runs_meta row is written, so
+# it can never become a run. Note demo.spec (unregistered but not a placeholder)
+# is deliberately still accepted (test_happy_path_202) -- only the replace_me.*
+# placeholder is rejected, so a legitimately-not-yet-registered composite run is
+# untouched.
+
+@pytest.mark.parametrize("placeholder", [
+    "replace_me.composites.placeholder",   # the exact scaffold_yaml.py value
+    "replace_me.composites.anything",       # any composite under the sentinel ns
+])
+def test_placeholder_spec_id_rejected_400(tmp_path, monkeypatch, placeholder):
+    ws = _make_ws(tmp_path)
+    monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
+
+    def _no_spawn(*a, **k):  # pragma: no cover - must never be called
+        raise AssertionError("a placeholder spec_id must never spawn a run")
+
+    monkeypatch.setattr(run_registry, "spawn_detached", _no_spawn)
+
+    body, status = views.composite_test_run(ws, {"id": placeholder})
+
+    assert status == 400
+    assert "placeholder" in body["error"]
+    # ⛔ THE POINT: no phantom run. No request.json, no runs_meta row, no run dir.
+    assert not (ws / ".pbg" / "runs").exists(), "a placeholder must not create a run dir"
+    db = ws / ".pbg" / "composite-runs.db"
+    if db.exists():
+        conn = sqlite3.connect(db)
+        try:
+            n = conn.execute("SELECT count(*) FROM runs_meta").fetchone()[0]
+        finally:
+            conn.close()
+        assert n == 0, "a placeholder must not write a runs_meta row"
+
+
+def test_placeholder_rejected_before_workspace_read(tmp_path, monkeypatch):
+    """The refusal precedes the workspace.yaml read / db work, so it holds even
+    for a workspace whose config would otherwise be consulted -- the placeholder
+    can never reach spawn regardless of surrounding state."""
+    ws = _make_ws(tmp_path)
+    monkeypatch.setattr(run_registry, "spawn_detached",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("must not spawn")))
+    body, status = views.composite_test_run(
+        ws, {"id": "replace_me.composites.placeholder", "steps": 5})
+    assert status == 400
+
+
+# ---------------------------------------------------------------------------
 # 429 — concurrency cap
 # ---------------------------------------------------------------------------
 
