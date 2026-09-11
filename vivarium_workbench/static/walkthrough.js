@@ -441,8 +441,25 @@
         if (doc && doc.body && window.ResizeObserver && !frame._roFit) {
           frame._roFit = new ResizeObserver(function () { fit(true); });
           frame._roFit.observe(doc.body);
+          // Observe documentElement too: a tab switch / async chart render can
+          // grow the document without changing body's observed box, so a
+          // body-only observer misses it and the porthole keeps its own
+          // scrollbar (the middle of the nested-scrollbar bug).
+          if (doc.documentElement) frame._roFit.observe(doc.documentElement);
         }
       } catch (_) { /* cross-origin */ }
+      // Bounded catch-up (~8s): the observer above can still miss content that
+      // grows well after load (lazy figure iframes finishing their own resize).
+      // Poll a refit so the porthole reaches full content height. Skipped while
+      // the landing scroll is active so it can't cancel the scroll-to-study.
+      if (frame._catchupTimer) { clearInterval(frame._catchupTimer); }
+      var _ticks = 0;
+      frame._catchupTimer = setInterval(function () {
+        if (!frame.isConnected) { clearInterval(frame._catchupTimer); frame._catchupTimer = null; return; }
+        if (window._embedLandingUntil && Date.now() < window._embedLandingUntil) return;
+        fit(false);
+        if (++_ticks >= 16) { clearInterval(frame._catchupTimer); frame._catchupTimer = null; }
+      }, 500);
     };
     frame.addEventListener('load', onload);
     try {

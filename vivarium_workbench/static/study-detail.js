@@ -421,20 +421,38 @@
   // chart's stamped meta sidecar) — this render is conditional on it so a
   // chart with no recorded provenance omits the link rather than fabricate
   // one (Task V3).
-  // Auto-height resizer (Task V6): byte-identical logic to the
-  // embed_visualizations iframe's onload handler in
-  // templates/study-detail.html — grows an iframe to its content's
-  // scrollHeight (or a CSS-pinned overflow:hidden height) so a three.js
-  // canvas / self-contained HTML figure isn't clipped inside a fixed box,
-  // without giving it a scrollbar. Reused rather than re-derived so the two
-  // iframe call sites can't drift.
-  var _FIGURE_IFRAME_ONLOAD =
-    "(function(f){try{var d=f.contentDocument;if(!d)return;var b=d.body,e=d.documentElement;" +
-    "var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;" +
-    "var pinnedH=0;if(bStyle&&(bStyle.overflow||'').indexOf('hidden')>=0){" +
-    "var hm=(bStyle.height||'').match(/^(\\d+(?:\\.\\d+)?)px$/);if(hm)pinnedH=Math.round(parseFloat(hm[1]));}" +
-    "var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);" +
-    "if(h>0)f.style.height=(h+24)+'px';}catch(e){}})(this)";
+  // Auto-height resizer (Task V6): grows a figure iframe to its content so a
+  // three.js canvas / self-contained HTML figure isn't clipped inside a fixed
+  // box. Two extra steps kill the innermost of the nested-scrollbar bug without
+  // ever feedback-looping on elastic (height:100%) Plotly content:
+  //   1. zero the figure document's default 8px body margin — that margin made
+  //      documentElement.scrollHeight sit ~8px above the fitted body height, so
+  //      the figure kept an 8px scrollbar (and made a re-fitting observer run
+  //      away, +8px per tick, as the margin compounded);
+  //   2. hide the figure documentElement's own overflow, so any residual px is
+  //      clipped rather than shown as a scrollbar.
+  // One-shot (no ResizeObserver): elastic Plotly fills whatever height we set,
+  // so continuous re-fitting is circular — a single measure is correct and safe.
+  // Exposed on window so the server-rendered embed_visualizations iframes
+  // (templates/study-detail.html) share ONE implementation and can't drift.
+  function _fitFigureFrame(f) {
+    try {
+      var d = f.contentDocument; if (!d) return;
+      var b = d.body, e = d.documentElement;
+      if (b) b.style.margin = '0';
+      if (e) e.style.overflow = 'hidden';
+      var bStyle = b && d.defaultView && d.defaultView.getComputedStyle ? d.defaultView.getComputedStyle(b) : null;
+      var pinnedH = 0;
+      if (bStyle && (bStyle.overflow || '').indexOf('hidden') >= 0) {
+        var hm = (bStyle.height || '').match(/^(\d+(?:\.\d+)?)px$/);
+        if (hm) pinnedH = Math.round(parseFloat(hm[1]));
+      }
+      var h = pinnedH > 0 ? pinnedH : Math.max(e ? e.scrollHeight : 0, b ? b.scrollHeight : 0);
+      if (h > 0) f.style.height = h + 'px';
+    } catch (e) {}
+  }
+  window.__fitFigureFrame = _fitFigureFrame;
+  var _FIGURE_IFRAME_ONLOAD = "window.__fitFigureFrame&&window.__fitFigureFrame(this)";
 
   function _renderChartCard(c) {
     // c.svg=inline svg; c.img=data-URI <img>; a declared threejs:/html: figure
