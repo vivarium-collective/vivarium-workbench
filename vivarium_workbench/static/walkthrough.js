@@ -932,7 +932,7 @@
   function _loadInputs() {
     var el = document.getElementById('inputs-api-render');
     if (!el) return;
-    el.innerHTML = '<p class="muted" style="font-style:italic">Loading inputs…</p>';
+    el.innerHTML = '<p class="muted" style="font-style:italic">Loading…</p>';
     // Prefer the Sources-page picker selection over the git-branch-current slug.
     var _slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
     var _pInputs = window.DataSource
@@ -8693,10 +8693,7 @@
     });
     var createBtn = document.getElementById('iset-browse-create');
     if (createBtn) createBtn.textContent = (tab === 'studies') ? '+ Study' : '+ Investigation';
-    // The zoom toolbar (#iset-zoom-toolbar) is always visible on both tabs —
-    // only the "click a card's studies count" tip is Studies-only.
-    var tip = document.getElementById('iset-list-tip');
-    if (tip) tip.style.display = (tab === 'studies') ? 'none' : '';
+    // The zoom toolbar (#iset-zoom-toolbar) is always visible on both tabs.
     var invCount = document.getElementById('iset-tab-inv-count');
     var studyCount = document.getElementById('iset-tab-study-count');
     if (invCount) invCount.textContent = (window._isetIndex || []).length || '';

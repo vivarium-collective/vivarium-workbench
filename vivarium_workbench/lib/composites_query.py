@@ -26,7 +26,7 @@ from pathlib import Path
 # re-imports the whole workspace package (~8s cold on v2ecoli). Without a cache
 # every /api/composites hit paid that in full — and, fired at page boot, the
 # slow calls saturated the browser's connection pool and stalled other tabs
-# (Sources' "Loading inputs…"). A short TTL keeps discovery fresh while making
+# (Sources' "Loading…"). A short TTL keeps discovery fresh while making
 # repeated loads instant. Keyed by str(ws_root); cleared on workspace switch.
 _COMPOSITES_CACHE: dict = {}
 _COMPOSITES_TTL = 30.0  # seconds
