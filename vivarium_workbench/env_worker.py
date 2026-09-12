@@ -172,6 +172,15 @@ def _workspace_meta(workspace: str):
                 continue
             if pkg:
                 pkgs.append(pkg.split(".")[0])
+    # Additional FIRST-PARTY packages the workspace repo ships beyond its single
+    # `package_path` (e.g. sms-ecoli ships both `pbg_v2ecoli` and `sms_modules`).
+    # Declared via `workspace_packages:` so their processes classify as
+    # `in_workspace` (Workspace, not Imported) like the package_path's do.
+    extra = ws_data.get("workspace_packages") or []
+    if isinstance(extra, list):
+        for e in extra:
+            if isinstance(e, str) and e.strip():
+                pkgs.append(e.strip().replace("-", "_").split(".")[0])
     pkgs.append(package_name.split(".")[0])
     return package_name, set(dict.fromkeys(pkgs)), ws_data
 
