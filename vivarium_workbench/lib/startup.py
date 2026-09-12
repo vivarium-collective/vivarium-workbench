@@ -147,7 +147,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # the whole workspace package) in a background thread so the FIRST user
     # navigation isn't stuck paying it — which, fired alongside other boot
     # fetches, saturated the browser connection pool and stalled tabs like
-    # Sources ("Loading inputs…"). Best-effort; daemon thread, never blocks boot.
+    # Sources ("Loading…"). Best-effort; daemon thread, never blocks boot.
     try:
         import threading
 

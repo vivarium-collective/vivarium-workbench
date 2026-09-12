@@ -1386,7 +1386,7 @@
     if (_studySimsLoaded && !force) return;
     _studySimsLoaded = true;
     var slug = studyName();
-    mount.innerHTML = '<p class="muted" style="margin:0">Loading simulations…</p>';
+    mount.innerHTML = '<p class="muted" style="margin:0">Loading…</p>';
     var DS = window.DataSource;
     var url = (DS && DS.simulationsUrl) ? DS.apiUrl(DS.simulationsUrl(slug))
       : '/api/simulations?study=' + encodeURIComponent(slug);
