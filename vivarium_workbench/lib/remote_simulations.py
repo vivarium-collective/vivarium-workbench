@@ -25,18 +25,27 @@ import datetime as _dt
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
 
 
-# Short-TTL cache for the remote fetch. The sms-api list round-trip (+ per-record
+# TTL cache for the remote fetch. The sms-api list round-trip (+ per-record
 # normalize) is the dominant cost of the Simulations index, and every call that
 # re-derives the index (the Runs tab, its filters/refresh, the study cards'
 # remote counts) would otherwise re-pay it. Remote (GovCloud) runs don't change
-# second-to-second, so a brief cache keeps paging/filtering snappy; pass
+# second-to-second, so a cache keeps paging/filtering snappy; pass
 # use_cache=False to force a fresh fetch (the Runs-tab refresh button).
+#
+# The fetch itself can be SLOW over a laggy tunnel (observed ~2 min cold), so the
+# TTL is generous and the study-index path uses the stale-while-revalidate helper
+# below (never blocks a page render on a cold/expired remote fetch).
 _REMOTE_CACHE: dict = {}
-_REMOTE_CACHE_TTL = 60.0
+_REMOTE_CACHE_TTL = 300.0
+# Keys with an in-flight background refresh, so we never spawn more than one
+# refresh thread per (ws_root, base_url, limit) at a time.
+_REMOTE_REFRESH_INFLIGHT: set = set()
+_REMOTE_REFRESH_LOCK = threading.Lock()
 
 
 # emitter tag -> capitalized label the UI pills key on (mirrors server.py).
@@ -268,6 +277,48 @@ def list_remote_simulations(ws_root: Path, base_url: str | None = None,
     rows = _fetch_remote_simulations(ws_root, base_url, limit)
     _REMOTE_CACHE[key] = (now + _REMOTE_CACHE_TTL, rows)
     return rows
+
+
+def list_remote_simulations_swr(ws_root: Path, base_url: str | None = None,
+                                limit: int = 2000) -> list[dict]:
+    """Stale-while-revalidate variant of :func:`list_remote_simulations`.
+
+    Returns whatever is in the cache **immediately** — even if expired, even if
+    empty — and NEVER blocks on the (potentially ~minutes-long) sms-api fetch.
+    When the cache is missing or stale it kicks off a single background daemon
+    refresh so the next caller gets fresh data. Use this on latency-sensitive
+    page renders (the study index) where remote run counts are an enhancement,
+    not a blocker; use :func:`list_remote_simulations` when you must have the
+    freshest rows (the Runs-tab refresh).
+    """
+    key = (str(ws_root), base_url or "", int(limit))
+    now = time.time()
+    hit = _REMOTE_CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]                      # fresh
+    _kick_remote_refresh(key, ws_root, base_url, limit)
+    return hit[1] if hit else []           # stale (serve last-known) or empty
+
+
+def _kick_remote_refresh(key: tuple, ws_root: Path, base_url: str | None,
+                         limit: int) -> None:
+    """Spawn at most one background refresh per cache key."""
+    with _REMOTE_REFRESH_LOCK:
+        if key in _REMOTE_REFRESH_INFLIGHT:
+            return
+        _REMOTE_REFRESH_INFLIGHT.add(key)
+
+    def _run() -> None:
+        try:
+            rows = _fetch_remote_simulations(ws_root, base_url, limit)
+            _REMOTE_CACHE[key] = (time.time() + _REMOTE_CACHE_TTL, rows)
+        except Exception:  # noqa: BLE001 — best-effort; a down tunnel must not crash the thread
+            pass
+        finally:
+            with _REMOTE_REFRESH_LOCK:
+                _REMOTE_REFRESH_INFLIGHT.discard(key)
+
+    threading.Thread(target=_run, name="remote-sims-refresh", daemon=True).start()
 
 
 def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
