@@ -241,3 +241,29 @@ def test_declared_figure_chart_run_id_always_null(tmp_path):
     (tmp_path / "charts" / "a.meta.json").write_text('{"source_run_id":"run-1"}')
     [rec] = discover_declared_figure_charts(tmp_path, [{"address": "png:a.png"}])
     assert rec["run_id"] is None
+
+
+# ── Tolerant discovery: figures declared via a bare file-pointer field ────────
+#
+# A `visualizations:` entry may point at a figure FILE with the bare
+# `path:`/`file:`/`chart:`/`src` field instead of the canonical
+# `address: <scheme>:<file>`. That must resolve too — including self-contained
+# HTML (rendered as an iframe) — so a workspace that used `path: viz/x.html`
+# still gets its figure rendered AND downloadable.
+
+def test_declared_html_via_path_field_resolves_to_iframe(tmp_path):
+    (tmp_path / "viz").mkdir()
+    (tmp_path / "viz" / "chart.html").write_text("<html><body>plotly</body></html>")
+    [rec] = discover_declared_figure_charts(tmp_path, [{"name": "chart", "path": "viz/chart.html"}])
+    assert rec["media"] == "html"
+    assert rec["iframe_url"] == "/viz/chart.html"
+    assert rec["title"] == "chart"
+    assert "img" not in rec and "svg" not in rec
+
+
+def test_declared_image_via_path_field_resolves_to_img(tmp_path):
+    (tmp_path / "viz").mkdir()
+    (tmp_path / "viz" / "p.png").write_bytes(b"\x89PNG")
+    [rec] = discover_declared_figure_charts(tmp_path, [{"name": "p", "path": "viz/p.png"}])
+    assert rec["media"] == "png"
+    assert rec["img"].startswith("data:image/png;base64,")

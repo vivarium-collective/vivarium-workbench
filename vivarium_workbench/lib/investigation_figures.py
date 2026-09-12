@@ -39,18 +39,9 @@ import yaml
 
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 from vivarium_workbench.lib.study_charts import (
-    _FIGURE_ADDR_SCHEMES,
-    _IFRAME_ADDR_SCHEMES,
     _resolve_figure_path,
+    resolve_declared_figure_ref,
 )
-
-# Schemes whose declared file we treat as a downloadable figure. Beyond the
-# static image schemes (``png``/``svg``/``gif``/…), this includes the *iframe*
-# schemes (``html``/``threejs``) so interactive charts count toward an
-# investigation's figure total and ride along in the ``↓ figures`` zip. This is
-# download-side only: ``study_charts`` still classifies ``html``/``threejs`` as
-# iframes for inline rendering, so the study view keeps showing them live.
-_DOWNLOAD_FIGURE_SCHEMES = _FIGURE_ADDR_SCHEMES | _IFRAME_ADDR_SCHEMES
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths, study_dir
 
 # ``figure_7`` / ``figure-7`` → 7. The stitcher writes ``figure_<N>.svg``.
@@ -83,23 +74,23 @@ def _load_study(ws_root: Path, slug: str) -> tuple[Optional[Path], dict]:
 
 def _image_files(study_dir_path: Path, spec: dict) -> list[Path]:
     """Every declared downloadable-figure file on a study, in the order the
-    study declares them. Deduped, existing files only. Covers the static image
-    schemes (svg/png/gif/jpg) *and* the interactive iframe schemes
-    (html/threejs) — see ``_DOWNLOAD_FIGURE_SCHEMES`` — so an investigation of
-    HTML charts still reports a figure count and its ``↓ figures`` zip carries
-    them."""
+    study declares them. Deduped, existing files only. Resolution is shared with
+    the render path via :func:`resolve_declared_figure_ref`, so it covers both
+    the canonical ``address: <scheme>:<file>`` form and a bare file-pointer field
+    (``path``/``file``/``chart``/``src``), for static images (svg/png/gif/jpg)
+    *and* interactive HTML — an investigation of HTML charts still reports a
+    figure count and its ``↓ figures`` zip carries them."""
     out: list[Path] = []
     seen: set[Path] = set()
     for entry in (spec.get("visualizations") or []):
-        if not isinstance(entry, dict):
+        # Shared resolver with the render path: accepts both the canonical
+        # ``address: <scheme>:<file>`` form and a bare file-pointer field
+        # (``path``/``file``/``chart``/``src``) — images and self-contained HTML
+        # — so a declared figure that renders is always also downloadable.
+        ref, _is_iframe, _media = resolve_declared_figure_ref(entry)
+        if not ref:
             continue
-        addr = str(entry.get("address") or "").strip()
-        if ":" not in addr:
-            continue
-        scheme, _, rest = addr.partition(":")
-        if scheme.strip().lower() not in _DOWNLOAD_FIGURE_SCHEMES:
-            continue
-        p = _resolve_figure_path(study_dir_path, rest.strip())
+        p = _resolve_figure_path(study_dir_path, ref)
         if p and p not in seen:
             seen.add(p)
             out.append(p)
