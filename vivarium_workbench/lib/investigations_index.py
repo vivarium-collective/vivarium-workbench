@@ -88,60 +88,97 @@ def _iter_study_dirs(ws_root: Path):
 # Run counting (ws_root-parameterized)
 # ---------------------------------------------------------------------------
 
-def _remote_study_run_counts(ws_root: Path) -> dict:
-    """``study_slug -> count`` of remote (GovCloud) runs tagged to each study.
+def _remote_study_run_stats(ws_root: Path) -> dict:
+    """``study_slug -> {"count": int, "last_run_ts": float|None}`` for remote runs.
 
-    A remote run lives in the Simulations index (its store is an ``s3://`` uri,
-    so it has no local ``runs.db``/``study.yaml`` entry). Without this the study
-    card's ``n_runs`` stays 0 even when the study's runs completed remotely and
-    are already study-tagged (via the workspace ``remote_run_study_map``). Gated
-    on that map so only workspaces that opted into remote-run association pay the
-    sms-api fetch; best-effort, never raises or blocks the index.
+    A remote (GovCloud) run lives in the Simulations index (its store is an
+    ``s3://`` uri, so it has no local ``runs.db``/``study.yaml`` entry). Without
+    this the study card's ``n_runs`` stays 0 — and its Last-run stays blank —
+    even when the study's runs completed remotely and are study-tagged (via the
+    workspace ``remote_run_study_map``). Gated on that map so only workspaces
+    that opted into remote-run association pay the sms-api fetch.
 
-    Cost note: this fetch is the same (~seconds) round-trip the Simulations index
-    makes; a shared TTL cache would let the two pages share it (follow-up).
+    Uses the STALE-WHILE-REVALIDATE fetch (``list_remote_simulations_swr``): the
+    sms-api round-trip can take ~minutes over a laggy tunnel, and the study index
+    must not block on it. A cold render returns no remote stats and kicks a
+    background refresh; the counts/last-run populate on a subsequent load once the
+    cache warms. Best-effort — never raises.
     """
     try:
         from vivarium_workbench.lib.remote_simulations import (
-            _load_remote_study_map, list_remote_simulations)
+            _load_remote_study_map, list_remote_simulations_swr)
         if not _load_remote_study_map(ws_root):
             return {}
-        rows = list_remote_simulations(ws_root)
+        rows = list_remote_simulations_swr(ws_root)
     except Exception:
         return {}
-    counts: dict = {}
+    stats: dict = {}
     for r in rows:
-        slug = r.get("study_slug") if isinstance(r, dict) else None
-        if slug:
-            counts[slug] = counts.get(slug, 0) + 1
-    return counts
+        if not isinstance(r, dict):
+            continue
+        slug = r.get("study_slug")
+        if not slug:
+            continue
+        s = stats.setdefault(slug, {"count": 0, "last_run_ts": None})
+        s["count"] += 1
+        raw = r.get("completed_at") or r.get("started_at")
+        try:
+            ts = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            ts = None
+        if ts is not None and (s["last_run_ts"] is None or ts > s["last_run_ts"]):
+            s["last_run_ts"] = ts
+    return stats
+
+
+def _remote_study_run_counts(ws_root: Path) -> dict:
+    """Back-compat wrapper: ``study_slug -> count`` (see
+    :func:`_remote_study_run_stats`, which also carries per-study last-run)."""
+    return {
+        slug: st.get("count", 0)
+        for slug, st in _remote_study_run_stats(ws_root).items()
+    }
+
+
+def _study_runs_db(ws_root: Path, name: str, wp=None):
+    """Resolve a study's ``runs.db`` path (nested- and flat-aware), or None if absent.
+
+    Pass a preloaded ``WorkspacePaths`` (``wp``) to avoid re-parsing
+    ``workspace.yaml`` per study — the index resolves 80+ studies per request and
+    re-loading WorkspacePaths each time is a measurable cost.
+    """
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    try:
+        wp = wp or WorkspacePaths.load(ws_root)
+        # Prefer the WorkspacePaths resolver (handles nested layout).
+        try:
+            study_d = wp.study_dir(name, must_exist=True)
+        except FileNotFoundError:
+            # Fall back to the flat studies/ path so it still resolves even when
+            # WorkspacePaths can't locate the study.
+            study_d = ws_root / "studies" / name
+    except Exception:
+        study_d = ws_root / "studies" / name
+    runs_db = study_d / "runs.db"
+    return runs_db if runs_db.is_file() else None
 
 
 def _count_runs_for_study(
-    ws_root: Path, name: str, spec: Optional[dict] = None, remote_count: int = 0
+    ws_root: Path, name: str, spec: Optional[dict] = None,
+    remote_count: int = 0, wp=None,
 ) -> int:
     """Count runs for a study, parameterized by ws_root.
 
     Checks the study's runs.db for row counts in runs_meta; falls back
     to ``len(spec.runs)``; and includes ``remote_count`` (study-tagged remote
-    runs, see :func:`_remote_study_run_counts`).  Returns the largest so the
-    dashboard never undercounts.  Never raises.
+    runs, see :func:`_remote_study_run_stats`).  Returns the largest so the
+    dashboard never undercounts.  Never raises.  Pass ``wp`` (a preloaded
+    ``WorkspacePaths``) to skip a per-call ``workspace.yaml`` parse.
     """
-    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
-
     db_count = 0
-    try:
-        wp = WorkspacePaths.load(ws_root)
-        # Prefer the WorkspacePaths resolver (handles nested layout).
+    runs_db = _study_runs_db(ws_root, name, wp)
+    if runs_db is not None:
         try:
-            study_d = wp.study_dir(name, must_exist=True)
-        except FileNotFoundError:
-            # Fall back to the flat studies/ path so the count still works
-            # even when WorkspacePaths can't locate the study.
-            study_d = ws_root / "studies" / name
-
-        runs_db = study_d / "runs.db"
-        if runs_db.is_file():
             conn = sqlite3.connect(str(runs_db))
             try:
                 tables = {
@@ -157,13 +194,37 @@ def _count_runs_for_study(
                 db_count = 0
             finally:
                 conn.close()
-    except Exception:
-        db_count = 0
+        except Exception:
+            db_count = 0
 
     spec_count = 0
     if spec is not None:
         spec_count = len(spec.get("runs") or [])
     return max(db_count, spec_count, remote_count or 0)
+
+
+def _local_last_run_ts(ws_root: Path, name: str, wp=None):
+    """Most-recent LOCAL run time (epoch float) from the study's runs.db, or None."""
+    runs_db = _study_runs_db(ws_root, name, wp)
+    if runs_db is None:
+        return None
+    try:
+        from vivarium_workbench.lib.study_spec import latest_run_timestamp
+        return latest_run_timestamp(runs_db)
+    except Exception:
+        return None
+
+
+def _epoch_to_iso(ts):
+    """Epoch float -> local ISO-8601 string, or None. The study index's Last-run
+    column slices the first 10 chars (YYYY-MM-DD)."""
+    if ts is None:
+        return None
+    try:
+        import datetime as _dt
+        return _dt.datetime.fromtimestamp(float(ts)).isoformat()
+    except (TypeError, ValueError, OSError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -341,10 +402,21 @@ def build_investigations(ws_root: Path) -> dict:
         s["name"]: s for _, s in loaded if not s.get("__invalid__")
     }
 
-    # Fetch study-tagged remote-run counts once (best-effort; empty unless the
+    # Fetch study-tagged remote-run stats once (best-effort; empty unless the
     # workspace declares a remote_run_study_map) so a study card reflects its
-    # GovCloud runs without a per-study sms-api round-trip.
-    remote_counts = _remote_study_run_counts(ws_root)
+    # GovCloud run count + last-run without a per-study sms-api round-trip. Uses
+    # the non-blocking stale-while-revalidate fetch (see _remote_study_run_stats)
+    # so a cold/slow sms-api never blocks this index.
+    remote_stats = _remote_study_run_stats(ws_root)
+
+    # Load WorkspacePaths ONCE and reuse it across the per-study run lookups: the
+    # loop resolves 80+ studies, and re-parsing workspace.yaml per study was a
+    # measurable slice of the (local) index cost.
+    try:
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+        _wp = WorkspacePaths.load(ws_root)
+    except Exception:
+        _wp = None
 
     out = []
     for d, spec in loaded:
@@ -354,16 +426,34 @@ def build_investigations(ws_root: Path) -> dict:
             )
             continue
 
-        rc = remote_counts.get(spec["name"], 0)
+        _rstat = remote_stats.get(spec["name"]) or {}
+        rc = _rstat.get("count", 0)
+        remote_last_ts = _rstat.get("last_run_ts")
         composites = spec.get("composites") or []
         if composites:
             composite_summary = ", ".join(c.get("name", "") for c in composites)
-            n_runs = _count_runs_for_study(ws_root, spec["name"], spec, rc)
+            n_runs = _count_runs_for_study(ws_root, spec["name"], spec, rc, wp=_wp)
         else:
-            composite_summary = spec.get("composite", "")
-            n_runs = _count_runs_for_study(ws_root, spec["name"], spec, rc)
+            # Fall back to the baseline composite(s) when a study declares its
+            # composite under `baseline:` rather than a top-level `composite:` /
+            # `composites:` (the common v3/v4 shape) — otherwise the Studies-tab
+            # Composite column reads "—" for studies that clearly have one.
+            composite_summary = spec.get("composite", "") or _format_baseline_source(spec)
+            n_runs = _count_runs_for_study(ws_root, spec["name"], spec, rc, wp=_wp)
             if n_runs == 0:
                 n_runs = len(spec.get("simulations") or [])
+
+        # Last run: prefer an authored `last_run`, else derive it from the SAME
+        # sources that feed the run COUNT — the local runs.db (newest run) and the
+        # study's remote GovCloud runs — so a study with runs never shows a blank
+        # Last-run. Rendered as ISO; the column slices YYYY-MM-DD.
+        _last_run = spec.get("last_run") or _epoch_to_iso(
+            max(
+                (t for t in (_local_last_run_ts(ws_root, spec["name"], _wp), remote_last_ts)
+                 if t is not None),
+                default=None,
+            )
+        )
 
         parents = _normalize_parents(spec)
         blocked_by = []
@@ -393,6 +483,11 @@ def build_investigations(ws_root: Path) -> dict:
         n_variants_top = (
             len(sim_set_top) if sim_set_top else len(spec.get("variants") or [])
         )
+        # Compute the running-aware display status ONCE — `status` and
+        # `effective_status` are the SAME value by construction (see below), and
+        # this helper can scan runs/tests, so computing it twice per study was
+        # pure duplicated work across 80+ studies.
+        _disp_status = _study_display_status(ws_root, spec["name"], spec)
         row = {
             "name": spec["name"],
             "composite": composite_summary,
@@ -412,7 +507,7 @@ def build_investigations(ws_root: Path) -> dict:
             # Display status: multi-axis truth with "running" gated on a real
             # active run, so a stale `status: running` doesn't mislabel a study
             # (mirrors the investigation-summary rule).
-            "status": _study_display_status(ws_root, spec["name"], spec),
+            "status": _disp_status,
             # Status AXES the client's unified _studyStatusMeta() reads: it prefers
             # the gate_status VERDICT, then the effective_status/status lifecycle,
             # then the hand-set `confidence`. The investigation-GRAPH nodes carry
@@ -423,13 +518,13 @@ def build_investigations(ws_root: Path) -> dict:
             # multi-axis display status as `status` above (via the one shared
             # _study_display_status helper the graph node now uses too), so the two
             # views derive an IDENTICAL state by construction.
-            "effective_status": _study_display_status(ws_root, spec["name"], spec),
+            "effective_status": _disp_status,
             "gate_status": spec.get("gate_status"),
             "confidence": spec.get("confidence"),
             "simulation_status": spec.get("simulation_status"),
             "evaluation_status": spec.get("evaluation_status"),
             "phase": spec.get("phase"),
-            "last_run": spec.get("last_run"),
+            "last_run": _last_run,
             "n_simulations": n_runs,
             "baseline_names": [
                 b.get("name", "")
