@@ -215,3 +215,34 @@ def test_publish_staging_paths(tmp_path):
     assert (out_dir / "figures" / "inv" / "figures.zip").is_file()
     assert (out_dir / "figures" / "studies" / "fig-07.zip").is_file()
     assert (out_dir / "figures" / "studies" / "fig-99.zip").is_file()
+
+
+def _make_path_field_ws(tmp_path):
+    """Investigation whose study declares figures via the bare `path:` field
+    (no `address:` scheme) — the non-canonical form some workspaces used. The
+    figures must still count toward n_figures + ride along in the `↓ figures` zip."""
+    _write(tmp_path / "investigations" / "inv" / "investigation.yaml",
+           yaml.safe_dump({"name": "inv", "title": "Inv", "studies": ["pf-01"]}))
+    _write(tmp_path / "studies" / "pf-01" / "study.yaml", yaml.safe_dump({
+        "name": "pf-01", "title": "Path-field figures",
+        "visualizations": [
+            {"name": "pop", "path": "viz/pop.html"},
+            {"name": "spatial", "path": "viz/spatial.html"},
+        ],
+    }))
+    _write(tmp_path / "studies" / "pf-01" / "viz" / "pop.html", "<html>pop</html>")
+    _write(tmp_path / "studies" / "pf-01" / "viz" / "spatial.html", "<html>spatial</html>")
+    return tmp_path
+
+
+def test_path_field_html_counts_as_figures(tmp_path):
+    r = figs.build_investigation_figures(_make_path_field_ws(tmp_path), "inv")
+    arcs = {f["arcname"] for f in r["files"]}
+    assert arcs == {"pf-01/pop.html", "pf-01/spatial.html"}
+
+
+def test_path_field_html_rides_along_in_zip(tmp_path):
+    blob = figs.build_figures_zip(_make_path_field_ws(tmp_path), "inv")
+    assert blob
+    names = set(zipfile.ZipFile(io.BytesIO(blob)).namelist())
+    assert names == {"pf-01/pop.html", "pf-01/spatial.html"}

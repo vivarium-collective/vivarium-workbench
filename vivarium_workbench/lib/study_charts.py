@@ -417,6 +417,62 @@ _FIGURE_SUFFIX_MIME = {
 # already in ``viz_gate._INTERACTIVE_KINDS`` ("threejs", "html").
 _IFRAME_ADDR_SCHEMES = {"threejs", "html"}
 
+# Self-contained-HTML suffixes accepted when a figure is declared via a bare
+# file-pointer field (see ``resolve_declared_figure_ref``). Such a file renders
+# as an iframe, like the ``html:``/``threejs:`` address schemes.
+_IFRAME_FIGURE_SUFFIXES = {".html", ".htm"}
+
+
+def resolve_declared_figure_ref(entry: dict) -> tuple[str, bool, str | None]:
+    """Resolve a ``visualizations[]`` entry to its figure-file reference.
+
+    Returns ``(ref, is_iframe, iframe_media)``: ``ref`` is the study-relative
+    file reference (``""`` when the entry is not a figure-file declaration —
+    e.g. a ``local:``/``dashboard:`` live renderer); ``is_iframe`` marks a
+    self-contained interactive page (rendered as an iframe) and ``iframe_media``
+    is its media marker (``"html"``/``"threejs"``).
+
+    Accepts BOTH the canonical ``address: <scheme>:<file>`` form AND a bare
+    file-pointer field (``path``/``file``/``chart``/``src``) whose value names a
+    figure file by suffix — static images *and* self-contained HTML. This is the
+    single source of truth shared by the render path
+    (:func:`discover_declared_figure_charts`) and the download path
+    (``investigation_figures._image_files``), so a figure that renders is always
+    also downloadable and vice versa. A file-pointer field is only honored when
+    its suffix is a known figure suffix, so a live renderer's config field is
+    never mistaken for a figure file."""
+    if not isinstance(entry, dict):
+        return "", False, None
+    ref = ""
+    is_iframe = False
+    iframe_media: str | None = None
+    addr = str(entry.get("address") or "").strip()
+    if ":" in addr:
+        scheme, _, rest = addr.partition(":")
+        scheme_l = scheme.strip().lower()
+        if scheme_l in _FIGURE_ADDR_SCHEMES:
+            ref = rest.strip()
+        elif scheme_l in _IFRAME_ADDR_SCHEMES:
+            ref = rest.strip()
+            is_iframe = True
+            iframe_media = scheme_l
+    if not ref:
+        # No figure scheme on the address; accept an explicit file-pointer field,
+        # but only when it names a figure file by suffix (so we never grab a live
+        # renderer's config). HTML → iframe; image/svg → static.
+        for fld in ("chart", "file", "path", "src"):
+            cand = str(entry.get(fld) or "").strip()
+            if not cand:
+                continue
+            suffix = Path(cand).suffix.lower()
+            if suffix in _IFRAME_FIGURE_SUFFIXES:
+                ref, is_iframe, iframe_media = cand, True, "html"
+                break
+            if suffix in ({".svg"} | set(_FIGURE_SUFFIX_MIME)):
+                ref = cand
+                break
+    return ref, is_iframe, iframe_media
+
 
 def _resolve_figure_path(study_dir: Path, ref: str) -> Path | None:
     """Find a declared figure file relative to a study dir.
@@ -476,28 +532,7 @@ def discover_declared_figure_charts(study_dir: Path,
     for entry in (visualizations or []):
         if not isinstance(entry, dict):
             continue
-        ref = ""
-        is_iframe = False
-        iframe_media = None
-        addr = str(entry.get("address") or "").strip()
-        if ":" in addr:
-            scheme, _, rest = addr.partition(":")
-            scheme_l = scheme.strip().lower()
-            if scheme_l in _FIGURE_ADDR_SCHEMES:
-                ref = rest.strip()
-            elif scheme_l in _IFRAME_ADDR_SCHEMES:
-                ref = rest.strip()
-                is_iframe = True
-                iframe_media = scheme_l
-        if not ref:
-            # No figure scheme on address; try explicit file-pointer fields, but
-            # only if they look like an image/svg (so we don't grab a live
-            # renderer's config).
-            for fld in ("chart", "file", "path", "src"):
-                cand = str(entry.get(fld) or "").strip()
-                if cand and Path(cand).suffix.lower() in ({".svg"} | set(_FIGURE_SUFFIX_MIME)):
-                    ref = cand
-                    break
+        ref, is_iframe, iframe_media = resolve_declared_figure_ref(entry)
         if not ref:
             continue
         fig = _resolve_figure_path(study_dir, ref)
