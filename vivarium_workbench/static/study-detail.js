@@ -1798,8 +1798,15 @@
     return api('GET', '/api/remote-run-config').then(function(cfgRes) {
       var cfg = (cfgRes.status === 200 && cfgRes.body) || {};
       if (cfg.pinned && cfg.simulator_id) return _dispatchRemotePinned(cfg);
-      if (!confirm("Run this study's CURRENT baseline spec as a new run?")) return _CANCELLED;
-      return api('POST', '/api/study-run-baseline', { study: studyName() });
+      // ui-modal.js: a non-blocking in-page modal, not window.confirm() --
+      // confirm()/alert()/prompt() are the only browser APIs that freeze the
+      // page's whole JS event loop, which made this button unusable by any
+      // browser-automation tool driving the page. Same Promise<boolean>
+      // shape confirm() would have returned synchronously.
+      return _confirmModal("Run this study's CURRENT baseline spec as a new run?").then(function (ok) {
+        if (!ok) return _CANCELLED;
+        return api('POST', '/api/study-run-baseline', { study: studyName() });
+      });
     });
   }
 
@@ -2510,9 +2517,13 @@
     // Guard: only the header delete button has data-study; variant/run deletes
     // use different class names so this handler won't fire for those.
     if (!btn.dataset.study) return;
-    if (!confirm('Delete this study and all its runs?')) return;
-    api('POST', '/api/study-delete', {name: studyName(), study: studyName()})
-      .then(function() { window.location = '/studies'; });
+    // ui-modal.js, not window.confirm() -- see the comment on
+    // _dispatchCurrentSpecBaseline above for why.
+    _confirmModal('Delete this study and all its runs?', {danger: true, okLabel: 'Delete'}).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/study-delete', {name: studyName(), study: studyName()})
+        .then(function() { window.location = '/studies'; });
+    });
   });
 
   // --- Baseline ---
@@ -2560,10 +2571,14 @@
   // study-run-delete → _post_investigation_run_delete
   bindAll('.btn-delete-run', function(btn) {
     var runId = btn.dataset.runId;
-    if (!confirm('Delete this run?')) return;
-    api('POST', '/api/study-run-delete', {
-      study: studyName(), run_id: runId,
-    }).then(function() { location.reload(); });
+    // ui-modal.js, not window.confirm() -- see the comment on
+    // _dispatchCurrentSpecBaseline above for why.
+    _confirmModal('Delete this run?', {danger: true, okLabel: 'Delete'}).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/study-run-delete', {
+        study: studyName(), run_id: runId,
+      }).then(function() { location.reload(); });
+    });
   });
 
   // --- Viz ---

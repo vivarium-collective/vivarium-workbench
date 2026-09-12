@@ -2241,6 +2241,11 @@ function _seedFollowupProposal(parent, proposalId) {
 window._seedFollowupStudy = _seedFollowupStudy;
 window._seedFollowupProposal = _seedFollowupProposal;
 </script>
+<!-- ui-modal.js: non-blocking _confirmModal/_showToast, replacing window.confirm()/
+     alert() where converted below -- those freeze the page's JS event loop,
+     which breaks any browser-automation tool driving this page. Loaded before
+     configure-run.js/study-detail.js, both of which reference it. -->
+<script src="/ui-modal.js"></script>
 <script src="/configure-run.js"></script>
 <script src="/sim-table.js"></script>
 <!-- composite-card.js: shared composite-card renderer (extracted from
