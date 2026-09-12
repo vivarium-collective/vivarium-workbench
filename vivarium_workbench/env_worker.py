@@ -296,6 +296,45 @@ def _registry_catalog() -> dict:
             "inputs": inputs_schema,
             "outputs": outputs_schema,
         })
+    # Also surface WORKSPACE-owned vivarium-bridge processes — vivarium-core
+    # Steps injected into the WCM engine via the ecoli topology bridge
+    # (registered in ecoli.processes.process_registry), NOT the pbg core. e.g.
+    # sms_modules' pg-maturation / pg-shape, which run inside EcoliWCM and so were
+    # invisible in the Registry. Only the workspace's OWN bridge ports, and only
+    # those not already shown as pbg-native above, are surfaced — tagged
+    # bridge=True so the UI can mark them (and distinguish them from the
+    # first-class pbg-native processes). Guarded: a no-op when there's no
+    # ecoli-style process_registry, so this stays generic for other workspaces.
+    try:
+        from ecoli.processes import process_registry as _bridge_reg  # type: ignore
+        _seen_addr = {p.get("address") for p in processes}
+        for _bname, _bcls in (getattr(_bridge_reg, "registry", {}) or {}).items():
+            if not isinstance(_bcls, type):
+                continue
+            try:
+                _btop = _bcls.__module__.split(".")[0]
+            except Exception:
+                continue
+            if _btop not in workspace_pkgs:
+                continue  # only the workspace's OWN bridge ports (not all of vEcoli's)
+            try:
+                _baddr = f"{_bcls.__module__}.{_bcls.__qualname__}"
+            except Exception:
+                _baddr = str(_bcls)
+            if _baddr in _seen_addr:
+                continue  # already surfaced as a pbg-native process above
+            processes.append({
+                "name": _bname, "address": _baddr,
+                "kind": "step", "bridge": True,
+                "schema_preview": "", "aliases": [],
+                "source": _classify_source(_bcls),
+                "description": _describe_class(_bcls),
+                "config_schema": None, "inputs": [], "outputs": [],
+            })
+            _seen_addr.add(_baddr)
+    except Exception:  # noqa: BLE001 — bridge surfacing is best-effort, never fatal
+        pass
+
     _source_order = {"in_workspace": 0, "framework": 1, "environment_only": 2}
     processes.sort(key=lambda p: (
         _source_order.get(p.get("source", "environment_only"), 2),
