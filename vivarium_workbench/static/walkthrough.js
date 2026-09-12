@@ -2255,6 +2255,15 @@
               : 'Temporal — a Process that advances state over a timestep') +
       '">' + (isStep ? 'Step' : 'Temporal') + '</span>';
   }
+  // Marks a vivarium-BRIDGE process: a vivarium-core Step injected into the
+  // whole-cell engine via the topology bridge (not a pbg-native process). Shown
+  // alongside the kind badge so it's clear it runs inside the WCM engine.
+  function _procBridgeBadge(p) {
+    if (!p || !p.bridge) return '';
+    return '<span class="proc-kind-badge proc-kind-other" ' +
+      'title="Bridge — a vivarium-core process injected into the whole-cell engine ' +
+      'via the topology bridge (not pbg-native; runs inside the WCM)">bridge</span>';
+  }
 
   // Config-schema + ports body, revealed by a per-card "config & ports" dropdown
   // in the grid view — keeps the grid dense but the contract one click away.
@@ -2442,7 +2451,7 @@
         ' title="Double-click to zoom in on this ' + (p.kind || 'process') + '">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
-          '<div class="reg-card-head"><strong class="reg-card-name">' + esc(p.name) + '</strong>' + _procKindBadge(p.kind) + defaultBadge + _regUseBadge(p) + '</div>' +
+          '<div class="reg-card-head"><strong class="reg-card-name">' + esc(p.name) + '</strong>' + _procKindBadge(p.kind) + _procBridgeBadge(p) + defaultBadge + _regUseBadge(p) + '</div>' +
           '<code class="reg-card-addr">' + addr + '</code>' +
           (short ? '<p class="reg-card-desc">' + esc(short) + '</p>' : '') +
         '</div>' +
@@ -3698,7 +3707,7 @@
           '" onclick="_selectRegistryEntry(\'' + _esc(p.address || '') + '\')" ondblclick="_zoomInOn(\'' + _esc(p.address || '') + '\')"' +
           ' title="Click to select · double-click to zoom in on this process">' +
         '<td class="reg-td-name" title="' + _esc(p.address || p.name || '') + '"><strong>' + _esc(p.name) + '</strong> <code>' + _esc(p.address || '') + '</code></td>' +
-        '<td class="reg-td-kind">' + (_procKindBadge(p.kind) || _esc(_procKindLabel(p.kind))) + '</td>' +
+        '<td class="reg-td-kind">' + (_procKindBadge(p.kind) || _esc(_procKindLabel(p.kind))) + _procBridgeBadge(p) + '</td>' +
         '<td title="' + _esc(mod(p)) + '">' + _esc(mod(p)) + '</td>' +
         '<td class="num">' + (p.use_count || 0) + '</td>' +
         '<td class="num">' + ((p.study_participation || {}).studies || 0) + '</td>' +
