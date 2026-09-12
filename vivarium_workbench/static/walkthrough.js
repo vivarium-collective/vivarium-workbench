@@ -4405,13 +4405,33 @@
       .catch(function() { body.textContent = 'unavailable'; });
   };
 
-  function _loadComposites() {
+  function _loadComposites(_attempt) {
+    _attempt = _attempt || 0;
+    // Discovery re-imports the workspace package in a subprocess (~seconds cold),
+    // and a cold pooled worker can briefly answer empty / with an `error`. Show a
+    // "Loading…" state on the first attempt (rather than flashing "No composites
+    // registered.") and retry a cold/empty/errored response a few times before
+    // concluding the workspace genuinely has none.
+    if (_attempt === 0 && !(window._composites && window._composites.length)) {
+      var _el0 = document.getElementById('registry-composites-container');
+      if (_el0) _el0.innerHTML = '<p class="empty-state">Loading composites…</p>';
+    }
     var _p = window.DataSource
       ? window.DataSource.loadComposites()
       : fetch('/api/composites').then(function(r) { return r.json(); });
+    var _retry = function () {
+      // ~error: definitely transient (cold/unavailable) → retry harder.
+      // ~empty, no error: probably genuine, but do one safety retry for a cold
+      // race. Non-empty → render.
+      setTimeout(function () { _loadComposites(_attempt + 1); }, 700 + _attempt * 900);
+    };
     _p
       .then(function(data) {
-        var composites = data.composites || [];
+        var composites = (data && data.composites) || [];
+        var hadError = !!(data && data.error);
+        var maxAttempts = hadError ? 5 : (composites.length ? 1 : 2);
+        if (!composites.length && _attempt + 1 < maxAttempts) { _retry(); return; }
+        if (hadError && !composites.length && _attempt + 1 < maxAttempts) { _retry(); return; }
         // Cache by id so onclick handlers pass just the id; _useComposite
         // looks the full object up. Inline JSON.stringify in onclick attrs
         // breaks when descriptions contain apostrophes / quotes.
@@ -4421,7 +4441,9 @@
 
         // (a) Registry/Processes-page "Composites" tab — accordion cards.
         _renderRegistryComposites(composites);
-
+      })
+      .catch(function () {
+        if (_attempt + 1 < 5) { _retry(); }
       });
   }
   window._loadComposites = _loadComposites;

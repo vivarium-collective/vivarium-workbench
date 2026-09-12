@@ -74,7 +74,16 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
     try:
         from vivarium_workbench.lib.env_worker_pool import get_pool
         _pooled = get_pool().call(ws_root, "composites_full")
-        if isinstance(_pooled, dict) and "composites" in _pooled and not _pooled.get("error"):
+        # Trust the pool ONLY when it returns a NON-EMPTY, error-free result. A
+        # cold pooled worker can answer with an empty {"composites": []} (no
+        # error) before the workspace package is fully importable; caching that
+        # left the Composites tab reading "No composites registered." for the
+        # whole TTL. Treat an empty pool answer as "not ready" and fall through
+        # to the authoritative subprocess below, which does a full fresh import
+        # (and caches its result — empty or not — so a genuinely-empty workspace
+        # still gets cached, just via the fallback path).
+        if (isinstance(_pooled, dict) and _pooled.get("composites")
+                and not _pooled.get("error")):
             _COMPOSITES_CACHE[ws_root_str] = {"data": _pooled, "ts": now}
             return _pooled
     except Exception:
