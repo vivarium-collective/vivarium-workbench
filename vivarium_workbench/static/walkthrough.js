@@ -944,8 +944,9 @@
     // Also load the investigation list so the panel can offer a picker when no
     // investigation is branch-current — the user chooses which investigation to
     // load sources INTO (its own sources, not the repo-wide shared sources).
-    var _pList = fetch(_api('/api/investigation-summaries'))
-      .then(function(r) { return r.json(); })
+    var _pList = (window.DataSource
+      ? window.DataSource.loadIsetList()
+      : fetch('/api/investigation-summaries').then(function(r) { return r.json(); }))
       .then(function(d) { return (d && d.investigations) || []; })
       .catch(function() { return []; });
     Promise.all([_pInputs, _pList])
@@ -8938,8 +8939,15 @@
       ' <button class="btn-mini" onclick="_rerunInvestigation()" ' +
         'title="Re-run every member study\'s CURRENT baseline spec (re-derives from each study\'s study.yaml)">▶ Run current spec</button>');
     if (name) {
-      fetch(_api('/api/investigation-summaries'), {headers: {Accept: 'application/json'}})
-        .then(function (r) { return r.json(); })
+      // Snapshot-aware: DataSource.loadIsetList() maps to the baked
+      // /api/investigation-summaries.json in a published bundle. The `_api()`
+      // adapter only prefixes the base path (never appends `.json`), so it 404s
+      // in a snapshot — leaving the ↓ figures button greyed even when figures.zip
+      // is baked. DataSource is always present in a published bundle.
+      (window.DataSource
+        ? window.DataSource.loadIsetList()
+        : fetch('/api/investigation-summaries', {headers: {Accept: 'application/json'}})
+            .then(function (r) { return r.json(); }))
         .then(function (j) {
           var me = ((j && j.investigations) || []).filter(function (i) { return i.name === name; })[0];
           var host = document.getElementById('ws-actions-figures');
