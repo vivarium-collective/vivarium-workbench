@@ -1108,6 +1108,16 @@ def _do_build(
         sims = build_simulations_data(ws_root)
     except Exception:
         sims = {"simulations": [], "current": None}
+    # Annotate each row's composite_registered against the workspace registry,
+    # exactly as the live GET /api/simulations endpoint does. Without this the
+    # static bundle leaves the flag None, so the read-only Runs DB renders every
+    # run as "not a registered composite" even when its spec_id resolves fine.
+    try:
+        from vivarium_workbench.lib.composite_lookup import (
+            annotate_composite_registered, known_composite_ids)
+        annotate_composite_registered(sims.get("simulations") or [], known_composite_ids(ws_root))
+    except Exception:  # noqa: BLE001 — never let annotation break the publish
+        pass
     _write_json(api_dir / "simulations.json", sims)
 
     # api/visualization-classes.json — registered viz/analysis classes
