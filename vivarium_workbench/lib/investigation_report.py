@@ -523,9 +523,15 @@ def _model_topology(ws_root, spec: dict) -> "dict | None":
         return None
 
 
-def build_report_data(ws_root, inv_slug: str) -> dict:
+def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
     """Assemble the pure report-data dict for one investigation from existing
-    files only. Raises FileNotFoundError if the investigation is missing."""
+    files only. Raises FileNotFoundError if the investigation is missing.
+
+    ``loom_embed`` (set only by the publisher, alongside the loom bundle) is a
+    ``{"loom": <loom index url>, "state": <composite-state dir url>}`` pair,
+    both relative to the report, that turns the Model section into the REAL
+    embedded bigraph-loom. Omitting it keeps the report fully self-contained
+    (the Model section falls back to the inlined image / static topology)."""
     ws_root = Path(ws_root)
     wp = WorkspacePaths.load(ws_root)
     inv_path = wp.investigations / inv_slug / "investigation.yaml"
@@ -604,6 +610,7 @@ def build_report_data(ws_root, inv_slug: str) -> dict:
             f"investigations/{inv_slug}/investigation.yaml · studies/*/study.yaml · loop-trajectory JSON"
         ),
         "studies": studies,
+        **({"loom_embed": loom_embed} if loom_embed else {}),
     }
 
 
@@ -673,11 +680,15 @@ def render_html(data: dict, plotly_js: "str | None" = None) -> str:
     return html.replace("__PLOTLY_JS__", pj)
 
 
-def render_investigation_report(ws_root, inv_slug: str, *, out_dir=None) -> Path:
+def render_investigation_report(ws_root, inv_slug: str, *, out_dir=None,
+                                loom_embed: "dict | None" = None) -> Path:
     """Render one investigation to ``reports/investigation-<slug>.html`` (or
-    ``out_dir``) and return the written path."""
+    ``out_dir``) and return the written path.
+
+    ``loom_embed`` (see :func:`build_report_data`) is passed only by the
+    publisher, to embed the real loom served alongside the bundle."""
     ws_root = Path(ws_root)
-    data = build_report_data(ws_root, inv_slug)
+    data = build_report_data(ws_root, inv_slug, loom_embed=loom_embed)
     # inline one shared Plotly.js only when the report actually carries an
     # interactive figure — an image/SVG-only report stays lean
     plotly_js = _find_plotly_js(ws_root) if _has_interactive_figures(data) else None

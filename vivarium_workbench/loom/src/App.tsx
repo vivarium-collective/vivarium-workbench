@@ -136,7 +136,15 @@ export default function App() {
   // Which layout mode arranges the graph, and the dispatcher that runs it.
   // Adding a mode to layouts/registry makes it selectable from the toolbar
   // with no change here.
-  const layoutMode = useLayoutMode();
+  // Stripped embed mode defaults to the compact 'hierarchy' (relationship)
+  // packing rather than the wide 'flow-down' tree, which fits a report iframe's
+  // aspect ratio far better (the tree renders as an unreadable wide strip).
+  const layoutMode = useLayoutMode((() => {
+    try {
+      return new URLSearchParams(window.location.search).get('embed') === '1'
+        ? 'hierarchy' : undefined;
+    } catch { return undefined; }
+  })());
   // Collapse view: 'none' (both), 'stores' (process-only graph), 'processes'
   // (stores + processes shrunk to hyperedge junctions).
   // Which processes are "active" (hovered / selected / pinned). Modes that
@@ -169,13 +177,23 @@ export default function App() {
   // provides Configure/Run/Outputs, so when embedded we hide the loom's own
   // breadcrumb + tab strip and show only the Explore (wiring) graph.
   const chromeless = (() => {
-    try { return new URLSearchParams(window.location.search).get('chrome') === 'off'; } catch { return false; }
+    try {
+      const p = new URLSearchParams(window.location.search);
+      return p.get('chrome') === 'off' || p.get('embed') === '1';  // embed implies chromeless
+    } catch { return false; }
   })();
   // Embedded FULL surface (in a workbench card): show the whole stacked surface
   // but hide the loom's own breadcrumb — the card header already names the
   // composite (avoids a double header). `?header=off`.
   const hideHeader = (() => {
     try { return new URLSearchParams(window.location.search).get('header') === 'off'; } catch { return false; }
+  })();
+  // Stripped embed mode (?embed=1): a simple, read-only bigraph surface for
+  // inlining in reports — implies chromeless PLUS hiding the side dock rail
+  // (Processes/Inspector/Nodes) and the top-right layout/export toolbar, leaving
+  // just the wiring canvas + zoom controls + the hover hint.
+  const embed = (() => {
+    try { return new URLSearchParams(window.location.search).get('embed') === '1'; } catch { return false; }
   })();
   const [compositeId, setCompositeId] = useState<string | null>(() => {
     // Bootstrap from URL query if present (for popups deep-linked with ?id=)
@@ -2061,8 +2079,8 @@ export default function App() {
         />
       ),
     },
-  ] as DockPanelSpec[]).filter((p) => !(chromeless && p.id === 'config')), [allNodes, focus, handleRailNavigate, hidden, toggleHidden, showAll, collapsed, setNodeCollapsed, revealPath, selection, inspectorReveal,
-      compositeId, parameters, overrides, handleApplied, STATIC, chromeless, state, setState]);
+  ] as DockPanelSpec[]).filter((p) => !embed && !(chromeless && p.id === 'config')), [allNodes, focus, handleRailNavigate, hidden, toggleHidden, showAll, collapsed, setNodeCollapsed, revealPath, selection, inspectorReveal,
+      compositeId, parameters, overrides, handleApplied, STATIC, chromeless, embed, state, setState]);
 
   if (!state) {
     return (
@@ -2192,7 +2210,9 @@ export default function App() {
                       : 'hover or click a process to highlight its wiring · shift-click to pin'}
                   </div>
                 )}
-                {/* Top-right toolbar: Re-layout + Download (current layout, white bg). */}
+                {/* Top-right toolbar: Re-layout + Download (current layout, white bg).
+                    Hidden in stripped embed mode (?embed=1). */}
+                {!embed && (
                 <div style={{
                   position: 'absolute', top: 8, right: 8, zIndex: 10,
                   display: 'flex', gap: 6, alignItems: 'center',
@@ -2268,6 +2288,7 @@ export default function App() {
                     )}
                   </div>
                 </div>
+                )}
                 <ReactFlow
                   nodes={tieredNodes}
                   edges={tieredEdges}

@@ -851,16 +851,22 @@ def _do_build(
             payload = {}
         _write_json(api_dir / "inputs" / f"{inv_name}.json", payload)
 
-    # reports/investigation-<slug>.html — pre-rendered self-contained investigation
-    # reports. In the live app these come from GET /api/investigation-report/<slug>;
-    # in the static bundle (no server) the ↓ report button opens these files. Each
-    # is fully self-contained (data + figures inlined), so no base-path rewrite is
-    # needed. A malformed investigation is skipped, not fatal to the bundle.
+    # reports/investigation-<slug>.html — pre-rendered investigation reports. In
+    # the live app these come from GET /api/investigation-report/<slug>; in the
+    # static bundle (no server) the ↓ report button opens these files. Figures +
+    # data are inlined, so no base-path rewrite is needed. Because the bundle also
+    # ships the loom (bigraph-loom/) and composite-state snapshots (api/composite-
+    # state/) beside the report, we pass `loom_embed` so the Model section renders
+    # the REAL embedded loom (relative URLs from reports/ → ../bigraph-loom/ and
+    # ../api/composite-state/); it self-falls-back to the inlined static topology
+    # if a snapshot is missing. A malformed investigation is skipped, not fatal.
     from vivarium_workbench.lib.investigation_report import render_investigation_report
     reports_dir = out_dir / "reports"
+    _loom_embed = {"loom": "../bigraph-loom/index.html", "state": "../api/composite-state/"}
     for inv_name in investigations:
         try:
-            render_investigation_report(ws_root, inv_name, out_dir=reports_dir)
+            render_investigation_report(ws_root, inv_name, out_dir=reports_dir,
+                                        loom_embed=_loom_embed)
         except Exception:
             pass
 

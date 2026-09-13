@@ -211,6 +211,10 @@ figcaption{color:var(--ink-2);font-size:12.5px;margin-top:8px;max-width:none}
    and its (often full-document) CSS can't leak into the report. onload sizes it
    to content; this is the pre-resize default. */
 .viz-frame{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);height:460px;display:block}
+/* embedded REAL bigraph-loom (primary Model view) */
+.loom-real-slot{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--surface);height:560px;overflow:hidden;resize:vertical;min-height:280px}
+.loom-real-slot iframe{width:100%;height:100%;border:0;display:block}
+.loom-real-boot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-size:12px}
 /* interactive lightweight loom */
 .iloom{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--surface);height:520px;overflow:hidden}
 .iloom svg{width:100%;height:100%;cursor:grab;display:block}
@@ -511,6 +515,31 @@ function loomEmbed(s){
         <details class="loom-fallback"><summary>open the interactive bigraph-loom view</summary>
           <div class="loom-frame"><iframe class="loom-iframe" title="bigraph-loom — ${esc(cid)}" src="${esc(src)}" loading="lazy"></iframe></div>
         </details></figcaption>
+    </figure>`;
+}
+// PRIMARY Model view (published bundle only): the REAL bigraph-loom, embedded
+// chromeless + stripped (?embed=1) and driven by the composite-state snapshot
+// that ships beside the report. This is the genuine loom renderer — process
+// rectangles, store circles, the place-graph nesting and wiring, click a process
+// for its contract — not a re-drawing. The two base URLs come from the DATA
+// (INV.loom_embed), set only when publishing alongside the loom bundle; a
+// standalone/self-contained report has no INV.loom_embed, so this returns '' and
+// the Model section falls back to the inlined image / static topology.
+// setupRealLooms() mounts it lazily and, if it can't boot, reveals the fallback.
+function loomRealEmbed(s){
+  const le=INV.loom_embed; if(!le||!le.loom||!le.state) return '';
+  const cid=(s.model_topology&&s.model_topology.composite)||(s.baseline&&s.baseline[0]&&s.baseline[0].composite);
+  if(!cid) return '';
+  const stateUrl=le.state+encodeURIComponent(cid)+'.json';
+  const src=le.loom+'?embed=1&static=1&stateUrl='+encodeURIComponent(stateUrl)+'&tab=explore';
+  const fb=(s.model_loom
+      ? `<div class="loom-frame" style="height:auto;max-height:640px;overflow:auto"><img src="${s.model_loom}" alt="bigraph-loom view of ${esc(cid)}" style="width:100%;display:block"/></div>`
+      : (s.model_topology?loomTopoSVG(s.model_topology):''))||'';
+  const id='loomreal'+(++_ILOOM_SEQ);
+  return `<figure class="loom-embed loom-real" id="${id}" data-loomsrc="${esc(src)}">
+      <div class="loom-real-slot"><div class="loom-real-boot">loading bigraph-loom…</div></div>
+      <div class="loom-real-fallback" hidden>${fb}</div>
+      <figcaption><b>bigraph-loom</b> — <span class="mono">${esc(cid)}</span>: the composite's process-bigraph (process rectangles, store nodes, and their wiring). Click a process for its contract; drag to pan, scroll to zoom.</figcaption>
     </figure>`;
 }
 const has = v => v!=null && !(Array.isArray(v)&&!v.length) && !(typeof v==='object'&&!Array.isArray(v)&&!Object.keys(v).length);
@@ -860,7 +889,11 @@ function renderStudy(s, inv, idx){
   // expand stores) when we have the wired topology; fall back to the pre-rendered
   // image, the live loom iframe, the static SVG topology, then a plain viz.
   const loomInter = (s.model_topology && (s.model_topology.edges||[]).length) ? loomInteractive(s.model_topology) : '';
-  let modelBody = loomInter || loomRendered || loomEmbed(s) || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
+  // Prefer the REAL embedded loom (served bundle); it carries its own offline
+  // fallback. Then the pre-rendered image, the lightweight SVG loom, the static
+  // topology, and finally a plain viz.
+  const loomReal = loomRealEmbed(s);
+  let modelBody = loomReal || loomRendered || loomInter || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
   if(s.sourcing){
     modelBody += `<div class="decision-line" style="margin-top:6px"><span class="chip decision">${esc(s.sourcing.decision)}</span>
       ${(s.sourcing.modules||[]).map(m=>`<span class="chip mod">${esc(m)}</span>`).join(' ')||'<span class="chip mod">new module</span>'}</div>
@@ -1324,6 +1357,31 @@ function setupInteractiveLooms(){
     window.addEventListener('mouseup',()=>{ drag=false; svg.classList.remove('grabbing'); });
   });
 }
+// Mount the embedded REAL loom(s) lazily (only one study section is visible at a
+// time, so we don't boot React/ReactFlow for every study up front). The loom
+// posts {type:'explore:ready'} once it mounts; if none arrives (a standalone
+// download with no sibling loom bundle), swap in the static-topology fallback.
+function setupRealLooms(){
+  const frames=[...document.querySelectorAll('.loom-real')];
+  if(!frames.length) return;
+  const booted=new WeakSet();
+  window.addEventListener('message',ev=>{
+    const d=ev.data; if(!d||d.type!=='explore:ready') return;
+    frames.forEach(f=>{ const ifr=f.querySelector('iframe');
+      if(ifr&&ifr.contentWindow===ev.source){ booted.add(f); const b=f.querySelector('.loom-real-boot'); if(b) b.remove(); } });
+  });
+  const mount=f=>{
+    if(f._mounted) return; f._mounted=true;
+    const slot=f.querySelector('.loom-real-slot'), src=f.getAttribute('data-loomsrc'); if(!slot||!src) return;
+    const ifr=document.createElement('iframe'); ifr.title='bigraph-loom'; ifr.setAttribute('loading','lazy'); ifr.src=src;
+    slot.appendChild(ifr);
+    setTimeout(()=>{ if(!booted.has(f)){ slot.hidden=true; const fb=f.querySelector('.loom-real-fallback'); if(fb) fb.hidden=false; } }, 8000);
+  };
+  if('IntersectionObserver' in window){
+    const io=new IntersectionObserver(es=>{es.forEach(e=>{ if(e.isIntersecting){ mount(e.target); io.unobserve(e.target); } });},{rootMargin:'250px'});
+    frames.forEach(f=>io.observe(f));
+  } else { frames.forEach(mount); }
+}
 
 /* ---------- one contiguous document ---------- */
 function render(inv){
@@ -1349,6 +1407,7 @@ function render(inv){
   updateCount(); window.scrollTo(0,0); spy();
   setupLazyPlotly();
   setupInteractiveLooms();
+  setupRealLooms();
 }
 
 /* ---------- wiring ---------- */

@@ -299,6 +299,43 @@ def test_template_renders_loom_view_and_light_markdown():
     assert "mdLite(conclusion)" in tpl
 
 
+def test_real_loom_embed_is_opt_in_and_self_contained_by_default(tmp_path):
+    """The Model section embeds the REAL bigraph-loom only when the publisher
+    passes ``loom_embed`` (the bundle ships the loom + composite-state beside the
+    report). Without it the report stays fully self-contained — no iframe, no
+    ``/api/`` reference — so a standalone download still opens offline."""
+    from vivarium_workbench.lib.investigation_report import build_report_data, render_html
+    ws = _ws(tmp_path)
+    # default: no loom_embed → self-contained, no embed payload
+    data = build_report_data(ws, "src")
+    assert "loom_embed" not in data
+    html = render_html(data)
+    assert "/api/" not in html and 'src="http' not in html
+    # publisher path: loom_embed present → carried into the embedded data payload
+    le = {"loom": "../bigraph-loom/index.html", "state": "../api/composite-state/"}
+    data2 = build_report_data(ws, "src", loom_embed=le)
+    assert data2["loom_embed"] == le
+    html2 = render_html(data2)
+    assert '"loom_embed"' in html2  # the client reads INV.loom_embed to build the iframe
+
+
+def test_template_wires_real_loom_embed():
+    """The template carries the real-loom embed renderer + its lazy mounter, and
+    builds the loom URL from the DATA (INV.loom_embed) — never a hardcoded
+    ``/api/`` path, which would break the self-contained default."""
+    from pathlib import Path
+    import vivarium_workbench
+    tpl = (Path(vivarium_workbench.__file__).parent
+           / "templates" / "investigation-report.html").read_text(encoding="utf-8")
+    assert "function loomRealEmbed(" in tpl
+    assert "function setupRealLooms(" in tpl
+    assert "setupRealLooms();" in tpl
+    assert "INV.loom_embed" in tpl
+    assert "?embed=1&static=1&stateUrl=" in tpl
+    # the template itself must contain no /api/ literal (self-contained default)
+    assert "/api/" not in tpl
+
+
 def test_template_wires_interactive_loom():
     """The Model section prefers the lightweight interactive loom when the
     resolved topology carries wiring edges, and the interaction helpers are
