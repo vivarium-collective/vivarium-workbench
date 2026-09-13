@@ -758,9 +758,16 @@
           '</div>' +
         '</div>' +
         '<div class="pcard-acc">' +
-          // The card body is now the FULL stacked loom surface — Configure/Inputs,
-          // the bigraph, Run/Step, and Outputs all live inside it. No more card
-          // re-implementations of those sections (which had diverging semantics).
+          // Card-level Run + Outputs, surfaced on the COLLAPSED card so a
+          // composite is runnable (and its results/visualizations viewable)
+          // without first opening Explore. When Explore IS open, the loom's own
+          // full stacked surface owns run+outputs and these are hidden (CSS,
+          // keyed on .pcard-loom-open) so the two run bars never both show —
+          // that was the "diverging semantics" the earlier refactor guarded.
+          runBar +
+          _pcardSection('outputs', 'Outputs', '<span class="pcard-sec-hint">◆ emitter · observables · run status → visualizations</span>', outputsBody, { resizable: true }) +
+          // Explore = the FULL stacked loom surface — Configure/Inputs, the
+          // bigraph, Run/Step, and Outputs all live inside it (lazy-mounted).
           _pcardSection('explore', 'Explore', '<span class="pcard-sec-hint">◆ Configure · run · outputs — click to open</span>', _compositeLoomExplore(c), { wide: true, feature: true }) +
         '</div>' +
       '</div>' +

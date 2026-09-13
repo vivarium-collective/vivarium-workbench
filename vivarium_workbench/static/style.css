@@ -2010,6 +2010,11 @@ body.pcard-sec-resizing{ cursor:ns-resize; user-select:none; }
 }
 .pcard-explore-btn:hover{ background:#d5f2ee; border-color:#4bb3ae; }
 .pcard-loom-open .pcard-explore-btn{ background:#fff; color:#475569; border-color:#e5e7eb; }
+/* Card-level Run bar + Outputs are for the COLLAPSED card (run/view without
+   Explore). Once Explore/loom is open, the loom's own full stacked surface owns
+   run+outputs — hide the card-level pair so the two run bars never both show. */
+.pcard-composite.pcard-loom-open > .loom-card > .pcard-acc > .pcard-runbar,
+.pcard-composite.pcard-loom-open > .loom-card > .pcard-acc > .pcard-sec-outputs{ display:none; }
 /* Collapse-the-bar button (⤢): only useful once the loom is open. */
 .pcard-hdr-collapse{
   border:1px solid #e5e7eb; background:#fff; color:#64748b; cursor:pointer;
