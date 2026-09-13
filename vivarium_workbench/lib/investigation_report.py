@@ -423,9 +423,19 @@ def _match_traj(trajs, slug, kind):
 
 def _compact_bigraph(state: dict) -> dict:
     """Reduce a resolved composite ``state`` to a compact bigraph topology for
-    the Model-section loom view: the nested store tree (name + type) and the
-    flat process list (name + address + declared input/output ports)."""
+    the Model-section loom view: the nested store tree (name + type), the flat
+    process list (name + address + ports + doc/contract), and the process↔store
+    WIRING edges (grouped by the top-level store compartment) so the report can
+    render an interactive bigraph without a running server."""
     procs: list = []
+    edges: list = []
+
+    def _port_paths(pm):
+        # port -> path list; yields (compartment, leaf) for each wired store
+        for path in (pm or {}).values():
+            if isinstance(path, (list, tuple)) and len(path) >= 2:
+                comp = path[1] if len(path) >= 3 else path[0]
+                yield str(comp), str(path[-1])
 
     def walk(node: dict) -> list:
         out = []
@@ -434,17 +444,32 @@ def _compact_bigraph(state: dict) -> dict:
                 continue
             t = v.get("_type")
             if t in ("process", "step"):
+                comps, leaves = set(), set()
+                for pm in (v.get("inputs"), v.get("outputs")):
+                    for comp, leaf in _port_paths(pm):
+                        comps.add(comp); leaves.add(leaf)
+                        edges.append({"p": k, "c": comp, "s": leaf})
+                doc = v.get("doc") or ""
                 procs.append({
                     "name": k, "kind": t, "address": v.get("address"),
                     "inputs": list((v.get("inputs") or {}).keys()),
                     "outputs": list((v.get("outputs") or {}).keys()),
+                    # first line of the describe() doc = the concise contract summary
+                    "doc": (doc.splitlines()[0] if doc else ""),
+                    "compartments": sorted(comps),
                 })
                 continue
             out.append({"name": k, "type": t, "children": walk(v)})
         return out
 
     stores = walk(state)
-    return {"processes": procs, "stores": stores}
+    # dedupe edges (a process may touch a store via >1 port)
+    seen = set(); uniq = []
+    for e in edges:
+        key = (e["p"], e["c"], e["s"])
+        if key not in seen:
+            seen.add(key); uniq.append(e)
+    return {"processes": procs, "stores": stores, "edges": uniq}
 
 
 def _baseline_composite_id(spec: dict) -> "str | None":

@@ -253,8 +253,9 @@ def test_compact_bigraph_extracts_processes_and_nested_stores():
     state = {
         "_type": "composite",
         "metabolism": {"_type": "process", "address": "local:Foo",
-                       "inputs": {"nutrients": ["env", "n"]},
-                       "outputs": {"biomass": ["cell", "m"]}},
+                       "doc": "FBA metabolism contract.\nsecond line ignored",
+                       "inputs": {"nutrients": ["cell", "env", "n"]},
+                       "outputs": {"biomass": ["cell", "physiology", "m"]}},
         "cell": {"biomass": {"_type": "mass"},
                  "sub": {"x": {"_type": "concentration"}}},
         "viz": {"_type": "step", "address": "local:Plot", "inputs": {}, "outputs": {}},
@@ -264,10 +265,17 @@ def test_compact_bigraph_extracts_processes_and_nested_stores():
     foo = next(p for p in topo["processes"] if p["name"] == "metabolism")
     assert foo["address"] == "local:Foo"
     assert foo["inputs"] == ["nutrients"] and foo["outputs"] == ["biomass"]
+    # first line of the describe() doc is carried as the concise contract summary
+    assert foo["doc"] == "FBA metabolism contract."
+    # a 3+ segment path resolves its compartment to the second segment
+    assert set(foo["compartments"]) == {"env", "physiology"}
     cell = next(st for st in topo["stores"] if st["name"] == "cell")
     assert any(c["name"] == "biomass" and c["type"] == "mass" for c in cell["children"])
     sub = next(c for c in cell["children"] if c["name"] == "sub")
     assert any(gc["name"] == "x" and gc["type"] == "concentration" for gc in sub["children"])
+    # process↔compartment wiring edges are emitted for the interactive loom
+    assert {(e["p"], e["c"]) for e in topo["edges"]} == {
+        ("metabolism", "env"), ("metabolism", "physiology")}
 
 
 def test_model_topology_is_fully_guarded():
@@ -289,6 +297,24 @@ def test_template_renders_loom_view_and_light_markdown():
     assert "s.model_topology ? loomTopoSVG(s.model_topology)" in tpl
     assert "function mdLite(" in tpl
     assert "mdLite(conclusion)" in tpl
+
+
+def test_template_wires_interactive_loom():
+    """The Model section prefers the lightweight interactive loom when the
+    resolved topology carries wiring edges, and the interaction helpers are
+    present so the embedded SVG pans/zooms/highlights without a server."""
+    from pathlib import Path
+    import vivarium_workbench
+    tpl = (Path(vivarium_workbench.__file__).parent
+           / "templates" / "investigation-report.html").read_text(encoding="utf-8")
+    assert "function loomInteractive(" in tpl
+    # the interactive view is chosen first, falling back to the static renders
+    assert "loomInteractive(s.model_topology)" in tpl
+    # interaction handlers wired into the embedded SVG
+    for fn in ("_iloomHi", "_iloomClear", "_iloomTip", "_iloomExpand",
+               "setupInteractiveLooms"):
+        assert f"function {fn}(" in tpl, fn
+    assert "setupInteractiveLooms();" in tpl
 
 
 def test_model_loom_png_embedded_in_report(tmp_path):

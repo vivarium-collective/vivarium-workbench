@@ -211,6 +211,24 @@ figcaption{color:var(--ink-2);font-size:12.5px;margin-top:8px;max-width:none}
    and its (often full-document) CSS can't leak into the report. onload sizes it
    to content; this is the pre-resize default. */
 .viz-frame{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);height:460px;display:block}
+/* interactive lightweight loom */
+.iloom{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--surface);height:520px;overflow:hidden}
+.iloom svg{width:100%;height:100%;cursor:grab;display:block}
+.iloom svg.grabbing{cursor:grabbing}
+.iloom .il-proc,.iloom .il-comp{cursor:pointer}
+.iloom .il-comp{cursor:pointer}
+.iloom .il-proc rect,.iloom .il-comp rect{transition:opacity .12s}
+.iloom .dim{opacity:.18}
+.iloom .il-edge.off{stroke-opacity:.05!important}
+.iloom .il-edge.on{stroke-opacity:.95!important;stroke-width:2.2!important}
+.iloom .il-tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--surface);font-size:11px;line-height:1.35;
+  padding:6px 9px;border-radius:6px;max-width:340px;z-index:5;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+.iloom .il-hint{position:absolute;left:10px;bottom:8px;font-size:10.5px;color:var(--ink-3);background:var(--surface);
+  padding:2px 7px;border-radius:6px;border:1px solid var(--line);opacity:.9}
+.iloom .il-stores{position:absolute;right:10px;top:10px;max-width:46%;max-height:70%;overflow:auto;background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+.iloom .il-leaves{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px}
+.iloom .il-leaf{font-family:var(--mono);font-size:10px;background:var(--sunken);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
 /* An interactive (Plotly) figure rendered inline in the main document, sharing
    the report's one Plotly.js. Bordered like the iframe path it replaces. */
 .embedded-plotly .plotly-holder{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:6px;overflow:hidden}
@@ -389,6 +407,79 @@ function loomTopoSVG(topo){
   sv+=`</svg>`;
   const cap=`Static topology of <span class="mono">${esc(topo.composite||'')}</span> — ${procs.length} process${procs.length==1?'':'es'} over ${rows.length} state node${rows.length==1?'':'s'}.`;
   return `<figure><div class="fig-scroll">${sv}</div><figcaption>${cap}</figcaption></figure>`;
+}
+
+// ---------- lightweight INTERACTIVE bigraph loom (self-contained, no server) ----------
+// A pan/zoom bipartite view of the composite: process nodes on the left wired to
+// the top-level store compartments on the right (from topo.edges). Hover a
+// process to read its contract and light up the compartments it touches; hover a
+// compartment to light up the processes that read/write it; click a compartment
+// to expand its store leaves. Vanilla SVG + a little JS — embeds directly in the
+// static report and works offline.
+let _ILOOM_SEQ=0;
+function loomInteractive(topo){
+  if(!topo) return '';
+  const procs=topo.processes||[], edges=topo.edges||[];
+  // The biological compartments are the children of the single "cell" root (a
+  // process-bigraph store tree nests everything under one root), so unwrap a
+  // lone root to its children. Fall back to whatever compartments the edges
+  // actually reference so nothing is dropped.
+  let roots=topo.stores||[];
+  if(roots.length===1 && (roots[0].children||[]).length) roots=roots[0].children;
+  let comps=roots.map(n=>n.name).filter(Boolean);
+  const edgeComps=[...new Set(edges.map(e=>e.c).filter(Boolean))];
+  // keep only compartments that carry edges, in store-tree order, then append
+  // any edge compartments the tree didn't name (defensive).
+  const compSet0=new Set(comps);
+  comps=comps.filter(c=>edgeComps.includes(c)).concat(edgeComps.filter(c=>!compSet0.has(c)));
+  if(!comps.length) comps=edgeComps;
+  if(!procs.length || !comps.length) return '';
+  // leaves per compartment (for click-to-expand): flatten each compartment subtree.
+  const leavesByComp={};
+  roots.forEach(n=>{ const out=[]; (function fl(ns){(ns||[]).forEach(c=>{ if(!(c.children&&c.children.length)) out.push(c.name); fl(c.children);});})(n.children); leavesByComp[n.name]=out.length?out:[n.name]; });
+  const compSet=new Set(comps);
+  const id='il'+(++_ILOOM_SEQ);
+  const rowH=26, padY=34, pW=210, cW=200, gap=230, cx0=24;
+  const compX=cx0+pW+gap;
+  const H=Math.max(procs.length,comps.length)*rowH+padY*2, W=compX+cW+cx0;
+  const py=i=>padY+i*rowH+ (Math.max(0,(comps.length-procs.length))*rowH)/2;
+  const cy=i=>padY+i*rowH+ (Math.max(0,(procs.length-comps.length))*rowH)/2;
+  const compIdx={}; comps.forEach((c,i)=>compIdx[c]=i);
+  const palette=['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#17becf','#bcbd22'];
+  const compColor=c=>palette[(compIdx[c]||0)%palette.length];
+  let g='';
+  // edges
+  edges.forEach(e=>{
+    const pi=procs.findIndex(p=>p.name===e.p); if(pi<0||!compSet.has(e.c)) return;
+    const x1=cx0+pW, y1=py(pi)+rowH/2-3, x2=compX, y2=cy(compIdx[e.c])+rowH/2-3, mx=(x1+x2)/2;
+    g+=`<path class="il-edge" data-p="${esc(e.p)}" data-c="${esc(e.c)}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${compColor(e.c)}" stroke-opacity=".28" stroke-width="1.1"/>`;
+  });
+  // process nodes
+  procs.forEach((p,i)=>{ const y=py(i);
+    g+=`<g class="il-proc" data-proc="${esc(p.name)}" tabindex="0"
+          onmouseenter="_iloomHi('${id}','proc','${esc(p.name)}')" onmouseleave="_iloomClear('${id}')"
+          onmousemove="_iloomTip(event,'${id}',${JSON.stringify(esc(p.name)+' — '+(p.doc||p.address||'')).replace(/"/g,'&quot;')})">
+        <rect x="${cx0}" y="${y}" width="${pW}" height="${rowH-6}" rx="7" fill="var(--surface)" stroke="var(--accent)"/>
+        <text x="${cx0+10}" y="${y+14}" font-family="var(--mono)" font-size="11" fill="var(--ink)">${esc(p.name)}</text></g>`;
+  });
+  // compartment nodes
+  comps.forEach((c,i)=>{ const y=cy(i), n=(leavesByComp[c]||[]).length;
+    g+=`<g class="il-comp" data-comp="${esc(c)}" tabindex="0"
+          onmouseenter="_iloomHi('${id}','comp','${esc(c)}')" onmouseleave="_iloomClear('${id}')"
+          onclick="_iloomExpand('${id}','${esc(c)}')"
+          onmousemove="_iloomTip(event,'${id}',${JSON.stringify(esc(c)+' — '+'store compartment').replace(/"/g,'&quot;')})">
+        <rect x="${compX}" y="${y}" width="${cW}" height="${rowH-6}" rx="7" fill="${compColor(c)}22" stroke="${compColor(c)}"/>
+        <text x="${compX+10}" y="${y+14}" font-family="var(--mono)" font-size="11" fill="var(--ink)">${esc(c)} <tspan fill="var(--ink-3)">· ${n}</tspan></text></g>`;
+  });
+  const leavesJSON=esc(JSON.stringify(leavesByComp)).replace(/"/g,'&quot;');
+  return `<figure class="iloom-fig">
+    <div class="iloom" id="${id}" data-leaves="${leavesJSON}">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet"><g class="il-view">${g}</g></svg>
+      <div class="il-tip" hidden></div>
+      <div class="il-hint">drag to pan · scroll to zoom · hover a process for its contract · click a compartment to list its stores</div>
+    </div>
+    <figcaption><b>bigraph-loom</b> (interactive) — <span class="mono">${esc(topo.composite||'')}</span>: ${procs.length} processes wired to ${comps.length} cell compartments.</figcaption>
+  </figure>`;
 }
 // Embed the REAL bigraph-loom for a study's baseline composite — the same live
 // loom the workbench serves at /bigraph-loom/, so the Model section shows loom's
@@ -765,7 +856,11 @@ function renderStudy(s, inv, idx){
          <img src="${s.model_loom}" alt="bigraph-loom view of ${esc(_mcid)}" style="width:100%;display:block"/></div>
        <figcaption><b>bigraph-loom</b> view of <span class="mono">${esc(_mcid)}</span> — the composite's bigraph with its config loaded.</figcaption></figure>`
     : '';
-  let modelBody = loomRendered || loomEmbed(s) || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
+  // Prefer the lightweight INTERACTIVE loom (pan/zoom, hover contracts, click to
+  // expand stores) when we have the wired topology; fall back to the pre-rendered
+  // image, the live loom iframe, the static SVG topology, then a plain viz.
+  const loomInter = (s.model_topology && (s.model_topology.edges||[]).length) ? loomInteractive(s.model_topology) : '';
+  let modelBody = loomInter || loomRendered || loomEmbed(s) || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
   if(s.sourcing){
     modelBody += `<div class="decision-line" style="margin-top:6px"><span class="chip decision">${esc(s.sourcing.decision)}</span>
       ${(s.sourcing.modules||[]).map(m=>`<span class="chip mod">${esc(m)}</span>`).join(' ')||'<span class="chip mod">new module</span>'}</div>
@@ -1184,6 +1279,52 @@ function setupLazyPlotly(){
   try{ setTimeout(sweep,120); }catch(e){}
 }
 
+/* ---------- interactive loom: hover / tooltip / expand / pan-zoom ---------- */
+function _iloomHi(id,kind,name){
+  const root=document.getElementById(id); if(!root) return;
+  root.classList.add('il-active');
+  root.querySelectorAll('.il-edge').forEach(e=>{
+    const on = kind==='proc' ? e.getAttribute('data-p')===name : e.getAttribute('data-c')===name;
+    e.classList.toggle('on',on); e.classList.toggle('off',!on);
+  });
+  const conn=new Set();
+  root.querySelectorAll('.il-edge.on').forEach(e=>{ conn.add('p:'+e.getAttribute('data-p')); conn.add('c:'+e.getAttribute('data-c')); });
+  root.querySelectorAll('.il-proc').forEach(g=>g.classList.toggle('dim', !conn.has('p:'+g.getAttribute('data-proc')) && !(kind==='proc'&&g.getAttribute('data-proc')===name)));
+  root.querySelectorAll('.il-comp').forEach(g=>g.classList.toggle('dim', !conn.has('c:'+g.getAttribute('data-comp')) && !(kind==='comp'&&g.getAttribute('data-comp')===name)));
+}
+function _iloomClear(id){ const r=document.getElementById(id); if(!r) return;
+  r.classList.remove('il-active');
+  r.querySelectorAll('.on,.off,.dim').forEach(e=>e.classList.remove('on','off','dim'));
+  const t=r.querySelector('.il-tip'); if(t) t.hidden=true; }
+function _iloomTip(evt,id,text){ const r=document.getElementById(id); if(!r) return;
+  const t=r.querySelector('.il-tip'); if(!t) return;
+  t.textContent=text; t.hidden=false;
+  const b=r.getBoundingClientRect();
+  t.style.left=Math.min(b.width-12, evt.clientX-b.left+12)+'px';
+  t.style.top=Math.max(4, evt.clientY-b.top-10)+'px'; }
+function _iloomExpand(id,comp){ const r=document.getElementById(id); if(!r) return;
+  let leaves={}; try{ leaves=JSON.parse(r.getAttribute('data-leaves')||'{}'); }catch(e){}
+  let panel=r.querySelector('.il-stores');
+  if(!panel){ panel=document.createElement('div'); panel.className='il-stores'; r.appendChild(panel); }
+  const list=(leaves[comp]||[]);
+  if(panel.dataset.comp===comp && !panel.hidden){ panel.hidden=true; panel.dataset.comp=''; return; }
+  panel.dataset.comp=comp; panel.hidden=false;
+  panel.innerHTML=`<b>cell/${comp}</b> — ${list.length} store${list.length==1?'':'s'}<div class="il-leaves">`+
+    list.map(s=>`<span class="il-leaf">${esc(s)}</span>`).join('')+`</div>`;
+}
+function setupInteractiveLooms(){
+  document.querySelectorAll('.iloom').forEach(root=>{
+    const svg=root.querySelector('svg'), view=root.querySelector('.il-view'); if(!svg||!view) return;
+    let z=1, tx=0, ty=0, drag=false, sx=0, sy=0;
+    const apply=()=>view.setAttribute('transform',`translate(${tx},${ty}) scale(${z})`);
+    svg.addEventListener('wheel',ev=>{ ev.preventDefault(); const f=ev.deltaY<0?1.12:1/1.12;
+      z=Math.max(0.3,Math.min(6,z*f)); apply(); },{passive:false});
+    svg.addEventListener('mousedown',ev=>{ if(ev.target.closest('.il-comp'))return; drag=true; sx=ev.clientX-tx; sy=ev.clientY-ty; svg.classList.add('grabbing'); });
+    window.addEventListener('mousemove',ev=>{ if(!drag)return; tx=ev.clientX-sx; ty=ev.clientY-sy; apply(); });
+    window.addEventListener('mouseup',()=>{ drag=false; svg.classList.remove('grabbing'); });
+  });
+}
+
 /* ---------- one contiguous document ---------- */
 function render(inv){
   CUR=inv.slug; loadFB();
@@ -1207,6 +1348,7 @@ function render(inv){
     </div>`;
   updateCount(); window.scrollTo(0,0); spy();
   setupLazyPlotly();
+  setupInteractiveLooms();
 }
 
 /* ---------- wiring ---------- */
