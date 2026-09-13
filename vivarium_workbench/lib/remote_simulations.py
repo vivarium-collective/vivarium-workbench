@@ -97,6 +97,39 @@ def _infer_study_slug(experiment_id: str, rules: list) -> "str | None":
     return None
 
 
+def _study_investigation_map(ws_root: Path) -> dict:
+    """Map each study slug -> its investigation slug (study.yaml ``investigation:``).
+
+    Lets a remote run that was associated with a study (via
+    ``remote_run_study_map``) also carry the right ``investigation_slug``, so the
+    investigation-scoped Runs/Sims views surface it. Without this a remote run
+    has a study but a null investigation and is filtered out of every
+    investigation scope (only local/backfill runs, which set investigation_slug
+    directly, showed). Best-effort + tolerant of flat and nested layouts.
+    """
+    import glob
+    import yaml as _yaml
+    out: dict = {}
+    ws = Path(ws_root)
+    patterns = [
+        ws / "studies" / "*" / "study.yaml",
+        ws / "workspace" / "studies" / "*" / "study.yaml",
+        ws / "investigations" / "*" / "studies" / "*" / "study.yaml",
+        ws / "workspace" / "investigations" / "*" / "studies" / "*" / "study.yaml",
+    ]
+    for pat in patterns:
+        for f in glob.glob(str(pat)):
+            try:
+                d = _yaml.safe_load(open(f, encoding="utf-8")) or {}
+            except Exception:
+                continue
+            slug = Path(f).parent.name
+            inv = d.get("investigation")
+            if inv and slug not in out:
+                out[slug] = inv
+    return out
+
+
 def _sms_api_base() -> str:
     # VIVA_API_BASE is canonical; SMS_API_BASE is a fallback alias (backend
     # repo was renamed sms-api -> viva-api).
@@ -362,10 +395,17 @@ def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
     # local study-slug-from-path inference in simulations_index can't fire).
     study_rules = _load_remote_study_map(ws_root)
     if study_rules:
+        inv_map = _study_investigation_map(ws_root)
         for r in rows:
             slug = _infer_study_slug(r.get("run_id", ""), study_rules)
             if slug:
                 r["study_slug"] = slug
                 r["studies"] = [slug]
+                # Carry the study's investigation so investigation-scoped views
+                # (Runs/Sims filtered to e.g. cd2) surface this remote run —
+                # otherwise it has a study but a null investigation and is hidden.
+                inv = inv_map.get(slug)
+                if inv:
+                    r["investigation_slug"] = inv
     rows.sort(key=lambda r: r.get("started_at") or 0.0, reverse=True)
     return rows[:limit] if limit and limit > 0 else rows
