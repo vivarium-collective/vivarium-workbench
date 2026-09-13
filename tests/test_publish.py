@@ -121,8 +121,12 @@ def test_build_bundle_investigation_json(tmp_workspace, tmp_path):
 
 
 def test_build_bundle_pre_renders_investigation_report(tmp_workspace, tmp_path):
-    """build_bundle pre-renders a self-contained report per investigation into
-    reports/ so the static bundle's ↓ report button can open it with no server."""
+    """build_bundle pre-renders a report per investigation into reports/ so the
+    static bundle's ↓ report button can open it with no server. Data + figures
+    are inlined; the Model section additionally embeds the real bigraph-loom that
+    ships in the SAME bundle (../bigraph-loom/ + ../api/composite-state/), which
+    are static sibling files, not a live backend — so there is still no runtime
+    fetch and no external URL."""
     from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
@@ -131,7 +135,15 @@ def test_build_bundle_pre_renders_investigation_report(tmp_workspace, tmp_path):
     assert report.is_file()
     html = report.read_text(encoding="utf-8")
     assert "Main Investigation" in html          # rendered from the real title
-    assert "fetch(" not in html and "/api/" not in html  # self-contained
+    assert "fetch(" not in html                  # no live backend calls
+    assert 'src="http' not in html and 'href="http' not in html  # no external URLs
+    # the published report embeds the sibling loom bundle (relative static refs)
+    assert '"loom_embed"' in html
+    # every /api/ reference is the static composite-state snapshot beside it,
+    # never a live /api/ endpoint call
+    import re
+    for m in re.findall(r'[^"\\]{0,24}/api/[^"\\]{0,40}', html):
+        assert "composite-state" in m, m
 
 
 def test_build_bundle_workspace_json(tmp_workspace, tmp_path):
