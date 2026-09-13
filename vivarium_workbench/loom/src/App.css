@@ -1985,6 +1985,24 @@ textarea.sr-input {
   padding: 7px 14px; background: #f8fafc; border-top: 1px solid #e5e7eb;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05); font-size: 13px; z-index: 5;
 }
+/* Grip between the graph and the run bar — drag to collapse/expand the graph. */
+.loom-graph-grip {
+  flex: 0 0 auto; height: 11px; display: flex; align-items: center; justify-content: center;
+  gap: 8px; cursor: row-resize; background: #f1f5f9; border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb; touch-action: none; user-select: none; z-index: 6;
+}
+.loom-graph-grip:hover { background: #e6edf5; }
+.loom-graph-grip-handle {
+  width: 40px; height: 4px; border-radius: 999px; background: #cbd5e1;
+}
+.loom-graph-grip:hover .loom-graph-grip-handle { background: #94a3b8; }
+/* Collapsed: give the grip a touch more presence + a label so it's discoverable. */
+.loom-graph-grip.collapsed {
+  height: 22px; background: #eef2f7;
+}
+.loom-graph-grip-label {
+  font-size: 11px; font-weight: 600; color: #64748b; letter-spacing: .02em;
+}
 .explore-runbar-dur input { width: 64px; margin-left: 2px; }
 .explore-runbar-kind {
   font-size: 11px; font-weight: 700; letter-spacing: .03em;
@@ -2344,17 +2362,8 @@ textarea.sr-input {
 .loom-outputs-dock.collapsed { height: auto !important; }
 .loom-outputs-dock.collapsed .outputs-panel { display: none; }
 .loom-outputs-dock .outputs-panel { flex: 1; min-height: 0; }
-/* Top grip: drag UP to enlarge the outputs (the graph above yields room). */
-.loom-outputs-grip {
-  flex: 0 0 auto; height: 7px; cursor: ns-resize; background: #e5e7eb;
-  position: relative; touch-action: none;
-}
-.loom-outputs-grip::before {
-  content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: 42px; height: 3px; border-radius: 999px; background: #b6c0cc;
-}
-.loom-outputs-grip:hover { background: #d5f2ee; }
-.loom-outputs-grip:hover::before { background: #4bb3ae; }
+/* The outputs dock has no drag grip of its own — the single graph↔run-bar grip
+   is the only resizer; outputs is toggle-only. */
 .loom-outputs-toggle {
   flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
   border: 0; background: #f8fafc; cursor: pointer; text-align: left;

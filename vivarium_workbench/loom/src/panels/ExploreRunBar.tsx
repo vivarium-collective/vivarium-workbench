@@ -55,6 +55,11 @@ export interface ExploreRunBarProps {
   // Save-points: capture the current frame's state, and load a saved state back.
   captureState?: () => Record<string, unknown> | null;
   onViewState?: (state: Record<string, unknown>) => void;
+  /** When the graph is collapsed, the graph-only controls (playback transport,
+   *  snapshot export, Save/History) hide — they belong to the graph — leaving
+   *  only the persistent strip (mode · Duration/Steps · Run · emit · status) so
+   *  the run bar reads identically whether the graph is open or collapsed. */
+  graphCollapsed?: boolean;
 }
 
 export function ExploreRunBar(props: ExploreRunBarProps) {
@@ -165,8 +170,10 @@ export function ExploreRunBar(props: ExploreRunBarProps) {
       )}
 
       {/* Run + step are ONE control: once a run yields a steppable trajectory the
-          playback transport lives right here in the run bar. */}
-      {props.transport && (
+          playback transport lives right here in the run bar — but only while the
+          graph is open (it scrubs the graph); when collapsed it hides so the
+          persistent strip stays identical. */}
+      {props.transport && !props.graphCollapsed && (
         <>
           <span className="explore-runbar-div" aria-hidden="true" />
           <TopoTransport {...props.transport} />
@@ -190,8 +197,10 @@ export function ExploreRunBar(props: ExploreRunBarProps) {
         </>
       )}
 
-      {/* Save-points: capture the current frame, browse history, view or fork. */}
-      {!props.readOnly && props.captureState && (
+      {/* Save-points: capture the current frame, browse history, view or fork.
+          A graph-only control (captures the graph's current frame state), so it
+          hides with the graph when collapsed. */}
+      {!props.readOnly && props.captureState && !props.graphCollapsed && (
         <>
           <span className="explore-runbar-div" aria-hidden="true" />
           <SavePointsMenu

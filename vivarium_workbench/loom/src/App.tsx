@@ -282,26 +282,46 @@ export default function App() {
   useEffect(() => {
     if (trajectory !== null || vizHtml !== null) setOutputsOpen(true);
   }, [trajectory, vizHtml]);
-  // Draggable height for the Outputs dock — drag its top grip UP to see more of
-  // the viz (the graph above shrinks to give it room).
-  const [outputsHeight, setOutputsHeight] = useState(300);
-  const outputsDragRef = useRef<{ startY: number; startH: number } | null>(null);
-  const onOutputsGripDown = useCallback((e: React.PointerEvent) => {
-    outputsDragRef.current = { startY: e.clientY, startH: outputsHeight };
+  // Default height for the Outputs dock when the graph fills the surface. Once
+  // the graph is dragged to a fixed height or collapsed, the outputs dock becomes
+  // the flex filler instead (see its style). There is ONE resize grip in the
+  // whole surface — the graph↔run-bar grip — so the outputs dock no longer has
+  // its own top-edge grip.
+  const outputsHeight = 300;
+
+  // Draggable + snap-collapsible GRAPH height. The grip sits between the graph
+  // and the run bar; drag it DOWN to shrink the graph continuously, and at/near
+  // zero it SNAPS closed into the collapsed view (graph gone, the run + outputs
+  // strip persists unchanged). Drag up — or double-click the grip — to reopen.
+  // graphHeight=null means "fill" (flex:1, the default full-graph state).
+  const GRAPH_SNAP_PX = 56;
+  const [graphHeight, setGraphHeight] = useState<number | null>(null);
+  const [graphCollapsed, setGraphCollapsed] = useState(false);
+  const graphRowRef = useRef<HTMLDivElement | null>(null);
+  const graphDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const onGraphGripDown = useCallback((e: React.PointerEvent) => {
+    const startH = graphCollapsed ? 0 : (graphRowRef.current?.offsetHeight ?? 0);
+    graphDragRef.current = { startY: e.clientY, startH };
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     e.preventDefault();
-  }, [outputsHeight]);
-  const onOutputsGripMove = useCallback((e: React.PointerEvent) => {
-    const d = outputsDragRef.current;
+  }, [graphCollapsed]);
+  const onGraphGripMove = useCallback((e: React.PointerEvent) => {
+    const d = graphDragRef.current;
     if (!d) return;
-    const dy = e.clientY - d.startY;           // drag up → dy<0 → taller dock
-    const h = Math.max(120, Math.min(window.innerHeight * 0.88, d.startH - dy));
-    setOutputsHeight(h);
+    const dy = e.clientY - d.startY;           // drag down → dy>0 → shorter graph
+    const h = d.startH - dy;
+    if (h < GRAPH_SNAP_PX) {
+      setGraphCollapsed(true);
+    } else {
+      setGraphCollapsed(false);
+      setGraphHeight(Math.min(window.innerHeight * 0.9, h));
+    }
   }, []);
-  const onOutputsGripUp = useCallback((e: React.PointerEvent) => {
-    outputsDragRef.current = null;
+  const onGraphGripUp = useCallback((e: React.PointerEvent) => {
+    graphDragRef.current = null;
     (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
   }, []);
+  const toggleGraphCollapsed = useCallback(() => setGraphCollapsed((c) => !c), []);
 
   // ── Topology playback (loom-live-play) ───────────────────────────────────
   // When a run's trajectory carries a place-graph that CHANGES over steps
@@ -2187,10 +2207,23 @@ export default function App() {
               </div>
             )}
             <EmitContext.Provider value={emitSet}>
-              {/* Dock row (flex:1) holds the Config/Process/Inspector/Nodes panels
-                  flanking the canvas; a slim run bar is pinned along the bottom so
-                  the composite can be run without leaving the graph. */}
-              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' }}>
+              {/* Dock row holds the Config/Process/Inspector/Nodes panels flanking
+                  the canvas; a slim run bar is pinned below so the composite can be
+                  run without leaving the graph. Its height is drag-collapsible (the
+                  grip below): flex:1 fills by default, a dragged pixel height
+                  shrinks it, and collapsed hides it entirely so only the persistent
+                  run + outputs strip remains (the "one continuous structure"). */}
+              <div
+                ref={graphRowRef}
+                className={'loom-graph-row' + (graphCollapsed ? ' collapsed' : '')}
+                style={
+                  graphCollapsed
+                    ? { height: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row' }
+                    : graphHeight != null
+                      ? { height: graphHeight, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row' }
+                      : { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' }
+                }
+              >
               <DockContainer
                 panels={dockPanels}
                 expandRequest={{ id: 'inspector', nonce: inspectorReveal }}
@@ -2359,6 +2392,25 @@ export default function App() {
               </div>
               </DockContainer>
               </div>
+              {/* Grip between the graph and the run bar: drag DOWN to shrink the
+                  graph until it snaps closed (collapsed card view); drag up — or
+                  double-click — to reopen. Hidden in chromeless embeds (the host
+                  card owns layout there). */}
+              {!chromeless && (
+                <div
+                  className={'loom-graph-grip' + (graphCollapsed ? ' collapsed' : '')}
+                  onPointerDown={onGraphGripDown}
+                  onPointerMove={onGraphGripMove}
+                  onPointerUp={onGraphGripUp}
+                  onDoubleClick={toggleGraphCollapsed}
+                  title={graphCollapsed
+                    ? 'Graph collapsed — drag up or double-click to reopen'
+                    : 'Drag down to collapse the graph · double-click to toggle'}
+                >
+                  <span className="loom-graph-grip-handle" />
+                  {graphCollapsed && <span className="loom-graph-grip-label">▸ graph</span>}
+                </div>
+              )}
               {/* Run + step are ONE unified control (the transport folds into the
                   run bar). Run itself is provided by the workbench card in
                   chromeless embeds, but the transport still shows there. */}
@@ -2397,6 +2449,7 @@ export default function App() {
                         onToggleEmit={toggleEmit}
                         captureState={captureFrameState}
                         onViewState={viewSavedState}
+                        graphCollapsed={graphCollapsed}
                       />
                     )}
                     {chromeless && transport && (
@@ -2409,15 +2462,18 @@ export default function App() {
                   stacked surface (drag its top edge to resize). In chromeless
                   embeds the workbench card owns Outputs, so it is hidden here. */}
               {!chromeless && (
-                <div className={'loom-outputs-dock' + (outputsOpen ? '' : ' collapsed')}
-                  style={outputsOpen ? { height: outputsHeight } : undefined}>
-                  {outputsOpen && (
-                    <div className="loom-outputs-grip"
-                      onPointerDown={onOutputsGripDown}
-                      onPointerMove={onOutputsGripMove}
-                      onPointerUp={onOutputsGripUp}
-                      title="Drag to resize — pull up to see more of the outputs" />
-                  )}
+                <div className={'loom-outputs-dock' + ((outputsOpen || graphCollapsed || graphHeight != null) ? '' : ' collapsed')}
+                  /* Once the graph is dragged to a fixed height or collapsed, the
+                     outputs dock becomes the flex filler so the graph visibly
+                     shrinks/grows with the grip and no gap opens below. Otherwise
+                     it keeps its own height (open) or just the toggle (closed).
+                     There is ONE resize grip in the whole surface — the graph↔run-
+                     bar grip above; the outputs dock no longer carries its own. */
+                  style={
+                    (graphCollapsed || graphHeight != null)
+                      ? { flex: '1 1 0', minHeight: 120 }
+                      : (outputsOpen ? { height: outputsHeight } : undefined)
+                  }>
                   <button className="loom-outputs-toggle" onClick={() => setOutputsOpen((o) => !o)}
                     title={outputsOpen ? 'Collapse outputs' : 'Expand outputs'}>
                     <span className="loom-outputs-chevron">{outputsOpen ? '▾' : '▸'}</span>
