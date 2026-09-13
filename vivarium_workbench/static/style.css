@@ -1917,28 +1917,37 @@ body.popcard-mode .pcard-maximize{ display:none; }   /* already full-window */
 /* persistent Run bar (not an accordion) — always visible at the card's top level */
 /* Run bar: the ▶ RUN label IS the run button (cyan, matching a section head),
    with the Steps selector beside it — one compact group at the bar's start. */
+/* Match the loom's Explore run bar (.explore-runbar) so the collapsed card and
+   the open-loom surface read as one design. */
 .pcard-runbar{
-  display:flex; align-items:center; flex-wrap:wrap; gap:10px;
-  padding:6px 16px; border-top:1px solid #eef2f7; border-bottom:1px solid #eef2f7;
-  background:#fff; box-shadow:inset 3px 0 0 #0891b2;   /* cyan run accent */
+  display:flex; align-items:center; flex-wrap:wrap; gap:12px;
+  padding:7px 14px; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb;
+  background:#f8fafc; font-size:13px;
 }
-/* The RUN button: looks like the section-head label, acts like a button. */
+/* Mode pill — mirrors the loom run bar's ◇ steps / ◷ time chip. */
+.pcard-run-kind{
+  font-size:11px; font-weight:700; letter-spacing:.03em;
+  padding:2px 8px; border-radius:999px; white-space:nowrap; cursor:help; flex:none;
+  color:#7c3aed; background:#f3effe; border:1px solid #ddd0fb;   /* steps = purple */
+}
+/* The RUN button — solid teal, matching the loom's ▶ Run (.sr-run-btn). */
 .pcard-run-go{
   display:inline-flex; align-items:center; gap:6px; flex:none;
-  font-family:inherit; font-size:0.72em; font-weight:700;
-  text-transform:uppercase; letter-spacing:0.07em; line-height:1;
-  color:#0891b2; background:none;
-  border:1px solid transparent; border-radius:6px;
-  padding:6px 12px; cursor:pointer; transition:background .12s, border-color .12s;
+  font-family:inherit; font-size:13px; font-weight:600; line-height:1;
+  color:#fff; background:#0d6e6b;
+  border:none; border-radius:6px;
+  padding:6px 16px; cursor:pointer; transition:background .12s;
 }
-.pcard-run-go:hover{ background:#ecfeff; border-color:#a5f3fc; }
-.pcard-run-go:active{ background:#cffafe; }
-.pcard-run-go:disabled, .pcard-run-go-disabled{ opacity:.5; cursor:default; }
-.pcard-runbar .loom-run-field{ margin-left:6px; }      /* Steps sits next to the button */
-.pcard-runbar .pcard-run-note{ margin-left:10px; }     /* read-only note next to the button */
+.pcard-run-go:hover{ background:#0a5754; }
+.pcard-run-go:disabled, .pcard-run-go-disabled{ opacity:.6; cursor:not-allowed; }
+.pcard-runbar .loom-run-field{ margin-left:2px; font-size:13px; }   /* Steps label next to the button */
+.pcard-runbar .pcard-run-time{ width:64px; margin-left:2px; }
+.pcard-runbar .pcard-run-note{ margin-left:6px; }     /* read-only note next to the button */
 .pcard-run-out{ font-size:0.8em; color:#64748b; }
+/* OUTPUTS section head → teal, matching the loom's OUTPUTS toggle (.loom-outputs-toggle). */
+.pcard-sec-outputs > .pcard-sec-head .pcard-sec-name{ color:#0d6e6b; }
 :root[data-theme="dark"] .pcard-runbar{ background:var(--surface-1, #0f1728); border-color:var(--border-faint); }
-:root[data-theme="dark"] .pcard-run-go:hover{ background:rgba(8,145,178,.15); border-color:#0e7490; }
+:root[data-theme="dark"] .pcard-run-go:hover{ background:#0a5754; }
 
 /* resizable sections: capped, scrollable body + a drag grip (dbl-click = fit) */
 .pcard-sec-resizable.pcard-sec-open > .pcard-sec-body{ max-height:var(--pch,300px); overflow:auto; }
