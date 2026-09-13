@@ -15,6 +15,13 @@ type TrajectoryRow = { step: number; time?: number; state: Record<string, unknow
 
 const ACTIVE_RUN_KEY = 'bigraph-loom:active-run';
 const POLL_MS = 1500;
+// Cheap /status is polled every POLL_MS. The full trajectory (whole snapshot
+// history) is a MUCH heavier read — seconds to minutes for a large composite —
+// so while a run is live we refresh it at most this often, and never overlap a
+// prior load. Fetching it every tick was what made a long run look "stuck": the
+// reads piled up, starved the /status poll, and the progress/label never
+// advanced even after the run had completed.
+const LIVE_TRAJ_MS = 15000;
 
 /** Human label for a run phase (backend emits lowercase stage names). */
 export function phaseLabel(phase: string): string {
@@ -50,6 +57,8 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
   const [runId, setRunId] = useState<string | null>(null);
   const [status, setStatus] = useState<RunStatus | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  // Non-blocking backend heads-up (e.g. a long/heavy run) — shown, not thrown.
+  const [startWarning, setStartWarning] = useState<string | null>(null);
   // True from the moment Stop is clicked until the poll observes a terminal
   // status — lets the button read "Stopping…" without a spurious extra state.
   const [stopping, setStopping] = useState(false);
@@ -80,12 +89,23 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
     }
   }, []);
 
-  const loadTrajectory = useCallback(async (id: string) => {
+  // Guards so live trajectory refreshes never overlap or run too often. Without
+  // these a slow full-history read fired every poll tick and saturated the server.
+  const trajInFlightRef = useRef(false);
+  const lastTrajAtRef = useRef(0);
+  const loadTrajectory = useCallback(async (id: string, opts?: { throttleMs?: number }) => {
+    const throttleMs = opts?.throttleMs ?? 0;
+    if (trajInFlightRef.current) return;                                  // never overlap
+    if (throttleMs && Date.now() - lastTrajAtRef.current < throttleMs) return;
+    trajInFlightRef.current = true;
     try {
       const traj = await fetchRunTrajectory(id);
+      lastTrajAtRef.current = Date.now();
       onTrajectoryRef.current?.(traj.trajectory);
     } catch {
       /* trajectory not ready yet — next poll retries */
+    } finally {
+      trajInFlightRef.current = false;
     }
   }, []);
 
@@ -102,11 +122,14 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
       onRunStateRef.current?.({ runId: id, downloadable: s.downloadable ?? false });
       if (s.viz_html) onVizHtmlRef.current?.(s.viz_html);
       if (s.status === 'running') {
-        void loadTrajectory(id);
+        // Live-scrub refresh only — throttled + non-overlapping. Progress and
+        // completion are driven by the cheap /status above, so the run never
+        // looks stuck even when this heavy read is slow.
+        void loadTrajectory(id, { throttleMs: LIVE_TRAJ_MS });
       } else {
         stopPolling();
         setStopping(false);
-        void loadTrajectory(id);
+        void loadTrajectory(id);  // final result — once, unthrottled
         sessionStorage.removeItem(ACTIVE_RUN_KEY);
         // The run is over: publish the viz result unconditionally so the panel
         // shows "no visualizations" instead of spinning on "Loading…" forever
@@ -147,6 +170,7 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
       return;
     }
     setStartError(null);
+    setStartWarning(null);
     setStatus(null);
     setStopping(false);
     onTrajectoryRef.current?.([]);
@@ -164,6 +188,7 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
         seed_state: seedState && Object.keys(seedState).length > 0 ? seedState : undefined,
       });
       setRunId(res.run_id);
+      if (res.warning) setStartWarning(res.warning);
       sessionStorage.setItem(ACTIVE_RUN_KEY, JSON.stringify({
         run_id: res.run_id, composite_id: args.compositeId,
       }));
@@ -197,7 +222,7 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
     : 0;
 
   return {
-    steps, setSteps, runId, status, startError, stopping,
+    steps, setSteps, runId, status, startError, startWarning, stopping,
     isRunning, isWorkflow, canRun, inInvestigation, pct, handleRun, handleStop, runFromState,
     // 'steps' = discrete step network (integer, steppable); 'duration' = temporal.
     stepMode: (isWorkflow ? 'steps' : 'duration') as 'steps' | 'duration',

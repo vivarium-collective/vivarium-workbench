@@ -709,22 +709,52 @@ def query_runs(conn: sqlite3.Connection, *, spec_id: str) -> list[dict]:
     return out
 
 
-def query_run(conn: sqlite3.Connection, *, run_id: str) -> list[dict]:
+#: Hard cap on how many trajectory frames a single read returns. A run with more
+#: steps is stride-decimated down to this many evenly-spaced frames (the final
+#: frame is always kept). Bounds both the JSON-decode cost and the response size
+#: so loading a long run's trajectory never blocks the loom — the scrubber does
+#: not need every step's full state to be useful. Per-step reads (query_run_state)
+#: remain exact for anyone who needs a specific frame.
+DEFAULT_MAX_TRAJECTORY_ROWS = 1500
+
+
+def query_run(conn: sqlite3.Connection, *, run_id: str,
+              max_rows: int | None = DEFAULT_MAX_TRAJECTORY_ROWS) -> list[dict]:
     """Return the trajectory `[{step, time, state}, ...]` for one run.
 
     Reads from the `history` table owned by process_bigraph.emitter.SQLiteEmitter.
     If that table doesn't exist yet (no SQLiteEmitter has ever written to this
     DB), returns an empty list.
+
+    When the run has more than ``max_rows`` steps the result is stride-decimated
+    to that many evenly-spaced frames (final frame always included), so a very
+    long run never forces a multi-GB, minutes-long read. Pass ``max_rows=None``
+    for the full, undecimated trajectory.
     """
     has_history = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"
     ).fetchone()
     if not has_history:
         return []
+    # Phase 1: cheap — pull just the step ints to decide which frames to keep.
+    steps = [r[0] for r in conn.execute(
+        "SELECT step FROM history WHERE simulation_id=? ORDER BY step ASC", (run_id,)
+    ).fetchall()]
+    if not steps:
+        return []
+    if max_rows and len(steps) > max_rows:
+        stride = (len(steps) + max_rows - 1) // max_rows   # ceil
+        kept = steps[::stride]
+        if kept[-1] != steps[-1]:
+            kept.append(steps[-1])                          # always keep the final frame
+    else:
+        kept = steps
+    # Phase 2: load full state ONLY for the kept frames (bounded json.loads).
+    qmarks = ",".join("?" * len(kept))
     rows = conn.execute(
-        "SELECT step, global_time AS time, state FROM history WHERE simulation_id=? "
-        "ORDER BY step ASC",
-        (run_id,),
+        f"SELECT step, global_time AS time, state FROM history "
+        f"WHERE simulation_id=? AND step IN ({qmarks}) ORDER BY step ASC",
+        (run_id, *kept),
     ).fetchall()
     out = []
     for r in rows:

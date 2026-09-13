@@ -251,6 +251,10 @@ export default function App() {
   // Run output, lifted up so Results / Visualizations tabs can read it.
   const [trajectory, setTrajectory] = useState<TrajectoryRow[] | null>(null);
   const [vizHtml, setVizHtml] = useState<Record<string, { html: string }> | null>(null);
+  // Visualizations the composite declares up front (resolve payload) — the
+  // Outputs → Visualizations tab shows these as expected cards before render.
+  const [declaredViz, setDeclaredViz] =
+    useState<Array<{ name?: string; config?: { title?: string } | null }> | null>(null);
   // Latest run id + downloadable flag, lifted from SetupRunPanel via onRunState.
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [downloadable, setDownloadable] = useState(false);
@@ -749,6 +753,7 @@ export default function App() {
         if (res.default_n_steps != null) setDefaultSteps(res.default_n_steps);
         if (res.name) setName((n) => n ?? res.name ?? null);
         if (res.description) setDescription((d) => d ?? res.description ?? null);
+        if (res.visualizations) setDeclaredViz(res.visualizations);
       })
       .catch(() => { /* leave Setup & Run with Steps + Run only */ });
     return () => { cancelled = true; };
@@ -2408,6 +2413,8 @@ export default function App() {
                     downloadable={downloadable}
                     readOnly={STATIC}
                     baseName={compositeId ? compositeId.split('.').pop() : (name || 'composite')}
+                    declaredViz={declaredViz}
+                    isRunning={activeRunId != null && vizHtml == null}
                   />
                 </div>
               )}

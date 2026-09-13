@@ -22,6 +22,12 @@ export interface OutputsPanelProps {
    *  band). Used to distinguish "none produced" from "produced, not embedded". */
   hasReport?: boolean;
   hasAnalyses?: boolean;
+  /** Visualizations the composite declares up front (resolve payload) — shown as
+   *  expected cards in the Visualizations tab before they render. */
+  declaredViz?: Array<{ name?: string; config?: { title?: string } | null }> | null;
+  /** Current run phase + whether a run is live, for the expected-card status. */
+  runPhase?: string | null;
+  isRunning?: boolean;
 }
 
 /** Split the run's HTML artifacts (viz_html) across the sub-tabs by name: a
@@ -128,6 +134,9 @@ export function OutputsPanel(props: OutputsPanelProps) {
             hasRun={props.hasRun}
             readOnly={props.readOnly}
             baseName={props.baseName}
+            declared={props.declaredViz}
+            phase={props.runPhase}
+            isRunning={props.isRunning}
           />
         )}
         {activeTab === 'cards' && (

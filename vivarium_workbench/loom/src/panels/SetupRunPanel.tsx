@@ -131,6 +131,10 @@ export interface SetupRunPanelProps {
 
 const ACTIVE_RUN_KEY = 'bigraph-loom:active-run';
 const POLL_MS = 1500;
+// See useCompositeRun.ts: the full-trajectory read is heavy, so refresh it live
+// at most this often and never overlapping — driving progress off the cheap
+// /status poll instead. Fetching it every tick made long runs look "stuck".
+const LIVE_TRAJ_MS = 15000;
 
 /** Human label for a run phase (backend emits lowercase stage names). */
 function _phaseLabel(phase: string): string {
@@ -194,12 +198,21 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
     }
   }, []);
 
-  const loadTrajectory = useCallback(async (id: string) => {
+  const trajInFlightRef = useRef(false);
+  const lastTrajAtRef = useRef(0);
+  const loadTrajectory = useCallback(async (id: string, opts?: { throttleMs?: number }) => {
+    const throttleMs = opts?.throttleMs ?? 0;
+    if (trajInFlightRef.current) return;                                  // never overlap
+    if (throttleMs && Date.now() - lastTrajAtRef.current < throttleMs) return;
+    trajInFlightRef.current = true;
     try {
       const traj = await fetchRunTrajectory(id);
+      lastTrajAtRef.current = Date.now();
       onTrajectoryRef.current?.(traj.trajectory);
     } catch {
       /* trajectory not ready yet — ignore, next poll retries */
+    } finally {
+      trajInFlightRef.current = false;
     }
   }, []);
 
@@ -218,10 +231,10 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
       onRunStateRef.current?.({ runId: id, downloadable: s.downloadable ?? false });
       if (s.viz_html) onVizHtmlRef.current?.(s.viz_html);
       if (s.status === 'running') {
-        void loadTrajectory(id);
+        void loadTrajectory(id, { throttleMs: LIVE_TRAJ_MS });  // throttled live-scrub
       } else {
         stopPolling();
-        void loadTrajectory(id);
+        void loadTrajectory(id);  // final result — once, unthrottled
         sessionStorage.removeItem(ACTIVE_RUN_KEY);
         if (s.status === 'completed' && props.compositeId) {
           postRunComplete(id, props.compositeId);

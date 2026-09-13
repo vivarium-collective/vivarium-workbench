@@ -51,6 +51,11 @@ def _ws_add_to_sys_path(ws_root: Path) -> None:
         sys.path.insert(0, ws)
 
 
+# Step count above which a run gets a non-blocking "this may be heavy" warning
+# in the launch response (full-state snapshots per step add up).
+_HEAVY_RUN_STEPS = 250
+
+
 def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Start a detached composite run. Returns ``(response_dict, status_code)``.
 
@@ -205,4 +210,18 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     finally:
         conn.close()
 
-    return {"run_id": run_id, "status": "running"}, 202
+    resp = {"run_id": run_id, "status": "running"}
+    # Non-blocking cost heads-up: the loom writes a full-state snapshot per step,
+    # so a long run can produce a large snapshot DB and a slow trajectory load.
+    # The run still starts — snapshots are decimated for display and the run
+    # self-terminates if the snapshot DB exceeds its 1 GiB budget — but a warning
+    # lets the user cut the run short or pass explicit emit_paths first.
+    if steps > _HEAVY_RUN_STEPS:
+        resp["warning"] = (
+            f"Long run ({int(steps)} steps): the loom captures a full-state snapshot "
+            f"per step, so the snapshot DB can grow large and loading the full "
+            f"trajectory is slower. Frames are decimated for display and the run "
+            f"self-terminates if snapshots exceed 1 GiB. For a lighter, faster run use "
+            f"fewer steps or pass explicit emit_paths."
+        )
+    return resp, 202

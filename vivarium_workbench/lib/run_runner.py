@@ -23,6 +23,16 @@ from vivarium_workbench.lib import composite_runs as cr
 # A run exceeding this self-terminates with status='failed'. Matches the
 # "tens of minutes" target from the design spec.
 MAX_RUNTIME_SEC = 1800
+# Snapshot-budget self-terminate. The loom's SQLiteEmitter writes one full-state
+# history row per tick; a large composite emitting many stores (e.g. a 55-process
+# whole-cell model with the all-stores fall-through) can balloon composite-runs.db
+# to multiple GB in a few hundred steps, after which loading the trajectory takes
+# minutes and the UI appears stuck. Cap the on-disk snapshot DB and self-terminate
+# with a clear message rather than letting it run away. Generous enough that a
+# normal run never trips it; pathological ones stop with guidance to declare an
+# emitter / pass explicit emit_paths / reduce steps.
+MAX_SNAPSHOT_BYTES = 1024 * 1024 * 1024   # 1 GiB
+_SNAPSHOT_CHECK_EVERY = 20                 # stat the DB every N steps, not every tick
 
 
 @dataclass
@@ -277,6 +287,15 @@ class _RunTimeout(Exception):
     accurate ``n_steps`` on the failed run. Raising from the progress callback
     lets the broker own the run loop while ``execute`` keeps the self-terminate
     semantics it had before the broker existed.
+    """
+
+
+class _SnapshotBudgetExceeded(Exception):
+    """Raised by the progress callback when the snapshot DB exceeds ``MAX_SNAPSHOT_BYTES``.
+
+    Carries ``(step, size_bytes)`` so ``execute`` can record where it tripped
+    and tell the user how large the run got. Same self-terminate mechanism as
+    ``_RunTimeout``.
     """
 
 
@@ -1047,6 +1066,16 @@ def execute(request_path: Path) -> int:
                                heartbeat_at=time.time())
             if time.monotonic() - started > MAX_RUNTIME_SEC:
                 raise _RunTimeout(step)
+            # Snapshot-budget guard: stop a run whose loom DB is ballooning
+            # before it becomes multi-GB and unloadable. Checked every N steps
+            # so we don't stat the file on every tick.
+            if step % _SNAPSHOT_CHECK_EVERY == 0 and req.db_file:
+                try:
+                    sz = os.path.getsize(req.db_file)
+                except OSError:
+                    sz = 0
+                if sz > MAX_SNAPSHOT_BYTES:
+                    raise _SnapshotBudgetExceeded((step, sz))
 
         cr.set_phase(conn, run_id=req.run_id, phase="simulating")
         try:
@@ -1059,6 +1088,18 @@ def execute(request_path: Path) -> int:
             step = exc.args[0] if exc.args else req.steps
             msg = (f"run exceeded max runtime ({MAX_RUNTIME_SEC}s) — "
                    f"terminating at step {step}")
+            print(msg, flush=True)
+            _write_log(req, msg)
+            cr.complete_metadata(conn, run_id=req.run_id, n_steps=step,
+                                 status="failed", workspace=req.workspace)
+            return 1
+        except _SnapshotBudgetExceeded as exc:
+            step, sz = (exc.args[0] if exc.args else (req.steps, 0))
+            gb = sz / (1024 ** 3)
+            msg = (f"run exceeded snapshot budget ({MAX_SNAPSHOT_BYTES // (1024**3)} GiB; "
+                   f"reached {gb:.2f} GiB) — terminating at step {step}. This composite "
+                   f"emits a large state every tick; declare an emitter (emitters=[...]) "
+                   f"or pass explicit emit_paths to capture fewer stores, or run fewer steps.")
             print(msg, flush=True)
             _write_log(req, msg)
             cr.complete_metadata(conn, run_id=req.run_id, n_steps=step,

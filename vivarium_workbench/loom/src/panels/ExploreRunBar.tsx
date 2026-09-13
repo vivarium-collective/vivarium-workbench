@@ -244,6 +244,16 @@ export function ExploreRunBar(props: ExploreRunBarProps) {
       {whyOpen && whyText && (
         <div className="explore-runbar-why-detail">{whyText}</div>
       )}
+      {run.startWarning && (
+        <span
+          title={run.startWarning}
+          style={{
+            fontSize: 12, color: '#b45309', background: '#fffbeb',
+            border: '1px solid #f6d98a', borderRadius: 6, padding: '2px 8px',
+            maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}
+        >⚠ {run.startWarning}</span>
+      )}
 
       {!run.isRunning && !run.startError && (
         run.inInvestigation ? (

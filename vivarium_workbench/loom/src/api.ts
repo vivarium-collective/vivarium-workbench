@@ -194,6 +194,9 @@ export interface StartRunArgs {
 export interface StartRunResponse {
   run_id: string;
   status: RunStatusValue;
+  /** Non-blocking heads-up from the backend (e.g. a heavy/long run). The run
+   *  still starts; the loom surfaces this next to the run controls. */
+  warning?: string;
 }
 
 export interface RunStatus {
@@ -237,6 +240,10 @@ export interface ResolveResponse {
   /** The resolved composite state (bigraph). Present on /api/composite-resolve —
    *  the Explore Config panel re-renders the graph from this after Apply. */
   state?: unknown;
+  /** Visualizations the composite generator declares up front (from
+   *  `spec.visualizations`). The Outputs → Visualizations panel renders these as
+   *  expected cards before the run produces them. */
+  visualizations?: Array<{ name?: string; config?: { title?: string } | null }>;
 }
 
 export async function resolveComposite(
