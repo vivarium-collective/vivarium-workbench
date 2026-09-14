@@ -664,7 +664,11 @@
       if (btnEl) { btnEl.disabled = false; btnEl.textContent = origLabel || "🧪 Analysis"; }
       var body = res.body || {};
       if (!res.ok) {
-        _toast("Analysis failed to start: " + (body.error || res.status));
+        // Surface the server's real error (the handler returns 502 {error, …} on
+        // an sms-api failure, 400/401/404 for known cases) plus the HTTP status,
+        // rather than a bare generic message — so the actual cause is visible.
+        _toast("Analysis failed to start (HTTP " + res.status + "): " +
+          (body.error || body.detail || "no error detail returned by the server"));
         return;
       }
       _toast("Analysis launched for simulation " + simulationId +
@@ -685,6 +689,14 @@
     var tr = btn.closest("tr[data-remote-sim-id]");
     var simId = tr ? tr.getAttribute("data-remote-sim-id") : "";
     if (!simId) return;
+    // Confirm before dispatch — this fires a REAL GovCloud compute job (a K8s
+    // Job on the deployment), not a local action. An accidental per-row click of
+    // this class previously caused a 36-job misfire, so gate it.
+    if (!window.confirm(
+        "Re-run analysis for simulation " + simId + "?\n\n" +
+        "This dispatches a real GovCloud compute job (recomputes cd1_*/ptools_* on the deployment).")) {
+      return;
+    }
     _runSimAnalysis(simId, btn, tr ? tr.getAttribute("data-study") : "");
   }
   document.addEventListener("click", _onRunAnalysisButtonClick, true);
