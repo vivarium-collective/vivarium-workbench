@@ -15571,7 +15571,14 @@
             'onclick="_initSimulations()">Retry</button></span>';
           return;
         }
-        window._simRows = data.simulations || [];
+        // Never shrink back to the local-only set once the remote-enriched rows
+        // have loaded: a quiet auto-refresh's fast local-only fetch must not clobber
+        // the (slow) GovCloud rows while they're still valid — that collapse-to-local
+        // then re-fetch was the visible flap.
+        var _incoming = data.simulations || [];
+        if (!window._simRemoteLoaded || _incoming.length >= (window._simRows || []).length) {
+          window._simRows = _incoming;
+        }
         // Scope target, most-specific first: the investigation currently open
         // in the detail view (_currentIsetSlug, set by _openInvestigationDetail),
         // else the git-branch investigation slug, else whatever investigation the
@@ -15582,8 +15589,10 @@
         _populateSimFilters();
         _applySimFilter();
         _pollNonTerminalRemoteRuns();
-        // Phase 2 — merge in the remote runs (slow) in the background.
-        if (!snapshot) _loadRemoteSimsAsync();
+        // Phase 2 — merge in the remote runs (slow ~100s) in the background.
+        // On a quiet auto-refresh this only re-fires after a backoff and never
+        // while one is in flight, so the 15s poll can't restart the slow fetch.
+        if (!snapshot) _maybeLoadRemoteSims(quiet);
       })
       .catch(function (err) {
         if (quiet) return;
@@ -15597,19 +15606,40 @@
   // Phase 2 of the Runs load: fetch local+remote (the second call includes the
   // GovCloud runs, deduped server-side) and merge into the table. Best-effort:
   // a down tunnel leaves the local-only view in place.
+  // Don't re-pull the slow GovCloud list more than ~every 3 min on the quiet
+  // auto-refresh; the deployed /simulations endpoint can take ~100s, so a 15s
+  // poll firing it repeatedly never settles.
+  var REMOTE_REFRESH_MS = 180000;
+
+  function _maybeLoadRemoteSims(quiet) {
+    // First load / explicit refresh: always. Quiet auto-refresh: only after the
+    // backoff, and never while a fetch is already in flight (guard below).
+    if (!quiet || !window._simRemoteLoaded ||
+        (Date.now() - (window._simLastRemoteLoad || 0)) > REMOTE_REFRESH_MS) {
+      _loadRemoteSimsAsync();
+    }
+  }
+
   function _loadRemoteSimsAsync() {
+    // Dedupe: the remote fetch is slow (~100s). Never start a second one while
+    // one is in flight — overlapping fetches are what made the page flap.
+    if (window._simRemoteInFlight) return;
+    window._simRemoteInFlight = true;
     _setSimRemoteStatus('loading');
     window.DataSource.loadSimulations({ includeRemote: true })
       .then(function (data) {
+        window._simRemoteInFlight = false;
         if (!data || data.error) { _setSimRemoteStatus('error'); return; }
         var all = data.simulations || [];
         if (all.length >= (window._simRows || []).length) window._simRows = all;
+        window._simRemoteLoaded = true;
+        window._simLastRemoteLoad = Date.now();
         _setSimRemoteStatus('done');
         _populateSimFilters();
         _applySimFilter();
         _pollNonTerminalRemoteRuns();
       })
-      .catch(function () { _setSimRemoteStatus('error'); });
+      .catch(function () { window._simRemoteInFlight = false; _setSimRemoteStatus('error'); });
   }
 
   function _setSimRemoteStatus(state) {

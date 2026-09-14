@@ -260,7 +260,16 @@
         'href="' + BP + '/api/composite-run/' + runIdEnc + '/artifact/' + name +
         '" style="text-decoration:none;">' + label + '</a>';
     }
-    var viz    = (completed && hasRun) ? _art("viz",    "📊 Viz",      "Open this run's visualizations (GIF + plots)", false) : "";
+    // A remote run's viz is never landed locally (⬇ Land folds only analyses.json
+    // + ptools/*.tsv), so the local artifact link 404s. Route a remote row's Viz
+    // to the S3 figure gallery instead (fast by-id endpoints, not the slow
+    // /simulations list). Local runs keep the artifact link.
+    var _remoteSimId = row && row.remote_origin && row.remote_origin.simulation_id;
+    var viz = completed
+      ? (_remoteSimId != null
+          ? '<button type="button" class="action-btn js-authoring viz-remote-btn" title="Open this remote run\'s visualizations (from S3)">📊 Viz</button>'
+          : (hasRun ? _art("viz", "📊 Viz", "Open this run's visualizations (GIF + plots)", false) : ""))
+      : "";
     var report = (completed && hasRun) ? _art("report", "📋 Report",   "Open this run's report card", false) : "";
     var analyses = (completed && hasRun) ? _art("analyses", "⬇ Analyses",   "Download this run's analyses (JSON)", true) : "";
     var data = (row.run_id && (row.store_path || row.db_path))
@@ -461,6 +470,75 @@
     _landRemote(runId, simId, btn);
   }
   document.addEventListener("click", _onLandButtonClick, true);
+
+  // Open a remote run's S3 figures. The local artifact link 404s for a remote
+  // run (viz is never landed), so fetch the figure list by-id
+  // (/api/remote-analysis-figures?simulation_id=… — fast, not the slow list
+  // endpoint) and embed each figure from /api/remote-analysis-figure into a
+  // self-contained gallery window (iframe for .html, <img> for images). No
+  // figures yet → a "pending" message, never a 404.
+  function _openRemoteVizGallery(simId, btnEl) {
+    if (!simId) return;
+    var BP = window.__BASE_PATH__ || "";
+    var orig = btnEl ? btnEl.textContent : "";
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "… loading"; }
+    // Open synchronously in the click so it isn't popup-blocked.
+    var w = window.open("", "_blank");
+    var shell = function (bodyHtml) {
+      if (!w) return;
+      w.document.open();
+      w.document.write('<!doctype html><meta charset="utf-8"><title>Remote run ' + simId +
+        ' — figures</title><body style="font-family:system-ui,-apple-system,sans-serif;margin:20px;color:#0f172a">' +
+        bodyHtml + '</body>');
+      w.document.close();
+    };
+    shell('<p>Loading figures for simulation ' + esc(simId) + '…</p>');
+    fetch(BP + "/api/remote-analysis-figures?simulation_id=" + encodeURIComponent(simId))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig || "📊 Viz"; }
+        if (!d || !d.available) {
+          var reason = (d && d.reason) || "no-figures";
+          var msg = 'No rendered figures for simulation ' + esc(simId) + ' yet (' + esc(reason) +
+            '). They appear once the remote analysis completes — use ⬇ Land / re-run its analysis.';
+          if (w) shell('<p>' + msg + '</p>'); else _toast(msg);
+          return;
+        }
+        var html = '<h2 style="font-size:16px;margin:0 0 4px">Simulation ' + esc(simId) + ' — figures</h2>';
+        var nFigs = 0;
+        (d.analyses || []).forEach(function (a) {
+          var figs = a.figures || [];
+          if (!figs.length) return;
+          html += '<h3 style="font-size:13px;color:#475569;margin:18px 0 6px">' + esc(a.name) +
+            ' <span style="font-weight:400;color:#94a3b8">(' + figs.length + ')</span></h3>';
+          figs.forEach(function (f) {
+            nFigs++;
+            var url = BP + "/api/remote-analysis-figure?simulation_id=" + encodeURIComponent(simId) +
+              "&analysis=" + encodeURIComponent(a.name) + "&path=" + encodeURIComponent(f.path);
+            html += /\.(svg|png|gif|jpe?g)$/i.test(f.path)
+              ? '<div style="margin:8px 0"><img src="' + url + '" style="max-width:100%;border:1px solid #e2e8f0"></div>'
+              : '<iframe src="' + url + '" style="width:100%;height:520px;border:1px solid #e2e8f0" loading="lazy"></iframe>';
+          });
+        });
+        if (!nFigs) html += '<p>Analyses present but no rendered figures (ptools tables only).</p>';
+        if (w) shell(html); else _toast("Opened " + nFigs + " figures for sim " + simId);
+      })
+      .catch(function (err) {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig || "📊 Viz"; }
+        var m = "Failed to load remote figures for sim " + simId + ": " + err;
+        if (w) shell('<p style="color:#c00">' + esc(String(err)) + '</p>'); else _toast(m);
+      });
+  }
+
+  function _onVizRemoteClick(e) {
+    var btn = e.target.closest(".viz-remote-btn");
+    if (!btn) return;
+    e.stopPropagation();
+    var tr = btn.closest("tr[data-remote-sim-id]");
+    var simId = tr ? tr.getAttribute("data-remote-sim-id") : "";
+    _openRemoteVizGallery(simId, btn);
+  }
+  document.addEventListener("click", _onVizRemoteClick, true);
 
   // One-click analysis re-run for a completed REMOTE simulation:
   // POST /api/remote-run-analysis -> viva-api POST /simulations/{id}/analysis.
