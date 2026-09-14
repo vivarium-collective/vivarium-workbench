@@ -382,7 +382,56 @@ def _resolve_emit_paths(req: RunRequest, state: dict, *,
     from_state = _emit_paths_from_state(state)
     if from_state:
         return from_state, "state"
+    # Last resort. For a TEMPORAL composite, emitting every store each tick
+    # deep-copies the full state (incl. the huge `unique`/`bulk` stores) into the
+    # loom trajectory and blows the snapshot budget (#754). Fall back to a safe,
+    # bounded set (global_time + listeners if present) instead — the composite's
+    # own parquet sink still captures full fidelity. Only a non-temporal (static)
+    # composite, whose whole state is small, still falls through to all-stores.
+    if _state_has_process(state):
+        return _safe_temporal_emit_paths(state), "safe-temporal"
     return cr.all_store_paths(state), "all-stores"
+
+
+# Top-level stores too heavy to snapshot into the loom trajectory every tick
+# (megabytes each for a whole-cell model). The declared parquet sink still
+# captures them at full fidelity; the loom playback only needs the lighter,
+# viz-relevant stores, so they are dropped from the sqlite history's emit set.
+_HEAVY_TRAJECTORY_STORES = {"bulk", "unique"}
+# Target number of trajectory snapshots for a long run; longer runs subsample.
+_TRAJECTORY_TARGET_FRAMES = 400
+
+
+def _safe_temporal_emit_paths(state: dict) -> list[str]:
+    """A bounded emit set for a temporal composite with no readable emitter
+    declaration: every store EXCEPT the known-heavy ones (bulk/unique). Small
+    composites keep all their stores; a whole-cell model sheds only the multi-MB
+    stores that blow the snapshot budget. Never returns empty."""
+    safe = [p for p in cr.all_store_paths(state)
+            if p.split("/", 1)[0] not in _HEAVY_TRAJECTORY_STORES]
+    return safe or ["global_time"]
+
+
+def _history_emit_paths(emit_paths: list[str]) -> list[str]:
+    """The loom-trajectory subset of `emit_paths`: drop the heavy per-tick stores
+    (bulk/unique) so the sqlite history stays bounded. Keeps everything else
+    (global_time, listeners, …); never returns empty."""
+    light = [p for p in emit_paths
+             if p.split("/", 1)[0] not in _HEAVY_TRAJECTORY_STORES]
+    return light or ["global_time"]
+
+
+def _history_subsample(steps) -> int:
+    """Stride so a long run's loom trajectory keeps ~<= _TRAJECTORY_TARGET_FRAMES
+    snapshots. 1 (every tick) for short runs."""
+    try:
+        n = int(steps)
+    except (TypeError, ValueError):
+        return 1
+    if n <= _TRAJECTORY_TARGET_FRAMES:
+        return 1
+    import math
+    return max(1, math.ceil(n / _TRAJECTORY_TARGET_FRAMES))
 
 
 def _emit_paths_for(req: RunRequest, state: dict, *,
@@ -1077,13 +1126,24 @@ def execute(request_path: Path) -> int:
                 if sz > MAX_SNAPSHOT_BYTES:
                     raise _SnapshotBudgetExceeded((step, sz))
 
+        # Loom trajectory (sqlite history) budget: keep it bounded independently
+        # of the full-fidelity parquet sink — drop the heavy stores (bulk/unique)
+        # and subsample long runs. A whole-cell generation (2700 ticks) then fits
+        # comfortably instead of tripping the 1 GiB snapshot budget.
+        history_paths = _history_emit_paths(emit_paths)
+        history_subsample = _history_subsample(req.steps)
+        _write_log(req, f"loom trajectory: {len(history_paths)} path(s)"
+                        f"{' (bulk/unique dropped)' if len(history_paths) < len(emit_paths) else ''}"
+                        f", subsample x{history_subsample}")
+
         cr.set_phase(conn, run_id=req.run_id, phase="simulating")
         try:
             prov = emitters.run_with_emitter(
                 name=name, state=state, run_id=req.run_id, emit_paths=emit_paths,
                 out_dir=str(run_dir), core=core, steps=req.steps,
                 db_file=req.db_file, progress_cb=_progress, spec=decl_source,
-                also_sqlite_history=True)
+                also_sqlite_history=True,
+                history_paths=history_paths, history_subsample=history_subsample)
         except _RunTimeout as exc:
             step = exc.args[0] if exc.args else req.steps
             msg = (f"run exceeded max runtime ({MAX_RUNTIME_SEC}s) — "

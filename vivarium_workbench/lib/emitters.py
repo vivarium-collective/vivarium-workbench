@@ -639,7 +639,8 @@ def _register_sqlite_emitter_link(core) -> None:
     core.register_link("SQLiteEmitter", SQLiteEmitter)
 
 
-def _inject_ram_and_sqlite(state: dict, *, emit_paths, run_id, db_file, core) -> dict:
+def _inject_ram_and_sqlite(state: dict, *, emit_paths, run_id, db_file, core,
+                           subsample: int = 1) -> dict:
     """Stack the RAM ``user_emitter`` + ``SQLiteEmitter`` — the ONE construction
     locus for this pair, shared by the plain ``sqlite`` output_kind and the
     Composite Explorer's parquet-with-history path (``also_sqlite_history=True``).
@@ -655,7 +656,8 @@ def _inject_ram_and_sqlite(state: dict, *, emit_paths, run_id, db_file, core) ->
     """
     from vivarium_workbench.lib import composite_runs as cr
     st = _inject_ram_for_paths(state, emit_paths)
-    st = cr.inject_sqlite_emitter(st, run_id=run_id, db_file=db_file)
+    st = cr.inject_sqlite_emitter(st, run_id=run_id, db_file=db_file,
+                                  subsample=subsample)
     _register_sqlite_emitter_link(core)
     return st
 
@@ -663,7 +665,8 @@ def _inject_ram_and_sqlite(state: dict, *, emit_paths, run_id, db_file, core) ->
 def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
                      db_file=None, progress_cb=None, spec=None,
                      emitter_config=None, store_path=None,
-                     also_sqlite_history=False) -> dict:
+                     also_sqlite_history=False,
+                     history_paths=None, history_subsample: int = 1) -> dict:
     """Inject the named emitter as a Step, build a Composite, run ``steps`` ticks
     (calling ``progress_cb(step)`` each tick), flush/close, and return provenance.
 
@@ -770,8 +773,16 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
                     core.register_link("ParquetEmitter", ParquetEmitter)
                 except ImportError:
                     pass
+            # The parquet sink above holds FULL fidelity independently of
+            # emit_paths, so the loom's sqlite trajectory can be lighter: drop the
+            # heavy `bulk`/`unique` stores (history_paths) and subsample long runs
+            # (history_subsample). Falls back to emit_paths / every-tick when the
+            # caller doesn't specify, so existing callers are unchanged.
             st = _inject_ram_and_sqlite(
-                st, emit_paths=emit_paths, run_id=run_id, db_file=db_file, core=core)
+                st,
+                emit_paths=(history_paths if history_paths is not None else emit_paths),
+                run_id=run_id, db_file=db_file, core=core,
+                subsample=history_subsample)
         else:
             # Study / non-Explorer parquet runs keep the declared-sink install
             # (byte-identical to before).

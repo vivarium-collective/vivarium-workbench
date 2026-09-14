@@ -801,7 +801,7 @@ def auto_label(overrides: dict) -> str:
 
 
 def inject_sqlite_emitter(state: dict, *, run_id: str,
-                          db_file: str | Path) -> dict:
+                          db_file: str | Path, subsample: int = 1) -> dict:
     """Return a copy of `state` with a SQLiteEmitter step appended.
 
     The injected step consumes the same input ports declared by the first
@@ -893,6 +893,10 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
             "file_path": str(db_file.parent),
             "db_file": db_file.name,
             "simulation_id": run_id,
+            # Downsample the loom trajectory: persist one history row every
+            # `subsample` ticks. 1 = every tick (unchanged); >1 keeps the DB
+            # bounded on long whole-cell runs without losing the shape.
+            "subsample": max(1, int(subsample)),
         },
         "inputs": inputs,
     }
