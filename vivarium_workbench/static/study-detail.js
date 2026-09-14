@@ -903,8 +903,12 @@
     fetch(url).then(function (r) { return r.text(); }).then(function (t) {
       var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {}
       if (!d.present) {
-        mount.innerHTML = '<p class="empty-message">' +
-          escapeHtmlForTests(d.reason || 'No run data to preview yet.') + '</p>';
+        // The preview reads the latest LOCAL run's store; a remote-only study
+        // has none, so don't leave a bare "no runs yet" over a list of remote
+        // runs — point at where the runs actually are.
+        mount.innerHTML = '<p class="empty-message">No local run preview yet — ' +
+          'if this study has remote runs, browse them in <strong>Raw simulation data</strong> ' +
+          'below, or see rendered figures in the <strong>Visualizations</strong> tab.</p>';
         return;
       }
       var stores = d.stores || [];
@@ -974,18 +978,66 @@
         bulkBtn.style.display = withDataCount ? '' : 'none';
         bulkBtn.textContent = '⬇ Download all raw data (' + withDataCount + ')';
       }
-      mount.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:0.88em">' +
-        rows.map(function (row) {
-          var runId = row.run_id || '', hasData = !!(row.store_path || row.db_path);
-          var label = row.sim_name || row.label || runId;
-          var loc = window.SimTable ? window.SimTable.location(row) : esc(row.store_path || row.db_path || '');
-          var dl = hasData
-            ? '<a class="action-btn" download href="' + (window.__BASE_PATH__ || "") + '/api/simulation-run-download?run_id=' + encodeURIComponent(runId) + '">⬇ Data</a>'
-            : '<span class="muted" style="font-size:0.82em">no store</span>';
-          return '<tr style="border-bottom:1px solid #f3f4f6"><td style="padding:5px 8px"><code style="font-size:0.85em">' + esc(label) + '</code></td>' +
-            '<td style="padding:5px 8px">' + loc + '</td>' +
-            '<td style="padding:5px 8px;text-align:right">' + dl + '</td></tr>';
-        }).join('') + '</table>';
+      // Navigate 100s of runs: fold by launch campaign (the leading simNNN — one
+      // fan-out per campaign), show status, and filter live. Turns a flat dump
+      // into a browsable index.
+      function _campaignOf(row) {
+        var n = String(row.sim_name || row.label || row.run_id || '');
+        var m = n.match(/^(sim\d+)/i);
+        return m ? m[1].toLowerCase() : 'other';
+      }
+      function _statusOf(row) { return String(row.status || '').toLowerCase() || 'unknown'; }
+      function _stColor(st) {
+        return st === 'completed' ? '#059669' : st === 'failed' ? '#dc2626'
+          : st === 'running' ? '#2563eb' : st === 'cancelled' ? '#b45309' : '#9ca3af';
+      }
+      var byStatus = {};
+      rows.forEach(function (r) { var s = _statusOf(r); byStatus[s] = (byStatus[s] || 0) + 1; });
+      var statusSummary = Object.keys(byStatus).sort().map(function (s) {
+        return '<span style="color:' + _stColor(s) + ';font-weight:600">' + byStatus[s] + '</span> ' + esc(s);
+      }).join(' · ');
+      var groups = {};
+      rows.forEach(function (r) { var c = _campaignOf(r); (groups[c] = groups[c] || []).push(r); });
+      function _rowHtml(row) {
+        var runId = row.run_id || '', hasData = !!(row.store_path || row.db_path);
+        var label = row.sim_name || row.label || runId;
+        var loc = window.SimTable ? window.SimTable.location(row) : esc(row.store_path || row.db_path || '');
+        var st = _statusOf(row);
+        var dl = hasData
+          ? '<a class="action-btn" download href="' + (window.__BASE_PATH__ || "") + '/api/simulation-run-download?run_id=' + encodeURIComponent(runId) + '">⬇ Data</a>'
+          : '<span class="muted" style="font-size:0.82em">no store</span>';
+        return '<tr class="rawrow" data-name="' + esc(label.toLowerCase()) + '" style="border-bottom:1px solid #f3f4f6">' +
+          '<td style="padding:5px 8px"><code style="font-size:0.85em">' + esc(label) + '</code></td>' +
+          '<td style="padding:5px 8px"><span style="color:' + _stColor(st) + ';font-size:0.8em;font-weight:600">' + esc(st) + '</span></td>' +
+          '<td style="padding:5px 8px">' + loc + '</td>' +
+          '<td style="padding:5px 8px;text-align:right">' + dl + '</td></tr>';
+      }
+      var groupsHtml = Object.keys(groups).sort().map(function (c) {
+        var g = groups[c];
+        var done = g.filter(function (r) { return _statusOf(r) === 'completed'; }).length;
+        return '<details class="rawgroup" open style="margin:6px 0">' +
+          '<summary style="cursor:pointer;font-weight:600;padding:4px 0">' + esc(c) +
+          ' <span class="muted" style="font-weight:400">(' + g.length + ' runs · ' + done + ' complete)</span></summary>' +
+          '<table style="width:100%;border-collapse:collapse;font-size:0.88em">' + g.map(_rowHtml).join('') + '</table>' +
+          '</details>';
+      }).join('');
+      mount.innerHTML =
+        '<div style="display:flex;align-items:center;gap:12px;margin:6px 0 10px;flex-wrap:wrap">' +
+        '<strong>' + rows.length + ' runs</strong><span class="muted" style="font-size:0.88em">' + statusSummary + '</span>' +
+        '<input id="rawdata-search" placeholder="filter runs…" ' +
+        'style="margin-left:auto;padding:4px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:0.85em">' +
+        '</div>' + groupsHtml;
+      var _search = document.getElementById('rawdata-search');
+      if (_search) _search.addEventListener('input', function () {
+        var q = this.value.toLowerCase();
+        mount.querySelectorAll('tr.rawrow').forEach(function (tr) {
+          tr.style.display = (!q || (tr.getAttribute('data-name') || '').indexOf(q) >= 0) ? '' : 'none';
+        });
+        mount.querySelectorAll('details.rawgroup').forEach(function (grp) {
+          var any = Array.prototype.slice.call(grp.querySelectorAll('tr.rawrow')).some(function (tr) { return tr.style.display !== 'none'; });
+          grp.style.display = any ? '' : 'none';
+        });
+      });
     }).catch(function () {
       mount.innerHTML = '<p class="empty-message">Could not load runs.</p>';
       if (bulkBtn) bulkBtn.style.display = 'none';
