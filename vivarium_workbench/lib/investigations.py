@@ -1374,6 +1374,17 @@ def _resolve_observable(observables: dict, path: str) -> list | None:
     return res
 
 
+def _dynamic_viz_class(class_key: str):
+    """Import the class named by a '!'-prefixed local address. process-bigraph
+    treats ``local:!<dotted.path.Class>`` as a dynamic import and resolves it when
+    the viz composite runs; the registry / inputs_by_class maps are keyed by
+    registered names, so they never contain it — import it here for its inputs()."""
+    import importlib
+    dotted = class_key.lstrip("!")
+    module, _, cls = dotted.rpartition(".")
+    return getattr(importlib.import_module(module), cls)
+
+
 def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict,
                         *, inputs_by_class: "dict | None" = None) -> dict:
     """Build the small composite that dispatches one visualization.
@@ -1390,7 +1401,15 @@ def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict,
     address = viz_spec["address"]
     class_key = address.split(":", 1)[1] if ":" in address else address
 
-    if inputs_by_class is not None:
+    if class_key.startswith("!"):
+        # Dynamic-import address (e.g. v2ecoli's ParquetAnalysisView) — pbg resolves
+        # it when the viz composite runs; import it here just for its declared inputs.
+        try:
+            declared_inputs = _dynamic_viz_class(class_key).__new__(
+                _dynamic_viz_class(class_key)).inputs()
+        except Exception:
+            declared_inputs = {}
+    elif inputs_by_class is not None:
         if class_key not in inputs_by_class:
             raise KeyError(f"Visualization class not registered: {address}")
         declared_inputs = inputs_by_class.get(class_key) or {}
