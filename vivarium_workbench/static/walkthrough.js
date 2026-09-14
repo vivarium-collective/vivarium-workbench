@@ -3947,7 +3947,8 @@
     var entries = vizEntries || [];
     var analyses = entries.filter(function(c) { return c.kind === 'analysis'; })
       .map(function (c) { return { name: c.name, address: c.address, description: c.doc || '', kind: 'analysis', source: 'framework' }; });
-    var vizzes   = entries.filter(function(c) { return c.kind !== 'analysis'; });
+    var cards    = entries.filter(function(c) { return c.kind === 'report_card' || c.kind === 'test'; });
+    var vizzes   = entries.filter(function(c) { var k = c.kind; return k !== 'analysis' && k !== 'report_card' && k !== 'test'; });
 
     // Analyses tab — same card renderers as everything else (grid/full/table),
     // and registered so semantic-zoom re-renders pick them up.
@@ -3980,6 +3981,28 @@
     window._registryVizEntries = union;
     var vCount = document.getElementById('registry-visualization-count');
     if (vCount) vCount.textContent = union.length;
+
+    // Tests tab (report cards) — merge the framework TEST_REGISTRY / report-card
+    // classes from the catalog with any build_core-registered ones, and keep the
+    // count in sync, symmetrically with Analyses + Visualizations above. Without
+    // this the report-card classes never surface (build_core's report_card kind
+    // is usually empty) and the "Tests" count stays 0.
+    var rcExisting = {};
+    document.querySelectorAll('#registry-report_cards-container .registry-entry strong')
+      .forEach(function(s) { rcExisting[(s.textContent || '').trim()] = true; });
+    var rcExtra = cards.filter(function(c) { return !rcExisting[(c.name || '').trim()]; })
+      .map(function(c) {
+        return { name: c.name, address: c.address, description: c.doc || '', source: 'framework', kind: 'report_card' };
+      });
+    var rcCurrent = ((window._registryByKind || {})['registry-report_cards-container'] || []);
+    var rcUnion = rcCurrent.concat(rcExtra);
+    if (rcExtra.length) {
+      (window._registryByKind = window._registryByKind || {})['registry-report_cards-container'] = rcUnion;
+      var rcContainer = document.getElementById('registry-report_cards-container');
+      if (rcContainer) _renderRegistryGrid('registry-report_cards-container', rcUnion);
+    }
+    var rcCount = document.getElementById('registry-report_card-count');
+    if (rcCount) rcCount.textContent = rcUnion.length;
   }
   window._enrichRegistryWithVizClasses = _enrichRegistryWithVizClasses;
 

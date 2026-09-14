@@ -473,6 +473,36 @@ def _list_visualizations() -> dict:
     except Exception:  # noqa: BLE001
         pass
 
+    # Append report-card / test classes. They auto-register into
+    # viva_superpowers.post_sim.TEST_REGISTRY (REPORT_CARD_REGISTRY is the same
+    # dict) when the modules that define them are imported — the same
+    # import-time-registration contract as the Analysis classes above, so import
+    # the card modules first. Surfaces them in the Registry's "Tests" tab.
+    try:
+        import v2ecoli.workflow.report_cards  # noqa: F401  (registers v2ecoli cards)
+    except Exception:  # noqa: BLE001
+        pass
+    _seen_rc: set = set()
+    for _modname, _regattr in (("viva_superpowers.post_sim", "TEST_REGISTRY"),
+                               ("v2ecoli.workflow.post_sim", "REPORT_CARD_REGISTRY")):
+        try:
+            _mod = __import__(_modname, fromlist=[_regattr])
+            _reg = getattr(_mod, _regattr, {}) or {}
+        except Exception:  # noqa: BLE001
+            continue
+        for _name, _cls in sorted(_reg.items()):
+            if not isinstance(_cls, type) or _name in _seen_rc:
+                continue
+            _seen_rc.add(_name)
+            try:
+                _doc = (_cls.__doc__ or "").strip().split("\n")[0]
+            except Exception:  # noqa: BLE001
+                _doc = ""
+            out.append({
+                "address": f"local:{_cls.__module__}.{_cls.__qualname__}",
+                "name": _name, "doc": _doc, "kind": "report_card",
+            })
+
     return {"classes": out}
 
 
