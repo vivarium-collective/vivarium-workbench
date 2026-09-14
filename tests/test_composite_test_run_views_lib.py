@@ -199,6 +199,12 @@ def test_pinned_mode_routes_to_deployment_target(tmp_path, monkeypatch, fixed_ru
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
     monkeypatch.setattr(run_registry, "spawn_detached",
                         lambda request_path, *, workspace, log_path: 4242)
+    # Routing test, not the git preflight — the tmp workspace isn't a pushed git
+    # repo, so mock the preflight as ready (its own behaviour is covered in
+    # test_composite_test_run_remote_build.py).
+    from vivarium_workbench.lib import remote_run
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight",
+                        lambda ws: {"ok": True, "reason": "ok"})
 
     body, status = views.composite_test_run(ws, {"id": "demo.spec", "steps": 7})
 

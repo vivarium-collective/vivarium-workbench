@@ -22,6 +22,12 @@ def test_composite_test_run_on_remote_build_dispatches(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
     monkeypatch.setattr(run_registry, "spawn_detached", lambda *a, **k: 4242)
+    # This test covers dispatch ROUTING, not the git preflight — the tmp workspace
+    # isn't a pushed git repo, so mock the preflight as ready (its own behaviour is
+    # covered by test_composite_test_run_remote_unpushed_returns_409 below).
+    from vivarium_workbench.lib import remote_run
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight",
+                        lambda ws: {"ok": True, "reason": "ok"})
 
     body, status = v.composite_test_run(
         tmp_path, {"id": "pkg.composites.x", "overrides": {}, "steps": 7})
@@ -34,6 +40,32 @@ def test_composite_test_run_on_remote_build_dispatches(tmp_path, monkeypatch):
     req = json.loads((run_dir / "request.json").read_text())
     assert req["target"] == "deployment"
     assert req["steps"] == 7
+
+
+def test_composite_test_run_remote_unpushed_returns_409(tmp_path, monkeypatch):
+    """A deployment-target dispatch on a workspace that isn't git-clean+pushed
+    returns a clean 409 (the preflight) with an actionable message, and spawns
+    NO detached run — instead of the runner tracing out on git_pip_url."""
+    from vivarium_workbench.lib import composite_test_run_views as v
+    from vivarium_workbench.lib import run_registry, remote_run
+
+    (tmp_path / ".pbg").mkdir()
+    (tmp_path / "workspace.yaml").write_text("name: remote-ws\n", encoding="utf-8")
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+    monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
+    spawned = []
+    monkeypatch.setattr(run_registry, "spawn_detached",
+                        lambda *a, **k: (spawned.append(1), 4242)[1])
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight",
+                        lambda ws: {"ok": False, "reason": "unpushed",
+                                    "message": "Workspace commit isn't pushed — push it first."})
+
+    body, status = v.composite_test_run(tmp_path, {"id": "pkg.composites.x", "steps": 7})
+
+    assert status == 409
+    assert body["reason"] == "unpushed"
+    assert "push" in body["error"].lower()
+    assert not spawned  # no detached run spawned
 
 
 def test_execute_remote_forwards_overrides_to_run_remote(tmp_path, monkeypatch):
