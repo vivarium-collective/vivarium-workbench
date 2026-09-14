@@ -201,7 +201,16 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
 
     out_sims: list = []
     total_figures = 0
-    for sid, name in cand[:max_sims]:
+    # Scan candidates until we've collected max_sims sims that actually HAVE
+    # figures, bounded by scan_cap so a study whose first rows lack rendered
+    # analyses (null result_uri / not-yet-analyzed) still surfaces the ones that
+    # do, without probing all N (each probe is an sms-api + S3 round-trip).
+    scan_cap = max(max_sims * 6, 40)
+    scanned = 0
+    for sid, name in cand:
+        if len(out_sims) >= max_sims or scanned >= scan_cap:
+            break
+        scanned += 1
         res = list_remote_analysis_figures(client, sid)
         if not res.get("available"):
             continue
@@ -223,7 +232,7 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
         "reason": "ok" if out_sims else ("no-figures" if cand else "no-remote-sims"),
         "study": slug, "sims": out_sims,
         "total_completed_remote_sims": len(cand), "shown_sims": len(out_sims),
-        "total_figures_across_shown": total_figures,
+        "scanned_sims": scanned, "total_figures_across_shown": total_figures,
     }
 
 
