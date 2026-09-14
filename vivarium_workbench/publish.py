@@ -1040,7 +1040,11 @@ def _do_build(
     # (…/composite-state/<id>.json → …/composite-default-view/<id>.json).
     dview_dir = api_dir / "composite-default-view"
     dview_dir.mkdir(parents=True, exist_ok=True)
-    for views_dir in sorted((ws_root / "investigations").glob("*/loom-views")):
+    # Resolve investigations through the workspace layout (a workspace may relocate
+    # it, e.g. layout: {investigations: workspace/investigations}); hardcoding
+    # ws_root/"investigations" misses the committed loom-views there and publishes
+    # no default view.
+    for views_dir in sorted(wp.investigations.glob("*/loom-views")):
         for vf in sorted(views_dir.glob("*.json")):
             try:
                 (dview_dir / vf.name).write_bytes(vf.read_bytes())
