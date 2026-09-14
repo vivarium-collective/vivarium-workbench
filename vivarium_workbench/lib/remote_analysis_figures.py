@@ -117,6 +117,57 @@ def _list_prefix(s3, bucket: str, list_under: str, rel_to: str, suffixes: tuple)
     return out
 
 
+def _list_analysis_dirs(s3, bucket: str, analyses_prefix: str) -> list:
+    """List the immediate analysis subdirectories under ``<out_uri>/analyses/`` —
+    one per analysis, INCLUDING in-region toolkit re-fires written by raw
+    ``aws s3 cp`` that create no sms-api DB record. Returns ``[(name, dir_key)]``;
+    empty on any error."""
+    out: list = []
+    base = analyses_prefix.rstrip("/") + "/"
+    token = None
+    try:
+        while True:
+            kw = {"Bucket": bucket, "Prefix": base, "Delimiter": "/"}
+            if token:
+                kw["ContinuationToken"] = token
+            resp = s3.list_objects_v2(**kw)
+            for cp in resp.get("CommonPrefixes", []) or []:
+                p = (cp.get("Prefix") or "").rstrip("/")
+                if p:
+                    out.append((p.rsplit("/", 1)[-1], p))
+            if resp.get("IsTruncated") and resp.get("NextContinuationToken"):
+                token = resp["NextContinuationToken"]
+            else:
+                break
+    except Exception:
+        return []
+    return out
+
+
+def _analyses_root(client, simulation_id: int, analyses: list) -> Optional[Tuple[str, str]]:
+    """Resolve ``(bucket, "<...>/analyses" key)`` for a sim — from any analysis's
+    ``result_uri`` (its grandparent), or the sim's output prefix via
+    ``get_simulation``. None if unresolvable. Lets us walk S3 for analysis dirs
+    that have no DB record."""
+    for a in (analyses or []):
+        ru = a.get("result_uri")
+        parsed = parse_s3_uri(ru) if ru else None
+        if parsed and "/analyses/" in parsed[1]:
+            bucket, key = parsed
+            return bucket, key.rsplit("/analyses/", 1)[0] + "/analyses"
+    try:
+        sim = client.get_simulation(simulation_id) or {}
+    except Exception:
+        return None
+    cfg = sim.get("config") or {}
+    out_uri = ((cfg.get("emitter_arg") or {}).get("out_uri")) or cfg.get("out_uri") or cfg.get("outdir")
+    parsed = parse_s3_uri(out_uri) if out_uri else None
+    if parsed:
+        bucket, key = parsed
+        return bucket, key.rstrip("/") + "/analyses"
+    return None
+
+
 def list_remote_analysis_figures(client, simulation_id: int) -> dict:
     """For every completed analysis on ``simulation_id`` with a non-null
     ``result_uri``, list its S3 ``viz/`` figures and ``ptools/`` tables.
@@ -141,6 +192,7 @@ def list_remote_analysis_figures(client, simulation_id: int) -> dict:
         return {"available": False, "reason": "s3-unavailable", "analyses": []}
 
     rows: list = []
+    covered: set = set()   # analysis-dir names already surfaced via a DB record
     saw_completed = False
     saw_result_uri = False
     for a in analyses:
@@ -151,21 +203,43 @@ def list_remote_analysis_figures(client, simulation_id: int) -> dict:
             saw_completed = True
         if not result_uri:
             # completed-but-null result_uri where objects may still exist is the
-            # sms-api write-side gap; surface the row so the caller can flag it.
+            # sms-api write-side gap; surface the row so the caller can flag it
+            # (the S3 walk below may still find its figures under a re-fire dir).
             rows.append({"name": name, "status": status, "result_uri": None,
-                         "figures": [], "ptools": []})
+                         "figures": [], "ptools": [], "source": "record"})
             continue
         saw_result_uri = True
         parsed = parse_s3_uri(result_uri)
         if not parsed:
             rows.append({"name": name, "status": status, "result_uri": result_uri,
-                         "figures": [], "ptools": []})
+                         "figures": [], "ptools": [], "source": "record"})
             continue
         bucket, prefix = parsed
         figures = _list_prefix(s3, bucket, prefix + "/viz", prefix, _FIGURE_SUFFIXES)
         ptools = _list_prefix(s3, bucket, prefix + "/ptools", prefix, _PTOOLS_SUFFIXES)
+        covered.add(prefix.rsplit("/", 1)[-1])
         rows.append({"name": name, "status": status, "result_uri": result_uri,
-                     "figures": figures, "ptools": ptools})
+                     "figures": figures, "ptools": ptools, "source": "record"})
+
+    # S3-prefix-walk UNION: surface analysis dirs on S3 that have no sms-api DB
+    # record. In-region toolkit re-fires write figures via raw `aws s3 cp` to
+    # <out_uri>/analyses/analysis-ptools-<scale>/ without registering a record —
+    # so a re-fire auto-surfaces here (S3 is the source of truth), no write-side
+    # result_uri backfill needed.
+    root = _analyses_root(client, simulation_id, analyses)
+    if root:
+        rbucket, rkey = root
+        for dname, dkey in _list_analysis_dirs(s3, rbucket, rkey):
+            if dname in covered:
+                continue
+            figs = _list_prefix(s3, rbucket, dkey + "/viz", dkey, _FIGURE_SUFFIXES)
+            pts = _list_prefix(s3, rbucket, dkey + "/ptools", dkey, _PTOOLS_SUFFIXES)
+            if figs or pts:
+                covered.add(dname)
+                saw_result_uri = True
+                rows.append({"name": dname, "status": "completed",
+                             "result_uri": f"s3://{rbucket}/{dkey}",
+                             "figures": figs, "ptools": pts, "source": "s3"})
 
     if not rows:
         return {"available": False, "reason": "no-analyses", "analyses": []}
@@ -245,12 +319,20 @@ def fetch_by_analysis(client, simulation_id: int, analysis_name: str,
     try:
         analyses = client.list_analyses(simulation_id)
     except Exception:
-        return None
+        analyses = []
     result_uri = None
     for a in analyses:
         if (a.get("name") or a.get("job_name")) == analysis_name and a.get("result_uri"):
             result_uri = a["result_uri"]
             break
+    if not result_uri:
+        # S3-only analysis (toolkit re-fire with no DB record): construct its
+        # result_uri as <out_uri>/analyses/<analysis_name> — the same dir the
+        # union walk in list_remote_analysis_figures surfaced it from.
+        root = _analyses_root(client, simulation_id, analyses)
+        if root:
+            rbucket, rkey = root
+            result_uri = f"s3://{rbucket}/{rkey}/{analysis_name}"
     if not result_uri:
         return None
     return fetch_remote_analysis_object(result_uri, relpath)
