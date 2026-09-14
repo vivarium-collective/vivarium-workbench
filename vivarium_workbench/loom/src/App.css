@@ -2003,6 +2003,15 @@ textarea.sr-input {
 .loom-graph-grip-label {
   font-size: 11px; font-weight: 600; color: #64748b; letter-spacing: .02em;
 }
+/* Bottom bar under Outputs (card embed): drag to resize outputs, double-click to
+   collapse the whole loom. Mirrors the graph grip's look. */
+.loom-outputs-bottombar {
+  flex: 0 0 auto; height: 14px; display: flex; align-items: center; justify-content: center;
+  cursor: ns-resize; background: #f1f5f9; border-top: 1px solid #e5e7eb;
+  touch-action: none; user-select: none;
+}
+.loom-outputs-bottombar:hover { background: #e6edf5; }
+.loom-outputs-bottombar:hover .loom-graph-grip-handle { background: #94a3b8; }
 .explore-runbar-dur input { width: 64px; margin-left: 2px; }
 .explore-runbar-kind {
   font-size: 11px; font-weight: 700; letter-spacing: .03em;

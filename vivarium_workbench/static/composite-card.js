@@ -392,17 +392,16 @@
   }
   window._pcardToggleSec = _pcardToggleSec;
 
-  // Collapse/expand a composite card's loom from the HEADER caret (the unified
-  // header is the single toggle — the separate "Explore" accordion strip is
-  // hidden). Reuses _pcardToggleSec so the loom lazy-mounts on first open, then
-  // syncs the header caret + a card-level class for styling.
+  // Open/close a composite card's loom. The single "graph" bar (.pcard-graph-bar)
+  // is the control; once open, the loom's OWN graph grip takes over and this bar
+  // is hidden (CSS, keyed on .pcard-loom-open). Reuses _pcardToggleSec so the loom
+  // lazy-mounts on first open, then syncs a card-level class for styling.
   function _toggleLoomCard(btn) {
     var card = btn.closest('.registry-entry-full'); if (!card) return;
     var sec = card.querySelector('.pcard-sec-explore'); if (!sec) return;
     var head = sec.querySelector('.pcard-sec-head'); if (!head) return;
     _pcardToggleSec(head);
     var open = sec.classList.contains('pcard-sec-open');
-    btn.textContent = open ? '▾ Collapse' : '▶ Explore';
     card.classList.toggle('pcard-loom-open', open);
     // Collapsing the loom also restores the header (no orphaned max-view state).
     if (!open) card.classList.remove('pcard-hdr-hidden');
@@ -416,7 +415,7 @@
     // If the loom isn't open yet, open it first (collapsing the bar over an
     // empty card would be pointless).
     if (!card.classList.contains('pcard-loom-open')) {
-      var exp = card.querySelector('.pcard-explore-btn');
+      var exp = card.querySelector('.pcard-graph-bar');
       if (exp) _toggleLoomCard(exp);
     }
     card.classList.toggle('pcard-hdr-hidden');
@@ -708,24 +707,6 @@
         '<span class="pcard-apply-status muted" data-role="apply-status"></span>' +
       '</div>';
 
-    var topNote = '<p class="muted pcard-toplevel-note">Top-level composite — its interface is the internal wiring (see Explore), not bridge ports.</p>';
-    var runBar = _pcardRunBar(
-      // Mirror the loom Explore run bar: a ◇ steps mode pill, then the solid
-      // teal ▶ Run button, then the Steps field — same order and look, so the
-      // collapsed card and the open-loom surface are one design.
-      '<span class="pcard-run-kind" title="Step network — advances in discrete integer steps.">◇ steps</span>' +
-      (c.read_only
-        ? '<span class="pcard-run-go pcard-run-go-disabled" aria-disabled="true">▶ Run</span>' +
-          '<span class="muted pcard-run-note">read-only composite — enable running inside Explore to run in place</span>'
-        : '<button class="pcard-run-go" type="button" onclick="_runComposite(this)">▶ Run</button>' +
-          '<label class="loom-run-field loom-run-interval-field">Steps <input type="number" step="1" min="1" class="pcard-run-time" placeholder="e.g. 10"></label>'));
-
-    // Outputs = the launched run's live status → its visualizations. A composite
-    // run is detached; _runComposite stores the run_id and _pollCompositeRun
-    // fills this panel (progress → viz_html on completion).
-    var outputsBody =
-      _compositeOutControls(c) +
-      '<div class="pcard-out-panel" data-role="out-panel">' + _compositeOutIdle() + '</div>';
     var addr = c.module ? (c.module + '.' + c.name) : c.id;
 
     return '<div class="registry-entry registry-entry-full loom-runnable pcard pcard-accordion pcard-composite' + sel +
@@ -733,7 +714,6 @@
       '<div class="loom-card loom-card-stack loom-card-composite">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" ondblclick="event.stopPropagation();_maximizeCardFromHeader(this)" title="Click to pin to top · double-click to maximize">' +
-            '<button class="pcard-explore-btn" type="button" onclick="event.stopPropagation();_toggleLoomCard(this)" title="Open the loom — Configure · graph · run · outputs">▶ Explore</button>' +
             '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + wsPill + roPill +
             '<code class="loom-addr">' + _esc(addr) + '</code>' +
             '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⌃</button>' +
@@ -760,16 +740,28 @@
           '</div>' +
         '</div>' +
         '<div class="pcard-acc">' +
-          // Card-level Run + Outputs, surfaced on the COLLAPSED card so a
-          // composite is runnable (and its results/visualizations viewable)
-          // without first opening Explore. When Explore IS open, the loom's own
-          // full stacked surface owns run+outputs and these are hidden (CSS,
-          // keyed on .pcard-loom-open) so the two run bars never both show —
-          // that was the "diverging semantics" the earlier refactor guarded.
-          runBar +
-          _pcardSection('outputs', 'Outputs', '', outputsBody, { resizable: true }) +
-          // Explore = the FULL stacked loom surface — Configure/Inputs, the
-          // bigraph, Run/Step, and Outputs all live inside it (lazy-mounted).
+          // ONE surface: the card body is just the lazily-mounted loom. The
+          // full-width "graph" bar is the single control (it replaces the old
+          // header Explore/Collapse button AND the duplicated static run/outputs
+          // strip). It looks and sits exactly like the loom's own collapsed graph
+          // grip, so opening is seamless: click to lazy-mount + open the loom
+          // (Configure · bigraph · run · outputs — the loom owns all of it). The
+          // loom is heavy to resolve, so the list stays fast by mounting only on
+          // click; once open, the loom's own graph grip takes over and this bar is
+          // hidden (CSS, keyed on .pcard-loom-open) — one continuous bar.
+          // The single control. Clicking it lazy-mounts the loom — which owns the
+          // run + outputs (and the graph). The loom mounts with its GRAPH COLLAPSED,
+          // so the first thing shown is the compact run + outputs strip (identical
+          // to every other state, since it IS the loom); the same bar then expands
+          // the graph. Once mounted, the loom's own grip takes over and this
+          // card-level bar hides (CSS, keyed on .pcard-loom-open).
+          '<button class="pcard-graph-bar" type="button" onclick="event.stopPropagation();_toggleLoomCard(this)" title="Open the composite — run · outputs · graph">' +
+            '<span class="pcard-graph-bar-handle"></span>' +
+            '<span class="pcard-graph-bar-label">▸ run · outputs · graph</span>' +
+          '</button>' +
+          // The loom — the FULL stacked surface (Configure/Inputs · bigraph ·
+          // Run/Step · Outputs), lazy-mounted on first open. Graph collapsed at
+          // first so run + outputs lead.
           _pcardSection('explore', 'Explore', '<span class="pcard-sec-hint">◆ Configure · run · outputs — click to open</span>', _compositeLoomExplore(c), { wide: true, feature: true }) +
         '</div>' +
       '</div>' +

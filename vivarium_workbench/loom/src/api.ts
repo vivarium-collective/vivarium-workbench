@@ -80,6 +80,31 @@ export function postRunComplete(simulation_id: string, composite_id: string) {
   );
 }
 
+export type ExploreAutoHeightMsg = {
+  type: 'explore:autoheight';
+  height: number;  // the surface's natural content height, in CSS px
+};
+
+/** Report the loom surface's natural content height so an embedding card can
+ *  size its iframe to fit — the surface then grows/shrinks downward with the
+ *  graph instead of scrolling inside a fixed-height frame. */
+export function postAutoHeight(height: number) {
+  const target = _embeddingTarget();
+  if (target) target.postMessage(
+    { type: 'explore:autoheight', height } as ExploreAutoHeightMsg,
+    '*',
+  );
+}
+
+export type ExploreCollapseCardMsg = { type: 'explore:collapse-card' };
+
+/** Ask the embedding card to fully collapse this loom back to its pre-mount
+ *  strip (header + the single open bar). Used by the surface's bottom bar. */
+export function postCollapseCard() {
+  const target = _embeddingTarget();
+  if (target) target.postMessage({ type: 'explore:collapse-card' } as ExploreCollapseCardMsg, '*');
+}
+
 export function onCompositeLoad(handler: (msg: CompositeLoadMsg) => void) {
   const listener = (ev: MessageEvent) => {
     if (ev.data?.type === 'composite:load') handler(ev.data as CompositeLoadMsg);

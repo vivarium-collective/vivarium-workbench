@@ -2007,23 +2007,25 @@ body.pcard-sec-resizing{ cursor:ns-resize; user-select:none; }
 .pcard-sec-feature > .pcard-sec-head:hover{ background:#f4efff; }
 .pcard-sec-feature > .pcard-sec-head .pcard-sec-caret{ color:#7c3aed; }
 .pcard-sec-feature > .pcard-sec-head .pcard-sec-name{ color:#6d28d9; }
-/* Unified composite header IS the single loom toggle: hide the separate
-   "Explore" accordion strip on composite cards; the header caret drives it. */
+/* The single loom toggle is the full-width "graph" bar; hide the separate
+   "Explore" accordion head on composite cards. */
 .pcard-composite .pcard-sec-explore > .pcard-sec-head{ display:none; }
 .pcard-composite .pcard-sec-feature{ background:transparent; }
-/* Obvious Explore button (replaces the tiny caret). */
-.pcard-explore-btn{
-  border:1px solid #b7ebe3; background:#ecfdf9; color:#0d6e6b; cursor:pointer;
-  font-size:12px; font-weight:700; line-height:1; padding:4px 11px; border-radius:6px;
-  flex:none; align-self:center; margin-right:2px; white-space:nowrap;
+/* Full-width "graph" bar — the ONE control that opens the loom. Styled to match
+   the loom's own collapsed graph grip so the handoff (card bar → loom's own grip)
+   is seamless: same height, ground, centered handle + "▸ graph" label. */
+.pcard-graph-bar{
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  width:100%; height:22px; padding:0; border:1px solid #e5e7eb; border-left:0; border-right:0;
+  background:#eef2f7; color:#64748b; cursor:pointer; user-select:none;
 }
-.pcard-explore-btn:hover{ background:#d5f2ee; border-color:#4bb3ae; }
-.pcard-loom-open .pcard-explore-btn{ background:#fff; color:#475569; border-color:#e5e7eb; }
-/* Card-level Run bar + Outputs are for the COLLAPSED card (run/view without
-   Explore). Once Explore/loom is open, the loom's own full stacked surface owns
-   run+outputs — hide the card-level pair so the two run bars never both show. */
-.pcard-composite.pcard-loom-open > .loom-card > .pcard-acc > .pcard-runbar,
-.pcard-composite.pcard-loom-open > .loom-card > .pcard-acc > .pcard-sec-outputs{ display:none; }
+.pcard-graph-bar:hover{ background:#e6edf5; }
+.pcard-graph-bar-handle{ width:40px; height:4px; border-radius:999px; background:#cbd5e1; }
+.pcard-graph-bar:hover .pcard-graph-bar-handle{ background:#94a3b8; }
+.pcard-graph-bar-label{ font-size:11px; font-weight:600; letter-spacing:.02em; }
+/* The card-level bar is only the pre-mount trigger. Once the loom is open it owns
+   run + outputs + the graph grip, so hide the card-level bar (one control shows). */
+.pcard-composite.pcard-loom-open > .loom-card > .pcard-acc > .pcard-graph-bar{ display:none; }
 /* Collapse-the-bar button (⤢): only useful once the loom is open. */
 .pcard-hdr-collapse{
   border:1px solid #e5e7eb; background:#fff; color:#64748b; cursor:pointer;
@@ -2169,6 +2171,10 @@ body.pcard-sec-resizing{ cursor:ns-resize; user-select:none; }
 .pcard-sec-wide > .pcard-sec-body{ padding:0; }
 .pcard-sec-wide .pcard-loom{ margin:0; }
 .pcard-sec-wide .ccard-loom-frame{ width:100%; min-height:340px; }
+/* Composite loom frame is auto-height (JS sizes it to the loom's content via
+   explore:autoheight, floored at 120px). Drop the 340px min so a collapsed graph
+   + closed outputs shrinks to a compact strip instead of leaving white space. */
+.pcard-composite .ccard-loom-frame{ min-height:0; }
 .pcard-composite .loom-card-composite{ position:relative; }
 .pcard-composite .composite-ws-tag{ margin-left:8px; }
 :root[data-theme="dark"] .proc-kind-composite ~ .composite-ws-tag{ opacity:0.9; }
@@ -4393,21 +4399,6 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   border-radius: 5px; padding: 3px 11px; cursor: pointer;
 }
 .ccard-loom-live-btn:hover { background: #047857; }
-/* Drag-to-resize grip at the bottom of an embedded loom — grow/shrink the panel
-   (and the card with it). Full-width bar so the gesture is obvious. */
-.ccard-loom-resize {
-  flex: 0 0 11px; cursor: ns-resize; background: #eef2f7;
-  border-top: 1px solid #d5dde8; position: relative; touch-action: none;
-  user-select: none;
-}
-.ccard-loom-resize::before {
-  content: ''; position: absolute; left: 50%; top: 50%;
-  width: 34px; height: 3px; margin: -1.5px 0 0 -17px; border-radius: 2px;
-  background: #9aa7b8;
-}
-.ccard-loom-resize:hover { background: #e2e8f2; }
-.ccard-loom-resize:hover::before { background: #6b7a90; }
-.ccard-loom-frame.is-resizing { user-select: none; }
 .ccard {
   display: flex; flex-direction: column; gap: 7px;
   border: 1px solid #e5e7eb; border-radius: 8px; background: #fff;

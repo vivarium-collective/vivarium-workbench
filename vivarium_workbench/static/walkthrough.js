@@ -2636,10 +2636,10 @@
           _bi.onclick = function (ev) { ev.stopPropagation(); _popCardBackIn(address, kind); };
           _hdr.appendChild(_bi);
         }
-        // For composites, auto-open Explore so the loom is visible immediately
-        // (via the header Explore button so its label stays in sync).
+        // For composites (popped-out single card), auto-open the loom so it's
+        // visible immediately — via the single graph bar that toggles it.
         if (isComposite) {
-          var expBtn = host.querySelector('.pcard-explore-btn');
+          var expBtn = host.querySelector('.pcard-graph-bar');
           if (expBtn && typeof _toggleLoomCard === 'function') _toggleLoomCard(expBtn);
         }
         return;
@@ -4261,135 +4261,11 @@
   window._enableInlineLoomRun = _enableInlineLoomRun;
 
 
-  // The static composite-state URL the loom fetches. In a PUBLISHED snapshot the
-  // live /api/composite-resolve endpoint doesn't exist — the pre-resolved state
-  // is a static file at /api/composite-state/<id>.json — so point there; in live
-  // mode use the resolve endpoint. (Without this, "View" 404'd in the snapshot.)
-  function _compositeStateUrl(id, overrides) {
-    var apiUrl = (window.DataSource && window.DataSource.apiUrl)
-      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
-    if (document.body.classList.contains('snapshot')) {
-      return apiUrl('/api/composite-state/' + encodeURIComponent(id) + '.json');
-    }
-    return apiUrl('/api/composite-resolve?id=' + encodeURIComponent(id)) +
-      (overrides ? '&overrides=' + encodeURIComponent(overrides) : '');
-  }
-
-  // "Pop out" — open this composite's loom in a separate window directly (live,
-  // full config + run), bypassing the standalone explorer page. In a published
-  // snapshot there's no live API, so open the static (?static=1&stateUrl=) URL.
-  function _popoutCompositeLoom(id) {
-    var apiUrl = (window.DataSource && window.DataSource.apiUrl)
-      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
-    var url;
-    if (document.body.classList.contains('snapshot')) {
-      url = apiUrl('/bigraph-loom/index.html') + '?static=1&stateUrl=' + encodeURIComponent(_compositeStateUrl(id));
-    } else {
-      url = apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id);
-    }
-    var w = window.open(url, '_blank',
-      'width=1280,height=860,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
-    if (!w) alert('Popup blocked. Allow popups from this site to pop out the composite.');
-  }
-  window._popoutCompositeLoom = _popoutCompositeLoom;
-
-
-
-  function _openCompositeLoomInline(det) {
-    if (!det || det._loomLoaded) return;
-    // <details> embeds only mount when open; a plain container (the ProcessCard
-    // Explore section) has no `.open` and mounts as soon as it's asked to.
-    if (det.tagName === 'DETAILS' && !det.open) return;
-    det._loomLoaded = true;
-    var id = det.getAttribute('data-id');
-    var host = det.querySelector('.ccard-loom-frame');
-    if (!host) return;
-    host.innerHTML = '<p class="muted" style="padding:10px;font-size:0.85em">Resolving composite (this can take a moment)…</p>';
-    var apiUrl = (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
-    // Live mode (user hit "Enable running") loads the same URL as the pop-out
-    // (?id=<ref>) so config is editable and Run works; otherwise a read-only
-    // static render pointed at live composite-resolve.
-    // chrome=off → embedded (no breadcrumb/tab strip). An optional data-view
-    // (e.g. "visualizations"/"results"/"document") selects which loom tab the
-    // embed shows — used by the card's Outputs section.
-    var tabParam = det.getAttribute('data-view') ? '&tab=' + encodeURIComponent(det.getAttribute('data-view')) : '';
-    // On a live dashboard the view-only loom still carries the composite id +
-    // live=1 so drilling into an inner Composite (a Composite Process like
-    // EcoliWCM) resolves via the live /api/composite-inner-state endpoint —
-    // static=1 alone (a published snapshot) would look for a pre-built file that
-    // only a snapshot ships. Omit both under body.snapshot (truly no server).
-    var liveInner = document.body.classList.contains('snapshot')
-      ? '' : '&id=' + encodeURIComponent(id) + '&live=1';
-    // `data-surface="full"` → the WHOLE stacked loom surface (Configure/Inputs +
-    // bigraph + Run/Step + Outputs), header hidden (the card names the composite).
-    // It runs LIVE (id-based) so Run + Apply work; the card no longer wraps its
-    // own Configure/Run/Outputs. Everything else keeps the chrome=off bigraph-only
-    // preview.
-    var fullSurface = det.getAttribute('data-surface') === 'full';
-    var isSnapshot = document.body.classList.contains('snapshot');
-    var chromeParam = fullSurface ? '&header=off' : '&chrome=off';
-    var loomUrl = (det._loomLive || (fullSurface && !isSnapshot))
-      ? apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id) +
-          (det._overrides ? '&overrides=' + encodeURIComponent(det._overrides) : '') + chromeParam + tabParam
-      : apiUrl('/bigraph-loom/index.html') + '?static=1&stateUrl=' +
-          encodeURIComponent(_compositeStateUrl(id, det._overrides)) + liveInner + chromeParam + tabParam;
-    var f = document.createElement('iframe');
-    f.className = 'ccard-loom-iframe' + (fullSurface ? ' ccard-loom-iframe-full' : '');
-    f.setAttribute('title', 'Loom — ' + id);
-    f.src = loomUrl;
-    host.innerHTML = '';
-    // Restore a previously dragged height (shared across all loom embeds); the
-    // full surface needs more room by default (four stacked zones).
-    var savedH = 0;
-    try { savedH = parseInt(localStorage.getItem('viv.loomFrameH') || '', 10) || 0; } catch (e) { /* private mode */ }
-    if (!savedH && fullSurface) savedH = Math.round(window.innerHeight * 0.72);
-    if (savedH) host.style.height = Math.max(fullSurface ? 480 : 220, Math.min(Math.round(window.innerHeight * 0.92), savedH)) + 'px';
-    host.appendChild(f);
-    _wireLoomResize(host, f);
-  }
-  window._openCompositeLoomInline = _openCompositeLoomInline;
-
-  // Drag-to-resize the embedded loom panel. A full-width grip below the iframe
-  // grows/shrinks the frame; the card grows with it. Height persists across
-  // embeds via localStorage. Pointer events are disabled on the iframe mid-drag
-  // so the gesture keeps tracking when the cursor moves over the loom.
-  function _wireLoomResize(frame, iframe) {
-    var grip = document.createElement('div');
-    grip.className = 'ccard-loom-resize';
-    grip.title = 'Drag to resize';
-    frame.appendChild(grip);
-    var startY = 0, startH = 0;
-    function pointY(e) { return e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY; }
-    function onMove(e) {
-      var maxH = Math.round(window.innerHeight * 0.92);
-      var h = Math.max(220, Math.min(maxH, startH + (pointY(e) - startY)));
-      frame.style.height = h + 'px';
-      if (e.cancelable) e.preventDefault();
-      try { localStorage.setItem('viv.loomFrameH', String(Math.round(h))); } catch (err) { /* private mode */ }
-    }
-    function onUp() {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.removeEventListener('touchmove', onMove);
-      document.removeEventListener('touchend', onUp);
-      if (iframe) iframe.style.pointerEvents = '';
-      frame.classList.remove('is-resizing');
-    }
-    function onDown(e) {
-      startY = pointY(e);
-      startH = frame.getBoundingClientRect().height;
-      if (iframe) iframe.style.pointerEvents = 'none';
-      frame.classList.add('is-resizing');
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-      document.addEventListener('touchmove', onMove, { passive: false });
-      document.addEventListener('touchend', onUp);
-      if (e.cancelable) e.preventDefault();
-    }
-    grip.addEventListener('mousedown', onDown);
-    grip.addEventListener('touchstart', onDown, { passive: false });
-  }
-  window._wireLoomResize = _wireLoomResize;
+  // The loom embed glue — _compositeStateUrl / _openCompositeLoomInline /
+  // _wireLoomAutoHeight — is defined ONCE in loom-embed.js (loaded before this
+  // file in the SPA, and standalone in the study-detail iframe). It installs
+  // window globals; the bare calls in this file resolve to them. Keeping a
+  // single copy avoids the byte-identical-duplication drift this used to carry.
 
 
   // Lazily fetch a composite's process/store counts when its "structure"

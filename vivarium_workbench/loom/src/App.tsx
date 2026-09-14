@@ -51,7 +51,7 @@ import { TopoTransport } from './panels/TopoTransport';
 import { OutputsPanel } from './panels/OutputsPanel';
 import { EmitContext } from './EmitContext';
 import {
-  postReady, postInspect, postEmitChanged, onCompositeLoad, decodeUrlComposite,
+  postReady, postInspect, postEmitChanged, postAutoHeight, postCollapseCard, onCompositeLoad, decodeUrlComposite,
   resolveComposite, fetchInnerComposite, parseUrlOverrides,
 } from './api';
 import type { ExploreInspectMsg, ParameterDecl } from './api';
@@ -282,46 +282,123 @@ export default function App() {
   useEffect(() => {
     if (trajectory !== null || vizHtml !== null) setOutputsOpen(true);
   }, [trajectory, vizHtml]);
-  // Default height for the Outputs dock when the graph fills the surface. Once
-  // the graph is dragged to a fixed height or collapsed, the outputs dock becomes
-  // the flex filler instead (see its style). There is ONE resize grip in the
-  // whole surface — the graph↔run-bar grip — so the outputs dock no longer has
-  // its own top-edge grip.
-  const outputsHeight = 300;
+  // Height of the open Outputs dock. Draggable via the surface's bottom bar (card
+  // embed): drag to make the output window taller, double-click to fully collapse
+  // the whole loom back to the card's pre-mount strip.
+  const [outputsHeight, setOutputsHeight] = useState(300);
 
   // Draggable + snap-collapsible GRAPH height. The grip sits between the graph
-  // and the run bar; drag it DOWN to shrink the graph continuously, and at/near
-  // zero it SNAPS closed into the collapsed view (graph gone, the run + outputs
-  // strip persists unchanged). Drag up — or double-click the grip — to reopen.
+  // and the run bar and behaves like a normal splitter: drag it DOWN to grow the
+  // graph (the viewer) continuously — the run + outputs strip below just slides
+  // down with it — and drag UP to shrink the graph, which at/near zero SNAPS it
+  // closed into the collapsed view (graph gone, the run + outputs strip persists
+  // unchanged). Double-click the grip to reopen a collapsed graph.
   // graphHeight=null means "fill" (flex:1, the default full-graph state).
   const GRAPH_SNAP_PX = 56;
-  const [graphHeight, setGraphHeight] = useState<number | null>(null);
-  const [graphCollapsed, setGraphCollapsed] = useState(false);
+  // In the card embed (?header=off) the surface is content-height (it grows the
+  // embedding iframe downward), so the graph needs a CONCRETE default height
+  // rather than flex:1 "fill" — there is no fixed frame to fill. Standalone /
+  // popout / full-window uses keep flex-fill (graphHeight=null).
+  const DEFAULT_CARD_GRAPH_PX = 440;
+  // A single CLICK on the grip pops the graph wide open (vs. drag for fine control).
+  const WIDE_CARD_GRAPH_PX = 720;
+  const CLICK_SLOP_PX = 4;   // pointer travel under this = a click, not a drag
+  const [graphHeight, setGraphHeight] = useState<number | null>(hideHeader ? DEFAULT_CARD_GRAPH_PX : null);
+  // Card embed: mount with the graph COLLAPSED so the compact run + outputs strip
+  // leads (the loom owns run/outputs; the graph is one grip-click away). Standalone
+  // / popout open with the graph visible.
+  const [graphCollapsed, setGraphCollapsed] = useState(hideHeader);
+  const surfaceRootRef = useRef<HTMLDivElement | null>(null);
   const graphRowRef = useRef<HTMLDivElement | null>(null);
-  const graphDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const graphDragRef = useRef<{ startY: number; startH: number; moved: boolean } | null>(null);
   const onGraphGripDown = useCallback((e: React.PointerEvent) => {
     const startH = graphCollapsed ? 0 : (graphRowRef.current?.offsetHeight ?? 0);
-    graphDragRef.current = { startY: e.clientY, startH };
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    graphDragRef.current = { startY: e.clientY, startH, moved: false };
+    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* no active pointer */ }
     e.preventDefault();
   }, [graphCollapsed]);
   const onGraphGripMove = useCallback((e: React.PointerEvent) => {
     const d = graphDragRef.current;
     if (!d) return;
-    const dy = e.clientY - d.startY;           // drag down → dy>0 → shorter graph
-    const h = d.startH - dy;
+    const dy = e.clientY - d.startY;           // drag down → dy>0 → taller graph
+    if (!d.moved && Math.abs(dy) < CLICK_SLOP_PX) return;  // still a click, not a drag
+    d.moved = true;
+    const h = d.startH + dy;
     if (h < GRAPH_SNAP_PX) {
       setGraphCollapsed(true);
     } else {
       setGraphCollapsed(false);
-      setGraphHeight(Math.min(window.innerHeight * 0.9, h));
+      // Fill-mode (standalone): cap to the viewport. Card embed: the iframe grows
+      // to fit, so window.innerHeight is our OWN height — capping to it would fight
+      // the growth. Use a generous absolute cap there instead.
+      const cap = hideHeader ? 2400 : window.innerHeight * 0.9;
+      setGraphHeight(Math.min(cap, h));
     }
-  }, []);
+  }, [hideHeader]);
   const onGraphGripUp = useCallback((e: React.PointerEvent) => {
+    const d = graphDragRef.current;
     graphDragRef.current = null;
-    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    try { (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId); } catch { /* no active pointer */ }
+    // A click (no meaningful drag) toggles: collapsed → pop WIDE open, open → collapse.
+    // Dragging is left to onGraphGripMove for fine control.
+    if (d && !d.moved) {
+      if (d.startH === 0) {   // was collapsed → open wide (card) or fill (standalone)
+        setGraphHeight(hideHeader ? WIDE_CARD_GRAPH_PX : null);
+        setGraphCollapsed(false);
+      } else {
+        setGraphCollapsed(true);
+      }
+    }
+  }, [hideHeader]);
+  const toggleGraphCollapsed = useCallback(() => setGraphCollapsed((c) => {
+    if (c) setGraphHeight(hideHeader ? WIDE_CARD_GRAPH_PX : null);
+    return !c;
+  }), [hideHeader]);
+
+  // Bottom bar of the card surface: DRAG to make the Outputs window taller/shorter,
+  // DOUBLE-CLICK to fully collapse the whole loom back to the card's pre-mount strip
+  // (via postCollapseCard → the embedding card closes it).
+  const outputsDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const onOutputsGripDown = useCallback((e: React.PointerEvent) => {
+    if (!outputsOpen) setOutputsOpen(true);
+    outputsDragRef.current = { startY: e.clientY, startH: outputsHeight };
+    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* no active pointer */ }
+    e.preventDefault();
+  }, [outputsOpen, outputsHeight]);
+  const onOutputsGripMove = useCallback((e: React.PointerEvent) => {
+    const d = outputsDragRef.current;
+    if (!d) return;
+    const dy = e.clientY - d.startY;   // drag down → taller outputs
+    setOutputsHeight(Math.max(80, Math.min(1600, d.startH + dy)));
   }, []);
-  const toggleGraphCollapsed = useCallback(() => setGraphCollapsed((c) => !c), []);
+  const onOutputsGripUp = useCallback((e: React.PointerEvent) => {
+    outputsDragRef.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId); } catch { /* no active pointer */ }
+  }, []);
+
+  // Card embed (?header=off): report the surface's natural content height to the
+  // embedding page so it can size the iframe to fit. Wired via a CALLBACK REF (not
+  // a mount effect) because the surface div mounts only AFTER the composite loads
+  // — a plain effect with a stable dep runs once, before the div exists, and never
+  // re-attaches. The callback fires when the div actually mounts, so a ResizeObserver
+  // catches every layout change (graph resize/collapse, outputs open/close, a run
+  // arriving) and the frame grows/shrinks downward to match — no fixed frame, no gap.
+  const autoHeightRoRef = useRef<ResizeObserver | null>(null);
+  const autoHeightRafRef = useRef(0);
+  const attachSurfaceRoot = useCallback((el: HTMLDivElement | null) => {
+    surfaceRootRef.current = el;
+    if (autoHeightRoRef.current) { autoHeightRoRef.current.disconnect(); autoHeightRoRef.current = null; }
+    cancelAnimationFrame(autoHeightRafRef.current);
+    if (!hideHeader || !el || typeof ResizeObserver === 'undefined') return;
+    const report = () => {
+      cancelAnimationFrame(autoHeightRafRef.current);
+      autoHeightRafRef.current = requestAnimationFrame(() => postAutoHeight(Math.ceil(el.offsetHeight)));
+    };
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    autoHeightRoRef.current = ro;
+  }, [hideHeader]);
 
   // ── Topology playback (loom-live-play) ───────────────────────────────────
   // When a run's trajectory carries a place-graph that CHANGES over steps
@@ -2139,7 +2216,16 @@ export default function App() {
   // can embed this same surface standalone. (`tab` stays 'wiring' internally.)
   return (
     <ReactFlowProvider>
-      <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh' }}>
+      <div
+        ref={attachSurfaceRoot}
+        style={{
+          display: 'flex', flexDirection: 'column', width: '100vw',
+          // Card embed (?header=off): content-height so the surface grows the
+          // embedding iframe downward. Everywhere else: fill the viewport.
+          height: hideHeader ? 'auto' : '100vh',
+          minHeight: hideHeader ? 0 : undefined,
+        }}
+      >
         {/* Composite top bar: name · id · library · counts, with an expandable
             description and a minimize toggle. The full workbench card supplies
             its own header, so the card embed (header=off) hides this one. */}
@@ -2162,9 +2248,17 @@ export default function App() {
             onOpenWorkbench={compositeId ? openInWorkbench : undefined}
           />
         )}
-        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-          {/* The bigraph surface — always rendered (no tab chrome). */}
-          <div style={{
+        <div style={hideHeader
+          ? { flex: '0 0 auto', minHeight: 0, position: 'relative' }
+          : { flex: 1, minHeight: 0, position: 'relative' }}>
+          {/* The bigraph surface — always rendered (no tab chrome). In the card
+              embed it flows in normal document order (content-height); elsewhere
+              it absolutely fills the viewport. */}
+          <div style={hideHeader ? {
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+          } : {
             position: 'absolute', inset: 0,
             display: 'flex',
             flexDirection: 'column',
@@ -2392,10 +2486,11 @@ export default function App() {
               </div>
               </DockContainer>
               </div>
-              {/* Grip between the graph and the run bar: drag DOWN to shrink the
-                  graph until it snaps closed (collapsed card view); drag up — or
-                  double-click — to reopen. Hidden in chromeless embeds (the host
-                  card owns layout there). */}
+              {/* Grip between the graph and the run bar: drag DOWN to grow the
+                  graph (the run + outputs strip slides down with it); drag UP to
+                  shrink it until it snaps closed (collapsed card view); double-
+                  click to reopen. Hidden in chromeless embeds (the host card owns
+                  layout there). */}
               {!chromeless && (
                 <div
                   className={'loom-graph-grip' + (graphCollapsed ? ' collapsed' : '')}
@@ -2405,7 +2500,7 @@ export default function App() {
                   onDoubleClick={toggleGraphCollapsed}
                   title={graphCollapsed
                     ? 'Graph collapsed — drag up or double-click to reopen'
-                    : 'Drag down to collapse the graph · double-click to toggle'}
+                    : 'Drag to resize the graph (up to collapse) · double-click to toggle'}
                 >
                   <span className="loom-graph-grip-handle" />
                   {graphCollapsed && <span className="loom-graph-grip-label">▸ graph</span>}
@@ -2459,21 +2554,18 @@ export default function App() {
                 );
               })()}
               {/* Docked OUTPUTS below the run/step bar — always part of the
-                  stacked surface (drag its top edge to resize). In chromeless
-                  embeds the workbench card owns Outputs, so it is hidden here. */}
+                  stacked surface. In chromeless embeds the workbench card owns
+                  Outputs, so it is hidden here. */}
               {!chromeless && (
-                <div className={'loom-outputs-dock' + ((outputsOpen || graphCollapsed || graphHeight != null) ? '' : ' collapsed')}
-                  /* Once the graph is dragged to a fixed height or collapsed, the
-                     outputs dock becomes the flex filler so the graph visibly
-                     shrinks/grows with the grip and no gap opens below. Otherwise
-                     it keeps its own height (open) or just the toggle (closed).
-                     There is ONE resize grip in the whole surface — the graph↔run-
-                     bar grip above; the outputs dock no longer carries its own. */
-                  style={
-                    (graphCollapsed || graphHeight != null)
-                      ? { flex: '1 1 0', minHeight: 120 }
-                      : (outputsOpen ? { height: outputsHeight } : undefined)
-                  }>
+                <div className={'loom-outputs-dock' + (outputsOpen ? '' : ' collapsed')}
+                  /* The Outputs toggle is the ONLY thing that opens/closes this
+                     dock — collapsing or resizing the graph never forces it open.
+                     Open → its own fixed height (Results scroll inside); closed →
+                     just the toggle strip. Never a flex filler: the surface is
+                     content-height, so there is no leftover space to fill and the
+                     graph↔run-bar grip alone resizes the graph (growing the whole
+                     surface downward). */
+                  style={outputsOpen ? { height: outputsHeight, flex: '0 0 auto' } : undefined}>
                   <button className="loom-outputs-toggle" onClick={() => setOutputsOpen((o) => !o)}
                     title={outputsOpen ? 'Collapse outputs' : 'Expand outputs'}>
                     <span className="loom-outputs-chevron">{outputsOpen ? '▾' : '▸'}</span>
@@ -2493,6 +2585,20 @@ export default function App() {
                     declaredViz={declaredViz}
                     isRunning={activeRunId != null && vizHtml == null}
                   />
+                </div>
+              )}
+              {/* Bottom bar (card embed only): DRAG to resize the Outputs window,
+                  DOUBLE-CLICK to fully collapse the loom back to the card's strip. */}
+              {hideHeader && !chromeless && (
+                <div
+                  className="loom-outputs-bottombar"
+                  onPointerDown={onOutputsGripDown}
+                  onPointerMove={onOutputsGripMove}
+                  onPointerUp={onOutputsGripUp}
+                  onDoubleClick={() => postCollapseCard()}
+                  title="Drag to resize outputs · double-click to close"
+                >
+                  <span className="loom-graph-grip-handle" />
                 </div>
               )}
             </EmitContext.Provider>
