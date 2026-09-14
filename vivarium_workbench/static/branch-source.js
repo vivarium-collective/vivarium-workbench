@@ -429,10 +429,15 @@
     // build downloads its workspace the first time (a few minutes; cached builds
     // are instant); a local workspace switches in-process. Distinct from "Open in
     // new tab" (which leaves this tab untouched).
+    var remoteScope = state.scope === "remote";
+
     var switchHereBtn = _el("button", "viv-bs-action", "Switch here"); switchHereBtn.id = "viv-bs-switch-here";
-    switchHereBtn.title = "Switch THIS tab to the selected source. A remote build downloads its "
-      + "workspace the first time (a few minutes; cached builds are instant); a local workspace "
-      + "switches in place. Use “Open in new tab” to keep this tab as it is.";
+    switchHereBtn.title = remoteScope
+      ? "Switch THIS tab to the selected remote build — downloads its ENTIRE workspace (hundreds of "
+        + "MB, up to a few minutes) the first time. You do NOT need this to view results; prefer "
+        + "“Open in new tab” unless you specifically need this tab to run that build's code."
+      : "Switch THIS tab to the selected source (a local workspace switches in place). Use “Open in "
+        + "new tab” to keep this tab as it is.";
     switchHereBtn.addEventListener("click", function () {
       var s = state.selected || {};
       if (s.simulator_id != null) _switchRemote(s.simulator_id, switchHereBtn);
@@ -440,18 +445,30 @@
       else if (s.name) _openEntry(s);   // catalog workspace with no local path → spawn by name (new tab)
       else alert("Nothing to switch to — pick a repo/branch with a build or workspace.");
     });
-    actions.appendChild(switchHereBtn);
 
     var openBtn = _el("button", "viv-bs-action", "Open in new tab"); openBtn.id = "viv-bs-open";
     openBtn.title = "Open the selected source in a NEW browser tab, leaving this tab unchanged "
-      + "(each tab stays bound to its own source).";
+      + "(each tab stays bound to its own source) — instant, and doesn't download anything.";
     openBtn.addEventListener("click", function () {
       var s = state.selected || {};
       // build → /?build=, catalog workspace → /?workspace=, path-only → in-place fallback.
       if (s.path || s.name || s.simulator_id != null) _openEntry(s);
       else alert("Nothing to open — pick a repo/branch with a build or workspace.");
     });
-    actions.appendChild(openBtn);
+
+    // For a REMOTE build, "Open in new tab" is instant + non-destructive, while
+    // "Switch here" downloads the whole workspace and re-points this tab — so
+    // emphasize Open (first, tinted) and de-emphasize Switch. A local workspace
+    // switch is cheap, so there Switch here stays first.
+    if (remoteScope) {
+      openBtn.style.cssText = "font-weight:600; border-color:#4bb3ae; color:#0d6e6b; background:#ecfdf9";
+      switchHereBtn.style.cssText = "opacity:.6";
+      actions.appendChild(openBtn);
+      actions.appendChild(switchHereBtn);
+    } else {
+      actions.appendChild(switchHereBtn);
+      actions.appendChild(openBtn);
+    }
 
     // Commit + Push moved to the GitHub card below (that card owns git sync;
     // this card owns "where the tab runs"). See index.html.j2 #viv-git-actions.
