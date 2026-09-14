@@ -55,6 +55,7 @@ from vivarium_workbench.lib import job_status_views as _job_status_views
 from vivarium_workbench.lib import run_jobs as _run_jobs
 from vivarium_workbench.lib import remote_run_jobs as _remote_run_jobs
 from vivarium_workbench.lib import remote_run_views as _remote_run_views
+from vivarium_workbench.lib import remote_analysis_figures as _remote_analysis_figures
 from vivarium_workbench.lib import auth_views as _auth_views
 from vivarium_workbench.lib import composite_run_views as _cr_views
 from vivarium_workbench.lib import composite_test_run_views as _composite_test_run_views
@@ -7086,6 +7087,40 @@ def create_app() -> FastAPI:
         existed. Returns the analysis id to poll via `/api/remote-run-poll`."""
         body, status = _remote_run_views.remote_run_analysis(ws, req or {})
         return JSONResponse(status_code=status, content=body)
+
+    @app.get("/api/remote-analysis-figures", tags=["Runs"],
+             summary="List a remote sim's completed-analysis figures + ptools on S3")
+    def remote_analysis_figures(simulation_id: int = 0,
+                                ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """The "accessible through the remote setting" read path: for each
+        completed analysis on ``simulation_id`` that carries a ``result_uri``,
+        list its rendered ``viz/*.html`` figures + ``ptools/*`` tables straight
+        from S3 (small-object GETs, no parquet stream). ``available: false`` +
+        a ``reason`` means fall back to landing / show "pending"."""
+        if not simulation_id:
+            return JSONResponse(status_code=400, content={"error": "simulation_id required"})
+        client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
+        return JSONResponse(content=_remote_analysis_figures.list_remote_analysis_figures(
+            client, simulation_id))
+
+    @app.get("/api/remote-analysis-figure", tags=["Runs"],
+             summary="Serve one rendered figure/ptools file from a remote analysis's S3 result_uri")
+    def remote_analysis_figure(simulation_id: int = 0, analysis: str = "", path: str = "",
+                               ws: Path = Depends(get_workspace)) -> Response:
+        """Stream a single ``viz/`` or ``ptools/`` object from the named
+        analysis's S3 ``result_uri`` (resolved server-side from ``simulation_id``
+        + ``analysis`` so no raw S3 uri crosses the wire; ``path`` is traversal-
+        guarded in the lib)."""
+        if not simulation_id or not analysis or not path:
+            return Response(content=b'{"error":"simulation_id, analysis, path required"}',
+                            status_code=400, media_type="application/json")
+        client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
+        got = _remote_analysis_figures.fetch_by_analysis(client, simulation_id, analysis, path)
+        if not got:
+            return Response(content=b'{"error":"not found"}', status_code=404,
+                            media_type="application/json")
+        body, ct = got
+        return Response(content=body, media_type=ct)
 
     @app.get("/api/remote-run-poll", tags=["Runs"],
              summary="Thin-client on-demand status (build, run or analysis phase)")

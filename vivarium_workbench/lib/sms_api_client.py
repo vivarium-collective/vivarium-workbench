@@ -507,6 +507,18 @@ class SmsApiClient:
         no persistent job-status API for the backing K8s Job."""
         return self._get(f"/analyses/{analysis_id}/status")
 
+    def list_analyses(self, simulation_id: int) -> list:
+        """GET /api/v1/simulations/{id}/analyses — the analyses attached to a
+        completed simulation. Each entry carries a ``result_uri`` (an ``s3://``
+        prefix like ``.../analyses/analysis-mnp-...``) that, for a completed
+        analysis, holds the rendered ``viz/*.html`` figures and ``ptools/*.tsv``
+        overlays. ``result_uri`` is nullable (older dispatch paths, or a
+        failed/pending analysis), so callers must handle ``None``.
+
+        Returns the raw list of analysis dicts; ``[]`` when none / unreachable."""
+        out = self._get(f"/api/v1/simulations/{simulation_id}/analyses")
+        return out if isinstance(out, list) else []
+
     # ------------------------------------------------------------------
     # Compose endpoints (generic .pbg runner, Phase C)
     # ------------------------------------------------------------------
