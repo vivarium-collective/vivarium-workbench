@@ -4,6 +4,7 @@ import type { ProcessNodeData } from "../types";
 import { deriveContract, contractCompleteness } from "../contract";
 import { portInfo } from "../portInfo";
 import { KatexBlock } from "../Katex";
+import { toLatex, MathText } from "../mathText";
 import InnerCompositePreview from "./InnerCompositePreview";
 import { configParams } from "../configView";
 import { displayName } from "../labels";
@@ -575,20 +576,20 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
               e.stopPropagation(); toggleSection('contract');
             }}
           >
-            <p className="contract-recital">{contract.summary}</p>
+            <p className="contract-recital"><MathText text={contract.summary} /></p>
           </div>
         )}
 
         {show.contract && contract && contract.math.length > 0 && (
           <div className="process-node-math" title={SECTION_HINT.math}>
-            {contract.math.map((m, i) => <KatexBlock key={i} tex={m} />)}
+            {contract.math.map((m, i) => <KatexBlock key={i} tex={toLatex(m)} />)}
           </div>
         )}
 
         {show.full && contract && Object.keys(contract.symbols).length > 0 && (
           <div className="process-node-symbols" title={SECTION_HINT.symbols}>
             {Object.entries(contract.symbols).map(([s, meaning]) => (
-              <div key={s}><em>{s}</em> — {meaning}</div>
+              <div key={s}><em><MathText text={s} symbolKey /></em> — <MathText text={meaning} /></div>
             ))}
           </div>
         )}
@@ -597,7 +598,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
             contract box is clicked at the `contract` tier. */}
         {(show.full || openSection === 'contract') && contract?.description
           && contract.description !== contract.summary && (
-          <div className="process-node-description">{contract.description}</div>
+          <div className="process-node-description"><MathText text={contract.description} /></div>
         )}
 
         {show.types && (data as any).address && (

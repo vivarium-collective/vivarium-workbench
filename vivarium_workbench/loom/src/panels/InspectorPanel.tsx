@@ -13,6 +13,8 @@ import type { ProcessNodeData } from '../types';
 import { deriveContract } from '../contract';
 import { portInfo } from '../portInfo';
 import { configParams } from '../configView';
+import { KatexBlock } from '../Katex';
+import { toLatex, MathText } from '../mathText';
 
 type Selection = Omit<ExploreInspectMsg, 'type'> | null;
 
@@ -95,7 +97,7 @@ function InspectorSection(props: { title: string; children: React.ReactNode; def
 }
 
 function Prose(props: { text: string }) {
-  return <p className="insp-prose">{props.text}</p>;
+  return <p className="insp-prose"><MathText text={props.text} /></p>;
 }
 
 /** A pretty-printed JSON block, or an em-dash when empty. */
@@ -211,7 +213,7 @@ function ProcessDetail(props: { details: ProcessNodeData }) {
       {contract && contract.math.length > 0 && (
         <InspectorSection title="Equations">
           <div className="insp-math">
-            {contract.math.map((m, i) => <div key={i}>{m}</div>)}
+            {contract.math.map((m, i) => <KatexBlock key={i} tex={toLatex(m)} />)}
           </div>
         </InspectorSection>
       )}
@@ -220,7 +222,7 @@ function ProcessDetail(props: { details: ProcessNodeData }) {
         <InspectorSection title="Symbols">
           <div className="insp-symbols">
             {Object.entries(contract.symbols).map(([s, meaning]) => (
-              <div key={s}><em>{s}</em> — {meaning}</div>
+              <div key={s}><em><MathText text={s} symbolKey /></em> — <MathText text={meaning} /></div>
             ))}
           </div>
         </InspectorSection>
