@@ -633,6 +633,11 @@
     <div class="overview-section findings-section">
       <h2 class="overview-label">🔬 Findings — what this study taught us</h2>
       {% for f in study.findings %}
+      {# Findings may carry `statement` (interpretation-tier) or only `summary`.
+         Skip a finding with neither, so an empty study doesn't render blank ◆
+         cards; and render whichever text is present. #}
+      {% set _text = f.statement or f.summary %}
+      {% if _text %}
       {% set _status = f.status or 'novel' %}
       {% set _glyph = {'confirms': '✓', 'partial': '◐', 'contradicts': '✗', 'novel': '◆'}.get(_status, '◆') %}
       {% set _ftok = (f.evidence.from_test or '').split(' ')[0] if f.evidence else '' %}
@@ -641,7 +646,7 @@
         <details class="finding-details">
           <summary class="finding-row">
             <span class="finding-status-glyph">{{ _glyph }}</span>
-            <span class="finding-claim finding-statement">{{ f.statement }}</span>
+            <span class="finding-claim finding-statement">{{ _text }}</span>
             {% if f.evidence and f.evidence.from_test %}
             <span class="finding-chip">via <code>{{ f.evidence.from_test }}</code></span>
             {% elif f.evidence and f.evidence.from_run %}
@@ -703,6 +708,7 @@
           </div>
         </details>
       </div>
+      {% endif %}
       {% endfor %}
     </div>
     {% endif %}
