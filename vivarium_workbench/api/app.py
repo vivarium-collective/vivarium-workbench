@@ -6730,6 +6730,24 @@ def create_app() -> FastAPI:
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
+    @app.get("/api/remote-dispatch-preflight", tags=["Composites"],
+             summary="Is this workspace ready for a remote (deployment) composite run?")
+    def remote_dispatch_preflight(ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """Proactive check the Run UI calls when the workspace runs remotely: a
+        deployment dispatch installs the workspace from git, so warn UP FRONT if
+        the tree is dirty or HEAD isn't pushed (with the exact fix) instead of
+        letting the run fail. ``{ok, reason, message, sha, dirty_files, target}``;
+        for a local workspace it's always ok (no push needed)."""
+        from vivarium_workbench.lib.remote_pinned import resolve_run_target
+        from vivarium_workbench.lib import remote_run as _remote_run
+        target = resolve_run_target(ws)
+        if target != "deployment":
+            return JSONResponse(content={"target": target, "ok": True, "reason": "local",
+                                         "message": "This workspace runs locally — no push needed."})
+        pf = _remote_run.remote_dispatch_preflight(ws)
+        pf["target"] = "deployment"
+        return JSONResponse(content=pf)
+
     # -----------------------------------------------------------------------
     # Loom SAVE-POINTS: workspace-persisted captured bigraph states. A save-point
     # is a full state snapshot at one frame of a run; the loom keeps them in

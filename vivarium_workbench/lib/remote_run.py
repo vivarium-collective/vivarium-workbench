@@ -91,6 +91,62 @@ def git_pip_url(ws_root: "Path | str") -> str:
     return f"git+{origin_url}@{sha}"
 
 
+def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
+    """Non-raising, structured counterpart to :func:`git_pip_url`'s guards.
+
+    A remote dispatch installs the workspace FROM GIT on the deployment, so the
+    tree must be clean AND HEAD must be pushed. Instead of letting the detached
+    run hit ``git_pip_url``'s ``RuntimeError`` (which surfaces as a raw traceback
+    in the run log), callers use this to check UP FRONT and return a clean,
+    actionable message — so the Run button warns + tells the user exactly what to
+    fix rather than dumping a stack trace.
+
+    Returns ``{ok, reason, message, sha, dirty_files, remote}`` where
+    ``reason`` ∈ {``"ok"``, ``"dirty"``, ``"unpushed"``, ``"no-remote"``,
+    ``"error"``}. Never raises."""
+    try:
+        ws_root = Path(ws_root).resolve()
+        # Same exclusion as git_pip_url: the .viv-build.json stamp is workbench
+        # bookkeeping and must not block a dispatch (#858).
+        dirty = _git(ws_root, "status", "--porcelain", "--", ".", ":!.viv-build.json").strip()
+        sha = _git(ws_root, "rev-parse", "HEAD").strip()
+    except Exception as e:  # noqa: BLE001 — a git failure is a clean preflight fail, not a crash
+        return {"ok": False, "reason": "error", "sha": "", "dirty_files": "",
+                "remote": "", "message": f"Could not read the workspace's git state: {e}"}
+
+    if dirty:
+        return {"ok": False, "reason": "dirty", "sha": sha, "dirty_files": dirty, "remote": "",
+                "message": "This workspace has uncommitted changes — a remote run installs the "
+                           "workspace from git, so commit and push them first "
+                           "(Branches tab → GitHub → Commit + Push), then run remotely."}
+
+    try:
+        remote_refs = _git(ws_root, "branch", "-r", "--contains", sha).strip()
+    except Exception:  # noqa: BLE001
+        remote_refs = ""
+    if not remote_refs:
+        return {"ok": False, "reason": "unpushed", "sha": sha, "dirty_files": "", "remote": "",
+                "message": f"Workspace commit {sha[:8]} isn't pushed to any remote branch — a remote "
+                           "run installs the workspace from git, so push it first "
+                           "(Branches tab → GitHub → Commit + Push), then run remotely."}
+
+    try:
+        origin = _git(ws_root, "remote", "get-url", "origin").strip()
+    except Exception:  # noqa: BLE001
+        try:
+            remotes = _git(ws_root, "remote").strip().split()
+            origin = _git(ws_root, "remote", "get-url", remotes[0]).strip() if remotes else ""
+        except Exception:  # noqa: BLE001
+            origin = ""
+    if not origin:
+        return {"ok": False, "reason": "no-remote", "sha": sha, "dirty_files": "", "remote": "",
+                "message": "This workspace has no git remote configured, so a remote build can't "
+                           "install it — add a remote and push before running remotely."}
+
+    return {"ok": True, "reason": "ok", "sha": sha, "dirty_files": "", "remote": origin,
+            "message": "Workspace is clean and pushed — ready to run remotely."}
+
+
 def run_remote(
     ws_root: "Path | str",
     composite_id: str,

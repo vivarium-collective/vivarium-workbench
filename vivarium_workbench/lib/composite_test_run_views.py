@@ -148,6 +148,18 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     # a .viv-build.json simulator_id for a composite PREVIEW) is untouched —
     # see resolve_run_target's docstring.
     target = resolve_run_target(ws_root)
+    # A 'deployment' (remote) dispatch installs the workspace FROM GIT on the
+    # build, so an uncommitted/unpushed tree can't be installed. Preflight the git
+    # state HERE and return a clean, actionable 409 up front — otherwise the
+    # detached runner hits remote_run.git_pip_url's RuntimeError and the user sees
+    # a raw traceback in the run log with no clear next step.
+    if target == "deployment":
+        from vivarium_workbench.lib import remote_run as _remote_run
+        pf = _remote_run.remote_dispatch_preflight(ws_root)
+        if not pf.get("ok"):
+            return {"error": pf.get("message", "workspace not ready to run remotely"),
+                    "reason": pf.get("reason"), "preflight": pf,
+                    "run_target": "deployment"}, 409
     try:
         plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=overrides,
                                    db_path=db_file, label=label, n_steps=steps,
