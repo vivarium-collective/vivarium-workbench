@@ -1705,8 +1705,33 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
         study_dir, (spec or {}).get("visualizations") or [], ws_root=ws_root)
     if declared_figs:
         static_keys = {c.get("key") for c in static_charts}
+        # A study's ``embed_visualizations`` are rendered separately as iframes
+        # (study-detail tab + the report), so a declared figure that is ALSO an
+        # embed would appear twice. Drop declared figures already covered by an
+        # embed — matched by name and by figure-file basename — keeping declared
+        # figures only for studies whose visualizations[] has no matching embed.
+        embeds = (spec or {}).get("embed_visualizations") or []
+        embed_names = {e.get("name") for e in embeds if isinstance(e, dict)}
+        embed_files = {
+            Path(str(e.get("url", ""))).name
+            for e in embeds if isinstance(e, dict) and e.get("url")
+        }
+        viz_by_name = {
+            e.get("name"): e for e in ((spec or {}).get("visualizations") or [])
+            if isinstance(e, dict)
+        }
+
+        def _is_embedded(c):
+            key = c.get("key")
+            if key in embed_names:
+                return True
+            entry = viz_by_name.get(key) or {}
+            fname = Path(str(entry.get("chart") or entry.get("file") or entry.get("path") or "")).name
+            return bool(fname) and fname in embed_files
+
         static_charts = static_charts + [
-            c for c in declared_figs if c.get("key") not in static_keys
+            c for c in declared_figs
+            if c.get("key") not in static_keys and not _is_embedded(c)
         ]
 
     # Per-chart freshness for static charts, matched on-disk against the spec's

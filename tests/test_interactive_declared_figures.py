@@ -259,3 +259,29 @@ def test_study_charts_api_carries_iframe_url_and_media(tmp_path, dashboard_clien
     [rec] = [c for c in body["charts"] if c.get("source") == "declared"]
     assert rec["media"] == "threejs"
     assert rec["iframe_url"] == "/studies/demo3d/scene.html"
+
+
+def test_declared_figure_that_is_also_an_embed_is_deduped(tmp_path):
+    """A visualizations[] figure that is ALSO declared in embed_visualizations
+    (rendered separately as an iframe in the study tab + report) must NOT also
+    appear as a declared chart — otherwise it shows twice. A declared figure with
+    no matching embed is still included."""
+    ws = tmp_path / "ws"
+    study_dir = ws / "studies" / "demo"
+    study_dir.mkdir(parents=True)
+    (study_dir / "shown.html").write_text("<html>shown</html>", encoding="utf-8")
+    (study_dir / "extra.html").write_text("<html>extra</html>", encoding="utf-8")
+    (study_dir / "study.yaml").write_text(yaml.safe_dump({
+        "name": "demo",
+        "visualizations": [
+            {"name": "shown", "address": "html:shown.html"},
+            {"name": "extra", "address": "html:extra.html"},
+        ],
+        "embed_visualizations": [
+            {"name": "shown", "url": "/studies/demo/shown.html"},
+        ],
+    }), encoding="utf-8")
+    charts = build_study_charts_payload(ws, "demo")["charts"]
+    declared = {c.get("key") for c in charts if c.get("source") == "declared"}
+    assert "shown" not in declared, "an embedded figure must not also be a declared chart"
+    assert "extra" in declared, "a declared figure with no embed must still render"
