@@ -402,23 +402,60 @@ _HEAVY_TRAJECTORY_STORES = {"bulk", "unique"}
 _TRAJECTORY_TARGET_FRAMES = 400
 
 
+def _has_heavy_descendant(node: dict) -> bool:
+    """True if `node`'s store subtree contains a heavy store (bulk/unique) at any
+    depth. Skips process/step nodes and schema keys; never descends INTO a heavy
+    store (its huge value doesn't matter — its presence does)."""
+    if not isinstance(node, dict):
+        return False
+    for k, v in node.items():
+        if k in _HEAVY_TRAJECTORY_STORES:
+            return True
+        if k.startswith("_") or not isinstance(v, dict):
+            continue
+        if v.get("_type") in ("process", "step"):
+            continue
+        if _has_heavy_descendant(v):
+            return True
+    return False
+
+
+def _light_store_paths(state: dict) -> list[str]:
+    """Store paths for a bounded loom trajectory, computed from the ACTUAL state
+    (robust to agent-nesting like `agents/0/bulk` and to mismatched/declared
+    paths). Emits each store as a coarse blob, but descends past any level that
+    holds a heavy store (bulk/unique) so those — and only those — are excluded.
+    The composite's own parquet sink still captures full fidelity."""
+    out: list[str] = []
+
+    def emit_children(node: dict, path: list[str]) -> None:
+        for k, v in node.items():
+            if k in _HEAVY_TRAJECTORY_STORES or k.startswith("_"):
+                continue                                    # heavy / schema key
+            if isinstance(v, dict) and v.get("_type") in ("process", "step"):
+                continue                                    # not a store
+            if not isinstance(v, dict):
+                out.append("/".join(path + [k]))            # scalar / leaf store
+            elif _has_heavy_descendant(v):
+                emit_children(v, path + [k])                # descend to shed heavy
+            else:
+                out.append("/".join(path + [k]))            # light subtree → blob
+
+    emit_children(state, [])
+    return out or ["global_time"]
+
+
 def _safe_temporal_emit_paths(state: dict) -> list[str]:
-    """A bounded emit set for a temporal composite with no readable emitter
-    declaration: every store EXCEPT the known-heavy ones (bulk/unique). Small
-    composites keep all their stores; a whole-cell model sheds only the multi-MB
-    stores that blow the snapshot budget. Never returns empty."""
-    safe = [p for p in cr.all_store_paths(state)
-            if p.split("/", 1)[0] not in _HEAVY_TRAJECTORY_STORES]
-    return safe or ["global_time"]
+    """Bounded emit set for a temporal composite with no readable emitter
+    declaration — every store except the heavy ones (bulk/unique), at any depth."""
+    return _light_store_paths(state)
 
 
-def _history_emit_paths(emit_paths: list[str]) -> list[str]:
-    """The loom-trajectory subset of `emit_paths`: drop the heavy per-tick stores
-    (bulk/unique) so the sqlite history stays bounded. Keeps everything else
-    (global_time, listeners, …); never returns empty."""
-    light = [p for p in emit_paths
-             if p.split("/", 1)[0] not in _HEAVY_TRAJECTORY_STORES]
-    return light or ["global_time"]
+def _history_emit_paths(state: dict) -> list[str]:
+    """The loom-trajectory emit set: every store except the heavy per-tick stores
+    (bulk/unique), computed from the actual state so agent-nested `agents/0/bulk`
+    is excluded too. The declared parquet sink keeps full fidelity."""
+    return _light_store_paths(state)
 
 
 def _history_subsample(steps) -> int:
@@ -1130,11 +1167,10 @@ def execute(request_path: Path) -> int:
         # of the full-fidelity parquet sink — drop the heavy stores (bulk/unique)
         # and subsample long runs. A whole-cell generation (2700 ticks) then fits
         # comfortably instead of tripping the 1 GiB snapshot budget.
-        history_paths = _history_emit_paths(emit_paths)
+        history_paths = _history_emit_paths(state)
         history_subsample = _history_subsample(req.steps)
-        _write_log(req, f"loom trajectory: {len(history_paths)} path(s)"
-                        f"{' (bulk/unique dropped)' if len(history_paths) < len(emit_paths) else ''}"
-                        f", subsample x{history_subsample}")
+        _write_log(req, f"loom trajectory: {len(history_paths)} store(s), "
+                        f"bulk/unique excluded, subsample x{history_subsample}")
 
         cr.set_phase(conn, run_id=req.run_id, phase="simulating")
         try:
