@@ -1490,9 +1490,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <div>
           <h4>Source — where this workspace runs</h4>
           <ul>
-            <li><strong>Local</strong> is a workspace checked out on this machine; <strong>Remote</strong> is a build registered on the GovCloud sms-api server.</li>
-            <li>Pick a <strong>Repo / Branch / Commit</strong> (or build), then <strong>Switch here</strong> to re-point <em>this</em> tab to it, or <strong>Open ↗</strong> to open it in a new tab. A remote build downloads its workspace the first time (a minute or two); cached builds are instant.</li>
-            <li><strong>Build via sms-api</strong> registers a branch's current HEAD as a new remote build. <strong>Reproduce locally</strong> gives you a command to recreate this exact source on your own machine.</li>
+            <li><strong>Local</strong> is a workspace checked out on this machine; <strong>Hosted</strong> is a build registered on the GovCloud sms-api server.</li>
+            <li>Pick a <strong>Repo / Branch / Commit</strong> (or build), then <strong>Open ↗</strong> to open it in a new tab (instant, non-destructive), or <strong>Run from hosted</strong> to re-point <em>this</em> tab to it — that downloads the hosted build's workspace the first time (a minute or two; cached builds are instant). You don't need to run from hosted to view results.</li>
+            <li><strong>Build via sms-api</strong> registers a branch's current HEAD as a new hosted build. <strong>Reproduce locally</strong> gives you a command to recreate this exact source on your own machine.</li>
             <li>In the build list, chips flag which build is <strong>in workspace ✓</strong>, on your <strong>workspace commit</strong>, or the <strong>latest</strong>.</li>
           </ul>
         </div>
