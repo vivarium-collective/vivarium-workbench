@@ -117,12 +117,19 @@
     // download reads as progress, never a dead spinner (hardening for external users).
     var controller = new AbortController();
     var t0 = Date.now();
+    function _elapsed() { return Math.round((Date.now() - t0) / 1000); }
     function _msg() {
-      var s = Math.round((Date.now() - t0) / 1000);
-      return "Loading build " + simulatorId + " — downloading its workspace (" + s + "s; cached builds are instant)…";
+      return "Loading build " + simulatorId + " — downloading its workspace (" + _elapsed()
+        + "s; a big workspace can take a few minutes; cached builds are instant)…";
     }
-    _setBusy(_msg(), function () { controller.abort(); });
-    var ticker = setInterval(function () { _setBusy(_msg(), function () { controller.abort(); }); }, 1000);
+    // Tick the BUTTON text too (not just the banner) so a slow download reads as
+    // live progress with a running clock, never a frozen "Loading…" spinner.
+    function _tick() {
+      _setBusy(_msg(), function () { controller.abort(); });
+      if (btn) btn.textContent = "Loading… " + _elapsed() + "s (Cancel below)";
+    }
+    _tick();
+    var ticker = setInterval(_tick, 1000);
     var deadline = setTimeout(function () { controller.abort(); }, 610000);  // 600s server cap + buffer
     function _cleanup() { clearInterval(ticker); clearTimeout(deadline); }
     try {
