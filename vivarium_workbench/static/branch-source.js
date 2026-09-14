@@ -535,6 +535,23 @@
     // current workspace doesn't need a filter box (it read as idle noise).
     var search = null;
     if (matches.length > 1 || (state.filter || "").trim()) {
+      // Section header — the list below is the browsable CATALOG (every
+      // registered build / known workspace), conceptually distinct from the
+      // Repo/Branch/Commit picker + actions above, which point THIS tab. The
+      // picker changes where this workspace runs; the list is what exists.
+      var _listHead = _el("div", "viv-bs-list-head");
+      _listHead.style.cssText = "margin-top:16px; padding-top:12px; border-top:1px solid #eef1f4";
+      var _lTitle = _el("div", "viv-bs-list-title",
+        state.scope === "remote" ? "Registered builds" : "Known workspaces");
+      _lTitle.style.cssText = "font-size:11px; font-weight:700; letter-spacing:.05em; "
+        + "text-transform:uppercase; color:#64748b";
+      var _lSub = _el("div", "viv-bs-list-sub", state.scope === "remote"
+        ? "Every build registered on sms-api — browse the history. Open ↗ explores one in a new tab; Switch here re-points THIS tab to it."
+        : "Local checkouts known to this workbench. Open ↗ for a new tab; Switch here re-points THIS tab.");
+      _lSub.style.cssText = "font-size:12px; color:#94a3b8; margin:2px 0 8px";
+      _listHead.appendChild(_lTitle); _listHead.appendChild(_lSub);
+      host.appendChild(_listHead);
+
       search = _el("input", "viv-bs-search");
       search.type = "search";
       search.placeholder = state.scope === "remote"
@@ -630,25 +647,28 @@
         // tab. Every source in the history is thus directly actionable without
         // re-selecting it in the pickers above. The current source shows a badge
         // instead of Switch (you're already on it).
+        // List = browse the catalog, so Open ↗ (new tab, non-destructive) is the
+        // primary row action; Switch here (re-points THIS tab, downloads a remote
+        // build's workspace) is secondary. The current source shows a badge.
         var acts = _el("div", "viv-bs-row-actions");
         acts.style.cssText = "flex:0 0 auto; display:flex; align-items:center; gap:6px";
+        var op = _rowBtn("Open ↗", "Open this source in a NEW tab, leaving this one unchanged", "primary");
+        op.addEventListener("click", function (e) { e.stopPropagation(); _openEntry(m); });
         if (m.current) {
           acts.appendChild(_rowTag("current ✓"));
+          acts.appendChild(op);
         } else {
           var sw = _rowBtn("Switch here", "Switch THIS tab to this source in place"
-            + (isRemote ? " — downloads its workspace the first time (cached builds are instant)" : ""),
-            "primary");
+            + (isRemote ? " — downloads its workspace the first time (cached builds are instant)" : ""));
           sw.addEventListener("click", function (e) {
             e.stopPropagation();
             if (isRemote) _switchRemote(m.simulator_id, sw);
             else if (m.path) _switchLocal(m.path);
             else if (m.name) _openEntry(m);   // catalog workspace, no local path → new tab
           });
+          acts.appendChild(op);
           acts.appendChild(sw);
         }
-        var op = _rowBtn("Open ↗", "Open this source in a NEW tab, leaving this one unchanged");
-        op.addEventListener("click", function (e) { e.stopPropagation(); _openEntry(m); });
-        acts.appendChild(op);
         if (state.scope === "local" && !m.current && m.path) {
           var x = _el("button", "viv-bs-forget", "✕"); x.title = "Forget this workspace";
           x.addEventListener("click", function (e) { e.stopPropagation(); _forget(m.path, li); });
