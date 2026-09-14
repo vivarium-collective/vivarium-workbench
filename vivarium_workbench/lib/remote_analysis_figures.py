@@ -175,6 +175,58 @@ def list_remote_analysis_figures(client, simulation_id: int) -> dict:
     return {"available": True, "reason": "ok", "analyses": rows}
 
 
+def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
+                         per_sim: int = 8) -> dict:
+    """Aggregate S3 figures + ptools across a study's COMPLETED remote sims, so
+    the study Visualizations/Analyses tabs can render them via the remote setting.
+
+    Volume-capped (a study can map hundreds of remote sims, each analysis holding
+    hundreds of figures): at most ``max_sims`` sims, ``per_sim`` figure/ptools
+    paths each, with the true totals reported so the UI can say "showing N of M".
+    Figure bytes are served lazily by ``/api/remote-analysis-figure``."""
+    try:
+        from vivarium_workbench.lib import simulations_index
+        data = simulations_index.build_simulations_data_cached(ws_root, include_remote=True)
+        sims = data.get("simulations") or []
+    except Exception:
+        return {"available": False, "reason": "no-sims", "study": slug, "sims": []}
+
+    cand = []
+    for s in sims:
+        if s.get("study_slug") == slug and s.get("status") == "completed":
+            ro = s.get("remote_origin") or {}
+            sid = ro.get("simulation_id")
+            if sid:
+                cand.append((sid, s.get("sim_name") or s.get("label") or str(sid)))
+
+    out_sims: list = []
+    total_figures = 0
+    for sid, name in cand[:max_sims]:
+        res = list_remote_analysis_figures(client, sid)
+        if not res.get("available"):
+            continue
+        analyses = []
+        for a in res["analyses"]:
+            if a["figures"] or a["ptools"]:
+                analyses.append({
+                    "name": a["name"], "status": a["status"], "simulation_id": sid,
+                    "n_figures": len(a["figures"]), "n_ptools": len(a["ptools"]),
+                    "figures": [f["path"] for f in a["figures"][:per_sim]],
+                    "ptools": [p["path"] for p in a["ptools"][:per_sim]],
+                })
+                total_figures += len(a["figures"])
+        if analyses:
+            out_sims.append({"simulation_id": sid, "sim_name": name, "analyses": analyses})
+
+    return {
+        "available": bool(out_sims),
+        "reason": "ok" if out_sims else ("no-figures" if cand else "no-remote-sims"),
+        "study": slug, "sims": out_sims,
+        "total_completed_remote_sims": len(cand), "shown_sims": len(out_sims),
+        "total_figures_across_shown": total_figures,
+    }
+
+
 def fetch_by_analysis(client, simulation_id: int, analysis_name: str,
                       relpath: str) -> Optional[Tuple[bytes, str]]:
     """Resolve ``analysis_name``'s ``result_uri`` on ``simulation_id`` (so the

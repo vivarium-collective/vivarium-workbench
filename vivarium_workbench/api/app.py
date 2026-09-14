@@ -7103,6 +7103,20 @@ def create_app() -> FastAPI:
         return JSONResponse(content=_remote_analysis_figures.list_remote_analysis_figures(
             client, simulation_id))
 
+    @app.get("/api/study-remote-figures", tags=["Runs"],
+             summary="Aggregate a study's remote-sim S3 figures + ptools for its Viz/Analyses tabs")
+    def study_remote_figures(study: str = "", limit: int = 10,
+                             ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """Volume-capped gallery manifest of the S3 figures/ptools across a
+        study's completed remote sims — the data source for rendering the study
+        Visualizations/Analyses tabs via the remote setting. Figure bytes are
+        fetched lazily through /api/remote-analysis-figure."""
+        if not study:
+            return JSONResponse(status_code=400, content={"error": "study required"})
+        client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
+        return JSONResponse(content=_remote_analysis_figures.study_remote_figures(
+            ws, client, study, max_sims=max(1, min(int(limit or 10), 30))))
+
     @app.get("/api/remote-analysis-figure", tags=["Runs"],
              summary="Serve one rendered figure/ptools file from a remote analysis's S3 result_uri")
     def remote_analysis_figure(simulation_id: int = 0, analysis: str = "", path: str = "",

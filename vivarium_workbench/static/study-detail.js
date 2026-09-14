@@ -106,7 +106,7 @@
     });
     if (kind === 'tests') { _loadTestsPanel(window._study); }
     if (kind === 'readouts') { _loadReadouts(); _loadReadoutsDownloadPointer(); }
-    if (kind === 'visualize') { _loadCharts('viz-charts-panel'); _loadNativeGallery(); }
+    if (kind === 'visualize') { _loadCharts('viz-charts-panel'); _loadNativeGallery(); _loadRemoteFigures(); }
     if (kind === 'compose') { _loadModelConfig(); _loadModelCards(); }
     // Study-spine reorg (spec §1, §3.2/3.3/3.4): Simulations keeps only the
     // runs table now; the analysis-files zip + raw-data bulk that used to
@@ -680,6 +680,62 @@
   // a self-contained Altair/Plotly doc, so it renders in its own srcdoc iframe
   // (innerHTML would not execute the embedded vega/plotly <script> tags).
   var _nativeGalleryLoaded = false;
+  var _remoteFiguresLoaded = false;
+
+  // Visualizations tab: render the study's completed remote sims' rendered
+  // figures straight from their S3 result_uri (via /api/study-remote-figures +
+  // /api/remote-analysis-figure). This is the "accessible through the remote
+  // setting" path — figures live on S3, not landed locally. Volume-capped
+  // server-side; degrades silently to nothing when unavailable (no creds,
+  // local-only workspace, or a study with no remote figures).
+  function _loadRemoteFigures() {
+    var anchor = document.getElementById('native-gallery-panel');
+    if (!anchor || _remoteFiguresLoaded) return;
+    _remoteFiguresLoaded = true;
+    var slug = studyName();
+    var panel = document.getElementById('remote-figures-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'remote-figures-panel';
+      anchor.parentNode.insertBefore(panel, anchor.nextSibling);
+    }
+    fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
+      .then(function (r) { return r.ok ? r.json() : { available: false }; })
+      .then(function (d) {
+        if (!d || !d.available || !(d.sims || []).length) {
+          panel.innerHTML = ''; _remoteFiguresLoaded = false; return;
+        }
+        var enc = encodeURIComponent;
+        var cards = [];
+        (d.sims || []).forEach(function (s) {
+          (s.analyses || []).forEach(function (a) {
+            (a.figures || []).forEach(function (fp) {
+              var url = '/api/remote-analysis-figure?simulation_id=' + enc(s.simulation_id)
+                + '&analysis=' + enc(a.name) + '&path=' + enc(fp);
+              cards.push('<div class="figure-card">'
+                + '<iframe src="' + url + '" loading="lazy" '
+                + 'class="figure-media-frame figure-media-frame--native"></iframe>'
+                + '<div class="figure-caption-row">'
+                + '<span class="figure-source-chip">remote · S3</span>'
+                + '<span class="figure-title">'
+                + escapeHtmlForTests(s.sim_name + ' · ' + fp.replace(/^viz\//, '')) + '</span>'
+                + '<span class="muted" style="margin-left:6px">(' + a.n_figures
+                + ' figs · ' + a.n_ptools + ' ptools)</span>'
+                + '</div></div>');
+            });
+          });
+        });
+        panel.innerHTML =
+          '<div class="figure-section-head" style="font-weight:600;margin:10px 0 6px">'
+          + 'Remote analysis figures (S3) — showing ' + d.shown_sims + ' of '
+          + d.total_completed_remote_sims + ' completed remote sims</div>'
+          + cards.join('');
+        _figuresSourceState.native = true;
+        _updateFiguresEmptyState();
+      })
+      .catch(function () { panel.innerHTML = ''; _remoteFiguresLoaded = false; });
+  }
+  window._loadRemoteFigures = _loadRemoteFigures;
   function _loadNativeGallery() {
     var host = document.getElementById('native-gallery-panel');
     if (!host || _nativeGalleryLoaded) return;
