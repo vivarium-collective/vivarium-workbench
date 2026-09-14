@@ -112,7 +112,7 @@
     // runs table now; the analysis-files zip + raw-data bulk that used to
     // trigger here moved onto their own Evidence panels (Analyses/Results).
     if (kind === 'simulate') { _loadStudySims(); }
-    if (kind === 'analyses') { _loadAnalyses(); }
+    if (kind === 'analyses') { _loadAnalyses(); _loadRemoteAnalyses(); }
     if (kind === 'results') { _loadResults(); }
     // Study-spine reorg (spec §1, §3.7/§3.8): Audit + Build complete the
     // Assurance trio — dispatched the same way as the other lazy-loaded
@@ -339,6 +339,59 @@
       });
   }
   window._loadAnalyses = _loadAnalyses;
+
+  // Analyses tab: list the study's completed remote sims' ptools/EcoCyc overlay
+  // .tsv files for download, read from their S3 result_uri via the remote
+  // setting (complements the local "Analysis result files" above and the
+  // figures in the Visualizations tab). Silent when unavailable.
+  var _remoteAnalysesLoaded = false;
+  function _loadRemoteAnalyses() {
+    var anchor = document.getElementById('data-files');
+    if (!anchor || _remoteAnalysesLoaded) return;
+    _remoteAnalysesLoaded = true;
+    var slug = anchor.getAttribute('data-study') || studyName();
+    if (!slug) return;
+    var panel = document.getElementById('remote-analyses-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'remote-analyses-panel';
+      anchor.parentNode.insertBefore(panel, anchor.nextSibling);
+    }
+    fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
+      .then(function (r) { return r.ok ? r.json() : { available: false }; })
+      .then(function (d) {
+        if (!d || !d.available || !(d.sims || []).length) {
+          panel.innerHTML = ''; _remoteAnalysesLoaded = false; return;
+        }
+        var enc = encodeURIComponent, esc = escapeHtmlForTests;
+        var rows = (d.sims || []).map(function (s) {
+          return (s.analyses || []).map(function (a) {
+            var links = (a.ptools || []).map(function (pp) {
+              var fname = pp.replace(/^ptools\//, '');
+              var url = '/api/remote-analysis-figure?simulation_id=' + enc(s.simulation_id)
+                + '&analysis=' + enc(a.name) + '&path=' + enc(pp);
+              return '<li><a href="' + url + '" download="' + esc(fname) + '">' + esc(fname) + '</a></li>';
+            }).join('');
+            var more = a.n_ptools > (a.ptools || []).length
+              ? ' <span class="muted">(showing ' + (a.ptools || []).length + ' of ' + a.n_ptools + ')</span>' : '';
+            return '<div style="margin:10px 0">'
+              + '<div style="font-weight:600">' + esc(s.sim_name) + '</div>'
+              + '<div class="muted" style="font-size:0.85em">' + esc(a.name) + ' — '
+              + a.n_ptools + ' ptools · ' + a.n_figures + ' figures' + more + '</div>'
+              + '<ul style="columns:3;-webkit-columns:3;font-size:0.82em;margin:4px 0">' + links + '</ul>'
+              + '</div>';
+          }).join('');
+        }).join('');
+        panel.innerHTML =
+          '<h4 style="margin-top:18px">Remote ptools / EcoCyc overlays (S3)</h4>'
+          + '<p class="muted">Rendered on GovCloud, read from S3 via the remote setting — showing '
+          + d.shown_sims + ' of ' + d.total_completed_remote_sims
+          + ' completed remote sims. Rendered figures are in the Visualizations tab.</p>'
+          + rows;
+      })
+      .catch(function () { panel.innerHTML = ''; _remoteAnalysesLoaded = false; });
+  }
+  window._loadRemoteAnalyses = _loadRemoteAnalyses;
 
   function _emitStatusBadge(status) {
     var e = escapeHtmlForTests;

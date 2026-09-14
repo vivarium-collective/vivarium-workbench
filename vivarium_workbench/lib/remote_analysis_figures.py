@@ -176,7 +176,7 @@ def list_remote_analysis_figures(client, simulation_id: int) -> dict:
 
 
 def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
-                         per_sim: int = 8) -> dict:
+                         per_sim: int = 8, per_ptools: int = 60) -> dict:
     """Aggregate S3 figures + ptools across a study's COMPLETED remote sims, so
     the study Visualizations/Analyses tabs can render them via the remote setting.
 
@@ -212,7 +212,7 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
                     "name": a["name"], "status": a["status"], "simulation_id": sid,
                     "n_figures": len(a["figures"]), "n_ptools": len(a["ptools"]),
                     "figures": [f["path"] for f in a["figures"][:per_sim]],
-                    "ptools": [p["path"] for p in a["ptools"][:per_sim]],
+                    "ptools": [p["path"] for p in a["ptools"][:per_ptools]],
                 })
                 total_figures += len(a["figures"])
         if analyses:
