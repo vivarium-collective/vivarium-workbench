@@ -1547,6 +1547,7 @@ export default function App() {
   // WHITE background. Captures the React Flow viewport element via html-to-image,
   // framed to the full nodes bounds (not just the on-screen viewport).
   const [showExport, setShowExport] = useState(false);
+  const [showNavHelp, setShowNavHelp] = useState(false);
   // While true, onlyRenderVisibleElements is disabled so the WHOLE graph (all
   // nodes AND edges) is in the DOM for html-to-image to capture. Otherwise the
   // off-viewport edges are culled and the export comes out wireless.
@@ -2234,6 +2235,10 @@ export default function App() {
                 ref={canvasWrapRef}
                 className={`loom-canvas loom-mode-${layoutMode.modeId}`}
                 style={{ flex: 1, position: 'relative', minWidth: 0, ['--loom-fs' as string]: fontScale } as React.CSSProperties}
+                /* Suppress the browser's default context menu over the canvas
+                   (in an iframe it offered "Reload Page / Open Frame / Save to
+                   Zotero …"), so right-click on a card no longer pops it. */
+                onContextMenu={(e) => e.preventDefault()}
               >
 
                 {/* Modes that cull edges start with NO wires drawn, which without
@@ -2287,6 +2292,50 @@ export default function App() {
                     captureCurrentView={captureCurrentView}
                     applyView={applyView}
                   />
+                  {/* Navigation help — a small ⓘ next to Download that explains the
+                      (standard) mouse controls, so they're discoverable. */}
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      onClick={() => setShowNavHelp((v) => !v)}
+                      title="How to navigate the graph"
+                      aria-label="How to navigate the graph"
+                      style={{
+                        height: 28, width: 28, padding: 0, fontSize: 14,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        background: showNavHelp ? '#eff6ff' : '#fff',
+                        border: '1px solid ' + (showNavHelp ? '#bfdbfe' : '#d1d5db'),
+                        borderRadius: 4, cursor: 'pointer', color: '#374151',
+                      }}
+                    >ⓘ</button>
+                    {showNavHelp && (
+                      <div style={{
+                        position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                        background: '#fff', border: '1px solid #d1d5db', borderRadius: 6,
+                        boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: '10px 12px',
+                        width: 250, zIndex: 20, fontSize: 12, color: '#374151',
+                        lineHeight: 1.5, textAlign: 'left', cursor: 'default',
+                      }}>
+                        <div style={{ fontWeight: 600, marginBottom: 6, color: '#111827' }}>
+                          Navigating the graph
+                        </div>
+                        <table style={{ borderCollapse: 'collapse' }}><tbody>
+                          {([
+                            ['Click', 'select a process / store'],
+                            ['Drag a card', 'move it'],
+                            ['Right-drag', 'pan the view'],
+                            ['Scroll / pinch', 'zoom in and out'],
+                            ['Double-click', 'expand a card'],
+                          ] as [string, string][]).map(([k, v]) => (
+                            <tr key={k}>
+                              <td style={{ padding: '2px 8px 2px 0', whiteSpace: 'nowrap',
+                                           fontWeight: 600, verticalAlign: 'top' }}>{k}</td>
+                              <td style={{ padding: '2px 0', color: '#6b7280' }}>{v}</td>
+                            </tr>
+                          ))}
+                        </tbody></table>
+                      </div>
+                    )}
+                  </div>
                   <div style={{ position: 'relative' }}>
                     <button
                       onClick={() => setShowExport((v) => !v)}
@@ -2371,11 +2420,10 @@ export default function App() {
                   edgesReconnectable={false}
                   connectOnClick={false}
                   deleteKeyCode={null}
-                  /* Box-select: left-drag on empty canvas draws a selection
-                     rectangle; the selected nodes then drag together. Panning
-                     moves to middle/right mouse so left-drag is free for select.
-                     Shift stays reserved for axis-locked node drag (above), so
-                     multi-select-by-click uses Meta/Ctrl instead. */
+                  /* Standard navigation: LEFT-click selects (and left-drag on empty
+                     canvas box-selects); RIGHT- or MIDDLE-drag pans the view. The
+                     browser's iframe context menu is suppressed on the canvas (see
+                     onContextMenu below) so right-drag-to-pan doesn't pop it. */
                   selectionOnDrag
                   selectNodesOnDrag={false}
                   panOnDrag={[1, 2]}
