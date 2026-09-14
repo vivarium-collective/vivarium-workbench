@@ -87,6 +87,14 @@
   function composite(row) {
     var cid = row && row.spec_id ? String(row.spec_id) : "";
     if (!cid) {
+      // A remote GovCloud run arrives from sms-api as a config/experiment with no
+      // registered-composite ref — expected, not an anomaly — so render it neutral.
+      // The red ⚠ stays only for a LOCAL run that genuinely should map to a
+      // registered composite but doesn't (the real case the warning was for).
+      if (row && row.remote_origin && row.remote_origin.simulation_id != null) {
+        return '<span title="Remote run — dispatched by config on the deployment; no local composite mapping." ' +
+          'style="color:#9ca3af;font-size:12px;white-space:nowrap;">remote</span>';
+      }
       return '<span title="No composite associated — every simulation must map to one registered composite." ' +
         'style="color:#b91c1c;font-size:12px;white-space:nowrap;">⚠ none</span>';
     }
@@ -270,61 +278,66 @@
           ? '<button type="button" class="action-btn js-authoring viz-remote-btn" title="Open this remote run\'s visualizations (from S3)">📊 Viz</button>'
           : (hasRun ? _art("viz", "📊 Viz", "Open this run's visualizations (GIF + plots)", false) : ""))
       : "";
-    var report = (completed && hasRun) ? _art("report", "📋 Report",   "Open this run's report card", false) : "";
-    var analyses = (completed && hasRun) ? _art("analyses", "⬇ Analyses",   "Download this run's analyses (JSON)", true) : "";
-    var data = (row.run_id && (row.store_path || row.db_path))
-      ? '<a class="action-btn js-authoring" title="Download this run\'s results / raw emitter data (.zip)" ' +
-        'href="' + BP + '/api/simulation-run-download?run_id=' + runIdEnc + '" download style="text-decoration:none;">⬇ Results</a>' : "";
-    // "Run analysis" — fires the analysis phase (cd1_*/ptools_*) on an existing,
-    // already-completed REMOTE simulation, via POST /api/remote-run-analysis ->
-    // viva-api POST /simulations/{id}/analysis. Remote-only and completed-only:
-    // a local run's analyses already ran in-process, and there is nothing to
-    // analyse before the sweep exists. viva-api auto-runs this as the dispatch
-    // DAG's last node, so the button is for RE-running it (a failed analysis, a
-    // study whose `analyses` changed since the run, or a simulation dispatched
-    // before the auto-trigger existed) — hence the label. No id is interpolated
-    // into markup: the delegated handler reads it back from the enclosing
-    // <tr data-remote-sim-id>, same idiom as ↻ Rerun below.
     var isSnapshot = (window.__DASH_CONFIG__ || {}).mode === "snapshot";
     var remoteSimId = row && row.remote_origin && row.remote_origin.simulation_id;
-    var analysis = (remoteSimId != null && completed && !isSnapshot)
+
+    // Actions are grouped VIEW / DOWNLOAD / RE-RUN with a short inline description
+    // so the overflow menu reads without hovering. Each entry: {group, html, desc}.
+    var out = [];
+    function add(group, html, desc) { if (html) out.push({ group: group, html: html, desc: desc }); }
+
+    // --- VIEW ---
+    add("VIEW", viz, "Open the run's figures");
+    add("VIEW", (completed && hasRun) ? _art("report", "📋 Report", "Open this run's report card", false) : "",
+      "Open the report card");
+
+    // --- DOWNLOAD ---
+    // ⬇ Analysis files (analyses.json). For a REMOTE run this replaces the old
+    // separate ⬇ Land button: one click lands the artifacts (POST
+    // /api/remote-run-land-artifacts folds analyses.json + ptools/*.tsv into
+    // .pbg/runs/<run_id>/) and then downloads — the delegated handler below reads
+    // run_id + sim id from the <tr>. Local runs download directly (nothing to land).
+    var analysisFiles;
+    if (completed && remoteSimId != null && hasRun && !isSnapshot) {
+      analysisFiles = '<button type="button" class="action-btn js-authoring analysis-files-remote-btn" ' +
+        'title="Pull this remote run\'s analysis files here (analyses.json + PTools exports), then download">' +
+        '⬇ Analysis files</button>';
+    } else {
+      analysisFiles = (completed && hasRun)
+        ? _art("analyses", "⬇ Analysis files", "Download this run's analyses (analyses.json)", true) : "";
+    }
+    add("DOWNLOAD", analysisFiles,
+      remoteSimId != null ? "analyses.json — lands from the deployment, then downloads" : "analyses.json");
+    add("DOWNLOAD", (row.run_id && (row.store_path || row.db_path))
+      ? '<a class="action-btn js-authoring" title="Download this run\'s raw emitter data (.zip)" ' +
+        'href="' + BP + '/api/simulation-run-download?run_id=' + runIdEnc + '" download style="text-decoration:none;">⬇ Raw data</a>' : "",
+      "Raw emitter data (.zip)");
+
+    // --- RE-RUN ---
+    // 🧪 Re-run analysis — recompute the analysis phase (cd1_*/ptools_*) on an
+    // existing, completed REMOTE simulation (POST /api/remote-run-analysis ->
+    // viva-api POST /simulations/{id}/analysis). Remote+completed only. The
+    // delegated handler reads the id from the enclosing <tr data-remote-sim-id>.
+    add("RERUN", (remoteSimId != null && completed && !isSnapshot)
       ? '<button type="button" class="action-btn js-authoring run-analysis-btn" ' +
         'title="Re-run this simulation\'s analysis phase (cd1_*/ptools_*) on the remote deployment">' +
-        '🧪 Analysis</button>' : "";
-    // "Land" — land-on-demand for a REMOTE run that lives only on the deployment
-    // (S3): pull its results here (fold analyses.json + copy ptools/*.tsv into
-    // .pbg/runs/<run_id>/) so the ⬇ Analyses artifact resolves and the run shows
-    // in the PTools Omics Viewer's run menu. Idempotent; refreshes the table on
-    // success. simulation_id + run_id are read from the enclosing <tr> (same
-    // idiom as 🧪 Analysis / ↻ Rerun), never interpolated into markup.
-    var land = (remoteSimId != null && completed && !isSnapshot)
-      ? '<button type="button" class="action-btn js-authoring land-remote-btn" ' +
-        'title="Pull this remote run\'s results here (analyses + PTools exports) so Analyses and the PTools viewer work locally">' +
-        '⬇ Land</button>' : "";
-    // Rerun — REPRODUCES this run (replays its recorded manifest verbatim —
-    // params/seed/emitter/emit_paths/runtime exactly as launched, ignoring
-    // whatever the study's spec currently says) via POST /api/study-reproduce
-    // (reproducible-rerun-spine Task 4; distinct from "Run current spec",
-    // which re-derives from the live study.yaml — see study-detail.html's
-    // header buttons). Not available against a published read-only snapshot
-    // (no live backend to launch against). No run_id is interpolated into
-    // markup/attributes here: embedding it in an inline onclick= JS string
-    // would need JS escaping, not esc()'s HTML-entity escaping (the browser
-    // HTML-decodes the attribute before compiling it as JS, so a literal `'`
-    // in run_id would decode back and terminate the string early). Instead
-    // the button carries no id at all — the document-level delegated
-    // listener below resolves run_id (+ study, for the request body) from
-    // the enclosing <tr data-run-id data-study> (already safely HTML-escaped
-    // there), and calls stopPropagation itself so the row's own
-    // click-to-open handler (the <tr> is clickable) never fires.
-    var rerun = (row.run_id && !isSnapshot)
+        '🧪 Re-run analysis</button>' : "",
+      "Recompute cd1_*/ptools_* on GovCloud");
+    // ↻ Re-run simulation — REPRODUCES this run (replays its recorded manifest
+    // verbatim via POST /api/study-reproduce). No run_id in markup: the delegated
+    // listener resolves it from <tr data-run-id data-study> (see _onRerunButtonClick).
+    add("RERUN", (row.run_id && !isSnapshot)
       ? '<button type="button" class="action-btn js-authoring rerun-btn" ' +
-        'title="Reproduce this run — replays its recorded manifest exactly, as a brand-new run">↻ Rerun</button>' : "";
-    return [viz, report, analyses, data, land, analysis, rerun].filter(function (h) { return !!h; });
+        'title="Reproduce this run — replays its recorded manifest exactly, as a brand-new run">↻ Re-run simulation</button>' : "",
+      "Replay this run's exact manifest");
+
+    return out;
   }
 
   // Legacy inline actions (study-detail Simulations tab): every button in a row.
-  function _actions(row) { return _actionList(row).join(" "); }
+  function _actions(row) {
+    return _actionList(row).map(function (a) { return a.html; }).join(" ");
+  }
 
   // Global Runs page: one primary action (the first available — Viz for a
   // completed run) plus a "⋯" overflow menu holding the rest, so the Actions
@@ -334,16 +347,30 @@
   function _globalActions(row) {
     var list = _actionList(row);
     if (!list.length) return '<span style="color:#9ca3af;">—</span>';
-    var primary = list[0];
+    var primary = list[0].html;
     var more = list.slice(1);
     if (!more.length) return primary;
-    var items = more.map(function (h) {
-      return '<div class="sim-action-menu-item">' + h + '</div>';
+    // Overflow grouped VIEW / DOWNLOAD / RE-RUN, each item showing its label plus
+    // a short gray description inline so it reads without hovering (tooltips kept).
+    var GROUPS = [["VIEW", "View"], ["DOWNLOAD", "Download"], ["RERUN", "Re-run"]];
+    var sections = GROUPS.map(function (g) {
+      var items = more.filter(function (a) { return a.group === g[0]; });
+      if (!items.length) return "";
+      return '<div class="sim-action-menu-group">' +
+        '<div class="sim-action-menu-header" style="font-size:10px;text-transform:uppercase;' +
+        'letter-spacing:.05em;color:#94a3b8;padding:6px 8px 2px;">' + g[1] + '</div>' +
+        items.map(function (a) {
+          return '<div class="sim-action-menu-item" style="display:flex;align-items:center;gap:6px;">' +
+            a.html +
+            (a.desc ? '<span class="sim-action-desc" style="color:#94a3b8;font-size:11px;">' +
+              esc(a.desc) + '</span>' : '') +
+            '</div>';
+        }).join("") + '</div>';
     }).join("");
     return primary +
       '<details class="sim-action-menu">' +
         '<summary class="action-btn" title="More actions" aria-label="More actions">⋯</summary>' +
-        '<div class="sim-action-menu-list" role="menu">' + items + '</div>' +
+        '<div class="sim-action-menu-list" role="menu">' + sections + '</div>' +
       '</details>';
   }
 
@@ -471,6 +498,49 @@
   }
   document.addEventListener("click", _onLandButtonClick, true);
 
+  // ⬇ Analysis files for a REMOTE run — one click lands then downloads (replaces
+  // the old separate ⬇ Land). POST /api/remote-run-land-artifacts folds
+  // analyses.json + ptools/*.tsv into .pbg/runs/<run_id>/, which is exactly what
+  // makes the local artifact resolve; then download it. Reads run_id + sim id from
+  // the <tr>, capture-phase + stopPropagation like the other row buttons.
+  function _landThenDownloadAnalyses(runId, simId, btn) {
+    if (!runId || simId == null || simId === "") return;
+    var BP = window.__BASE_PATH__ || "";
+    var orig = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "… landing"; }
+    fetch("/api/remote-run-land-artifacts", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ simulation_id: Number(simId), run_id: runId }),
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
+        .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
+    }).then(function (res) {
+      if (btn) { btn.disabled = false; btn.textContent = orig || "⬇ Analysis files"; }
+      if (!res.ok) { _toast("Could not land analysis files: " + ((res.body || {}).error || res.status)); return; }
+      // Landed — download the now-resolvable analyses artifact.
+      var a = document.createElement("a");
+      a.href = BP + "/api/composite-run/" + encodeURIComponent(runId) + "/artifact/analyses";
+      a.setAttribute("download", "");
+      document.body.appendChild(a); a.click(); a.remove();
+      if (typeof window._initSimulations === "function") window._initSimulations(true);
+      if (typeof window._loadStudySims === "function") window._loadStudySims(true);
+    }).catch(function (err) {
+      if (btn) { btn.disabled = false; btn.textContent = orig || "⬇ Analysis files"; }
+      _toast("Could not land analysis files: " + err);
+    });
+  }
+
+  function _onAnalysisFilesRemoteClick(e) {
+    var btn = e.target.closest(".analysis-files-remote-btn");
+    if (!btn) return;
+    e.stopPropagation();
+    var tr = btn.closest("tr[data-run-id]");
+    var runId = tr ? tr.getAttribute("data-run-id") : "";
+    var simId = tr ? tr.getAttribute("data-remote-sim-id") : "";
+    _landThenDownloadAnalyses(runId, simId, btn);
+  }
+  document.addEventListener("click", _onAnalysisFilesRemoteClick, true);
+
   // Open a remote run's S3 figures. The local artifact link 404s for a remote
   // run (viz is never landed), so fetch the figure list by-id
   // (/api/remote-analysis-figures?simulation_id=… — fast, not the slow list
@@ -500,7 +570,7 @@
         if (!d || !d.available) {
           var reason = (d && d.reason) || "no-figures";
           var msg = 'No rendered figures for simulation ' + esc(simId) + ' yet (' + esc(reason) +
-            '). They appear once the remote analysis completes — use ⬇ Land / re-run its analysis.';
+            '). They appear once the remote analysis completes — use 🧪 Re-run analysis, or ⬇ Analysis files to pull what exists.';
           if (w) shell('<p>' + msg + '</p>'); else _toast(msg);
           return;
         }
