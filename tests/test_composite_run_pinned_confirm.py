@@ -43,24 +43,23 @@ def test_shared_confirm_gate_defined_and_exported():
     assert "window._confirmRemoteDispatchThen = _confirmRemoteDispatchThen" in js
 
 
-def test_run_composite_routes_through_confirm_gate_before_dispatch():
-    """The pcard inline Run bar's ▶ Run button (_runComposite, bound via
-    onclick="_runComposite(this)")."""
-    js = _js("walkthrough.js")
-    fn = _function_body(js, "_runComposite")
-    assert "_confirmRemoteDispatchThen(" in fn
-    # The ▶ Run button markup itself (_renderCompositeCardFull's runBar) moved
-    # to static/composite-card.js in the study-spine-reorg Task 6 extraction
-    # (shared verbatim with the Study Detail Model tab); composite-card.js
-    # loads BEFORE walkthrough.js wherever both are used, so the two files
-    # form one runtime system — the gate handler stays in _runComposite
-    # (checked above) regardless of which file renders the button markup.
-    assert "onclick=\"_runComposite(this)\"" in (js + _js("composite-card.js"))
-    # the actual dispatch must be INSIDE the gate's fire callback, not fired
-    # unconditionally before it. rindex (not index): an existing explanatory
-    # comment earlier in this function also mentions the endpoint string —
-    # the REAL fetch() call is the LAST occurrence.
-    assert fn.index("_confirmRemoteDispatchThen(") < fn.rindex("/api/composite-test-run")
+def test_composite_card_loom_run_routes_through_confirm_gate_before_dispatch():
+    """The composite card's ▶ Run now lives in the loom's run bar (SetupRunPanel →
+    api.ts `startRun`), which replaced the old inline pcard `_runComposite` button.
+    `startRun` must gate a remote-pinned dispatch the same way — fetch fresh
+    /api/remote-run-config, check `pinned`, confirm before POSTing composite-test-run
+    (which routes to AWS Batch when pinned via resolve_run_target)."""
+    api_ts = (Path(vivarium_workbench.__file__).parent
+              / "loom" / "src" / "api.ts").read_text(encoding="utf-8")
+    start = api_ts.index("export async function startRun(")
+    # The gate call precedes the actual dispatch fetch inside startRun.
+    fn = api_ts[start:start + 1 + api_ts[start + 1:].index("\nexport ")]
+    assert "_confirmRemoteDispatch(" in fn
+    assert fn.index("_confirmRemoteDispatch(") < fn.index("/api/composite-test-run")
+    # And the gate itself reads the pinned config and confirms.
+    assert "/api/remote-run-config" in api_ts
+    assert "cfg.pinned" in api_ts
+    assert "confirm(" in api_ts
 
 
 def test_ce_test_run_routes_through_confirm_gate_before_dispatch():

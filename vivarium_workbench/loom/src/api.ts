@@ -321,9 +321,35 @@ export function parseUrlOverrides(search: string): Record<string, unknown> {
   }
 }
 
+/** Remote-dispatch confirm gate. On a remote-PINNED workspace, composite-test-run
+ *  dispatches to AWS Batch (resolve_run_target → 'deployment'), so require explicit
+ *  confirmation before firing — mirrors walkthrough.js's _confirmRemoteDispatchThen
+ *  (fetch fresh /api/remote-run-config; show repo/branch/commit/simulator_id; block
+ *  on cancel). A local (unpinned) workspace, or an unreachable config, does not gate. */
+async function _confirmRemoteDispatch(): Promise<void> {
+  let cfg: Record<string, unknown> = {};
+  try {
+    const r = await fetch('/api/remote-run-config');
+    if (r.ok) cfg = (await r.json()) as Record<string, unknown>;
+  } catch { cfg = {}; }
+  if (!cfg || !cfg.pinned) return;
+  const s = (v: unknown) => (v == null ? '(unknown)' : String(v));
+  const msg = 'Dispatch to AWS Batch:\n\n'
+    + '  repo:    ' + s(cfg.repo_url) + '\n'
+    + '  branch:  ' + s(cfg.branch) + '\n'
+    + '  commit:  ' + s(cfg.commit).slice(0, 12) + '\n'
+    + '  simulator id: ' + s(cfg.simulator_id) + '\n\n'
+    + 'Proceed?';
+  if (!window.confirm(msg)) {
+    throw new Error('Run cancelled — remote dispatch not confirmed.');
+  }
+}
+
 /** Start a detached composite run. Resolves with {run_id}; rejects on non-2xx
- *  (notably 429 when the concurrency cap is hit) with the server's error text. */
+ *  (notably 429 when the concurrency cap is hit) with the server's error text.
+ *  Passes through the remote-dispatch confirm gate first (see above). */
 export async function startRun(args: StartRunArgs): Promise<StartRunResponse> {
+  await _confirmRemoteDispatch();
   const r = await fetch('/api/composite-test-run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
