@@ -38,6 +38,26 @@ _DEFAULT_REGION = "us-gov-west-1"
 _FIGURE_SUFFIXES = (".html", ".svg", ".png")
 _PTOOLS_SUFFIXES = (".tsv", ".csv", ".json")
 
+# Figure base names to hide from the gallery. ``chromosome_state_view`` renders
+# one HTML per timestep/agent (hundreds per sim — the ``t = N min · oriC = K``
+# circles), which floods Visualizations with little analytical value. The files
+# stay in S3; they are just filtered out of the listing. Matched on the base
+# name — the part of ``viz/<name>__variant=..._gen=..._agent=....html`` before
+# the first ``__``.
+_HIDDEN_FIGURE_NAMES = {"chromosome_state_view"}
+
+
+def _figure_base_name(path: str) -> str:
+    """``viz/chromosome_state_view__variant=0_....html`` -> ``chromosome_state_view``.
+
+    The name is the part before the first ``__`` (variant/seed/gen/agent suffix);
+    for a figure with no such suffix, drop the file extension instead."""
+    stem = path.rsplit("/", 1)[-1].split("__", 1)[0]
+    for suf in _FIGURE_SUFFIXES:
+        if stem.lower().endswith(suf):
+            return stem[: -len(suf)]
+    return stem
+
 
 def _region() -> str:
     return os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION") or _DEFAULT_REGION
@@ -94,6 +114,7 @@ def _list_prefix(s3, bucket: str, list_under: str, rel_to: str, suffixes: tuple)
     token = None
     base = list_under.rstrip("/") + "/"
     root = rel_to.rstrip("/") + "/"
+    is_viz = base.endswith("/viz/")
     try:
         while True:
             kw = {"Bucket": bucket, "Prefix": base}
@@ -103,8 +124,11 @@ def _list_prefix(s3, bucket: str, list_under: str, rel_to: str, suffixes: tuple)
             for obj in resp.get("Contents", []) or []:
                 key = obj.get("Key", "")
                 if key.lower().endswith(suffixes):
+                    rel = key[len(root):] if key.startswith(root) else key
+                    if is_viz and _figure_base_name(rel) in _HIDDEN_FIGURE_NAMES:
+                        continue
                     out.append({
-                        "path": key[len(root):] if key.startswith(root) else key,
+                        "path": rel,
                         "key": key,
                         "size": obj.get("Size", 0),
                     })
