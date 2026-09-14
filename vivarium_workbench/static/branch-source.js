@@ -273,7 +273,7 @@
     host.appendChild(_el("h3", "viv-bs-title", "Source"));
     // One-line scope cue so the two cards read as distinct jobs: this card is
     // "where the tab runs"; the GitHub card below is "sync & collaborate".
-    var _sub = _el("div", "viv-bs-subtitle", "Where this tab runs — pick a local workspace or a remote build.");
+    var _sub = _el("div", "viv-bs-subtitle", "Where this workspace runs — a local checkout or a remote build.");
     _sub.style.cssText = "color:#93a1b5; font-size:12px; margin:-4px 0 12px";
     host.appendChild(_sub);
 
