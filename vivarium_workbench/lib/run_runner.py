@@ -1146,22 +1146,30 @@ def execute(request_path: Path) -> int:
         # self-terminate: raising _RunTimeout aborts the broker's run loop and
         # is caught below, preserving the prior failed-status behavior.
         started = time.monotonic()
+        # composite-runs.db is SHARED across every run in the workspace, so its
+        # total size reflects all prior runs, not this one. Budget THIS run's
+        # growth (delta from the size at start) — otherwise a workspace with a
+        # large accumulated history trips the guard on step 1 of every new run.
+        try:
+            _snapshot_baseline = os.path.getsize(req.db_file) if req.db_file else 0
+        except OSError:
+            _snapshot_baseline = 0
 
         def _progress(step: int) -> None:
             cr.update_progress(conn, run_id=req.run_id, progress_step=step,
                                heartbeat_at=time.time())
             if time.monotonic() - started > MAX_RUNTIME_SEC:
                 raise _RunTimeout(step)
-            # Snapshot-budget guard: stop a run whose loom DB is ballooning
-            # before it becomes multi-GB and unloadable. Checked every N steps
-            # so we don't stat the file on every tick.
+            # Snapshot-budget guard: stop a run whose OWN loom-DB contribution is
+            # ballooning before it becomes multi-GB and unloadable. Checked every
+            # N steps so we don't stat the file on every tick.
             if step % _SNAPSHOT_CHECK_EVERY == 0 and req.db_file:
                 try:
-                    sz = os.path.getsize(req.db_file)
+                    grew = os.path.getsize(req.db_file) - _snapshot_baseline
                 except OSError:
-                    sz = 0
-                if sz > MAX_SNAPSHOT_BYTES:
-                    raise _SnapshotBudgetExceeded((step, sz))
+                    grew = 0
+                if grew > MAX_SNAPSHOT_BYTES:
+                    raise _SnapshotBudgetExceeded((step, grew))
 
         # Loom trajectory (sqlite history) budget: keep it bounded independently
         # of the full-fidelity parquet sink — drop the heavy stores (bulk/unique)
