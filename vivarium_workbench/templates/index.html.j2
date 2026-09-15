@@ -531,7 +531,7 @@ body.snapshot .viv-wsp-trigger .viv-wsp-dot { color: #94a3b8; }
 .viv-bs-select:focus, .viv-bs-commit-select:focus, .viv-bs-search:focus {
   outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.12);
 }
-/* Scope: a segmented Local/Remote control. */
+/* Environment: a segmented Local/Cloud control. */
 .viv-bs-scope-group { display: inline-flex; }
 .viv-bs-toggle {
   padding: 5px 14px; border: 1px solid #e2e8f0; background: #f1f5f9; cursor: pointer;
@@ -1490,9 +1490,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <div>
           <h4>Source — where this workspace runs</h4>
           <ul>
-            <li><strong>Local</strong> is a workspace checked out on this machine; <strong>Hosted</strong> is a build registered on the GovCloud sms-api server.</li>
-            <li>Pick a <strong>Repo / Branch / Commit</strong> (or build), then <strong>Open ↗</strong> to open it in a new tab (instant, non-destructive), or <strong>Run from hosted</strong> to re-point <em>this</em> tab to it — that downloads the hosted build's workspace the first time (a minute or two; cached builds are instant). You don't need to run from hosted to view results.</li>
-            <li><strong>Build via sms-api</strong> registers a branch's current HEAD as a new hosted build. <strong>Reproduce locally</strong> gives you a command to recreate this exact source on your own machine.</li>
+            <li><strong>Local</strong> is a workspace checked out on this machine; <strong>Cloud</strong> is a build registered on the GovCloud sms-api server.</li>
+            <li>Pick a <strong>Repo / Branch / Commit</strong> (or build), then <strong>Open ↗</strong> to open it in a new tab (instant, non-destructive), or <strong>Use this environment</strong> to re-point <em>this</em> tab to it — that downloads the cloud environment's workspace the first time (a minute or two; cached builds are instant). You don't need to use the cloud environment to view results.</li>
+            <li><strong>Build via sms-api</strong> registers a branch's current HEAD as a new cloud environment. <strong>Run locally</strong> gives you a command to recreate this exact source on your own machine.</li>
             <li>In the build list, chips flag which build is <strong>in workspace ✓</strong>, on your <strong>workspace commit</strong>, or the <strong>latest</strong>.</li>
           </ul>
         </div>

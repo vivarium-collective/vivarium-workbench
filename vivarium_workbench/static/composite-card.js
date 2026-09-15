@@ -668,7 +668,46 @@
   }
   window._renderCompositeCardGrid = _renderCompositeCardGrid;
 
+  // --- Run-target badge -----------------------------------------------------
+  // Show whether a composite ▶ Run will execute Local or on the Cloud (GovCloud)
+  // deployment. This is resolve_run_target(workspace) — per WORKSPACE, not per card,
+  // and NOT the same as the Local/Cloud *scope* selector (which binds the source).
+  // That distinction is exactly what confuses: scope can say "remote" while a Run
+  // still executes locally. One preflight fetch per composites render fills every
+  // card's badge.
+  function _applyRunTargetBadges(pf) {
+    var badges = document.querySelectorAll('.pcard-runtarget[data-role="runtarget"]');
+    if (!badges.length) return;
+    var known = !!(pf && pf.target);
+    var cloud = known && pf.target === 'deployment';
+    var label = !known ? 'Runs: —' : (cloud ? 'Runs: Cloud' : 'Runs: Local');
+    var bg = cloud ? '#e6f0fb' : '#eef1f4';
+    var fg = !known ? '#8a97a4' : (cloud ? '#1e5fa4' : '#667085');
+    var tip;
+    if (!known) tip = 'Could not determine where a Run will execute.';
+    else if (cloud) tip = (pf.message || 'This workspace runs on the Cloud (GovCloud) deployment — ▶ Run dispatches remotely.');
+    else tip = (pf.message || 'This workspace runs locally.') +
+      ' The Local/Cloud scope sets the source binding, not where a Run executes — to run on Cloud, open a Cloud build (a materialized workspace) and “Use this environment”.';
+    badges.forEach(function (b) { b.textContent = label; b.title = tip; b.style.background = bg; b.style.color = fg; });
+  }
+  window._applyRunTargetBadges = _applyRunTargetBadges;
+
+  var _runTargetScheduled = false;
+  function _scheduleRunTargetBadges() {
+    if (_runTargetScheduled) return;   // debounce: one fetch per render batch, not per card
+    _runTargetScheduled = true;
+    setTimeout(function () {
+      _runTargetScheduled = false;
+      var BP = window.__BASE_PATH__ || '';
+      fetch(BP + '/api/remote-dispatch-preflight')
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(_applyRunTargetBadges);
+    }, 0);
+  }
+
   function _renderCompositeCardFull(c) {
+    _scheduleRunTargetBadges();
     var params = (c.parameters && typeof c.parameters === 'object') ? c.parameters : {};
     var pKeys = Object.keys(params), nCfg = pKeys.length;
     var desc = (c.description || '').trim();
@@ -715,6 +754,9 @@
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" ondblclick="event.stopPropagation();_maximizeCardFromHeader(this)" title="Click to pin to top · double-click to maximize">' +
             '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + wsPill + roPill +
+            '<span class="pcard-runtarget" data-role="runtarget" title="checking where a Run will execute…" ' +
+              'style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
+              'background:#eef1f4;color:#8a97a4;vertical-align:middle">Runs: …</span>' +
             '<code class="loom-addr">' + _esc(addr) + '</code>' +
             '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⌃</button>' +
             _shareCompositeBtn() +
