@@ -222,10 +222,12 @@ export function ExploreRunBar(props: ExploreRunBarProps) {
             <span className="sr-phase-dot" /> {phaseLabel(run.status.phase)}…
           </span>
         ) : (
-          <span className="explore-runbar-progress" title={`step ${run.status.progress_step} of ${run.status.n_steps ?? '?'}`}>
+          <span className="explore-runbar-progress" title={run.status.remote ? 'Running on the cloud — progress is reported as a phase, not per-step' : `step ${run.status.progress_step} of ${run.status.n_steps ?? '?'}`}>
             <span className="explore-runbar-track"><span className="explore-runbar-fill" style={{ width: `${run.pct}%` }} /></span>
             <span className="explore-runbar-status">
-              {run.isWorkflow ? 'Running' : `step ${run.status.progress_step}/${run.status.n_steps ?? '?'}`}
+              {run.isWorkflow ? 'Running'
+                : run.status.remote ? (run.status.raw_status === 'queued' ? 'Queued on cloud…' : 'Running on cloud…')
+                : `step ${run.status.progress_step}/${run.status.n_steps ?? '?'}`}
             </span>
           </span>
         )

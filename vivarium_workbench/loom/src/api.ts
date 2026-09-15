@@ -230,6 +230,11 @@ export interface RunStatus {
   progress_step: number;
   n_steps: number | null;
   heartbeat_at: number | null;
+  /** Image-backed Cloud run (plan B): runs on GovCloud via run_simulation, so
+   *  progress is a coarse phase (queued/running/done), not a per-step count.
+   *  The run bar shows "Running on cloud…" instead of "step null/?". */
+  remote?: boolean;
+  raw_status?: string;
   /** Sub-status while status==='running' (simulate → rendering visualizations →
    *  analysis flush) so the UI can announce the current stage. */
   phase?: string | null;
