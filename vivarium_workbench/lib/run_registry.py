@@ -57,6 +57,12 @@ def spawn_detached(request_path: Path, *, workspace: Path,
     try:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(workspace) + os.pathsep + env.get("PYTHONPATH", "")
+        # Pin the ParCa cache-fingerprint source tree to this workspace (see
+        # env_worker_client for the full rationale): v2ecoli's candidate_repo_roots
+        # resolves INPUT_FILES against $V2E_ROOT before falling back to a cwd walk,
+        # so a detached runner whose cwd resolves a different workspace.yaml can't
+        # hash a divergent tree for the same out/cache.
+        env["V2E_ROOT"] = str(workspace)
         proc = subprocess.Popen(
             [sys.executable, "-m", "vivarium_workbench.cli",
              "run-composite", "--request", str(request_path)],

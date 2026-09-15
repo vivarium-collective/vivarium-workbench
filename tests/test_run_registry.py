@@ -55,6 +55,35 @@ def test_reconcile_marks_null_pid_orphaned(tmp_path):
     conn.close()
 
 
+def test_spawn_detached_pins_v2e_root_to_workspace(tmp_path, monkeypatch):
+    """The detached runner must set V2E_ROOT to the workspace so v2ecoli's
+    ParCa cache fingerprint resolves against THIS tree, not whatever workspace
+    the process's cwd happens to sit under (the "cache drift" root cause)."""
+    from vivarium_workbench.lib import run_registry
+
+    captured: dict = {}
+
+    class _FakeProc:
+        pid = 4321
+
+    def _fake_popen(cmd, **kw):
+        captured["env"] = kw.get("env")
+        captured["cwd"] = kw.get("cwd")
+        return _FakeProc()
+
+    monkeypatch.setattr(run_registry.subprocess, "Popen", _fake_popen)
+    req = tmp_path / "request.json"
+    req.write_text("{}")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    pid = run_registry.spawn_detached(req, workspace=ws, log_path=tmp_path / "run.log")
+    assert pid == 4321
+    assert captured["cwd"] == str(ws)
+    assert captured["env"]["V2E_ROOT"] == str(ws)
+    # PYTHONPATH still prepends the workspace (unchanged behavior).
+    assert str(ws) in captured["env"]["PYTHONPATH"]
+
+
 def test_count_running_counts_only_running(tmp_path):
     db_file = tmp_path / "runs.db"
     conn = connect(db_file)

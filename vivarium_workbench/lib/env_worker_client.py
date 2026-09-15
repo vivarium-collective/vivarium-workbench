@@ -83,6 +83,14 @@ class EnvWorker:
                 # the old `cwd=ws_root` subprocess. Safe — a worker is dedicated
                 # to one workspace, so this is not a process-global chdir.
                 cwd=self.workspace,
+                # Pin the ParCa cache-fingerprint source tree to THIS workspace.
+                # v2ecoli's candidate_repo_roots() resolves INPUT_FILES against
+                # $V2E_ROOT first, then an upward walk from cwd — so without this,
+                # a worker whose cwd sits under a different workspace.yaml would
+                # hash a different tree for the same out/cache and disagree with
+                # the HTTP process / build_cache.py (the "cache drift" 400s).
+                # Pinning it makes the cache identity "this workspace's tree".
+                env={**os.environ, "V2E_ROOT": self.workspace},
             )
         finally:
             child.close()  # the child holds its own inherited copy
