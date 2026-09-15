@@ -174,3 +174,63 @@ describe('parseUrlOverrides', () => {
     expect(parseUrlOverrides('?overrides=42')).toEqual({});         // a scalar
   });
 });
+
+describe('cloud-run dispatch protocol', () => {
+  // The embedding card owns robust tracking of a slow (~20s) Cloud dispatch; the
+  // loom hands it the sms-api sim id and dispatch state via postMessage. Tests
+  // capture via a mock opener (the embedding-target branch _embeddingTarget hits
+  // first — same pattern as the postMessage-protocol suite above).
+  const mockOpener = { postMessage: vi.fn() };
+  beforeEach(() => {
+    mockOpener.postMessage.mockReset();
+    Object.defineProperty(window, 'opener', { value: mockOpener, configurable: true, writable: true });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Object.defineProperty(window, 'opener', { value: null, configurable: true, writable: true });
+    window.history.replaceState({}, '', '/');
+  });
+
+  it('the three posters hit the embedding target with typed payloads', async () => {
+    const api = await import('../api');
+    api.postRemoteDispatching(212);
+    expect(mockOpener.postMessage).toHaveBeenCalledWith(
+      { type: 'explore:remote-dispatching', build_sim: 212 }, '*');
+    api.postRemoteDispatched({ run_id: 'remote-sim-9', simulation_id: 9, experiment_id: 'exp1' });
+    expect(mockOpener.postMessage).toHaveBeenCalledWith(
+      { type: 'explore:remote-dispatched', run_id: 'remote-sim-9', simulation_id: 9, experiment_id: 'exp1' }, '*');
+    api.postRemoteDispatchFailed('boom');
+    expect(mockOpener.postMessage).toHaveBeenCalledWith(
+      { type: 'explore:remote-dispatch-failed', error: 'boom' }, '*');
+  });
+
+  it('startRun hands the parent the sms-api sim id on a remote 202', async () => {
+    // No Cloud scope in the URL → the pinned/materialized path; the backend still
+    // returns remote:true, and the card must get explore:remote-dispatched.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 202,
+      json: async () => ({ run_id: 'remote-sim-77', status: 'running',
+        remote: true, simulation_id: 77, experiment_id: 'e1' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { startRun } = await import('../api');
+    const res = await startRun({ id: 'pkg.composites.demo', steps: 5, emit_paths: [] });
+    expect(res.remote).toBe(true);
+    expect(mockOpener.postMessage).toHaveBeenCalledWith(
+      { type: 'explore:remote-dispatched', run_id: 'remote-sim-77', simulation_id: 77, experiment_id: 'e1' }, '*');
+  });
+
+  it('Cloud-scoped startRun posts dispatching, then dispatch-failed on error', async () => {
+    window.history.replaceState({}, '', '/?run_target=deployment&build_sim=212&build_repo=r&build_commit=c');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status: 502, json: async () => ({ error: 'cloud dispatch failed: boom' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { startRun } = await import('../api');
+    await expect(startRun({ id: 'x', steps: 1, emit_paths: [] })).rejects.toThrow(/cloud dispatch failed/);
+    expect(mockOpener.postMessage).toHaveBeenCalledWith(
+      { type: 'explore:remote-dispatching', build_sim: 212 }, '*');
+    expect(mockOpener.postMessage).toHaveBeenCalledWith(
+      { type: 'explore:remote-dispatch-failed', error: 'cloud dispatch failed: boom' }, '*');
+  });
+});

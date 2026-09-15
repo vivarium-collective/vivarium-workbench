@@ -10,6 +10,156 @@
 (function () {
   "use strict";
 
+  function _esc(s) {
+    return String(s == null ? '' : s).replace(/[<>&"]/g, function (c) {
+      return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c];
+    });
+  }
+
+  // ── Cloud-run tracking (parent-owned) ─────────────────────────────────────
+  // A composite-card Cloud Run dispatches the selected build's PRE-BUILT image
+  // via sms-api run_simulation (plan B). That dispatch POST is inherently slow
+  // (~15-25s while sms-api registers the whole-cell run over the SSM tunnel) and
+  // the loom's own run bar times out during it, mislabelling a run that actually
+  // landed on GovCloud. So the loom hands the PARENT the sms-api simulation id
+  // (postMessage explore:remote-dispatched) and the parent owns the tracking:
+  // a patient chip driven by the SAME robust sim-status endpoint the Runs tab
+  // uses (/api/composite-run/remote-sim-<id>/status), with backoff, terminating
+  // only on a real completed/failed — never a false "complete".
+
+  // Map a /api/composite-run/remote-sim-<id>/status body to a chip phase.
+  // A missing/error body (slow tunnel, sim not yet registered) returns null so
+  // the poller keeps waiting rather than ever flipping to a false terminal state.
+  function _cloudPhaseFromStatus(body) {
+    if (!body || typeof body !== 'object') return null;   // transient — keep polling
+    var st = body.status;
+    if (st === 'completed') return 'completed';
+    if (st === 'failed' || st === 'orphaned') return 'failed';
+    if (st === 'running') {
+      var raw = String(body.raw_status || '').toLowerCase();
+      return /queued|pending|submitted|created/.test(raw) ? 'queued' : 'running';
+    }
+    return null;   // unknown status — keep polling
+  }
+
+  // Pure chip HTML for a cloud-run phase. `state` = {phase, simId, buildSim, error}.
+  // phase ∈ dispatching | queued | running | completed | failed | dispatch-failed.
+  function _cloudRunChipHtml(state) {
+    state = state || {};
+    var phase = state.phase, simId = state.simId;
+    var pal = {
+      dispatching: ['#e6f0fb', '#1e5fa4'], queued: ['#e5e7eb', '#374151'],
+      running: ['#dbeafe', '#1e40af'], completed: ['#dcfce7', '#166534'],
+      failed: ['#fee2e2', '#991b1b'], 'dispatch-failed': ['#fee2e2', '#991b1b'],
+    }[phase] || ['#e5e7eb', '#374151'];
+    var label;
+    if (phase === 'dispatching') {
+      label = '☁ Dispatching to Cloud build #' +
+        _esc(state.buildSim != null ? state.buildSim : '?') + '…';
+    } else if (phase === 'dispatch-failed') {
+      label = '☁ Cloud dispatch failed';
+    } else {
+      var word = { queued: 'queued', running: 'running',
+        completed: '✓ completed', failed: '✗ failed' }[phase] || _esc(phase);
+      label = '☁ Cloud run #' + _esc(simId != null ? simId : '?') + ' · ' + word;
+    }
+    var chip = '<span class="pcard-cloud-chip" style="display:inline-flex;align-items:center;gap:6px;' +
+      'background:' + pal[0] + ';color:' + pal[1] + ';padding:2px 9px;border-radius:10px;' +
+      'font-size:12px;font-weight:600">' + label + '</span>';
+    var link = (simId != null && phase !== 'dispatching' && phase !== 'dispatch-failed')
+      ? ' <a href="#simulations" class="pcard-cloud-link" onclick="return _viewCloudRunInRuns(' +
+          Number(simId) + ')" style="font-size:12px;margin-left:8px">View in Runs DB →</a>'
+      : '';
+    var err = (phase === 'dispatch-failed' && state.error)
+      ? '<div class="muted" style="font-size:11px;margin-top:3px">' + _esc(state.error) + '</div>' : '';
+    return '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:6px 0">' +
+      chip + link + '</div>' + err;
+  }
+
+  // Render/refresh the cloud-run chip on a card (creating the host if the card's
+  // markup predates the data-role="cloud-run" container).
+  function _renderCloudChip(card, state) {
+    if (!card) return;
+    var host = card.querySelector('[data-role="cloud-run"]');
+    if (!host) {
+      host = document.createElement('div');
+      host.className = 'pcard-cloud-run';
+      host.setAttribute('data-role', 'cloud-run');
+      var bar = card.querySelector('.pcard-graph-bar');
+      if (bar && bar.parentNode) bar.parentNode.insertBefore(host, bar);
+      else card.appendChild(host);
+    }
+    host.hidden = false;
+    host.innerHTML = _cloudRunChipHtml(state);
+  }
+
+  // Poll the robust remote sim-status endpoint (same source the Runs tab uses)
+  // with backoff. Terminates only on a real completed/failed; a transient error
+  // just retries — so a slow tunnel never produces a false "complete".
+  var _CLOUD_POLL_DELAYS = [2000, 3000, 5000, 8000];
+  var _CLOUD_POLL_MAX_TICKS = 130;   // generous cap (~16 min at 8s) so no zombie timer
+  function _pollCloudRun(card, simId) {
+    if (!card || simId == null) return;
+    if (card._cloudRunPoll) { clearTimeout(card._cloudRunPoll); card._cloudRunPoll = null; }
+    var apiUrl = (window.DataSource && window.DataSource.apiUrl)
+      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
+    var i = 0;
+    function schedule() {
+      var d = _CLOUD_POLL_DELAYS[Math.min(i, _CLOUD_POLL_DELAYS.length - 1)];
+      i++;
+      card._cloudRunPoll = setTimeout(tick, d);
+    }
+    function tick() {
+      card._cloudRunPoll = null;
+      if (!document.body.contains(card)) return;   // card re-rendered/removed
+      if (i > _CLOUD_POLL_MAX_TICKS) return;         // give up quietly, keep last chip
+      fetch(apiUrl('/api/composite-run/remote-sim-' + encodeURIComponent(simId) + '/status'))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (body) {
+          var phase = _cloudPhaseFromStatus(body);
+          if (phase === 'completed' || phase === 'failed') {
+            _renderCloudChip(card, { phase: phase, simId: simId });
+            return;   // terminal — stop polling
+          }
+          if (phase) _renderCloudChip(card, { phase: phase, simId: simId });
+          schedule();
+        })
+        .catch(function () { schedule(); });   // transient — never false-complete
+    }
+    tick();
+  }
+
+  // "View in Runs DB" — open the Simulations/Runs tab focused on this run.
+  function _focusRemoteRow(simId) {
+    var tries = 0;
+    (function look() {
+      var row = document.querySelector('tr[data-remote-sim-id="' + simId + '"]');
+      if (row) {
+        try { row.scrollIntoView({ block: 'center' }); } catch (e) { /* ignore */ }
+        var prev = row.style.boxShadow;
+        row.style.boxShadow = 'inset 0 0 0 2px #2563eb';
+        setTimeout(function () { row.style.boxShadow = prev; }, 2200);
+        return;
+      }
+      if (tries++ < 25) setTimeout(look, 400);
+    })();
+  }
+  function _viewCloudRunInRuns(simId) {
+    if (typeof window._switchPage === 'function') {
+      window._switchPage('simulations');
+      _focusRemoteRow(simId);
+    } else {
+      // Study-detail iframe / no SPA driver: navigate the top window to Runs.
+      try { (window.top || window).location.hash = 'simulations'; } catch (e) { /* cross-origin */ }
+    }
+    return false;
+  }
+  window._viewCloudRunInRuns = _viewCloudRunInRuns;
+  window._cloudRunChipHtml = _cloudRunChipHtml;
+  window._cloudPhaseFromStatus = _cloudPhaseFromStatus;
+  window._renderCloudChip = _renderCloudChip;
+  window._pollCloudRun = _pollCloudRun;
+
   function _compositeStateUrl(id, overrides) {
     var apiUrl = (window.DataSource && window.DataSource.apiUrl)
       ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
@@ -86,6 +236,12 @@
     return null;
   }
 
+  // The .registry-entry-full card that owns the loom iframe a message came from.
+  function _cardFromMsg(ev) {
+    var ifr = _cardForLoomMessage(ev);
+    return ifr ? ifr.closest('.registry-entry-full') : null;
+  }
+
   // Handle messages from full-surface loom iframes: (a) auto-height — size the
   // frame to the loom's content so it grows/shrinks with the graph instead of
   // scrolling inside a fixed frame; (b) collapse-card — the loom's bottom bar was
@@ -109,6 +265,23 @@
         var card = ifr && ifr.closest('.registry-entry-full');
         var bar = card && card.querySelector('.pcard-graph-bar');
         if (bar && typeof window._toggleLoomCard === 'function') window._toggleLoomCard(bar);
+      } else if (d.type === 'explore:remote-dispatching') {
+        // The ~20s Cloud dispatch POST is in flight — show a patient chip so the
+        // card never mislabels a run that is still being registered on GovCloud.
+        var cd = _cardFromMsg(ev);
+        if (cd) _renderCloudChip(cd, { phase: 'dispatching', buildSim: d.build_sim });
+      } else if (d.type === 'explore:remote-dispatched') {
+        // 202 carrying the sms-api simulation id — the SAME id the Runs tab
+        // tracks. Own the chip + robust poll here, in the parent (vanilla JS),
+        // independent of the loom bar's own per-run polling.
+        var cx = _cardFromMsg(ev);
+        if (cx && d.simulation_id != null) {
+          _renderCloudChip(cx, { phase: 'queued', simId: d.simulation_id });
+          _pollCloudRun(cx, d.simulation_id);
+        }
+      } else if (d.type === 'explore:remote-dispatch-failed') {
+        var cf = _cardFromMsg(ev);
+        if (cf) _renderCloudChip(cf, { phase: 'dispatch-failed', error: d.error });
       }
     });
   }

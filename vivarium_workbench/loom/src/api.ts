@@ -105,6 +105,38 @@ export function postCollapseCard() {
   if (target) target.postMessage({ type: 'explore:collapse-card' } as ExploreCollapseCardMsg, '*');
 }
 
+// --- Cloud-run dispatch protocol -----------------------------------------
+// A composite-card Cloud Run dispatches a build's pre-built image via sms-api
+// run_simulation. That POST is inherently slow (~15-25s registering the run over
+// the SSM tunnel) and this bar's own run state is timeout-prone during it, so the
+// embedding card owns robust tracking instead. These messages hand it (a) the
+// in-flight dispatch, (b) the sms-api simulation id once the run lands, and (c) a
+// dispatch failure — see loom-embed.js's parent-side chip + poll.
+export type ExploreRemoteDispatchingMsg = { type: 'explore:remote-dispatching'; build_sim?: number };
+export type ExploreRemoteDispatchedMsg = {
+  type: 'explore:remote-dispatched';
+  run_id: string;
+  simulation_id?: number | string;
+  experiment_id?: string;
+};
+export type ExploreRemoteDispatchFailedMsg = { type: 'explore:remote-dispatch-failed'; error?: string };
+
+export function postRemoteDispatching(buildSim?: number) {
+  const target = _embeddingTarget();
+  if (target) target.postMessage(
+    { type: 'explore:remote-dispatching', build_sim: buildSim } as ExploreRemoteDispatchingMsg, '*');
+}
+export function postRemoteDispatched(payload: Omit<ExploreRemoteDispatchedMsg, 'type'>) {
+  const target = _embeddingTarget();
+  if (target) target.postMessage(
+    { type: 'explore:remote-dispatched', ...payload } as ExploreRemoteDispatchedMsg, '*');
+}
+export function postRemoteDispatchFailed(error?: string) {
+  const target = _embeddingTarget();
+  if (target) target.postMessage(
+    { type: 'explore:remote-dispatch-failed', error } as ExploreRemoteDispatchFailedMsg, '*');
+}
+
 export function onCompositeLoad(handler: (msg: CompositeLoadMsg) => void) {
   const listener = (ev: MessageEvent) => {
     if (ev.data?.type === 'composite:load') handler(ev.data as CompositeLoadMsg);
@@ -222,6 +254,11 @@ export interface StartRunResponse {
   /** Non-blocking heads-up from the backend (e.g. a heavy/long run). The run
    *  still starts; the loom surfaces this next to the run controls. */
   warning?: string;
+  /** Image-backed Cloud dispatch (plan B): the run executes on GovCloud. When
+   *  true, `simulation_id` is the sms-api DB id the Runs tab tracks. */
+  remote?: boolean;
+  simulation_id?: number | string;
+  experiment_id?: string;
 }
 
 export interface RunStatus {
@@ -382,17 +419,43 @@ export async function startRun(args: StartRunArgs): Promise<StartRunResponse> {
     // Explicit-build Cloud run: the backend dispatches against git+repo@commit and
     // skips the git-ready/push preflight, so we skip the confirm gate too.
     body = { ...body, run_target: rt.run_target, build: rt.build };
+    // Tell the embedding card the ~20s Cloud dispatch is in flight so it can show
+    // a patient "Dispatching to Cloud build #N…" chip and own robust tracking,
+    // rather than depend on this bar's own (timeout-prone) run state.
+    postRemoteDispatching(rt.build.simulator_id);
   } else {
     await _confirmRemoteDispatch();
   }
-  const r = await fetch('/api/composite-test-run', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const respBody = await r.json();
-  if (!r.ok) throw new Error(respBody.error || `HTTP ${r.status}`);
-  return respBody as StartRunResponse;
+  let r: Response;
+  let respBody: { error?: string; remote?: boolean; run_id?: string;
+    simulation_id?: number | string; experiment_id?: string } & Record<string, unknown>;
+  try {
+    r = await fetch('/api/composite-test-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    respBody = await r.json();
+  } catch (e: unknown) {
+    if (rt) postRemoteDispatchFailed(String(e instanceof Error ? e.message : e));
+    throw e;
+  }
+  if (!r.ok) {
+    if (rt) postRemoteDispatchFailed(respBody.error || `HTTP ${r.status}`);
+    throw new Error(respBody.error || `HTTP ${r.status}`);
+  }
+  // Image-backed Cloud run: hand the embedding card the sms-api simulation id so
+  // it owns robust tracking (poll /api/composite-run/remote-sim-<id>/status),
+  // independent of this bar's polling. Fires for both the explicit run_target
+  // path and a pinned/materialized workspace (backend sets remote:true either way).
+  if (respBody.remote) {
+    postRemoteDispatched({
+      run_id: String(respBody.run_id),
+      simulation_id: respBody.simulation_id,
+      experiment_id: respBody.experiment_id,
+    });
+  }
+  return respBody as unknown as StartRunResponse;
 }
 
 /** Poll one run's status. Cheap single-row read; safe to call on an interval. */

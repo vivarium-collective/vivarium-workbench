@@ -682,11 +682,16 @@
     try {
       if (window.VivEnv && window.VivEnv.isCloud()) {
         var b = window.VivEnv.runBuild();
-        if (b) return { label: 'Runs: Cloud · #' + b.simulator_id, bg: '#e6f0fb', fg: '#1e5fa4',
-          tip: 'This Run dispatches to the Cloud against build #' + b.simulator_id +
+        // Action-oriented affordance: make it obvious that ▶ Run dispatches to a
+        // SPECIFIC Cloud build, not just that the workspace "runs on cloud".
+        // Green/cloud styling separates the ready-to-dispatch state from the
+        // amber "no build" blocker and the grey Local state.
+        if (b) return { label: '▶ Run → ☁ Cloud · build #' + b.simulator_id, bg: '#e7f6ec', fg: '#1a7f4b',
+          tip: '▶ Run dispatches to the Cloud (GovCloud) against build #' + b.simulator_id +
                (b.commit ? ' (' + String(b.commit).slice(0, 7) + ')' : '') +
-               '. It runs the build’s committed code — local edits not in that build won’t apply.' };
-        return { label: 'Runs: Cloud · no build ⚠', bg: '#fdf0e3', fg: '#a15c12',
+               '. It runs the build’s committed code — local edits not in that build won’t apply. ' +
+               'The dispatch itself takes ~15-25s (sms-api registers the run over the SSM tunnel); the card tracks it robustly once it lands.' };
+        return { label: '☁ Cloud · no build ⚠', bg: '#fdf0e3', fg: '#a15c12',
           tip: 'Cloud is active but no build is selected — a Run is blocked. Pick or build one, or switch to Local.' };
       }
     } catch (e) { /* VivEnv unavailable → fall through to preflight */ }
@@ -801,6 +806,13 @@
           '</div>' +
         '</div>' +
         '<div class="pcard-acc">' +
+          // Card-owned Cloud-run status chip. When a Run dispatches to the Cloud
+          // the loom emits explore:remote-dispatching / -dispatched / -failed
+          // messages (see loom-embed.js); the PARENT owns a patient "Dispatching
+          // to Cloud build #N…" → "☁ Cloud run #<simid> · queued → running →
+          // completed" chip here, polling the robust sim-status endpoint the Runs
+          // tab uses — instead of the loom bar's timeout-prone per-run polling.
+          '<div class="pcard-cloud-run" data-role="cloud-run" hidden></div>' +
           // ONE surface: the card body is just the lazily-mounted loom. The
           // full-width "graph" bar is the single control (it replaces the old
           // header Explore/Collapse button AND the duplicated static run/outputs
