@@ -675,22 +675,41 @@
   // That distinction is exactly what confuses: scope can say "remote" while a Run
   // still executes locally. One preflight fetch per composites render fills every
   // card's badge.
+  function _computeRunTarget(pf) {
+    // The Environment scope (dynamic run-target) wins when Cloud is active — a Run
+    // then dispatches to the selected build. Otherwise the badge reflects the
+    // workspace's resolve_run_target (the preflight).
+    try {
+      if (window.VivEnv && window.VivEnv.isCloud()) {
+        var b = window.VivEnv.runBuild();
+        if (b) return { label: 'Runs: Cloud · #' + b.simulator_id, bg: '#e6f0fb', fg: '#1e5fa4',
+          tip: 'This Run dispatches to the Cloud against build #' + b.simulator_id +
+               (b.commit ? ' (' + String(b.commit).slice(0, 7) + ')' : '') +
+               '. It runs the build’s committed code — local edits not in that build won’t apply.' };
+        return { label: 'Runs: Cloud · no build ⚠', bg: '#fdf0e3', fg: '#a15c12',
+          tip: 'Cloud is active but no build is selected — a Run is blocked. Pick or build one, or switch to Local.' };
+      }
+    } catch (e) { /* VivEnv unavailable → fall through to preflight */ }
+    var known = !!(pf && pf.target);
+    var cloud = known && pf.target === 'deployment';
+    if (!known) return { label: 'Runs: —', bg: '#eef1f4', fg: '#8a97a4', tip: 'Could not determine where a Run will execute.' };
+    if (cloud) return { label: 'Runs: Cloud', bg: '#e6f0fb', fg: '#1e5fa4',
+      tip: pf.message || 'This workspace runs on the Cloud (GovCloud) deployment — ▶ Run dispatches remotely.' };
+    return { label: 'Runs: Local', bg: '#eef1f4', fg: '#667085',
+      tip: (pf.message || 'This workspace runs locally.') +
+        ' Switch the Environment scope to Cloud (with a build selected) to dispatch a Run remotely instead.' };
+  }
   function _applyRunTargetBadges(pf) {
     var badges = document.querySelectorAll('.pcard-runtarget[data-role="runtarget"]');
     if (!badges.length) return;
-    var known = !!(pf && pf.target);
-    var cloud = known && pf.target === 'deployment';
-    var label = !known ? 'Runs: —' : (cloud ? 'Runs: Cloud' : 'Runs: Local');
-    var bg = cloud ? '#e6f0fb' : '#eef1f4';
-    var fg = !known ? '#8a97a4' : (cloud ? '#1e5fa4' : '#667085');
-    var tip;
-    if (!known) tip = 'Could not determine where a Run will execute.';
-    else if (cloud) tip = (pf.message || 'This workspace runs on the Cloud (GovCloud) deployment — ▶ Run dispatches remotely.');
-    else tip = (pf.message || 'This workspace runs locally.') +
-      ' The Local/Cloud scope sets the source binding, not where a Run executes — to run on Cloud, open a Cloud build (a materialized workspace) and “Use this environment”.';
-    badges.forEach(function (b) { b.textContent = label; b.title = tip; b.style.background = bg; b.style.color = fg; });
+    if (pf !== undefined) window._lastRunTargetPreflight = pf;  // cache for scope-change re-apply
+    var t = _computeRunTarget(pf !== undefined ? pf : window._lastRunTargetPreflight);
+    badges.forEach(function (b) { b.textContent = t.label; b.title = t.tip; b.style.background = t.bg; b.style.color = t.fg; });
   }
   window._applyRunTargetBadges = _applyRunTargetBadges;
+  // Re-reflect the badge live when the Environment scope / selected build changes
+  // (branch-source.js dispatches viv:envchange) — no re-fetch, re-reads VivEnv.
+  window.addEventListener('viv:envchange', function () { _applyRunTargetBadges(); });
 
   var _runTargetScheduled = false;
   function _scheduleRunTargetBadges() {

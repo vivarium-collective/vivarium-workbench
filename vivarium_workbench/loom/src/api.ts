@@ -345,19 +345,49 @@ async function _confirmRemoteDispatch(): Promise<void> {
   }
 }
 
+/** Dynamic run-target, set on the embed URL by loom-embed.js when the workbench
+ *  Environment scope is Cloud. `run_target=deployment` + build → route this Run to
+ *  the cloud against that build's committed code; `run_target=deployment` with no
+ *  build is the Q3 case (Cloud active, nothing selected) — the caller blocks. */
+function _dynamicRunTarget():
+  | { run_target: 'deployment'; build?: { simulator_id: number; repo_url: string; commit: string } }
+  | null {
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('run_target') !== 'deployment') return null;
+  const sim = q.get('build_sim');
+  if (sim == null || sim === '') return { run_target: 'deployment' };
+  return {
+    run_target: 'deployment',
+    build: { simulator_id: Number(sim), repo_url: q.get('build_repo') || '', commit: q.get('build_commit') || '' },
+  };
+}
+
 /** Start a detached composite run. Resolves with {run_id}; rejects on non-2xx
  *  (notably 429 when the concurrency cap is hit) with the server's error text.
- *  Passes through the remote-dispatch confirm gate first (see above). */
+ *  When the Environment scope is Cloud (dynamic run-target), dispatches against the
+ *  selected build's committed code and skips the git-push confirm gate (the backend
+ *  runs git+repo@commit — no local push). Otherwise passes through the gate. */
 export async function startRun(args: StartRunArgs): Promise<StartRunResponse> {
-  await _confirmRemoteDispatch();
+  const rt = _dynamicRunTarget();
+  let body: Record<string, unknown> = { ...(args as unknown as Record<string, unknown>) };
+  if (rt) {
+    if (!rt.build) {
+      throw new Error('Cloud is active but no build is selected — pick or build one, or switch to Local.');
+    }
+    // Explicit-build Cloud run: the backend dispatches against git+repo@commit and
+    // skips the git-ready/push preflight, so we skip the confirm gate too.
+    body = { ...body, run_target: rt.run_target, build: rt.build };
+  } else {
+    await _confirmRemoteDispatch();
+  }
   const r = await fetch('/api/composite-test-run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(args),
+    body: JSON.stringify(body),
   });
-  const body = await r.json();
-  if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-  return body as StartRunResponse;
+  const respBody = await r.json();
+  if (!r.ok) throw new Error(respBody.error || `HTTP ${r.status}`);
+  return respBody as StartRunResponse;
 }
 
 /** Poll one run's status. Cheap single-row read; safe to call on an interval. */

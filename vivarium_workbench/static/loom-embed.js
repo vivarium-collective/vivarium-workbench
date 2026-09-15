@@ -36,9 +36,25 @@
     var fullSurface = det.getAttribute('data-surface') === 'full';
     var isSnapshot = document.body.classList.contains('snapshot');
     var chromeParam = fullSurface ? '&header=off' : '&chrome=off';
+    // Dynamic run-target: if the Environment scope is Cloud and a build resolves,
+    // tell the loom to dispatch this Run to the cloud against that build (the loom
+    // forwards run_target + build into the composite-test-run request; the backend
+    // runs against git+repo@commit — no local push). Cloud-but-no-build passes
+    // run_target with no build, and the loom blocks the Run (Q3).
+    var rtParam = '';
+    try {
+      if (window.VivEnv && window.VivEnv.isCloud()) {
+        var b = window.VivEnv.runBuild();
+        rtParam = b
+          ? '&run_target=deployment&build_sim=' + encodeURIComponent(b.simulator_id) +
+            '&build_repo=' + encodeURIComponent(b.repo_url || '') +
+            '&build_commit=' + encodeURIComponent(b.commit || '')
+          : '&run_target=deployment';
+      }
+    } catch (e) { /* VivEnv unavailable → default local behavior */ }
     var loomUrl = (det._loomLive || (fullSurface && !isSnapshot))
       ? apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id) +
-          (det._overrides ? '&overrides=' + encodeURIComponent(det._overrides) : '') + chromeParam + tabParam
+          (det._overrides ? '&overrides=' + encodeURIComponent(det._overrides) : '') + chromeParam + tabParam + rtParam
       : apiUrl('/bigraph-loom/index.html') + '?static=1&stateUrl=' +
           encodeURIComponent(_compositeStateUrl(id, det._overrides)) + liveInner + chromeParam + tabParam;
     var f = document.createElement('iframe');

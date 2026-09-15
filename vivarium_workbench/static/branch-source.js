@@ -418,6 +418,7 @@
       });
       sel.addEventListener("change", function () {
         state.selected = ordered.filter(function (m) { return m.commit === sel.value; })[0];
+        try { window.dispatchEvent(new Event('viv:envchange')); } catch (e) { /* older browsers */ }
       });
       var cur = ordered.filter(function (m) { return m.current; })[0] || ordered[0];
       state.selected = cur;
@@ -974,9 +975,28 @@
       }
     }
     _render();
+    // Dynamic run-target: let the composite cards re-reflect their run badge for
+    // the settled scope / selected build (composite-card.js listens for this).
+    try { window.dispatchEvent(new Event('viv:envchange')); } catch (e) { /* older browsers */ }
   }
 
   window._renderBranchSource = refresh;
+
+  // Dynamic run-target: expose the environment scope + the build a Cloud Run
+  // should dispatch against, so the composite card + loom-embed can route a Run
+  // to the cloud instead of running in-process. scope() is "local" | "remote".
+  // runBuild() returns the resolved Cloud build (state.selected already defaults
+  // to the branch's latest, carrying {simulator_id, repo_url, commit}), or null
+  // when the scope is Cloud but no build is available (Q3 — block the Run).
+  window.VivEnv = {
+    scope: function () { return state.scope; },
+    isCloud: function () { return state.scope === "remote"; },
+    runBuild: function () {
+      if (state.scope !== "remote") return null;
+      var s = state.selected;
+      return (s && s.simulator_id != null) ? s : null;
+    }
+  };
   document.addEventListener("DOMContentLoaded", function () {
     if (document.getElementById("viv-branch-source")) refresh();
   });
