@@ -178,6 +178,14 @@
     var id = det.getAttribute('data-id');
     var host = det.querySelector('.ccard-loom-frame');
     if (!host) return;
+    // Build-error chip (PR #1111 degrade): if this composite's wiring came back
+    // stale/degraded, show the amber warning chip in the card header. Lazy (only
+    // on loom mount, so no ParCa-heavy build on list load), fire-and-forget, and
+    // hits the same TTL-cached composite-state the loom itself resolves.
+    var _card = det.closest ? det.closest('.registry-entry-full') : null;
+    if (_card && id && typeof window._loadCompositeBuildWarn === 'function') {
+      window._loadCompositeBuildWarn(_card, id, det._overrides);
+    }
     host.innerHTML = '<p class="muted" style="padding:10px;font-size:0.85em">Resolving composite (this can take a moment)…</p>';
     var apiUrl = (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
     var tabParam = det.getAttribute('data-view') ? '&tab=' + encodeURIComponent(det.getAttribute('data-view')) : '';

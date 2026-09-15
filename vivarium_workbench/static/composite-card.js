@@ -582,6 +582,91 @@
   }
   window._loadCompositeObservables = _loadCompositeObservables;
 
+  // ── Build-error warning chip ──────────────────────────────────────────────
+  // PR #1111 made GET /api/composite-state degrade to a 200 with a `build_error`
+  // object (+ kind: static-fallback/last-good/skeleton, optional stale_overrides)
+  // instead of 400ing when a generator build fails (stale/absent ParCa cache,
+  // env-probe drift, an import error). This renders a small, non-blocking amber
+  // chip near the composite header so the user knows the shown wiring is stale/
+  // degraded. It is informational only — it never blocks the Run button or the
+  // view (the card already renders the best-available wiring).
+  //
+  // Given a composite-state response object, return {text, title} for the chip,
+  // or null when the wiring is healthy (no chip).
+  function _buildErrorChipInfo(d) {
+    if (!d || typeof d !== 'object') return null;
+    var be = (d.build_error && typeof d.build_error === 'object') ? d.build_error : null;
+    var kind = d.kind || '';
+    var unavailable = (kind === 'skeleton' || d.wiring_status === 'unavailable');
+    // Healthy build (kind generator/spec, no build_error) → no chip.
+    if (!be && kind !== 'last-good' && !unavailable && !d.stale_overrides) return null;
+    var detail = be ? String(be.detail || '') : String(d.notice || '');
+    var shortDetail = detail.length > 160 ? detail.slice(0, 160) + '…' : detail;
+    var msg = (be && be.notice) ? be.notice : shortDetail;
+    var label;
+    if (unavailable) {
+      label = 'wiring preview unavailable';
+    } else if (kind === 'last-good') {
+      label = 'showing last-known-good wiring';
+    } else if (be && (be.kind === 'stale-cache' || be.remote_no_cache)) {
+      label = 'wiring may be stale';
+    } else if (kind === 'static-fallback' || be) {
+      label = 'showing default wiring — live build failed';
+    } else {
+      label = 'wiring may be degraded';
+    }
+    var text = '⚠ ' + label;   // ⚠
+    if (msg && msg !== label) text += ' — ' + msg;   // — msg
+    if (d.stale_overrides) {
+      text += ' · Config → Apply didn’t render (showing default wiring)';
+    }
+    return { text: text, title: detail || msg || label };
+  }
+  window._buildErrorChipInfo = _buildErrorChipInfo;
+
+  // Fill (or clear) a card's build-warning chip from a composite-state response.
+  function _renderCompositeBuildWarn(cardEl, d) {
+    if (!cardEl) return;
+    var chip = cardEl.querySelector('[data-role="build-warn"]');
+    if (!chip) return;
+    var info = _buildErrorChipInfo(d);
+    if (!info) { chip.hidden = true; chip.textContent = ''; chip.removeAttribute('title'); return; }
+    chip.textContent = info.text;
+    chip.title = info.title || info.text;
+    chip.hidden = false;
+  }
+  window._renderCompositeBuildWarn = _renderCompositeBuildWarn;
+
+  // Composite-state URL. `build_error` lives on /api/composite-state — NOT on the
+  // /api/composite-resolve the card payload came from — so the chip needs its own
+  // lookup. Snapshot bundles bake it at <base>/api/composite-state/<id>.json.
+  function _compositeBuildStateUrl(id, overridesJson) {
+    var apiUrl = (window.DataSource && window.DataSource.apiUrl)
+      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
+    if (document.body.classList.contains('snapshot')) {
+      return apiUrl('/api/composite-state/' + encodeURIComponent(id) + '.json');
+    }
+    return apiUrl('/api/composite-state?ref=' + encodeURIComponent(id)) +
+      (overridesJson ? '&overrides=' + encodeURIComponent(overridesJson) : '');
+  }
+
+  // Lazily fetch composite-state for a mounted card and render the build-warning
+  // chip if the wiring came back degraded. Fire-and-forget: never throws, never
+  // blocks the card/Run — a fetch failure just leaves the chip hidden. The build
+  // is ParCa-heavy so this only runs on demand (loom mount), once per card, and
+  // the backend TTL-caches the same lookup the loom itself makes.
+  function _loadCompositeBuildWarn(cardEl, id, overridesJson) {
+    if (!cardEl || !id || cardEl._buildWarnLoaded) return;
+    cardEl._buildWarnLoaded = true;
+    try {
+      fetch(_compositeBuildStateUrl(id, overridesJson))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d) _renderCompositeBuildWarn(cardEl, d); })
+        .catch(function () { /* informational only — leave the chip hidden */ });
+    } catch (e) { /* never break the card */ }
+  }
+  window._loadCompositeBuildWarn = _loadCompositeBuildWarn;
+
   // ── Composite ProcessCard ────────────────────────────────────────────────
   // A composite IS a process (§ unified idea): same card, same accordion, plus
   // an EXPLORE section (the wide loom bigraph) between Inputs and Run. A
@@ -782,6 +867,14 @@
               'style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
               'background:#eef1f4;color:#8a97a4;vertical-align:middle">Runs: …</span>' +
             '<code class="loom-addr">' + _esc(addr) + '</code>' +
+            // Build-error warning chip (PR #1111 degrade). Hidden until a
+            // composite-state fetch reports the shown wiring is stale/degraded
+            // (_loadCompositeBuildWarn fires when the loom mounts). Amber, matching
+            // the workbench's status-pill convention; informational, non-blocking.
+            '<span class="pcard-build-warn" data-role="build-warn" hidden ' +
+              'style="display:inline-block;margin-left:8px;padding:1px 9px;border-radius:10px;' +
+              'font-size:11px;font-weight:600;background:#fef3c7;color:#92400e;border:1px solid #fde68a;' +
+              'vertical-align:middle;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>' +
             '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⌃</button>' +
             _shareCompositeBtn() +
             _compositeJsonBtn() +
