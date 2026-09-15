@@ -40,6 +40,13 @@ def stop_composite_run(ws_root: Path, run_id: str) -> tuple[dict, int]:
     run_id = (run_id or "").strip()
     if not run_id:
         return {"error": "missing run_id"}, 400
+    # Plan B: a "remote-sim-<id>" run executes on GovCloud and has no local
+    # process to signal (and sms-api exposes no simulation cancel). Return a
+    # graceful, honest outcome — the loom's Stop detaches from a cloud run
+    # rather than pretending to cancel it, and the run continues on GovCloud.
+    if run_id.startswith("remote-sim-"):
+        return {"run_id": run_id, "outcome": "remote-uncancellable",
+                "note": "Cloud runs continue on GovCloud — track it in the Runs tab."}, 200
     db_file = WorkspacePaths.load(ws_root).pbg / "composite-runs.db"
     result = run_registry.stop_run(db_file, run_id, workspace=ws_root)
     status = _OUTCOME_STATUS.get(result.get("outcome"), 200)

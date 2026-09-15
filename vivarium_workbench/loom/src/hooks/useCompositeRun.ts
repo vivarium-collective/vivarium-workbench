@@ -210,12 +210,25 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
   // a lost/failed request just gets reconciled by the poll loop.
   const handleStop = useCallback(() => {
     if (!runId) return;
+    // A cloud (image-backed) run executes on GovCloud and can't be signalled from
+    // here — sms-api exposes no simulation cancel. "Stop" DETACHES: stop watching
+    // and clear the run bar; the run keeps running on the cloud and appears in the
+    // Runs tab. (Honest — we never fake a 'cancelled' state for a job still running.)
+    if (status?.remote) {
+      stopPolling();
+      setStopping(false);
+      setStatus(null);
+      setRunId(null);
+      sessionStorage.removeItem(ACTIVE_RUN_KEY);
+      setStartWarning('Cloud runs continue on GovCloud — track this run in the Runs tab.');
+      return;
+    }
     setStopping(true);
     void (async () => {
       try { await stopRun(runId); }
       catch { /* already terminal or transient — the poll loop reconciles */ }
     })();
-  }, [runId]);
+  }, [runId, status, stopPolling]);
 
   const pct = status && status.n_steps
     ? Math.min(100, Math.round((status.progress_step / status.n_steps) * 100))
