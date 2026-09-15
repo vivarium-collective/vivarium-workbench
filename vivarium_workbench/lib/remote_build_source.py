@@ -270,6 +270,36 @@ def ensure_git_workspace(cache_dir: Path, repo_url: str, branch: str, commit: st
         shutil.rmtree(cache_dir / ".git", ignore_errors=True)  # don't leave a half-initialized .git behind
 
 
+def build_is_cached(simulator_id: Any, commit: str) -> bool:
+    """True when this build's workspace is already materialized in the local
+    build cache — i.e. Open / Run from hosted is instant (no download).
+
+    Checks ``cache_dir_for`` exactly, then tolerates a short-vs-full commit
+    mismatch: a build listed with a short sha still counts as cached when the
+    cache dir was written with the full sha (or vice-versa), matching on a
+    shared >=7-char commit prefix. Never raises.
+    """
+    if not simulator_id or not commit:
+        return False
+    try:
+        if cache_dir_for(simulator_id, commit).is_dir():
+            return True
+        root = build_cache_root()
+        if not root.is_dir():
+            return False
+        prefix = f"sim{simulator_id}-"
+        for d in root.glob(f"{prefix}*"):
+            if not d.is_dir():
+                continue
+            c = d.name[len(prefix):]
+            n = min(len(c), len(commit))
+            if n >= 7 and c[:n] == commit[:n]:
+                return True
+    except Exception:  # noqa: BLE001 — a cache probe must never break the list
+        return False
+    return False
+
+
 def list_build_sources(client: Any) -> dict:
     """Map sms-api's simulator versions to dropdown build entries.
 
@@ -293,5 +323,7 @@ def list_build_sources(client: Any) -> dict:
             "branch": v.get("git_branch", ""),
             "created_at": v.get("created_at", ""),
             "label": f"{repo} @ {commit} (build #{sim_id})",
+            # Already downloaded to the local build cache → Open/Run is instant.
+            "cached": build_is_cached(sim_id, commit),
         })
     return {"builds": builds, "error": None}

@@ -231,6 +231,9 @@
                    // build). `matchesWorkspace` = a build of the commit the workspace
                    // is on (may be several; shown when not the exact active build).
                    current: b.simulator_id === state.currentSimId,
+                   // `cached` = this build's workspace is already in the local
+                   // build cache, so Open / Run from hosted is instant (no download).
+                   cached: !!b.cached,
                    matchesWorkspace: !!curC && _short(b.commit) === curC };
         });
       }
@@ -651,6 +654,17 @@
           chip.title = "Newest build of " + (m.branch || "this branch");
         }
         if (chip) pEl.appendChild(chip);
+        // Cached = this build's workspace is already downloaded locally, so
+        // Open / Run from hosted is instant. Shown alongside latest/workspace
+        // chips (a build can be both). Absence means the first open downloads it.
+        if (m.cached) {
+          var cchip = _el("span", null, "⚡ cached");
+          cchip.style.cssText = "flex:0 0 auto; font-size:10px; font-weight:600; color:#8a5a00; "
+            + "background:#fff4e0; border:1px solid #f0d6a0; border-radius:10px; padding:1px 7px";
+          cchip.title = "This build's workspace is already downloaded to the local build cache — "
+            + "Open / Run from hosted is instant, no download.";
+          pEl.appendChild(cchip);
+        }
         labelWrap.appendChild(pEl);
         var metaBits = [];
         if (isRemote) {

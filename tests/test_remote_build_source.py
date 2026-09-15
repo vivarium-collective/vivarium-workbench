@@ -558,3 +558,36 @@ def test_switch_build_wires_ensure_git_workspace(monkeypatch, tmp_path):
         "cache_dir": cache, "repo_url": "https://github.com/CovertLabEcoli/sms-ecoli",
         "branch": "main", "commit": "32b901", "sim_id": 45,
     }
+
+
+def test_build_is_cached_detects_materialized_builds(tmp_path, monkeypatch):
+    """build_is_cached is True when the build's workspace dir exists in the
+    local cache (exactly, or via a short-vs-full commit prefix match)."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BUILD_CACHE", str(tmp_path))
+    (tmp_path / "sim211-33ecd77").mkdir()            # cached with a short sha
+    (tmp_path / "sim169-d16c5b0383345658967b84db1e24fe0f").mkdir()  # cached with a full sha
+
+    assert rbs.build_is_cached(211, "33ecd77") is True          # exact
+    assert rbs.build_is_cached(169, "d16c5b0") is True          # short listed, full in cache
+    assert rbs.build_is_cached(211, "33ecd7700000000") is True  # full listed, short in cache
+    assert rbs.build_is_cached(999, "deadbeef") is False        # not cached
+    assert rbs.build_is_cached(211, "") is False                # no commit
+    assert rbs.build_is_cached(None, "33ecd77") is False        # no id
+
+
+def test_list_build_sources_marks_cached(tmp_path, monkeypatch):
+    """Each build entry carries a `cached` bool reflecting the local cache."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BUILD_CACHE", str(tmp_path))
+    (tmp_path / "sim210-9102846").mkdir()
+
+    class _Client:
+        def list_simulators(self):
+            return {"versions": [
+                {"database_id": 210, "git_commit_hash": "9102846", "git_repo_url": "https://github.com/x/sms-ecoli.git", "git_branch": "main"},
+                {"database_id": 211, "git_commit_hash": "33ecd77", "git_repo_url": "https://github.com/x/sms-ecoli.git", "git_branch": "main"},
+            ]}
+
+    out = rbs.list_build_sources(_Client())
+    by_id = {b["simulator_id"]: b for b in out["builds"]}
+    assert by_id[210]["cached"] is True   # in cache
+    assert by_id[211]["cached"] is False  # not in cache
