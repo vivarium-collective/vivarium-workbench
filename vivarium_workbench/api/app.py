@@ -192,6 +192,7 @@ from vivarium_workbench.lib.models import (
     SavedVisualizationsPayload,
     SimRow,
     SimulationsPayload,
+    RemoteSourceState,
     ProvenanceManifest,
     RemoteHealth,
     SourceBuilds,
@@ -772,8 +773,10 @@ def create_app() -> FastAPI:
         if refresh:
             from vivarium_workbench.lib import remote_simulations as _rs
             _rs._REMOTE_CACHE.clear()
+            _rs._REMOTE_META.clear()
             clear_build_cache()
-        data = build_simulations_data_cached(ws, include_remote=include_remote)
+        data = build_simulations_data_cached(ws, include_remote=include_remote,
+                                             fresh=refresh)
         sims = data.get("simulations", [])
         if study:
             sims = [s for s in sims
@@ -793,8 +796,11 @@ def create_app() -> FastAPI:
             _known = set()
         annotate_composite_registered(sims, _known)
         rows = [SimRow.model_validate(r) for r in sims]
-        return SimulationsPayload(simulations=rows, current=data.get("current"),
-                                  total=total, offset=offset, limit=limit)
+        remote_state = data.get("remote")
+        return SimulationsPayload(
+            simulations=rows, current=data.get("current"),
+            total=total, offset=offset, limit=limit,
+            remote=RemoteSourceState.model_validate(remote_state) if remote_state else None)
 
     @app.get(
         "/api/workspace-manifest",

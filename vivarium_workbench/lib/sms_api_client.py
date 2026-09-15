@@ -131,9 +131,16 @@ def caller_identity() -> str | None:
 
 
 class SmsApiClient:
-    def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 30.0) -> None:
+    def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 30.0,
+                 max_retries: int = _GET_RETRIES) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        # Default retry budget for idempotent GET/status calls made through this
+        # client. Latency-sensitive callers (the SWR "fresh" path on
+        # /api/simulations) construct a client with a short timeout and
+        # ``max_retries=1`` so a wedged tunnel can't pin the request thread for
+        # ``timeout * _GET_RETRIES`` seconds. Never consulted by _post/_delete.
+        self.max_retries = max_retries
 
     def _headers(self, accept: str = "application/json") -> dict[str, str]:
         """Request headers, carrying the caller's identity when there is one.
@@ -154,7 +161,7 @@ class SmsApiClient:
         path: str,
         params: dict | None = None,
         *,
-        retries: int = _GET_RETRIES,
+        retries: int | None = None,
         backoff: float = _RETRY_BACKOFF,
     ) -> dict:
         """GET a JSON endpoint, retrying transient failures.
@@ -164,6 +171,8 @@ class SmsApiClient:
         retried up to ``retries`` attempts total; a 4xx is a client error, not a
         transient one, and is raised immediately without retrying.
         """
+        if retries is None:
+            retries = self.max_retries
         url = self.base_url + path
         if params:
             url = f"{url}?{urlencode(params, doseq=True)}"

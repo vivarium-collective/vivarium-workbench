@@ -1504,14 +1504,26 @@ def _emitter_tag(emitter) -> str:
     return emitter.lower() if isinstance(emitter, str) else ""
 
 
-def _append_remote_simulations(sims: list, ws_root: Path) -> list:
+def _append_remote_simulations(sims: list, ws_root: Path, *, fresh: bool = False) -> list:
     """Append the active remote build's server-side runs (scoped to the build's
     commit/repo) to the local Simulations-DB rows. No-op for local workspaces
     or when sms-api is unreachable — single source for the local+remote merge,
-    shared by ``build_simulations_data`` and the ``/api/simulations`` handler."""
+    shared by ``build_simulations_data`` and the ``/api/simulations`` handler.
+
+    By default this routes through the NON-blocking stale-while-revalidate helper
+    (``list_remote_simulations_swr``): it returns whatever the SWR cache holds
+    immediately and refreshes in the background, so a cold/slow/wedged tunnel can
+    never pin the request thread. ``fresh=True`` (threaded from ``?refresh=true``)
+    takes the blocking path but bounds it with a short timeout and one retry so
+    even the explicit refresh can't hang the request for minutes."""
     try:
-        from vivarium_workbench.lib.remote_simulations import list_remote_simulations
-        remote = list_remote_simulations(ws_root)
+        from vivarium_workbench.lib import remote_simulations as _rs
+        if fresh:
+            remote = _rs.list_remote_simulations(
+                ws_root, use_cache=False,
+                timeout=_rs._FRESH_TIMEOUT, max_retries=_rs._FRESH_MAX_RETRIES)
+        else:
+            remote = _rs.list_remote_simulations_swr(ws_root)
     except Exception:
         remote = []
     if not remote:
@@ -1900,19 +1912,24 @@ def clear_build_cache() -> None:
 
 
 def build_simulations_data_cached(ws_root: Path, include_remote: bool = True,
-                                  ttl: float = _BUILD_CACHE_TTL) -> dict:
-    """TTL-cached :func:`build_simulations_data` for the live-serving path."""
+                                  ttl: float = _BUILD_CACHE_TTL,
+                                  fresh: bool = False) -> dict:
+    """TTL-cached :func:`build_simulations_data` for the live-serving path.
+
+    ``fresh=True`` (the ``?refresh=true`` path, which already clears this cache)
+    forces the blocking-but-bounded remote fetch instead of the SWR cache."""
     key = (str(ws_root), bool(include_remote))
     now = time.time()
     hit = _BUILD_CACHE.get(key)
     if hit and hit[0] > now:
         return hit[1]
-    data = build_simulations_data(ws_root, include_remote=include_remote)
+    data = build_simulations_data(ws_root, include_remote=include_remote, fresh=fresh)
     _BUILD_CACHE[key] = (now + ttl, data)
     return data
 
 
-def build_simulations_data(ws_root: Path, include_remote: bool = True) -> dict:
+def build_simulations_data(ws_root: Path, include_remote: bool = True,
+                           fresh: bool = False) -> dict:
     """Data builder for GET /api/simulations — the ``list_simulations`` rows
     enriched with emitter_type labels + active remote build runs + current slug.
 
@@ -1958,8 +1975,17 @@ def build_simulations_data(ws_root: Path, include_remote: bool = True) -> dict:
     sims.sort(key=lambda r: (r.get("completed_at") or r.get("started_at") or 0),
               reverse=True)
 
+    remote_state: dict | None = None
     if include_remote:
-        sims = _append_remote_simulations(sims, ws_root)
+        sims = _append_remote_simulations(sims, ws_root, fresh=fresh)
+        # Provenance of the remote source, so the Runs tab can show
+        # "as of HH:MM (refreshing…)" instead of a spinner. Best-effort: a
+        # failure here must never break the local listing.
+        try:
+            from vivarium_workbench.lib import remote_simulations as _rs
+            remote_state = _rs.remote_state(ws_root)
+        except Exception:  # noqa: BLE001
+            remote_state = None
 
     # Capability-matched analysis tools + their launch URLs, per row (Simulations
     # DB "launch into tool" affordance). Best-effort at every layer already
@@ -1981,7 +2007,10 @@ def build_simulations_data(ws_root: Path, include_remote: bool = True) -> dict:
                 s["source_ref"] = dict(_ws_source)
 
     from vivarium_workbench.lib.investigation_status import current_branch_slug
-    return {"simulations": sims, "current": current_branch_slug(ws_root)}
+    data = {"simulations": sims, "current": current_branch_slug(ws_root)}
+    if remote_state is not None:
+        data["remote"] = remote_state
+    return data
 
 
 def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, tempfile.TemporaryDirectory | None]":

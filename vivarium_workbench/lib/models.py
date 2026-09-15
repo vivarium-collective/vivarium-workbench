@@ -113,11 +113,30 @@ class SimRow(BaseModel):
     matched_tools: list[dict[str, Any]] = []
 
 
+class RemoteSourceState(BaseModel):
+    """Provenance of the remote (sms-api) runs merged into the Simulations DB.
+
+    Lets the Runs tab show "GovCloud runs as of HH:MM (refreshing…)" instead of a
+    spinner, and stay honest when the tunnel is down — the fetch is
+    stale-while-revalidate, so the payload never blocks on it.
+    """
+
+    #: fresh (cache current) | stale (serving last-known, refresh pending) |
+    #: refreshing (a background fetch is in flight) | unavailable (unreachable,
+    #: no prior data).
+    state: str
+    as_of: Optional[float] = None      # epoch of the last successful fetch
+    error: Optional[str] = None        # last fetch error, when unreachable
+
+
 class SimulationsPayload(BaseModel):
     """``GET /api/simulations`` payload (server.py ``_simulations_data``)."""
 
     simulations: list[SimRow]
     current: Optional[str] = None     # current branch slug
+    # Remote-source provenance (present only when the remote merge ran). SWR, so
+    # a cold/slow/down tunnel never blocks this payload — the state field says so.
+    remote: Optional[RemoteSourceState] = None
     # Pagination (all optional / back-compatible: omitting ``limit`` returns
     # every row, ``total is None``). ``total`` is the row count for the current
     # view (after any ``?study=`` filter, before the page slice) so the client

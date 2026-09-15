@@ -42,10 +42,84 @@ from pathlib import Path
 # below (never blocks a page render on a cold/expired remote fetch).
 _REMOTE_CACHE: dict = {}
 _REMOTE_CACHE_TTL = 300.0
+# A FAILED fetch (tunnel down / sms-api unreachable) is cached for only this
+# long — long enough that the Runs tab's 15s auto-refresh doesn't re-probe a
+# wedged tunnel on every poll (each probe costs the fresh client's timeout),
+# short enough that a recovered tunnel is picked up promptly.
+_NEGATIVE_CACHE_TTL = 30.0
+# Bounds for the request-blocking "fresh" fetch (?refresh=true): a wedged tunnel
+# must not pin the uvicorn worker for timeout * _GET_RETRIES seconds.
+_FRESH_TIMEOUT = 10.0
+_FRESH_MAX_RETRIES = 1
+# Per-key provenance for the last completed fetch, so the /api/simulations
+# payload can report remote-source state (fresh/stale/refreshing/unavailable)
+# instead of a spinner. {key: {"as_of": epoch|None, "error": str|None}}.
+_REMOTE_META: dict = {}
 # Keys with an in-flight background refresh, so we never spawn more than one
 # refresh thread per (ws_root, base_url, limit) at a time.
 _REMOTE_REFRESH_INFLIGHT: set = set()
 _REMOTE_REFRESH_LOCK = threading.Lock()
+
+
+def _cache_key(ws_root, base_url: str | None, limit: int) -> tuple:
+    return (str(ws_root), base_url or "", int(limit))
+
+
+def _store_result(key: tuple, rows: list, error: "str | None") -> list:
+    """Record a fetch outcome in the TTL cache + provenance map, and return the
+    rows that callers should serve.
+
+    On success the fresh rows are cached for the full TTL and ``as_of`` is
+    stamped. On failure the LAST-KNOWN rows (if any) are kept and re-cached for
+    the short negative TTL, ``as_of`` is preserved, and the error is recorded so
+    the state resolves to "stale" (we have older rows) or "unavailable" (we
+    never had any).
+    """
+    now = time.time()
+    if error:
+        prev = _REMOTE_CACHE.get(key)
+        rows = prev[1] if prev else rows
+        _REMOTE_CACHE[key] = (now + _NEGATIVE_CACHE_TTL, rows)
+        prev_meta = _REMOTE_META.get(key) or {}
+        _REMOTE_META[key] = {"as_of": prev_meta.get("as_of"), "error": error}
+    else:
+        _REMOTE_CACHE[key] = (now + _REMOTE_CACHE_TTL, rows)
+        _REMOTE_META[key] = {"as_of": now, "error": None}
+    return rows
+
+
+def remote_state(ws_root: Path, base_url: str | None = None,
+                 limit: int = 2000) -> dict:
+    """Provenance of the remote-runs source for the /api/simulations payload.
+
+    ``{"state": "fresh"|"stale"|"refreshing"|"unavailable", "as_of": epoch|None,
+    "error": str|None}`` — computed from the same SWR cache the fetch-invocation
+    functions populate, so the Runs tab can show "as of HH:MM (refreshing…)"
+    instead of blocking or spinning.
+    """
+    key = _cache_key(ws_root, base_url, limit)
+    now = time.time()
+    hit = _REMOTE_CACHE.get(key)
+    meta = _REMOTE_META.get(key) or {}
+    with _REMOTE_REFRESH_LOCK:
+        refreshing = key in _REMOTE_REFRESH_INFLIGHT
+    as_of = meta.get("as_of")
+    error = meta.get("error")
+    if refreshing:
+        state = "refreshing"
+    elif error:
+        # A failure with no prior success is a dead source; with prior rows it's
+        # a stale-but-serving source.
+        state = "stale" if as_of is not None else "unavailable"
+    elif hit and hit[0] > now and as_of is not None:
+        state = "fresh"
+    elif as_of is not None:
+        state = "stale"
+    else:
+        # Nothing fetched yet (cold, no refresh in flight) — honest "refreshing"
+        # since the SWR read will kick one.
+        state = "refreshing"
+    return {"state": state, "as_of": as_of, "error": error}
 
 
 # emitter tag -> capitalized label the UI pills key on (mirrors server.py).
@@ -335,22 +409,26 @@ def _scope_build_ids(ws_root: Path, bm, builds) -> "tuple[set, object] | tuple[N
 
 
 def list_remote_simulations(ws_root: Path, base_url: str | None = None,
-                            limit: int = 2000, use_cache: bool = True) -> list[dict]:
+                            limit: int = 2000, use_cache: bool = True, *,
+                            timeout: float | None = None,
+                            max_retries: int | None = None) -> list[dict]:
     """Remote sms-api runs to surface in the Simulations DB, or ``[]``.
 
     Cached for ``_REMOTE_CACHE_TTL`` seconds (see the module cache) so repeated
     index derivations don't re-hit sms-api; ``use_cache=False`` forces a fresh
-    fetch. Thin wrapper over :func:`_fetch_remote_simulations`.
+    fetch. This is the BLOCKING variant — the ``?refresh=true`` path uses it with
+    a bounded ``timeout``/``max_retries`` so a wedged tunnel can't hang the
+    request. Thin wrapper over :func:`_fetch_remote_simulations_meta`; a failed
+    fetch is negative-cached (short TTL) so it isn't re-probed every poll.
     """
-    key = (str(ws_root), base_url or "", int(limit))
-    now = time.time()
+    key = _cache_key(ws_root, base_url, limit)
     if use_cache:
         hit = _REMOTE_CACHE.get(key)
-        if hit and hit[0] > now:
+        if hit and hit[0] > time.time():
             return hit[1]
-    rows = _fetch_remote_simulations(ws_root, base_url, limit)
-    _REMOTE_CACHE[key] = (now + _REMOTE_CACHE_TTL, rows)
-    return rows
+    rows, error = _fetch_remote_simulations_meta(
+        ws_root, base_url, limit, timeout=timeout, max_retries=max_retries)
+    return _store_result(key, rows, error)
 
 
 def list_remote_simulations_swr(ws_root: Path, base_url: str | None = None,
@@ -365,7 +443,7 @@ def list_remote_simulations_swr(ws_root: Path, base_url: str | None = None,
     not a blocker; use :func:`list_remote_simulations` when you must have the
     freshest rows (the Runs-tab refresh).
     """
-    key = (str(ws_root), base_url or "", int(limit))
+    key = _cache_key(ws_root, base_url, limit)
     now = time.time()
     hit = _REMOTE_CACHE.get(key)
     if hit and hit[0] > now:
@@ -384,8 +462,8 @@ def _kick_remote_refresh(key: tuple, ws_root: Path, base_url: str | None,
 
     def _run() -> None:
         try:
-            rows = _fetch_remote_simulations(ws_root, base_url, limit)
-            _REMOTE_CACHE[key] = (time.time() + _REMOTE_CACHE_TTL, rows)
+            rows, error = _fetch_remote_simulations_meta(ws_root, base_url, limit)
+            _store_result(key, rows, error)
         except Exception:  # noqa: BLE001 — best-effort; a down tunnel must not crash the thread
             pass
         finally:
@@ -397,37 +475,57 @@ def _kick_remote_refresh(key: tuple, ws_root: Path, base_url: str | None,
 
 def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
                               limit: int = 2000) -> list[dict]:
-    """Uncached remote fetch — see :func:`list_remote_simulations`.
+    """Uncached remote fetch (rows only) — back-compat wrapper over
+    :func:`_fetch_remote_simulations_meta`. Never raises."""
+    rows, _error = _fetch_remote_simulations_meta(ws_root, base_url, limit)
+    return rows
 
-    For a materialized remote build, that's the active build's (repo, commit).
-    For a plain local checkout, it's every remote run of the workspace's repo,
-    so the project's GovCloud runs appear alongside local ones — capped to the
-    ``limit`` most recent. Returns ``[]`` when the repo can't be resolved or
-    sms-api is unreachable — never raises, so a down tunnel can't break the
-    local listing.
+
+def _fetch_remote_simulations_meta(
+    ws_root: Path, base_url: str | None = None, limit: int = 2000, *,
+    timeout: float | None = None, max_retries: int | None = None,
+) -> "tuple[list[dict], str | None]":
+    """Uncached remote fetch returning ``(rows, error)``.
+
+    ``error`` is a human-readable string when sms-api was UNREACHABLE
+    (connection/timeout — the case the negative cache exists to suppress) and
+    ``None`` on success, including a successful fetch that yields zero rows (a
+    local checkout with no matching remote builds is success, not failure). This
+    lets the SWR layer negative-cache a down tunnel while still treating "no
+    remote runs" as fresh.
+
+    For a materialized remote build, the scope is the active build's (repo,
+    commit); for a plain local checkout, every remote run of the workspace's
+    repo, capped to the ``limit`` most recent. Never raises — a down tunnel can't
+    break the local listing. ``timeout``/``max_retries`` bound the request when
+    the caller cannot tolerate the default (30s x 3) budget.
     """
     try:
         from vivarium_workbench.lib.sms_api_client import SmsApiClient
     except ImportError:
-        return []
-    client = SmsApiClient(base_url or _sms_api_base())
+        return [], None
+    client = SmsApiClient(
+        base_url or _sms_api_base(),
+        timeout=timeout if timeout is not None else 30.0,
+        max_retries=max_retries if max_retries is not None else 3,
+    )
     try:
         builds = _builds_list(client.list_simulators())
-    except Exception:
-        return []
+    except Exception as e:  # noqa: BLE001 — unreachable source, report for negative cache
+        return [], f"sms-api unreachable: {e}"
 
     matching, seed = _scope_build_ids(ws_root, _read_build_meta(ws_root), builds)
     if not matching or seed is None:
-        return []
+        return [], None
 
     try:
         # The list endpoint ignores its simulator_id filter and returns every
         # recorded sim, so any build id seeds it; we filter client-side.
         sims = client.list_build_simulations(seed)
-    except Exception:
-        return []
+    except Exception as e:  # noqa: BLE001
+        return [], f"sms-api unreachable: {e}"
     if not isinstance(sims, list):
-        return []
+        return [], None
 
     # Enrich the newest window with live status from the per-sim /status endpoint
     # (the list carries none). A just-launched run is always among the newest ids,
@@ -490,4 +588,4 @@ def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
                 if inv:
                     r["investigation_slug"] = inv
     rows.sort(key=lambda r: r.get("started_at") or 0.0, reverse=True)
-    return rows[:limit] if limit and limit > 0 else rows
+    return (rows[:limit] if limit and limit > 0 else rows), None
