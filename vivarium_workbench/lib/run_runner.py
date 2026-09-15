@@ -69,6 +69,13 @@ class RunRequest:
     # wins on name collision. Empty/absent = a no-op merge (composite defaults
     # flow through unchanged), never a crash.
     declared_results: dict = None  # type: ignore[assignment]
+    # Cloud-run-against-build: when a deployment run targets a SELECTED registered
+    # build (the Environment picker's chosen Cloud build), this carries that
+    # build's identity {simulator_id, repo_url, commit}. run_remote then installs
+    # the workspace code from build_ref['commit'] instead of the local git tree —
+    # so a Cloud run needs no local push. Absent/None = the stock deployment path
+    # (pinned config, else the clean+pushed local tree via git_pip_url).
+    build_ref: dict = None  # type: ignore[assignment]
 
     @classmethod
     def from_file(cls, path: Path) -> "RunRequest":
@@ -91,6 +98,7 @@ class RunRequest:
             declared_results=data.get("declared_results") or {
                 "analyses": [], "visualizations": [],
             },
+            build_ref=data.get("build_ref") or None,
         )
 
 
@@ -1004,6 +1012,10 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
             )
             if analysis_options:
                 run_remote_kwargs["analysis_options"] = analysis_options
+            # Cloud run against a selected build → run_remote installs that build's
+            # committed code (git+repo@commit), not the local tree (no push needed).
+            if req.build_ref:
+                run_remote_kwargs["build_ref"] = req.build_ref
             results_path = remote_run.run_remote(req.workspace, req.spec_id, **run_remote_kwargs)
             if results_path is not None:
                 try:

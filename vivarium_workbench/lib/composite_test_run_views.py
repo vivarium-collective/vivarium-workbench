@@ -147,19 +147,38 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     # they can never resolve this differently. composite_resolve (which needs
     # a .viv-build.json simulator_id for a composite PREVIEW) is untouched —
     # see resolve_run_target's docstring.
-    target = resolve_run_target(ws_root)
-    # A 'deployment' (remote) dispatch installs the workspace FROM GIT on the
-    # build, so an uncommitted/unpushed tree can't be installed. Preflight the git
-    # state HERE and return a clean, actionable 409 up front — otherwise the
-    # detached runner hits remote_run.git_pip_url's RuntimeError and the user sees
-    # a raw traceback in the run log with no clear next step.
-    if target == "deployment":
-        from vivarium_workbench.lib import remote_run as _remote_run
-        pf = _remote_run.remote_dispatch_preflight(ws_root)
-        if not pf.get("ok"):
-            return {"error": pf.get("message", "workspace not ready to run remotely"),
-                    "reason": pf.get("reason"), "preflight": pf,
-                    "run_target": "deployment"}, 409
+    # Explicit Cloud run against a SELECTED build (Environment picker → Cloud):
+    # the request carries run_target="deployment" + build {simulator_id, repo_url,
+    # commit}. The run installs THAT build's already-pushed commit (via run_remote's
+    # build_ref path) — NOT the local working tree — so there is NO git preflight
+    # here: a Cloud run needs no local push. If Cloud is chosen but no build was
+    # resolved, block with a clear message (never silently fall back to local).
+    req_target = str(body.get("run_target") or "").strip()
+    build = body.get("build") or None
+    build_ref = None
+    if req_target == "deployment":
+        if not (isinstance(build, dict) and build.get("commit") and build.get("repo_url")):
+            return {"error": "No Cloud build selected — pick or build a Cloud build, "
+                             "or switch the Environment to Local.",
+                    "reason": "no-build", "run_target": "deployment"}, 409
+        target = "deployment"
+        build_ref = {"simulator_id": build.get("simulator_id"),
+                     "repo_url": build.get("repo_url"),
+                     "commit": build.get("commit")}
+    else:
+        # Stock path: the workspace's own resolved target (pinned/.viv-build.json
+        # → deployment, else local). A workspace-resolved deployment DOES install
+        # the local git tree, so the clean+pushed preflight stays for that path —
+        # otherwise the detached runner hits git_pip_url's RuntimeError and the
+        # user sees a raw traceback with no clear next step.
+        target = resolve_run_target(ws_root)
+        if target == "deployment":
+            from vivarium_workbench.lib import remote_run as _remote_run
+            pf = _remote_run.remote_dispatch_preflight(ws_root)
+            if not pf.get("ok"):
+                return {"error": pf.get("message", "workspace not ready to run remotely"),
+                        "reason": pf.get("reason"), "preflight": pf,
+                        "run_target": "deployment"}, 409
     try:
         plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=overrides,
                                    db_path=db_file, label=label, n_steps=steps,
@@ -187,6 +206,9 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         # vs. sms-api /compose/v1). `run_target_for` stamps 'deployment' for a
         # materialized remote build (.viv-build.json), 'local' otherwise.
         "target": plan.target,
+        # Cloud-run-against-build: the selected build to install code from
+        # (git+repo_url@commit) instead of the local tree. None on every other path.
+        "build_ref": build_ref,
     }), encoding="utf-8")
 
     # Reproducibility manifest (spec Part A): the composite path's full replay

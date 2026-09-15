@@ -160,8 +160,9 @@ def test_happy_path_202(tmp_path, monkeypatch, fixed_run_id):
     assert set(req) == {
         "run_id", "spec_id", "pkg", "workspace", "overrides",
         "steps", "emit_paths", "seed_state", "declared_results", "db_file",
-        "log_path", "target",
+        "log_path", "target", "build_ref",
     }
+    assert req["build_ref"] is None  # local run → no selected Cloud build
     assert req["declared_results"] == {"analyses": [], "visualizations": []}
     assert req["seed_state"] == {}  # no save-point fork → empty
     assert req["target"] == "local"  # no .viv-build.json → local target

@@ -159,6 +159,7 @@ def run_remote(
     skip_preflight: bool = False,
     expected_variant_count: "int | None" = None,
     analysis_options: "dict | None" = None,
+    build_ref: "dict | None" = None,
 ) -> Path:
     """Export a composite, submit to sms-api, poll, and land results.tar.gz.
 
@@ -226,7 +227,18 @@ def run_remote(
     # by. Local dev (unpinned) keeps the clean+pushed git_pip_url path.
     from vivarium_workbench.lib import remote_pinned
     cfg = remote_pinned.pinned_config()
-    if cfg is not None:
+    if build_ref and build_ref.get("commit") and build_ref.get("repo_url"):
+        # Explicit build target: a Cloud Run against a SELECTED registered build
+        # (the Environment picker's chosen build). Run against THAT build's
+        # already-pushed commit — NOT the local working tree — so no clean/pushed
+        # check on ws_root (git_pip_url is skipped entirely). This is what lets a
+        # Cloud run fire without first pushing session-latest: build N's code is
+        # already on GitHub at build_ref['commit'] and already built by sms-api.
+        repo = str(build_ref["repo_url"]).strip().rstrip("/")
+        if repo.endswith(".git"):
+            repo = repo[: -len(".git")]
+        pip_url = f"git+{repo}.git@{build_ref['commit']}"
+    elif cfg is not None:
         resolved = remote_pinned.resolve_pinned_build(client, cfg.repo_url, cfg.branch)
         repo = cfg.repo_url.strip().rstrip("/")
         if repo.endswith(".git"):
