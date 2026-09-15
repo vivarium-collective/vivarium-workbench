@@ -478,7 +478,7 @@
     // Commit + Push moved to the GitHub card below (that card owns git sync;
     // this card owns "where the tab runs"). See index.html.j2 #viv-git-actions.
 
-    var buildBtn = _el("button", "viv-bs-action", "Build via sms-api"); buildBtn.id = "viv-bs-build";
+    var buildBtn = _el("button", "viv-bs-action", "Build on cloud"); buildBtn.id = "viv-bs-build";
     // repo_url comes from the REPO (any entry for it carries the same repo_url),
     // not from state.selected specifically — that field only exists for branches
     // that already have a build, which is exactly the gap item 67 fixes: this
@@ -488,9 +488,10 @@
     var effectiveBranch = state.branch === NEW_BRANCH_SENTINEL ? (state.newBranch || "").trim() : state.branch;
     buildBtn.disabled = !(state.scope === "remote" && repoUrlForBuild && effectiveBranch);
     buildBtn.title = buildBtn.disabled
-      ? "Select a Remote repo and branch (or type a new branch name) to register a build"
-      : "Register this repo@branch’s current HEAD as a build on sms-api (GovCloud) so it can "
-        + "be run remotely. Resolves the live HEAD server-side; no local checkout needed.";
+      ? "Pick a Cloud repo and branch (or type a new branch name) to build it on the cloud"
+      : "Build this repo@branch’s current HEAD on the cloud so it can be run remotely — for a "
+        + "commit that isn’t in the list above yet. Resolves the live HEAD in the cloud; no "
+        + "local checkout or push needed.";
     buildBtn.addEventListener("click", function () {
       var repo = repoUrlForBuild, branch = effectiveBranch;
       if (!repo || !branch) { alert("Pick a repo and branch first"); return; }
@@ -500,15 +501,16 @@
         body: JSON.stringify({ repo: repo, branch: branch }),
       }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
-          buildBtn.disabled = false; buildBtn.textContent = "Build via sms-api";
+          buildBtn.disabled = false; buildBtn.textContent = "Build on cloud";
           if (res.ok) {
-            alert("Registered build #" + res.d.simulator_id + " @ " + (res.d.commit || "").slice(0, 7));
+            alert("Building on cloud: build #" + res.d.simulator_id + " @ " + (res.d.commit || "").slice(0, 7)
+              + " — it’ll show as ☁ cloud in the list.");
             state.branch = res.d.branch || branch; state.newBranch = ""; state.scope = "remote"; refresh();
           }
           else alert("Build failed: " + (res.d.error || "error"));
         })
         .catch(function () {
-          buildBtn.disabled = false; buildBtn.textContent = "Build via sms-api";
+          buildBtn.disabled = false; buildBtn.textContent = "Build on cloud";
           alert("Build failed: network error");
         });
     });
@@ -575,7 +577,7 @@
       _lTitle.style.cssText = "font-size:11px; font-weight:700; letter-spacing:.05em; "
         + "text-transform:uppercase; color:#64748b";
       var _lSub = _el("div", "viv-bs-list-sub", state.scope === "remote"
-        ? "Every cloud environment registered on sms-api — browse the history. Open ↗ explores one in a new tab; Use this environment re-points THIS tab to it."
+        ? "Every build registered on the cloud (☁ cloud) — browse the history; ⚡ local copy marks the ones already downloaded to your machine. Open ↗ explores one in a new tab; Use this environment re-points THIS tab to it. Not here yet? Build it on the cloud above."
         : "Local checkouts known to this workbench. Open ↗ for a new tab; Switch here re-points THIS tab.");
       _lSub.style.cssText = "font-size:12px; color:#94a3b8; margin:2px 0 8px";
       _listHead.appendChild(_lTitle); _listHead.appendChild(_lSub);
@@ -655,6 +657,22 @@
           chip.title = "Newest build of " + (m.branch || "this branch");
         }
         if (chip) pEl.appendChild(chip);
+        // ☁ cloud — this build is registered on the cloud, so it runs remotely
+        // as-is. Every build in this (remote-scope) list is on the cloud by
+        // definition: the list IS the cloud's build registry, so a commit that
+        // isn't built yet simply won't appear (use "Build on cloud" to add it).
+        // This is the "available on the cloud" answer, kept deliberately distinct
+        // from ⚡ local copy below (which is only about whether YOUR machine has
+        // downloaded a copy for instant browsing) — the two were conflated before.
+        if (isRemote) {
+          var clchip = _el("span", null, "☁ cloud");
+          clchip.style.cssText = "flex:0 0 auto; font-size:10px; font-weight:600; color:#2563a8; "
+            + "background:#e8f1fb; border:1px solid #b3cdec; border-radius:10px; padding:1px 7px";
+          clchip.title = "Registered on the cloud — this build can be run remotely as-is. "
+            + "Every build listed here is on the cloud; a commit that isn't built yet won't "
+            + "appear. To put one there, pick its branch and use “Build on cloud”.";
+          pEl.appendChild(clchip);
+        }
         // Cached = this build's workspace is already downloaded locally, so
         // Open / Use this environment is instant. Shown alongside latest/workspace
         // chips (a build can be both). Absence means the first open downloads it.
