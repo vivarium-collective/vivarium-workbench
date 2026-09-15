@@ -69,6 +69,12 @@ def build_composite_run(ws_root: Path, run_id: str) -> tuple[dict, int]:
       rows for ``run_id``).
     * HTTP 200 ``{"run_id": ..., "trajectory": [...]}`` — success.
     """
+    # Plan B (image-backed Cloud run): a "remote-sim-<id>" run has no local
+    # trajectory — its data lives on the cloud and surfaces in the Simulations/
+    # Runs tab. Return an empty trajectory so the loom degrades gracefully (no
+    # inline graph) instead of throwing on a 404.
+    if run_id.startswith("remote-sim-"):
+        return {"run_id": run_id, "trajectory": [], "remote": True}, 200
     db = _db_file(ws_root)
     if not db.is_file():
         return {"error": "no run database"}, 404
@@ -131,6 +137,32 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
       ``JSONDecodeError``.
     """
     ws_root = Path(ws_root)
+    # Plan B (image-backed Cloud run): a composite-card Cloud run dispatched via
+    # run_simulation has no local run row — its state lives on sms-api. The loom
+    # polls this endpoint with the synthetic "remote-sim-<id>" run_id; map it to
+    # the sms-api simulation status so the run bar shows running -> completed. The
+    # run itself surfaces in the Simulations/Runs tab via remote_simulations.
+    if run_id.startswith("remote-sim-"):
+        try:
+            sim_id = int(run_id[len("remote-sim-"):])
+        except ValueError:
+            return {"error": "run not found"}, 404
+        from vivarium_workbench.lib import remote_run_views as _rrv
+        st, code = _rrv.remote_run_status({"simulation_id": sim_id})
+        if code != 200:
+            return st, code
+        phase = st.get("phase")
+        mapped = {"done": "completed", "failed": "failed"}.get(phase, "running")
+        return {
+            "run_id": run_id,
+            "status": mapped,
+            "progress_step": None,
+            "n_steps": None,
+            "heartbeat_at": None,
+            "remote": True,
+            "simulation_id": sim_id,
+            "raw_status": st.get("raw_status"),
+        }, 200
     db = _db_file(ws_root)
     if not db.is_file():
         return {"error": "no run database"}, 404

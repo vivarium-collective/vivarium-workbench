@@ -165,6 +165,37 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         build_ref = {"simulator_id": build.get("simulator_id"),
                      "repo_url": build.get("repo_url"),
                      "commit": build.get("commit")}
+        # Image-backed Cloud run (plan B): dispatch the registered build's
+        # PRE-BUILT image via run_simulation (sms-api /api/v1/simulations)
+        # instead of exporting a .pbg and compose-submitting the build's git
+        # repo. The compose git-install path requires the repo in sms-api's
+        # compose allow-list — which most build repos are NOT — so it 403s;
+        # the image path needs no allow-list and runs the build's committed
+        # code as-is. run_simulation runs the BUILD's whole-cell simulation
+        # (its default config), which for the whole-cell baseline composite IS
+        # this composite. Async: returns a "remote-sim-<id>" run_id the loom
+        # polls via /api/composite-run/<id>/status (mapped to sms-api below);
+        # the run also surfaces in the Simulations/Runs tab via remote_simulations.
+        if build_ref.get("simulator_id"):
+            from vivarium_workbench.lib import remote_run_views as _rrv
+            from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+            try:
+                sim = SmsApiClient(_rrv._sms_api_base()).run_simulation(
+                    simulator_id=int(build_ref["simulator_id"]),
+                    num_generations=int(overrides.get("n_generations") or 1),
+                    num_seeds=int(overrides.get("n_seeds") or 1),
+                    run_parca=True,
+                    observables=list(emit_paths or []),
+                    config_filename=(body.get("config_filename") or "").strip() or None,
+                    description=f"composite-card cloud run: {spec_id}",
+                )
+            except SmsApiError as e:
+                return {"error": f"cloud dispatch failed: {e}",
+                        "reason": "dispatch-failed", "run_target": "deployment"}, 502
+            sim_db_id = sim.get("database_id") or sim.get("simulation_id")
+            return {"run_id": f"remote-sim-{sim_db_id}", "status": "running",
+                    "remote": True, "simulation_id": sim_db_id,
+                    "experiment_id": sim.get("experiment_id")}, 202
     else:
         # Stock path: the workspace's own resolved target (pinned/.viv-build.json
         # → deployment, else local). A workspace-resolved deployment DOES install
