@@ -233,6 +233,24 @@ export function ExploreRunBar(props: ExploreRunBarProps) {
         )
       )}
       {run.isRunning && !run.status && <span className="explore-runbar-status">Starting…</span>}
+      {/* Poll-link health (f1): a degraded/dead link reads "reconnecting…" (or
+          "cloud link down" for a remote run whose status proxy is unreachable)
+          over the last-known progress, so the bar never looks frozen at a stale
+          %. When polling gives up entirely, offer Resume. */}
+      {run.isRunning && run.link !== 'ok' && !run.linkStalled && (
+        <span className="explore-runbar-reconnect" title="Lost contact with the server — retrying with backoff."
+          style={{ fontSize: 12, color: '#b45309', marginLeft: 4 }}>
+          {run.status?.remote ? '⚠ cloud link down' : '⟳ reconnecting…'}
+        </span>
+      )}
+      {run.linkStalled && (
+        <span className="explore-runbar-reconnect" title="No response from the server for about a minute."
+          style={{ fontSize: 12, color: '#b45309', marginLeft: 4 }}>
+          ⚠ lost contact with the server
+          <button type="button" className="explore-runbar-why" onClick={run.resumePolling}
+            style={{ marginLeft: 6 }}>Resume</button>
+        </span>
+      )}
       {run.status?.status === 'completed' && <span className="explore-runbar-done">✓ complete</span>}
       {run.status?.status === 'cancelled' && (
         <span className="explore-runbar-stopped" title="Run stopped — the results computed up to this point are kept below.">

@@ -15,6 +15,22 @@ type TrajectoryRow = { step: number; time?: number; state: Record<string, unknow
 
 const ACTIVE_RUN_KEY = 'bigraph-loom:active-run';
 const POLL_MS = 1500;
+// Backoff while the link to the server is degraded: 1.5s → 3s → 5s. Reset to
+// POLL_MS the instant a poll succeeds. Keeps a flaky/dead link from hammering
+// the server (or the cloud proxy) at 1.5s/tick.
+const POLL_MS_FLAKY = 3000;
+const POLL_MS_DOWN = 5000;
+// After this many consecutive missed polls (~1 min at the 5s down-interval) we
+// stop polling entirely and surface a Resume affordance, rather than spin
+// forever against a server that is not coming back on its own.
+const MAX_MISSES = 40;
+// Do not resume a run this old on mount — a stale ACTIVE_RUN_KEY from a
+// long-past session must not re-attach the bar to a run the server forgot.
+const RESUME_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** Health of the poll link to the server, surfaced so the run bar can show
+ *  "reconnecting…"/"cloud link down" instead of a frozen progress %. */
+export type RunLink = 'ok' | 'flaky' | 'down';
 // Cheap /status is polled every POLL_MS. The full trajectory (whole snapshot
 // history) is a MUCH heavier read — seconds to minutes for a large composite —
 // so while a run is live we refresh it at most this often, and never overlap a
@@ -62,7 +78,16 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
   // True from the moment Stop is clicked until the poll observes a terminal
   // status — lets the button read "Stopping…" without a spurious extra state.
   const [stopping, setStopping] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Poll-link health. 'ok' → normal 1.5s poll; 'flaky'/'down' → the bar reads
+  // "reconnecting…" (or "cloud link down") over the last-known progress instead
+  // of a frozen %. `linkStalled` = polling gave up after MAX_MISSES; a Resume
+  // affordance restarts it.
+  const [link, setLink] = useState<RunLink>('ok');
+  const [linkStalled, setLinkStalled] = useState(false);
+  // Self-rescheduling setTimeout (not setInterval) so the poll interval can back
+  // off while the link is degraded.
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const missesRef = useRef(0);
 
   const inInvestigation = !!(args.runContext && args.runContext.startsWith('investigation:'));
   const canRun = !!args.compositeId && !inInvestigation && !args.readOnly;
@@ -84,7 +109,7 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
-      clearInterval(pollRef.current);
+      clearTimeout(pollRef.current);
       pollRef.current = null;
     }
   }, []);
@@ -111,13 +136,58 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
 
   const beginPolling = useCallback((id: string) => {
     stopPolling();
+    missesRef.current = 0;
+    setLink('ok');
+    setLinkStalled(false);
+
+    // Reschedule the next tick with the interval that matches current link
+    // health: 1.5s while healthy, backing off to 3s/5s while degraded.
+    const schedule = (l: RunLink) => {
+      const delay = l === 'ok' ? POLL_MS : l === 'flaky' ? POLL_MS_FLAKY : POLL_MS_DOWN;
+      pollRef.current = setTimeout(tick, delay);
+    };
+
     const tick = async () => {
       let s: RunStatus;
       try {
         s = await fetchRunStatus(id);
-      } catch {
-        return; // transient — retry next tick
+      } catch (e: any) {
+        // 404 → the run no longer exists (cleaned up, or the server restarted
+        // and lost it). This is TERMINAL, not transient: stop polling, forget
+        // the active run, and tell the user — otherwise the bar shows "running"
+        // with no progress forever.
+        if (e?.status === 404) {
+          stopPolling();
+          try { sessionStorage.removeItem(ACTIVE_RUN_KEY); } catch { /* ignore */ }
+          setRunId(null);
+          setStatus(null);
+          setLink('ok');
+          setStartWarning('This run is no longer tracked by the server (it was cleaned up or the server was restarted) — check the Runs tab.');
+          return;
+        }
+        // Everything else is a link problem, not a run problem: keep the run id
+        // and the last-known status, and back off. A cloud (remote-sim) run
+        // whose status proxy returns 502 {phase:"unreachable"} is specifically a
+        // cloud-link outage → jump straight to 'down' ("cloud link down") and
+        // keep the run alive.
+        const cloudDown = e?.status === 502 && e?.phase === 'unreachable';
+        missesRef.current += 1;
+        const next: RunLink = (cloudDown || missesRef.current >= 3) ? 'down' : 'flaky';
+        setLink(next);
+        if (missesRef.current >= MAX_MISSES) {
+          // ~1 min of backoff with no recovery — stop hammering and offer Resume.
+          stopPolling();
+          setLink('down');
+          setLinkStalled(true);
+          return;
+        }
+        schedule(next);
+        return;
       }
+      // Success → the link is healthy again; reset backoff.
+      missesRef.current = 0;
+      setLink('ok');
+      setLinkStalled(false);
       setStatus(s);
       onRunStateRef.current?.({ runId: id, downloadable: s.downloadable ?? false });
       if (s.viz_html) onVizHtmlRef.current?.(s.viz_html);
@@ -126,11 +196,12 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
         // completion are driven by the cheap /status above, so the run never
         // looks stuck even when this heavy read is slow.
         void loadTrajectory(id, { throttleMs: LIVE_TRAJ_MS });
+        schedule('ok');
       } else {
         stopPolling();
         setStopping(false);
         void loadTrajectory(id);  // final result — once, unthrottled
-        sessionStorage.removeItem(ACTIVE_RUN_KEY);
+        try { sessionStorage.removeItem(ACTIVE_RUN_KEY); } catch { /* ignore */ }
         // The run is over: publish the viz result unconditionally so the panel
         // shows "no visualizations" instead of spinning on "Loading…" forever
         // when a composite declares none (or its viz step produced nothing).
@@ -142,7 +213,6 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
       }
     };
     void tick();
-    pollRef.current = setInterval(tick, POLL_MS);
   }, [stopPolling, loadTrajectory, args.compositeId]);
 
   // Re-attach to an in-flight run after an iframe reload / network blip.
@@ -150,7 +220,15 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
     const raw = sessionStorage.getItem(ACTIVE_RUN_KEY);
     if (!raw) return;
     try {
-      const saved = JSON.parse(raw) as { run_id: string; composite_id: string };
+      const saved = JSON.parse(raw) as { run_id: string; composite_id: string; started_at?: number };
+      // Don't resume an ancient run: a stale ACTIVE_RUN_KEY (>24h old) is not a
+      // live run the server still tracks — drop it silently so the bar starts
+      // clean instead of polling a run that is long gone. (Entries written
+      // before started_at existed have no timestamp → treated as not-ancient.)
+      if (saved.started_at && Date.now() - saved.started_at > RESUME_MAX_AGE_MS) {
+        sessionStorage.removeItem(ACTIVE_RUN_KEY);
+        return;
+      }
       if (saved.composite_id === args.compositeId && saved.run_id) {
         setRunId(saved.run_id);
         beginPolling(saved.run_id);
@@ -190,7 +268,7 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
       setRunId(res.run_id);
       if (res.warning) setStartWarning(res.warning);
       sessionStorage.setItem(ACTIVE_RUN_KEY, JSON.stringify({
-        run_id: res.run_id, composite_id: args.compositeId,
+        run_id: res.run_id, composite_id: args.compositeId, started_at: Date.now(),
       }));
       beginPolling(res.run_id);
     } catch (e: unknown) {
@@ -219,6 +297,8 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
       setStopping(false);
       setStatus(null);
       setRunId(null);
+      setLink('ok');
+      setLinkStalled(false);
       sessionStorage.removeItem(ACTIVE_RUN_KEY);
       setStartWarning('Cloud runs continue on GovCloud — track this run in the Runs tab.');
       return;
@@ -230,6 +310,13 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
     })();
   }, [runId, status, stopPolling]);
 
+  // Restart polling after the link stalled (MAX_MISSES with no recovery). Bound
+  // to a Resume affordance so a bar that gave up on a flaky link can reattach on
+  // demand instead of only on remount.
+  const resumePolling = useCallback(() => {
+    if (runId) beginPolling(runId);
+  }, [runId, beginPolling]);
+
   const pct = status && status.n_steps
     ? Math.min(100, Math.round((status.progress_step / status.n_steps) * 100))
     : 0;
@@ -237,6 +324,9 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
   return {
     steps, setSteps, runId, status, startError, startWarning, stopping,
     isRunning, isWorkflow, canRun, inInvestigation, pct, handleRun, handleStop, runFromState,
+    // Poll-link health for the run bar: 'ok' | 'flaky' | 'down'. `linkStalled`
+    // means polling gave up (Resume via resumePolling).
+    link, linkStalled, resumePolling,
     // 'steps' = discrete step network (integer, steppable); 'duration' = temporal.
     stepMode: (isWorkflow ? 'steps' : 'duration') as 'steps' | 'duration',
   };
