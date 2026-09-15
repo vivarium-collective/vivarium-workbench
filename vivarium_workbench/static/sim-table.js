@@ -347,14 +347,12 @@
   function _globalActions(row) {
     var list = _actionList(row);
     if (!list.length) return '<span style="color:#9ca3af;">—</span>';
-    var primary = list[0].html;
-    var more = list.slice(1);
-    if (!more.length) return primary;
-    // Overflow grouped VIEW / DOWNLOAD / RE-RUN, each item showing its label plus
-    // a short gray description inline so it reads without hovering (tooltips kept).
+    // One "⌄ Actions" menu per row: ALL actions — including 📊 Viz (first in VIEW) —
+    // live inside it, grouped VIEW / DOWNLOAD / RE-RUN with an inline description each.
+    // (No standalone primary button pulled out front — one clean trigger per row.)
     var GROUPS = [["VIEW", "View"], ["DOWNLOAD", "Download"], ["RERUN", "Re-run"]];
     var sections = GROUPS.map(function (g) {
-      var items = more.filter(function (a) { return a.group === g[0]; });
+      var items = list.filter(function (a) { return a.group === g[0]; });
       if (!items.length) return "";
       return '<div class="sim-action-menu-group">' +
         '<div class="sim-action-menu-header" style="font-size:10px;text-transform:uppercase;' +
@@ -367,9 +365,8 @@
             '</div>';
         }).join("") + '</div>';
     }).join("");
-    return primary +
-      '<details class="sim-action-menu">' +
-        '<summary class="action-btn" title="More actions" aria-label="More actions">⋯</summary>' +
+    return '<details class="sim-action-menu">' +
+        '<summary class="action-btn" title="Row actions" aria-label="Actions">⌄ Actions</summary>' +
         '<div class="sim-action-menu-list" role="menu">' + sections + '</div>' +
       '</details>';
   }
