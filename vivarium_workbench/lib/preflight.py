@@ -432,6 +432,23 @@ def _check_emit_paths(document: "dict | None", extra_paths: "list[str] | None", 
     notes: list[str] = []
     for path in declared:
         exists, empty = _resolve_store_path(state, path)
+        # Agents-wrapped whole-cell composites nest the cell — and its bulk /
+        # listeners stores — under agents/<id>/, with the emitter placed INSIDE
+        # the agent (e.g. ecoli_baseline's /agents/0/emitter). The emitter's
+        # cell-relative wires ('bulk', 'listeners') are recovered here without
+        # the agents/<id>/ prefix, so a top-level resolve misses a store that
+        # genuinely exists and IS emitted at run time. Retry under each agent
+        # before declaring a miss. This only ADDS resolution — a path that
+        # resolves nowhere still fails, so the §2.9 protection is intact.
+        if not exists:
+            agents = state.get("agents") if isinstance(state, dict) else None
+            if isinstance(agents, dict):
+                for agent in agents.values():
+                    if isinstance(agent, dict):
+                        a_exists, a_empty = _resolve_store_path(agent, path)
+                        if a_exists:
+                            exists, empty = a_exists, a_empty
+                            break
         from_emitter_node = path in from_doc
         if exists and not empty:
             continue

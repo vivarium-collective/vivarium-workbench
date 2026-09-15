@@ -54,6 +54,23 @@ def pf_good(core=None, injected_processes=None, variants=None, bad_emit=False):
     }}
 
 
+@composite_generator(name="pf_agents_wrapped", description="", parameters=_PARAMS)
+def pf_agents_wrapped(core=None, injected_processes=None, variants=None, bad_emit=False):
+    """Agents-wrapped whole-cell shape: the cell (and the store its emitter reads)
+    lives under agents/<id>/, with the emitter placed INSIDE the agent — mirrors
+    ecoli_baseline's /agents/0/emitter wired to cell-relative bulk/listeners. The
+    recovered emit path is bare ``level``, which resolves under the agent wrapper,
+    NOT at the top level; the preflight must accept it, not flag a §2.9 miss."""
+    return {"state": {
+        "global_time": 0.0,
+        "agents": {"0": {
+            "level": 1.0,
+            "emitter": {"_type": "step", "address": "local:RAMEmitter",
+                        "inputs": {"observed": ["level"]}},
+        }},
+    }}
+
+
 @composite_generator(name="pf_dropping", description="", parameters=_PARAMS)
 def pf_dropping(core=None, injected_processes=None, variants=None, bad_emit=False):
     """Composite that DROPS the requested swap — mirrors the §2.2 batch-mode bug
@@ -161,6 +178,21 @@ def test_preflight_fails_on_bogus_emit_path(tmp_path):
     failures = ei.value.failures
     assert any("emit-paths" in f for f in failures)
     assert any("§2.9" in f or "emit nothing" in f for f in failures)
+
+
+def test_preflight_passes_agents_wrapped_emit_path(tmp_path):
+    # Agents-wrapped whole-cell composite (ecoli_baseline shape): the emitter lives
+    # inside agents/<id>/ and reads a cell-relative store, so the recovered emit
+    # path resolves under the agent wrapper, not at the top level. The preflight
+    # must accept it rather than raise a §2.9 "emits nothing" failure.
+    report = preflight_composite_run(
+        tmp_path, f"{MOD}.pf_agents_wrapped",
+        overrides={},
+        core=_core(),
+    )
+    assert not report.failures
+    assert any("emit-paths" in line and "resolve to real stores" in line
+               for line in report.summary().splitlines())
 
 
 def test_preflight_fails_on_extra_bogus_emit_path(tmp_path):
