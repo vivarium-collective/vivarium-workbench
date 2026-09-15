@@ -71,8 +71,26 @@ def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filena
     from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
 
     overrides = overrides or {}
+    client = SmsApiClient(_rrv._sms_api_base())
+    # Resolve a real config for this build. sms-api defaults to
+    # 'api_simulation_default.json', which only exists in the vEcoli-lineage
+    # repos (e.g. v2ecoli) — a build whose repo lacks it (e.g. the sms-ecoli fork,
+    # which carries only CD-specific configs) 404s when the config is omitted. So
+    # when the caller didn't pin one, ask discovery and prefer the whole-cell
+    # default, else the build's first available config, so the dispatch never 404s.
+    if not config_filename:
+        try:
+            disc = client._get("/api/v1/simulations/discovery",
+                               params={"simulator_id": int(simulator_id)})
+            cfgs = disc.get("config_filenames") or []
+            if "api_simulation_default.json" in cfgs:
+                config_filename = "api_simulation_default.json"
+            elif cfgs:
+                config_filename = cfgs[0]
+        except Exception:  # noqa: BLE001 — discovery is best-effort; fall back to the sms-api default
+            pass
     try:
-        sim = SmsApiClient(_rrv._sms_api_base()).run_simulation(
+        sim = client.run_simulation(
             simulator_id=int(simulator_id),
             num_generations=int(overrides.get("n_generations") or 1),
             num_seeds=int(overrides.get("n_seeds") or 1),
