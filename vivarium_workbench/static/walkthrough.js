@@ -217,6 +217,13 @@
       window._ceLastRunId = ev.data.simulation_id || null;
       var bar = document.getElementById('ce-post-run-bar');
       if (bar) bar.style.display = 'flex';
+      // A just-completed run should appear in the Runs tab right away — without a
+      // manual reload or waiting the ~100s remote fetch. Re-pull the sim index: the
+      // Phase-1 local fetch picks up the new .pbg/composite-runs.db row fast
+      // (including a Cloud run's save_metadata row). The backed-off remote fetch
+      // (_maybeLoadRemoteSims) is not re-triggered, so this stays cheap.
+      if (typeof window._initSimulations === 'function') window._initSimulations(true);
+      if (typeof window._loadStudySims === 'function') window._loadStudySims(true);
     }
   });
 
