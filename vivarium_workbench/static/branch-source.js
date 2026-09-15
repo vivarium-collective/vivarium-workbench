@@ -139,14 +139,14 @@
         signal: controller.signal,
       });
     } catch (e) {
-      _cleanup(); _setBusy(""); if (btn) { btn.disabled = false; btn.textContent = "Run from hosted"; }
+      _cleanup(); _setBusy(""); if (btn) { btn.disabled = false; btn.textContent = "Use this environment"; }
       alert(e && e.name === "AbortError"
         ? "Switch cancelled or timed out — the workspace download took too long. The remote endpoint may be slow or unreachable."
         : "Switch failed: network error");
       return;
     }
     _cleanup();
-    if (btn) { btn.disabled = false; btn.textContent = "Run from hosted"; }
+    if (btn) { btn.disabled = false; btn.textContent = "Use this environment"; }
     if (!r.ok) _setBusy("");
     _afterSwitch(r);
   }
@@ -232,7 +232,7 @@
                    // is on (may be several; shown when not the exact active build).
                    current: b.simulator_id === state.currentSimId,
                    // `cached` = this build's workspace is already in the local
-                   // build cache, so Open / Run from hosted is instant (no download).
+                   // build cache, so Open / Use this environment is instant (no download).
                    cached: !!b.cached,
                    matchesWorkspace: !!curC && _short(b.commit) === curC };
         });
@@ -280,10 +280,10 @@
     var host = document.getElementById("viv-branch-source");
     if (!host) return;
     host.innerHTML = "";
-    host.appendChild(_el("h3", "viv-bs-title", "Source"));
+    host.appendChild(_el("h3", "viv-bs-title", "Environment"));
     // One-line scope cue so the two cards read as distinct jobs: this card is
     // "where the tab runs"; the GitHub card below is "sync & collaborate".
-    var _sub = _el("div", "viv-bs-subtitle", "Where this workspace runs — a local checkout or a hosted build.");
+    var _sub = _el("div", "viv-bs-subtitle", "Choose where to work with this project. Local uses a checkout on your computer; Cloud uses a reusable environment managed by Workbench.");
     _sub.style.cssText = "color:#93a1b5; font-size:12px; margin:-4px 0 12px";
     host.appendChild(_sub);
 
@@ -299,12 +299,12 @@
     // Scope toggle — wrap the buttons in a segmented group so they share one grid
     // cell (otherwise each button lands in its own cell and "Remote" wraps).
     var scopeRow = _el("div", "viv-bs-row");
-    scopeRow.appendChild(_el("label", "viv-bs-key", "Scope"));
+    scopeRow.appendChild(_el("label", "viv-bs-key", "Environment"));
     var scopeGroup = _el("div", "viv-bs-scope-group");
     ["local", "remote"].forEach(function (s) {
       var label = RO
         ? (s === "local" ? "Workspaces" : "sms-api builds")
-        : (s === "local" ? "Local" : "Hosted");
+        : (s === "local" ? "Local" : "Cloud");
       var b = _el("button", "viv-bs-toggle" + (state.scope === s ? " active" : ""), label);
       b.addEventListener("click", function () { state.scope = s; state.repo = null; state.branch = null; state.newBranch = ""; state.showAllBuilds = false; refresh(); });
       scopeGroup.appendChild(b);
@@ -434,7 +434,7 @@
     // new tab" (which leaves this tab untouched).
     var remoteScope = state.scope === "remote";
 
-    var switchHereBtn = _el("button", "viv-bs-action", remoteScope ? "Run from hosted" : "Switch here");
+    var switchHereBtn = _el("button", "viv-bs-action", remoteScope ? "Use this environment" : "Use this environment");
     switchHereBtn.id = "viv-bs-switch-here";
     switchHereBtn.title = remoteScope
       ? "Switch THIS tab to the selected remote build — downloads its ENTIRE workspace (hundreds of "
@@ -513,7 +513,7 @@
     });
     actions.appendChild(buildBtn);
 
-    var syncBtn = _el("button", "viv-bs-action", "Reproduce locally"); syncBtn.id = "viv-bs-sync";
+    var syncBtn = _el("button", "viv-bs-action", "Run locally"); syncBtn.id = "viv-bs-sync";
     syncBtn.title = "Get a copy of this exact source on YOUR machine: pops a "
       + "‘vivarium-workbench sync <url>’ command that materializes this repo@commit workspace "
       + "(pinned by its uv.lock) locally. Copy-and-run it in a terminal — it does not change this tab.";
@@ -574,7 +574,7 @@
       _lTitle.style.cssText = "font-size:11px; font-weight:700; letter-spacing:.05em; "
         + "text-transform:uppercase; color:#64748b";
       var _lSub = _el("div", "viv-bs-list-sub", state.scope === "remote"
-        ? "Every hosted build registered on sms-api — browse the history. Open ↗ explores one in a new tab; Run from hosted re-points THIS tab to it."
+        ? "Every cloud environment registered on sms-api — browse the history. Open ↗ explores one in a new tab; Use this environment re-points THIS tab to it."
         : "Local checkouts known to this workbench. Open ↗ for a new tab; Switch here re-points THIS tab.");
       _lSub.style.cssText = "font-size:12px; color:#94a3b8; margin:2px 0 8px";
       _listHead.appendChild(_lTitle); _listHead.appendChild(_lSub);
@@ -655,14 +655,14 @@
         }
         if (chip) pEl.appendChild(chip);
         // Cached = this build's workspace is already downloaded locally, so
-        // Open / Run from hosted is instant. Shown alongside latest/workspace
+        // Open / Use this environment is instant. Shown alongside latest/workspace
         // chips (a build can be both). Absence means the first open downloads it.
         if (m.cached) {
           var cchip = _el("span", null, "⚡ cached");
           cchip.style.cssText = "flex:0 0 auto; font-size:10px; font-weight:600; color:#8a5a00; "
             + "background:#fff4e0; border:1px solid #f0d6a0; border-radius:10px; padding:1px 7px";
           cchip.title = "This build's workspace is already downloaded to the local build cache — "
-            + "Open / Run from hosted is instant, no download.";
+            + "Open / Use this environment is instant, no download.";
           pEl.appendChild(cchip);
         }
         labelWrap.appendChild(pEl);
@@ -697,9 +697,9 @@
           acts.appendChild(_rowTag("current ✓"));
           acts.appendChild(op);
         } else {
-          var sw = _rowBtn(isRemote ? "Run from hosted" : "Switch here",
+          var sw = _rowBtn(isRemote ? "Use this environment" : "Switch here",
             "Switch THIS tab to this source in place"
-            + (isRemote ? " — downloads the hosted build's workspace the first time (a few minutes; cached builds are instant). You don't need this to view results." : ""));
+            + (isRemote ? " — downloads the cloud environment's workspace the first time (a few minutes; cached builds are instant). You don't need this to view results." : ""));
           sw.addEventListener("click", function (e) {
             e.stopPropagation();
             if (isRemote) _switchRemote(m.simulator_id, sw);
@@ -838,7 +838,7 @@
     var host = document.getElementById("viv-branch-source");
     if (!host) return;
     host.innerHTML = "";
-    host.appendChild(_el("h3", "viv-bs-title", "Source"));
+    host.appendChild(_el("h3", "viv-bs-title", "Environment"));
 
     _renderProvenance(host);
 
