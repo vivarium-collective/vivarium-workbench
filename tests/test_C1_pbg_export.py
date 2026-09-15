@@ -29,6 +29,28 @@ def test_leaves_full_path_untouched():
     assert out["state"]["a"]["address"] == "local:!x.Y"
 
 
+def test_rewrites_dotted_importable_path_not_in_registry():
+    # A whole-cell composite (v2ecoli.ecoli_baseline) wires its processes by full
+    # importable dotted path — ``local:<module>.<Class>`` — NOT by the registry
+    # short name, and the registry is keyed by short class name. Such an address
+    # is the full form missing only the ``!`` marker: resolve it by import and
+    # canonicalize, even with an EMPTY registry.
+    core = _FakeCore({})  # nothing registered
+    doc = {"state": {"p": {"address": "local:collections.OrderedDict"}}}
+    out = rewrite_local_addresses(doc, core)
+    assert out["state"]["p"]["address"] == "local:!collections.OrderedDict"
+
+
+def test_dotted_non_importable_still_fails_loudly():
+    # A dotted path that does NOT import is not a valid full address; it falls
+    # through to the registry check and still raises — the export-time protection
+    # against an unresolvable process address is intact.
+    core = _FakeCore({})
+    doc = {"state": {"p": {"address": "local:no.such.module.Nope"}}}
+    with pytest.raises(ValueError, match="not found in core.link_registry"):
+        rewrite_local_addresses(doc, core)
+
+
 def test_leaves_non_local_protocols_untouched():
     core = _FakeCore({})
     doc = {"state": {"b": {"address": "pkg:mod.Z"}}}

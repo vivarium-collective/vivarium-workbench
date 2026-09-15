@@ -100,6 +100,31 @@ def _rewrite_address(node: dict, core, errors: list[str]) -> None:
     if rest.startswith("!"):
         return  # already full-path form — untouched
 
+    # Dotted full path (``local:<module>.<Class>``): the importable full address
+    # missing only the ``!`` marker. A whole-cell composite (v2ecoli.ecoli_baseline
+    # builds 30+ processes/steps addressed this way) wires its edges by full dotted
+    # path, NOT by the short registry name — and the registry is keyed by short
+    # class name ("Metabolism"), so treating the dotted path as a short name always
+    # misses. Resolve it by import instead: if ``<module>.<Class>`` imports to a
+    # clean, importable class, canonicalize to ``local:!<module>.<qualname>`` (the
+    # same form the registry branch below produces). Fall through to the registry
+    # lookup only when it is NOT an importable dotted path.
+    if "." in rest:
+        mod_name, _, cls_name = rest.rpartition(".")
+        imported = None
+        try:
+            import importlib
+            imported = getattr(importlib.import_module(mod_name), cls_name, None)
+        except Exception:  # noqa: BLE001 — any import failure → not a dotted path, try registry
+            imported = None
+        if imported is not None:
+            module = getattr(imported, "__module__", None)
+            qualname = getattr(imported, "__qualname__", None)
+            if (module and qualname and module != "__main__"
+                    and "<locals>" not in qualname):
+                node["address"] = f"local:!{module}.{qualname}"
+                return
+
     # Short name: look up in registry
     cls = core.link_registry.get(rest)
     if cls is None:
