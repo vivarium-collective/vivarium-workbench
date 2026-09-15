@@ -116,6 +116,38 @@ def test_build_error_no_fallback_400(tmp_path, monkeypatch):
     assert body == {"error": "generator build failed: boom"}
 
 
+def test_parca_cache_error_generic_ws_unchanged(tmp_path, monkeypatch):
+    """A ParCa cache error on a plain local workspace (no .viv-build.json) still
+    surfaces the raw 'generator build failed' — the clearer remote-build message
+    is scoped to materialized remote builds only."""
+    csv.clear_cache()
+    ws = _make_ws(tmp_path)
+    _patch_subprocess(monkeypatch, {"__build_error__": "Cache at 'out/cache' is stale or unversioned"})
+    body, status = csv.build_composite_state(ws, "gen")
+    assert status == 400
+    assert body["error"].startswith("generator build failed:")
+    assert "remote_no_cache" not in body
+
+
+def test_parca_cache_error_on_remote_build_soft_message(tmp_path, monkeypatch):
+    """A materialized remote build (.viv-build.json) ships no local ParCa cache, so
+    a local generator build fails with a cache error. build_composite_state must
+    degrade to a clear, build-aware message (remote_no_cache), not a raw failure."""
+    csv.clear_cache()
+    ws = _make_ws(tmp_path)
+    (ws / ".viv-build.json").write_text(
+        json.dumps({"simulator_id": 211, "commit": "33ecd77abc"}), encoding="utf-8")
+    _patch_subprocess(monkeypatch, {"__build_error__": "Cache at 'out/cache' is stale or unversioned"})
+    body, status = csv.build_composite_state(ws, "gen")
+    assert status == 400
+    assert body.get("remote_no_cache") is True
+    assert "build #211" in body["error"]
+    assert "33ecd77" in body["error"]
+    assert "no local ParCa cache" in body["error"]
+    # original cache error is still carried so the frontend's cache hint fires
+    assert "stale or unversioned" in body["error"]
+
+
 def test_generator_success_and_cache(tmp_path, monkeypatch):
     csv.clear_cache()
     ws = _make_ws(tmp_path)

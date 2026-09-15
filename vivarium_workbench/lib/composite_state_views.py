@@ -45,6 +45,18 @@ _COMPOSITE_STATE_CACHE: dict = {}
 _COMPOSITE_STATE_TTL_S = 300.0  # seconds
 
 
+def _is_parca_cache_error(msg: str) -> bool:
+    """True when a generator build error is a missing/stale ParCa cache — the
+    expected failure when building an ecoli composite with no local ``out/cache``
+    (a materialized remote build ships none). Keyed on the ParCa cache-version
+    guard's wording plus the plain "cache does not exist" case."""
+    m = msg.lower()
+    if "cache" not in m:
+        return False
+    return any(s in m for s in ("stale or unversioned", "unversioned",
+                                "does not exist", "no such file", "tf_ids"))
+
+
 def clear_cache() -> None:
     """Clear the composite-state build cache (called on workspace switch)."""
     _COMPOSITE_STATE_CACHE.clear()
@@ -255,6 +267,29 @@ def build_composite_state(
                 return _payload, 200
             except Exception:
                 pass
+        # A materialized remote build ships no local ParCa cache (the GitHub source
+        # archive excludes gitignored out/), so a local generator build fails with
+        # a cache error ("Cache at 'out/cache' is stale or unversioned"). This is
+        # the SAME "remote build has no local ParCa cache" case that readouts_views
+        # / composite_resolve already degrade to a soft notice — mirror that here
+        # instead of surfacing a raw "generator build failed" for the wiring
+        # preview. The frontend renders {error} as a clean panel; the clearer text
+        # tells the user this is expected for a Cloud build, not a broken composite.
+        _e_str = str(e)
+        if _is_parca_cache_error(_e_str):
+            from vivarium_workbench.lib.remote_simulations import _read_build_meta
+            _meta = _read_build_meta(ws_root)   # non-None only for a materialized remote build
+            if _meta is not None:
+                _sim = _meta.get("simulator_id")
+                _commit = str(_meta.get("commit") or "")[:7]
+                _who = (f"remote build #{_sim}" if _sim is not None else "this remote build") \
+                    + (f" @ {_commit}" if _commit else "")
+                return {
+                    "error": (f"{_who} has no local ParCa cache, so its wiring preview "
+                              f"can't be built here — run it on the Cloud, or provision a "
+                              f"local out/cache. ({_e_str})"),
+                    "remote_no_cache": True,
+                }, 400
         return {"error": f"generator build failed: {e}"}, 400
     # __not_registered__ or subprocess failure → fall through to path resolution.
 
