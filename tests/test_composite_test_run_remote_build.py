@@ -216,3 +216,35 @@ def test_remote_sim_run_status_and_trajectory_map_to_sms_api(tmp_path, monkeypat
     traj, tcode = crv.build_composite_run(tmp_path, "remote-sim-909")
     assert tcode == 200
     assert traj == {"run_id": "remote-sim-909", "trajectory": [], "remote": True}
+
+
+def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypatch):
+    """Plan B, pinned path: a composite-card Run on a workspace pinned to a build
+    (a full .viv-build.json) sends NO explicit run_target — the loom only sends it
+    when the scope is toggled. resolve_run_target → 'deployment', and the run must
+    still dispatch the pinned build's image (not fall to compose/preflight)."""
+    from vivarium_workbench.lib import composite_test_run_views as v
+    from vivarium_workbench.lib import run_registry, remote_run, remote_pinned
+    from vivarium_workbench.lib import sms_api_client as sac
+
+    (tmp_path / ".pbg").mkdir()
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
+    monkeypatch.setattr(run_registry, "spawn_detached",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no compose spawn")))
+    # Pinned to build 124 (resolve_run_target → deployment; session build resolves).
+    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws: "deployment")
+    monkeypatch.setattr(remote_pinned, "resolved_from_session_build",
+                        lambda ws: {"simulator_id": 124, "repo_url": "r", "commit": "c", "branch": "b"})
+    # The compose preflight must never be consulted when a pinned build resolves.
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight",
+                        lambda ws: (_ for _ in ()).throw(AssertionError("preflight skipped on pinned image path")))
+    captured = {}
+    monkeypatch.setattr(sac.SmsApiClient, "run_simulation",
+                        lambda self, **kw: (captured.update(kw), {"database_id": 777})[1])
+
+    resp, status = v.composite_test_run(tmp_path, {"id": "pkg.composites.x", "steps": 7})
+    assert status == 202, resp
+    assert resp["run_id"] == "remote-sim-777"
+    assert resp["remote"] is True
+    assert captured["simulator_id"] == 124

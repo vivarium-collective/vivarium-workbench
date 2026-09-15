@@ -56,6 +56,40 @@ def _ws_add_to_sys_path(ws_root: Path) -> None:
 _HEAVY_RUN_STEPS = 250
 
 
+def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filename, spec_id):
+    """Dispatch a registered build's PRE-BUILT image via sms-api run_simulation
+    (plan B) and return the composite-test-run response tuple.
+
+    Used for both composite-card Cloud paths — an explicit run_target=deployment
+    + build, and a pinned/materialized-build workspace. Skips the compose
+    git-install path entirely: run_simulation runs the build's committed code
+    from its image, so no compose allow-list entry (and no local push) is needed.
+    Async — returns a synthetic ``remote-sim-<id>`` run_id the loom polls; the run
+    surfaces in the Simulations/Runs tab via remote_simulations.
+    """
+    from vivarium_workbench.lib import remote_run_views as _rrv
+    from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+
+    overrides = overrides or {}
+    try:
+        sim = SmsApiClient(_rrv._sms_api_base()).run_simulation(
+            simulator_id=int(simulator_id),
+            num_generations=int(overrides.get("n_generations") or 1),
+            num_seeds=int(overrides.get("n_seeds") or 1),
+            run_parca=True,
+            observables=list(emit_paths or []),
+            config_filename=config_filename,
+            description=f"composite-card cloud run: {spec_id}",
+        )
+    except SmsApiError as e:
+        return {"error": f"cloud dispatch failed: {e}",
+                "reason": "dispatch-failed", "run_target": "deployment"}, 502
+    sim_db_id = sim.get("database_id") or sim.get("simulation_id")
+    return {"run_id": f"remote-sim-{sim_db_id}", "status": "running",
+            "remote": True, "simulation_id": sim_db_id,
+            "experiment_id": sim.get("experiment_id")}, 202
+
+
 def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Start a detached composite run. Returns ``(response_dict, status_code)``.
 
@@ -177,32 +211,27 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         # polls via /api/composite-run/<id>/status (mapped to sms-api below);
         # the run also surfaces in the Simulations/Runs tab via remote_simulations.
         if build_ref.get("simulator_id"):
-            from vivarium_workbench.lib import remote_run_views as _rrv
-            from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
-            try:
-                sim = SmsApiClient(_rrv._sms_api_base()).run_simulation(
-                    simulator_id=int(build_ref["simulator_id"]),
-                    num_generations=int(overrides.get("n_generations") or 1),
-                    num_seeds=int(overrides.get("n_seeds") or 1),
-                    run_parca=True,
-                    observables=list(emit_paths or []),
-                    config_filename=(body.get("config_filename") or "").strip() or None,
-                    description=f"composite-card cloud run: {spec_id}",
-                )
-            except SmsApiError as e:
-                return {"error": f"cloud dispatch failed: {e}",
-                        "reason": "dispatch-failed", "run_target": "deployment"}, 502
-            sim_db_id = sim.get("database_id") or sim.get("simulation_id")
-            return {"run_id": f"remote-sim-{sim_db_id}", "status": "running",
-                    "remote": True, "simulation_id": sim_db_id,
-                    "experiment_id": sim.get("experiment_id")}, 202
+            cfg_fn = (body.get("config_filename") or "").strip() or None
+            return _dispatch_build_image_run(
+                build_ref["simulator_id"], overrides, emit_paths, cfg_fn, spec_id)
     else:
         # Stock path: the workspace's own resolved target (pinned/.viv-build.json
-        # → deployment, else local). A workspace-resolved deployment DOES install
-        # the local git tree, so the clean+pushed preflight stays for that path —
-        # otherwise the detached runner hits git_pip_url's RuntimeError and the
-        # user sees a raw traceback with no clear next step.
+        # → deployment, else local). A pinned/materialized remote build resolves
+        # to 'deployment' WITHOUT an explicit run_target in the body (the loom
+        # only sends run_target when the Environment scope is toggled to Cloud) —
+        # so a composite-card Run on a pinned workspace lands HERE. Route it to
+        # the SAME image dispatch as the explicit path, using the pinned build's
+        # simulator_id. Only when no build resolves does the compose git-install
+        # path (and its clean+pushed preflight) apply.
         target = resolve_run_target(ws_root)
+        if target == "deployment":
+            from vivarium_workbench.lib import remote_pinned as _rp
+            pinned = _rp.resolved_from_session_build(ws_root) or _rp.pinned_config() or {}
+            pinned_sid = pinned.get("simulator_id")
+            if pinned_sid:
+                cfg_fn = (body.get("config_filename") or "").strip() or None
+                return _dispatch_build_image_run(
+                    pinned_sid, overrides, emit_paths, cfg_fn, spec_id)
         if target == "deployment":
             from vivarium_workbench.lib import remote_run as _remote_run
             pf = _remote_run.remote_dispatch_preflight(ws_root)
