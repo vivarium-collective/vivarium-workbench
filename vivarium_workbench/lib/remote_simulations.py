@@ -51,6 +51,41 @@ _REMOTE_REFRESH_LOCK = threading.Lock()
 # emitter tag -> capitalized label the UI pills key on (mirrors server.py).
 _EMITTER_LABEL = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray", "none": "—"}
 
+# The sms-api LIST endpoint (GET /api/v1/simulations) carries NO run status — a
+# record only tells us it exists. Live status lives on the per-sim
+# GET /api/v1/simulations/<id>/status endpoint. So a run that is queued or
+# running would otherwise be mislabeled "completed". We enrich the newest window
+# of records with their live status (bounded, because /status is one round-trip
+# each): a just-launched run is always among the newest ids, so this is enough to
+# surface it as queued/running without paying a status call for all ~1300 sims.
+_STATUS_ENRICH_WINDOW = 40
+# sms-api status strings that mean the run has NOT finished — these are surfaced
+# even when the run targets a build outside the pinned scope, so nothing a user
+# launches is ever invisible in the Runs DB.
+_ACTIVE_STATES = {"queued", "pending", "submitted", "running", "in_progress", "started"}
+
+
+def _map_remote_status(raw: "str | None", has_out_uri: bool) -> str:
+    """Map an sms-api status string to a Runs-DB status.
+
+    ``raw`` is the live per-sim status (``None`` when we didn't enrich this
+    record). With no live status, a persisted sim (it has an ``out_uri``) is
+    ``completed``; one without is assumed still ``running`` rather than falsely
+    ``completed``.
+    """
+    s = (raw or "").strip().lower()
+    if s in ("completed", "done", "success", "succeeded", "finished"):
+        return "completed"
+    if s in ("failed", "error", "errored", "cancelled", "canceled"):
+        return "failed"
+    if s in ("running", "in_progress", "started"):
+        return "running"
+    if s in ("queued", "pending", "submitted"):
+        return "queued"
+    if s:
+        return s
+    return "completed" if has_out_uri else "running"
+
 
 def _load_remote_study_map(ws_root: Path) -> list:
     """Workspace-declared experiment_id -> study_slug rules for remote runs.
@@ -196,8 +231,13 @@ def _to_epoch(s):
         return None
 
 
-def _normalize(rec: dict) -> dict:
-    """Convert one sms-api simulation record to a Simulations-DB row dict."""
+def _normalize(rec: dict, live_status: "str | None" = None) -> dict:
+    """Convert one sms-api simulation record to a Simulations-DB row dict.
+
+    ``live_status`` is the per-sim ``/status`` value when we enriched this
+    record (see ``_fetch_remote_simulations``); ``None`` falls back to the
+    record's own status or the out_uri heuristic.
+    """
     cfg = rec.get("config") or {}
     sid = rec.get("simulator_id")
     db_id = rec.get("database_id")
@@ -205,15 +245,16 @@ def _normalize(rec: dict) -> dict:
     out_uri = ((cfg.get("emitter_arg") or {}).get("out_uri")) or None
     emitter_tag = (cfg.get("emitter") or "").lower() or None
     ts = _to_epoch(rec.get("last_updated") or rec.get("created_at"))
+    status = _map_remote_status(live_status or rec.get("status"), bool(out_uri))
     return {
         "run_id": experiment_id,
         "spec_id": "",
         "sim_name": cfg.get("description") or experiment_id,
         "label": experiment_id,
-        # The list endpoint carries no run status; these are recorded, persisted
-        # simulations (they have an out_uri). Surface as completed; the per-sim
-        # /status endpoint could enrich this later without changing the shape.
-        "status": rec.get("status") or "completed",
+        # Live status from the per-sim /status endpoint (the list endpoint
+        # carries none), so a queued/running cloud run shows as such instead of a
+        # false "completed"; falls back to the out_uri heuristic when unenriched.
+        "status": status,
         "n_steps": None,
         "progress_step": None,
         "started_at": ts,
@@ -221,7 +262,7 @@ def _normalize(rec: dict) -> dict:
         "db_path": None,
         "store_path": out_uri,                 # s3:// — shown in the Location column
         "emitter": emitter_tag,
-        "emitter_type": _EMITTER_LABEL.get(emitter_tag, emitter_tag or "—"),
+        "emitter_type": _EMITTER_LABEL.get(emitter_tag or "", emitter_tag or "—"),
         "studies": [],
         "study_slug": None,
         "investigation_slug": None,            # remote builds aren't investigation-organized
@@ -388,8 +429,37 @@ def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
     if not isinstance(sims, list):
         return []
 
-    rows = [_normalize(rec) for rec in sims
-            if isinstance(rec, dict) and rec.get("simulator_id") in matching]
+    # Enrich the newest window with live status from the per-sim /status endpoint
+    # (the list carries none). A just-launched run is always among the newest ids,
+    # so this window is enough to catch queued/running runs without a status call
+    # per record. Failures are swallowed — an un-enriched record falls back to the
+    # out_uri heuristic in _normalize.
+    newest = sorted(
+        (s for s in sims if isinstance(s, dict) and s.get("database_id") is not None),
+        key=lambda s: s.get("database_id") or 0, reverse=True,
+    )[:_STATUS_ENRICH_WINDOW]
+    live_status: dict = {}
+    for s in newest:
+        did = s.get("database_id")
+        if did is None:
+            continue
+        try:
+            live_status[did] = (client.simulation_status(int(did)) or {}).get("status")
+        except Exception:
+            pass
+
+    def _keep(rec: dict) -> bool:
+        # Pinned-build scope (completed history for this exact build/commit)…
+        if rec.get("simulator_id") in matching:
+            return True
+        # …plus any ACTIVE run on any build, so nothing a user just launched is
+        # invisible in the Runs DB merely because it targets a different build.
+        st = (live_status.get(rec.get("database_id")) or "").strip().lower()
+        return st in _ACTIVE_STATES
+
+    rows = [_normalize(rec, live_status.get(rec.get("database_id")))
+            for rec in sims
+            if isinstance(rec, dict) and _keep(rec)]
     # Associate each remote run with its study via the workspace's declared
     # experiment_id -> study_slug rules (remote runs have no db_path, so the
     # local study-slug-from-path inference in simulations_index can't fire).
