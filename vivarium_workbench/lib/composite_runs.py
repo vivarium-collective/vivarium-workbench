@@ -496,12 +496,23 @@ def complete_metadata(conn, *, run_id, n_steps, status, workspace=None,
         })
 
 
-def delete_run(conn: sqlite3.Connection, *, run_id: str) -> bool:
+def delete_run(conn: sqlite3.Connection, *, run_id: str,
+               workspace: "str | Path | None" = None) -> bool:
     """Explicitly delete a run's metadata row. Returns True if a row was removed.
     (Store artifacts under .pbg/runs/<run_id>/ are removed by the caller that
-    knows the workspace root.)"""
+    knows the workspace root.)
+
+    ``workspace`` (when given) makes the deletion STICK: the Simulations DB is
+    folded from the append-only JSONL run log, and a bare row delete leaves the
+    run's ``started`` event behind, so the next ``backfill_index_into_jsonl``
+    fold resurrects it as a "running" phantom. Appending a ``deleted`` tombstone
+    is the only thing that removes it from the fold (see
+    ``run_log.append_deleted_event``). Pass it whenever a workspace is in scope.
+    """
     cur = conn.execute("DELETE FROM runs_meta WHERE run_id=?", (run_id,))
     conn.commit()
+    if workspace is not None:
+        run_log.append_deleted_event(Path(workspace), run_id)
     return cur.rowcount > 0
 
 

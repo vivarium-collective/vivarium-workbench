@@ -1674,6 +1674,23 @@ def _rec_to_simrow(run_id: str, rec: dict) -> dict:
     if not (isinstance(ro, dict) and ro):
         origin = rec.get("origin")
         ro = origin if isinstance(origin, dict) and origin else None
+    # Belt-and-braces (#1108): a `remote-pending-<id>` placeholder's `started`
+    # event carries its remote provenance under `params` (source + simulation_id)
+    # but no `remote_origin` mapping, so the frontend poller — which keys on
+    # remote_origin.simulation_id — never polled it. Synthesize one here so the
+    # poller covers placeholders even before the server-side reconciler
+    # (remote_reconcile) terminalizes them.
+    if not (isinstance(ro, dict) and ro) and run_id.startswith("remote-pending-"):
+        params = rec.get("params")
+        if isinstance(params, dict) and params.get("source") \
+                and params.get("simulation_id") is not None:
+            ro = {
+                "deployment": params.get("source"),
+                "simulation_id": params.get("simulation_id"),
+                "experiment_id": params.get("experiment_id"),
+                "backend": params.get("backend"),
+                "s3_uri": params.get("s3_uri"),
+            }
     if ro:
         row["remote_origin"] = ro
 

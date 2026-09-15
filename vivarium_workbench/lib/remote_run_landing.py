@@ -451,7 +451,8 @@ def land_remote_run(
         # deleting a run_id that was never written (any simulation landed via
         # an older/other path, or a simulation never dispatched through
         # remote_run_submit at all) is a silent no-op.
-        cr.delete_run(conn, run_id=f"remote-pending-{simulation_id}")
+        cr.delete_run(conn, run_id=f"remote-pending-{simulation_id}",
+                      workspace=ws_root)
     finally:
         conn.close()
 

@@ -448,6 +448,18 @@ def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
         except Exception:
             pass
 
+    # Reconcile `remote-pending-<id>` placeholder rows against live status
+    # (#1108 / item d2). Force-include placeholder sim ids in the enrichment
+    # window so older placeholders (outside the newest-N window above) resolve,
+    # then terminalize any whose sim is done/failed/unknown. Best-effort — a
+    # down tunnel or a broken workspace layout must not break the remote listing.
+    try:
+        from vivarium_workbench.lib import remote_reconcile
+        remote_reconcile.enrich_placeholder_status(client, ws_root, live_status)
+        remote_reconcile.reconcile_pending_placeholders(ws_root, live_status)
+    except Exception:  # noqa: BLE001
+        pass
+
     def _keep(rec: dict) -> bool:
         # Pinned-build scope (completed history for this exact build/commit)…
         if rec.get("simulator_id") in matching:
