@@ -125,7 +125,7 @@ def test_build_simulations_data_attaches_matched_tools_end_to_end(monkeypatch, t
         "r1": {"run_id": "r1", "study_slug": "ecoli-3d", "status": "completed",
                "capabilities": ["3d_pack"]},
     })
-    monkeypatch.setattr(si, "_append_remote_simulations", lambda sims, ws: sims)
+    monkeypatch.setattr(si, "_append_remote_simulations", lambda sims, ws, **kw: sims)
     data = si.build_simulations_data(tmp_path)
     row = data["simulations"][0]
     assert row["matched_tools"][0]["id"] == "parsimony-viewer"

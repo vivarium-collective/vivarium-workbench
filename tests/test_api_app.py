@@ -233,8 +233,12 @@ def test_simulations_empty_workspace(client):
     """An empty workspace yields the typed empty payload, not a 500."""
     r = client.get("/api/simulations")
     assert r.status_code == 200
-    assert r.json() == {"simulations": [], "current": None,
-                        "total": 0, "offset": 0, "limit": None}
+    body = r.json()
+    assert body["simulations"] == [] and body["current"] is None
+    assert body["total"] == 0 and body["offset"] == 0 and body["limit"] is None
+    # SWR remote-source provenance (added with non-blocking remote fetch): shape is
+    # stable; the state value varies (refreshing/stale/unavailable) so don't pin it.
+    assert set(body["remote"]) == {"state", "as_of", "error"}
 
 
 def test_simulations_returns_typed_rows(client, monkeypatch):
