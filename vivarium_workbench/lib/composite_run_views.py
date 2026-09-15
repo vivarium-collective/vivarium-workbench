@@ -151,7 +151,7 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
         st, code = _rrv.remote_run_status({"simulation_id": sim_id})
         if code != 200:
             return st, code
-        phase = st.get("phase")
+        phase = str(st.get("phase") or "")
         mapped = {"done": "completed", "failed": "failed"}.get(phase, "running")
         return {
             "run_id": run_id,
