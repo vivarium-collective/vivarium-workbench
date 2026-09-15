@@ -21,6 +21,7 @@ Design (see Simulations-DB remote-runs decision):
 
 from __future__ import annotations
 
+import concurrent.futures as _futures
 import datetime as _dt
 import json
 import os
@@ -59,6 +60,15 @@ _EMITTER_LABEL = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray", 
 # each): a just-launched run is always among the newest ids, so this is enough to
 # surface it as queued/running without paying a status call for all ~1300 sims.
 _STATUS_ENRICH_WINDOW = 40
+# Wall-clock budget for the whole status-enrichment pass. The per-sim /status
+# calls run concurrently; whatever hasn't returned within this budget is dropped
+# and those records fall back to the out_uri heuristic. This guarantees the Runs
+# tab never stalls on a slow or unresponsive tunnel — a laggy GovCloud link
+# degrades the *precision* of a few statuses, never the load itself.
+_STATUS_ENRICH_BUDGET_S = 5.0
+# Per-call timeout for the enrichment client (short — status is a tiny payload),
+# so a single wedged call can't hold a worker for the client's default 30s.
+_STATUS_CALL_TIMEOUT_S = 4.0
 # sms-api status strings that mean the run has NOT finished — these are surfaced
 # even when the run targets a build outside the pinned scope, so nothing a user
 # launches is ever invisible in the Runs DB.
@@ -431,22 +441,40 @@ def _fetch_remote_simulations(ws_root: Path, base_url: str | None = None,
 
     # Enrich the newest window with live status from the per-sim /status endpoint
     # (the list carries none). A just-launched run is always among the newest ids,
-    # so this window is enough to catch queued/running runs without a status call
-    # per record. Failures are swallowed — an un-enriched record falls back to the
-    # out_uri heuristic in _normalize.
+    # so this window is enough to catch queued/running runs. The calls run
+    # CONCURRENTLY under a wall-clock budget: N sequential round-trips over a laggy
+    # tunnel used to add tens of seconds (and hang outright on a dead one), stalling
+    # the whole Runs tab; in parallel the pass costs ~one round-trip, and anything
+    # past the budget is dropped to the out_uri heuristic in _normalize.
     newest = sorted(
         (s for s in sims if isinstance(s, dict) and s.get("database_id") is not None),
         key=lambda s: s.get("database_id") or 0, reverse=True,
     )[:_STATUS_ENRICH_WINDOW]
+    dids = [int(s["database_id"]) for s in newest if s.get("database_id") is not None]
     live_status: dict = {}
-    for s in newest:
-        did = s.get("database_id")
-        if did is None:
-            continue
+    if dids:
+        # A short-timeout client for enrichment only, so one wedged call can't hold
+        # a worker for the default 30s (the budget is the outer guard either way).
+        status_client = SmsApiClient(base_url or _sms_api_base(), timeout=_STATUS_CALL_TIMEOUT_S)
+
+        def _one(d: int) -> "tuple[int, str | None]":
+            try:
+                return d, (status_client.simulation_status(d) or {}).get("status")
+            except Exception:
+                return d, None
+
+        ex = _futures.ThreadPoolExecutor(max_workers=min(12, len(dids)))
+        futs = [ex.submit(_one, d) for d in dids]
         try:
-            live_status[did] = (client.simulation_status(int(did)) or {}).get("status")
-        except Exception:
-            pass
+            for fut in _futures.as_completed(futs, timeout=_STATUS_ENRICH_BUDGET_S):
+                d, st = fut.result()
+                if st is not None:
+                    live_status[d] = st
+        except _futures.TimeoutError:
+            pass  # budget spent — use what completed, heuristic for the rest
+        # Don't block on stragglers (a wedged call keeps its thread until it
+        # times out on its own); cancel the queued ones and move on.
+        ex.shutdown(wait=False, cancel_futures=True)
 
     def _keep(rec: dict) -> bool:
         # Pinned-build scope (completed history for this exact build/commit)…
