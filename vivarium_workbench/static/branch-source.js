@@ -659,11 +659,13 @@
         // Open / Use this environment is instant. Shown alongside latest/workspace
         // chips (a build can be both). Absence means the first open downloads it.
         if (m.cached) {
-          var cchip = _el("span", null, "⚡ cached");
+          var cchip = _el("span", null, "⚡ local copy");
           cchip.style.cssText = "flex:0 0 auto; font-size:10px; font-weight:600; color:#8a5a00; "
             + "background:#fff4e0; border:1px solid #f0d6a0; border-radius:10px; padding:1px 7px";
-          cchip.title = "This build's workspace is already downloaded to the local build cache — "
-            + "Open / Use this environment is instant, no download.";
+          cchip.title = "This cloud build's workspace is already downloaded to YOUR machine "
+            + "(the local build cache), so Open / Use this environment is instant — no re-download. "
+            + "This is about the local copy on your computer, NOT whether the build runs on the cloud "
+            + "(every registered build is runnable on the cloud regardless).";
           pEl.appendChild(cchip);
         }
         labelWrap.appendChild(pEl);
