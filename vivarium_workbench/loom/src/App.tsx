@@ -94,6 +94,12 @@ type TrajectoryRow = { step: number; time?: number; state: Record<string, unknow
 
 export default function App() {
   const [state, setState] = useState<any | null>(decodeUrlComposite());
+  // A composite-state build/resolve failure (HTTP 4xx/5xx, or a { error } body)
+  // is held here and rendered as a clean error panel — NOT setState'd, which
+  // would draw the error dict as an "error"/string store node in the canvas.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Bumped by the error panel's Retry to re-trigger the composite-state fetch.
+  const [retryTick, setRetryTick] = useState(0);
   const [selection, setSelection] = useState<Omit<ExploreInspectMsg, 'type'> | null>(null);
   // Bumped on every plain node click so the Inspector dock panel un-collapses
   // (a locked process must have a visible detail panel). See DockContainer's
@@ -795,10 +801,24 @@ export default function App() {
           : null);
     if (!src) return;
     let cancelled = false;
+    setLoadError(null);
     fetch(src)
-      .then((r) => r.json())
-      .then((data) => {
+      .then((r) => r.json().then((data) => ({ ok: r.ok, status: r.status, data })))
+      .then(({ ok, status, data }) => {
         if (cancelled) return;
+        // A build/resolve failure comes back as { error, [unresolved], [ref] } at
+        // HTTP 4xx/5xx (e.g. "generator build failed: Cache at 'out/cache' is
+        // stale or unversioned"). Render it as a clean error panel instead of
+        // letting the error dict flow into setState — otherwise convert.ts draws
+        // it as an "error" store node whose value is the message (type "string").
+        // Guard the { error } test on a *string* error so a bona-fide store named
+        // "error" (an object leaf) still renders as state.
+        if (!ok || (data && typeof data === 'object' && !('state' in data) && typeof data.error === 'string')) {
+          if (!state) setLoadError(
+            (data && typeof data === 'object' && typeof data.error === 'string')
+              ? data.error : `Composite state unavailable (HTTP ${status}).`);
+          return;
+        }
         // Accept either an /api/composite-state response ({state: ...}) or a
         // bare state object (a committed snapshot may be either shape).
         let st = (data && typeof data === 'object' && 'state' in data) ? data.state : data;
@@ -850,7 +870,7 @@ export default function App() {
       })
       .catch(() => { /* fall through to postMessage path */ });
     return () => { cancelled = true; };
-  }, [compositeId, state, urlOverrides]);
+  }, [compositeId, state, urlOverrides, retryTick]);
 
   // Standardize Setup & Run: /api/composite-state carries the wiring but NOT the
   // config, so when a composite is opened by id (live mode) and no parameters
@@ -2186,6 +2206,40 @@ export default function App() {
       compositeId, parameters, overrides, handleApplied, STATIC, chromeless, embed, state, setState]);
 
   if (!state) {
+    if (loadError) {
+      // A stale-cache / build failure surfaces the message so the rebuild path is
+      // clear, and offers a Retry that re-triggers the composite-state fetch.
+      const cacheHint = /cache/i.test(loadError) && /stale|unversioned/i.test(loadError);
+      return (
+        <div style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 680 }}>
+          <h3 style={{ margin: '0 0 8px' }}>⚠ Composite build failed</h3>
+          <p style={{ color: '#334155', margin: '0 0 12px' }}>
+            {compositeId
+              ? <>Couldn’t build <code>{compositeId}</code>.</>
+              : 'Couldn’t build this composite.'}
+          </p>
+          <pre style={{
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fef2f2',
+            border: '1px solid #fecaca', color: '#991b1b', borderRadius: 6,
+            padding: '10px 12px', fontSize: 12, margin: '0 0 12px',
+          }}>{loadError}</pre>
+          {cacheHint && (
+            <p style={{ color: '#64748b', fontSize: 12, margin: '0 0 12px' }}>
+              The ParCa cache (<code>out/cache</code>) is missing or built from
+              different source. Rebuild it for this workspace, then Retry.
+            </p>
+          )}
+          <button
+            onClick={() => { setLoadError(null); setRetryTick((t) => t + 1); }}
+            style={{
+              fontFamily: 'system-ui', fontSize: 13, padding: '6px 14px',
+              border: '1px solid #cbd5e1', borderRadius: 6, background: '#fff',
+              color: '#334155', cursor: 'pointer',
+            }}
+          >Retry</button>
+        </div>
+      );
+    }
     return (
       <div style={{ padding: 24, fontFamily: 'system-ui' }}>
         <h3>bigraph-loom</h3>
