@@ -355,6 +355,7 @@ files = [
     "vivarium_workbench/lib/smoke.py",
     "vivarium_workbench/lib/comparison_pinning.py",
     "vivarium_workbench/lib/server_capabilities.py",
+    "vivarium_workbench/lib/remote_link.py",
     "vivarium_workbench/lib/test_run_views.py",
     "vivarium_workbench/lib/comparative_runs.py",
     "vivarium_workbench/lib/run_unblocked_views.py",

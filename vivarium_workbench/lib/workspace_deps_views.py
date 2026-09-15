@@ -24,10 +24,12 @@ from typing import Optional
 def _sms_api_base() -> str:
     """Base URL of the viva-api (nee sms-api; the SSM tunnel by default).
 
-    ``VIVA_API_BASE`` is the canonical name; ``SMS_API_BASE`` is kept as a
-    fallback alias since the backend repo was renamed sms-api -> viva-api.
+    Delegates to the single source of truth :func:`sms_api_client.sms_api_base`;
+    kept under this name because several modules import it from here.
     """
-    return os.environ.get("VIVA_API_BASE") or os.environ.get("SMS_API_BASE", "http://localhost:8080")
+    from vivarium_workbench.lib.sms_api_client import sms_api_base
+
+    return sms_api_base()
 
 
 def build_source_builds() -> dict:

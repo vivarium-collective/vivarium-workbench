@@ -100,6 +100,17 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
         except Exception as e:  # noqa: BLE001
             print(f"warning: remote sms-api health check failed: {e}", file=sys.stderr)
 
+        # Start the RemoteLink circuit-breaker probe so a wedged tunnel is
+        # detected in the background (~3s probe every 30s) and every sms-api call
+        # site fails fast instead of burning its 91.5s timeout budget. Opt-in:
+        # only when the remote endpoint is configured (this branch), so tests and
+        # the CLI never spawn the thread. Best-effort; never blocks/raises.
+        try:
+            from vivarium_workbench.lib.remote_link import start_probe
+            start_probe()
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: remote-link probe failed to start: {e}", file=sys.stderr)
+
     # No `os.chdir(workspace)` and no `sys.path.insert(workspace)`: both are
     # single-workspace process globals that would corrupt concurrent different-
     # workspace sessions (audit risk #5). Neither is needed anymore:

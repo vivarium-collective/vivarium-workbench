@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import os
 import re
 import threading
 import time
@@ -240,9 +239,11 @@ def _study_investigation_map(ws_root: Path) -> dict:
 
 
 def _sms_api_base() -> str:
-    # VIVA_API_BASE is canonical; SMS_API_BASE is a fallback alias (backend
-    # repo was renamed sms-api -> viva-api).
-    return os.environ.get("VIVA_API_BASE") or os.environ.get("SMS_API_BASE", "http://localhost:8080")
+    # Single source of truth: sms_api_client.sms_api_base (VIVA_API_BASE canonical,
+    # SMS_API_BASE a fallback alias from the sms-api -> viva-api rename).
+    from vivarium_workbench.lib.sms_api_client import sms_api_base
+
+    return sms_api_base()
 
 
 def _builds_list(versions_resp) -> list:

@@ -8,6 +8,7 @@ base_url (the SSM tunnel, default http://localhost:8080).
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import time
@@ -16,6 +17,17 @@ from urllib.error import HTTPError, URLError
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+
+def sms_api_base() -> str:
+    """Base URL of the viva-api (nee sms-api; the SSM tunnel by default).
+
+    ``VIVA_API_BASE`` is the canonical name; ``SMS_API_BASE`` is kept as a
+    fallback alias since the backend repo was renamed sms-api -> viva-api. The
+    single source of truth for this lookup — ``workspace_deps_views`` and
+    ``remote_simulations`` re-export it under their old ``_sms_api_base`` name.
+    """
+    return os.environ.get("VIVA_API_BASE") or os.environ.get("SMS_API_BASE", "http://localhost:8080")
 
 
 class SmsApiError(Exception):
@@ -44,6 +56,18 @@ DOWNLOAD_TIMEOUT = 1800.0  # 30 minutes
 #: ``backoff * 2**attempt``.
 _GET_RETRIES = 3
 _RETRY_BACKOFF = 0.5
+
+#: e3 — timeouts and retry budgets by call class. A probe must fail fast (a
+#: wedged tunnel usually fails the first byte); a status poll is latency-
+#: sensitive; a list can be large; a download runs on ``DOWNLOAD_TIMEOUT``.
+#: ``SmsApiClient.for_(kind)`` builds a client wired to the right policy so call
+#: sites stop hand-rolling ``timeout=``/``max_retries=`` themselves.
+_CALL_CLASS_POLICY: "dict[str, tuple[float, int]]" = {
+    "probe": (3.0, 1),
+    "status": (5.0, 2),
+    "list": (15.0, 2),
+    "download": (DOWNLOAD_TIMEOUT, 1),
+}
 
 
 def _http_error_detail(e: HTTPError, limit: int = 200) -> str:
@@ -132,7 +156,7 @@ def caller_identity() -> str | None:
 
 class SmsApiClient:
     def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 30.0,
-                 max_retries: int = _GET_RETRIES) -> None:
+                 max_retries: int = _GET_RETRIES, *, force_link: bool = False) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         # Default retry budget for idempotent GET/status calls made through this
@@ -141,6 +165,50 @@ class SmsApiClient:
         # ``max_retries=1`` so a wedged tunnel can't pin the request thread for
         # ``timeout * _GET_RETRIES`` seconds. Never consulted by _post/_delete.
         self.max_retries = max_retries
+        # When True, this client bypasses the RemoteLink circuit breaker
+        # (``check(force=True)``) — used by the breaker's own probe and by
+        # user-initiated explicit refreshes, which must be able to re-test a link
+        # the breaker currently holds open. Normal calls leave it False so a
+        # known-down tunnel fails in microseconds instead of the full timeout.
+        self.force_link = force_link
+
+    @classmethod
+    def for_(cls, kind: str, base_url: str | None = None, *, force_link: bool = False) -> "SmsApiClient":
+        """Build a client wired to the timeout/retry policy for a call *class*.
+
+        ``kind`` is one of ``"probe"``, ``"status"``, ``"list"``, ``"download"``
+        (see :data:`_CALL_CLASS_POLICY`). ``base_url`` defaults to the configured
+        endpoint (:func:`sms_api_base`).
+        """
+        try:
+            timeout, retries = _CALL_CLASS_POLICY[kind]
+        except KeyError:
+            raise ValueError(
+                f"unknown call class {kind!r}; expected one of {sorted(_CALL_CLASS_POLICY)}"
+            ) from None
+        return cls(base_url or sms_api_base(), timeout=timeout,
+                   max_retries=retries, force_link=force_link)
+
+    def _link(self) -> Any:
+        """The RemoteLink circuit breaker for this client's base_url (lazy import
+        to avoid an import cycle: remote_link imports this module)."""
+        from vivarium_workbench.lib.remote_link import link
+
+        return link(self.base_url)
+
+    def _mark_link_up(self) -> None:
+        """Passive success signal to the breaker — never let bookkeeping raise."""
+        try:
+            self._link().mark_up()
+        except Exception:  # noqa: BLE001 - breaker bookkeeping must not fail a real call
+            pass
+
+    def _mark_link_down(self, error: str) -> None:
+        """Passive connection-failure signal to the breaker (never raises)."""
+        try:
+            self._link().mark_down(error)
+        except Exception:  # noqa: BLE001 - see _mark_link_up
+            pass
 
     def _headers(self, accept: str = "application/json") -> dict[str, str]:
         """Request headers, carrying the caller's identity when there is one.
@@ -173,6 +241,9 @@ class SmsApiClient:
         """
         if retries is None:
             retries = self.max_retries
+        # Fail fast when the tunnel is known-down (raises CircuitOpen, itself an
+        # SmsApiError). force_link bypasses it for the probe / explicit refresh.
+        self._link().check(force=self.force_link)
         url = self.base_url + path
         if params:
             url = f"{url}?{urlencode(params, doseq=True)}"
@@ -182,8 +253,12 @@ class SmsApiClient:
             attempt += 1
             try:
                 with urlopen(req, timeout=self.timeout) as r:  # noqa: S310 — fixed scheme, internal tunnel
-                    return json.loads(r.read().decode())
+                    payload = json.loads(r.read().decode())
+                self._mark_link_up()
+                return payload
             except HTTPError as e:
+                # The server answered — the tunnel is alive; do not trip the
+                # breaker on an HTTP status (a 4xx/5xx is not a link failure).
                 if e.code >= 500 and attempt < retries:
                     time.sleep(backoff * (2 ** (attempt - 1)))
                     continue
@@ -192,6 +267,7 @@ class SmsApiClient:
                 if attempt < retries:
                     time.sleep(backoff * (2 ** (attempt - 1)))
                     continue
+                self._mark_link_down(str(e))
                 raise SmsApiError(f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
 
     def latest_simulator(self, repo_url: str, branch: str) -> dict:
@@ -432,6 +508,8 @@ class SmsApiClient:
 
     def _post(self, path: str, params: dict | None = None, json_body: dict | None = None) -> dict:
         # doseq=True so list-valued params become repeated keys (?observables=a&observables=b)
+        # Fail fast when the tunnel is known-down (CircuitOpen, an SmsApiError).
+        self._link().check(force=self.force_link)
         url = self.base_url + path
         if params:
             url = f"{url}?{urlencode(params, doseq=True)}"
@@ -442,10 +520,14 @@ class SmsApiClient:
         req = Request(url, data=data, method="POST", headers=headers)
         try:
             with urlopen(req, timeout=self.timeout) as r:  # noqa: S310
-                return json.loads(r.read().decode())
+                payload = json.loads(r.read().decode())
+            self._mark_link_up()
+            return payload
         except HTTPError as e:
+            # Server answered — link is alive; do not trip the breaker on status.
             raise SmsApiError(f"POST {url} -> {e.code}{_http_error_detail(e)}", status=e.code) from e
         except (URLError, OSError) as e:
+            self._mark_link_down(str(e))
             raise SmsApiError(f"POST {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
 
     def upload_simulator(self, simulator: dict, force: bool = False) -> dict:
