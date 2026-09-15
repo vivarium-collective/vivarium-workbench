@@ -1014,7 +1014,20 @@
     runBuild: function () {
       if (state.scope !== "remote") return null;
       var s = state.selected;
-      return (s && s.simulator_id != null) ? s : null;
+      if (s && s.simulator_id != null) return s;
+      // Local checkout, no explicit build picked: if the workspace's checked-out
+      // commit corresponds to a registered cloud build (matchesWorkspace, set in
+      // _loadEntries by short-sha), dispatch the Run against it. This lets the
+      // Cloud toggle route a Run remotely (no local git push) even when the active
+      // source is an on-disk checkout rather than a materialized remote build —
+      // otherwise runBuild() returned null here and the Run fell back to the stock
+      // local/push path despite Cloud being active. Newest matching build wins.
+      var m = (state.entries || []).filter(function (e) {
+        return e.simulator_id != null && e.matchesWorkspace;
+      }).sort(function (a, b) {
+        return (Number(b.simulator_id) || 0) - (Number(a.simulator_id) || 0);
+      })[0];
+      return m || null;
     }
   };
   document.addEventListener("DOMContentLoaded", function () {
