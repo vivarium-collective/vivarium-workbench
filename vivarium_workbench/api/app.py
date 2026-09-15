@@ -6733,19 +6733,46 @@ def create_app() -> FastAPI:
     @app.get("/api/remote-dispatch-preflight", tags=["Composites"],
              summary="Is this workspace ready for a remote (deployment) composite run?")
     def remote_dispatch_preflight(ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """Proactive check the Run UI calls when the workspace runs remotely: a
-        deployment dispatch installs the workspace from git, so warn UP FRONT if
-        the tree is dirty or HEAD isn't pushed (with the exact fix) instead of
-        letting the run fail. ``{ok, reason, message, sha, dirty_files, target}``;
-        for a local workspace it's always ok (no push needed)."""
+        """Proactive check the Run UI calls when the workspace runs remotely.
+
+        Cloud runs execute a registered build's PRE-BUILT image (plan B / #1101),
+        so the question is "does a cloud image resolve for this workspace" — the
+        SAME decision :func:`composite_test_run_views.resolve_cloud_target` makes
+        at dispatch. When one does, it's ready (no push needed). When none does,
+        return the actionable ``actions[]`` shape (Build on cloud / Switch to
+        Local) so the card renders buttons, not prose. The dead compose/git-install
+        path (which needs a clean+pushed tree AND the repo on sms-api's compose
+        allow-list) is only surfaced when an operator opts in via
+        ``VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH=1``.
+        Returns ``{target, ok, reason, message, actions?, ...}``; a local
+        workspace is always ok (no push needed)."""
         from vivarium_workbench.lib.remote_pinned import resolve_run_target
         from vivarium_workbench.lib import remote_run as _remote_run
+        from vivarium_workbench.lib import composite_test_run_views as _ctr
         target = resolve_run_target(ws)
         if target != "deployment":
             return JSONResponse(content={"target": target, "ok": True, "reason": "local",
                                          "message": "This workspace runs locally — no push needed."})
+        cloud = _ctr.resolve_cloud_target(ws, {})
+        if isinstance(cloud, _ctr.CloudTarget):
+            return JSONResponse(content={
+                "target": "deployment", "ok": True, "reason": "image",
+                "dispatch": "image", "simulator_id": cloud.simulator_id,
+                "message": f"Cloud image (build #{cloud.simulator_id}) is ready — "
+                           "runs execute its pre-built image, no push needed."})
+        if not _ctr._compose_dispatch_allowed():
+            # No cloud image and compose is not opted into → actionable dead-end.
+            payload, _status = cloud if isinstance(cloud, tuple) else _ctr._no_image(None, reason="no-build")
+            payload = dict(payload)
+            payload.update(target="deployment", ok=False)
+            return JSONResponse(content=payload)
+        # Opt-in compose path: the git-install preflight, plus the real requirement.
         pf = _remote_run.remote_dispatch_preflight(ws)
         pf["target"] = "deployment"
+        pf["actions"] = _ctr.cloud_build_actions(pf.get("sha"))
+        pf["message"] = (pf.get("message", "") + " The compose path installs your "
+                         "repo from git on the deployment and requires the repo to be "
+                         "on sms-api's compose allow-list.").strip()
         return JSONResponse(content=pf)
 
     # -----------------------------------------------------------------------

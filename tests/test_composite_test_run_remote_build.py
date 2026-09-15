@@ -18,7 +18,11 @@ def test_composite_test_run_on_remote_build_dispatches(tmp_path, monkeypatch):
 
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: remote-ws\n", encoding="utf-8")
+    # simulator_id-only stamp (no repo_url) → no session-build image resolves, so
+    # this exercises the opt-in compose/git-install path, which is gated behind
+    # VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH=1 (c1). Without the flag it's a 409.
     (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH", "1")
 
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
     monkeypatch.setattr(run_registry, "spawn_detached", lambda *a, **k: 4242)
@@ -52,6 +56,8 @@ def test_composite_test_run_remote_unpushed_returns_409(tmp_path, monkeypatch):
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: remote-ws\n", encoding="utf-8")
     (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+    # Opt-in compose path (no session-build image resolves from a bare stamp).
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH", "1")
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
     spawned = []
     monkeypatch.setattr(run_registry, "spawn_detached",
@@ -65,6 +71,7 @@ def test_composite_test_run_remote_unpushed_returns_409(tmp_path, monkeypatch):
     assert status == 409
     assert body["reason"] == "unpushed"
     assert "push" in body["error"].lower()
+    assert body["actions"]  # actionable buttons alongside the preflight message
     assert not spawned  # no detached run spawned
 
 

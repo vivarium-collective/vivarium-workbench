@@ -197,6 +197,8 @@ def test_pinned_mode_routes_to_deployment_target(tmp_path, monkeypatch, fixed_ru
     from vivarium_workbench.lib import remote_pinned
     ws = _make_ws(tmp_path)  # NOTE: no .viv-build.json stamped
     monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
+    # Pinned mode with no resolvable image → the opt-in compose path (c1).
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH", "1")
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
     monkeypatch.setattr(run_registry, "spawn_detached",
                         lambda request_path, *, workspace, log_path: 4242)
