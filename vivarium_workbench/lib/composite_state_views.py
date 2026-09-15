@@ -57,9 +57,157 @@ def _is_parca_cache_error(msg: str) -> bool:
                                 "does not exist", "no such file", "tf_ids"))
 
 
+# Last-known-good composite state, keyed by ``(ws_str, ref)`` with NO TTL — so a
+# view survives a transient build failure (a stale ParCa cache, an env-probe
+# drift, a mid-restart worker) by showing the last wiring that DID build, clearly
+# labelled, instead of a hard 400 that blanks the Composites view and hides the
+# Run button. Persisted per-workspace to ``.pbg/composite-state-cache/<ref>.json``
+# so a server RESTART also has something to show. This is distinct from
+# ``_COMPOSITE_STATE_CACHE`` (a short-TTL hot cache of fresh builds).
+_LAST_GOOD: dict = {}
+
+
 def clear_cache() -> None:
     """Clear the composite-state build cache (called on workspace switch)."""
     _COMPOSITE_STATE_CACHE.clear()
+    _LAST_GOOD.clear()
+
+
+def _last_good_path(ws_root: Path, ref: str) -> "Path | None":
+    """Persisted last-good file for ``ref`` under this workspace's ``.pbg``."""
+    try:
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+        safe = ref.replace("/", "_").replace(":", "_")
+        return WorkspacePaths.load(ws_root).pbg / "composite-state-cache" / (safe + ".json")
+    except Exception:
+        return None
+
+
+def _record_last_good(ws_root: Path, ref: str, payload: dict) -> None:
+    """Remember a successfully-built composite state (memory + disk), best-effort."""
+    key = (str(ws_root), ref)
+    _LAST_GOOD[key] = payload
+    if len(_LAST_GOOD) > 64:  # cap memory; drop the oldest entry
+        _LAST_GOOD.pop(next(iter(_LAST_GOOD)))
+    p = _last_good_path(ws_root, ref)
+    if p is None:
+        return
+    try:
+        from vivarium_workbench.lib import atomic_io
+        p.parent.mkdir(parents=True, exist_ok=True)
+        atomic_io.atomic_write_text(p, json.dumps(payload, default=str))
+    except Exception:
+        pass  # a cosmetic cache write must never break the request
+
+
+def _load_last_good(ws_root: Path, ref: str) -> "dict | None":
+    """Last-good state for ``ref`` — memory first, then the persisted file."""
+    hit = _LAST_GOOD.get((str(ws_root), ref))
+    if hit is not None:
+        return hit
+    p = _last_good_path(ws_root, ref)
+    if p is not None and p.is_file():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _build_error_kind(err_str: str) -> str:
+    """Classify a generator build failure for the client's warning chip."""
+    if _is_parca_cache_error(err_str):
+        return "stale-cache"
+    low = err_str.lower()
+    if "import" in low or "module" in low:
+        return "import"
+    return "build-error"
+
+
+def _degrade_build_error(
+    ws_root: Path, ref: str, overrides: "dict | None", err: Any,
+    emitters: Any, cache_key: tuple,
+) -> "tuple[dict, int]":
+    """A generator build failed — return a 200 degrade instead of a 400, so the
+    Composites view still renders (with a warning chip) and the Run button stays
+    reachable. Whether a Run is *allowed* is a separate decision the dispatch path
+    makes (a cloud run needs no local cache; a local run does). Three tiers:
+
+      1. static artifact (``reports/composite-state/<ref>.json``) — the default
+         wiring; when overrides were supplied it can't reflect them, so it is
+         served with ``stale_overrides: True`` and a notice (the user still sees
+         their Apply did not render), rather than the old hard refusal.
+      2. last-known-good — the last state that DID build (this session or a prior
+         one, via the persisted file).
+      3. skeleton — an honest ``wiring_status: "unavailable"`` placeholder.
+
+    Every tier attaches ``build_error`` so the card can render the warning.
+    """
+    err_str = str(err)
+    build_error: "dict[str, Any]" = {"kind": _build_error_kind(err_str), "detail": err_str}
+    # A materialized remote build ships no local ParCa cache — keep the clearer,
+    # expected-for-Cloud wording as the notice rather than a raw build trace.
+    if _is_parca_cache_error(err_str):
+        try:
+            from vivarium_workbench.lib.remote_simulations import _read_build_meta
+            _meta = _read_build_meta(ws_root)
+        except Exception:
+            _meta = None
+        if _meta is not None:
+            _sim = _meta.get("simulator_id")
+            _commit = str(_meta.get("commit") or "")[:7]
+            who = (f"remote build #{_sim}" if _sim is not None else "this remote build") \
+                + (f" @ {_commit}" if _commit else "")
+            build_error["notice"] = (
+                f"{who} has no local ParCa cache, so its wiring preview can't be built "
+                f"here — run it on the Cloud, or provision a local out/cache.")
+            build_error["remote_no_cache"] = True
+
+    def _finish(payload: dict) -> "tuple[dict, int]":
+        payload["build_error"] = build_error
+        _COMPOSITE_STATE_CACHE[cache_key] = (time.time(), payload)
+        if len(_COMPOSITE_STATE_CACHE) > 16:
+            _COMPOSITE_STATE_CACHE.pop(next(iter(_COMPOSITE_STATE_CACHE)))
+        return payload, 200
+
+    # Tier 1: static artifact.
+    static = ws_root / "reports" / "composite-state" / (ref + ".json")
+    if static.is_file():
+        try:
+            doc = json.loads(static.read_text(encoding="utf-8"))
+            inner = doc.get("state", doc) if isinstance(doc, dict) else doc
+            inner = process_docs.attach_process_docs_via_worker(ws_root, inner)
+            _embed_declared_emit_paths(inner, emitters)
+            note = ("served pre-generated default wiring (live build failed: "
+                    f"{err_str})")
+            payload = {"state": inner, "kind": "static-fallback", "note": note}
+            if overrides:
+                # The artifact is the UNOVERRIDDEN default; say so, so the user
+                # sees their Config → Apply did not render (the old code refused
+                # outright here, blanking the view).
+                payload["stale_overrides"] = True
+                payload["note"] = ("Config → Apply could not be rendered locally "
+                                   f"({err_str}); showing DEFAULT wiring.")
+            return _finish(payload)
+        except Exception:
+            pass
+
+    # Tier 2: last-known-good.
+    lg = _load_last_good(ws_root, ref)
+    if lg is not None and isinstance(lg.get("state"), (dict, list)):
+        payload = {"state": lg["state"], "kind": "last-good",
+                   "note": ("showing the last wiring that built successfully "
+                            f"(current build failed: {err_str})")}
+        if overrides:
+            payload["stale_overrides"] = True
+        return _finish(payload)
+
+    # Tier 3: honest skeleton — never a 400 for a build failure.
+    notice = build_error.get("notice") or (
+        f"wiring preview is unavailable (build failed: {err_str})")
+    payload = {"state": None, "kind": "skeleton", "wiring_status": "unavailable",
+               "notice": notice}
+    return _finish(payload)
 
 
 def composite_state_via_subprocess(
@@ -178,10 +326,15 @@ def build_composite_state(
     - **no ref** → 400 ``{"error": "ref required"}``.
     - **generator branch** (subprocess returns ``{state, module}``) → 200
       ``{state, kind: "generator", module}`` (cached).
-    - **build-error → static fallback** (subprocess returns ``{__build_error__}``):
-      if ``reports/composite-state/<ref>.json`` exists, load + ``attach_process_docs``
-      the inner state → 200 ``{state, kind: "static-fallback", note}`` (cached);
-      else 400 ``{"error": "generator build failed: <e>"}``.
+    - **build-error → graceful degrade** (subprocess returns ``{__build_error__}``):
+      never a 400 (a build failure is usually environmental — a stale/absent ParCa
+      cache, an env-probe drift — not a broken composite, and a Cloud run needs no
+      local cache). :func:`_degrade_build_error` returns 200 with a ``build_error``
+      chip and the best available wiring: the static artifact
+      (``reports/composite-state/<ref>.json``, ``kind: "static-fallback"``; served
+      with ``stale_overrides`` when overrides couldn't render), else the
+      last-known-good state (``kind: "last-good"``), else an honest skeleton
+      (``kind: "skeleton"``, ``wiring_status: "unavailable"``).
     - **spec/path resolution** (``__not_registered__`` / subprocess failure):
       resolve via ``find_composite_path``, then workspace-relative ``ws_root/ref``,
       then static ``reports/composite-state/<ref>.json``; parse (json if ``.json``
@@ -241,56 +394,18 @@ def build_composite_state(
         cache[ckey] = (time.time(), payload)
         if len(cache) > 16:  # cap memory; drop the oldest entry
             cache.pop(next(iter(cache)))
+        _record_last_good(ws_root, ref, payload)  # so a later build failure can degrade to this
         return payload, 200
     if res is not None and "__build_error__" in res:
-        # ROBUST FALLBACK: a live build can fail for environmental reasons
-        # (e.g. a stale ParCa cache missing 'tf_ids') even when the composite
-        # is valid — serve the pre-generated static state if it exists.
-        # BUT NOT when the caller supplied Config overrides: the static artifact
-        # is the UNOVERRIDDEN default, so serving it would silently mask an
-        # invalid-override error (e.g. a single-value param given a comma-list)
-        # as if the bad config had been accepted. Surface the error instead.
-        e = res["__build_error__"]
-        _static = ws_root / "reports" / "composite-state" / (ref + ".json")
-        if not overrides and _static.is_file():
-            try:
-                _doc = json.loads(_static.read_text(encoding="utf-8"))
-                _inner = _doc.get("state", _doc) if isinstance(_doc, dict) else _doc
-                _inner = process_docs.attach_process_docs_via_worker(ws_root, _inner)
-                # The subprocess resolved `entry` before the build failed, so
-                # its declared emitters are still authoritative here (more
-                # accurate than trusting a possibly-stale static artifact).
-                _embed_declared_emit_paths(_inner, res.get("emitters"))
-                _payload = {"state": _inner, "kind": "static-fallback",
-                            "note": f"served pre-generated state (live build failed: {e})"}
-                cache[ckey] = (time.time(), _payload)
-                return _payload, 200
-            except Exception:
-                pass
-        # A materialized remote build ships no local ParCa cache (the GitHub source
-        # archive excludes gitignored out/), so a local generator build fails with
-        # a cache error ("Cache at 'out/cache' is stale or unversioned"). This is
-        # the SAME "remote build has no local ParCa cache" case that readouts_views
-        # / composite_resolve already degrade to a soft notice — mirror that here
-        # instead of surfacing a raw "generator build failed" for the wiring
-        # preview. The frontend renders {error} as a clean panel; the clearer text
-        # tells the user this is expected for a Cloud build, not a broken composite.
-        _e_str = str(e)
-        if _is_parca_cache_error(_e_str):
-            from vivarium_workbench.lib.remote_simulations import _read_build_meta
-            _meta = _read_build_meta(ws_root)   # non-None only for a materialized remote build
-            if _meta is not None:
-                _sim = _meta.get("simulator_id")
-                _commit = str(_meta.get("commit") or "")[:7]
-                _who = (f"remote build #{_sim}" if _sim is not None else "this remote build") \
-                    + (f" @ {_commit}" if _commit else "")
-                return {
-                    "error": (f"{_who} has no local ParCa cache, so its wiring preview "
-                              f"can't be built here — run it on the Cloud, or provision a "
-                              f"local out/cache. ({_e_str})"),
-                    "remote_no_cache": True,
-                }, 400
-        return {"error": f"generator build failed: {e}"}, 400
+        # A live build can fail for ENVIRONMENTAL reasons (a stale/absent ParCa
+        # cache, an env-probe drift, a mid-restart worker) even when the composite
+        # is perfectly valid. Do NOT 400 — that blanks the Composites view and
+        # hides the Run button, which for a Cloud run needs no local cache at all.
+        # Degrade to a labelled 200 (static default / last-good / skeleton), with a
+        # build_error the card renders as a warning chip. Whether a Run is allowed
+        # is decided at dispatch, not here.
+        return _degrade_build_error(
+            ws_root, ref, overrides, res["__build_error__"], res.get("emitters"), ckey)
     # __not_registered__ or subprocess failure → fall through to path resolution.
 
     path = None
@@ -344,7 +459,9 @@ def build_composite_state(
     # `doc["state"]`.
     if isinstance(doc, dict) and isinstance(doc.get("state"), dict):
         _embed_declared_emit_paths(doc["state"], doc.get("emitters"))
-    return {"state": doc, "kind": "spec"}, 200
+    _spec_payload = {"state": doc, "kind": "spec"}
+    _record_last_good(ws_root, ref, _spec_payload)
+    return _spec_payload, 200
 
 
 def _embed_declared_emit_paths(state_doc: Any, decls: "list | None") -> None:

@@ -2142,12 +2142,16 @@ def test_composite_state_static_fallback_200(tmp_path, monkeypatch):
     assert body["state"] == {"y": 2}
 
 
-def test_composite_state_build_error_400(tmp_path, monkeypatch):
+def test_composite_state_build_error_degrades(tmp_path, monkeypatch):
+    """A generator build failure degrades to a 200 skeleton with a build_error
+    chip (not a 400) so the Composites view still renders and Run stays reachable."""
     ws = _cs_ws(tmp_path)
     _patch_cs_subprocess(monkeypatch, {"__build_error__": "boom"})
     r = _cs_client(ws).get("/api/composite-state", params={"ref": "gen"})
-    assert r.status_code == 400
-    assert r.json() == {"error": "generator build failed: boom"}
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "skeleton"
+    assert body["build_error"]["detail"] == "boom"
 
 
 def test_composite_state_in_openapi(client):
