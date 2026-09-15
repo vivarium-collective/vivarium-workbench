@@ -1086,3 +1086,21 @@ def test_runner_recorded_runs_not_prefixed_when_study_has_store(tmp_path):
     ids = {s["run_id"] for s in sims}
     # one row, verbatim id (store row + study.yaml entry merged), no "s:run-abc"
     assert ids == {"run-abc"}
+
+
+def test_sim_recency_key_pins_active_runs_to_top():
+    """A just-launched (queued/running) cloud run must sort to the TOP of the
+    merged Runs DB, ahead of older completed local/remote rows — the fix for a
+    remote row being appended after the local sort and landing at the bottom."""
+    from vivarium_workbench.lib.simulations_index import _sim_recency_key
+    rows = [
+        {"run_id": "local-old", "status": "completed", "started_at": 1788494400.0},
+        {"run_id": "remote-queued", "status": "queued", "started_at": 1789416841.0,
+         "remote_origin": {"simulation_id": 1343}},
+        {"run_id": "remote-done", "status": "completed", "started_at": 1789000000.0,
+         "remote_origin": {"simulation_id": 1300}},
+        {"run_id": "local-recent", "status": "completed", "started_at": 1789500000.0},
+    ]
+    rows.sort(key=_sim_recency_key, reverse=True)
+    assert rows[0]["run_id"] == "remote-queued"           # active pinned to top
+    assert [r["run_id"] for r in rows[1:]] == ["local-recent", "remote-done", "local-old"]

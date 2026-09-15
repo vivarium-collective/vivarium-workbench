@@ -1928,6 +1928,32 @@ def build_simulations_data_cached(ws_root: Path, include_remote: bool = True,
     return data
 
 
+# Run statuses that mean "not finished" — a run in one of these is something the
+# user just launched and is actively watching, so it pins to the top of the Runs DB.
+_ACTIVE_RUN_STATUSES = {"queued", "running", "pending", "submitted", "in_progress",
+                        "started", "dispatching", "refreshing"}
+
+
+def _sim_recency_key(r: dict) -> tuple:
+    """Sort key for the merged Runs-DB list (used with ``reverse=True``):
+    ACTIVE runs first, then newest-first by completion/start time, then by remote
+    ``simulation_id`` so the latest-dispatched cloud run leads among same-time rows.
+    """
+    status = str(r.get("status") or "").strip().lower()
+    active = 1 if status in _ACTIVE_RUN_STATUSES else 0
+    ts = r.get("completed_at") or r.get("started_at") or 0
+    try:
+        ts = float(ts)
+    except (TypeError, ValueError):
+        ts = 0.0
+    ro = r.get("remote_origin") or {}
+    try:
+        simid = int(ro.get("simulation_id") or 0)
+    except (TypeError, ValueError):
+        simid = 0
+    return (active, ts, simid)
+
+
 def build_simulations_data(ws_root: Path, include_remote: bool = True,
                            fresh: bool = False) -> dict:
     """Data builder for GET /api/simulations — the ``list_simulations`` rows
@@ -1978,6 +2004,16 @@ def build_simulations_data(ws_root: Path, include_remote: bool = True,
     remote_state: dict | None = None
     if include_remote:
         sims = _append_remote_simulations(sims, ws_root, fresh=fresh)
+        # Re-sort the MERGED local+remote list. _append_remote_simulations appends
+        # remote rows AFTER the local-only sort above, so without this a just-
+        # dispatched cloud run (a remote row) lands at the bottom instead of the
+        # top — exactly what the user sees after clicking Run. Pin ACTIVE runs
+        # (queued/running — what someone just launched and is watching) to the very
+        # top, then newest-first by completion/start time, with the remote
+        # simulation_id as a tiebreaker so the latest dispatch leads (remote list
+        # timestamps come from an unreliable bulk `last_updated`, so the id is the
+        # more trustworthy recency signal for same-timestamped remote rows).
+        sims.sort(key=_sim_recency_key, reverse=True)
         # Provenance of the remote source, so the Runs tab can show
         # "as of HH:MM (refreshing…)" instead of a spinner. Best-effort: a
         # failure here must never break the local listing.
