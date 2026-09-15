@@ -395,11 +395,42 @@ export async function startRun(args: StartRunArgs): Promise<StartRunResponse> {
   return respBody as StartRunResponse;
 }
 
-/** Poll one run's status. Cheap single-row read; safe to call on an interval. */
+/** Error thrown by fetchRunStatus so the poll loop can tell a run that is GONE
+ *  (HTTP 404 — the server no longer tracks it) from a transient network blip or
+ *  a cloud-link outage (HTTP 502 with `phase: "unreachable"`) apart from an
+ *  ordinary failure. Carries the HTTP status and, when the body has one, the
+ *  proxied phase so `useCompositeRun` can route each case correctly. */
+export interface RunStatusError extends Error {
+  /** HTTP status of the failed /status response (0 for a network-level error). */
+  status: number;
+  /** Proxied phase from the response body (e.g. sms-api "unreachable"). */
+  phase?: string;
+}
+
+/** Poll one run's status. Cheap single-row read; safe to call on an interval.
+ *  Rejects with a {@link RunStatusError} carrying the HTTP status so the caller
+ *  can distinguish a 404 ("run gone" — terminal) from a transient failure and a
+ *  502 cloud-link outage. */
 export async function fetchRunStatus(runId: string): Promise<RunStatus> {
-  const r = await fetch(`/api/composite-run/${runId}/status`);
-  const body = await r.json();
-  if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+  let r: Response;
+  try {
+    r = await fetch(`/api/composite-run/${runId}/status`);
+  } catch (e: any) {
+    // Network-level failure (server down / DNS / offline): no HTTP status.
+    const err = new Error(e?.message || String(e)) as RunStatusError;
+    err.status = 0;
+    throw err;
+  }
+  let body: any = null;
+  try { body = await r.json(); } catch { /* non-JSON / empty body */ }
+  if (!r.ok) {
+    const err = new Error((body && body.error) || `HTTP ${r.status}`) as RunStatusError;
+    err.status = r.status;
+    // A cloud (remote-sim) status proxies sms-api; a 502 {phase:"unreachable"}
+    // means the LINK is down, not that the run is gone.
+    if (body && typeof body.phase === 'string') err.phase = body.phase;
+    throw err;
+  }
   return body as RunStatus;
 }
 
