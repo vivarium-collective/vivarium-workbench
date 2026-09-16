@@ -141,12 +141,38 @@
         setTimeout(function () { row.style.boxShadow = prev; }, 2200);
         return;
       }
-      if (tries++ < 25) setTimeout(look, 400);
+      // A just-dispatched cloud run only lands in the Runs list after the slow
+      // remote (GovCloud) merge — up to ~2 min on a cold fetch — so keep looking
+      // well past the local-first paint instead of giving up at 10s and leaving
+      // the user staring at a list that "doesn't have" their run yet.
+      if (tries++ < 300) setTimeout(look, 500);
     })();
+  }
+  // A composite-card cloud run is a baseline run with NO investigation tag, but
+  // the Runs DB defaults its Investigation filter to the current git branch's
+  // investigation (e.g. cd2). That default filters the run out entirely, so the
+  // user lands on Runs with their just-dispatched run invisible. Widen the scope
+  // to "All" (and mark it a deliberate choice so a background refresh doesn't
+  // snap it back to the branch default) before we try to focus the row.
+  function _widenRunsToAllOnce() {
+    try {
+      window._simInvChosen = true;
+      var sel = document.getElementById('sim-inv-filter');
+      if (sel) sel.value = '';
+      if (typeof window._applySimFilter === 'function') window._applySimFilter();
+    } catch (e) { /* ignore — best-effort widen */ }
+  }
+  // _switchPage's _initSimulations runs async and re-populates the filter select
+  // (local-first, then again after the remote merge), and either pass can re-read
+  // a stale branch value. Re-assert the widen across those passes so "All" sticks.
+  function _widenRunsToAll() {
+    _widenRunsToAllOnce();
+    [250, 700, 1500].forEach(function (ms) { setTimeout(_widenRunsToAllOnce, ms); });
   }
   function _viewCloudRunInRuns(simId) {
     if (typeof window._switchPage === 'function') {
       window._switchPage('simulations');
+      _widenRunsToAll();
       _focusRemoteRow(simId);
     } else {
       // Study-detail iframe / no SPA driver: navigate the top window to Runs.
