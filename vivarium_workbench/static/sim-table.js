@@ -830,6 +830,14 @@
     });
   }
 
+  // Active (not-finished) run statuses — always pin to the top of a sorted table
+  // (a just-launched cloud run can't rise on the frozen bulk remote timestamp).
+  var _ACTIVE_RUN_STATUSES = { queued: 1, running: 1, pending: 1, submitted: 1,
+                               in_progress: 1, started: 1, dispatching: 1 };
+  function _isActiveRun(row) {
+    return !!_ACTIVE_RUN_STATUSES[String((row && row.status) || "").toLowerCase()];
+  }
+
   function sortValue(row, key) {
     if (key === "time") return row.completed_at || row.started_at || 0;
     if (key === "composite") return String(row.spec_id || "").toLowerCase();
@@ -870,6 +878,10 @@
     var sort = mount._simSort || { key: "time", dir: "desc" };
     mount._simSort = sort;
     var sorted = rows.slice().sort(function (a, b) {
+      // Active runs (queued/running) always pin to the top, regardless of the
+      // column sort — a live run can't rise on the frozen bulk remote timestamp.
+      var aa = _isActiveRun(a), ba = _isActiveRun(b);
+      if (aa !== ba) return aa ? -1 : 1;
       var av = sortValue(a, sort.key), bv = sortValue(b, sort.key);
       var c = av < bv ? -1 : av > bv ? 1 : 0;
       return sort.dir === "asc" ? c : -c;

@@ -15364,15 +15364,39 @@
     return '';
   }
 
+  // Statuses that mean "not finished" — a run the user just launched and is
+  // actively watching. These ALWAYS pin to the top of the Runs list, regardless
+  // of the column sort: remote list timestamps come from an unreliable bulk
+  // `last_updated` (every GovCloud run shows the same frozen time), so a live
+  // cloud run can't otherwise rise above the wall of old completed runs.
+  var _ACTIVE_RUN_STATUSES = { queued: 1, running: 1, pending: 1, submitted: 1,
+                               in_progress: 1, started: 1, dispatching: 1 };
+  function _isActiveRun(row) {
+    return !!_ACTIVE_RUN_STATUSES[String((row && row.status) || '').toLowerCase()];
+  }
+  function _sortActiveRuns(list) {
+    // Newest dispatch first among the active runs — the remote simulation_id is
+    // monotonic and trustworthy (unlike the frozen timestamp), else fall to time.
+    return list.slice().sort(function (a, b) {
+      var ai = ((a.remote_origin || {}).simulation_id) || 0;
+      var bi = ((b.remote_origin || {}).simulation_id) || 0;
+      if (ai !== bi) return bi - ai;
+      return (b.completed_at || b.started_at || 0) - (a.completed_at || a.started_at || 0);
+    });
+  }
+
   function _sortSimRows(rows, key, dir) {
-    if (!key) return rows;
-    const s = rows.slice().sort(function (a, b) {
+    var active = rows.filter(_isActiveRun);
+    var rest = rows.filter(function (r) { return !_isActiveRun(r); });
+    if (!key) return _sortActiveRuns(active).concat(rest);  // backend order for the rest
+    var s = rest.slice().sort(function (a, b) {
       var va = _simSortValue(a, key), vb = _simSortValue(b, key);
       if (va < vb) return -1;
       if (va > vb) return 1;
       return 0;
     });
-    return dir === 'desc' ? s.reverse() : s;
+    var sortedRest = dir === 'desc' ? s.reverse() : s;
+    return _sortActiveRuns(active).concat(sortedRest);
   }
 
   function _onSimHeaderClick(th) {
