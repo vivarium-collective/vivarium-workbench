@@ -135,6 +135,11 @@ def test_composite_test_run_explicit_cloud_build_dispatches_image(tmp_path, monk
         captured.update(kw)
         return {"database_id": 909, "experiment_id": "sim211-exp"}
     monkeypatch.setattr(sac.SmsApiClient, "run_simulation", _fake_run_simulation)
+    # This build carries the whole-cell default config (a v2ecoli-style repo), so
+    # config resolution succeeds and the dispatch proceeds (#1113 fail-closed only
+    # triggers when NO default is discoverable — covered by its own test below).
+    monkeypatch.setattr(sac.SmsApiClient, "_get",
+                        lambda self, path, params=None: {"config_filenames": ["api_simulation_default.json"]})
 
     body = {"id": "pkg.composites.x", "steps": 7, "run_target": "deployment",
             "build": {"simulator_id": 211,
@@ -249,9 +254,54 @@ def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypa
     captured = {}
     monkeypatch.setattr(sac.SmsApiClient, "run_simulation",
                         lambda self, **kw: (captured.update(kw), {"database_id": 777})[1])
+    # Build carries the whole-cell default so config resolution succeeds (#1113).
+    monkeypatch.setattr(sac.SmsApiClient, "_get",
+                        lambda self, path, params=None: {"config_filenames": ["api_simulation_default.json"]})
 
     resp, status = v.composite_test_run(tmp_path, {"id": "pkg.composites.x", "steps": 7})
     assert status == 202, resp
     assert resp["run_id"] == "remote-sim-777"
     assert resp["remote"] is True
     assert captured["simulator_id"] == 124
+
+
+def test_composite_test_run_no_config_no_default_fails_closed(tmp_path, monkeypatch):
+    """#1113: a Cloud image dispatch with NO explicit config, against a build whose
+    repo has no whole-cell default, must FAIL CLOSED (409 no-config-for-composite)
+    — never silently fall back to the build's alphabetically-first config (which
+    ran an UNRELATED simulation attributed to the requested composite). Confirmed
+    live 6/6 on build #211: every ecoli_baseline card-run silently became
+    fss_pathway_oe_native_oe_carina. run_simulation must NOT be called."""
+    from vivarium_workbench.lib import composite_test_run_views as v
+    from vivarium_workbench.lib import run_registry, remote_run
+    from vivarium_workbench.lib import sms_api_client as sac
+
+    (tmp_path / ".pbg").mkdir()
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
+    monkeypatch.setattr(run_registry, "spawn_detached",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no compose spawn")))
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight",
+                        lambda ws: (_ for _ in ()).throw(AssertionError("preflight skipped")))
+    # The sms-ecoli fork build (#211): only CD-specific configs, NO whole-cell
+    # default — the exact case that used to resolve to an arbitrary cfgs[0].
+    monkeypatch.setattr(sac.SmsApiClient, "_get",
+                        lambda self, path, params=None: {"config_filenames":
+                            ["fss_pathway_oe_native_oe_carina.json", "mecillinam_wellmixed.json"]})
+
+    def _must_not_run(self, **kw):  # pragma: no cover - only hit on regression
+        raise AssertionError("run_simulation must not be called when config fails closed")
+    monkeypatch.setattr(sac.SmsApiClient, "run_simulation", _must_not_run)
+
+    body = {"id": "v2ecoli.composites.ecoli_baseline", "steps": 7, "run_target": "deployment",
+            "build": {"simulator_id": 211,
+                      "repo_url": "https://github.com/CovertLabEcoli/sms-ecoli.git",
+                      "commit": "33ecd77"}}
+    resp, status = v.composite_test_run(tmp_path, body)
+    assert status == 409, resp
+    assert resp["reason"] == "no-config-for-composite"
+    assert "ecoli_baseline" in resp["error"]
+    assert "#211" in resp["error"]
+    assert resp["spec_id"] == "v2ecoli.composites.ecoli_baseline"
+    assert resp["available_configs"] == [
+        "fss_pathway_oe_native_oe_carina.json", "mecillinam_wellmixed.json"]

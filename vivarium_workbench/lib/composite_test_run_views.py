@@ -78,18 +78,38 @@ def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filena
     # repos (e.g. v2ecoli) — a build whose repo lacks it (e.g. the sms-ecoli fork,
     # which carries only CD-specific configs) 404s when the config is omitted. So
     # when the caller didn't pin one, ask discovery and prefer the whole-cell
-    # default, else the build's first available config, so the dispatch never 404s.
+    # default.
+    #
+    # #1113: do NOT fall back to the build's first available config (cfgs[0]).
+    # ``spec_id`` (the composite actually requested) never mapped to that pick, so
+    # cfgs[0] — the alphabetically-first file in the build's repo — silently ran an
+    # UNRELATED simulation (e.g. every ecoli_baseline card-run against build #211,
+    # which lacks the whole-cell default, resolved to fss_pathway_oe_native_oe_carina
+    # and burned real Batch/ParCa compute before failing later for an unrelated
+    # reason). Fail CLOSED instead: a wrong-config dispatch that happens to succeed
+    # would attribute a real result to the wrong composite. The caller must pick a
+    # config explicitly when the build has no whole-cell default.
     if not config_filename:
+        cfgs: list = []
         try:
             disc = client._get("/api/v1/simulations/discovery",
                                params={"simulator_id": int(simulator_id)})
             cfgs = disc.get("config_filenames") or []
-            if "api_simulation_default.json" in cfgs:
-                config_filename = "api_simulation_default.json"
-            elif cfgs:
-                config_filename = cfgs[0]
-        except Exception:  # noqa: BLE001 — discovery is best-effort; fall back to the sms-api default
-            pass
+        except Exception:  # noqa: BLE001 — discovery is best-effort; treated as "none discovered"
+            cfgs = []
+        if "api_simulation_default.json" in cfgs:
+            config_filename = "api_simulation_default.json"
+        else:
+            _avail = ", ".join(cfgs) if cfgs else "(none discovered)"
+            return {
+                "error": (f"Cloud build #{simulator_id} has no default config for "
+                          f"'{spec_id}'. Pick a config explicitly before dispatching "
+                          f"— configs available on this build: {_avail}."),
+                "reason": "no-config-for-composite",
+                "run_target": "deployment",
+                "spec_id": spec_id,
+                "available_configs": cfgs,
+            }, 409
     try:
         sim = client.run_simulation(
             simulator_id=int(simulator_id),
