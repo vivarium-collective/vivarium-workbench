@@ -96,7 +96,12 @@ def _post(url, payload):
 
 
 def _get(url):
-    with urllib.request.urlopen(url, timeout=10) as r:
+    # timeout=60 (matching _post): /api/investigations builds the investigation
+    # registry, which under SHARDED CI ("suite N/4") resource contention can take
+    # longer than the old 10s → a socket TimeoutError that failed the test
+    # reproducibly while it passed on main's single-job pytest. The request is
+    # correct, just slow under contention, so give it the same headroom as _post.
+    with urllib.request.urlopen(url, timeout=60) as r:
         return r.status, json.loads(r.read().decode())
 
 
