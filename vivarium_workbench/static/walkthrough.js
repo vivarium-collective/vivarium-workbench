@@ -1380,9 +1380,12 @@
     // workspaces without a provider see no extra UI. Rendered FIRST (above the
     // shared datasets/references) as the primary repo-wide source.
     html += '<div id="data-sources-host" style="display:none;margin-bottom:16px"></div>';
-    html += '<h4 style="margin:12px 0 4px">Datasets</h4>' +
+    // Scope the sub-headers so they stay unambiguous when the panel's own
+    // "Repo-wide data sources" heading scrolls off — otherwise a bare "Datasets"
+    // here reads as a twin of the investigation's "Datasets" table above.
+    html += '<h4 style="margin:12px 0 4px">Repo-wide datasets</h4>' +
       _inputsDatasetsHtml(glob.datasets);
-    html += '<h4 style="margin:12px 0 4px">References</h4>' +
+    html += '<h4 style="margin:12px 0 4px">Repo-wide references</h4>' +
       _inputsRefsHtml(glob.references);
     html += '</div>';
 
