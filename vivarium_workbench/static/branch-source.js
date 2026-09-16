@@ -1028,6 +1028,24 @@
         return (Number(b.simulator_id) || 0) - (Number(a.simulator_id) || 0);
       })[0];
       return m || null;
+    },
+    // Programmatic scope setter so a per-run control on the composite card (the
+    // run-target chip) can flip Local↔Cloud IN PLACE — without navigating to the
+    // Source panel's segmented Environment toggle, the friction this removes.
+    // Mirrors that toggle's click handler: reset the source selectors, then
+    // refresh() (re-fetches builds for the new scope and fires viv:envchange so
+    // every run-target badge re-reflects). No-op when already on `s`. When the
+    // Source panel isn't mounted, still fire viv:envchange so the cards update.
+    setScope: function (s) {
+      if (s !== "local" && s !== "remote") return;
+      if (state.scope === s) return;
+      state.scope = s;
+      state.repo = null; state.branch = null; state.newBranch = ""; state.showAllBuilds = false;
+      if (document.getElementById("viv-branch-source")) {
+        refresh();
+      } else {
+        try { window.dispatchEvent(new Event('viv:envchange')); } catch (e) { /* older browsers */ }
+      }
     }
   };
   document.addEventListener("DOMContentLoaded", function () {

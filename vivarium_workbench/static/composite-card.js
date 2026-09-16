@@ -789,17 +789,43 @@
       tip: (pf.message || 'This workspace runs locally.') +
         ' Switch the Environment scope to Cloud (with a build selected) to dispatch a Run remotely instead.' };
   }
+  // Per-run local/remote switch: the run-target badge is a CLICKABLE chip when
+  // VivEnv is available (live mode) — clicking flips the Environment scope
+  // Local↔Cloud in place, so you switch where a Run executes without leaving the
+  // card for the Source panel's toggle. Snapshot/static mode (no VivEnv) leaves
+  // the badge as a passive label.
+  function _runTargetClickable() {
+    return !!(window.VivEnv && typeof window.VivEnv.setScope === 'function');
+  }
   function _applyRunTargetBadges(pf) {
     var badges = document.querySelectorAll('.pcard-runtarget[data-role="runtarget"]');
     if (!badges.length) return;
     if (pf !== undefined) window._lastRunTargetPreflight = pf;  // cache for scope-change re-apply
     var t = _computeRunTarget(pf !== undefined ? pf : window._lastRunTargetPreflight);
-    badges.forEach(function (b) { b.textContent = t.label; b.title = t.tip; b.style.background = t.bg; b.style.color = t.fg; });
+    var clickable = _runTargetClickable();
+    badges.forEach(function (b) {
+      b.textContent = t.label;
+      b.title = t.tip + (clickable ? ' — click to switch Local ⇄ Cloud.' : '');
+      b.style.background = t.bg; b.style.color = t.fg;
+      b.style.cursor = clickable ? 'pointer' : '';
+      b.setAttribute('data-clickable', clickable ? '1' : '0');
+    });
   }
   window._applyRunTargetBadges = _applyRunTargetBadges;
   // Re-reflect the badge live when the Environment scope / selected build changes
   // (branch-source.js dispatches viv:envchange) — no re-fetch, re-reads VivEnv.
   window.addEventListener('viv:envchange', function () { _applyRunTargetBadges(); });
+  // One delegated handler for the clickable chip: flip scope to the OTHER target.
+  // Registered once; badges are re-created per render, so delegation (not per-badge
+  // listeners) avoids duplicates/leaks. viv:envchange then re-applies every badge.
+  document.addEventListener('click', function (ev) {
+    var chip = ev.target && ev.target.closest && ev.target.closest('.pcard-runtarget[data-role="runtarget"]');
+    if (!chip || chip.getAttribute('data-clickable') !== '1') return;
+    if (!_runTargetClickable()) return;
+    ev.preventDefault(); ev.stopPropagation();
+    try { window.VivEnv.setScope(window.VivEnv.isCloud() ? 'local' : 'remote'); }
+    catch (e) { /* VivEnv gone → no-op */ }
+  });
 
   var _runTargetScheduled = false;
   function _scheduleRunTargetBadges() {
