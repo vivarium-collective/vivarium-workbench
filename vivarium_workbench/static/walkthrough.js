@@ -3957,6 +3957,15 @@
     var entries = vizEntries || [];
     var analyses = entries.filter(function(c) { return c.kind === 'analysis'; })
       .map(function (c) { return { name: c.name, address: c.address, description: c.doc || '', kind: 'analysis', source: 'framework' }; });
+    // Merge the address-classified workspace analyses (kind=step under ….analyses.…,
+    // which /api/visualization-classes doesn't enumerate) so they render in the
+    // Analyses tab instead of Processes. Dedupe by name (viz-classes entry wins).
+    var _seenA = {};
+    analyses.forEach(function (a) { _seenA[(a.name || '').trim()] = true; });
+    (window._addrClassifiedAnalyses || []).forEach(function (a) {
+      var nm = (a.name || '').trim();
+      if (nm && !_seenA[nm]) { _seenA[nm] = true; analyses.push(a); }
+    });
     var cards    = entries.filter(function(c) { return c.kind === 'report_card' || c.kind === 'test'; });
     var vizzes   = entries.filter(function(c) { var k = c.kind; return k !== 'analysis' && k !== 'report_card' && k !== 'test'; });
 
@@ -4183,14 +4192,38 @@
         // Processes and Steps share one "Processes" tab — both are Processes
         // (edges); each card/row is badged Temporal vs Step (_procKindBadge).
         var procsAndSteps = byKind.process.concat(byKind.step);
+        // Analysis/visualization classes are mechanically Steps (they subclass
+        // Step), so build_core reports them as kind=step and they'd otherwise pile
+        // into the Processes tab even though they each have their own tab. Route
+        // them by the module-path convention (….analyses.… / ….visualizations.…)
+        // so a class shows under exactly one tab; genuine processes/steps stay put.
+        // (/api/visualization-classes only enumerates framework analyses, not the
+        // workspace's own sms_modules.analyses.* — hence the path-based split here.)
+        var _addrCat = function (e) {
+          var s = '.' + String(e.address || '').toLowerCase() + '.';
+          if (s.indexOf('.analyses.') >= 0 || s.indexOf('.analysis.') >= 0) return 'analysis';
+          if (s.indexOf('.visualizations.') >= 0 || s.indexOf('.visualization.') >= 0) return 'visualization';
+          return 'process';
+        };
+        var realProcs = [], addrAnalyses = [], addrViz = [];
+        procsAndSteps.forEach(function (p) {
+          var c = _addrCat(p);
+          if (c === 'analysis') addrAnalyses.push(Object.assign({}, p, {kind: 'analysis'}));
+          else if (c === 'visualization') addrViz.push(p);
+          else realProcs.push(p);
+        });
+        byKind.visualization = byKind.visualization.concat(addrViz);
+        // Stashed for _enrichRegistryWithVizClasses to merge into the Analyses tab
+        // (deduped by name) alongside the /api/visualization-classes analyses.
+        window._addrClassifiedAnalyses = addrAnalyses;
         window._registryByKind = {
-          'registry-processes-container': procsAndSteps,
+          'registry-processes-container': realProcs,
           'registry-emitters-container': byKind.emitter,
           'registry-visualizations-container': byKind.visualization,
           'registry-report_cards-container': byKind.report_card,
         };
         // Render tabbed Registry browser (Registry page).
-        _renderRegistryGrid('registry-processes-container', procsAndSteps);
+        _renderRegistryGrid('registry-processes-container', realProcs);
         _renderRegistryGrid('registry-emitters-container', byKind.emitter);
         window._registryVizEntries = byKind.visualization;
         _renderRegistryGrid('registry-visualizations-container', byKind.visualization);
@@ -4219,7 +4252,7 @@
             ? total + ' total'
             : wsCount + ' from this workspace, ' + (total - wsCount) + ' from environment';
         };
-        setCount('registry-process-count', procsAndSteps);
+        setCount('registry-process-count', realProcs);
         setCount('registry-emitter-count', byKind.emitter);
         setCount('registry-visualization-count', byKind.visualization);
         setCount('registry-report_card-count', byKind.report_card);
