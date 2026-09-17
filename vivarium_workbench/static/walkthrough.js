@@ -1512,7 +1512,7 @@
     var dlEl = document.getElementById('ds-preview-download');
     if (titleEl) titleEl.textContent = key;
     if (dlEl) dlEl.setAttribute('href', url);
-    if (bodyEl) bodyEl.textContent = 'Loading…';
+    if (bodyEl) bodyEl.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml() : 'Loading…';
     openModal('modal-ds-preview');
     fetch(url)
       .then(function(r) {
@@ -7058,10 +7058,15 @@
         }
       }
       if (!match) {
-        host.innerHTML =
-          '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">' +
-          'Loading study…' +
-          '</p>';
+        if (window.ProgressTrack) {
+          window.ProgressTrack.loading(host, 'Loading study…');
+          host.firstElementChild.classList.add('viv-loading-compact');
+        } else {
+          host.innerHTML =
+            '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">' +
+            'Loading study…' +
+            '</p>';
+        }
         return;
       }
       var topic = (match.topic && match.topic.trim()) ? match.topic.trim() : 'Ungrouped';
@@ -7960,7 +7965,7 @@
   function _legacyLoadCompositeSvg(ref) {
     var el = document.getElementById('composite-explore-svg-legacy');
     if (!el) return;
-    el.innerHTML = '<p style="color:#888">Loading SVG…</p>';
+    el.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading SVG…') : '<p style="color:#888">Loading SVG…</p>';
     fetch(_api('/api/composite-resolve?id=' + encodeURIComponent(ref)))
       .then(function(r) { return r.json(); })
       .then(function(data) {
@@ -9826,7 +9831,7 @@
     document.getElementById('investigations-list').style.display = 'none';
     document.getElementById('investigation-detail-view').style.display = '';
     document.getElementById('investigation-detail-title').textContent = name;
-    document.getElementById('investigation-detail-description').textContent = 'Loading…';
+    document.getElementById('investigation-detail-description').innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml() : 'Loading…';
 
     // Route through DataSource so snapshot mode reads api/investigation/<name>.json from
     // the static bundle instead of hitting the live /api/investigation/<name> endpoint

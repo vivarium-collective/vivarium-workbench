@@ -50,7 +50,7 @@
     menu.innerHTML = `
       <div class="viv-iset-menu-header">Repositories</div>
       <ul class="viv-iset-menu-list">
-        <li class="viv-iset-menu-loading">Loading…</li>
+        <li class="viv-iset-menu-loading">${window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading…') : 'Loading…'}</li>
       </ul>
       <div class="viv-iset-menu-divider"></div>
       <button type="button" class="viv-iset-menu-new" role="menuitem">+ New Investigation</button>
@@ -112,7 +112,7 @@
     // switching now lives in the Investigations list view. Studies-sidebar
     // sync still rides the on-load /api/investigation-registry call below.
     const list = menu.querySelector('.viv-iset-menu-list');
-    list.innerHTML = '<li class="viv-iset-menu-loading">Loading…</li>';
+    list.innerHTML = '<li class="viv-iset-menu-loading">' + (window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading…') : 'Loading…') + '</li>';
     try {
       const resp = await fetch('/api/workspaces', { headers: { Accept: 'application/json' } });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
