@@ -101,6 +101,30 @@ function run() {
   assert(allText(p2).toLowerCase().indexOf('fail') !== -1, 'panel renders even with no reason');
   sess.clearFailure();
 
+  // ── in-page materialization progress (item 70 phase 2) ───────────────────
+  var mount = makeNode('div'); mount.id = 'viv-materialize-progress';
+  fakeBody.appendChild(mount);
+
+  // Without window.ProgressTrack (e.g. the script failed to load), degrades
+  // to hidden — never throws, never shows a half-built widget.
+  sess.renderMaterializeProgress({ status: 'materializing', phase: 'cloning' });
+  assert.strictEqual(mount.style.display, 'none', 'no ProgressTrack -> mount stays hidden');
+
+  // With it available: real phase -> real stage state, no invented timer.
+  global.window = { ProgressTrack: require('../../vivarium_workbench/static/progress-track.js') };
+  sess.renderMaterializeProgress({ status: 'materializing', phase: 'cloning' });
+  assert.notStrictEqual(mount.style.display, 'none', 'mount shown while materializing');
+  assert(mount.innerHTML.indexOf('ptrack-seg-done') !== -1, 'queued renders as done once cloning is active');
+  assert(mount.innerHTML.indexOf('ptrack-seg-active') !== -1, 'cloning renders as the active segment');
+  assert(mount.innerHTML.indexOf('ptrack-spin') !== -1, 'active phase shows the spinner');
+
+  // ready/failed/no-response all hide it again (each has its own treatment
+  // elsewhere — favicon, or the failure panel above).
+  sess.renderMaterializeProgress({ status: 'ready' });
+  assert.strictEqual(mount.style.display, 'none', 'ready -> progress panel hidden');
+  sess.renderMaterializeProgress(null);
+  assert.strictEqual(mount.style.display, 'none', 'no response -> progress panel hidden');
+
   console.log('test_session_status.js: all assertions passed');
 }
 

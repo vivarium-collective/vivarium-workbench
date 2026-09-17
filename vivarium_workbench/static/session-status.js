@@ -160,6 +160,38 @@
     return panel;
   }
 
+  // ── In-page materialization progress (item 70 phase 2) ───────────────────
+  // The favicon/title above tells you a workspace is preparing; this renders
+  // WHY it's taking a while, in-page, via ProgressTrack's real `phase` field
+  // (session_env._map_job: the job's own queued/cloning/syncing status, not a
+  // client-side guess). Mirrors renderFailure's honest-degrade shape: only
+  // ever reflects a real poll response, never fabricates a stage or a timer.
+  var MATERIALIZE_STAGES = [
+    { key: "queued", label: "Queued" },
+    { key: "cloning", label: "Cloning" },
+    { key: "syncing", label: "Syncing" },
+  ];
+  var MATERIALIZE_KEYS = MATERIALIZE_STAGES.map(function (s) { return s.key; });
+
+  function renderMaterializeProgress(d) {
+    var mount = document.getElementById("viv-materialize-progress");
+    if (!mount) return;
+    var PT = typeof window !== "undefined" ? window.ProgressTrack : null;
+    if (!d || d.status !== "materializing" || !PT) {
+      mount.style.display = "none";
+      mount.innerHTML = "";
+      return;
+    }
+    var phase = d.phase || "queued";
+    var idx = MATERIALIZE_KEYS.indexOf(phase);
+    var done = idx > 0 ? MATERIALIZE_KEYS.slice(0, idx) : [];
+    mount.style.display = "";
+    PT.render(mount, {
+      mode: "stages", stages: MATERIALIZE_STAGES, done: done, active: phase,
+      note: "Preparing workspace…",
+    });
+  }
+
   function poll() {
     fetch("/api/source/materialization")
       .then(function (r) { return r && r.ok ? r.json() : null; })
@@ -167,13 +199,18 @@
         var state = apply((d && d.status) || "ready");
         if (state === "failed") renderFailure(d || {});
         else clearFailure();
+        renderMaterializeProgress(d);
         if (state === "preparing") setTimeout(poll, POLL_MS);
       })
-      .catch(function () { apply("ready"); });
+      .catch(function () {
+        apply("ready");
+        renderMaterializeProgress(null);
+      });
   }
 
   var api = { apply: apply, poll: poll, renderFailure: renderFailure,
-              clearFailure: clearFailure, svgDataUri: svgDataUri, FAVICONS: FAVICONS };
+              clearFailure: clearFailure, svgDataUri: svgDataUri, FAVICONS: FAVICONS,
+              renderMaterializeProgress: renderMaterializeProgress };
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;                 // Node (tests): no auto-run

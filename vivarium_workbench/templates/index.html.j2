@@ -742,6 +742,10 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                 title="Open Source — repository · branch · commit" aria-label="Open Source page">↗</button>
       </div>
     </div>
+    <!-- Materialization progress (item 70 phase 2): hidden by default, shown by
+         session-status.js's poll() only while status === "materializing" — the
+         in-page view the tab favicon/title alone can't provide. -->
+    <div id="viv-materialize-progress" style="display:none;padding:2px 14px 8px"></div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
     <div class="viv-repo-label" id="snapshot-repo-label" style="display:none;cursor:pointer"
          role="button" tabindex="0"
