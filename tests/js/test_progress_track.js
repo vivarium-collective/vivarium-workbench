@@ -84,4 +84,11 @@ const m2 = Object.assign({}, queuedModel, { soft: { startedAt: NOW - 400000, typ
 const sig = s => (s.match(/data-sig="([^"]*)"/) || [])[1];
 assert.strictEqual(sig(PT.html(m1, NOW)), sig(PT.html(m2, NOW)), 'signature is stable across soft-fill progress');
 
+// ── indeterminateHTML: composable "Loading…" swap-in (item 70 phase 1) ──
+assert.strictEqual(PT.indeterminateHTML('Loading…'), '<span class="ptrack-spin-solo" aria-hidden="true"></span>Loading…', 'wraps label with the standalone spinner span');
+assert.strictEqual(PT.indeterminateHTML(), '<span class="ptrack-spin-solo" aria-hidden="true"></span>Loading…', 'defaults to "Loading…" when no label given');
+assert.strictEqual(PT.indeterminateHTML('<script>x</script>'), '<span class="ptrack-spin-solo" aria-hidden="true"></span>&lt;script&gt;x&lt;/script&gt;', 'escapes the label — it is not pre-sanitized HTML like note/detail');
+// no wrapping element — callers drop this into their own container/class
+assert(PT.indeterminateHTML('x').indexOf('role="progressbar"') === -1, 'is a bare fragment, not a full ptrack widget');
+
 console.log('ok');

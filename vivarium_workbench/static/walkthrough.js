@@ -8330,9 +8330,18 @@
   window._isetIndex = [];        // [{name, title, status, studies:[slug, ...]}]
   window._currentIset = null;    // name of the iset currently open in detail view
 
+  // Small indeterminate-loading swap-in for the bare "Loading…" idiom, reusing
+  // ProgressTrack's spinner (progress-track.js) when it's loaded; degrades to
+  // the original plain-text version if that script didn't load.
+  function _loadingHTML(label) {
+    return (window.ProgressTrack && window.ProgressTrack.indeterminateHTML)
+      ? window.ProgressTrack.indeterminateHTML(label)
+      : _esc(label == null ? 'Loading…' : label);
+  }
+
   function _loadInvestigationSets() {
     var list = document.getElementById('investigations-list');
-    if (list) list.innerHTML = '<p class="empty-state">Loading…</p>';
+    if (list) list.innerHTML = '<p class="empty-state">' + _loadingHTML() + '</p>';
     var _p = window.DataSource
       ? window.DataSource.loadIsetList()
       : fetch('/api/investigation-summaries', {headers: {Accept: 'application/json'}})
@@ -12369,7 +12378,7 @@
     if (!Array.isArray(window._investigations) || !window._investigations.length) {
       // No studies in memory yet → fall back to the legacy render until they arrive.
       if (typeof _renderRailInvestigationsLegacy === 'function') return _renderRailInvestigationsLegacy();
-      host.innerHTML = '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>';
+      host.innerHTML = '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">' + _loadingHTML() + '</p>';
       if (typeof _loadInvestigations === 'function') _loadInvestigations();
       return;
     }

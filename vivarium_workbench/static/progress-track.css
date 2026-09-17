@@ -59,6 +59,20 @@
 }
 @keyframes ptrack-spin { to { transform: rotate(360deg); } }
 
+/* Standalone variant for the bare "Loading…" idiom (ProgressTrack.indeterminateHTML) —
+ * same animation, but not positioned inside a .ptrack-seg bar segment. */
+.ptrack-spin-solo {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: ptrack-spin 0.8s linear infinite;
+}
+
 /* Stage labels under the bar, colour-coded to their state. */
 .ptrack-labels {
   display: flex;
@@ -106,6 +120,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ptrack-fill { transition: none; }
   .ptrack-spin { animation: none; opacity: 0.85; }
+  .ptrack-spin-solo { animation: none; opacity: 0.85; }
 }
 
 /* Dark theme. Same token/hex idiom as style.css's :root[data-theme="dark"]
@@ -126,3 +141,4 @@
 :root[data-theme="dark"] .ptrack-pct{ color:#93c5fd; }
 :root[data-theme="dark"] .ptrack-steptext{ color:var(--text-muted); }
 :root[data-theme="dark"] .ptrack-detail{ color:var(--text-muted); }
+:root[data-theme="dark"] .ptrack-spin-solo{ border-color:var(--surface-3); border-top-color:#93c5fd; }

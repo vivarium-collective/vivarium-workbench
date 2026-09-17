@@ -234,9 +234,19 @@
     _softUpdate(root, model, Date.now());
   }
 
+  // Small composable fragment for the bare "Loading…" idiom used throughout
+  // the app (`.empty-state`, `.viv-rail-empty`, etc.) — a spinner + label,
+  // NOT a wrapping element, so callers drop it into whatever container/class
+  // they already have. Reuses the same .ptrack-spin animation via the
+  // standalone `.ptrack-spin-solo` variant (progress-track.css).
+  function indeterminateHTML(label) {
+    return '<span class="ptrack-spin-solo" aria-hidden="true"></span>' + _esc(label == null ? 'Loading…' : label);
+  }
+
   var api = {
     render: render, tick: tick, html: html,
     stageFraction: stageFraction, softFraction: softFraction, measuredFraction: measuredFraction,
+    indeterminateHTML: indeterminateHTML,
   };
 
   global.ProgressTrack = api;
