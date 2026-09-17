@@ -83,7 +83,7 @@
   var ctxState = {};
   function mount(el, ctx) {
     ctxState = ctx || {};
-    el.innerHTML = '<div class="cfg-run"><div class="cfg-loading">Loading composite…</div></div>';
+    el.innerHTML = '<div class="cfg-run">' + (window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading composite…') : '<div class="cfg-loading">Loading composite…</div>') + '</div>';
     var id = ctxState.composite;
     if (!id) { el.querySelector(".cfg-run").innerHTML = '<p class="muted">Pick a composite to configure.</p>'; return; }
     // Read-only (published) bundle has no live backend — resolve the composite's
