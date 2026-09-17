@@ -463,6 +463,17 @@ class SmsApiClient:
         recomputing/guessing them on the landing laptop (audit §3.9)."""
         return self._get(f"/api/v1/simulations/{simulation_id}")
 
+    def cancel_simulation(self, simulation_id: int) -> dict:
+        """DELETE /api/v1/simulations/{id}/cancel (item 53).
+
+        For a chain-dispatch campaign row (``chain_final_job_ids`` set),
+        viva-api's own handler walks every seed's own dependsOn chain and
+        cancels/terminates whichever job is actually non-terminal per seed —
+        not just a single job id. Idempotent: already-terminal rows short-
+        circuit server-side and return their existing status. Same ``_delete``
+        pattern as :meth:`cancel_env_worker_task`."""
+        return self._delete(f"/api/v1/simulations/{simulation_id}/cancel")
+
     def simulator_commit(self, simulator_id: int) -> str | None:
         """Resolve ``simulator_id`` -> the git commit sms-api actually built
         and ran, from sms-api's OWN simulator registry (``GET

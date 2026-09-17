@@ -2509,6 +2509,38 @@
     return el;
   }
 
+  // item 53: "Stop campaign" — mirrors configure-run.js's local-engine
+  // _stopRun (disable, "Stopping…", let the next poll tick reflect the
+  // terminal state; no optimistic UI beyond that). Calls the proxy added for
+  // this item, /api/remote-run-cancel -> SmsApiClient.cancel_simulation ->
+  // viva-api's real DELETE /api/v1/simulations/{id}/cancel, which walks every
+  // seed's own dependsOn chain for a chain-dispatch row (see that handler's
+  // own docstring / backlog item 53's file for the full design — this button
+  // has zero cancel logic of its own, purely a proxy + confirm).
+  function _stopCampaign(runId, btn) {
+    var e = escapeHtmlForTests;
+    if (!window.confirm('Stop campaign ' + runId + '? This cancels every seed still in flight.')) return;
+    btn.disabled = true; btn.textContent = 'Stopping…';
+    api('POST', '/api/remote-run-cancel', { simulation_id: runId })
+      .then(function (res) {
+        if (res.status !== 200) {
+          btn.disabled = false; btn.textContent = '■ Stop campaign';
+          var el = _chainProgressEl();
+          if (el) el.innerHTML += ' <span class="inv-run-err">stop failed: ' +
+            e((res.body && (res.body.error || res.body.reason)) || res.status) + '</span>';
+          return;
+        }
+        // Success: leave the button disabled/"Stopping…" — the next
+        // _pollChainProgress tick (still scheduled) will see the now-terminal
+        // status and re-render without the button at all.
+      })
+      .catch(function (err) {
+        btn.disabled = false; btn.textContent = '■ Stop campaign';
+        var el = _chainProgressEl();
+        if (el) el.innerHTML += ' <span class="inv-run-err">' + e(String(err)) + '</span>';
+      });
+  }
+
   function _renderChainProgress(d) {
     var el = _chainProgressEl();
     if (!el) return;
@@ -2520,16 +2552,24 @@
       el.textContent = '⚠ progress unavailable (sms-api unreachable)';
       return;
     }
+    var e = escapeHtmlForTests;
     var total = d.seeds_total, done = d.seeds_succeeded, failed = d.seeds_failed,
         inProgress = d.seeds_in_progress;
-    if (total == null) { el.textContent = 'run ' + d.simulation_id + ': ' + d.phase; return; }
-    var pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    var bar = '';
-    var filled = Math.round((pct / 100) * 20);
-    for (var i = 0; i < 20; i++) bar += (i < filled ? '█' : '░');
-    var failedTxt = failed ? (', ' + failed + ' failed') : '';
-    el.textContent = '[' + bar + '] ' + pct + '%  ' + done + '/' + total + ' seeds' + failedTxt +
-      (d.terminal ? ' — done' : ' — ' + inProgress + ' in progress');
+    var stopBtnHtml = d.terminal ? '' :
+      ' <button type="button" class="btn-mini study-stop-campaign-btn">■ Stop campaign</button>';
+    if (total == null) {
+      el.innerHTML = 'run ' + e(String(d.simulation_id)) + ': ' + e(String(d.phase)) + stopBtnHtml;
+    } else {
+      var pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      var bar = '';
+      var filled = Math.round((pct / 100) * 20);
+      for (var i = 0; i < 20; i++) bar += (i < filled ? '█' : '░');
+      var failedTxt = failed ? (', ' + failed + ' failed') : '';
+      el.innerHTML = '[' + bar + '] ' + pct + '%  ' + done + '/' + total + ' seeds' + failedTxt +
+        (d.terminal ? ' — done' : ' — ' + inProgress + ' in progress') + stopBtnHtml;
+    }
+    var sb = el.querySelector('.study-stop-campaign-btn');
+    if (sb) sb.onclick = function () { _stopCampaign(d.simulation_id, sb); };
   }
 
   function _pollChainProgress(runId) {
