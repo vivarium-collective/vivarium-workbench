@@ -706,6 +706,7 @@ def build_catalog(ws_root: Path, full: bool = False) -> dict:
             continue
         name = m.get("name")
         s = stats.get(_norm(name)) or stats.get(name) or {}
+        m["n_processes"] = s.get("n_processes", 0)
         m["n_composites"] = s.get("n_composites", 0)
         m["n_investigations"] = s.get("n_investigations", 0)
         m["n_studies"] = s.get("n_studies", 0)

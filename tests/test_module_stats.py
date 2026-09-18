@@ -22,8 +22,38 @@ import yaml
 from vivarium_workbench.lib.module_stats import (
     _installed_composites_by_norm,
     _norm,
+    _processes_by_norm,
     module_content_stats,
 )
+
+# A synthetic registry payload spanning several owning packages + non-process
+# kinds, so the process-count attribution can be asserted without a live venv /
+# build_core. Mirrors the real /api/registry shape (each entry: name, address,
+# kind).
+_FAKE_REGISTRY = {
+    "processes": [
+        # viva-ketchup contributes 2 (one process, one step); pbg_ spelling must
+        # collapse to the same "ketchup" identity.
+        {"name": "KetchupEstimator", "kind": "process",
+         "address": "viva_ketchup.processes.KetchupEstimator"},
+        {"name": "KetchupDynamicEstimator", "kind": "step",
+         "address": "pbg_ketchup.steps.KetchupDynamicEstimator"},
+        # viva-copasi contributes 3.
+        {"name": "BaseCopasi", "kind": "process", "address": "pbg_copasi.processes.BaseCopasi"},
+        {"name": "CopasiODE", "kind": "process", "address": "viva_copasi.processes.CopasiODE"},
+        {"name": "CopasiStep", "kind": "step", "address": "viva_copasi.steps.CopasiStep"},
+        # A workspace's own package.
+        {"name": "MillardPDMPMetabolism", "kind": "step",
+         "address": "v2ecoli.steps.millard_pdmp_metabolism.MillardPDMPMetabolism"},
+        # Framework class — attributes to its OWN key, never double-counted onto
+        # a module card.
+        {"name": "Emitter", "kind": "process", "address": "process_bigraph.emitter.Emitter"},
+        # Non-process kinds must be excluded from the count.
+        {"name": "ParquetEmitter", "kind": "emitter", "address": "pbg_emitters.parquet.ParquetEmitter"},
+        {"name": "SomeChart", "kind": "visualization", "address": "viva_copasi.viz.SomeChart"},
+        {"name": "AType", "kind": "type", "address": "viva_ketchup.types.AType"},
+    ]
+}
 
 FIX = Path(__file__).parent / "_fixtures" / "ws_federation_demo"
 
@@ -234,6 +264,82 @@ def test_n_used_counts_bare_registered_name_for_uninstalled_repo(tmp_path):
     assert key == "ketchup"
     assert key in stats
     assert stats[key]["n_used"] == 1
+
+
+def test_processes_by_norm_attributes_by_package_prefix(tmp_path, monkeypatch):
+    """`_processes_by_norm` counts only process/step classes, attributed to the
+    alias-collapsed owning package of each class address — so viva-ketchup's and
+    viva-copasi's contributed Steps/Processes are counted under `ketchup`/`copasi`
+    regardless of pbg_/viva_ spelling, framework classes fall under their own key,
+    and emitters/visualizations/types are excluded."""
+    import vivarium_workbench.lib.registry as _registry
+    monkeypatch.setattr(_registry, "build_registry", lambda ws_root, **kw: _FAKE_REGISTRY)
+
+    by_norm = _processes_by_norm(tmp_path)
+    assert len(by_norm["ketchup"]) == 2       # process + step, pbg_/viva_ collapsed
+    assert len(by_norm["copasi"]) == 3        # viz excluded, not counted
+    assert len(by_norm["v2ecoli"]) == 1
+    # Framework class keeps its OWN key — never merged onto a module card.
+    assert by_norm.get("process_bigraph") and len(by_norm["process_bigraph"]) == 1
+    # Non-process kinds contribute nothing.
+    assert "emitters" not in by_norm          # ParquetEmitter (kind=emitter) skipped
+
+
+def test_processes_by_norm_degrades_to_empty_on_registry_error(tmp_path, monkeypatch):
+    """A failing / unavailable registry must not break the count — degrade to {}."""
+    import vivarium_workbench.lib.registry as _registry
+
+    def _boom(ws_root, **kw):
+        raise RuntimeError("no venv / build_core failed")
+
+    monkeypatch.setattr(_registry, "build_registry", _boom)
+    assert _processes_by_norm(tmp_path) == {}
+
+
+def test_module_content_stats_includes_n_processes(tmp_path, monkeypatch):
+    """`module_content_stats` surfaces `n_processes` per module, so a repo whose
+    processes aren't among the loaded composite artifacts (viva-ketchup /
+    viva-copasi) still reports a real Processes count instead of `—`."""
+    import vivarium_workbench.lib.registry as _registry
+    monkeypatch.setattr(_registry, "build_registry", lambda ws_root, **kw: _FAKE_REGISTRY)
+
+    (tmp_path / "workspace.yaml").write_text("name: host_procs\n")
+    stats = module_content_stats(tmp_path)
+
+    assert stats["ketchup"]["n_processes"] == 2
+    assert stats["copasi"]["n_processes"] == 3
+    assert stats["v2ecoli"]["n_processes"] == 1
+    # Every emitted record carries the field.
+    assert all("n_processes" in rec for rec in stats.values())
+
+
+def test_build_catalog_surfaces_n_processes(tmp_path, monkeypatch):
+    """catalog.build_catalog copies `n_processes` onto each module card so the
+    frontend backfill (`b.process = c.n_processes`) has a value to read."""
+    from vivarium_workbench.lib import catalog as _catalog
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text(yaml.safe_dump({
+        "schema_version": 2, "name": "t", "package_path": "pkg_t",
+    }))
+    (ws / "pkg_t").mkdir()
+
+    monkeypatch.setattr(_catalog, "_detect_workspace_venv_distributions", lambda _w: {})
+    monkeypatch.setattr(_catalog, "_check_installed_module_sync", lambda ws, pkg, path: None)
+    monkeypatch.setattr("viva_superpowers.catalog.load_registry", lambda _w: [
+        {"name": "viva-ketchup", "package": "pbg_ketchup", "description": "k"},
+    ])
+    monkeypatch.setattr(_catalog, "module_content_stats", lambda ws_root: {
+        "ketchup": {"n_processes": 2, "n_composites": 3, "n_investigations": 0,
+                    "n_studies": 0, "n_used": 0, "n_repos": 1, "last_updated": None},
+    })
+
+    modules = _catalog.build_catalog(ws)["modules"]
+    by_name = {m["name"]: m for m in modules}
+    assert by_name["viva-ketchup"]["n_processes"] == 2
+    # A module with no stats record still carries the field, defaulted to 0.
+    assert all("n_processes" in m for m in modules if isinstance(m, dict))
 
 
 def test_alias_join_pbg_and_viva_reference_same_module(tmp_path):

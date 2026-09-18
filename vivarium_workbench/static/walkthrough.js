@@ -5759,15 +5759,18 @@
     Object.keys(byRepo).forEach(function (k) {
       var b = byRepo[k], c = b._cat;
       if (!b._fromArtifacts && c) {
+        b.process = c.n_processes || 0;
         b.composite = c.n_composites || 0;
         b.study = c.n_studies || 0;
         b.investigation = c.n_investigations || 0;
         b.total = b.process + b.composite + b.study + b.investigation;
         b.use = c.n_used || 0;
       }
-      // Affected studies = this workspace's OWN studies that depend on the repo
-      // (module_stats.n_used — deep, via composite→process usage). The real
-      // "what breaks if I uninstall" signal, distinct from total artifact uses.
+      // Affected studies = studies that depend on / use this repo — this
+      // workspace's OWN studies AND linked (federated) workspaces' studies
+      // (module_stats.n_used — deep, via composite→process usage + bare-name/
+      // alias attribution). The real "what breaks if I uninstall" signal,
+      // distinct from total artifact uses.
       b.affected = (c && typeof c.n_used === 'number') ? c.n_used : 0;
       if (!b.url) b.url = _marketRepoUrl(b.repo);
     });
@@ -5826,7 +5829,7 @@
   function _repoFoot(b) {
     var meta = [];
     if (b.total) meta.push(b.total + ' artifact' + (b.total === 1 ? '' : 's'));
-    if (b.affected) meta.push('<span title="studies in your investigations that depend on this repo"><b>' + b.affected + '</b> affected stud' + (b.affected === 1 ? 'y' : 'ies') + '</span>');
+    if (b.affected) meta.push('<span title="Studies that depend on / use this repository (in this workspace and linked workspaces)"><b>' + b.affected + '</b> affected stud' + (b.affected === 1 ? 'y' : 'ies') + '</span>');
     return '<div class="repo-card-foot"><span class="repo-meta">' + (meta.join(' · ') || '&nbsp;') + '</span>'
       + _repoActions(b) + '</div>';
   }
@@ -5864,11 +5867,11 @@
       + '<th class="repo-th" style="width:100px">Processes</th>'
       + '<th class="repo-th" style="width:100px">Composites</th>'
       + '<th class="repo-th" style="width:90px">Studies</th>'
-      + '<th class="repo-th" style="width:130px" title="Studies in your investigations that depend on this repo">Affected studies</th>'
+      + '<th class="repo-th" style="width:130px" title="Studies that depend on / use this repository (in this workspace and linked workspaces)">Affected studies</th>'
       + '<th class="repo-th" style="width:190px"></th></tr>';
     var body = repos.map(function (b) {
       var aff = b.affected
-        ? '<span class="repo-affected" title="studies in your investigations that depend on this repo">' + b.affected + '</span>'
+        ? '<span class="repo-affected" title="Studies that depend on / use this repository (in this workspace and linked workspaces)">' + b.affected + '</span>'
         : '<span class="repo-td-zero">—</span>';
       return '<tr class="repo-tr">'
         + '<td class="market-td-name">📦 ' + _esc(_vivaLabel(b.display_name || b.repo))

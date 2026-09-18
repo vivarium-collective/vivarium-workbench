@@ -118,6 +118,51 @@ def _installed_composites_by_norm() -> dict[str, set[str]]:
     return out
 
 
+def _processes_by_norm(ws_root: Path) -> dict[str, set[str]]:
+    """Registered process/step class addresses grouped by :func:`_norm` of the
+    owning top-level package — the count of processes each repo CONTRIBUTES.
+
+    Reads the workspace's live process registry (``registry.build_registry`` —
+    the same ``build_core()``-backed introspection the Registry tab shows, warm-
+    cached), and attributes each ``process``/``step`` class to a module by the
+    top-level package of its ``address`` (``module.qualname``), normalized with
+    the SAME alias-aware :func:`_norm` used for composites/studies — so
+    ``viva_ketchup.processes.KetchupEstimator`` and its ``pbg_ketchup`` spelling
+    both land on ``ketchup``. Emitters, visualizations, and types are excluded
+    (they're not "processes" in the card sense — mirrors the Registry facet).
+
+    Each class is attributed to EXACTLY ONE norm key (its defining package), so
+    a repo counts only its OWN processes and framework classes (process_bigraph,
+    bigraph_schema, …) fall under their own keys that match no module card —
+    nothing is double-counted.
+
+    Best-effort: degrades to ``{}`` on any failure (no venv, build error) so a
+    missing registry just leaves the Processes column at 0/``—`` rather than
+    breaking the catalog payload.
+    """
+    out: dict[str, set[str]] = {}
+    try:
+        from vivarium_workbench.lib.registry import build_registry
+        data = build_registry(Path(ws_root))
+    except Exception:
+        return out
+    try:
+        procs = data.get("processes") or []
+    except Exception:
+        return out
+    for p in procs:
+        if not isinstance(p, dict):
+            continue
+        if (p.get("kind") or "process") not in ("process", "step"):
+            continue
+        addr = p.get("address") or p.get("name") or ""
+        nk = _norm(addr)
+        if not nk:
+            continue
+        out.setdefault(nk, set()).add(str(addr))
+    return out
+
+
 def _last_updated(root: Path) -> str | None:
     """Best-effort ISO-8601 timestamp for a module's on-disk root.
 
@@ -395,8 +440,11 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
     package name; both are the catalog module entry's ``name`` under a
     different spelling convention, hence the normalization).
 
-    Each value: ``{n_composites, n_investigations, n_studies, n_used,
-    last_updated}``. ``n_composites`` unions federated (linked-workspace)
+    Each value: ``{n_processes, n_composites, n_investigations, n_studies,
+    n_used, n_repos, last_updated}``. ``n_processes`` counts the process/step
+    classes the repo contributes to the live registry, attributed by the
+    package prefix of each class's address (see :func:`_processes_by_norm`).
+    ``n_composites`` unions federated (linked-workspace)
     composites with installed-package composites, so a wheel-only module's
     packaged ``composites/`` dir counts even with no ``external/`` link.
     ``n_studies``/``n_investigations`` come from the external federation scan
@@ -477,6 +525,16 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
             continue
 
     installed_comps_by_norm = _installed_composites_by_norm()
+
+    # Per-module process/step count, attributed by the package prefix of each
+    # registered class's address (alias-aware, so pbg_/viva_ spellings collapse).
+    # Lets a repo whose processes aren't among the loaded composite artifacts
+    # (e.g. viva-ketchup / viva-copasi contribute Steps/Processes but their
+    # composites may be federated-only) still show a real Processes count.
+    try:
+        procs_by_norm = _processes_by_norm(ws_root)
+    except Exception:
+        procs_by_norm = {}
 
     # Reference-driven usage: which imported modules the ecosystem's studies
     # actually use. Attribute each study to a module by (1) the package prefix of
@@ -581,6 +639,7 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
         | set(ref_comps_by_norm)
         | set(used_by_studies)
         | set(repos_by_norm)
+        | set(procs_by_norm)
     )
     all_norm_keys.discard("")
 
@@ -595,9 +654,14 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
             n_inv = n_investigations_by_norm.get(key, 0)
             n_used = len(used_by_studies.get(key, set()))
             n_repos = len(repos_by_norm.get(key, set()))
-            if not composite_ids and not study_ids and not n_inv and not n_used and not n_repos:
+            n_procs = len(procs_by_norm.get(key, set()))
+            if (
+                not composite_ids and not study_ids and not n_inv
+                and not n_used and not n_repos and not n_procs
+            ):
                 continue
             stats[key] = {
+                "n_processes": n_procs,
                 "n_composites": len(composite_ids),
                 "n_investigations": n_inv,
                 "n_studies": len(study_ids),
