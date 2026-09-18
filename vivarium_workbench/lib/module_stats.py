@@ -48,6 +48,13 @@ from vivarium_workbench.lib.federation import (
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
+# The rebrand prefixes that name the SAME module under two spellings
+# (``pbg_ketchup`` == ``viva_ketchup``, ``pbg_copasi`` == ``viva_copasi``).
+# Only these two are collapsed by :func:`_norm` — nothing else — so the alias
+# folding stays conservative and never merges unrelated names.
+_ALIAS_PREFIXES = ("pbg_", "viva_")
+
+
 def _norm(name: str | None) -> str:
     """Normalize a module/package identity for cross-source joins.
 
@@ -57,10 +64,37 @@ def _norm(name: str | None) -> str:
     (``pkg_name.composites.stem``). Lowercase, strip, dashes -> underscores,
     and take the first dot-segment so any trailing dotted suffix doesn't
     break the match. Empty/None input normalizes to ``""``.
+
+    Alias-aware: a leading ``pbg_``/``viva_`` prefix is stripped so the two
+    rebrand spellings of one module collapse to the SAME identity
+    (``pbg_ketchup`` and ``viva_ketchup`` both -> ``ketchup``, ``pbg-copasi``
+    and its ``viva_copasi`` shim both -> ``copasi``). Only that one prefix
+    distinction is collapsed — never a longer common substring — so unrelated
+    names stay distinct. The bare prefix alone (``pbg_`` -> "") is left intact.
     """
     if not name:
         return ""
-    return str(name).strip().lower().replace("-", "_").split(".", 1)[0]
+    base = str(name).strip().lower().replace("-", "_").split(".", 1)[0]
+    for pfx in _ALIAS_PREFIXES:
+        if base.startswith(pfx) and len(base) > len(pfx):
+            return base[len(pfx):]
+    return base
+
+
+def _pkg_name_variants(norm_key: str) -> set[str]:
+    """Importable package-name spellings a normalized (alias-collapsed) key can
+    take in source text / import declarations.
+
+    ``_norm`` folds ``pbg_ketchup``/``viva_ketchup`` -> ``ketchup``; a static
+    source scan, though, must look for the ACTUAL package tokens. So expand a
+    collapsed key back to ``{ketchup, pbg_ketchup, viva_ketchup}``. A key that
+    already carries a distinct prefix-free name (``spatio_flux``, ``v2ecoli``)
+    just yields itself plus the two prefixed forms — harmless extra candidates
+    that simply never appear in real source."""
+    k = _norm(norm_key)
+    if not k:
+        return set()
+    return {k} | {pfx + k for pfx in _ALIAS_PREFIXES}
 
 
 def _installed_composites_by_norm() -> dict[str, set[str]]:
@@ -240,6 +274,46 @@ def _composite_source_file(cid: str, ws_root: Path) -> "Path | None":
     return None
 
 
+def _ref_tokens(ref: str) -> list[str]:
+    """Ordered lowercase word tokens of a composite/process reference, split on
+    non-alphanumerics AND camelCase boundaries.
+
+    ``ketchup_baseline`` -> ``[ketchup, baseline]``; ``KetchupEstimator`` ->
+    ``[ketchup, estimator]``; ``ketchup_dynamic`` -> ``[ketchup, dynamic]``.
+    Used to attribute a BARE registered composite/process name (one a workspace's
+    ``core.py`` registers under a short alias, with no ``pkg.composites.…`` path)
+    back to the owning module when the module's key leads the name."""
+    if not ref:
+        return []
+    # Break camelCase, then split on any run of non-alphanumeric characters.
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(ref))
+    return [t for t in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if t]
+
+
+def _bare_ref_module_keys(cid: str, candidates: set[str]) -> set[str]:
+    """Alias-collapsed module keys a BARE composite reference (no
+    ``.composites.`` path segment) attributes to.
+
+    A study can reference a composite by the short name a workspace registered it
+    under (``ketchup_baseline``/``ketchup_dynamic`` for ``pbg_ketchup``), which
+    carries no importable package path. Attribute it to any imported module whose
+    collapsed key appears as a leading token of that bare name — so a study using
+    ``ketchup_baseline`` credits the ``ketchup`` repo even when ``pbg_ketchup``
+    isn't importable in the serving venv. Conservative: only the FIRST token is
+    matched (the registration-name convention ``<module>_<variant>``), so a
+    trailing coincidental token can't cause a spurious attribution.
+
+    ``candidates`` are already alias-collapsed (from :func:`_installed_module_pkgs`).
+    ``None`` / already-qualified ids attribute nothing here."""
+    if not cid or ".composites." in cid:
+        return set()
+    ordered = _ref_tokens(cid)
+    if not ordered:
+        return set()
+    first = ordered[0]  # module name in the <module>_<variant> convention
+    return {c for c in candidates if c and c == first}
+
+
 def _deep_module_usage(ws_root: Path, study_refs: dict[str, set[str]]) -> dict[str, set[str]]:
     """Deeper study->module usage the composite-id package prefix alone misses:
 
@@ -276,9 +350,14 @@ def _deep_module_usage(ws_root: Path, study_refs: dict[str, set[str]]) -> dict[s
                     except OSError:
                         txt = ""
                     for pkg in candidates:
-                        # pkg is already _norm'd (underscores); source uses the
-                        # importable underscore form.
-                        if pkg and re.search(r"\b" + re.escape(pkg) + r"\b", txt):
+                        # pkg is an alias-collapsed key; source uses the actual
+                        # importable spelling (``viva_munk``/``pbg_munk``/``munk``),
+                        # so match any of its package-name variants as whole words.
+                        variants = _pkg_name_variants(pkg)
+                        if not variants:
+                            continue
+                        pat = r"\b(?:" + "|".join(re.escape(v) for v in variants) + r")\b"
+                        if re.search(pat, txt):
                             hits.add(pkg)
                 _src_cache[cid] = hits
             for nk in hits:
@@ -299,11 +378,11 @@ def _deep_module_usage(ws_root: Path, study_refs: dict[str, set[str]]) -> dict[s
         except Exception:
             pass
         # The emitter framework module (pbg-emitters / viva-emitters) provides the
-        # default emitter every run uses. Credit whichever emitter package the
-        # workspace actually installed.
-        for emitter_pkg in ("pbg_emitters", "viva_emitters"):
-            if emitter_pkg in candidates and all_slugs:
-                out.setdefault(emitter_pkg, set()).update(all_slugs)
+        # default emitter every run uses. ``candidates`` are alias-collapsed, so
+        # both spellings land on the ``emitters`` key; credit it to every study.
+        emitter_key = _norm("pbg_emitters")  # -> "emitters"
+        if emitter_key in candidates and all_slugs:
+            out.setdefault(emitter_key, set()).update(all_slugs)
 
     return out
 
@@ -399,18 +478,42 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
 
     installed_comps_by_norm = _installed_composites_by_norm()
 
-    # Reference-driven usage: which imported modules THIS workspace's own studies
+    # Reference-driven usage: which imported modules the ecosystem's studies
     # actually use. Attribute each study to a module by (1) the package prefix of
     # a composite id it references (catches Python @composite_generator modules
     # that file-discovery misses, e.g. pbg-ketchup), (2) whichever module's
     # federated/installed content set contains that id (catches federated modules
-    # whose composite ids don't embed the module name), and (3) an explicit
+    # whose composite ids don't embed the module name), (3) an explicit
     # `uses_modules:` list (catches modules used only via a runner script, e.g.
-    # pbg-torch). `n_used` then counts THIS workspace's own studies -- not items.
+    # pbg-torch), and (4) the leading token of a BARE registered composite name
+    # (catches a repo referenced only by a short alias like `ketchup_baseline`,
+    # even when its package isn't importable here). Both THIS workspace's own
+    # studies AND linked (federated) workspaces' studies are counted, so an
+    # ecosystem repo shows its real cross-workspace usage. `n_used` counts
+    # studies -- not items.
     try:
         study_refs, study_uses = _own_module_usage(ws_root)
     except Exception:
         study_refs, study_uses = {}, {}
+
+    # Federated (linked-workspace) study usage: an ecosystem repo's real usage
+    # includes studies that live in OTHER linked workspaces (e.g. v2ecoli's own
+    # studies that reference ketchup), not just this workspace's own studies.
+    # Collect their composite references the same way, keyed by the federated
+    # study's unique id ("<repo>::<name>").
+    fed_refs: dict[str, set[str]] = {}
+    try:
+        for s in federated_studies(ws_root):
+            sid = s.get("id")
+            spec = s.get("spec")
+            if not sid or not isinstance(spec, dict):
+                continue
+            for section in ("baseline", "variants"):
+                for entry in (spec.get(section) or []):
+                    if isinstance(entry, dict) and entry.get("composite"):
+                        fed_refs.setdefault(sid, set()).add(str(entry["composite"]))
+    except Exception:
+        pass
 
     # Reverse index: composite/study item id -> the module norms that own it.
     item_to_norms: dict[str, set[str]] = {}
@@ -419,22 +522,46 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
             for _id in _ids:
                 item_to_norms.setdefault(_id, set()).add(_nk)
 
+    # Alias-collapsed keys of every module this workspace declares as imported.
+    # The scan target for bare registered-name attribution (2): a study can
+    # reference a composite by the short name a workspace registered it under
+    # (``ketchup_baseline`` for ``pbg_ketchup``), which carries no importable
+    # package path AND need not be importable in this venv.
+    try:
+        import_candidates = _installed_module_pkgs(ws_root)
+    except Exception:
+        import_candidates = set()
+
     used_by_studies: dict[str, set[str]] = {}
     ref_comps_by_norm: dict[str, set[str]] = {}   # referenced composites, by module (for n_composites)
-    for slug, cids in study_refs.items():
+
+    def _attribute(study_key: str, cids: set[str]) -> None:
         for cid in cids:
-            pkg = cid.split(".composites.", 1)[0] if ".composites." in cid else cid
             attribute = set(item_to_norms.get(cid, set()))
-            pfx = _norm(pkg)
-            if pfx:
-                attribute.add(pfx)
-                if ".composites." in cid:
+            if ".composites." in cid:
+                # Fully-qualified id: attribute by the owning package prefix and
+                # count it as a referenced composite for that module.
+                pfx = _norm(cid.split(".composites.", 1)[0])
+                if pfx:
+                    attribute.add(pfx)
                     ref_comps_by_norm.setdefault(pfx, set()).add(cid)
+            else:
+                # Bare registered name (no package path): attribute to any
+                # imported module whose alias-collapsed key leads the name, so a
+                # non-importable repo still gets credited (2).
+                attribute |= _bare_ref_module_keys(cid, import_candidates)
             for nk in attribute:
-                used_by_studies.setdefault(nk, set()).add(slug)
+                if nk:
+                    used_by_studies.setdefault(nk, set()).add(study_key)
+
+    for slug, cids in study_refs.items():
+        _attribute(slug, cids)
+    for sid, cids in fed_refs.items():
+        _attribute(sid, cids)
     for slug, norms in study_uses.items():
         for nk in norms:
-            used_by_studies.setdefault(nk, set()).add(slug)
+            if nk:
+                used_by_studies.setdefault(nk, set()).add(slug)
 
     # Deeper usage: composite-source scan (a composite wiring another module's
     # processes, e.g. ecoli_colony -> viva_munk) + the runtime default emitter

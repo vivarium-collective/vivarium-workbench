@@ -29,13 +29,27 @@ FIX = Path(__file__).parent / "_fixtures" / "ws_federation_demo"
 
 
 def test_norm_equates_dash_underscore_and_case_variants():
-    assert _norm("pbg-copasi") == _norm("pbg_copasi") == "pbg_copasi"
-    assert _norm("Viva-munk") == "viva_munk"
-    assert _norm("spatio-flux") == "spatio_flux"
+    # dash/underscore/case all fold together.
+    assert _norm("Spatio-Flux") == _norm("spatio_flux") == "spatio_flux"
     # First dot-segment only, so a dotted suffix doesn't break the match.
-    assert _norm("pbg_ketchup.composites") == "pbg_ketchup"
+    assert _norm("v2ecoli.composites") == "v2ecoli"
     assert _norm(None) == ""
     assert _norm("") == ""
+
+
+def test_norm_collapses_pbg_viva_alias_to_same_identity():
+    # The two rebrand spellings of one module normalize to the SAME identity.
+    assert _norm("pbg-copasi") == _norm("viva_copasi") == _norm("copasi") == "copasi"
+    assert _norm("pbg_ketchup") == _norm("Viva-ketchup") == "ketchup"
+    assert _norm("pbg_ketchup.composites") == "ketchup"
+    assert _norm("Viva-munk") == _norm("pbg_munk") == "munk"
+    # Conservative: only the pbg_/viva_ prefix is collapsed, not longer common
+    # substrings, so unrelated names stay distinct.
+    assert _norm("pbg_ketchup") != _norm("pbg_copasi")
+    assert _norm("spatio_flux") == "spatio_flux"      # no alias prefix
+    # The bare prefix alone must not collapse to empty.
+    assert _norm("pbg_") == "pbg_"
+    assert _norm("viva") == "viva"
 
 
 def test_module_content_stats_counts_donor_repo_content():
@@ -46,9 +60,9 @@ def test_module_content_stats_counts_donor_repo_content():
     assert rec["n_composites"] == 1
     assert rec["n_studies"] == 1
     assert rec["n_investigations"] == 1
-    # host_ws (the fixture's own workspace) has no own studies referencing
-    # donor-repo content, so nothing is "used" yet.
-    assert rec["n_used"] == 0
+    # host_ws has no OWN studies, but the donor's own (federated) study
+    # references the donor composite, so cross-workspace usage counts it (1).
+    assert rec["n_used"] == 1
 
 
 def test_module_content_stats_never_raises_with_no_external_dir(tmp_path):
@@ -88,7 +102,9 @@ def test_module_content_stats_n_used_counts_own_study_reference(tmp_path):
     assert rec["n_composites"] == 1
     assert rec["n_studies"] == 1
     assert rec["n_investigations"] == 1
-    assert rec["n_used"] == 1
+    # Both this workspace's own `my_study` AND the donor's own federated study
+    # reference the donor composite, so n_used counts both (2).
+    assert rec["n_used"] == 2
 
     # The shared fixture must be untouched.
     assert not (FIX / "studies").exists()
@@ -162,12 +178,14 @@ def test_build_catalog_merges_stats_via_normalized_name(tmp_path, monkeypatch):
         {"name": "pbg-copasi", "package": "pbg_copasi", "description": "c"},
         {"name": "pbg_ketchup", "package": "pbg_ketchup", "description": "k"},
     ])
+    # module_content_stats keys are alias-collapsed (pbg_/viva_ prefix stripped),
+    # so "pbg-copasi" -> "copasi" and "pbg_ketchup" -> "ketchup".
     monkeypatch.setattr(_catalog, "module_content_stats", lambda ws_root: {
-        "pbg_copasi": {
+        "copasi": {
             "n_composites": 3, "n_investigations": 0, "n_studies": 1,
             "n_used": 1, "last_updated": None,
         },
-        "pbg_ketchup": {
+        "ketchup": {
             "n_composites": 5, "n_investigations": 2, "n_studies": 0,
             "n_used": 0, "last_updated": None,
         },
@@ -184,3 +202,64 @@ def test_build_catalog_merges_stats_via_normalized_name(tmp_path, monkeypatch):
     ket = by_name["pbg_ketchup"]
     assert ket["n_composites"] == 5
     assert ket["n_investigations"] == 2
+
+
+def test_n_used_counts_bare_registered_name_for_uninstalled_repo(tmp_path):
+    """A repo whose package isn't importable in this venv but IS imported and
+    referenced by a study (by the bare short name it's registered under) still
+    gets a non-zero affected-studies count.
+
+    Mirrors the ketchup case: `viva-ketchup` (package `pbg_ketchup`) is imported
+    but not importable, and a study references the bare `ketchup_baseline`
+    composite that v2ecoli's core.py registers on its behalf. No `external/`
+    link and no installed distribution — pure scan-based attribution.
+    """
+    (tmp_path / "workspace.yaml").write_text(
+        "name: host_ket\n"
+        "imports:\n"
+        "  viva_ketchup:\n"
+        "    package: pbg_ketchup\n"
+    )
+    studies = tmp_path / "studies" / "uses_ketchup"
+    studies.mkdir(parents=True)
+    (studies / "study.yaml").write_text(
+        "name: uses_ketchup\n"
+        "description: References ketchup's bare registered composite.\n"
+        "baseline:\n"
+        "  - {name: base, composite: ketchup_baseline}\n"
+    )
+
+    stats = module_content_stats(tmp_path)
+    key = _norm("viva-ketchup")            # -> "ketchup"
+    assert key == "ketchup"
+    assert key in stats
+    assert stats[key]["n_used"] == 1
+
+
+def test_alias_join_pbg_and_viva_reference_same_module(tmp_path):
+    """A study referencing the `pbg_`-prefixed composite id attributes to the
+    SAME identity a `viva_`-prefixed import/lookup resolves to (and vice versa),
+    so a rebrand-mismatched repo row fills instead of showing `—`."""
+    (tmp_path / "workspace.yaml").write_text(
+        "name: host_alias\n"
+        "imports:\n"
+        "  viva_ketchup:\n"
+        "    package: viva_ketchup\n"
+    )
+    studies = tmp_path / "studies" / "s1"
+    studies.mkdir(parents=True)
+    # Reference the pbg_-spelled fully-qualified composite id.
+    (studies / "study.yaml").write_text(
+        "name: s1\n"
+        "description: d\n"
+        "baseline:\n"
+        "  - {name: base, composite: pbg_ketchup.composites.ketchup_baseline}\n"
+    )
+
+    stats = module_content_stats(tmp_path)
+    # pbg_ketchup (from the composite id) and viva_ketchup (the import) both
+    # collapse to "ketchup", so the usage joins the repo row.
+    assert _norm("pbg_ketchup") == _norm("viva_ketchup") == "ketchup"
+    assert "ketchup" in stats
+    assert stats["ketchup"]["n_used"] == 1
+    assert stats["ketchup"]["n_composites"] == 1
