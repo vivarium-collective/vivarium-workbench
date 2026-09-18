@@ -3002,6 +3002,39 @@
   }
   window._confirmRemoteDispatchThen = _confirmRemoteDispatchThen;
 
+  // #1113 (functional half): a Cloud image dispatch against a build with no
+  // whole-cell default config fails closed (409 reason=no-config-for-composite,
+  // composite_test_run_views.py's _dispatch_build_image_run) rather than
+  // silently guessing -- correctly, since nothing in this codebase's data model
+  // (composite definitions carry no config association; config filenames on a
+  // CD-variant repo like sms-ecoli aren't named after the composite they run,
+  // confirmed by reading both repos directly) lets the server infer the right
+  // config from spec_id alone. The fix completes the other half of that
+  // contract: surface the real available_configs list from the 409 and let the
+  // human -- who DOES know which config the composite needs -- pick one, then
+  // retry the SAME dispatch with config_filename pinned explicitly. No modal;
+  // renders inline in the caller's own status/results element (both call sites
+  // already have one) to avoid a third confirm-style overlay implementation.
+  function _renderConfigPicker(container, availableConfigs, onDispatch) {
+    if (!container) return;
+    var options = (availableConfigs || [])
+      .map(function (f) { return '<option value="' + _esc(f) + '">' + _esc(f) + '</option>'; })
+      .join('');
+    container.innerHTML =
+      '<div class="cfg-picker" style="margin-top:6px">' +
+        '<div class="muted" style="font-size:0.82em">No default config for this composite on this build ' +
+          '&mdash; pick one to dispatch:</div>' +
+        '<select class="cfg-picker-select" style="margin-top:4px;max-width:100%">' + options + '</select> ' +
+        '<button type="button" class="btn-mini cfg-picker-go">Dispatch</button>' +
+      '</div>';
+    var btn = container.querySelector('.cfg-picker-go');
+    var sel = container.querySelector('.cfg-picker-select');
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      onDispatch(sel.value);
+    });
+  }
+
   // Launch a composite run directly (no modal): POST /api/simulation with the
   // inline Time (t_end), the Configure params as overrides, and an auto name.
   // Detached run — feedback + a link to Runs; the "Configure & Run" modal is
@@ -3034,10 +3067,12 @@
       }
     }
     var orig = btn.textContent;
-    _confirmRemoteDispatchThen(function () {
+    function _launch(configFilename) {
+      var body = payload;
+      if (configFilename) { body = Object.assign({}, payload, { config_filename: configFilename }); }
       btn.disabled = true; btn.textContent = 'Launching…';
       if (status) { status.classList.remove('pcard-apply-err'); status.textContent = 'launching run…'; }
-      fetch(_api('/api/composite-test-run'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      fetch(_api('/api/composite-test-run'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
         .then(function (res) {
           var rid = res.j && res.j.run_id;
@@ -3055,13 +3090,19 @@
           } else if (res.status === 429) {
             btn.disabled = false; btn.textContent = orig;
             setErr('too many runs in progress — try again shortly');
+          } else if (res.status === 409 && res.j && res.j.reason === 'no-config-for-composite'
+                     && res.j.available_configs && res.j.available_configs.length) {
+            btn.disabled = false; btn.textContent = orig;
+            if (status) status.classList.remove('pcard-apply-err');
+            _renderConfigPicker(status, res.j.available_configs, _launch);
           } else {
             btn.disabled = false; btn.textContent = orig;
             setErr('✗ ' + ((res.j && res.j.error) || ('HTTP ' + res.status)));
           }
         })
         .catch(function (e) { btn.disabled = false; btn.textContent = orig; setErr('network error: ' + String(e)); });
-    }, function () { setErr('Cancelled.'); });
+    }
+    _confirmRemoteDispatchThen(function () { _launch(null); }, function () { setErr('Cancelled.'); });
   }
   window._runComposite = _runComposite;
 
@@ -8119,21 +8160,31 @@
     var steps = parseInt(document.getElementById('ce-steps').value, 10) || 5;
     var overrides = _ceCollectOverrides();
     var resultsEl = document.getElementById('ce-test-results');
-    _confirmRemoteDispatchThen(function () {
+    function _launch(configFilename) {
+      var reqBody = {
+        id: window._ceCurrent.id,
+        overrides: overrides,
+        steps: steps,
+        emit_paths: window._explorerEmitPaths || [],
+      };
+      if (configFilename) reqBody.config_filename = configFilename;
       resultsEl.innerHTML = '<p class="empty-state">Starting run&hellip;</p>';
       fetch(_api('/api/composite-test-run'), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          id: window._ceCurrent.id,
-          overrides: overrides,
-          steps: steps,
-          emit_paths: window._explorerEmitPaths || [],
-        }),
+        body: JSON.stringify(reqBody),
       })
         .then(function(r) { return r.json().then(function(j) { return [r.status, j]; }); })
         .then(function(parts) {
           var code = parts[0], body = parts[1];
+          if (code === 409 && body && body.reason === 'no-config-for-composite'
+              && body.available_configs && body.available_configs.length) {
+            var pickerHost = document.createElement('div');
+            resultsEl.innerHTML = '';
+            resultsEl.appendChild(pickerHost);
+            _renderConfigPicker(pickerHost, body.available_configs, _launch);
+            return;
+          }
           if (code !== 202) {
             var errMsg = body && body.error
               ? body.error
@@ -8169,7 +8220,9 @@
             '<div style="color:#c00;"><strong>Network error:</strong> ' +
             _esc(String(err)) + '</div>';
         });
-    }, function () { resultsEl.innerHTML = '<p class="empty-state">Cancelled.</p>'; });
+    }
+    _confirmRemoteDispatchThen(function () { _launch(null); },
+      function () { resultsEl.innerHTML = '<p class="empty-state">Cancelled.</p>'; });
   }
   window._ceTestRun = _ceTestRun;
 
