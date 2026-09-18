@@ -20,6 +20,7 @@ import {
   type RunStatus,
 } from '../api';
 import { parseListString, formatListString } from '../parsers';
+import { ConfigFileInput } from './ConfigFileInput';
 
 // ---- Form helpers (lifted from ConfigurePanel) ------------------------------
 
@@ -389,6 +390,10 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
                       <option value="true">true</option>
                       <option value="false">false</option>
                     </select>
+                  ) : pdef.type === 'config_file' ? (
+                    <ConfigFileInput id={id} className="sr-input" value={String(val ?? '')}
+                      compositeId={props.compositeId} readOnly={props.readOnly}
+                      onChange={(p) => onChange(p as FormValue)} />
                   ) : (
                     <input
                       id={id}

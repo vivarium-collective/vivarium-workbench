@@ -439,3 +439,84 @@ class TestImportRoute:
     def test_import_in_openapi(self, client: TestClient) -> None:
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/import" in paths and "post" in paths["/api/import"]
+
+
+# ---------------------------------------------------------------------------
+# persist_composite_config
+# ---------------------------------------------------------------------------
+
+
+class TestPersistCompositeConfig:
+    def test_happy_returns_abs_path(self, ws: Path) -> None:
+        resp, code = um.persist_composite_config(ws, {
+            "file_b64": _b64(b'{"sim": {"seed": 0}}'),
+            "filename": "test_installation.json",
+            "composite_id": "v2ecoli.composites.vecoli.vecoli",
+        })
+        assert code == 200, resp
+        assert resp["ok"] is True
+        rel = "uploads/composite-configs/v2ecoli.composites.vecoli.vecoli/test_installation.json"
+        dest = ws / rel
+        assert dest.is_file()
+        assert dest.read_bytes() == b'{"sim": {"seed": 0}}'
+        # The returned path is absolute and points at the written file.
+        assert resp["path"] == str(dest.resolve())
+        assert Path(resp["path"]).is_absolute()
+        assert resp["rel_path"] == rel
+        assert len(resp["sha256"]) == 64
+
+    def test_happy_no_composite_id_lands_under_misc(self, ws: Path) -> None:
+        resp, code = um.persist_composite_config(ws, {
+            "file_b64": _b64(b"{}"), "filename": "c.json",
+        })
+        assert code == 200, resp
+        assert (ws / "uploads" / "composite-configs" / "misc" / "c.json").is_file()
+
+    def test_filename_traversal_stripped(self, ws: Path) -> None:
+        # A directory-laden filename is reduced to its basename — no escape.
+        resp, code = um.persist_composite_config(ws, {
+            "file_b64": _b64(b"{}"), "filename": "../../../etc/pw.json",
+            "composite_id": "c",
+        })
+        assert code == 200, resp
+        assert resp["rel_path"] == "uploads/composite-configs/c/pw.json"
+        assert (ws / "uploads" / "composite-configs" / "c" / "pw.json").is_file()
+
+    def test_400_missing_file_b64(self, ws: Path) -> None:
+        resp, code = um.persist_composite_config(ws, {"filename": "c.json"})
+        assert code == 400
+        assert "file_b64 is required" in resp.get("error", "")
+
+    def test_400_missing_filename(self, ws: Path) -> None:
+        resp, code = um.persist_composite_config(ws, {"file_b64": _b64(b"{}")})
+        assert code == 400
+        assert "filename is required" in resp.get("error", "")
+
+    def test_400_filename_empty_after_sanitize(self, ws: Path) -> None:
+        resp, code = um.persist_composite_config(ws, {
+            "file_b64": _b64(b"{}"), "filename": "...",
+        })
+        assert code == 400
+        assert "filename is required" in resp.get("error", "")
+
+
+class TestCompositeConfigPersistRoute:
+    def test_happy_path(self, client: TestClient, ws: Path) -> None:
+        resp = client.post("/api/composite-config-persist", json={
+            "file_b64": _b64(b'{"a": 1}'), "filename": "cfg.json", "composite_id": "c",
+        })
+        assert resp.status_code == 200, resp.json()
+        body = resp.json()
+        assert body["ok"] is True
+        assert Path(body["path"]).is_absolute()
+        assert (ws / "uploads" / "composite-configs" / "c" / "cfg.json").is_file()
+
+    def test_400_missing_file_b64(self, client: TestClient) -> None:
+        resp = client.post("/api/composite-config-persist", json={"filename": "c.json"})
+        assert resp.status_code == 400
+        assert "file_b64 is required" in resp.json().get("error", "")
+
+    def test_persist_in_openapi(self, client: TestClient) -> None:
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/composite-config-persist" in paths
+        assert "post" in paths["/api/composite-config-persist"]

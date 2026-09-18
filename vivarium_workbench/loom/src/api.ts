@@ -3,7 +3,7 @@
 /** One parameter declared by a composite (spec or generator). Mirrors the
  *  Python decorator's parameters shape. */
 export interface ParameterDecl {
-  type: 'string' | 'int' | 'float' | 'bool' | 'list[string]' | string;
+  type: 'string' | 'int' | 'float' | 'bool' | 'list[string]' | 'config_file' | string;
   default?: unknown;
   description?: string;
   /** Optional enum: when present (a list of allowed string values), the
@@ -322,6 +322,39 @@ export async function resolveComposite(
   const body = await r.json();
   if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
   return body as ResolveResponse;
+}
+
+/** Read a File into a base64 string (no `data:` prefix). Chunked so a large
+ *  file doesn't blow the call stack via String.fromCharCode(...spread). */
+export async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/** Persist an uploaded composite config file server-side and return its stored
+ *  absolute path. Backs the file-upload control for `config_file` params (e.g.
+ *  the vecoli composite's `whole_config` / `fork_config`): the returned path
+ *  becomes the param value, which the composite then loads wholesale. The path
+ *  is used as a param value ONLY — it never feeds run_simulation's
+ *  config_filename. */
+export async function persistCompositeConfig(
+  filename: string,
+  fileB64: string,
+  compositeId?: string,
+): Promise<{ path: string; rel_path?: string; sha256?: string }> {
+  const r = await fetch('/api/composite-config-persist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, file_b64: fileB64, composite_id: compositeId ?? '' }),
+  });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+  return body as { path: string; rel_path?: string; sha256?: string };
 }
 
 export interface TranslateConfigResponse {

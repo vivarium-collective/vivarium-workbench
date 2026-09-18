@@ -68,6 +68,71 @@ def _save_upload(file_b64: str, target_path: Path) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _safe_filename(name: str) -> str:
+    """basename + sanitize, preserving a single extension. '' if unusable.
+
+    Strips any directory components first (path-traversal guard), then keeps
+    only word chars / dot / hyphen in the stem and a plain extension.
+    """
+    base = Path(name).name  # drop any dir components ('../x' -> 'x')
+    p = Path(base)
+    stem = re.sub(r"[^A-Za-z0-9_.-]", "-", p.stem).strip("-.")[:60]
+    ext = re.sub(r"[^A-Za-z0-9.]", "", p.suffix)[:16]
+    return f"{stem}{ext}" if stem else ""
+
+
+# ---------------------------------------------------------------------------
+# persist_composite_config
+# ---------------------------------------------------------------------------
+
+
+def persist_composite_config(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """POST /api/composite-config-persist — store an uploaded composite config
+    file under the workspace and return its absolute path.
+
+    Backs the Composite Explorer's file-upload control for ``config_file``
+    params (e.g. the vecoli composite's ``whole_config`` / ``fork_config``): the
+    browser uploads a full config, the server persists it under
+    ``uploads/composite-configs/<composite-slug>/<filename>``, and the returned
+    absolute path becomes the param's value — which the composite then loads
+    wholesale. The path is returned to the caller ONLY; it is not registered
+    anywhere and never feeds run_simulation's ``config_filename``.
+
+    Body: ``{file_b64, filename, composite_id?}``
+
+    Returns:
+      200  {ok: True, path: <abs>, rel_path: <ws-relative>, sha256: <hex>}
+      400  validation failures (missing file_b64 / filename, bad filename,
+           undecodable content)
+    """
+    file_b64 = (body.get("file_b64") or "").strip()
+    if not file_b64:
+        return {"error": "file_b64 is required"}, 400
+    filename = _safe_filename(body.get("filename") or "")
+    if not filename:
+        return {"error": "a valid filename is required"}, 400
+
+    composite_id = (body.get("composite_id") or "").strip()
+    # Bucket by composite id, keeping dots so a module path stays readable and
+    # "a.b" / "a-b" don't collapse. One path segment (slashes → '-'), with
+    # leading/trailing dots+dashes stripped, so it can't traverse.
+    sub = re.sub(r"[^A-Za-z0-9_.-]", "-", composite_id).strip("-.")[:80] or "misc"
+
+    dest_rel = f"uploads/composite-configs/{sub}/{filename}"
+    dest = ws_root / dest_rel
+    try:
+        sha = _save_upload(file_b64, dest)
+    except Exception as exc:  # undecodable base64, unwritable path, etc.
+        return {"error": f"could not persist config: {exc}"}, 400
+
+    return {
+        "ok": True,
+        "path": str(dest.resolve()),
+        "rel_path": dest_rel,
+        "sha256": sha,
+    }, 200
+
+
 def _investigation_yaml_path(ws_root: Path, inv: str) -> "Path | None":
     """Resolve investigations/<inv>/investigation.yaml, or None if missing."""
     for d in _invstatus.iter_iset_dirs(ws_root):

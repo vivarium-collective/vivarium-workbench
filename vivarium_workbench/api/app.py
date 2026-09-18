@@ -280,6 +280,7 @@ from vivarium_workbench.lib.models import (
     VisualizationCommitBatchBody,
     # Batch 25: request-body models for upload / import mutations
     DatasetUploadBody,
+    CompositeConfigPersistBody,
     ExpertDocUploadBody,
     ImportRegisterBody,
     # Batch 26: request-body models for reference mutations
@@ -4939,6 +4940,36 @@ def create_app() -> FastAPI:
         Delegates to ``lib.upload_mutations.register_dataset``.
         """
         body, status = _upload_mut.register_dataset(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/composite-config-persist",
+        tags=["Data, inputs & references"],
+        summary="Persist an uploaded composite config file and return its stored path",
+    )
+    def composite_config_persist(
+        req: CompositeConfigPersistBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Store an uploaded composite config file under the workspace.
+
+        Body: ``{file_b64, filename, composite_id?}``. The file is written under
+        ``uploads/composite-configs/<composite-slug>/<filename>`` and its
+        absolute path returned, to become the value of a ``config_file`` param
+        (e.g. the vecoli composite's ``whole_config``), which the composite then
+        loads wholesale. The returned path is used as a param value only — it is
+        registered nowhere and never feeds run_simulation's ``config_filename``.
+        400 on missing/invalid ``file_b64``/``filename``; 200
+        ``{ok: true, path, rel_path, sha256}`` on success.
+
+        Note: like the sibling upload routes in this batch, the CSRF guard is
+        deferred to the state/flip batch.
+
+        Delegates to ``lib.upload_mutations.persist_composite_config``.
+        """
+        body, status = _upload_mut.persist_composite_config(ws, req.model_dump(exclude_unset=True))
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ParameterDecl } from '../api';
 import { resolveComposite, translateExternalConfig } from '../api';
 import { _initialValue, _castFormValue } from './SetupRunPanel';
+import { ConfigFileInput } from './ConfigFileInput';
 
 type FormValue = string | number | boolean;
 
@@ -488,6 +489,10 @@ export function ConfigPanel(props: ConfigPanelProps) {
                     <option value="true">true</option>
                     <option value="false">false</option>
                   </select>
+                ) : pdef.type === 'config_file' ? (
+                  <ConfigFileInput id={id} className="sr-input cfg-input" value={String(val ?? '')}
+                    compositeId={props.compositeId} readOnly={props.readOnly}
+                    onChange={(p) => onChange(p as FormValue)} />
                 ) : (
                   <input id={id} className="sr-input cfg-input"
                     type={_normType(pdef.type) === 'int' || _normType(pdef.type) === 'float' ? 'number' : 'text'}

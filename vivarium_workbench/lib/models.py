@@ -2191,6 +2191,22 @@ class DatasetUploadBody(BaseModel):
     investigation: Optional[str] = None
 
 
+class CompositeConfigPersistBody(BaseModel):
+    """POST /api/composite-config-persist {file_b64, filename, composite_id?}
+
+    Backs the Composite Explorer's file-upload control for ``config_file``
+    params: the uploaded file is stored under the workspace and its absolute
+    path is returned to become the param's value. ``model_dump(exclude_unset=True)``
+    preserves the ``"key" in body`` presence semantics the builder relies on.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    file_b64: Optional[str] = None
+    filename: Optional[str] = None
+    composite_id: Optional[str] = None
+
+
 class ExpertDocUploadBody(BaseModel):
     """POST /api/expert-doc {name, file_b64?, filename?, source_path?, description?, contributor?, claims_supported?, investigation?}
 
