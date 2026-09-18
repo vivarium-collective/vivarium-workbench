@@ -630,10 +630,14 @@
     var chip = cardEl.querySelector('[data-role="build-warn"]');
     if (!chip) return;
     var info = _buildErrorChipInfo(d);
-    if (!info) { chip.hidden = true; chip.textContent = ''; chip.removeAttribute('title'); return; }
+    // Toggle style.display too: the chip's inline style sets a display, which
+    // overrides the `hidden` attribute's UA display:none — without this the empty
+    // amber pill lingers visible when the wiring is healthy.
+    if (!info) { chip.hidden = true; chip.style.display = 'none'; chip.textContent = ''; chip.removeAttribute('title'); return; }
     chip.textContent = info.text;
     chip.title = info.title || info.text;
     chip.hidden = false;
+    chip.style.display = 'inline-block';
   }
   window._renderCompositeBuildWarn = _renderCompositeBuildWarn;
 
@@ -898,7 +902,7 @@
             // (_loadCompositeBuildWarn fires when the loom mounts). Amber, matching
             // the workbench's status-pill convention; informational, non-blocking.
             '<span class="pcard-build-warn" data-role="build-warn" hidden ' +
-              'style="display:inline-block;margin-left:8px;padding:1px 9px;border-radius:10px;' +
+              'style="display:none;margin-left:8px;padding:1px 9px;border-radius:10px;' +
               'font-size:11px;font-weight:600;background:#fef3c7;color:#92400e;border:1px solid #fde68a;' +
               'vertical-align:middle;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>' +
             '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⌃</button>' +
