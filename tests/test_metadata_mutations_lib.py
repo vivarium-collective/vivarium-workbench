@@ -432,6 +432,66 @@ class TestSetStudyExpertInput:
 
 
 # ---------------------------------------------------------------------------
+# 2b. Consolidated PATCH orchestrators (patch_study / patch_investigation)
+# ---------------------------------------------------------------------------
+
+
+class TestPatchStudyLib:
+    def test_multi_field_applies_all(self, ws):
+        res, code = mm.patch_study(ws, "s1", {
+            "objective": "New obj",
+            "conclusions": "# C",
+            "overview": {"question": "Q?"},
+            "observables": [["a", "b"]],
+            "expert_input": {"name": "kS", "current": 3.0},
+            "narrative": {"path": "biological_summary", "value": "N"},
+        })
+        assert code == 200, res
+        assert set(res["applied"]) == {
+            "objective", "conclusions", "overview", "observables", "expert_input", "narrative",
+        }
+        spec = _read_study(ws)
+        assert spec["objective"] == "New obj"
+        assert spec["conclusions"] == "# C"  # written via markdown, not the old `text` bug
+        assert spec["question"] == "Q?"
+        assert spec["biological_summary"] == "N"
+        target = next(e for e in spec["conditions"]["model_settings"] if e["name"] == "kS")
+        assert target["current"] == 3.0
+
+    def test_empty_400(self, ws):
+        assert mm.patch_study(ws, "s1", {})[1] == 400
+
+    def test_missing_slug_400(self, ws):
+        assert mm.patch_study(ws, "", {"objective": "x"})[1] == 400
+
+    def test_bad_field_is_annotated(self, ws):
+        res, code = mm.patch_study(ws, "s1", {"narrative": {"path": "baseline.x", "value": "y"}})
+        assert code == 400 and res["field"] == "narrative"
+
+    def test_unknown_study_404(self, ws):
+        res, code = mm.patch_study(ws, "no-such", {"objective": "x"})
+        assert code == 404 and res["field"] == "objective"
+
+
+class TestPatchInvestigationLib:
+    def test_status_writes_investigation_yaml(self, ws):
+        res, code = mm.patch_investigation(ws, "dnaa-test", {"status": "completed", "conclusions": "# IC"})
+        assert code == 200, res
+        assert _read_inv_yaml(ws)["status"] == "completed"  # investigation.yaml, not the spec
+        assert _read_inv_spec(ws)["conclusions"] == "# IC"
+
+    def test_overview_status_is_the_spec_status(self, ws):
+        # overview.status is the spec/study.yaml status — a different field from
+        # the top-level investigation.yaml status above.
+        res, code = mm.patch_investigation(ws, "dnaa-test", {"overview": {"status": "completed"}})
+        assert code == 200, res
+        assert _read_inv_spec(ws)["status"] == "completed"
+
+    def test_empty_400(self, ws):
+        assert mm.patch_investigation(ws, "dnaa-test", {})[1] == 400
+
+
+# ---------------------------------------------------------------------------
 # 3. FastAPI route tests
 # ---------------------------------------------------------------------------
 
@@ -442,26 +502,6 @@ def client(ws) -> TestClient:
     app = create_app()
     app.dependency_overrides[get_workspace] = lambda: ws
     return TestClient(app)
-
-
-class TestInvestigationSetObservablesRoute:
-    def test_200_sets_observables(self, client, ws):
-        r = client.post("/api/investigation-set-observables", json={
-            "investigation": "dnaa-test",
-            "paths": [["path", "a"]],
-        })
-        assert r.status_code == 200
-        spec = _read_inv_spec(ws)
-        assert spec["observables"] == [{"path": ["path", "a"]}]
-
-    def test_400_missing_investigation(self, client):
-        r = client.post("/api/investigation-set-observables", json={"paths": []})
-        assert r.status_code == 400
-
-    def test_in_openapi(self, client):
-        schema = client.get("/openapi.json").json()
-        paths = schema["paths"]
-        assert "/api/investigation-set-observables" in paths
 
 
 class TestStudySetAnalysesRoute:
@@ -483,167 +523,83 @@ class TestStudySetAnalysesRoute:
         assert "/api/study-set-analyses" in schema["paths"]
 
 
-class TestInvestigationSetConclusionsRoute:
-    def test_200_sets_conclusions(self, client, ws):
-        r = client.post("/api/investigation-set-conclusions", json={
-            "investigation": "dnaa-test",
-            "markdown": "# Final",
+class TestStudyPatchRoute:
+    def test_200_multi_field(self, client, ws):
+        r = client.patch("/api/study/s1", json={
+            "objective": "Route obj",
+            "conclusions": "# RC",
+            "overview": {"question": "RQ?"},
         })
-        assert r.status_code == 200
-        spec = _read_inv_spec(ws)
-        assert spec["conclusions"] == "# Final"
-
-    def test_400_missing_investigation(self, client):
-        r = client.post("/api/investigation-set-conclusions", json={"markdown": "x"})
-        assert r.status_code == 400
-
-    def test_in_openapi(self, client):
-        schema = client.get("/openapi.json").json()
-        assert "/api/investigation-set-conclusions" in schema["paths"]
-
-
-class TestInvestigationSetOverviewRoute:
-    def test_200_sets_question(self, client, ws):
-        r = client.post("/api/investigation-set-overview", json={
-            "investigation": "dnaa-test",
-            "fields": {"question": "Route question?"},
-        })
-        assert r.status_code == 200
-        spec = _read_inv_spec(ws)
-        assert spec["question"] == "Route question?"
-
-    def test_400_invalid_status(self, client):
-        r = client.post("/api/investigation-set-overview", json={
-            "investigation": "dnaa-test",
-            "fields": {"status": "bogus"},
-        })
-        assert r.status_code == 400
-
-    def test_in_openapi(self, client):
-        schema = client.get("/openapi.json").json()
-        assert "/api/investigation-set-overview" in schema["paths"]
-
-
-class TestInvestigationSetStatusRoute:
-    def test_200_sets_status(self, client, ws):
-        r = client.post("/api/investigation-set-status", json={
-            "investigation": "dnaa-test",
-            "status": "completed",
-        })
-        assert r.status_code == 200
-        assert r.json()["ok"] is True
-        spec = _read_inv_yaml(ws)
-        assert spec["status"] == "completed"
-
-    def test_400_invalid_status(self, client):
-        r = client.post("/api/investigation-set-status", json={
-            "investigation": "dnaa-test",
-            "status": "bogus",
-        })
-        assert r.status_code == 400
-
-    def test_404_unknown_investigation(self, client):
-        r = client.post("/api/investigation-set-status", json={
-            "investigation": "no-such",
-            "status": "archived",
-        })
-        assert r.status_code == 404
-
-    def test_in_openapi(self, client):
-        schema = client.get("/openapi.json").json()
-        assert "/api/investigation-set-status" in schema["paths"]
-
-
-class TestStudySetObjectiveRoute:
-    def test_200_sets_objective(self, client, ws):
-        r = client.post("/api/study-set-objective", json={
-            "study": "s1",
-            "text": "Route objective.",
-        })
-        assert r.status_code == 200
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True
+        assert set(body["applied"]) == {"objective", "conclusions", "overview"}
         spec = _read_study(ws)
-        assert spec["objective"] == "Route objective."
+        assert spec["objective"] == "Route obj"
+        assert spec["conclusions"] == "# RC"
+        assert spec["question"] == "RQ?"
+
+    def test_200_narrative_and_expert_input(self, client, ws):
+        r = client.patch("/api/study/s1", json={
+            "narrative": {"path": "biological_summary", "value": "N"},
+            "expert_input": {"name": "kS", "current": 4.0},
+        })
+        assert r.status_code == 200, r.text
+        spec = _read_study(ws)
+        assert spec["biological_summary"] == "N"
+        target = next(e for e in spec["conditions"]["model_settings"] if e["name"] == "kS")
+        assert target["current"] == 4.0
+
+    def test_400_empty_body(self, client):
+        assert client.patch("/api/study/s1", json={}).status_code == 400
 
     def test_404_unknown_study(self, client):
-        r = client.post("/api/study-set-objective", json={
-            "study": "no-such",
-            "text": "x",
-        })
-        assert r.status_code == 404
+        assert client.patch("/api/study/no-such", json={"objective": "x"}).status_code == 404
 
     def test_in_openapi(self, client):
         schema = client.get("/openapi.json").json()
-        assert "/api/study-set-objective" in schema["paths"]
+        assert "patch" in schema["paths"]["/api/study/{slug}"]
+
+    def test_old_setter_routes_gone(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        for p in ("/api/study-set-objective", "/api/study-narrative-set",
+                  "/api/study-expert-input-set", "/api/study-set-observables",
+                  "/api/study-set-conclusion", "/api/study-set-description"):
+            assert p not in paths
 
 
-class TestStudyNarrativeSetRoute:
-    def test_200_sets_narrative(self, client, ws):
-        r = client.post("/api/study-narrative-set", json={
-            "study": "s1",
-            "path": "biological_summary",
-            "value": "Route narrative.",
+class TestInvestigationPatchRoute:
+    def test_200_status_writes_investigation_yaml(self, client, ws):
+        r = client.patch("/api/investigation/dnaa-test", json={"status": "completed"})
+        assert r.status_code == 200, r.text
+        assert _read_inv_yaml(ws)["status"] == "completed"
+
+    def test_200_conclusions_overview_observables(self, client, ws):
+        r = client.patch("/api/investigation/dnaa-test", json={
+            "conclusions": "# IC",
+            "overview": {"question": "IQ?"},
+            "observables": [["p", "a"]],
         })
-        assert r.status_code == 200
-        spec = _read_study(ws)
-        assert spec["biological_summary"] == "Route narrative."
+        assert r.status_code == 200, r.text
+        spec = _read_inv_spec(ws)
+        assert spec["conclusions"] == "# IC"
+        assert spec["question"] == "IQ?"
+        assert spec["observables"] == [{"path": ["p", "a"]}]
 
-    def test_400_missing_value_key(self, client):
-        # 'value' key absent — lib returns 400
-        r = client.post("/api/study-narrative-set", json={
-            "study": "s1",
-            "path": "biological_summary",
-        })
+    def test_400_invalid_status_is_field_annotated(self, client):
+        r = client.patch("/api/investigation/dnaa-test", json={"status": "bogus"})
         assert r.status_code == 400
+        assert r.json().get("field") == "status"
 
-    def test_400_forbidden_root(self, client):
-        r = client.post("/api/study-narrative-set", json={
-            "study": "s1",
-            "path": "baseline.name",
-            "value": "x",
-        })
-        assert r.status_code == 400
+    def test_404_unknown(self, client):
+        assert client.patch("/api/investigation/no-such", json={"status": "archived"}).status_code == 404
 
     def test_in_openapi(self, client):
         schema = client.get("/openapi.json").json()
-        assert "/api/study-narrative-set" in schema["paths"]
+        assert "patch" in schema["paths"]["/api/investigation/{slug}"]
 
-
-class TestStudyExpertInputSetRoute:
-    def test_200_sets_current(self, client, ws):
-        r = client.post("/api/study-expert-input-set", json={
-            "study": "s1",
-            "name": "kS",
-            "current": 7.0,
-        })
-        assert r.status_code == 200
-        assert r.json() == {"study": "s1", "name": "kS", "current": 7.0}
-        spec = _read_study(ws)
-        target = next(e for e in spec["conditions"]["model_settings"] if e["name"] == "kS")
-        assert target["current"] == 7.0
-
-    def test_400_out_of_range(self, client):
-        r = client.post("/api/study-expert-input-set", json={
-            "study": "s1",
-            "name": "kS",
-            "current": 99.0,
-        })
-        assert r.status_code == 400
-
-    def test_400_missing_current_key(self, client):
-        r = client.post("/api/study-expert-input-set", json={
-            "study": "s1",
-            "name": "kS",
-        })
-        assert r.status_code == 400
-
-    def test_404_setting_not_found(self, client):
-        r = client.post("/api/study-expert-input-set", json={
-            "study": "s1",
-            "name": "no-such",
-            "current": 1.0,
-        })
-        assert r.status_code == 404
-
-    def test_in_openapi(self, client):
-        schema = client.get("/openapi.json").json()
-        assert "/api/study-expert-input-set" in schema["paths"]
+    def test_old_setter_routes_gone(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        for p in ("/api/investigation-set-observables", "/api/investigation-set-conclusions",
+                  "/api/investigation-set-overview", "/api/investigation-set-status"):
+            assert p not in paths

@@ -2162,10 +2162,10 @@ function _saveExpertInput(studyName, eiName, btn) {
   flash.className = 'cond-ei-flash';
   flash.style.display = '';
   flash.textContent = 'saving…';
-  fetch('/api/study-expert-input-set', {
-    method: 'POST',
+  fetch('/api/study/' + encodeURIComponent(studyName), {
+    method: 'PATCH',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({study: studyName, name: eiName, current: val}),
+    body: JSON.stringify({expert_input: {name: eiName, current: val}}),
   }).then(function(r) {
     return r.text().then(function(t) { return {ok: r.ok, status: r.status, body: t}; });
   }).then(function(res) {

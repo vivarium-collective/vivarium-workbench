@@ -1,5 +1,5 @@
 """Tests for _post_study_narrative_set_for_test — the v4 narrative-spine
-generic writer that backs the new POST /api/study-narrative-set endpoint.
+generic writer that backs the ``narrative`` field of PATCH /api/study/{slug}.
 
 Covers:
 - Happy path for each allowlisted root (report, study_card,

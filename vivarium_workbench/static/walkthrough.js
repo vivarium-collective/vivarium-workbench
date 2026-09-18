@@ -9053,7 +9053,10 @@
           if (!p[0]) { errEl.textContent = p[1].error || 'Create failed.'; return; }
           var created = (p[1] && p[1].name) || name;
           // Seed the question on the scaffolded study (best-effort).
-          post('/api/study-narrative-set', { study: created, path: 'purpose.question', value: prompt })
+          fetch('/api/study/' + encodeURIComponent(created), {
+            method: 'PATCH', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ narrative: { path: 'purpose.question', value: prompt } }),
+          })
             .catch(function () {}).then(function () {
               closeModal('modal-browse-create');
               window._investigationsLoaded = false;
@@ -9350,10 +9353,10 @@
   function _setInvestigationStatus(btn, name, status) {
     var orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
-    fetch('/api/investigation-set-status', {
-      method: 'POST',
+    fetch('/api/investigation/' + encodeURIComponent(name), {
+      method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: name, status: status}),
+      body: JSON.stringify({status: status}),
     })
       .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function() {
@@ -13286,12 +13289,12 @@
   }
 
   function _saveOverviewField(invName, key, value) {
-    var body = { investigation: invName, fields: {} };
-    body.fields[key] = value;
-    fetch('/api/investigation-set-overview', {
-      method: 'POST',
+    var overview = {};
+    overview[key] = value;
+    fetch('/api/investigation/' + encodeURIComponent(invName), {
+      method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
+      body: JSON.stringify({overview: overview}),
     })
       .then(function(r) {
         if (!r.ok) {
@@ -13345,10 +13348,10 @@
     var invName = window._currentInvestigation;
     if (!invName) return;
     var blob = _emitConclusionsBlob();
-    fetch('/api/investigation-set-conclusions', {
-      method: 'POST',
+    fetch('/api/investigation/' + encodeURIComponent(invName), {
+      method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: invName, markdown: blob}),
+      body: JSON.stringify({conclusions: blob}),
     })
       .then(function(r) {
         if (!r.ok) return r.json().then(function(j) { alert(j.error || 'save failed'); });
@@ -14380,9 +14383,9 @@
       document.querySelectorAll('#inv-observables-tree input[type=checkbox][data-path]:checked')
         .forEach(function(cb) { paths.push(cb.dataset.path.split('.')); });
     }
-    fetch('/api/investigation-set-observables', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: invName, paths: paths, emit_all: emitAll}),
+    fetch('/api/investigation/' + encodeURIComponent(invName), {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({observables: paths, emit_all: emitAll}),
     }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var status = document.getElementById('inv-observables-status');

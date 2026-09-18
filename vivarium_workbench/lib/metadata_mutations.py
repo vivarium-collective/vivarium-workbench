@@ -406,3 +406,114 @@ def set_study_expert_input(ws_root: Path, body: dict) -> tuple[dict, int]:
         return {"error": f"write failed: {e}"}, 500
 
     return {"study": slug, "name": name, "current": new_current}, 200
+
+
+# ---------------------------------------------------------------------------
+# Consolidated partial-update orchestrators
+#
+# One entry point per entity, backing PATCH /api/study/{slug} and
+# PATCH /api/investigation/{slug}. They dispatch each present field of a typed
+# partial body to the bespoke per-field mutation above (there is no uniform
+# "set field X" primitive — each field writes a differently-shaped target), so
+# the HTTP surface collapses from the ten per-field setter POSTs to two routes
+# while the field-level write behavior is unchanged. ``patch`` is the caller's
+# ``model_dump(exclude_unset=True)`` — only fields the client actually sent.
+# On the first failing field the whole call returns that field's (error, code)
+# annotated with ``field``; fields already applied stay written (per-field RMW,
+# same as calling the old setters in sequence).
+# ---------------------------------------------------------------------------
+
+
+def _observables_body(slug: str, patch: dict) -> dict:
+    body: dict = {"investigation": slug}
+    if "observables" in patch:
+        body["paths"] = patch["observables"]
+    if "emit_all" in patch:
+        body["emit_all"] = patch["emit_all"]
+    return body
+
+
+def patch_study(ws_root: Path, slug: str, patch: dict) -> tuple[dict, int]:
+    """Apply a partial update to ``studies/<slug>/study.yaml`` (PATCH /api/study/{slug})."""
+    slug = (slug or "").strip()
+    if not slug:
+        return {"error": "missing study"}, 400
+    if not patch:
+        return {"error": "no fields to patch"}, 400
+
+    applied: list[str] = []
+    if "observables" in patch or "emit_all" in patch:
+        res, code = set_investigation_observables(ws_root, _observables_body(slug, patch))
+        if code != 200:
+            return {**res, "field": "observables"}, code
+        applied.append("observables")
+    if "objective" in patch:
+        res, code = set_study_objective(ws_root, {"study": slug, "text": patch["objective"]})
+        if code != 200:
+            return {**res, "field": "objective"}, code
+        applied.append("objective")
+    if "conclusions" in patch:
+        res, code = set_investigation_conclusions(ws_root, {"study": slug, "markdown": patch["conclusions"]})
+        if code != 200:
+            return {**res, "field": "conclusions"}, code
+        applied.append("conclusions")
+    if "overview" in patch:
+        res, code = set_investigation_overview(ws_root, {"investigation": slug, "fields": patch["overview"]})
+        if code != 200:
+            return {**res, "field": "overview"}, code
+        applied.append("overview")
+    if "narrative" in patch:
+        n = patch["narrative"] or {}
+        res, code = set_study_narrative(ws_root, {"study": slug, "path": n.get("path", ""), "value": n.get("value")})
+        if code != 200:
+            return {**res, "field": "narrative"}, code
+        applied.append("narrative")
+    if "expert_input" in patch:
+        e = patch["expert_input"] or {}
+        res, code = set_study_expert_input(ws_root, {"study": slug, "name": e.get("name", ""), "current": e.get("current")})
+        if code != 200:
+            return {**res, "field": "expert_input"}, code
+        applied.append("expert_input")
+
+    if not applied:
+        return {"error": "no fields to patch"}, 400
+    return {"ok": True, "applied": applied}, 200
+
+
+def patch_investigation(ws_root: Path, slug: str, patch: dict) -> tuple[dict, int]:
+    """Apply a partial update to an investigation's metadata (PATCH /api/investigation/{slug}).
+
+    ``status`` writes investigations/<slug>/investigation.yaml; the spec/study.yaml
+    overview status is set via ``overview: {status: ...}`` instead.
+    """
+    slug = (slug or "").strip()
+    if not slug:
+        return {"error": "missing investigation"}, 400
+    if not patch:
+        return {"error": "no fields to patch"}, 400
+
+    applied: list[str] = []
+    if "observables" in patch or "emit_all" in patch:
+        res, code = set_investigation_observables(ws_root, _observables_body(slug, patch))
+        if code != 200:
+            return {**res, "field": "observables"}, code
+        applied.append("observables")
+    if "conclusions" in patch:
+        res, code = set_investigation_conclusions(ws_root, {"investigation": slug, "markdown": patch["conclusions"]})
+        if code != 200:
+            return {**res, "field": "conclusions"}, code
+        applied.append("conclusions")
+    if "overview" in patch:
+        res, code = set_investigation_overview(ws_root, {"investigation": slug, "fields": patch["overview"]})
+        if code != 200:
+            return {**res, "field": "overview"}, code
+        applied.append("overview")
+    if "status" in patch:
+        res, code = set_investigation_status(ws_root, {"investigation": slug, "status": patch["status"]})
+        if code != 200:
+            return {**res, "field": "status"}, code
+        applied.append("status")
+
+    if not applied:
+        return {"error": "no fields to patch"}, 400
+    return {"ok": True, "applied": applied}, 200

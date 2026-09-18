@@ -114,35 +114,28 @@ def test_study_delete_unknown_404(tmp_path):
     assert r.status_code == 404
 
 
-def test_study_set_observables_missing_400(tmp_path):
-    ws, _ = _study_ws(tmp_path)
-    r = _client(ws).post("/api/study-set-observables", json={"paths": []})
+def test_study_patch_empty_400(tmp_path):
+    ws, slug = _study_ws(tmp_path)
+    r = _client(ws).patch("/api/study/" + slug, json={})
     assert r.status_code == 400
 
 
-def test_study_set_conclusion_happy(tmp_path):
+def test_study_patch_conclusions_happy(tmp_path):
     ws, slug = _study_ws(tmp_path)
-    r = _client(ws).post(
-        "/api/study-set-conclusion", json={"investigation": slug, "markdown": "done"}
-    )
+    r = _client(ws).patch("/api/study/" + slug, json={"conclusions": "done"})
     assert r.status_code == 200
 
 
-def test_study_set_description_happy(tmp_path):
+def test_study_patch_overview_happy(tmp_path):
+    # Formerly study-set-description — writes the overview fields, not a scalar.
     ws, slug = _study_ws(tmp_path)
-    r = _client(ws).post(
-        "/api/study-set-description",
-        json={"investigation": slug, "fields": {"question": "why?"}},
-    )
+    r = _client(ws).patch("/api/study/" + slug, json={"overview": {"question": "why?"}})
     assert r.status_code == 200
 
 
-def test_study_set_observables_happy(tmp_path):
+def test_study_patch_observables_happy(tmp_path):
     ws, slug = _study_ws(tmp_path)
-    r = _client(ws).post(
-        "/api/study-set-observables",
-        json={"investigation": slug, "paths": [["a", "b"]]},
-    )
+    r = _client(ws).patch("/api/study/" + slug, json={"observables": [["a", "b"]]})
     assert r.status_code == 200
 
 

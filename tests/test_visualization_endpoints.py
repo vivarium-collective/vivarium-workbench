@@ -70,6 +70,20 @@ def _post(url, body):
         return e.code, json.loads(e.read())
 
 
+def _patch(url, body):
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        method="PATCH",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -641,10 +655,9 @@ def test_post_set_observables_writes_spec_yaml(workspace_server):
         'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
     }, sort_keys=False))
 
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-observables',
-        {'investigation': 'demo',
-         'paths': [['chromosome', 'DnaA_count'], ['chromosome', 'free_DnaA']],
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'observables': [['chromosome', 'DnaA_count'], ['chromosome', 'free_DnaA']],
          'emit_all': False},
     )
     assert code in (200, 500), j
@@ -660,9 +673,9 @@ def test_post_set_observables_emit_all(workspace_server):
     (inv / 'spec.yaml').write_text(yaml.safe_dump({
         'name': 'demo', 'composites': [], 'runs': [],
     }, sort_keys=False))
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-observables',
-        {'investigation': 'demo', 'paths': [], 'emit_all': True},
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'observables': [], 'emit_all': True},
     )
     assert code in (200, 500), j
     spec = yaml.safe_load((inv / 'spec.yaml').read_text())
@@ -670,10 +683,11 @@ def test_post_set_observables_emit_all(workspace_server):
     assert spec['observables'] == [{'path': []}]
 
 
-def test_post_set_observables_rejects_missing_investigation(workspace_server):
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-observables',
-        {'paths': []},
+def test_post_patch_rejects_empty_body(workspace_server):
+    # The slug is in the path now; an empty PATCH body has nothing to apply.
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {},
     )
     assert code == 400
 
@@ -691,9 +705,9 @@ def test_post_set_observables_rejects_non_list_paths(workspace_server):
 
 
 def test_post_set_observables_rejects_missing_investigation_dir(workspace_server):
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-observables',
-        {'investigation': 'nonexistent', 'paths': []},
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/nonexistent',
+        {'observables': []},
     )
     assert code == 404
 
@@ -710,9 +724,9 @@ def test_post_set_conclusions_writes_markdown(workspace_server):
     }, sort_keys=False))
 
     md = "# Conclusions\n\nThe DnaA threshold is approximately 50 molecules.\n"
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-conclusions',
-        {'investigation': 'demo', 'markdown': md},
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'conclusions': md},
     )
     assert code in (200, 500), j
     spec = yaml.safe_load((inv / 'spec.yaml').read_text())
@@ -727,9 +741,9 @@ def test_post_set_conclusions_rejects_oversize(workspace_server):
     }, sort_keys=False))
 
     oversize = 'x' * (256 * 1024 + 1)  # 256KB + 1 byte
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-conclusions',
-        {'investigation': 'demo', 'markdown': oversize},
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'conclusions': oversize},
     )
     assert code == 400, j
     assert '256' in j.get('error', '') or 'size' in j.get('error', '').lower() or 'limit' in j.get('error', '').lower()
@@ -746,9 +760,9 @@ def test_post_set_overview_updates_question(workspace_server):
         'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
     }, sort_keys=False))
 
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-overview',
-        {'investigation': 'demo', 'fields': {'question': 'Does X drive Y?'}},
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'overview': {'question': 'Does X drive Y?'}},
     )
     assert code in (200, 500), j
     spec = yaml.safe_load((inv / 'spec.yaml').read_text())
@@ -762,9 +776,9 @@ def test_post_set_overview_rejects_invalid_status(workspace_server):
         'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
     }, sort_keys=False))
 
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-overview',
-        {'investigation': 'demo', 'fields': {'status': 'bogus'}},
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'overview': {'status': 'bogus'}},
     )
     assert code == 400, j
     err = j.get('error', '').lower()
@@ -781,17 +795,17 @@ def test_post_set_overview_partial_update_preserves_other_fields(workspace_serve
         'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
     }, sort_keys=False))
 
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-overview',
-        {'investigation': 'demo', 'fields': {
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'overview': {
             'question': 'Q1', 'hypothesis': 'H1', 'status': 'in-progress',
         }},
     )
     assert code in (200, 500), j
 
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-overview',
-        {'investigation': 'demo', 'fields': {'status': 'completed'}},
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'overview': {'status': 'completed'}},
     )
     assert code in (200, 500), j
 
@@ -808,9 +822,9 @@ def test_post_set_overview_accepts_topic(workspace_server):
         'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
     }, sort_keys=False))
 
-    code, j = _post(
-        workspace_server.url + '/api/investigation-set-overview',
-        {'investigation': 'demo', 'fields': {'topic': 'Antibiotic response'}},
+    code, j = _patch(
+        workspace_server.url + '/api/investigation/demo',
+        {'overview': {'topic': 'Antibiotic response'}},
     )
     assert code in (200, 500), j
     spec = yaml.safe_load((inv / 'spec.yaml').read_text())

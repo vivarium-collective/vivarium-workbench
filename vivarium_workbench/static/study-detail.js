@@ -1766,16 +1766,20 @@
 
   // --- Inline-edit (overview fields: objective, conclusion, question, hypothesis, status) ---
   function _saveOverviewField(field, value) {
+    var url = '/api/study/' + encodeURIComponent(studyName());
     if (field === 'objective') {
-      return api('POST', '/api/study-set-objective', {study: studyName(), text: value});
+      return api('PATCH', url, {objective: value});
     }
     if (field === 'conclusion') {
-      return api('POST', '/api/study-set-conclusion', {study: studyName(), text: value});
+      // The consolidated PATCH takes `conclusions` (mirrors study.yaml); the old
+      // study-set-conclusion path silently read `markdown`, so sending `text`
+      // blanked the field — fixed here.
+      return api('PATCH', url, {conclusions: value});
     }
     if (field === 'question' || field === 'hypothesis' || field === 'status') {
-      var body = {investigation: studyName(), fields: {}};
-      body.fields[field] = value;
-      return api('POST', '/api/investigation-set-overview', body);
+      var overview = {};
+      overview[field] = value;
+      return api('PATCH', url, {overview: overview});
     }
     return Promise.resolve();
   }
@@ -1818,10 +1822,8 @@
     if (!path) return;
     var value = el.value;
     el.classList.remove('narrative-saved', 'narrative-error');
-    return api('POST', '/api/study-narrative-set', {
-      study: studyName(),
-      path: path,
-      value: value,
+    return api('PATCH', '/api/study/' + encodeURIComponent(studyName()), {
+      narrative: {path: path, value: value},
     }).then(function(res) {
       // api() returns {status, body}. 200 + body.ok === success.
       if (res && res.status === 200 && res.body && res.body.ok) {

@@ -1358,16 +1358,6 @@ class SystemDepsCheck(BaseModel):
 # return {ok:True}/{error:...} — too generic to need a separate model).
 
 
-class SetObservablesBody(BaseModel):
-    """POST /api/investigation-set-observables {investigation, paths, emit_all?}"""
-
-    model_config = ConfigDict(extra="allow")
-
-    investigation: str = ""
-    paths: Optional[list] = None
-    emit_all: Optional[bool] = None
-
-
 class SetAnalysesBody(BaseModel):
     """POST /api/investigation-set-analyses {investigation, analyses}
 
@@ -1382,71 +1372,74 @@ class SetAnalysesBody(BaseModel):
     analyses: Optional[list] = None
 
 
-class SetConclusionsBody(BaseModel):
-    """POST /api/investigation-set-conclusions {investigation|name|study, markdown}"""
-
-    model_config = ConfigDict(extra="allow")
-
-    investigation: Optional[str] = None
-    name: Optional[str] = None
-    study: Optional[str] = None
-    markdown: str = ""
-
-
-class SetOverviewBody(BaseModel):
-    """POST /api/investigation-set-overview {investigation, fields:{question?,hypothesis?,status?,topic?}}"""
-
-    model_config = ConfigDict(extra="allow")
-
-    investigation: str = ""
-    fields: Optional[dict] = None
+# ---------------------------------------------------------------------------
+# Consolidated PATCH bodies: study / investigation metadata
+#
+# One typed partial-update body per entity, replacing the per-field setter POSTs
+# (study-set-objective, study-narrative-set, ...). Each present field dispatches
+# to its existing lib.metadata_mutations function. Field names mirror the on-disk
+# study.yaml / investigation.yaml so a future typed schema tightens these rather
+# than redefining them. These are deliberately NOT extra="allow": they are the
+# typed contract. The handler applies only the fields the client actually sends
+# (``model_fields_set``), so a structured field explicitly set to null (e.g. a
+# narrative leaf delete) stays distinct from an absent field.
+# ---------------------------------------------------------------------------
 
 
-class SetStatusBody(BaseModel):
-    """POST /api/investigation-set-status {investigation, status}"""
+class NarrativePatch(BaseModel):
+    """One narrative-tree leaf write: dotted ``path`` under an allowlisted root;
+    ``value`` written at it (null/"" deletes the leaf and prunes empties)."""
 
-    model_config = ConfigDict(extra="allow")
-
-    investigation: str = ""
-    status: str = ""
-
-
-class SetObjectiveBody(BaseModel):
-    """POST /api/study-set-objective {study, text?}"""
-
-    model_config = ConfigDict(extra="allow")
-
-    study: str = ""
-    text: Optional[str] = None
+    path: str
+    value: Any = None
 
 
-class NarrativeSetBody(BaseModel):
-    """POST /api/study-narrative-set {study, path, value}
+class ExpertInputPatch(BaseModel):
+    """Patch one expert-input entry: set ``current`` on the model-settings entry
+    whose ``name`` matches."""
 
-    ``value`` is intentionally not declared as a model field — it may be any
-    type including null, and its *absence* (key not sent by client) is
-    semantically distinct from ``null``.  With extra="allow" it passes through
-    as an extra field so model_dump(exclude_unset=True) correctly omits it
-    when the client did not send it.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    study: str = ""
-    path: str = ""
+    name: str
+    current: Any = None
 
 
-class ExpertInputSetBody(BaseModel):
-    """POST /api/study-expert-input-set {study, name, current}
+class StudyPatchBody(BaseModel):
+    """PATCH /api/study/{slug} — partial update of a study's metadata.
 
-    ``current`` is intentionally not declared — same reasoning as
-    NarrativeSetBody.value (may be null; absence is distinct from null).
-    """
+    Each present field routes to its ``lib.metadata_mutations`` function:
+    ``objective``→set_study_objective, ``narrative``→set_study_narrative,
+    ``expert_input``→set_study_expert_input, ``observables``/``emit_all``→
+    set_investigation_observables, ``conclusions``→set_investigation_conclusions,
+    ``overview``→set_investigation_overview.
 
-    model_config = ConfigDict(extra="allow")
+    (Note: the legacy ``study-set-description`` route was a misnomer — it aliased
+    set_investigation_overview and wrote the overview fields, never a
+    ``description`` scalar — so this body exposes ``overview``, not ``description``.)"""
 
-    study: str = ""
-    name: str = ""
+    objective: Optional[str] = None
+    narrative: Optional[NarrativePatch] = None
+    expert_input: Optional[ExpertInputPatch] = None
+    observables: Optional[list[list[str]]] = None
+    emit_all: Optional[bool] = None
+    conclusions: Optional[str] = None
+    overview: Optional[dict[str, Any]] = None
+
+
+class InvestigationPatchBody(BaseModel):
+    """PATCH /api/investigation/{slug} — partial update of an investigation's metadata.
+
+    ``observables``/``emit_all``→set_investigation_observables,
+    ``conclusions``→set_investigation_conclusions,
+    ``overview``→set_investigation_overview, ``status``→set_investigation_status.
+    NOTE two distinct statuses: top-level ``status`` writes
+    ``investigations/<slug>/investigation.yaml`` (enum active/in-progress/planning/
+    completed/archived/closed); the spec/study.yaml overview status is set via
+    ``overview: {status: ...}`` (enum draft/in-progress/completed/archived)."""
+
+    observables: Optional[list[list[str]]] = None
+    emit_all: Optional[bool] = None
+    conclusions: Optional[str] = None
+    overview: Optional[dict[str, Any]] = None
+    status: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

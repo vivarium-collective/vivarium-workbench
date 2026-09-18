@@ -210,14 +210,9 @@ from vivarium_workbench.lib.models import (
     WorkStatusInactive,
     Generation,
     WorkCompositeDiff,
-    SetObservablesBody,
     SetAnalysesBody,
-    SetConclusionsBody,
-    SetOverviewBody,
-    SetStatusBody,
-    SetObjectiveBody,
-    NarrativeSetBody,
-    ExpertInputSetBody,
+    StudyPatchBody,
+    InvestigationPatchBody,
     # Batch 19: request-body models for study CRUD
     StudyVariantAddBody,
     StudyVariantDeleteBody,
@@ -587,7 +582,7 @@ def create_app() -> FastAPI:
         ``VIVARIUM_WORKBENCH_ALLOWED_ORIGINS`` (``--allowed-origin``) — an exact
         match short-circuits to allow, header-independently.
         """
-        if request.method in ("POST", "DELETE"):
+        if request.method in ("POST", "DELETE", "PATCH"):
             if not _csrf.is_request_allowed(
                 request.headers.get("origin"),
                 request.headers.get("host"),
@@ -3945,93 +3940,48 @@ def create_app() -> FastAPI:
     # flip.  A shared Depends(csrf_guard) for all POST routes is added then.
     # -----------------------------------------------------------------------
 
-    @app.post(
-        "/api/investigation-set-observables",
-        tags=["Investigations"],
-        summary="Set investigation observable paths",
+    @app.patch(
+        "/api/study/{slug}",
+        tags=["Studies"],
+        summary="Partial-update a study's metadata (consolidates the study-set-* setters)",
     )
-    def investigation_set_observables(
-        req: SetObservablesBody,
+    def study_patch(
+        slug: str,
+        req: StudyPatchBody,
         ws: Path = Depends(get_workspace),
     ) -> dict:
-        """Rewrite spec.yaml/study.yaml observables[].
+        """Apply a partial update to a study's metadata.
 
-        Body: ``{investigation, paths: [[str,...]], emit_all?: bool}``
+        Body carries any subset of ``{objective, narrative, expert_input,
+        observables, emit_all, conclusions, overview}``; each present field is
+        dispatched to its ``lib.metadata_mutations`` function. Returns
+        ``{ok, applied:[...]}``, or the first failing field's error annotated
+        with ``field`` (fields applied before it stay written).
         """
-        body, status = _meta_mut.set_investigation_observables(ws, req.model_dump())
+        body, status = _meta_mut.patch_study(ws, slug, req.model_dump(exclude_unset=True))
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
 
-    @app.post(
-        "/api/investigation-set-conclusions",
+    @app.patch(
+        "/api/investigation/{slug}",
         tags=["Investigations"],
-        summary="Set investigation conclusions markdown",
+        summary="Partial-update an investigation's metadata (consolidates the investigation-set-* setters)",
     )
-    def investigation_set_conclusions(
-        req: SetConclusionsBody,
+    def investigation_patch(
+        slug: str,
+        req: InvestigationPatchBody,
         ws: Path = Depends(get_workspace),
     ) -> dict:
-        """Write spec.yaml/study.yaml conclusions (256 KB limit).
+        """Apply a partial update to an investigation's metadata.
 
-        Body: ``{investigation|name|study, markdown: str}``
+        Body carries any subset of ``{observables, emit_all, conclusions,
+        overview, status}``; top-level ``status`` writes investigation.yaml,
+        while the spec/study.yaml overview status is set via
+        ``overview: {status: ...}``. Returns ``{ok, applied:[...]}``, or the
+        first failing field's error annotated with ``field``.
         """
-        body, status = _meta_mut.set_investigation_conclusions(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/investigation-set-overview",
-        tags=["Investigations"],
-        summary="Set investigation overview metadata fields",
-    )
-    def investigation_set_overview(
-        req: SetOverviewBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """Selectively update question/hypothesis/status/topic on spec.yaml.
-
-        Body: ``{investigation, fields: {question?, hypothesis?, status?, topic?}}``
-        """
-        body, status = _meta_mut.set_investigation_overview(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/investigation-set-status",
-        tags=["Investigations"],
-        summary="Set investigation status (archived / active / …)",
-    )
-    def investigation_set_status(
-        req: SetStatusBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """Write the status field into investigations/<slug>/investigation.yaml.
-
-        Body: ``{investigation, status}``
-        Valid statuses: active, in-progress, planning, completed, archived, closed.
-        """
-        body, status = _meta_mut.set_investigation_status(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-set-objective",
-        tags=["Investigations"],
-        summary="Set study objective text",
-    )
-    def study_set_objective(
-        req: SetObjectiveBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """Write study.yaml objective field.
-
-        Body: ``{study, text?: str}``
-        """
-        body, status = _meta_mut.set_study_objective(ws, req.model_dump())
+        body, status = _meta_mut.patch_investigation(ws, slug, req.model_dump(exclude_unset=True))
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
@@ -4068,50 +4018,6 @@ def create_app() -> FastAPI:
                 content={"error": payload["error"], "study": name}, status_code=404
             )
         return JSONResponse(content=payload, status_code=200)
-
-    @app.post(
-        "/api/study-narrative-set",
-        tags=["Investigations"],
-        summary="Set a v4 narrative-spine field at a dotted path",
-    )
-    def study_narrative_set(
-        req: NarrativeSetBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """Generic writer for v4 narrative-spine fields.
-
-        Body: ``{study, path: "dotted.path", value: any}``
-        ``value`` absence (not sent) is distinct from null — absence triggers
-        a 400; null clears the leaf.  Pass ``model_dump(exclude_unset=True)``
-        so the lib builder's ``"value" not in body`` check works correctly.
-        """
-        body, status = _meta_mut.set_study_narrative(
-            ws, req.model_dump(exclude_unset=True)
-        )
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-expert-input-set",
-        tags=["Investigations"],
-        summary="Patch conditions.model_settings[i].current in study.yaml",
-    )
-    def study_expert_input_set(
-        req: ExpertInputSetBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """Update one expert model-setting value.
-
-        Body: ``{study, name, current: any}``
-        ``current`` absence is distinct from null — absence triggers a 400.
-        """
-        body, status = _meta_mut.set_study_expert_input(
-            ws, req.model_dump(exclude_unset=True)
-        )
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
 
     # -----------------------------------------------------------------------
     # Batch 19: Study CRUD — variant / baseline / intervention / run / comparison
@@ -5444,21 +5350,6 @@ def create_app() -> FastAPI:
         return body
 
     @app.post(
-        "/api/study-set-observables",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-set-observables",
-    )
-    def study_set_observables(
-        req: SetObservablesBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.metadata_mutations.set_investigation_observables``."""
-        body, status = _meta_mut.set_investigation_observables(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
         "/api/study-set-analyses",
         tags=["Studies"],
         summary="Set a study's analyses[] (translated into analysis_options at remote dispatch)",
@@ -5474,36 +5365,6 @@ def create_app() -> FastAPI:
         dispatch time (``lib.study_run_post.build_analysis_options``), not here.
         """
         body, status = _meta_mut.set_investigation_analyses(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-set-conclusion",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-set-conclusions",
-    )
-    def study_set_conclusion(
-        req: SetConclusionsBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.metadata_mutations.set_investigation_conclusions``."""
-        body, status = _meta_mut.set_investigation_conclusions(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-set-description",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-set-overview",
-    )
-    def study_set_description(
-        req: SetOverviewBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.metadata_mutations.set_investigation_overview``."""
-        body, status = _meta_mut.set_investigation_overview(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
