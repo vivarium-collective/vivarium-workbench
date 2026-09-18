@@ -5028,22 +5028,6 @@ def create_app() -> FastAPI:
         """
         return _reference_bibtex(req, ws)
 
-    @app.post(
-        "/api/reference",
-        tags=["Data, inputs & references"],
-        summary="Add a paper reference from pasted BibTeX (legacy alias of /api/reference-bibtex)",
-    )
-    def reference(
-        req: ReferenceBibtex,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """Legacy alias of ``POST /api/reference-bibtex`` — identical behaviour.
-
-        Both paths map to the same ``_post_reference`` handler in the live
-        server; here both call ``lib.reference_mutations.register_reference``.
-        """
-        return _reference_bibtex(req, ws)
-
     # -----------------------------------------------------------------------
     # Batch 27: investigation-composite POST writers (Composites tag)
     # -----------------------------------------------------------------------
@@ -5290,51 +5274,6 @@ def create_app() -> FastAPI:
         return body
 
     @app.post(
-        "/api/study-comparison-update",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-comparison-update",
-    )
-    def study_comparison_update(
-        req: InvestigationComparisonUpdateBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.compare_group_mutations.comparison_update``."""
-        body, status = _compare_grp_mut.comparison_update(ws, req.model_dump(exclude_unset=True))
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-group-add",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-group-add",
-    )
-    def study_group_add(
-        req: InvestigationGroupAddBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.compare_group_mutations.group_add``."""
-        body, status = _compare_grp_mut.group_add(ws, req.model_dump(exclude_unset=True))
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-group-update",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-group-update",
-    )
-    def study_group_update(
-        req: InvestigationGroupUpdateBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.compare_group_mutations.group_update``."""
-        body, status = _compare_grp_mut.group_update(ws, req.model_dump(exclude_unset=True))
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
         "/api/study-delete",
         tags=["Studies"],
         summary="Alias of /api/investigation-delete",
@@ -5365,21 +5304,6 @@ def create_app() -> FastAPI:
         dispatch time (``lib.study_run_post.build_analysis_options``), not here.
         """
         body, status = _meta_mut.set_investigation_analyses(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-variant-rebuild",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-composite-rebuild",
-    )
-    def study_variant_rebuild(
-        req: InvestigationCompositeRebuild,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.composite_mutations.rebuild_investigation_composite``."""
-        body, status = _composite_mut.rebuild_investigation_composite(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
@@ -5668,70 +5592,6 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
     # study-* GET routes re-exposed over FastAPI (aliases + v3-native).
     # -----------------------------------------------------------------------
-
-    @app.get(
-        "/api/study-viz-html",
-        response_model=InvestigationVizHtmlPayload,
-        tags=["Studies"],
-        summary="Alias of /api/investigation-viz-html",
-    )
-    def study_viz_html_route(
-        investigation: Optional[str] = None,
-        study: Optional[str] = None,
-        run_id: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> Union[InvestigationVizHtmlPayload, JSONResponse]:
-        """study-* alias → ``lib.investigation_views.build_investigation_viz_html``.
-
-        Accepts ``?study=`` or ``?investigation=`` for the slug.
-        """
-        slug = (investigation or study or "").strip()
-        try:
-            body = _inv_views.build_investigation_viz_html(ws, slug, run_id or "")
-        except _inv_views.InvViewError as exc:
-            return JSONResponse(status_code=exc.status, content=exc.body)
-        return InvestigationVizHtmlPayload.model_validate(body)
-
-    @app.get(
-        "/api/study-composites",
-        response_model=InvestigationCompositesPayload,
-        tags=["Studies"],
-        summary="Alias of /api/investigation-composites",
-    )
-    def study_composites_route(
-        investigation: Optional[str] = None,
-        study: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> Union[InvestigationCompositesPayload, JSONResponse]:
-        """study-* alias → ``lib.investigation_views.build_investigation_composites``."""
-        slug = (investigation or study or "").strip()
-        try:
-            body = _inv_views.build_investigation_composites(ws, slug)
-        except _inv_views.InvViewError as exc:
-            return JSONResponse(status_code=exc.status, content=exc.body)
-        return InvestigationCompositesPayload.model_validate(body)
-
-    @app.get(
-        "/api/study-state-tree",
-        response_model=InvestigationStateTree,
-        tags=["Studies"],
-        summary="Alias of /api/investigation-state-tree",
-    )
-    def study_state_tree_route(
-        investigation: Optional[str] = None,
-        study: Optional[str] = None,
-        composite: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> Union[InvestigationStateTree, JSONResponse]:
-        """study-* alias → ``lib.investigation_views.build_investigation_state_tree``."""
-        slug = (investigation or study or "").strip()
-        try:
-            body = _inv_views.build_investigation_state_tree(
-                ws, slug, (composite or "").strip()
-            )
-        except _inv_views.InvViewError as exc:
-            return JSONResponse(status_code=exc.status, content=exc.body)
-        return InvestigationStateTree.model_validate(body)
 
     @app.get(
         "/api/study-bigraph-paths",

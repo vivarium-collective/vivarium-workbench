@@ -69,7 +69,7 @@ def test_study_comparison_add_missing_study_400(tmp_path):
 def test_study_comparison_update_not_found_404(tmp_path):
     ws, _ = _study_ws(tmp_path)
     r = _client(ws).post(
-        "/api/study-comparison-update",
+        "/api/investigation-comparison-update",
         json={"investigation": "nope", "name": "cmp", "fields_to_update": {}},
     )
     assert r.status_code == 404
@@ -80,7 +80,7 @@ def test_study_group_add_happy(tmp_path):
         "variants": [{"name": "v1"}, {"name": "v2"}],
     })
     r = _client(ws).post(
-        "/api/study-group-add",
+        "/api/investigation-group-add",
         json={"investigation": slug, "name": "grp", "variants": ["v1", "v2"]},
     )
     assert r.status_code == 200
@@ -90,7 +90,7 @@ def test_study_group_add_happy(tmp_path):
 def test_study_group_update_not_found_404(tmp_path):
     ws, _ = _study_ws(tmp_path)
     r = _client(ws).post(
-        "/api/study-group-update",
+        "/api/investigation-group-update",
         json={"investigation": "nope", "name": "grp", "fields_to_update": {}},
     )
     assert r.status_code == 404
@@ -141,7 +141,7 @@ def test_study_patch_observables_happy(tmp_path):
 
 def test_study_variant_rebuild_missing_400(tmp_path):
     ws, _ = _study_ws(tmp_path)
-    r = _client(ws).post("/api/study-variant-rebuild", json={})
+    r = _client(ws).post("/api/investigation-composite-rebuild", json={})
     assert r.status_code in (400, 404)
 
 
@@ -196,7 +196,7 @@ def test_study_readout_migrate_unknown_study_404(tmp_path):
 
 def test_study_viz_html_missing_param_400(tmp_path):
     ws, _ = _study_ws(tmp_path)
-    r = _client(ws).get("/api/study-viz-html", params={"study": "demo-study"})
+    r = _client(ws).get("/api/investigation-viz-html", params={"investigation": "demo-study"})
     # missing run_id -> 400 per lib contract
     assert r.status_code == 400
 
@@ -204,7 +204,7 @@ def test_study_viz_html_missing_param_400(tmp_path):
 def test_study_viz_html_happy_empty(tmp_path):
     ws, slug = _study_ws(tmp_path)
     r = _client(ws).get(
-        "/api/study-viz-html", params={"study": slug, "run_id": "run-1"}
+        "/api/investigation-viz-html", params={"investigation": slug, "run_id": "run-1"}
     )
     assert r.status_code == 200
     assert r.json()["viz_files"] == []
@@ -212,20 +212,20 @@ def test_study_viz_html_happy_empty(tmp_path):
 
 def test_study_composites_happy(tmp_path):
     ws, slug = _study_ws(tmp_path)
-    r = _client(ws).get("/api/study-composites", params={"study": slug})
+    r = _client(ws).get("/api/investigation-composites", params={"investigation": slug})
     assert r.status_code == 200
     assert "composites" in r.json()
 
 
 def test_study_composites_missing_400(tmp_path):
     ws, _ = _study_ws(tmp_path)
-    r = _client(ws).get("/api/study-composites")
+    r = _client(ws).get("/api/investigation-composites")
     assert r.status_code == 400
 
 
 def test_study_state_tree_missing_400(tmp_path):
     ws, _ = _study_ws(tmp_path)
-    r = _client(ws).get("/api/study-state-tree", params={"study": "demo-study"})
+    r = _client(ws).get("/api/investigation-state-tree", params={"investigation": "demo-study"})
     # missing composite -> 400
     assert r.status_code == 400
 

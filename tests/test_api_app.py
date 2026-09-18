@@ -3792,36 +3792,16 @@ class TestBatch26ReferenceRoutes:
         assert r.json()["ok"] is True
         assert "Foo2020" in (ws / "references" / "papers.bib").read_text()
 
-    def test_reference_alias_happy(self, rc: TestClient, ws: Path) -> None:
-        r = rc.post("/api/reference", json={
-            "bibtex_text": "@article{Bar2021, year = {2021}}",
-        })
-        assert r.status_code == 200, r.json()
-        assert r.json()["ok"] is True
-        assert "Bar2021" in (ws / "references" / "papers.bib").read_text()
-
-    def test_reference_bibtex_and_alias_behave_identically(
-        self, rc: TestClient, ws: Path
-    ) -> None:
-        # Same key via both routes: first succeeds, the second (global, dup) 409s
-        # regardless of which path is hit — proving identical handling.
+    def test_reference_bibtex_duplicate_409(self, rc: TestClient, ws: Path) -> None:
+        # Same key twice: first succeeds, the second is a global duplicate -> 409.
         r1 = rc.post("/api/reference-bibtex", json={
             "bibtex_text": "@article{Same2020, year = {2020}}",
         })
         assert r1.status_code == 200
-        r2 = rc.post("/api/reference", json={
+        r2 = rc.post("/api/reference-bibtex", json={
             "bibtex_text": "@article{Same2020, year = {2020}}",
         })
         assert r2.status_code == 409
-        # And the reverse ordering for a fresh key:
-        r3 = rc.post("/api/reference", json={
-            "bibtex_text": "@article{Other2020, year = {2020}}",
-        })
-        assert r3.status_code == 200
-        r4 = rc.post("/api/reference-bibtex", json={
-            "bibtex_text": "@article{Other2020, year = {2020}}",
-        })
-        assert r4.status_code == 409
 
     def test_reference_bibtex_400_missing_text(self, rc: TestClient) -> None:
         r = rc.post("/api/reference-bibtex", json={})
@@ -3836,7 +3816,8 @@ class TestBatch26ReferenceRoutes:
     def test_reference_routes_in_openapi(self, rc: TestClient) -> None:
         paths = rc.get("/openapi.json").json()["paths"]
         assert "/api/reference-bibtex" in paths and "post" in paths["/api/reference-bibtex"]
-        assert "/api/reference" in paths and "post" in paths["/api/reference"]
+        # The /api/reference legacy alias was removed (dead code, zero callers).
+        assert "/api/reference" not in paths
 
 
 class TestBatch27CompositeRoutes:
