@@ -2507,6 +2507,12 @@
   var CHAIN_PROGRESS_POLL_MS = 8000;
   var _chainProgressTimer = null;
 
+  // Task 4.1: set true right before a Tests-tab-initiated baseline dispatch
+  // (runStudyTests' no_run branch) so _pollChainProgress's terminal handler
+  // knows to reload the Tests tab once THAT run finishes -- never for an
+  // ordinary "Run current spec" / "Reproduce" click, which leaves this false.
+  var _gradeAfterRun = false;
+
   function _chainProgressEl() {
     var el = document.getElementById('study-chain-progress');
     if (!el) {
@@ -2552,6 +2558,17 @@
         _renderChainProgress(d);
         if (!d.terminal && d.phase !== 'not_a_campaign' && d.phase !== 'not_found') {
           _chainProgressTimer = setTimeout(function () { _pollChainProgress(runId); }, CHAIN_PROGRESS_POLL_MS);
+          return;
+        }
+        // Polling has stopped (real completion, or nothing trackable e.g. a
+        // local-engine run with no AWS chain). Only a genuine terminal
+        // completion (d.terminal) warrants reloading the Tests tab -- a
+        // 'not_a_campaign'/'not_found' phase can fire immediately for a
+        // local dispatch, long before that run actually finishes, so it
+        // must clear the flag without triggering a premature reload.
+        if (_gradeAfterRun) {
+          _gradeAfterRun = false;
+          if (d.terminal) _reloadStudyAndTests();
         }
       })
       .catch(function () {
@@ -3998,12 +4015,31 @@
     }
   }
 
+  // Task 4.1: re-fetch the study spec and re-render the Tests tab from it --
+  // reused after a study-grade success AND after a Tests-tab-initiated
+  // baseline run completes (see _gradeAfterRun / _pollChainProgress above).
+  // Reuses window.DataSource.loadStudy (the page's existing study-reload
+  // path, also used by _dispatchRemotePinned) rather than a bespoke fetch.
+  function _reloadStudyAndTests() {
+    var slug = studyName();
+    var reload = (window.DataSource && window.DataSource.loadStudy)
+      ? window.DataSource.loadStudy(slug)
+      : fetch('/api/study/' + encodeURIComponent(slug)).then(function(r) { return r.json(); });
+    return reload.then(function(spec) {
+      window._study = spec;
+      _loadTestsPanel(spec);   // _renderTestsGateSummary + report cards + loadTestsTab
+    }).catch(function(err) {
+      alert('Reload failed: ' + (err && err.message ? err.message : err));
+    });
+  }
+  window._reloadStudyAndTests = _reloadStudyAndTests;
+
   function runStudyTests() {
     var btn = document.getElementById('run-tests-btn');
     if (!btn) return;
     btn.disabled = true;
-    btn.textContent = 'Running…';
-    fetch('/api/study-tests-run', {
+    btn.textContent = 'Grading…';
+    fetch('/api/study-grade', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({study: studyName()}),
@@ -4011,21 +4047,50 @@
       return resp.json().then(function(d) { return {status: resp.status, body: d}; });
     }).then(function(r) {
       if (r.status !== 200) {
-        alert('Test run failed: ' + (r.body && r.body.error || r.status));
+        alert('Grade failed: ' + (r.body && r.body.error || r.status));
         return;
       }
-      renderTestResults(r.body);
+      if (r.body.graded) { _reloadStudyAndTests(); return; }
+      // No usable run (reason: "no_run", or an ungradable status) -- run
+      // the study's CURRENT baseline spec (its flush auto-evaluates), then
+      // reload once that specific run reaches a real terminal state.
+      btn.textContent = 'Simulating…';
+      _gradeAfterRun = true;
+      _dispatchCurrentSpecBaseline().then(function(res) {
+        if (res && res.body && res.body.cancelled) { _gradeAfterRun = false; return; }
+        if (res && (res.status === 200 || res.status === 202)) {
+          var runId = res.body && (res.body.run_id || res.body.simulation_id);
+          if (runId) {
+            if (typeof _loadStudySims === 'function') _loadStudySims(true);
+            _pollChainProgress(runId);
+            return;
+          }
+        } else {
+          alert('Run failed: ' + (res && res.body && res.body.error || (res && res.status)));
+        }
+        _gradeAfterRun = false;
+      }).catch(function(err) {
+        _gradeAfterRun = false;
+        alert('Run failed: network error — ' + err);
+      });
     }).catch(function(err) {
-      alert('Test run error: ' + err);
+      alert('Grade error: ' + err);
     }).then(function() {
       btn.disabled = false;
-      btn.textContent = 'Run tests';
+      if (btn.textContent === 'Grading…') btn.textContent = 'Run tests';
     });
   }
 
   var runBtn = document.getElementById('run-tests-btn');
   if (runBtn) {
-    runBtn.addEventListener('click', runStudyTests);
+    // Snapshot/read-only bundle: no live backend to grade or dispatch a run
+    // against -- hide it, mirroring how #study-reproduce / #study-run-current-spec
+    // are hidden for the same reason (study-detail.html's snapshot-mode block).
+    if (_isSnapshot()) {
+      runBtn.style.display = 'none';
+    } else {
+      runBtn.addEventListener('click', runStudyTests);
+    }
   }
 
   // ── Stage-3c: Tracked Feedback panel ─────────────────────────────────────
