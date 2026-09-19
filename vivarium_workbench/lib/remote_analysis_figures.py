@@ -90,6 +90,22 @@ def _s3_client():
         return None
 
 
+def _aws_creds_ok() -> bool:
+    """True when AWS credentials currently resolve.
+
+    Used to disambiguate an empty S3 walk: with valid creds an empty result
+    means "no rendered figures", but with expired/absent creds every S3 list
+    fails (swallowed → []) and looks identical. A cheap STS ``get_caller_identity``
+    needs no S3 policy and fails fast on missing/expired creds. Best-effort —
+    any error (no boto3, no creds, network) → False."""
+    try:
+        import boto3  # type: ignore
+        boto3.client("sts", region_name=_region()).get_caller_identity()
+        return True
+    except Exception:
+        return False
+
+
 def _content_type(path: str) -> str:
     p = path.lower()
     if p.endswith(".html"):
@@ -282,12 +298,29 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
     hundreds of figures): at most ``max_sims`` sims, ``per_sim`` figure/ptools
     paths each, with the true totals reported so the UI can say "showing N of M".
     Figure bytes are served lazily by ``/api/remote-analysis-figure``."""
+    # Candidate remote sims for this study. Source from the authoritative
+    # remote-sim list (``list_remote_simulations`` applies the workspace's
+    # ``remote_run_study_map`` tagging) rather than the combined
+    # ``build_simulations_data_cached`` index: that index appends remote rows
+    # via a stale-while-revalidate cache which returns ZERO remote rows on a
+    # COLD cache, silently collapsing this endpoint to "no-remote-sims" even for
+    # a study with hundreds of tagged remote sims. Fall back to the combined
+    # index only if the remote list is empty (covers remote runs that landed
+    # locally with a runs_meta ``remote_origin`` the sms-api list may not echo).
+    sims: list = []
     try:
-        from vivarium_workbench.lib import simulations_index
-        data = simulations_index.build_simulations_data_cached(ws_root, include_remote=True)
-        sims = data.get("simulations") or []
+        from vivarium_workbench.lib import remote_simulations as _rs
+        sims = _rs.list_remote_simulations(ws_root) or []
     except Exception:
-        return {"available": False, "reason": "no-sims", "study": slug, "sims": []}
+        sims = []
+    if not sims:
+        try:
+            from vivarium_workbench.lib import simulations_index
+            data = simulations_index.build_simulations_data_cached(
+                ws_root, include_remote=True)
+            sims = data.get("simulations") or []
+        except Exception:
+            return {"available": False, "reason": "no-sims", "study": slug, "sims": []}
 
     cand = []
     for s in sims:
@@ -325,9 +358,24 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
         if analyses:
             out_sims.append({"simulation_id": sid, "sim_name": name, "analyses": analyses})
 
+    # Reason. Distinguish a genuine "no rendered figures" from the server simply
+    # being unable to READ S3 (expired/absent AWS credentials): every S3 walk
+    # swallows its exceptions and returns [], so an auth failure otherwise looks
+    # identical to missing data. When candidates exist but nothing surfaced,
+    # probe the credentials and report "s3-auth-error" so the UI can say
+    # "figures are on S3 but the server can't read them (check AWS credentials)"
+    # instead of the misleading "no figures".
+    if out_sims:
+        reason = "ok"
+    elif not cand:
+        reason = "no-remote-sims"
+    elif not _aws_creds_ok():
+        reason = "s3-auth-error"
+    else:
+        reason = "no-figures"
     return {
         "available": bool(out_sims),
-        "reason": "ok" if out_sims else ("no-figures" if cand else "no-remote-sims"),
+        "reason": reason,
         "study": slug, "sims": out_sims,
         "total_completed_remote_sims": len(cand), "shown_sims": len(out_sims),
         "scanned_sims": scanned, "total_figures_across_shown": total_figures,

@@ -361,7 +361,12 @@
       .then(function (r) { return r.ok ? r.json() : { available: false }; })
       .then(function (d) {
         if (!d || !d.available || !(d.sims || []).length) {
-          panel.innerHTML = ''; _remoteAnalysesLoaded = false; return;
+          panel.innerHTML = (d && d.reason === 's3-auth-error' && d.total_completed_remote_sims)
+            ? '<p class="muted" style="margin:10px 0">' + d.total_completed_remote_sims
+              + ' completed remote sim(s) have ptools/figures on S3, but the server can’t read them '
+              + '— check the workbench host’s AWS credentials.</p>'
+            : '';
+          _remoteAnalysesLoaded = false; return;
         }
         var enc = encodeURIComponent, esc = escapeHtmlForTests;
         var rows = (d.sims || []).map(function (s) {
@@ -756,7 +761,12 @@
       .then(function (r) { return r.ok ? r.json() : { available: false }; })
       .then(function (d) {
         if (!d || !d.available || !(d.sims || []).length) {
-          panel.innerHTML = ''; _remoteFiguresLoaded = false; return;
+          panel.innerHTML = (d && d.reason === 's3-auth-error' && d.total_completed_remote_sims)
+            ? '<p class="muted" style="margin:10px 0">' + d.total_completed_remote_sims
+              + ' completed remote sim(s) have figures on S3, but the server can’t read them '
+              + '— check the workbench host’s AWS credentials.</p>'
+            : '';
+          _remoteFiguresLoaded = false; return;
         }
         var enc = encodeURIComponent;
         var cards = [];
