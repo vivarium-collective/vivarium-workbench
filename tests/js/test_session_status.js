@@ -101,6 +101,38 @@ function run() {
   assert(allText(p2).toLowerCase().indexOf('fail') !== -1, 'panel renders even with no reason');
   sess.clearFailure();
 
+  // ── Materialization progress panel (item 70 phase 2) ──────────────────────
+  // stageProgress() is pure (no DOM) — direct real-phase → milestone mapping.
+  assert.deepStrictEqual(sess.stageProgress('queued'), { done: [], active: 'queued' }, 'queued: nothing done yet');
+  assert.deepStrictEqual(sess.stageProgress('cloning'), { done: ['queued'], active: 'cloning' }, 'cloning: queued done');
+  assert.deepStrictEqual(sess.stageProgress('syncing'), { done: ['queued', 'cloning'], active: 'syncing' }, 'syncing: queued+cloning done');
+  assert.deepStrictEqual(sess.stageProgress('bogus'), { done: [], active: 'queued' }, 'unrecognized phase defaults to stage 0, no fabricated credit');
+  assert.deepStrictEqual(sess.stageProgress(undefined), { done: [], active: 'queued' }, 'missing phase defaults to stage 0');
+
+  // renderProgress() is a safe no-op with no window.ProgressTrack loaded (this
+  // test's fake `document` never defines a global `window`).
+  sess.renderProgress({ status: 'materializing', phase: 'cloning' }); // must not throw
+  assert(document.getElementById('viv-session-progress') === null, 'no panel mounted without ProgressTrack loaded');
+
+  // With a fake ProgressTrack present, the panel mounts while materializing,
+  // fed the real phase-derived model (not a client-side guess)...
+  var rendered = null;
+  global.window = { ProgressTrack: { render: function (mount, model) { rendered = { mount: mount, model: model }; } } };
+  sess.renderProgress({ status: 'materializing', phase: 'syncing' });
+  assert(document.getElementById('viv-session-progress') !== null, 'progress panel mounted while materializing');
+  assert.strictEqual(rendered.model.mode, 'stages', 'uses ProgressTrack stages mode');
+  assert.strictEqual(rendered.model.active, 'syncing', 'passes the real active phase through');
+  assert.deepStrictEqual(rendered.model.done, ['queued', 'cloning'], 'passes real done stages through');
+
+  // ...and clears on any terminal status (ready or failed) — no lingering panel.
+  sess.renderProgress({ status: 'ready' });
+  assert(document.getElementById('viv-session-progress') === null, 'progress panel cleared on ready');
+  sess.renderProgress({ status: 'materializing', phase: 'queued' });
+  assert(document.getElementById('viv-session-progress') !== null, 'panel remounts on a fresh materializing poll');
+  sess.renderProgress({ status: 'failed', error: 'boom' });
+  assert(document.getElementById('viv-session-progress') === null, 'progress panel cleared on failed (renderFailure owns the failure UX)');
+  delete global.window;
+
   console.log('test_session_status.js: all assertions passed');
 }
 

@@ -1547,7 +1547,7 @@
     if (_studySimsLoaded && !force) return;
     _studySimsLoaded = true;
     var slug = studyName();
-    mount.innerHTML = '<p class="muted" style="margin:0">Loading…</p>';
+    mount.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading simulations…') : '<p class="muted" style="margin:0">Loading simulations…</p>';
     var DS = window.DataSource;
     var url = (DS && DS.simulationsUrl) ? DS.apiUrl(DS.simulationsUrl(slug))
       : '/api/simulations?study=' + encodeURIComponent(slug);
@@ -1635,7 +1635,7 @@
     // snapshot). DataSource resolves the base-path-prefixed URL for either.
     var _cfg = window.__DASH_CONFIG__ || {};
     var _isSnapshot = _cfg.mode === 'snapshot';
-    panel.innerHTML = '<p class="muted" style="margin:0">Loading charts…</p>';
+    panel.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading charts…') : '<p class="muted" style="margin:0">Loading charts…</p>';
     window.DataSource.loadStudyCharts(studyName())
       .then(function(d) {
         if (!d || !d.charts || !d.charts.length) {

@@ -150,7 +150,7 @@
   function loadAudit() {
     var el = _container();
     if (!el) return;
-    el.innerHTML = _notice('Loading audit…');
+    el.innerHTML = global.ProgressTrack ? global.ProgressTrack.loadingHtml('Loading audit…') : _notice('Loading audit…');
     var ds = global.DataSource;
     if (!ds || typeof ds.getAudit !== 'function') {
       el.innerHTML = _notice('Audit unavailable — data source not loaded.');

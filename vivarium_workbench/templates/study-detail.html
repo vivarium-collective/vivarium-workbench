@@ -764,7 +764,7 @@
      arm's own derived params (run_config vs whole_config vs inlined). #}
   <div id="model-composite-cards" class="model-composite-cards" data-study="{{ study.name }}"
        data-study-config="{{ study.config or (study.three_arm.native_config if (study.three_arm and study.three_arm.native_config) else '') }}">
-    <p class="muted" style="font-size:0.85em;margin:0">Loading composite card(s)…</p>
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading composite card(s)…</span></div>
   </div>
 
   {# Build-block visibility mirrors the pre-merge panel-build guard exactly (model_change/impl_reqs/conditions/baseline) so non-v3 studies keep their Model + Conditions sections. #}
@@ -845,7 +845,7 @@
       {# Config that runs — resolved params (composite defaults ⊕ this study's
          overrides), fetched on demand from /api/composite-resolve. #}
       <div class="model-config-mount" style="margin-top:8px">
-        <p class="muted" style="font-size:0.85em;margin:0">Loading configuration…</p></div>
+        <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading configuration…</span></div></div>
       {# Run settings — replication + the latest run's steps/emitter/status. #}
       {% set _r = (study.runs[0] if study.runs else None) %}
       {% if study.robustness or _r %}
@@ -879,7 +879,7 @@
       </div>
       {% endif %}
       <div class="model-config-mount" style="margin-top:8px">
-        <p class="muted" style="font-size:0.85em;margin:0">Loading configuration…</p></div>
+        <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading configuration…</span></div></div>
       {% set _r = (study.runs[0] if study.runs else None) %}
       {% if study.robustness or _r %}
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:0.8em">
@@ -1114,7 +1114,7 @@
 
 <div class="overview-section" id="simulations-section">
   <h2>Simulations</h2>
-  <div id="study-sim-table" style="overflow-x:auto"><p class="muted" style="margin:0">Loading…</p></div>
+  <div id="study-sim-table" style="overflow-x:auto"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading simulations…</span></div></div>
   <div id="study-run-detail" style="margin-top:14px"></div>
 </div>
 
@@ -1142,7 +1142,7 @@
   <h4>Latest run preview</h4>
   <p class="muted" style="font-size:0.9em">Per-store sparkline + first/last/min/max from the most recent run's emitted trajectory. This is a downsampled PREVIEW, not the full data — use the per-store or Download-all links for the complete arrays.</p>
   <div id="results-preview" data-study="{{ name }}">
-    <p class="empty-message">Loading results preview…</p>
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading results preview…</span></div>
   </div>
 
   <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-top:22px">
@@ -1150,7 +1150,7 @@
     <button type="button" id="raw-data-download-all" class="btn-mini" style="display:none"
             onclick="_downloadAllRawExports()">⬇ Download all raw data</button>
   </div>
-  <div id="raw-data-list"><p class="empty-message">Loading runs…</p></div>
+  <div id="raw-data-list"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading runs…</span></div></div>
 </div>
 
 </section>
@@ -1173,7 +1173,7 @@
        href="{{ base_path }}/api/study-analysis-zip?study={{ name }}">Download all (.zip)</a>
   </div>
   <div id="data-files" data-study="{{ name }}">
-    <p class="empty-message">Loading result files…</p>
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading result files…</span></div>
   </div>
 </div>
 
@@ -1194,7 +1194,7 @@
     <code>lib/emitters.py</code> and this study's (or the workspace's)
     <code>runtime.default_emitter</code>.</p>
     <div id="readouts-emitter" data-study="{{ name }}">
-      <p class="empty-message">Loading emitter configuration…</p>
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter configuration…</span></div>
     </div>
 
     <h4>Emitted paths</h4>
@@ -1211,7 +1211,7 @@
     <div id="readouts-download" style="margin:0 0 16px 0"></div>
 
     <div id="readouts-table" data-study="{{ name }}">
-      <p class="empty-message">Loading readouts from the composite emit plan…</p>
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading readouts from the composite emit plan…</span></div>
     </div>
 
     <h4>Outputs &amp; shapes</h4>
@@ -1219,7 +1219,7 @@
     <code>(n_steps, …)</code>, units, and a best-effort byte estimate for each emitted
     leaf.</p>
     <div id="readouts-shapes" data-study="{{ name }}">
-      <p class="empty-message">Loading output shapes…</p>
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading output shapes…</span></div>
     </div>
 
     {% if study.expected_behavior %}
@@ -1248,7 +1248,7 @@
     </div>
     {% endif %}
 
-    <div id="native-gallery-panel" class="figure-mount"><p class="empty-message">Loading figures…</p></div>
+    <div id="native-gallery-panel" class="figure-mount"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading figures…</span></div></div>
 
     {# ─── Embedded HTML visualizations (e.g. pre-execution preview pages
          produced by a runner script). study.embed_visualizations is a list of
@@ -1409,7 +1409,7 @@
      the per-gate list below. The per-gate detail is NOT repeated here — it
      renders once, in the "Behavioral tests" list (#tests-list) below
      (Fable §4.6: one score line + one list, not the gate set twice). #}
-  <div class="tests-gate-summary" id="tests-gate-summary"><p class="empty-message">Loading gate summary…</p></div>
+  <div class="tests-gate-summary" id="tests-gate-summary"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading gate summary…</span></div></div>
 
   {# Study-spine reorg (spec §3.6): the rigor scorecard (Fable G5) and L0-L5
      reproducibility audit (Fable G6) check groups MOVED out of Tests into
@@ -1442,7 +1442,7 @@
     <h3 class="section-title">Report cards
       <span class="muted" style="font-size:0.85em;font-weight:normal">— cross-card comparison; each card's full scorecard is inline at its row in Behavioral tests below</span>
     </h3>
-    <div id="report-cards-panel"><p class="empty-message">Loading comparison…</p></div>
+    <div id="report-cards-panel"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading comparison…</span></div></div>
   </div>
   {% endif %}
 
@@ -1579,15 +1579,15 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 
   <div class="checks-band">
     <div class="check-group check-group-sufficiency" id="audit-sufficiency" data-check-group="sufficiency">
-      <p class="empty-message">Loading sufficiency checks…</p>
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading sufficiency checks…</span></div>
     </div>
 
     <div class="check-group check-group-quality" id="check-group-quality" data-check-group="quality" style="margin-top:16px">
-      <p class="empty-message">Loading quality checks…</p>
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading quality checks…</span></div>
     </div>
 
     <div class="check-group check-group-reproducibility" id="check-group-reproducibility" data-check-group="reproducibility" style="margin-top:16px">
-      <p class="empty-message">Loading reproducibility checks…</p>
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading reproducibility checks…</span></div>
     </div>
 
     {# Sourcing sub-panel (Slice 3) — where the model came from (reuse /
@@ -1595,7 +1595,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
        Filled by _loadAuditSourcing off window._study.sourcing; hides itself
        when the study records no sourcing decision. #}
     <div class="check-group check-group-sourcing" id="audit-sourcing" data-check-group="sourcing" style="margin-top:16px">
-      <p class="empty-message">Loading sourcing…</p>
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading sourcing…</span></div>
     </div>
   </div>
 </section>
@@ -1612,7 +1612,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
   <h2>Build</h2>
   <p class="muted" style="margin:0 0 12px 0"><strong>Was it earned?</strong> The agentic model-building loop that iterated the model to clear the bar — the draft, the frozen tests, the iteration-by-iteration trajectory, and the result (or an honest give-up).</p>
 
-  <div id="build-loop-state"><p class="empty-message">Loading loop provenance…</p></div>
+  <div id="build-loop-state"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading loop provenance…</span></div></div>
 </section>
 
 <section class="study-tab-panel" data-kind="conclusions" id="panel-conclusions" hidden>
@@ -2260,6 +2260,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
      Model card stays stuck on "Resolving composite…". -->
 <script src="/loom-embed.js"></script>
 <script src="/composite-card.js"></script>
+<script src="/progress-track.js"></script>
 <script src="/study-detail.js"></script>
 <script>
 // Re-assert the refresh-aware seed handlers AFTER study-detail.js (which
