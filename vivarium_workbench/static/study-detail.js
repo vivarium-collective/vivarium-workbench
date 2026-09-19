@@ -3749,24 +3749,40 @@
     var e = escapeHtmlForTests;
     var html = '<div style="font-weight:600">' + passed + '/' + total + ' gates passed</div>';
 
-    // Task 4.2: tie Tests to the Decision — a short line naming the
-    // pipeline_gate's proceed condition and whether the gate currently
-    // passes (spec.gate, the SAME severity-aware field the badge below
-    // reads — not re-derived here). Omitted when the study declares no
+    // Task 4.2 (fixed): tie Tests to the Decision — a short line naming the
+    // pipeline_gate's proceed condition and the SAME 3-state gate status
+    // (pass/warn/fail) as the severity-gate badge in loadTestsTab, via the
+    // shared _gateStatusInfo — so this line can never contradict that badge
+    // (a `warn` study used to show green "gate passes" here while the badge
+    // showed amber "gate: warn"). Omitted when the study declares no
     // pipeline_gate (older specs / studies with no downstream dependent).
     var pg = spec && spec.pipeline_gate;
     if (pg && pg.proceed_condition) {
       var cond = String(pg.proceed_condition);
       if (cond.length > 140) cond = cond.slice(0, 137) + '…';
-      var gateFailed = !!(spec && spec.gate && spec.gate.status === 'fail');
+      var gateStatus = spec && spec.gate && spec.gate.status;
+      var gi = gateStatus ? _gateStatusInfo(gateStatus) : null;
       html += '<div class="muted" style="margin-top:4px;font-size:0.85em">'
         + 'Decision: proceed when <em>' + e(cond) + '</em> — '
-        + (gateFailed
-            ? '<span style="color:#dc2626;font-weight:600">gate does not pass</span>'
-            : '<span style="color:#16a34a;font-weight:600">gate passes</span>')
+        + (gi
+            ? '<span style="color:' + gi[0] + ';font-weight:600">' + e(gi[2]) + '</span>'
+            : '<span class="muted">gate not yet evaluated</span>')
         + '</div>';
     }
     host.innerHTML = html;
+  }
+
+  // Gate status (spec.gate.status: pass/warn/fail) → [color, badge label,
+  // decision-line label] — the SINGLE source both the severity-gate badge
+  // (loadTestsTab) and the tab-header Decision line (_renderTestsGateSummary,
+  // above) read, so the two can never disagree about the same gate.
+  var _GATE_STATUS_GL = {
+    pass: ['#16a34a', '✓ gate: pass', 'gate passes'],
+    warn: ['#d97706', '≈ gate: warn', 'gate: warn — proceed with caution'],
+    fail: ['#dc2626', '✗ gate: fail', 'gate fails']
+  };
+  function _gateStatusInfo(status) {
+    return _GATE_STATUS_GL[status] || ['#64748b', 'gate: ' + status, 'gate: ' + status];
   }
 
   // Verdict-chip vocabulary for a test's graded axis (outcome.axis.verdict) —
@@ -3857,19 +3873,66 @@
     return '';
   }
 
-  // Last run whose runs[].outcomes carries this test name — last-array-order
-  // wins, same convention the (legacy) computed-outcomes block below uses.
-  // Reads window._study (not a function argument) — the same convention
-  // _axisChange already uses for cross-cutting run/diff lookups on this tab.
-  function _runIdentForTest(name) {
-    var runs = (window._study && window._study.runs) || [];
-    var found = null;
-    runs.forEach(function (r) {
-      if (r && r.outcomes && Object.prototype.hasOwnProperty.call(r.outcomes, name)) {
-        found = r.run_id || r.name || found;
-      }
+  // Meter-normalized margin bar for a test report card: a track with the
+  // pass boundary fixed at 50% and a fill to axis.meter (already computed by
+  // test_contract.check() to be scale-normalized into [0,1], 0.5 = boundary
+  // — see viva_superpowers/test_contract.py _meter/check). Ported from the
+  // server-side reference renderer vivarium_workbench/lib/behavior_test_card.py
+  // _margin_bar_html so the client and the (behavior-tests card's) server
+  // rendering agree pixel-for-pixel on what the bar means. Colored by
+  // axis.verdict via _RC_GL (same palette used everywhere else on this tab).
+  // Returns '' when axis carries no numeric meter — never guesses from
+  // margin, which is a different, unnormalized quantity.
+  function _meterBar(axis) {
+    if (!axis || typeof axis.meter !== 'number' || !isFinite(axis.meter)) return '';
+    var pct = Math.max(0, Math.min(1, axis.meter)) * 100;
+    var color = (_RC_GL[axis.verdict] || _RC_GL.ungraded)[0];
+    var left, width;
+    if (pct >= 50) { left = 50; width = pct - 50; } else { left = pct; width = 50 - pct; }
+    width = Math.max(width, 1.5);
+    var marginLabel = '';
+    if (typeof axis.margin === 'number' && isFinite(axis.margin)) {
+      marginLabel = '<span style="color:#475569;font-size:0.82em;font-variant-numeric:tabular-nums">'
+        + 'Δ-to-pass ' + (axis.margin >= 0 ? '+' : '') + axis.margin.toPrecision(3)
+        + (axis.severity ? ' · ' + escapeHtmlForTests(String(axis.severity)) : '') + '</span>';
+    }
+    return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'
+      + '<div style="position:relative;height:9px;flex:1;max-width:220px;background:#eef2f7;'
+        + 'border-radius:5px" title="pass boundary at centre">'
+      + '<div style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:#94a3b8"></div>'
+      + '<div style="position:absolute;left:' + left.toFixed(1) + '%;width:' + width.toFixed(1) + '%;'
+        + 'top:0;bottom:0;background:' + color + ';border-radius:5px;opacity:0.85"></div>'
+      + '</div>' + marginLabel + '</div>';
+  }
+
+  // Statuses that count as "completed" for canonical-run selection — mirrors
+  // viva_workspace.outcomes._COMPLETE exactly.
+  var _COMPLETE_RUN_STATUSES = { complete: 1, completed: 1, ran: 1, done: 1 };
+
+  // The canonical run: an explicit canonical:true run (last one wins), else
+  // the newest COMPLETED run by timestamp, else the last run, else null.
+  // Ported verbatim from viva_workspace.outcomes.canonical_run — the SAME
+  // selection spec.latest_outcomes (and so every test card's outcome) is
+  // built from server-side, so the footer run link always points at the run
+  // that actually produced the shown value (fix for a prior version that
+  // picked the array-LAST run merely containing this test's outcome, which
+  // can be a different run than the canonical one).
+  function _canonicalRunForLink() {
+    var runs = ((window._study && window._study.runs) || []).filter(function (r) {
+      return r && typeof r === 'object';
     });
-    return found;
+    if (!runs.length) return null;
+    var flagged = runs.filter(function (r) { return r.canonical === true; });
+    if (flagged.length) return flagged[flagged.length - 1];
+    var completed = runs.filter(function (r) {
+      return !!_COMPLETE_RUN_STATUSES[String(r.status || '').toLowerCase()];
+    });
+    if (completed.length) {
+      return completed.reduce(function (best, r) {
+        return (String(r.timestamp || '') > String(best.timestamp || '')) ? r : best;
+      }, completed[0]);
+    }
+    return runs[runs.length - 1];
   }
 
   // Task 4.2: the redesigned per-test report card — the single, self-
@@ -3928,10 +3991,15 @@
       + ' <span style="margin-left:10px"><strong>measured:</strong> ' + e(mvText) + '</span>'
       + '</div>';
 
-    // 4. Margin bar (reuses _marginBar verbatim — same track/mark/colour it
-    // already draws for report-card axis rows; omits gracefully when there
-    // is no numeric margin on this axis).
-    var marginBarHtml = axis ? '<div style="margin-top:8px;max-width:320px">' + _marginBar(axis) + '</div>' : '';
+    // 4. Margin bar — fixed: this MUST read axis.meter (check() already
+    // scale-normalizes it to [0,1], boundary at 0.5), NOT axis.margin (a
+    // raw, unnormalized signed value in the test's own physical units —
+    // clamping that straight to [-1,1] saturates or vanishes the bar for
+    // most real tests). _marginBar(axis) reads .margin and is the wrong
+    // helper here; _meterBar(axis) below ports the correct reference
+    // renderer (vivarium_workbench/lib/behavior_test_card.py's
+    // _margin_bar_html) to JS. Omits gracefully when axis.meter is absent.
+    var marginBarHtml = _meterBar(axis);
 
     // 5. Evidence — basis + cites/calibration_anchor (checked on pass_if
     // first per the DATA CONTRACT, falling back to the older top-level
@@ -3968,8 +4036,17 @@
       }
     }
 
-    // 7. Footer — run link + collapsed Assertion.
-    var runIdent = _runIdentForTest(name);
+    // 7. Footer — run link + collapsed Assertion. Fixed: attribute the link
+    // to the CANONICAL run (the run latest_outcomes/this outcome actually
+    // came from), not merely the array-last run that happens to mention this
+    // test name — those can differ, which used to point the link at a run
+    // that didn't produce the value shown above it. Only shown when there is
+    // an outcome to attribute (a pending/absent test has no run to link).
+    var runIdent = null;
+    if (outcome) {
+      var _canonRun = _canonicalRunForLink();
+      runIdent = _canonRun ? (_canonRun.run_id || _canonRun.name) : null;
+    }
     var runLink = runIdent
       ? '<a href="#run-' + e(runIdent) + '" onclick="_setStudyTab(\'simulate\')" style="color:#3b82f6">'
         + 'from run ' + e(runIdent) + ' ↗</a>'
@@ -4048,10 +4125,7 @@
     // the per-test-outcome rollup above.
     var _gate = spec && spec.gate;
     if (_gate && _gate.status) {
-      var _gc = {pass: ['#16a34a', '✓ gate: pass'],
-                 warn: ['#d97706', '≈ gate: warn'],
-                 fail: ['#dc2626', '✗ gate: fail']}[_gate.status] ||
-                ['#64748b', 'gate: ' + _gate.status];
+      var _gc = _gateStatusInfo(_gate.status);
       var _nhard = (_gate.gated_by || []).length;
       var _glabel = _gc[1] + (_gate.status === 'fail' && _nhard
         ? ' (' + _nhard + ' hard axis' + (_nhard === 1 ? '' : 'es') + ')' : '');
@@ -4068,7 +4142,13 @@
     // expander, untouched) into the full report-card layout, single-sourced
     // from spec.latest_outcomes (the SAME canonical-run outcome the gate
     // summary/rollup above reads, so a card can't disagree with the strip)
-    // and spec.test_diff.per (matched by id == test name). Runs BEFORE the
+    // and spec.test_diff.per — matched via the SAME (card, group, id) triple
+    // _axisChange already uses for report-card axis rows (test_diff.per[]
+    // entries are keyed on that triple, per viva_superpowers/test_diff.py;
+    // matching by id alone risks attaching a same-named axis from an
+    // unrelated card). A plain behavioral test carries no card/group of its
+    // own, so it has no valid triple to match — the badge is then gracefully
+    // omitted (see _diffForBehaviorTest) rather than guessed. Runs BEFORE the
     // legacy per-test computed-outcomes block below so that block's
     // insertAdjacentHTML('beforeend', ...) still lands after this card,
     // inside the same <li> — nothing is duplicated for studies that don't
@@ -4076,19 +4156,16 @@
     var _btAll = (spec && (spec.behavior_tests || spec.expected_behavior)) || [];
     if (_btAll.length) {
       var _latestOutcomes = (spec && spec.latest_outcomes) || {};
-      var _diffPer = (spec && spec.test_diff && Array.isArray(spec.test_diff.per)) ? spec.test_diff.per : [];
-      var _diffForName = function (tname) {
-        for (var i = 0; i < _diffPer.length; i++) {
-          if (_diffPer[i] && _diffPer[i].id === tname) return _diffPer[i];
-        }
-        return null;
+      var _diffForBehaviorTest = function (t) {
+        if (!t || !t.card || !t.group) return null;
+        return _axisChange(t.card, t.group, t.name);
       };
       _btAll.forEach(function (t) {
         if (!t || !t.name) return;
         if ((t.kind || 'behavioral') === 'report_card') return;
         var li = document.getElementById('bt-' + t.name);
         if (!li) return;
-        li.innerHTML = _renderTestReportCard(t, _latestOutcomes[t.name] || null, _diffForName(t.name));
+        li.innerHTML = _renderTestReportCard(t, _latestOutcomes[t.name] || null, _diffForBehaviorTest(t));
       });
       // Grouped: primary tests first, then secondary, then everything else —
       // a DOM reorder of the existing <li> nodes (moves, doesn't recreate),
