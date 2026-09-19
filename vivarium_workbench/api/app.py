@@ -337,6 +337,7 @@ from vivarium_workbench.lib.models import (
     StudyRunBaselineRequest,
     StudyRunVariantRequest,
     StudyTestsRunRequest,
+    StudyGradeRequest,
     RunTestsRequest,
     # Task 6: rerun-capability POST request body
     InvestigationRerunRequest,
@@ -6422,6 +6423,22 @@ def create_app() -> FastAPI:
           - 200  ``{summary, tests, note}``
         """
         body, status = _test_run_views.study_tests_run(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/study-grade",
+        tags=["Studies"],
+        summary="Grade a study's behavior tests against its latest run (no re-sim)",
+    )
+    def study_grade(
+        req: StudyGradeRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Grade the declared behavior tests against the study's latest completed
+        run and return the refreshed rollup. Body: ``{"study"}``. Returns
+        ``{graded: false, reason: "no_run"}`` when there is no usable run."""
+        from ..lib import study_grade as _study_grade
+        body, status = _study_grade.grade_study(ws, req.study)
         return JSONResponse(status_code=status, content=body)
 
     @app.post(

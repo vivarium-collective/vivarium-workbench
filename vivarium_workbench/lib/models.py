@@ -2992,6 +2992,11 @@ class StudyTestsRunRequest(BaseModel):
     study: str = ""
 
 
+class StudyGradeRequest(BaseModel):
+    """POST /api/study-grade request body — ``{"study"}``."""
+    study: str
+
+
 class RerunResult(BaseModel):
     """Result of ``POST /api/study-reproduce`` — the new run's launch result plus
     rerun provenance (``origin``, and on success the replayed ``reran`` run_id).
