@@ -9,16 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from viva_workspace.outcomes import canonical_run
 
 from . import auto_evaluate, behavior_test_card
 from .workspace_paths import WorkspacePaths
-
-
-def _latest_completed_run_id(spec: dict) -> str | None:
-    for r in reversed(spec.get("runs") or []):
-        if (r or {}).get("status") == "completed":
-            return r.get("run_id") or r.get("name")
-    return None
 
 
 def grade_study(ws_root: Path, slug: str) -> tuple[dict, int]:
@@ -29,7 +23,10 @@ def grade_study(ws_root: Path, slug: str) -> tuple[dict, int]:
         return {"error": f"study not found: {slug}"}, 404
 
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-    run_id = _latest_completed_run_id(spec)
+    run = canonical_run(spec)
+    if run is None:
+        return {"graded": False, "reason": "no_run"}, 200
+    run_id = run.get("run_id") or run.get("name")
     if not run_id:
         return {"graded": False, "reason": "no_run"}, 200
 
