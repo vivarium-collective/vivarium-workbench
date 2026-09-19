@@ -42,6 +42,13 @@ def test_feedback_panel_and_wrapper_survive():
     assert 'class="study-overview"' in ov
 
 
-def test_analyses_box_removed_from_model_tab():
-    assert 'id="analyses-section"' not in TEMPLATE
-    assert 'Save analyses' not in TEMPLATE
+def test_analyses_box_restored_to_model_tab():
+    # This box (then id="analyses-section", a free-text textarea) was cut in
+    # PR #844 as one incidental line inside an unrelated Overview redesign —
+    # no rationale given, and _saveStudyAnalyses/its backend endpoint were
+    # both left fully intact. item 69 (#3) restores it as a proper
+    # <select multiple> (id="study-analyses-list", new id — see
+    # test_compose_unification.py::test_analyses_section_present_and_reachable_on_the_study_page
+    # for the markup-shape assertions), reusing the same save handler.
+    assert 'id="study-analyses-section"' in TEMPLATE
+    assert 'Save analyses' in TEMPLATE
