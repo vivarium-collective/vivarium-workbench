@@ -2507,11 +2507,13 @@
   var CHAIN_PROGRESS_POLL_MS = 8000;
   var _chainProgressTimer = null;
 
-  // Task 4.1: set true right before a Tests-tab-initiated baseline dispatch
-  // (runStudyTests' no_run branch) so _pollChainProgress's terminal handler
-  // knows to reload the Tests tab once THAT run finishes -- never for an
-  // ordinary "Run current spec" / "Reproduce" click, which leaves this false.
-  var _gradeAfterRun = false;
+  // Task 4.1: set to the run_id/simulation_id of a Tests-tab-initiated
+  // baseline dispatch (runStudyTests' no_run branch) right after that
+  // dispatch resolves, so _pollChainProgress's terminal handler knows to
+  // reload the Tests tab once THAT SPECIFIC run finishes -- scoped by id
+  // (not a bare boolean) so an unrelated "Run current spec" / "Reproduce"
+  // click, or a later unrelated run reaching terminal, never triggers it.
+  var _gradeAfterRunId = null;
 
   function _chainProgressEl() {
     var el = document.getElementById('study-chain-progress');
@@ -2562,12 +2564,15 @@
         }
         // Polling has stopped (real completion, or nothing trackable e.g. a
         // local-engine run with no AWS chain). Only a genuine terminal
-        // completion (d.terminal) warrants reloading the Tests tab -- a
-        // 'not_a_campaign'/'not_found' phase can fire immediately for a
-        // local dispatch, long before that run actually finishes, so it
-        // must clear the flag without triggering a premature reload.
-        if (_gradeAfterRun) {
-          _gradeAfterRun = false;
+        // completion (d.terminal) of THIS SAME run (matched by id) warrants
+        // reloading the Tests tab -- a 'not_a_campaign'/'not_found' phase
+        // can fire immediately for a local dispatch, long before that run
+        // actually finishes, so it must clear the flag without triggering a
+        // premature reload; and a terminal event for some OTHER run (e.g. a
+        // plain "Run current spec" click while a graded run is still in
+        // flight, or vice versa) must never trigger this run's reload.
+        if (_gradeAfterRunId != null && String(_gradeAfterRunId) === String(runId)) {
+          _gradeAfterRunId = null;
           if (d.terminal) _reloadStudyAndTests();
         }
       })
@@ -4017,7 +4022,7 @@
 
   // Task 4.1: re-fetch the study spec and re-render the Tests tab from it --
   // reused after a study-grade success AND after a Tests-tab-initiated
-  // baseline run completes (see _gradeAfterRun / _pollChainProgress above).
+  // baseline run completes (see _gradeAfterRunId / _pollChainProgress above).
   // Reuses window.DataSource.loadStudy (the page's existing study-reload
   // path, also used by _dispatchRemotePinned) rather than a bespoke fetch.
   function _reloadStudyAndTests() {
@@ -4051,33 +4056,47 @@
         return;
       }
       if (r.body.graded) { _reloadStudyAndTests(); return; }
-      // No usable run (reason: "no_run", or an ungradable status) -- run
-      // the study's CURRENT baseline spec (its flush auto-evaluates), then
-      // reload once that specific run reaches a real terminal state.
+      // graded:false carries one of SIX reasons: no_run, run_not_found,
+      // no_tests, store_unresolved, evaluator_unavailable:…, runner_error:….
+      // Only no_run means "nothing to grade yet -- simulate". Every other
+      // reason means a run exists but can't be graded for some OTHER cause
+      // that a new simulation can't fix (missing tests, unresolved store,
+      // evaluator down, etc.) -- dispatching a costly baseline there would
+      // silently paper over the real problem, so just surface it.
+      if (r.body.reason !== 'no_run') {
+        alert('Cannot grade: ' + (r.body.reason || 'unknown') + '. No usable run to grade.');
+        return;
+      }
+      // No run yet -- run the study's CURRENT baseline spec (its flush
+      // auto-evaluates), then reload once that specific run reaches a real
+      // terminal state. Returned (not fire-and-forget) so the outer chain's
+      // finally-handler below waits for the dispatch itself to settle --
+      // confirm dialog included -- before re-enabling the button; otherwise
+      // a second click during "Simulating…" could launch a duplicate run.
       btn.textContent = 'Simulating…';
-      _gradeAfterRun = true;
-      _dispatchCurrentSpecBaseline().then(function(res) {
-        if (res && res.body && res.body.cancelled) { _gradeAfterRun = false; return; }
+      return _dispatchCurrentSpecBaseline().then(function(res) {
+        if (res && res.body && res.body.cancelled) return;
         if (res && (res.status === 200 || res.status === 202)) {
           var runId = res.body && (res.body.run_id || res.body.simulation_id);
           if (runId) {
             if (typeof _loadStudySims === 'function') _loadStudySims(true);
+            _gradeAfterRunId = runId;   // scope the reload to THIS run only
             _pollChainProgress(runId);
-            return;
           }
         } else {
           alert('Run failed: ' + (res && res.body && res.body.error || (res && res.status)));
         }
-        _gradeAfterRun = false;
       }).catch(function(err) {
-        _gradeAfterRun = false;
         alert('Run failed: network error — ' + err);
       });
     }).catch(function(err) {
       alert('Grade error: ' + err);
     }).then(function() {
+      // Reached only once grading -- and, when it happened, the dispatch
+      // itself -- has settled (success, cancel, or error alike): safe to
+      // hand control back to the user either way.
       btn.disabled = false;
-      if (btn.textContent === 'Grading…') btn.textContent = 'Run tests';
+      btn.textContent = 'Run tests';
     });
   }
 
