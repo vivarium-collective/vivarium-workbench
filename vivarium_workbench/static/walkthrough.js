@@ -18,6 +18,23 @@
     return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p;
   }
 
+  // Single client for all workbench /api calls. Applies the base-path shim via
+  // _api(path) (composes safely with the global _base_path_shim) and the JSON
+  // request shape, and returns the raw fetch Response so call sites keep their
+  // own `.then(function (r) { ... })` handling — a drop-in for the uniform
+  // `fetch(url, { method, headers: {'Content-Type': 'application/json'},
+  // body: JSON.stringify(x) })` pattern this file used ~77 times. Pass `body`
+  // to send it as JSON; omit it for GET / no-body requests. FormData / raw-body
+  // uploads stay on plain fetch (they don't fit the JSON shape).
+  function apiFetch(method, path, body) {
+    var opts = { method: method };
+    if (body !== undefined && body !== null) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(_api(path), opts);
+  }
+
   // Module-level so EVERY render function can call it. It was previously only
   // defined nested inside the investigation-report builder, but called from
   // sibling scopes (tick / study-card / v4 renderers) — which threw
@@ -629,11 +646,7 @@
   // This is a mirror, not the source of truth — workspace.yaml stays that.
   function _setAutoResults(checked) {
     var cb = document.getElementById('ui-auto-results-cb');
-    fetch(_api('/api/ui-config'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ auto_results: !!checked }),
-    }).then(function(r) {
+    apiFetch('POST', '/api/ui-config', { auto_results: !!checked }).then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).then(function() {
@@ -672,11 +685,7 @@
 
     var data = dataFn ? dataFn(form) : _formToObj(form);
 
-    fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    })
+    apiFetch('POST', endpoint, data)
       .then(function (res) {
         return res.json().then(function (json) {
           return { ok: res.ok, status: res.status, json: json };
@@ -698,7 +707,7 @@
         if (next) msg += "\n\nNext terminal step:\n  " + next;
         if (note) msg += "\n\n" + note;
         // Re-render then reload (strip updates on reload).
-        fetch("/api/render", { method: "POST" }).finally(function () {
+        apiFetch('POST', "/api/render").finally(function () {
           alert(msg);
           location.reload();
         });
@@ -725,11 +734,7 @@
   }
 
   function _postPhaseAction(endpoint, data) {
-    fetch("/api/" + endpoint, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(data),
-    })
+    apiFetch('POST', "/api/" + endpoint, data)
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], json = parts[1];
@@ -738,7 +743,7 @@
           return;
         }
         var msg = "Done! Branch: " + (json.branch || "?");
-        fetch("/api/render", {method: "POST"}).finally(function() {
+        apiFetch('POST', "/api/render").finally(function() {
           _refreshGitStatus();
           alert(msg);
           location.reload();
@@ -1172,11 +1177,7 @@
     body = body || {};
     var slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
     if (slug) body.investigation = slug;
-    fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
+    apiFetch('POST', endpoint, body)
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         if (!res.ok || (res.d && res.d.error)) {
@@ -3037,7 +3038,7 @@
     _confirmRemoteDispatchThen(function () {
       btn.disabled = true; btn.textContent = 'Launching…';
       if (status) { status.classList.remove('pcard-apply-err'); status.textContent = 'launching run…'; }
-      fetch(_api('/api/composite-test-run'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      apiFetch('POST', '/api/composite-test-run', payload)
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
         .then(function (res) {
           var rid = res.j && res.j.run_id;
@@ -3602,10 +3603,7 @@
     var orig = btn.textContent;
     btn.disabled = true; btn.textContent = 'Running…';
     out.innerHTML = '<div class="muted" style="font-size:0.85em">Running…</div>';
-    fetch('/api/registry/run-process', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address: address, config: config, inputs: inputs, interval: interval }),
-    })
+    apiFetch('POST', '/api/registry/run-process', { address: address, config: config, inputs: inputs, interval: interval })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         btn.disabled = false; btn.textContent = orig;
@@ -5000,11 +4998,7 @@
 
   function _uninstallFromInstalled(name) {
     if (!confirm('Uninstall ' + name + '? This removes it from this workspace\'s dependencies.')) return;
-    fetch('/api/catalog-uninstall', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({name: name}),
-    })
+    apiFetch('POST', '/api/catalog-uninstall', {name: name})
       .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, json: j}; }); })
       .then(function(p) {
         if (!p.ok) {
@@ -6100,11 +6094,7 @@
     var body = {name: name};
     if (opts && opts.skip_system_deps_check) body.skip_system_deps_check = true;
     if (opts && opts.full_repo) body.full_repo = true;
-    fetch('/api/catalog-install', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    })
+    apiFetch('POST', '/api/catalog-install', body)
       .then(function(r) { return r.json().then(function(j) { return [r.ok, r.status, j]; }); })
       .then(function(parts) {
         var ok = parts[0], status = parts[1], json = parts[2];
@@ -6132,7 +6122,7 @@
         var msg = "Installed " + name + ".\nCommit: " + (json.commit || 'n/a');
         alert(msg);
         window._registryLoaded = false;  // force registry reload on next switch
-        fetch('/api/render', {method: 'POST'}).finally(function() {
+        apiFetch('POST', '/api/render').finally(function() {
           location.reload();
         });
       })
@@ -6246,11 +6236,7 @@
     var btn = document.getElementById('sysdeps-install-btn');
     if (errEl) errEl.textContent = '';
     if (btn) { btn.disabled = true; btn.textContent = 'Installing…'; }
-    fetch('/api/system-deps-install', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name, check_names: checkNames}),
-    })
+    apiFetch('POST', '/api/system-deps-install', {name: name, check_names: checkNames})
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
@@ -6381,11 +6367,7 @@
     var errEl = document.getElementById('uninstall-error');
     if (errEl) errEl.textContent = '';
     if (btn) { btn.disabled = true; btn.textContent = 'Uninstalling…'; }
-    fetch('/api/catalog-uninstall', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    })
+    apiFetch('POST', '/api/catalog-uninstall', {name: name})
       .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, json: j}; }); })
       .then(function(p) {
         if (!p.ok) {
@@ -6440,15 +6422,11 @@
 
   function _deleteSimulation(name) {
     if (!confirm("Remove simulation '" + name + "'?")) return;
-    fetch('/api/simulation', {
-      method: 'DELETE',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    })
+    apiFetch('DELETE', '/api/simulation', {name: name})
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         if (!parts[0]) { alert("Error: " + (parts[1].error || "unknown")); return; }
-        fetch('/api/render', {method: 'POST'}).finally(function() { location.reload(); });
+        apiFetch('POST', '/api/render').finally(function() { location.reload(); });
       });
   }
 
@@ -6465,11 +6443,7 @@
     var btn = event.target;
     btn.disabled = true;
     btn.textContent = "Installing…";
-    fetch('/api/import-install', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    })
+    apiFetch('POST', '/api/import-install', {name: name})
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], json = parts[1];
@@ -6482,7 +6456,7 @@
         alert("Installed.\nBranch: " + json.branch + "\n\nRegistry will refresh; new processes may appear after pip-cached subprocess restarts.");
         // Drop registry cache, switch to Registry tab so user sees the change.
         window._registryLoaded = false;
-        fetch('/api/render', {method: 'POST'}).finally(function() {
+        apiFetch('POST', '/api/render').finally(function() {
           location.hash = '#modules';
           location.reload();
         });
@@ -6558,10 +6532,7 @@
     };
     var submitBtn = form.querySelector('button[type=submit]');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Pushing…'; }
-    fetch('/api/work-link-branch', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    }).then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/work-link-branch', body).then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); })
       .then(function (pair) {
         var ok = pair[0], j = pair[1];
         if (!ok) {
@@ -6591,11 +6562,7 @@
   function _startWork() {
     var name = prompt("Investigation branch name (suggested: investigation/<short-slug>):", "investigation/");
     if (!name) return;
-    fetch('/api/work-start', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({branch: name.trim()}),
-    })
+    apiFetch('POST', '/api/work-start', {branch: name.trim()})
       .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
       .then(function(parts){
         if (!parts[0]) { alert("Could not start investigation branch:\n" + (parts[1].error || 'unknown')); return; }
@@ -6606,7 +6573,7 @@
   window._startWork = _startWork;
 
   function _pushWork() {
-    fetch('/api/work-push', {method: 'POST'})
+    apiFetch('POST', '/api/work-push')
       .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
       .then(function(parts){
         var ok = parts[0], json = parts[1];
@@ -6637,11 +6604,7 @@
     };
     var errEl = form.querySelector('.form-error');
     errEl.textContent = '';
-    fetch('/api/work-create-pr', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data),
-    })
+    apiFetch('POST', '/api/work-create-pr', data)
       .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
       .then(function(parts){
         var ok = parts[0], json = parts[1];
@@ -6664,11 +6627,7 @@
     var input = form.elements[fieldName];
     btn.disabled = true;
     btn.textContent = "…";
-    fetch('/api/suggest', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({kind: kind}),
-    })
+    apiFetch('POST', '/api/suggest', {kind: kind})
       .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
       .then(function(parts){
         var ok = parts[0], json = parts[1];
@@ -6705,7 +6664,7 @@
 
   function _endWork() {
     if (!confirm("End this investigation branch? Switches you back to base; the branch is preserved.")) return;
-    fetch('/api/work-end', {method: 'POST'})
+    apiFetch('POST', '/api/work-end')
       .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
       .then(function(parts){
         if (!parts[0]) { alert("Could not end investigation branch:\n" + (parts[1].error || 'unknown')); return; }
@@ -6726,11 +6685,7 @@
     if (spinner) spinner.style.display = "inline";
     if (out) out.textContent = "Running…";
 
-    fetch("/api/run-tests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: model }),
-    })
+    apiFetch('POST', "/api/run-tests", { model: model })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (btn) btn.disabled = false;
@@ -7228,11 +7183,7 @@
   window._vizRefreshAll = _vizRefreshAll;
 
   function _vizCreate(name) {
-    fetch('/api/visualization-create', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    })
+    apiFetch('POST', '/api/visualization-create', {name: name})
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(pair) {
         var ok = pair[0], json = pair[1];
@@ -7259,11 +7210,7 @@
   }
 
   function _vizAddToProject(name) {
-    fetch('/api/visualization-add-to-project', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    })
+    apiFetch('POST', '/api/visualization-add-to-project', {name: name})
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(pair) {
         var ok = pair[0], json = pair[1];
@@ -7275,33 +7222,25 @@
 
   function _vizCommit(names) {
     if (!confirm('Commit ' + names.length + ' visualization(s) to the active branch?')) return;
-    fetch('/api/visualization-commit-batch', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({names: names}),
-    })
+    apiFetch('POST', '/api/visualization-commit-batch', {names: names})
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(pair) {
         var ok = pair[0], json = pair[1];
         if (!ok) { alert('Commit failed: ' + (json.error || 'unknown')); return; }
         alert('Committed: ' + (json.committed || []).join(', '));
-        fetch('/api/render', {method: 'POST'}).finally(function() { location.reload(); });
+        apiFetch('POST', '/api/render').finally(function() { location.reload(); });
       });
   }
   window._vizCommit = _vizCommit;
 
   function _vizCommitAll() {
-    fetch('/api/visualization-commit-batch', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({}),
-    })
+    apiFetch('POST', '/api/visualization-commit-batch', {})
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(pair) {
         var ok = pair[0], json = pair[1];
         if (!ok) { alert('Commit-all failed: ' + (json.error || 'unknown')); return; }
         alert('Committed: ' + (json.committed || []).join(', '));
-        fetch('/api/render', {method: 'POST'}).finally(function() { location.reload(); });
+        apiFetch('POST', '/api/render').finally(function() { location.reload(); });
       });
   }
   window._vizCommitAll = _vizCommitAll;
@@ -7322,10 +7261,7 @@
     // Preview a registered workspace.yaml instance by name. The server
     // looks up its class+config and renders against demo data (or a real
     // investigation if source is set later via the modal).
-    fetch('/api/visualization-preview-instance', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name, source: 'demo'}),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/visualization-preview-instance', {name: name, source: 'demo'}).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         if (!ok) {
@@ -7339,10 +7275,7 @@
 
   function _vizClassPreview(address, className) {
     // Preview a raw Visualization class (no config) against demo data.
-    fetch('/api/visualization-preview', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({address: address, source: 'demo'}),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/visualization-preview', {address: address, source: 'demo'}).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         if (!ok) {
@@ -7356,16 +7289,12 @@
 
   function _vizRemove(name) {
     if (!confirm("Remove visualization '" + name + "'?")) return;
-    fetch('/api/visualization', {
-      method: 'DELETE',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    })
+    apiFetch('DELETE', '/api/visualization', {name: name})
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(pair) {
         var ok = pair[0], json = pair[1];
         if (!ok) { alert('Remove failed: ' + (json.error || 'unknown')); return; }
-        fetch('/api/render', {method: 'POST'}).finally(function() { location.reload(); });
+        apiFetch('POST', '/api/render').finally(function() { location.reload(); });
       });
   }
   window._vizRemove = _vizRemove;
@@ -7435,11 +7364,7 @@
     var name = id.indexOf('.') >= 0 ? id.split('.').pop() : id;
     var btn = document.getElementById('ce-begin-study-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Starting study…'; }
-    fetch('/api/study-create-from-composite', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({composite_name: name}),
-    })
+    apiFetch('POST', '/api/study-create-from-composite', {composite_name: name})
       .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, body: j}; }); })
       .then(function(res) {
         if (!res.ok) {
@@ -8121,16 +8046,12 @@
     var resultsEl = document.getElementById('ce-test-results');
     _confirmRemoteDispatchThen(function () {
       resultsEl.innerHTML = '<p class="empty-state">Starting run&hellip;</p>';
-      fetch(_api('/api/composite-test-run'), {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
+      apiFetch('POST', '/api/composite-test-run', {
           id: window._ceCurrent.id,
           overrides: overrides,
           steps: steps,
           emit_paths: window._explorerEmitPaths || [],
-        }),
-      })
+        })
         .then(function(r) { return r.json().then(function(j) { return [r.status, j]; }); })
         .then(function(parts) {
           var code = parts[0], body = parts[1];
@@ -8220,16 +8141,12 @@
     var submitBtn = document.querySelector('#form-save-as-study button[type="submit"]');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creating…'; }
 
-    fetch('/api/study-create-from-run', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
+    apiFetch('POST', '/api/study-create-from-run', {
         name: name,
         objective: objective,
         description: description,
         source_run_id: sourceRunId,
-      }),
-    })
+      })
       .then(function(r) { return r.json().then(function(d) { return {status: r.status, body: d}; }); })
       .then(function(res) {
         if (res.status === 200) {
@@ -9037,7 +8954,7 @@
     var errEl = form.querySelector('.form-error');
     if (!name) { errEl.textContent = 'Name required.'; return; }
     var post = function (url, body) {
-      return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      return apiFetch('POST', url, body)
         .then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); });
     };
     if (window._browseCreateMode === 'investigation') {
@@ -9056,10 +8973,7 @@
           if (!p[0]) { errEl.textContent = p[1].error || 'Create failed.'; return; }
           var created = (p[1] && p[1].name) || name;
           // Seed the question on the scaffolded study (best-effort).
-          fetch('/api/study/' + encodeURIComponent(created), {
-            method: 'PATCH', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ narrative: { path: 'purpose.question', value: prompt } }),
-          })
+          apiFetch('PATCH', '/api/study/' + encodeURIComponent(created), { narrative: { path: 'purpose.question', value: prompt } })
             .catch(function () {}).then(function () {
               closeModal('modal-browse-create');
               window._investigationsLoaded = false;
@@ -9356,11 +9270,7 @@
   function _setInvestigationStatus(btn, name, status) {
     var orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
-    fetch('/api/investigation/' + encodeURIComponent(name), {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({status: status}),
-    })
+    apiFetch('PATCH', '/api/investigation/' + encodeURIComponent(name), {status: status})
       .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function() {
         if (typeof _loadInvestigationSets === 'function') _loadInvestigationSets();
@@ -10002,11 +9912,7 @@
     var panel = document.getElementById('investigation-run-progress');
     if (btn) { btn.disabled = true; btn.textContent = '… queuing'; }
     if (panel) { panel.style.display = ''; panel.innerHTML = '<div class="inv-run-progress-banner">Queuing run-unblocked job…</div>'; }
-    fetch('/api/investigation-run-unblocked', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: name}),
-    }).then(function(r) {
+    apiFetch('POST', '/api/investigation-run-unblocked', {investigation: name}).then(function(r) {
       return r.json().then(function(j) { return {ok: r.ok, body: j, status: r.status}; });
     }).then(function(res) {
       if (!res.ok) {
@@ -10062,11 +9968,7 @@
     var panel = document.getElementById('investigation-run-progress');
     if (btn) { btn.disabled = true; btn.textContent = '… launching'; }
     if (panel) { panel.style.display = ''; panel.innerHTML = '<div class="inv-run-progress-banner">Launching reruns…</div>'; }
-    fetch('/api/investigation-rerun', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ investigation: name }),
-    }).then(function(r) {
+    apiFetch('POST', '/api/investigation-rerun', { investigation: name }).then(function(r) {
       return r.json().then(function(j) { return { ok: r.ok, body: j, status: r.status }; });
     }).then(function(res) {
       if (btn) { btn.disabled = false; btn.textContent = '▶ Run current spec'; }
@@ -10127,11 +10029,7 @@
       if (!prog.waiting) { lastDone = (prog.done || 0); return; }
       if ((prog.done || 0) === lastDone) return;   // nothing settled since last look
       lastDone = (prog.done || 0);
-      fetch(_api('/api/investigation-run-redrive'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ job_id: jobId })
-      }).catch(function() { /* best-effort: the next change re-tries */ });
+      apiFetch('POST', '/api/investigation-run-redrive', { job_id: jobId }).catch(function() { /* best-effort: the next change re-tries */ });
     }
     function tick() {
       fetch('/api/investigation-run-unblocked-status?job_id=' + encodeURIComponent(jobId))
@@ -10332,13 +10230,9 @@
     if (!_dagInvSlug) return;
     var original = btnEl ? btnEl.textContent : '';
     if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'triggering…'; }
-    fetch('/api/investigation-trigger', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    apiFetch('POST', '/api/investigation-trigger', {
         investigation: _dagInvSlug, target_study: slug, on_missing: onMissing,
-      }),
-    }).then(function (r) {
+      }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
     }).then(function (res) {
       if (btnEl) { btnEl.disabled = false; btnEl.textContent = original; }
@@ -11024,11 +10918,7 @@
   // surfaces converge on the same backend.
   function _seedFollowupAndOpen(parentName, idx) {
     if (!confirm('Seed a new study from this follow-up?\n\nA new study.yaml will be created under studies/<new-name>/.')) return;
-    fetch('/api/study-seed-followup', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({parent: parentName, followup_idx: idx}),
-    }).then(function(r) { return r.json().then(function(d) { return {status: r.status, body: d}; }); })
+    apiFetch('POST', '/api/study-seed-followup', {parent: parentName, followup_idx: idx}).then(function(r) { return r.json().then(function(d) { return {status: r.status, body: d}; }); })
       .then(function(res) {
         if (res.status !== 200 || res.body.error) {
           alert('Seed failed: ' + (res.body.error || res.status));
@@ -11057,11 +10947,7 @@
     var payload = {parent: parentName};
     if (proposalId) payload.proposal_id = proposalId;
     payload.proposal_idx = proposalIdx;
-    fetch('/api/study-seed-followup', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
-    }).then(function(r) { return r.json().then(function(d) { return {status: r.status, body: d}; }); })
+    apiFetch('POST', '/api/study-seed-followup', payload).then(function(r) { return r.json().then(function(d) { return {status: r.status, body: d}; }); })
       .then(function(res) {
         if (res.status !== 200 || res.body.error) {
           alert('Seed failed: ' + (res.body.error || res.status));
@@ -11300,10 +11186,7 @@
     if (ev) ev.stopPropagation();
     if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return;
     if (!confirm("Run this study's current baseline spec as a new run?")) return;
-    fetch('/api/study-run-baseline', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({study: slug}),
-    }).then(function (r) { return r.json(); }).then(function (j) {
+    apiFetch('POST', '/api/study-run-baseline', {study: slug}).then(function (r) { return r.json(); }).then(function (j) {
       var id = j && (j.run_id || j.simulation_id);
       var msg = id ? ('Run launched — ' + id) : ('Run: ' + ((j && j.error) || 'done'));
       if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
@@ -11320,10 +11203,7 @@
         var rows = (j && (j.simulations || j.runs)) || [];
         var latest = rows[0] && (rows[0].run_id || rows[0].id || rows[0].name);
         if (!latest) { alert('No run to reproduce yet for ' + slug + '.'); return; }
-        return fetch('/api/study-reproduce', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({study: slug, run_id: latest}),
-        }).then(function (r) { return r.json(); }).then(function (res) {
+        return apiFetch('POST', '/api/study-reproduce', {study: slug, run_id: latest}).then(function (r) { return r.json(); }).then(function (res) {
           var id = res && res.run_id;
           var msg = id ? ('Reproduce launched — ' + id) : ('Reproduce: ' + ((res && res.error) || 'done'));
           if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
@@ -11456,7 +11336,7 @@
     var setStatus = function(txt) { if (statusEl) statusEl.textContent = txt || ''; };
     btn.disabled = true;
     setStatus('refreshing…');
-    fetch('/api/study-refresh-viz/' + encodeURIComponent(study), {method: 'POST'})
+    apiFetch('POST', '/api/study-refresh-viz/' + encodeURIComponent(study))
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -12902,10 +12782,7 @@
   function _submitInvestigationCreate(form) {
     var data = new FormData(form);
     var payload = { name: data.get('name'), composite: data.get('composite'), source: data.get('source') || '' };
-    fetch('/api/study-create', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/study-create', payload).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         if (!ok) {
@@ -13294,11 +13171,7 @@
   function _saveOverviewField(invName, key, value) {
     var overview = {};
     overview[key] = value;
-    fetch('/api/investigation/' + encodeURIComponent(invName), {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({overview: overview}),
-    })
+    apiFetch('PATCH', '/api/investigation/' + encodeURIComponent(invName), {overview: overview})
       .then(function(r) {
         if (!r.ok) {
           return r.json().then(function(j) { alert(j.error || 'save failed'); });
@@ -13351,11 +13224,7 @@
     var invName = window._currentInvestigation;
     if (!invName) return;
     var blob = _emitConclusionsBlob();
-    fetch('/api/investigation/' + encodeURIComponent(invName), {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({conclusions: blob}),
-    })
+    apiFetch('PATCH', '/api/investigation/' + encodeURIComponent(invName), {conclusions: blob})
       .then(function(r) {
         if (!r.ok) return r.json().then(function(j) { alert(j.error || 'save failed'); });
         if (typeof _showToast === 'function') _showToast('Saved conclusions');
@@ -13584,11 +13453,7 @@
         observables: fields.observables,
       };
     }
-    fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    })
+    apiFetch('POST', url, body)
       .then(function(r) {
         return r.json().then(function(j) { return {ok: r.ok, body: j}; });
       })
@@ -13615,11 +13480,7 @@
     var invName = window._currentInvestigation;
     if (!invName) return;
     if (!confirm('Remove comparison "' + cmpName + '"?')) return;
-    fetch('/api/investigation-comparison', {
-      method: 'DELETE',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: invName, name: cmpName}),
-    })
+    apiFetch('DELETE', '/api/investigation-comparison', {investigation: invName, name: cmpName})
       .then(function(r) {
         return r.json().then(function(j) { return {ok: r.ok, status: r.status, body: j}; });
       })
@@ -13829,11 +13690,7 @@
         variants: fields.variants,
       };
     }
-    fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    })
+    apiFetch('POST', url, body)
       .then(function(r) {
         return r.json().then(function(j) { return {ok: r.ok, body: j}; });
       })
@@ -13860,11 +13717,7 @@
     var invName = window._currentInvestigation;
     if (!invName) return;
     if (!confirm('Remove group "' + grpName + '"?')) return;
-    fetch('/api/investigation-group', {
-      method: 'DELETE',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: invName, name: grpName}),
-    })
+    apiFetch('DELETE', '/api/investigation-group', {investigation: invName, name: grpName})
       .then(function(r) {
         return r.json().then(function(j) { return {ok: r.ok, status: r.status, body: j}; });
       })
@@ -14255,11 +14108,7 @@
       parameter_overrides: paramObj,
       process_overrides: procObj,
     };
-    fetch('/api/investigation-composite-perturb', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    })
+    apiFetch('POST', '/api/investigation-composite-perturb', body)
       .then(function(r) {
         return r.json().then(function(j) { return {ok: r.ok, body: j}; });
       })
@@ -14386,10 +14235,7 @@
       document.querySelectorAll('#inv-observables-tree input[type=checkbox][data-path]:checked')
         .forEach(function(cb) { paths.push(cb.dataset.path.split('.')); });
     }
-    fetch('/api/investigation/' + encodeURIComponent(invName), {
-      method: 'PATCH', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({observables: paths, emit_all: emitAll}),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('PATCH', '/api/investigation/' + encodeURIComponent(invName), {observables: paths, emit_all: emitAll}).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var status = document.getElementById('inv-observables-status');
         if (!status) return;
@@ -14433,10 +14279,7 @@
     var names = ((el && el.value) || '').split(/[\n,]/)
       .map(function(s) { return s.trim(); }).filter(Boolean);
     var analyses = names.map(function(n) { return {name: n, params: {}}; });
-    fetch('/api/study-set-analyses', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: invName, analyses: analyses}),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/study-set-analyses', {investigation: invName, analyses: analyses}).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var status = document.getElementById('inv-analyses-status');
         if (!status) return;
@@ -14478,10 +14321,7 @@
       name: data.get('name'),
       source: data.get('source'),
     };
-    fetch('/api/investigation-composite-add', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/investigation-composite-add', payload).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         if (!ok) {
@@ -14532,10 +14372,7 @@
     };
     if (po) payload.parameter_overrides = po;
     if (procO) payload.process_overrides = procO;
-    fetch('/api/investigation-composite-perturb', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/investigation-composite-perturb', payload).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         if (!ok) {
@@ -14549,10 +14386,7 @@
   window._submitPerturb = _submitPerturb;
 
   function _rebuildComposite(invName, compName) {
-    fetch('/api/investigation-composite-rebuild', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: invName, name: compName}),
-    }).then(function() {
+    apiFetch('POST', '/api/investigation-composite-rebuild', {investigation: invName, name: compName}).then(function() {
       _loadInvComposites(invName);
       _loadInvCompositeDetail(invName, compName);
     });
@@ -14561,10 +14395,7 @@
 
   function _removeComposite(invName, compName) {
     if (!confirm('Remove composite ' + compName + '?')) return;
-    fetch('/api/investigation-composite', {
-      method: 'DELETE', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: invName, name: compName}),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('DELETE', '/api/investigation-composite', {investigation: invName, name: compName}).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         if (!ok) {
@@ -14645,16 +14476,12 @@
       if (errEl) errEl.textContent = 'Target name must match [a-z0-9_-]+';
       return;
     }
-    fetch('/api/composite-promote-to-catalog', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
+    apiFetch('POST', '/api/composite-promote-to-catalog', {
         investigation: invName,
         variant: variant,
         target_name: target,
         description: desc,
-      }),
-    })
+      })
       .then(function(r) {
         return r.json().then(function(j) { return {status: r.status, body: j}; });
       })
@@ -14709,10 +14536,7 @@
     var detail = document.getElementById('investigation-detail');
     var btn = detail.querySelector('button.action-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
-    fetch('/api/investigation-run', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j, r.status]; }); })
+    apiFetch('POST', '/api/investigation-run', {name: name}).then(function(r) { return r.json().then(function(j) { return [r.ok, j, r.status]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1], code = parts[2];
         // §A5: a v3 investigation is now delegated server-side to the SAME
@@ -14744,10 +14568,7 @@
 
   function _deleteInvestigation(name) {
     if (!confirm('Delete investigation "' + name + '"? This removes its runs.db, visualizations, and spec.yaml.')) return;
-    fetch('/api/investigation-delete', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    }).then(function(r) { return r.json(); }).then(function(j) {
+    apiFetch('POST', '/api/investigation-delete', {name: name}).then(function(r) { return r.json(); }).then(function(j) {
       if (!j.ok) { alert('Delete failed: ' + (j.error || 'unknown')); return; }
       var detail = document.getElementById('investigation-detail');
       if (detail) { detail.style.display = 'none'; detail.innerHTML = ''; }
@@ -14761,10 +14582,7 @@
 
   function _deleteRun(investigationName, runId) {
     if (!confirm('Delete run ' + runId.slice(-12) + '?')) return;
-    fetch('/api/investigation-run-delete', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: investigationName, run_id: runId}),
-    }).then(function(r) { return r.json(); }).then(function(j) {
+    apiFetch('POST', '/api/investigation-run-delete', {investigation: investigationName, run_id: runId}).then(function(r) { return r.json(); }).then(function(j) {
       if (!j.ok) { alert('Delete failed: ' + (j.error || 'unknown')); return; }
       _openInvestigation(investigationName);
     });
@@ -14773,10 +14591,7 @@
 
   function _clearRuns(investigationName) {
     if (!confirm('Clear ALL runs from ' + investigationName + '? (visualizations will be empty until you re-run)')) return;
-    fetch('/api/investigation-runs-clear', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({investigation: investigationName}),
-    }).then(function(r) { return r.json(); }).then(function(j) {
+    apiFetch('POST', '/api/investigation-runs-clear', {investigation: investigationName}).then(function(r) { return r.json(); }).then(function(j) {
       if (!j.ok) { alert('Clear failed: ' + (j.error || 'unknown')); return; }
       _openInvestigation(investigationName);
     });
@@ -14791,15 +14606,12 @@
     var overrides;
     try { overrides = JSON.parse(edited); }
     catch (e) { alert('Invalid JSON: ' + e); return; }
-    fetch('/api/investigation-run-one', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
+    apiFetch('POST', '/api/investigation-run-one', {
         investigation: investigationName,
         sim_name: simName + '-copy',
         overrides: overrides,
         steps: steps,
-      }),
-    }).then(function(r) { return r.json(); }).then(function(j) {
+      }).then(function(r) { return r.json(); }).then(function(j) {
       if (!j.ok) { alert('Duplicate-run failed: ' + (j.error || 'unknown')); return; }
       // Re-render the investigation; the new run's viz HTML lives at
       // /investigations/<inv>/viz/<run_id>/<name>.html and is discoverable
@@ -15048,10 +14860,7 @@
       address: data.get('address'),
       config: config,
     };
-    fetch('/api/investigation-add-viz', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/investigation-add-viz', payload).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         if (!ok) {
@@ -15059,10 +14868,7 @@
           return;
         }
         closeModal('modal-investigation-add-viz');
-        fetch('/api/investigation-render-viz', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({name: payload.investigation}),
-        }).then(function() {
+        apiFetch('POST', '/api/investigation-render-viz', {name: payload.investigation}).then(function() {
           _openInvestigation(payload.investigation);  // refresh detail panel
         });
       });
@@ -15082,10 +14888,7 @@
       name: data.get('name'),
       description: data.get('description'),
     };
-    fetch('/api/visualization-generate', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/visualization-generate', payload).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         if (!ok) {
@@ -15125,10 +14928,7 @@
   }
 
   function _acceptGeneratedClass(name) {
-    fetch('/api/visualization-accept', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+    apiFetch('POST', '/api/visualization-accept', {name: name}).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
         var ok = parts[0], j = parts[1];
         var statusEl = document.getElementById('viz-generate-status');
@@ -15920,11 +15720,7 @@
     // Replace the confirm handler each time to bind the current run_id.
     confirm.onclick = function () {
       confirm.disabled = true;
-      fetch('/api/simulation-run', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ run_id: run_id }),
-      }).then(function (r) { return r.json().then(function (d) {
+      apiFetch('DELETE', '/api/simulation-run', { run_id: run_id }).then(function (r) { return r.json().then(function (d) {
         return { ok: r.ok, status: r.status, body: d };
       }); }).then(function (res) {
         confirm.disabled = false;
@@ -16398,14 +16194,11 @@
           if (!html) return null;
           var filename = 'investigation-' + iset.name + '.html';
           setStatus('Committing report…');
-          return fetch('/api/work-attach-report', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+          return apiFetch('POST', '/api/work-attach-report', {
               filename: filename,
               html: html,
               commit_message: 'docs(report): refresh investigation report for PR',
-            }),
-          }).then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); });
+            }).then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); });
         });
     } else {
       attachPromise = Promise.resolve(null);
@@ -16420,10 +16213,7 @@
         }
       }
       setStatus('Creating PR…');
-      return fetch('/api/work-create-pr', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(prBody),
-      }).then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); });
+      return apiFetch('POST', '/api/work-create-pr', prBody).then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); });
     })
     .then(function (pair) {
       var ok = pair[0], j = pair[1];
@@ -16490,10 +16280,7 @@
     var btn = document.getElementById('btn-commit-push');
     if (btn) { btn.disabled = true; btn.textContent = 'Pushing…'; }
     function _reset() { if (btn) { btn.disabled = false; btn.textContent = 'Commit + Push'; } }
-    fetch('/api/branch/push', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg }),
-    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+    apiFetch('POST', '/api/branch/push', { message: msg }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         _reset();
         if (res.ok) {
