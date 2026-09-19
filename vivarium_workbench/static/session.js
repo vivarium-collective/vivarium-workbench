@@ -144,6 +144,19 @@
       } catch (e) { /* history unavailable — harmless */ }
     }
 
+    // item 41: any path that does NOT end in a reload must explicitly dismiss the
+    // boot overlay + surface a real error — a reload never happens on those
+    // paths, so the pre-paint script never gets to re-run and clear it on its
+    // own, which would otherwise strand the user behind a spinner forever.
+    function bindFailed(message) {
+      try { document.documentElement.removeAttribute("data-ws-boot"); } catch (e) { /* no-op */ }
+      try {
+        if (window.vivSessionStatus && typeof window.vivSessionStatus.renderFailure === "function") {
+          window.vivSessionStatus.renderFailure({ error: message });
+        }
+      } catch (e) { /* renderFailure unavailable — overlay is still dismissed above */ }
+    }
+
     return window.fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -153,12 +166,14 @@
       // Reload the (now clean) URL so GET / re-renders for the bound workspace.
       if (r && r.ok && window.location && typeof window.location.reload === "function") {
         window.location.reload();
+      } else if (!r || !r.ok) {
+        bindFailed("Failed to open workspace — " + endpoint + " returned " + (r ? r.status : "no response"));
       }
       return r;
     }).catch(function () {
-      // Bind failed — leave the app on its default workspace. A later slice adds
-      // spawn-error UI; for now just clean the URL.
+      // Bind failed — leave the app on its default workspace.
       stripParam();
+      bindFailed("Failed to open workspace — network error contacting " + endpoint);
     });
   }
 
