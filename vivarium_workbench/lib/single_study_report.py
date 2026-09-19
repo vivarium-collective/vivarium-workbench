@@ -1184,10 +1184,15 @@ def _render_gate_ledger(spec: dict) -> str:
     rerun = split.get("committed_rerunnable")
     rerun_html = ""
     if rerun is not None:
+        # #285: committed_rerunnable is a COUNT of tests carrying an
+        # executable check / machine predicate (not a bool) — render the
+        # number when we have one, but stay tolerant of a bool from an
+        # older/offline local mirror.
+        rerun_text = ("yes" if rerun else "no") if isinstance(rerun, bool) else str(rerun)
         rerun_html = (
             '<div style="color:#64748b;font-size:0.85em;margin-top:4px">'
             'committed rerunnable evidence: '
-            + ("yes" if rerun else "no") + '</div>'
+            + rerun_text + '</div>'
         )
     return (
         '<section id="gate-ledger"><h2>Gate ledger</h2>'

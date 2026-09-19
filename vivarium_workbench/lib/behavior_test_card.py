@@ -252,10 +252,13 @@ def render_behavior_tests_html(verdict: dict, spec: dict) -> str:
         + f' · {n_total} total'
     ) if n_total else "no tests"
     # Split ledger (pins vs acceptance vs expected-fail) beside the counts,
-    # when the study classified any of its gates.
+    # when the study classified any of its gates. (#285: the label always
+    # renders "pins: X/Y; acceptance: A/B" — even at 0/0 — rather than a
+    # "no classified gates" sentinel, so that old sentinel check is dead;
+    # gating on n_total alone is enough.)
     split = verdict.get("count_split")
     split_label = (split or {}).get("label") if isinstance(split, dict) else None
-    if n_total and split_label and split_label != "no classified gates":
+    if n_total and split_label:
         summary += (f' · <span style="color:#475569">{_html.escape(split_label)}</span>')
 
     return (

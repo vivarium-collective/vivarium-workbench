@@ -109,10 +109,13 @@ def test_verdict_count_split_mixed():
     assert split["acceptance_criteria"] == {"total": 2, "pass": 1, "fail": 1}
     assert split["expected_fail"] == {"total": 1, "behaved": 1}
     assert split["unclassified"] == 0
-    assert split["committed_rerunnable"] is True
-    assert "pins 1/1" in split["label"]
-    assert "acceptance 1/2" in split["label"]
-    assert "expected-fail behaved 1/1" in split["label"]
+    # #285: committed_rerunnable is a COUNT of tests carrying an executable
+    # check / machine predicate (pass_if here), not a bool — all 4 tests
+    # in this fixture declare pass_if.
+    assert split["committed_rerunnable"] == 4
+    assert "pins: 1/1" in split["label"]
+    assert "acceptance: 1/2" in split["label"]
+    assert "expected-fail behaved: 1/1" in split["label"]
 
 
 def test_verdict_count_split_narrated_and_unclassified():
@@ -128,12 +131,16 @@ def test_verdict_count_split_narrated_and_unclassified():
     split = gate_rigor.verdict_count_split(spec)
     assert split["narrated"] == 1
     assert split["unclassified"] == 1
-    assert split["committed_rerunnable"] is False
+    # #285: committed_rerunnable counts tests with an executable check —
+    # only "graded_no_class" (pass_if) qualifies; "prose_only" doesn't.
+    assert split["committed_rerunnable"] == 1
     assert split["regression_pins"]["total"] == 0
 
 
 def test_verdict_count_split_tolerates_garbage():
-    assert gate_rigor.verdict_count_split({})["label"] == "no classified gates"
+    # #285: the label always renders the pins/acceptance ledger (even at
+    # 0/0) rather than falling back to a "no classified gates" sentinel.
+    assert gate_rigor.verdict_count_split({})["label"] == "pins: 0/0; acceptance: 0/0"
     assert gate_rigor.verdict_count_split(None)["regression_pins"]["total"] == 0
 
 
@@ -170,8 +177,8 @@ def test_card_html_renders_gate_badges_and_expected_fail():
     assert "EXPECTED FAIL" in html
     # The behaved control's amber pill — never the green PASS palette.
     assert "#fef3c7" in html
-    # Split ledger surfaces in the summary strip.
-    assert "expected-fail behaved 1/1" in html
+    # Split ledger surfaces in the summary strip (#285 label uses "behaved:").
+    assert "expected-fail behaved: 1/1" in html
 
 
 def test_card_html_unexpected_pass_never_green():
