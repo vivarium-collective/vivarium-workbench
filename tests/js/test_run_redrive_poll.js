@@ -36,15 +36,27 @@ function harness() {
     posts.push({ url, opts });
     return Promise.resolve({});
   };
+  // maybeRedrive now calls walkthrough.js's shared `apiFetch` client (Phase 1a).
+  // Inject an apiFetch matching the shipped implementation, built on the stubbed
+  // fetch, so `posts` still records the redrive call identically ({url, opts}
+  // with method / Content-Type header / JSON body).
+  const apiFetch = (method, path, body) => {
+    const opts = { method: method };
+    if (body !== undefined && body !== null) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    return stubFetch(path, opts);
+  };
   // `lastDone` is closed over by the real function; thread it through `state`
   // so successive calls see the same value a live poll would.
   const state = { lastDone: -1 };
   // eslint-disable-next-line no-new-func
-  const call = new Function('state', 'jobId', '_api', 'fetch',
+  const call = new Function('state', 'jobId', '_api', 'fetch', 'apiFetch',
     'var lastDone = state.lastDone;' +
     extract('maybeRedrive') +
     '; return function(job){ maybeRedrive(job); state.lastDone = lastDone; };'
-  )(state, 'j1', (p) => p, stubFetch);
+  )(state, 'j1', (p) => p, stubFetch, apiFetch);
   return { posts, call };
 }
 
