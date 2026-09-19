@@ -491,6 +491,10 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/remote-run-start",
     # remote-run thin client (WS1, two-phase)
     "/api/remote-run-build", "/api/remote-run-submit", "/api/remote-run-land",
+    # item 53: cancelling a real remote run is a control action, same class of
+    # operational necessity as starting one — a read-only deployment must not
+    # block an operator from stopping a runaway campaign
+    "/api/remote-run-cancel",
     # SP-C: save a completed run as a named study variant / delete a run
     "/api/save-run-as-variant",
     "/api/run-delete",
@@ -6968,6 +6972,18 @@ def create_app() -> FastAPI:
         if not simulation_id:
             return JSONResponse(status_code=400, content={"error": "simulation_id required"})
         body, status = _remote_run_views.remote_run_chain_progress({"simulation_id": simulation_id})
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post("/api/remote-run-cancel", tags=["Runs"],
+              summary="Cancel a real remote simulation/chain-dispatch campaign (item 53)")
+    def remote_run_cancel(req: Union[dict, None] = Body(default=None)) -> JSONResponse:
+        """Backlog item 53: proxies viva-api's ``DELETE /api/v1/simulations/{id}/
+        cancel``, the "Stop campaign" control. For a chain-dispatch campaign row,
+        viva-api's own handler walks every seed's own dependsOn chain and
+        cancels/terminates whichever job is actually non-terminal per seed — see
+        ``lib.remote_run_views.remote_run_cancel`` for the full proxy contract.
+        Body: ``{simulation_id}``."""
+        body, status = _remote_run_views.remote_run_cancel(req or {})
         return JSONResponse(status_code=status, content=body)
 
     @app.post("/api/remote-run-pinned-build", tags=["Runs"], status_code=202,
