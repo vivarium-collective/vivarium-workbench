@@ -2001,13 +2001,15 @@
       if (!numGenerations) missing.push('n_generations');
       if (!numSeeds) missing.push('n_seeds');
       if (missing.length) {
-        alert(
+        // item 81: styled modal, not window.alert() -- see _confirmModal's
+        // own comment above for why (blocks the event loop, including
+        // browser-automation UI verification).
+        return _alertModal(
           'Cannot dispatch: ' + missing.join(' and ') +
           (missing.length > 1 ? ' are' : ' is') + ' not set.\n\n' +
           'Set ' + (missing.length > 1 ? 'both' : 'it') + ' in the Model tab ' +
           '(Runnable models → edit ' + missing.join(' / ') + ' → Save parameter changes) before running.'
-        );
-        return _CANCELLED;
+        ).then(function () { return _CANCELLED; });
       }
       var msg = 'Dispatch to AWS Batch:\n\n' +
         '  repo:    ' + (cfg.repo_url || '(unknown)') + '\n' +
@@ -2017,12 +2019,17 @@
         '  generations:  ' + numGenerations + '\n' +
         '  seeds:        ' + numSeeds + '\n\n' +
         'Proceed?';
-      if (!confirm(msg)) return _CANCELLED;
-      return api('POST', '/api/remote-run-submit', {
-        study: slug,
-        simulator_id: cfg.simulator_id,
-        num_generations: numGenerations,
-        num_seeds: numSeeds,
+      // item 81: styled modal, not window.confirm() -- reuses item 20b's
+      // existing _confirmModal (same file) rather than adding a second
+      // implementation; see its own comment above for the rationale.
+      return _confirmModal(msg).then(function (ok) {
+        if (!ok) return _CANCELLED;
+        return api('POST', '/api/remote-run-submit', {
+          study: slug,
+          simulator_id: cfg.simulator_id,
+          num_generations: numGenerations,
+          num_seeds: numSeeds,
+        });
       });
     });
   }
@@ -2270,6 +2277,45 @@
     });
   }
 
+  // item 81: same non-blocking-event-loop rationale as _confirmModal above,
+  // for the pure-notice case (window.alert()) -- a single OK button, no
+  // Cancel (there's nothing to cancel; acknowledgement is the only action).
+  function _alertModal(message) {
+    return new Promise(function (resolve) {
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.35);'
+        + 'display:flex;align-items:center;justify-content:center';
+      var box = document.createElement('div');
+      box.style.cssText = 'background:var(--panel-bg,#fff);border:1px solid var(--border,#e2e8f0);'
+        + 'border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,0.25);padding:16px 20px;'
+        + 'max-width:520px;width:90%;font:12px/1.5 system-ui,-apple-system,sans-serif';
+      var text = document.createElement('div');
+      text.style.cssText = 'white-space:pre-wrap;margin-bottom:14px';
+      text.textContent = message;
+      var actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;justify-content:flex-end';
+      var okBtn = document.createElement('button');
+      okBtn.type = 'button';
+      okBtn.className = 'btn-mini';
+      okBtn.textContent = 'OK';
+      actions.appendChild(okBtn);
+      box.appendChild(text);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      function done() {
+        document.removeEventListener('keydown', onKey);
+        overlay.remove();
+        resolve();
+      }
+      function onKey(ev) { if (ev.key === 'Escape' || ev.key === 'Enter') done(); }
+      okBtn.addEventListener('click', done);
+      overlay.addEventListener('click', function (ev) { if (ev.target === overlay) done(); });
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(overlay);
+      okBtn.focus();
+    });
+  }
+
   function _dispatchRemoteComposite() {
     _cpError(null);
     var mechSel = document.getElementById('cp-mechanism');
@@ -2497,6 +2543,14 @@
   var CHAIN_PROGRESS_POLL_MS = 8000;
   var _chainProgressTimer = null;
 
+  // item 81: styled, wall-time-aware replacement for the plain ASCII
+  // [████░░░░] text bar above -- Alex's own words watching the old bar live
+  // (item 80, 2026-08-22): "doesn't meaningfully show anything." Builds the
+  // DOM ONCE and updates segment widths/text on each poll (rather than
+  // replacing innerHTML wholesale), so CSS transitions actually animate the
+  // fill instead of popping between polls.
+  var _chainProgressStart = null;
+
   function _chainProgressEl() {
     var el = document.getElementById('study-chain-progress');
     if (!el) {
@@ -2505,33 +2559,78 @@
       if (!host) return null;
       el = document.createElement('div');
       el.id = 'study-chain-progress';
-      el.style.cssText = 'margin-top:8px; font:12px/1.5 system-ui,-apple-system,sans-serif; color:var(--muted,#8a8fa3)';
+      el.style.cssText = 'margin-top:8px; font:12px/1.5 system-ui,-apple-system,sans-serif';
+      el.innerHTML =
+        '<div class="chain-progress-track" style="position:relative;height:8px;border-radius:4px;'
+          + 'overflow:hidden;background:var(--surface-2,#eef0f3);border:1px solid var(--border,#e2e6eb)">'
+          + '<div class="chain-progress-seg-done" style="position:absolute;left:0;top:0;bottom:0;width:0%;'
+            + 'background:linear-gradient(90deg,var(--accent,#3a8),var(--accent2,#7c3aed));'
+            + 'transition:width 0.6s ease"></div>'
+          + '<div class="chain-progress-seg-fail" style="position:absolute;top:0;bottom:0;width:0%;'
+            + 'background:#dc2626;transition:width 0.6s ease,left 0.6s ease"></div>'
+          + '<div class="chain-progress-seg-live" style="position:absolute;top:0;bottom:0;width:0%;'
+            + 'background:var(--accent,#3a8);opacity:0.35;transition:width 0.6s ease,left 0.6s ease;'
+            + 'animation:chain-progress-pulse 1.6s ease-in-out infinite"></div>'
+        + '</div>'
+        + '<div class="chain-progress-label" style="margin-top:4px;color:var(--muted,#8a8fa3)"></div>';
+      if (!document.getElementById('chain-progress-pulse-kf')) {
+        var kf = document.createElement('style');
+        kf.id = 'chain-progress-pulse-kf';
+        kf.textContent = '@keyframes chain-progress-pulse {'
+          + '0%,100%{opacity:0.25} 50%{opacity:0.55}}';
+        document.head.appendChild(kf);
+      }
       host.insertBefore(el, btn.nextSibling);
     }
     return el;
   }
 
+  function _fmtElapsed(ms) {
+    var s = Math.round(ms / 1000);
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h > 0 ? (h + 'h ' + m + 'm') : (m > 0 ? (m + 'm ' + sec + 's') : (sec + 's'));
+  }
+
   function _renderChainProgress(d) {
     var el = _chainProgressEl();
     if (!el) return;
+    var track = el.querySelector('.chain-progress-track');
+    var label = el.querySelector('.chain-progress-label');
     if (!d || d.phase === 'not_a_campaign' || d.phase === 'not_found') {
-      el.textContent = '';
+      el.style.display = 'none';
       return;
     }
+    el.style.display = '';
     if (d.phase === 'unreachable') {
-      el.textContent = '⚠ progress unavailable (sms-api unreachable)';
+      track.style.display = 'none';
+      label.textContent = '⚠ progress unavailable (sms-api unreachable)';
       return;
     }
     var total = d.seeds_total, done = d.seeds_succeeded, failed = d.seeds_failed,
         inProgress = d.seeds_in_progress;
-    if (total == null) { el.textContent = 'run ' + d.simulation_id + ': ' + d.phase; return; }
-    var pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    var bar = '';
-    var filled = Math.round((pct / 100) * 20);
-    for (var i = 0; i < 20; i++) bar += (i < filled ? '█' : '░');
+    if (total == null) {
+      track.style.display = 'none';
+      label.textContent = 'run ' + d.simulation_id + ': ' + d.phase;
+      return;
+    }
+    track.style.display = '';
+    var donePct = total > 0 ? (done / total) * 100 : 0;
+    var failPct = total > 0 ? (failed / total) * 100 : 0;
+    var livePct = total > 0 ? (inProgress / total) * 100 : 0;
+    var doneSeg = el.querySelector('.chain-progress-seg-done');
+    var failSeg = el.querySelector('.chain-progress-seg-fail');
+    var liveSeg = el.querySelector('.chain-progress-seg-live');
+    doneSeg.style.width = donePct + '%';
+    failSeg.style.left = donePct + '%';
+    failSeg.style.width = failPct + '%';
+    liveSeg.style.left = (donePct + failPct) + '%';
+    liveSeg.style.width = d.terminal ? '0%' : livePct + '%';
+    liveSeg.style.animationPlayState = d.terminal ? 'paused' : 'running';
+    var pct = Math.round(donePct);
     var failedTxt = failed ? (', ' + failed + ' failed') : '';
-    el.textContent = '[' + bar + '] ' + pct + '%  ' + done + '/' + total + ' seeds' + failedTxt +
-      (d.terminal ? ' — done' : ' — ' + inProgress + ' in progress');
+    var elapsedTxt = _chainProgressStart ? (' · ' + _fmtElapsed(Date.now() - _chainProgressStart)) : '';
+    label.textContent = pct + '%  ' + done + '/' + total + ' seeds' + failedTxt +
+      (d.terminal ? ' — done' : ' — ' + inProgress + ' in progress') + elapsedTxt;
   }
 
   function _pollChainProgress(runId) {
@@ -2564,7 +2663,7 @@
           var msg = 'Run launched' + (runId ? ' — new run ' + runId : '');
           if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
           if (typeof _loadStudySims === 'function') _loadStudySims(true);
-          if (runId) _pollChainProgress(runId);
+          if (runId) { _chainProgressStart = Date.now(); _pollChainProgress(runId); }
         } else {
           alert('Run failed: ' + (res.body && res.body.error || res.status));
         }
