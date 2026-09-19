@@ -102,15 +102,18 @@ def test_study_group_update_not_found_404(tmp_path):
 
 
 def test_study_delete_happy(tmp_path):
+    # study-delete was a pure alias of investigation-delete (both →
+    # delete_investigation); the alias was removed, so a study is deleted via the
+    # canonical route with its slug.
     ws, slug = _study_ws(tmp_path)
-    r = _client(ws).post("/api/study-delete", json={"name": slug})
+    r = _client(ws).post("/api/investigation-delete", json={"name": slug})
     assert r.status_code == 200
     assert not (ws / "studies" / slug).exists()
 
 
 def test_study_delete_unknown_404(tmp_path):
     ws, _ = _study_ws(tmp_path)
-    r = _client(ws).post("/api/study-delete", json={"name": "ghost"})
+    r = _client(ws).post("/api/investigation-delete", json={"name": "ghost"})
     assert r.status_code == 404
 
 

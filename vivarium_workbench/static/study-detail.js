@@ -2684,7 +2684,7 @@
     // use different class names so this handler won't fire for those.
     if (!btn.dataset.study) return;
     if (!confirm('Delete this study and all its runs?')) return;
-    api('POST', '/api/study-delete', {name: studyName(), study: studyName()})
+    api('POST', '/api/investigation-delete', {name: studyName()})
       .then(function() { window.location = '/studies'; });
   });
 

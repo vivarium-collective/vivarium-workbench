@@ -5274,21 +5274,6 @@ def create_app() -> FastAPI:
         return body
 
     @app.post(
-        "/api/study-delete",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-delete",
-    )
-    def study_delete(
-        req: InvestigationDeleteBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.scaffold_mutations.delete_investigation``."""
-        body, status = _scaffold_mut.delete_investigation(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
         "/api/study-set-analyses",
         tags=["Studies"],
         summary="Set a study's analyses[] (translated into analysis_options at remote dispatch)",
