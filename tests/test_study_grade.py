@@ -296,6 +296,30 @@ behavior_tests:
 """
 
 
+def test_grade_study_no_run_tests_is_config_dict(tmp_path):
+    """A run-less study whose ``tests:`` is the pytest-config DICT (not a
+    behavior-test list) must not be treated as store-less-gradeable — it
+    returns no_run without iterating the dict's keys (regression: that raised
+    500 in the live endpoint)."""
+    study_dir = tmp_path / "studies" / "cfg-study"
+    study_dir.mkdir(parents=True)
+    study_dir.joinpath("study.yaml").write_text(
+        "name: cfg-study\n"
+        "baseline: []\n"
+        "tests:\n"
+        "  auto_discover: true\n"
+        "  data_source: latest_run\n",
+        encoding="utf-8",
+    )
+    body, status = study_grade.grade_study(tmp_path, "cfg-study")
+    assert status == 200
+    assert body == {"graded": False, "reason": "no_run"}
+    # No evaluation run was synthesized.
+    import yaml as _yaml
+    spec = _yaml.safe_load((study_dir / "study.yaml").read_text())
+    assert not spec.get("runs")
+
+
 def test_grade_study_storeless_derived_scalar_with_registered_computer(tmp_path, monkeypatch):
     """A run-less derived_scalar study grades store-less when the workspace
     registers a derived-scalar computer — the field resolves through the #298

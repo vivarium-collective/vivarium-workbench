@@ -38,9 +38,17 @@ def grade_study(ws_root: Path, slug: str) -> tuple[dict, int]:
         # (e.g. a ParCa study). Synthesize an evaluation-only run so the outcomes
         # have a home in runs[], then grade it store-less. A study whose tests
         # need run data has genuinely nothing to grade until it runs.
-        tests = spec.get("behavior_tests") or spec.get("tests") or []
+        # ``tests`` may be a behavior-test LIST or the pytest-config DICT
+        # (auto_discover/data_source/...). Only a non-empty list of test dicts
+        # can be graded store-less.
+        tests = spec.get("behavior_tests")
+        if not isinstance(tests, list):
+            candidate = spec.get("tests")
+            tests = candidate if isinstance(candidate, list) else []
         if tests and all(
-            (t.get("measure") or {}).get("kind") in _STORELESS_KINDS for t in tests
+            isinstance(t, dict)
+            and (t.get("measure") or {}).get("kind") in _STORELESS_KINDS
+            for t in tests
         ):
             run_id = _ensure_evaluation_run(spec_path)
         else:
