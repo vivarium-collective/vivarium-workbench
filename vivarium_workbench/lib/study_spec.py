@@ -1570,6 +1570,18 @@ def _latest_outcomes(spec: dict) -> tuple[dict, dict]:
 
     outcomes = _vw_canonical_outcomes(spec.get("runs", []) or [])
     latest: dict = dict(outcomes) if isinstance(outcomes, dict) else {}
+    # Fallback: the canonical run can be an auxiliary run.py-sweep run that
+    # carries observables but no graded outcomes, shadowing a graded baseline.
+    # When the canonical run has no outcomes but another completed run does, use
+    # the run with the most graded outcomes so the study page shows the real
+    # results instead of "pending".
+    if not latest:
+        best: dict = {}
+        for _r in (spec.get("runs") or []):
+            _oc = _r.get("outcomes") if isinstance(_r, dict) else None
+            if isinstance(_oc, dict) and len(_oc) > len(best):
+                best = _oc
+        latest = dict(best)
     rollup = {"PASS": 0, "FAIL": 0, "SKIP": 0, "PARTIAL": 0, "pending": 0,
               "total": 0, "runs": 1 if latest else 0}
     for outcome in latest.values():
