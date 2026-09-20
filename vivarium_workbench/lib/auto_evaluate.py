@@ -167,6 +167,15 @@ def _evaluator_test_runner(
 
     store = _resolve_run_store(run, study_dir, ws_root)
     if store is None:
+        if run.get("evaluation_only"):
+            # Store-less grading for a run-less (params-only) study: its behavior
+            # tests are derived-scalar checks that read persisted observables (via
+            # the workspace derived-scalar registry), not the run store, so they
+            # grade with reader=None. A test that genuinely needs the reader falls
+            # to the agent bucket honestly. Only evaluation-only runs take this
+            # path — a real run whose store is missing still raises, preserving
+            # that diagnostic.
+            return evaluate_study(spec, None, ws_root=ws_root)
         raise StoreUnresolved(f"no openable store for run {run.get('name')!r}")
     from viva_emitters import RunReader  # noqa: PLC0415  (evaluator extra)
 

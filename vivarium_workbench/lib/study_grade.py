@@ -14,6 +14,12 @@ from viva_workspace.outcomes import canonical_run
 from . import auto_evaluate, behavior_test_card
 from .workspace_paths import WorkspacePaths
 
+# Measure kinds that grade WITHOUT a run store: derived-scalar checks read
+# persisted observables through the workspace derived-scalar registry, and
+# config-value checks read the study's declared params. A study whose tests are
+# all of these kinds can be graded even when it has no simulation run.
+_STORELESS_KINDS = frozenset({"derived_scalar", "derived", "config_value"})
+
 
 def grade_study(ws_root: Path, slug: str) -> tuple[dict, int]:
     ws_root = Path(ws_root)
@@ -25,10 +31,24 @@ def grade_study(ws_root: Path, slug: str) -> tuple[dict, int]:
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     run = canonical_run(spec)
     if run is None:
-        return {"graded": False, "reason": "no_run"}, 200
-    run_id = run.get("run_id") or run.get("name")
-    if not run_id:
-        return {"graded": False, "reason": "no_run"}, 200
+        # No simulation run. Grade store-less ONLY when every declared test can
+        # be evaluated without a run store — derived-scalar checks (read
+        # persisted observables via the workspace registry) and config-value
+        # checks (read declared params). This is the params-only study case
+        # (e.g. a ParCa study). Synthesize an evaluation-only run so the outcomes
+        # have a home in runs[], then grade it store-less. A study whose tests
+        # need run data has genuinely nothing to grade until it runs.
+        tests = spec.get("behavior_tests") or spec.get("tests") or []
+        if tests and all(
+            (t.get("measure") or {}).get("kind") in _STORELESS_KINDS for t in tests
+        ):
+            run_id = _ensure_evaluation_run(spec_path)
+        else:
+            return {"graded": False, "reason": "no_run"}, 200
+    else:
+        run_id = run.get("run_id") or run.get("name")
+        if not run_id:
+            return {"graded": False, "reason": "no_run"}, 200
 
     result = auto_evaluate.evaluate_on_run_completion(
         study_dir, run_id, ws_root=ws_root, overwrite_authored=False,
@@ -48,6 +68,41 @@ def grade_study(ws_root: Path, slug: str) -> tuple[dict, int]:
     spec2 = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     rollup = _rollup(spec2)
     return {"graded": True, "outcome_rollup": rollup, "run_id": run_id}, 200
+
+
+def _ensure_evaluation_run(spec_path: Path) -> str:
+    """Append an evaluation-only run to a study.yaml ``runs[]`` if absent.
+
+    Gives a run-less (params-only) study a home for its outcomes and marks the
+    run store-less (``evaluation_only: true``) so grading proceeds without an
+    openable store. Idempotent (reuses an existing evaluation run). Returns the
+    run id. Comment-preserving ruamel round-trip.
+    """
+    import ruamel.yaml  # noqa: PLC0415
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    slug = spec_path.parent.name
+    run_id = f"{slug}-evaluation"
+    ryaml = ruamel.yaml.YAML()
+    with spec_path.open("r", encoding="utf-8") as fh:
+        doc = ryaml.load(fh)
+    runs = doc.get("runs")
+    if not isinstance(runs, list):
+        runs = ryaml.load("[]")
+        doc["runs"] = runs
+    for r in runs:
+        if isinstance(r, dict) and (r.get("run_id") == run_id or r.get("name") == run_id):
+            return run_id  # already present — idempotent
+    entry = ruamel.yaml.comments.CommentedMap()
+    entry["name"] = "evaluation"
+    entry["run_id"] = run_id
+    entry["status"] = "completed"
+    entry["evaluation_only"] = True
+    entry["timestamp"] = datetime.now(timezone.utc).timestamp()
+    runs.append(entry)
+    with spec_path.open("w", encoding="utf-8") as fh:
+        ryaml.dump(doc, fh)
+    return run_id
 
 
 def _rollup(spec: dict) -> dict:
