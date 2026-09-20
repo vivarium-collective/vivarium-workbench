@@ -78,8 +78,12 @@ def _ensure_evaluation_run(spec_path: Path) -> str:
     openable store. Idempotent (reuses an existing evaluation run). Returns the
     run id. Comment-preserving ruamel round-trip.
     """
-    import ruamel.yaml  # noqa: PLC0415
+    import io  # noqa: PLC0415
     from datetime import datetime, timezone  # noqa: PLC0415
+
+    import ruamel.yaml  # noqa: PLC0415
+
+    from .atomic_io import atomic_write_text  # noqa: PLC0415
 
     slug = spec_path.parent.name
     run_id = f"{slug}-evaluation"
@@ -98,10 +102,14 @@ def _ensure_evaluation_run(spec_path: Path) -> str:
     entry["run_id"] = run_id
     entry["status"] = "completed"
     entry["evaluation_only"] = True
+    # Float epoch timestamp — matches the convention real runs carry
+    # (composite_runs writes time.time(); on-disk runs[].timestamp are floats),
+    # so canonical_run's max()-by-timestamp never mixes float and str.
     entry["timestamp"] = datetime.now(timezone.utc).timestamp()
     runs.append(entry)
-    with spec_path.open("w", encoding="utf-8") as fh:
-        ryaml.dump(doc, fh)
+    sio = io.StringIO()
+    ryaml.dump(doc, sio)
+    atomic_write_text(spec_path, sio.getvalue())  # never a half-written study.yaml
     return run_id
 
 

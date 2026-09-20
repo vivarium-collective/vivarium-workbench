@@ -280,3 +280,47 @@ def test_grade_study_storeless_is_idempotent(ws_storeless_no_run):
         (ws_storeless_no_run / "studies" / "params-study" / "study.yaml").read_text()
     )
     assert len(spec["runs"]) == 1
+
+
+_STUDY_YAML_DERIVED_NO_RUN = """\
+name: derived-study
+behavior_tests:
+- name: growth_ok
+  measure:
+    kind: derived_scalar
+    field: my_derived
+  pass_if:
+    op: range
+    low: 0.8
+    high: 0.9
+"""
+
+
+def test_grade_study_storeless_derived_scalar_with_registered_computer(tmp_path, monkeypatch):
+    """A run-less derived_scalar study grades store-less when the workspace
+    registers a derived-scalar computer — the field resolves through the #298
+    registry (via ObservableNotFound with reader=None), not the run store. This
+    is the ParCa-study path: derived_scalar IS store-less-gradeable."""
+    import yaml as _yaml
+    import viva_superpowers.study_evaluator as se
+
+    study_dir = tmp_path / "studies" / "derived-study"
+    study_dir.mkdir(parents=True)
+    (study_dir / "study.yaml").write_text(_STUDY_YAML_DERIVED_NO_RUN, encoding="utf-8")
+
+    # Register a workspace derived-scalar computer for the declared field.
+    monkeypatch.setattr(
+        se, "load_workspace_derived_scalars",
+        lambda ws_root: {"my_derived": lambda reader, test, ws: 0.85},
+    )
+
+    body, status = study_grade.grade_study(tmp_path, "derived-study")
+    assert status == 200
+    assert body["graded"] is True
+    assert body["outcome_rollup"]["PASS"] == 1
+    assert body["run_id"] == "derived-study-evaluation"
+
+    spec = _yaml.safe_load((study_dir / "study.yaml").read_text())
+    oc = spec["runs"][-1]["outcomes"]["growth_ok"]
+    assert oc["result"] == "PASS"
+    assert oc["measured_value"] == 0.85
