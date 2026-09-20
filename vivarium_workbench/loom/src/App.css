@@ -768,7 +768,7 @@ body {
 .inner-preview-badge { font-size: 10px; font-weight: 700; color: #2563eb; }
 .inner-preview-count { font-size: 10px; color: #64748b; }
 .inner-preview-svg {
-  display: block; width: 100%; flex: 1 1 auto; min-height: 220px; max-height: 720px;
+  display: block; width: 100%; flex: 1 1 auto; min-height: 320px; max-height: 1200px;
   background: #fff; border: 0;
 }
 /* Store labels are shown (small); process cards + stores highlight on hover.
