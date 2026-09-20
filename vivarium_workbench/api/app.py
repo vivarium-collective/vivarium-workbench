@@ -5295,36 +5295,6 @@ def create_app() -> FastAPI:
         return body
 
     @app.post(
-        "/api/study-viz-add",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-add-viz",
-    )
-    def study_viz_add(
-        req: InvestigationAddViz,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.investigation_viz_mutations.add_viz``."""
-        body, status = _inv_viz_mut.add_viz(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-viz-render",
-        tags=["Studies"],
-        summary="Alias of /api/investigation-render-viz",
-    )
-    def study_viz_render(
-        req: InvestigationRenderViz,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """study-* alias → ``lib.investigation_viz_mutations.render_viz``."""
-        body, status = _inv_viz_mut.render_viz(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
         "/api/study-sync-runs",
         tags=["Studies"],
         summary="Reconcile a study's runs[] against its runs.db",

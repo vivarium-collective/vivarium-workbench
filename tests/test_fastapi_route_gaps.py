@@ -148,18 +148,18 @@ def test_study_variant_rebuild_missing_400(tmp_path):
     assert r.status_code in (400, 404)
 
 
-def test_study_viz_add_unknown_404(tmp_path):
+def test_investigation_add_viz_unknown_404(tmp_path):
     ws, _ = _study_ws(tmp_path)
     r = _client(ws).post(
-        "/api/study-viz-add",
+        "/api/investigation-add-viz",
         json={"investigation": "ghost", "name": "v1", "address": "pkg.viz.x"},
     )
     assert r.status_code == 404
 
 
-def test_study_viz_render_unknown_404(tmp_path):
+def test_investigation_render_viz_unknown_404(tmp_path):
     ws, _ = _study_ws(tmp_path)
-    r = _client(ws).post("/api/study-viz-render", json={"name": "ghost"})
+    r = _client(ws).post("/api/investigation-render-viz", json={"name": "ghost"})
     assert r.status_code in (400, 404)
 
 
