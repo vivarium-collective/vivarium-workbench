@@ -2356,6 +2356,26 @@ export default function App() {
               </div>
             )}
             <EmitContext.Provider value={emitSet}>
+              {/* Thin collapse bar ABOVE the viewer — mirrors the graph↔run-bar
+                  grip below so a tall graph can be closed without scrolling down
+                  to reach it. Click (or Enter/Space) collapses; reopening + fine
+                  drag-resize stay on the bottom grip. Only while the graph is open
+                  and the loom owns its layout (not chromeless embeds). */}
+              {!chromeless && !graphCollapsed && (
+                <div
+                  className="loom-graph-grip loom-graph-grip-top"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setGraphCollapsed(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setGraphCollapsed(true); }
+                  }}
+                  title="Collapse the graph"
+                >
+                  <span className="loom-graph-grip-handle" />
+                  <span className="loom-graph-grip-label">⌃ collapse graph</span>
+                </div>
+              )}
               {/* Dock row holds the Config/Process/Inspector/Nodes panels flanking
                   the canvas; a slim run bar is pinned below so the composite can be
                   run without leaving the graph. Its height is drag-collapsible (the
