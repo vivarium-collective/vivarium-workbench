@@ -654,6 +654,33 @@ def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
     return {"investigation": investigation, "global": global_block, "current": current}
 
 
+def _federated_investigation_detail(ws_root: Path, name: str):
+    """Locate a read-only investigation named ``name`` in a linked workspace.
+
+    Returns ``(spec, LinkedWorkspace, spec_path)`` or ``None``. Matches on the
+    investigation directory name OR the spec's ``name`` field -- the same bare
+    name the federation-aware listing renders its card by
+    (:func:`~vivarium_workbench.lib.federation.federated_investigation_sets`).
+    Best-effort: a malformed linked workspace is skipped, never raising.
+    """
+    from vivarium_workbench.lib import federation as _fed  # noqa: PLC0415
+    for lw in _fed.linked_workspaces(ws_root):
+        idir = lw.layout.investigations
+        if not idir.is_dir():
+            continue
+        for d in sorted(p for p in idir.iterdir() if p.is_dir()):
+            f = d / "investigation.yaml"
+            if not f.is_file():
+                continue
+            try:
+                spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            except Exception:  # noqa: BLE001
+                continue
+            if d.name == name or spec.get("name") == name:
+                return spec, lw, f
+    return None
+
+
 def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     """GET /api/investigation/<name> builder.
 
@@ -666,13 +693,36 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     """
     ws_root = Path(ws_root)
     wp = WorkspacePaths.load(ws_root)
+    # `study_wp` is the workspace layout that member studies + the acceptance
+    # roll-up resolve against. It is the host workspace for a native
+    # investigation, but the LINKED workspace for a federated one (below).
+    study_wp = wp
+    origin_repo: Optional[str] = None
+    read_only = False
     spec_path = wp.investigations / name / "investigation.yaml"
-    if not spec_path.is_file():
-        return None
-    try:
-        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-    except Exception:  # noqa: BLE001
-        return None
+    if spec_path.is_file():
+        try:
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            return None
+    else:
+        # Federation fallback. A read-only investigation shipped by a linked
+        # workspace (installed under external/<repo>/) is surfaced by the
+        # federation-AWARE listing (build_iset_summary / build_investigations)
+        # as a card keyed by its bare name -- but this DETAIL builder used to
+        # look only under the host `investigations/<name>/`, so clicking that
+        # card 404'd ("shows in the list, fails to load"). Resolve the spec AND
+        # its member studies against the linked workspace instead. The
+        # host-oriented run/report-card enrichment below reads `ws_root` and
+        # harmlessly finds nothing for a read-only federated study (no host
+        # runs), which is the correct read-only view.
+        _fed_hit = _federated_investigation_detail(ws_root, name)
+        if _fed_hit is None:
+            return None
+        spec, _lw, spec_path = _fed_hit
+        study_wp = _lw.layout
+        origin_repo = _lw.repo
+        read_only = True
 
     # Make the workspace's own package importable (mirrors _ws_add_to_sys_path).
     ws_str = str(ws_root)
@@ -700,9 +750,9 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     studies_out: list[dict] = []
     for slug in investigation_member_slugs(spec):
         try:
-            sp = wp.study_dir(slug, must_exist=True) / "study.yaml"
+            sp = study_wp.study_dir(slug, must_exist=True) / "study.yaml"
         except FileNotFoundError:
-            sp = wp.investigations / slug / "spec.yaml"
+            sp = study_wp.investigations / slug / "spec.yaml"
         if not sp.is_file():
             studies_out.append({
                 "name": slug, "status": "missing", "error": "study.yaml not found"
@@ -864,7 +914,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         from viva_superpowers.investigation_status import roll_up_acceptance
         from viva_superpowers import study_io as _sio
         studies_by_name: dict = {}
-        for _sd in wp.iter_study_dirs():
+        for _sd in study_wp.iter_study_dirs():
             _syp = _sd / "study.yaml"
             if _syp.exists():
                 try:
@@ -895,6 +945,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         "object_of_evaluation": spec.get("object_of_evaluation"),
         "status":              spec.get("status", "planning"),
         "effective_status":    effective_status,
+        # Federation provenance: set for a read-only investigation resolved from
+        # a linked workspace under external/ (None / False for a native one).
+        "origin_repo":         origin_repo,
+        "read_only":           read_only,
         "expert_docs":         _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
         "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
         "computed_acceptance": computed_acceptance,

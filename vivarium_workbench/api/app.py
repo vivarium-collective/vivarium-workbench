@@ -1709,6 +1709,33 @@ def create_app() -> FastAPI:
         return CatalogPayload.model_validate(build_catalog(ws))
 
     @app.get(
+        "/api/module-import-diagnostics",
+        tags=["Registry & catalog"],
+        summary="Which declared workspace modules fail to import at runtime",
+    )
+    def module_import_diagnostics(ws: Path = Depends(get_workspace)) -> dict:
+        """Probe every workspace-declared catalog module for a runtime ImportError.
+
+        Complements ``/api/catalog`` (which reports *metadata* install state) and
+        the framework ``doctor``: this surfaces the deployment decoupling where a
+        module is "installed" yet **fails to import** (e.g. a ``--no-deps``
+        install missing a transitive dep) — the silent failure that leaves its
+        processes/composites unregistered and produces "not a registered
+        composite" at run time. Each module is probed in an isolated subprocess.
+        Best-effort — never 500s.
+
+        ``{modules: [{ok, name, module, source, detail}], problems: [...]}``.
+        """
+        from vivarium_workbench.lib.module_import_doctor import (  # noqa: PLC0415
+            diagnose_module_imports, module_import_problems,
+        )
+        try:
+            findings = diagnose_module_imports(ws)
+        except Exception as e:  # noqa: BLE001
+            return {"modules": [], "problems": [], "error": f"{type(e).__name__}: {e}"}
+        return {"modules": findings, "problems": module_import_problems(findings)}
+
+    @app.get(
         "/api/marketplace",
         response_model=CatalogPayload,
         tags=["Registry & catalog"],

@@ -277,13 +277,34 @@ def find_composite_path(ws_root: Path, package_path: str, spec_id: str) -> Path 
                 continue
             if isinstance(doc, dict) and doc.get("name") == stem:
                 return f
-    # Installed packages
-    specs = discover_installed_pbg_composites()
-    rec = specs.get(spec_id)
-    if rec and rec.get("_path"):
-        p = Path(rec["_path"])
-        if p.is_file():
-            return p
+    # Installed & federated packages. The workspace scan above resolves the
+    # workspace's OWN package; this fallback resolves a spec that lives in an
+    # installed distribution or a linked (federated) workspace under external/.
+    # Historically only `pbg-*` distributions were scanned here, so a
+    # wheel-installed package that does not follow that naming convention
+    # (e.g. `spatio-flux`, or the post-rebrand `viva-*` packages) was invisible
+    # and its composites failed to resolve with "not a registered composite" --
+    # even though the LISTING path (discover_all_composites) already found them
+    # via discover_installed_composites_all + federation. Consult the same
+    # broadened set so resolve is consistent with list. pbg-* is tried first as
+    # the fast path; each source is best-effort.
+    def _federated_specs() -> dict[str, dict]:
+        from vivarium_workbench.lib import federation as _fed  # noqa: PLC0415
+        return _fed.federated_composites(ws_root)
+
+    for _source in (
+        discover_installed_pbg_composites,
+        discover_installed_composites_all,
+        _federated_specs,
+    ):
+        try:
+            rec = _source().get(spec_id)
+        except Exception:  # noqa: BLE001
+            continue
+        if rec and rec.get("_path"):
+            p = Path(rec["_path"])
+            if p.is_file():
+                return p
     return None
 
 

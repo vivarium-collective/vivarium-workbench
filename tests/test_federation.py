@@ -85,3 +85,65 @@ def test_federated_investigation_sets_never_raises_on_bad_workspace(monkeypatch)
     names = {i["name"] for i in isets}
     assert "donor_inv" in names
     assert "bad-repo" not in {i["origin_repo"] for i in isets}
+
+
+def test_build_iset_detail_federation_fallback():
+    """A federated investigation (shipped by a linked workspace under external/)
+    must resolve on the DETAIL endpoint, not just the listing. Before the
+    federation fallback in build_iset_detail this returned None -> HTTP 404
+    ("shows in the list, fails to load")."""
+    from vivarium_workbench.lib.report_views import build_iset_detail
+
+    detail = build_iset_detail(FIX, "donor_inv")
+    assert detail is not None
+    assert detail["name"] == "donor_inv"
+    assert detail["origin_repo"] == "donor-repo"
+    assert detail["read_only"] is True
+    # Member study resolved against the LINKED workspace, not reported "missing".
+    ds = next(s for s in detail["studies"] if s["name"] == "donor_study")
+    assert ds.get("status") != "missing"
+
+
+def test_build_iset_detail_native_unaffected(tmp_path):
+    """A native investigation still resolves and carries no federation tags."""
+    import yaml as _yaml
+    from vivarium_workbench.lib.report_views import build_iset_detail
+
+    (tmp_path / "workspace.yaml").write_text("name: host\npackage_path: host\n")
+    inv = tmp_path / "investigations" / "native_inv"
+    inv.mkdir(parents=True)
+    (inv / "investigation.yaml").write_text(
+        _yaml.safe_dump({"name": "native_inv", "studies": []})
+    )
+    detail = build_iset_detail(tmp_path, "native_inv")
+    assert detail is not None
+    assert detail["name"] == "native_inv"
+    assert detail["origin_repo"] is None
+    assert detail["read_only"] is False
+
+
+def test_build_iset_detail_unknown_returns_none():
+    from vivarium_workbench.lib.report_views import build_iset_detail
+
+    assert build_iset_detail(FIX, "does-not-exist-anywhere") is None
+
+
+def test_find_composite_path_resolves_federated_and_non_pbg():
+    """find_composite_path must resolve a composite that lives in a linked
+    workspace under external/ (and, by the same broadened scan, any
+    wheel-installed non-`pbg-` distribution). Before generalizing the fallback
+    it only scanned `pbg-*` dists, so a `spatio-flux`/`viva-*` package's
+    composite failed to resolve with "not a registered composite" even though
+    the LISTING found it."""
+    from vivarium_workbench.lib.composite_lookup import find_composite_path
+
+    p = find_composite_path(FIX, "host", "donor.composites.donor")
+    assert p is not None
+    assert p.is_file()
+    assert "external/donor" in str(p)
+
+
+def test_find_composite_path_unknown_returns_none():
+    from vivarium_workbench.lib.composite_lookup import find_composite_path
+
+    assert find_composite_path(FIX, "host", "nope.composites.missing") is None
