@@ -193,9 +193,11 @@ class TestGitSubmoduleInstall:
         }
         _write_ws(tmp_path, {"name": "ws", "imports": {}})
         _make_venv_pip(tmp_path)
-        # Pre-create external/foo so the submodule-add step is skipped — only the
-        # editable pip install subprocess runs.
+        # Pre-create a NON-EMPTY external/foo so the submodule-add step is skipped
+        # (an empty dir now correctly triggers a re-add) — only the editable pip
+        # install subprocess runs.
         (tmp_path / "external" / "foo").mkdir(parents=True)
+        (tmp_path / "external" / "foo" / "pyproject.toml").write_text("")
         monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
         monkeypatch.setattr(views.shutil, "which", lambda x: None)
 
@@ -244,9 +246,11 @@ class TestGitSubmoduleInstall:
         }
         _write_ws(tmp_path, {"name": "ws", "imports": {}})
         _make_venv_pip(tmp_path)
-        # Pre-create external/foo so the submodule-add step is skipped — only
-        # the editable pip install subprocess runs.
+        # Pre-create a NON-EMPTY external/foo so the submodule-add step is skipped
+        # (an empty dir now correctly triggers a re-add) — only the editable pip
+        # install subprocess runs.
         (tmp_path / "external" / "foo").mkdir(parents=True)
+        (tmp_path / "external" / "foo" / "pyproject.toml").write_text("")
         monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
         monkeypatch.setattr(views.shutil, "which", lambda x: None)
 
@@ -296,6 +300,187 @@ class TestGitSubmoduleInstall:
         # Two subprocess calls: git submodule add, then pip install -e.
         assert cmds[0][:3] == ["git", "submodule", "add"]
         assert cmds[1][:3] == [str(tmp_path / ".venv" / "bin" / "pip"), "install", "-e"]
+
+    def test_git_runs_submodule_add_when_dir_is_empty(self, tmp_path, monkeypatch):
+        # An empty `external/foo/` (a failed prior install, or a stray submodule
+        # shell) must NOT be treated as "already installed" — otherwise the add
+        # is skipped and `pip install -e` runs on an empty dir and fails opaquely.
+        entry = {
+            "name": "foo", "source": "https://example.com/foo.git", "ref": "main",
+        }
+        _write_ws(tmp_path, {"name": "ws", "imports": {}})
+        _make_venv_pip(tmp_path)
+        # Pre-create an EMPTY external/foo (the bug trigger).
+        (tmp_path / "external" / "foo").mkdir(parents=True)
+        monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
+        monkeypatch.setattr(views.shutil, "which", lambda x: None)
+
+        cmds = []
+        monkeypatch.setattr(
+            views.subprocess, "run",
+            lambda cmd, **kw: cmds.append(cmd)
+            or subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr=""))
+        _patch_yaml_io(monkeypatch)
+        _patch_pyproject_noops(monkeypatch)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+
+        body, status = views.catalog_install(tmp_path, {"name": "foo"})
+        assert status == 200
+        # submodule add STILL runs despite the pre-existing (empty) dir.
+        assert cmds[0][:3] == ["git", "submodule", "add"]
+        assert cmds[1][:3] == [str(tmp_path / ".venv" / "bin" / "pip"), "install", "-e"]
+
+    def test_git_skips_submodule_add_when_dir_has_content(self, tmp_path, monkeypatch):
+        # Regression guard: a non-empty external/foo is still treated as present
+        # (the add is skipped) — the empty-dir guard must not re-add populated dirs.
+        entry = {
+            "name": "foo", "source": "https://example.com/foo.git", "ref": "main",
+        }
+        _write_ws(tmp_path, {"name": "ws", "imports": {}})
+        _make_venv_pip(tmp_path)
+        (tmp_path / "external" / "foo").mkdir(parents=True)
+        (tmp_path / "external" / "foo" / "pyproject.toml").write_text("")
+        monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
+        monkeypatch.setattr(views.shutil, "which", lambda x: None)
+
+        cmds = []
+        monkeypatch.setattr(
+            views.subprocess, "run",
+            lambda cmd, **kw: cmds.append(cmd)
+            or subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr=""))
+        _patch_yaml_io(monkeypatch)
+        _patch_pyproject_noops(monkeypatch)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+
+        body, status = views.catalog_install(tmp_path, {"name": "foo"})
+        assert status == 200
+        # Only the editable pip install ran; NO submodule add.
+        assert len(cmds) == 1
+        assert cmds[0][:3] == [str(tmp_path / ".venv" / "bin" / "pip"), "install", "-e"]
+
+
+# ===========================================================================
+# uv-locked dependency closure (git/path-only deps a plain pip can't resolve)
+# ===========================================================================
+class TestUvLockedDeps:
+    def _make_venv_python(self, tmp_path: Path) -> None:
+        (tmp_path / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".venv" / "bin" / "python3").write_text("")
+
+    def test_locked_deps_installed_before_editable(self, tmp_path, monkeypatch):
+        # A module that ships uv.lock: its locked closure is installed via uv
+        # (export → pip install -r) BEFORE the editable install of the project.
+        entry = {
+            "name": "foo", "source": "https://example.com/foo.git", "ref": "main",
+        }
+        _write_ws(tmp_path, {"name": "ws", "imports": {}})
+        _make_venv_pip(tmp_path)
+        self._make_venv_python(tmp_path)
+        # Pre-populate external/foo with a uv.lock (submodule-add skipped).
+        (tmp_path / "external" / "foo").mkdir(parents=True)
+        (tmp_path / "external" / "foo" / "uv.lock").write_text("# lock\n")
+        (tmp_path / "external" / "foo" / "pyproject.toml").write_text("")
+        monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
+        monkeypatch.setattr(views.shutil, "which", lambda x: "/usr/bin/uv")
+
+        cmds = []
+
+        def _fake_run(cmd, **kw):
+            cmds.append(cmd)
+            if cmd[:2] == ["/usr/bin/uv", "export"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="viva-munk==0.1\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+        monkeypatch.setattr(views.subprocess, "run", _fake_run)
+        _patch_yaml_io(monkeypatch)
+        _patch_pyproject_noops(monkeypatch)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+
+        body, status = views.catalog_install(tmp_path, {"name": "foo"})
+        assert status == 200
+        kinds = [c[:2] for c in cmds]
+        # uv export, then uv pip install -r, then the editable pip install.
+        assert ["/usr/bin/uv", "export"] in kinds
+        assert ["/usr/bin/uv", "pip"] in kinds
+        i_export = kinds.index(["/usr/bin/uv", "export"])
+        i_editable = next(n for n, c in enumerate(cmds)
+                          if c[:3] == [str(tmp_path / ".venv" / "bin" / "pip"), "install", "-e"])
+        assert i_export < i_editable
+
+    def test_no_uv_lock_means_no_uv_calls(self, tmp_path, monkeypatch):
+        # No uv.lock in the module → no uv export/install; only pip install -e.
+        entry = {
+            "name": "foo", "source": "https://example.com/foo.git", "ref": "main",
+        }
+        _write_ws(tmp_path, {"name": "ws", "imports": {}})
+        _make_venv_pip(tmp_path)
+        self._make_venv_python(tmp_path)
+        (tmp_path / "external" / "foo").mkdir(parents=True)
+        (tmp_path / "external" / "foo" / "pyproject.toml").write_text("")
+        monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
+        monkeypatch.setattr(views.shutil, "which", lambda x: "/usr/bin/uv")
+
+        cmds = []
+        monkeypatch.setattr(
+            views.subprocess, "run",
+            lambda cmd, **kw: cmds.append(cmd)
+            or subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr=""))
+        _patch_yaml_io(monkeypatch)
+        _patch_pyproject_noops(monkeypatch)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+
+        body, status = views.catalog_install(tmp_path, {"name": "foo"})
+        assert status == 200
+        assert not any(c[:1] == ["/usr/bin/uv"] for c in cmds)
+        assert len(cmds) == 1  # editable pip install only
+
+    def test_helper_noop_when_export_empty(self, tmp_path, monkeypatch):
+        # Empty/stale lock export → no install call, a logged skip, no raise.
+        log: list[str] = []
+
+        def _fake_run(cmd, **kw):
+            if cmd[1] == "export":
+                return subprocess.CompletedProcess(cmd, 0, stdout="   \n", stderr="")
+            raise AssertionError("uv pip install must not run on an empty export")
+
+        monkeypatch.setattr(views.subprocess, "run", _fake_run)
+        views._install_locked_deps_with_uv(
+            "/usr/bin/uv", tmp_path / ".venv" / "bin" / "python3", tmp_path,
+            timeout=30, log_holder=log)
+        assert log and "skipped" in log[0]
+
+    def test_helper_installs_exported_requirements(self, tmp_path, monkeypatch):
+        log: list[str] = []
+        seen = {}
+
+        def _fake_run(cmd, **kw):
+            if cmd[1] == "export":
+                return subprocess.CompletedProcess(cmd, 0, stdout="viva-munk==0.1\n", stderr="")
+            seen["install_cmd"] = cmd
+            seen["input"] = kw.get("input")
+            return subprocess.CompletedProcess(cmd, 0, stdout="installed", stderr="")
+
+        monkeypatch.setattr(views.subprocess, "run", _fake_run)
+        views._install_locked_deps_with_uv(
+            "/usr/bin/uv", tmp_path / ".venv" / "bin" / "python3", tmp_path,
+            timeout=30, log_holder=log)
+        assert seen["install_cmd"][:3] == ["/usr/bin/uv", "pip", "install"]
+        assert seen["install_cmd"][-2:] == ["-r", "-"]
+        assert seen["input"] == "viva-munk==0.1\n"
+        assert any("installed via uv" in m for m in log)
+
+    def test_helper_swallows_errors(self, tmp_path, monkeypatch):
+        log: list[str] = []
+
+        def _boom(cmd, **kw):
+            raise OSError("uv exploded")
+
+        monkeypatch.setattr(views.subprocess, "run", _boom)
+        # Must not raise — the editable install has to proceed regardless.
+        views._install_locked_deps_with_uv(
+            "/usr/bin/uv", tmp_path / ".venv" / "bin" / "python3", tmp_path,
+            timeout=30, log_holder=log)
+        assert log and "errored" in log[0]
 
 
 # ===========================================================================

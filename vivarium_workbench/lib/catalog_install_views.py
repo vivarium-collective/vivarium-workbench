@@ -85,6 +85,61 @@ def _ws_add_to_sys_path(ws_root: Path) -> None:
         sys.path.insert(0, ws)
 
 
+def _install_locked_deps_with_uv(
+    uv_path: str,
+    venv_py: Path,
+    project_dir: Path,
+    *,
+    timeout: int,
+    log_holder: list[str],
+) -> None:
+    """Install a uv-locked module's dependency closure into the workspace venv.
+
+    A module that ships its own ``uv.lock`` is a uv-managed project whose
+    dependency closure — including **git/path-only** deps that a plain
+    ``pip install -e`` cannot resolve from PyPI (e.g. ``viva-munk``) — is pinned
+    in that lock. We export the lock (excluding the project itself) and install
+    it *additively* into the workspace venv with ``uv pip install -r``.
+
+    Deliberately NOT ``uv sync``: ``uv sync`` prunes the target venv down to the
+    project's lock, which would remove the workbench and framework from the
+    workspace venv. ``export`` → ``pip install`` only adds; it never removes.
+
+    Best-effort: any failure (stale/absent lock, uv error, timeout) is logged
+    and swallowed so the editable install of the project itself still runs.
+    """
+    try:
+        exported = subprocess.run(
+            [uv_path, "export", "--frozen", "--no-hashes", "--no-emit-project",
+             "--format", "requirements-txt"],
+            cwd=project_dir, capture_output=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
+        )
+        if exported.returncode != 0 or not exported.stdout.strip():
+            log_holder.append(
+                "uv export of locked deps skipped (falling back to pip): "
+                + ((exported.stderr or "empty lock").strip()[-300:])
+            )
+            return
+        installed = subprocess.run(
+            [uv_path, "pip", "install", "--python", str(venv_py), "-r", "-"],
+            input=exported.stdout, cwd=project_dir, capture_output=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
+        )
+        tail = (installed.stdout + "\n" + installed.stderr).strip()[-500:]
+        log_holder.append(
+            ("locked deps installed via uv:\n" if installed.returncode == 0
+             else "locked-dep install via uv failed (continuing with pip):\n")
+            + tail
+        )
+    except subprocess.TimeoutExpired:
+        log_holder.append(
+            f"locked-dep install via uv timed out after {timeout}s (continuing)"
+        )
+    except Exception as exc:  # never block the editable install
+        log_holder.append(f"locked-dep install via uv errored (continuing): {exc}")
+
+
 def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Install a catalog module into the workspace venv.
 
@@ -238,13 +293,22 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
             # ---- Git-submodule fallback path ----
             install_mode_holder.append("git")
 
-            # Step 1: submodule add if directory not already present.
-            if not abs_target.exists():
+            # Step 1: submodule add if the target is missing OR present-but-empty.
+            # A leftover empty `external/<name>/` (a failed prior install, or a
+            # submodule dir git left behind on a partial checkout) would otherwise
+            # skip the add and drop straight into `pip install -e` on an empty
+            # directory, failing opaquely ("neither 'setup.py' nor 'pyproject.toml'
+            # found"). Treat empty-as-absent: remove the empty shell so
+            # `git submodule add` doesn't refuse an existing path.
+            target_empty = abs_target.is_dir() and not any(abs_target.iterdir())
+            if not abs_target.exists() or target_empty:
+                if target_empty:
+                    shutil.rmtree(abs_target, ignore_errors=True)
                 # Clean up any stale `.git/modules/<path>` left behind by a
                 # previous uninstall — git refuses `submodule add` when one
                 # exists. The matching working-tree dir was already
-                # verified absent above, and the module is not in
-                # .gitmodules, so the leftover is safe to remove.
+                # verified absent (or just removed) above, and the module is
+                # not in .gitmodules, so the leftover is safe to remove.
                 stale = ws_root / ".git" / "modules" / target_path
                 if stale.is_dir():
                     shutil.rmtree(stale, ignore_errors=True)
@@ -268,6 +332,18 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                     raise RuntimeError(
                         f"submodule add failed: {(r.stderr or r.stdout)[:300]}"
                     )
+
+            # Step 1b: if the module ships a uv.lock it declares a pinned
+            # dependency closure that may include git/path-only deps a plain
+            # `pip install -e` can't resolve from PyPI. Install that closure
+            # additively into the workspace venv first (best-effort, never
+            # prunes). Modules without a uv.lock are unaffected.
+            uv_lock = abs_target / "uv.lock"
+            if uv_path and venv_py.exists() and uv_lock.is_file():
+                _install_locked_deps_with_uv(
+                    uv_path, venv_py, abs_target,
+                    timeout=_install_timeout(), log_holder=log_holder,
+                )
 
             # Step 2: pip install -e.
             timeout = _install_timeout()
