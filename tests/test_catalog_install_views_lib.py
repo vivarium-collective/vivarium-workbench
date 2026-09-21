@@ -379,11 +379,14 @@ class TestInstallFailure:
         monkeypatch.setattr(views.shutil, "which", lambda x: None)
 
         def _raise(cmd, **kw):
-            raise subprocess.TimeoutExpired(cmd, 180)
+            raise subprocess.TimeoutExpired(cmd, 600)
 
         monkeypatch.setattr(views.subprocess, "run", _raise)
         monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 500
-        assert body == {"error": "action failed: pip install from PyPI timed out after 180s"}
+        assert body == {
+            "error": "action failed: pip install from PyPI timed out after 600s "
+            "(raise VIVARIUM_WORKBENCH_INSTALL_TIMEOUT to allow longer)"
+        }
