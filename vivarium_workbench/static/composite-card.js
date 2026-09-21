@@ -375,8 +375,19 @@
     var sec = head.closest('.pcard-sec'); if (!sec) return;
     var open = sec.classList.toggle('pcard-sec-open');
     var caret = head.querySelector('.pcard-sec-caret'); if (caret) caret.textContent = open ? '▾' : '▸';
-    if (!open) return;
     var card = head.closest('.registry-entry-full');
+    // Keep the card-level `.pcard-loom-open` flag in sync no matter HOW the
+    // explore (loom) section is toggled — the "run · outputs · graph" bar, a
+    // direct info-panel jump, or "open maximized". Only `_toggleLoomCard` used to
+    // set it, so opening the loom by any other path left the flag off and the
+    // collapsed "▸ run · outputs · graph" strip (hidden via .pcard-loom-open in
+    // CSS) lingered stacked over the already-mounted loom. Restore the header on
+    // close too, so no orphaned max-view state survives collapsing the loom.
+    if (card && sec.querySelector('.ccard-loom-embed')) {
+      card.classList.toggle('pcard-loom-open', open);
+      if (!open) card.classList.remove('pcard-hdr-hidden');
+    }
+    if (!open) return;
     // Process cards lazy-load resolved config/input fields; composites don't.
     // (_loadFullRunFields is walkthrough.js's process-card-only concern — a
     // composite card never reaches this branch, so its absence here is safe.)
