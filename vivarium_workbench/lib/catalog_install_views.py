@@ -34,6 +34,7 @@ byte-identically with ``WORKSPACE`` → ``ws_root``.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,31 @@ from vivarium_workbench.lib import registry as _registry
 from vivarium_workbench.lib import workspace_deps_views as _workspace_deps
 from vivarium_workbench.lib import workspace_yaml as _workspace_yaml
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+
+#: Default per-step timeout (seconds) for catalog-install subprocesses. Generous
+#: because a ``git submodule add`` of a large repo, or a ``pip install`` of a heavy
+#: scientific stack, over a slow or proxied network routinely exceeds a short cap
+#: (the old 120s git / 180s pip caps were the #1 catalog-install failure in the
+#: k8s/HeLx deployment). Overridable per-deployment via the env var below.
+_INSTALL_TIMEOUT_DEFAULT = 600
+
+
+def _install_timeout(default: int = _INSTALL_TIMEOUT_DEFAULT) -> int:
+    """Subprocess timeout (seconds) for a catalog-install step.
+
+    Overridable with ``VIVARIUM_WORKBENCH_INSTALL_TIMEOUT``; falls back to
+    ``default`` when the env var is unset, non-integer, or non-positive.
+    """
+    raw = os.environ.get("VIVARIUM_WORKBENCH_INSTALL_TIMEOUT")
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        if value > 0:
+            return value
+    return default
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
@@ -163,14 +189,18 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
             # ---- PyPI install path ----
             install_mode_holder.append("pypi")
 
+            timeout = _install_timeout()
             try:
                 result = subprocess.run(
                     pypi_install_cmd,
                     cwd=ws_root, capture_output=True,
-                    encoding="utf-8", errors="replace", timeout=180,
+                    encoding="utf-8", errors="replace", timeout=timeout,
                 )
             except subprocess.TimeoutExpired:
-                raise RuntimeError("pip install from PyPI timed out after 180s")
+                raise RuntimeError(
+                    f"pip install from PyPI timed out after {timeout}s "
+                    "(raise VIVARIUM_WORKBENCH_INSTALL_TIMEOUT to allow longer)"
+                )
 
             excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
             log_holder.append(excerpt)
@@ -219,26 +249,39 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                 if stale.is_dir():
                     shutil.rmtree(stale, ignore_errors=True)
 
-                r = subprocess.run(
-                    ["git", "submodule", "add", "-b", catalog_entry["ref"],
-                     catalog_entry["source"], target_path],
-                    cwd=ws_root, capture_output=True,
-                    encoding="utf-8", errors="replace", timeout=120,
-                )
+                timeout = _install_timeout()
+                try:
+                    r = subprocess.run(
+                        ["git", "submodule", "add", "-b", catalog_entry["ref"],
+                         catalog_entry["source"], target_path],
+                        cwd=ws_root, capture_output=True,
+                        encoding="utf-8", errors="replace", timeout=timeout,
+                    )
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError(
+                        f"git submodule add timed out after {timeout}s — a large "
+                        "repo over a slow/proxied network. Raise "
+                        "VIVARIUM_WORKBENCH_INSTALL_TIMEOUT, or bake the module "
+                        "into the image at build time."
+                    )
                 if r.returncode != 0:
                     raise RuntimeError(
                         f"submodule add failed: {(r.stderr or r.stdout)[:300]}"
                     )
 
             # Step 2: pip install -e.
+            timeout = _install_timeout()
             try:
                 result = subprocess.run(
                     pip_cmd_base + [str(abs_target)],
                     cwd=ws_root, capture_output=True,
-                    encoding="utf-8", errors="replace", timeout=180,
+                    encoding="utf-8", errors="replace", timeout=timeout,
                 )
             except subprocess.TimeoutExpired:
-                raise RuntimeError("pip install timed out after 180s")
+                raise RuntimeError(
+                    f"pip install timed out after {timeout}s "
+                    "(raise VIVARIUM_WORKBENCH_INSTALL_TIMEOUT to allow longer)"
+                )
 
             excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
             log_holder.append(excerpt)
