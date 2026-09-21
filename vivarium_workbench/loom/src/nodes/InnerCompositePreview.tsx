@@ -313,10 +313,12 @@ function MiniMap(props: {
            outer React Flow canvas (which owns node-drag + pane-zoom). */
         className="inner-preview-svg nodrag nowheel"
         viewBox={vb}
-        preserveAspectRatio="xMidYMid meet"
-        /* No aspect-ratio lock: the svg fills the card's content box (flex), and
-           the graph scales to fit (meet) — so it uses the card's white space and
-           re-fits when the card is resized narrower/wider. */
+        preserveAspectRatio="none"
+        /* Fill the outer box: the svg element already fills the card's content box
+           (flex), and `none` lets the inner graph stretch to those box dimensions
+           instead of aspect-fitting (`meet`) and leaving letterbox whitespace. So
+           the inner-composite window is controlled by the card's shape — resize the
+           card wider/taller and the mini-map follows, edge to edge. */
         style={{ cursor: 'grab' }}
         onWheel={onWheel}
         onMouseDown={onDown}
