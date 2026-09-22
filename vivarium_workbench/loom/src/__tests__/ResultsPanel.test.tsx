@@ -4,12 +4,38 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { ResultsPanel } from '../panels/ResultsPanel';
 import { runDownloadUrl } from '../api';
 
-afterEach(() => { cleanup(); });
+const HOME = window.location.pathname + window.location.search;
+afterEach(() => {
+  cleanup();
+  window.history.replaceState({}, '', HOME);
+  delete (window as unknown as { __BASE_PATH__?: string }).__BASE_PATH__;
+});
 
 describe('runDownloadUrl', () => {
-  it('returns the correct download endpoint path', () => {
+  it('returns a bare endpoint path when served at the root (no sub-path)', () => {
     expect(runDownloadUrl('r1')).toBe('/api/composite-run/r1/download');
     expect(runDownloadUrl('abc-123')).toBe('/api/composite-run/abc-123/download');
+  });
+
+  it('keeps the download inside a HeLx sub-path ingress', () => {
+    // The loom iframe is served at <prefix>/bigraph-loom/index.html; the
+    // download must be prefixed too, or it escapes to the ingress root.
+    window.history.replaceState({}, '',
+      '/user/phil/proxy/8080/bigraph-loom/index.html?id=demo');
+    expect(runDownloadUrl('r1')).toBe(
+      '/user/phil/proxy/8080/api/composite-run/r1/download');
+  });
+
+  it('honours an explicit ?apiBase= (published static bundle)', () => {
+    window.history.replaceState({}, '', '/bigraph-loom/index.html?apiBase=/proj/site');
+    expect(runDownloadUrl('r1')).toBe('/proj/site/api/composite-run/r1/download');
+  });
+
+  it('honours window.__BASE_PATH__ when a host injects it (matches Phil)', () => {
+    (window as unknown as { __BASE_PATH__?: string }).__BASE_PATH__ = '/user/phil/proxy/8080';
+    // even served at a bare path, the injected global wins
+    expect(runDownloadUrl('r1')).toBe(
+      '/user/phil/proxy/8080/api/composite-run/r1/download');
   });
 });
 
