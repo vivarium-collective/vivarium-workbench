@@ -30,11 +30,13 @@ protocol (spec §5).
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import socket
 import contextlib
 import struct
+import subprocess
 import sys
 import time
 import traceback
@@ -3248,6 +3250,96 @@ def _run_process(params: dict) -> dict:
     return {"ok": True, "kind": "step" if is_step else "process", "outputs": _json_safe(out)}
 
 
+# --- runtime module provisioning ------------------------------------------
+# The env-worker runs a fixed image and cannot see the workbench's PVC, so a
+# module the user installs through the Catalog tab (into /workspace/.venv on the
+# PVC) is invisible here. The workbench pushes the workspace's declared install
+# specs via the ``install_modules`` RPC; we pip-install them into an isolated
+# writable dir (the existing ``/scratch`` emptyDir) and prepend it to sys.path,
+# so a subsequent build_core / discovery sees the packages. Best-effort: a
+# failed install is a reported result, never a worker crash (mirrors the
+# discovery soft-degrade).
+
+_PROVISION_DEFAULT_SITE = "/scratch/env-worker-site"
+
+
+def _provision_target() -> str:
+    """Writable dir the pushed modules install into (overridable for tests/dev)."""
+    return os.environ.get("VIVARIUM_ENV_WORKER_SITE") or _PROVISION_DEFAULT_SITE
+
+
+def _pip_target_for_spec(spec: dict) -> "str | None":
+    """The pip install target for one workspace ``imports`` spec, or None to skip.
+
+    - ``mode: pypi`` -> the PyPI name.
+    - anything with a git ``source`` (reference / submodule mode) -> a network
+      ``git+<source>@<ref>`` install. The workbench-side ``external/<name>``
+      editable path is deliberately NOT used — it does not exist in this pod.
+    """
+    mode = str(spec.get("mode") or "").lower()
+    if mode == "pypi":
+        name = spec.get("pypi_name") or spec.get("package") or spec.get("name")
+        return str(name) if name else None
+    source = spec.get("source")
+    if source:
+        ref = spec.get("ref")
+        return f"git+{source}@{ref}" if ref else f"git+{source}"
+    # A pypi_name without an explicit mode is still installable.
+    if spec.get("pypi_name"):
+        return str(spec["pypi_name"])
+    return None
+
+
+def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = None,
+                       timeout: float = 600.0) -> "list[dict]":
+    """pip-install each spec into ``target`` and make them importable.
+
+    Returns one ``{name, ok, detail}`` per spec. Never raises.
+    """
+    target = target or _provision_target()
+    results: list[dict] = []
+    try:
+        os.makedirs(target, exist_ok=True)
+    except Exception as e:  # noqa: BLE001
+        return [{"name": (s.get("name") or "?"), "ok": False,
+                 "detail": f"target unusable: {type(e).__name__}: {e}"} for s in (specs or [])]
+    for spec in specs or []:
+        name = spec.get("name") or spec.get("package") or "?"
+        pkg = _pip_target_for_spec(spec)
+        if not pkg:
+            results.append({"name": name, "ok": False, "detail": "no installable form (skipped)"})
+            continue
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--target", target, pkg],
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            results.append({"name": name, "ok": False, "detail": f"install timed out after {timeout:.0f}s"})
+            continue
+        except Exception as e:  # noqa: BLE001
+            results.append({"name": name, "ok": False, "detail": f"pip launch failed: {type(e).__name__}: {e}"})
+            continue
+        if proc.returncode == 0:
+            results.append({"name": name, "ok": True, "detail": "installed"})
+        else:
+            tail = (proc.stderr or "").strip().splitlines()
+            results.append({"name": name, "ok": False,
+                            "detail": tail[-1] if tail else f"pip exited {proc.returncode}"})
+    # Make freshly installed packages importable by THIS process and any child
+    # (build_core shells out): front of sys.path + PYTHONPATH, and drop stale
+    # import caches so a previously-missing module now resolves.
+    if any(r["ok"] for r in results):
+        if target in sys.path:
+            sys.path.remove(target)
+        sys.path.insert(0, target)
+        existing = os.environ.get("PYTHONPATH")
+        parts = [target] + ([existing] if existing else [])
+        os.environ["PYTHONPATH"] = os.pathsep.join(parts)
+        importlib.invalidate_caches()
+    return results
+
+
 def _handle(method: str, params: dict) -> dict:
     """Dispatch one method (spec §11)."""
     if method == "ping":
@@ -3312,6 +3404,11 @@ def _handle(method: str, params: dict) -> dict:
         return _data_sources_provider(params)
     if method == "analysis_viewers":
         return _analysis_viewers(params)
+    if method == "install_modules":
+        # Runtime provisioning: the workbench pushes the workspace's declared
+        # module install specs so composites that reference them can register
+        # here. Called once on a cold worker before any discovery. Idempotent.
+        return {"ok": True, "results": _provision_modules(params.get("modules") or [])}
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")
