@@ -17,15 +17,24 @@ from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def parsimony_viewer_dir() -> Path | None:
-    """Return the bundled ``pbg_parsimony`` viewer asset dir, or None when the
-    optional ``pbg_parsimony`` package is not installed (feature-detect seam)."""
+    """Return the bundled parsimony viewer asset dir, or None when the optional
+    parsimony package is not installed (feature-detect seam).
+
+    The package was renamed ``pbg_parsimony`` -> ``viva_parsimony`` (the new dist
+    ships ``viewer/`` as ``viva_parsimony`` package-data; ``pbg_parsimony`` remains
+    only as a Python import shim WITHOUT the viewer assets). Probe both names and
+    return whichever module actually carries a ``viewer/`` dir, so both the old
+    pinned installs and current ``viva-parsimony`` resolve."""
     try:
         import importlib.util
-        spec = importlib.util.find_spec("pbg_parsimony")
-        if spec is None or not spec.origin:
-            return None
-        d = Path(spec.origin).parent / "viewer"
-        return d if d.is_dir() else None
+        for pkg in ("viva_parsimony", "pbg_parsimony"):
+            spec = importlib.util.find_spec(pkg)
+            if spec is None or not spec.origin:
+                continue
+            d = Path(spec.origin).parent / "viewer"
+            if d.is_dir():
+                return d
+        return None
     except Exception:
         return None
 
