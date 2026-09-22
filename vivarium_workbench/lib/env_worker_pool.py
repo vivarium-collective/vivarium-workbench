@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast, TYPE_CHECKING
 
 from vivarium_workbench.lib.env_compat import get_env
+from vivarium_workbench.lib.env_worker_provision import install_specs_from_workspace
 
 logger = logging.getLogger(__name__)
 from vivarium_workbench.lib.env_worker_client import EnvWorker, EnvWorkerUnavailable
@@ -288,10 +289,40 @@ class WorkerPool:
                 # lazy spawn (local: Popen is ~ms; remote: a pod dialling back —
                 # build_core is on the first call either way)
                 worker = launcher.launch(ws, interpreter=interp, timeout=self.call_timeout)
+                # Provision catalog-installed modules into the fresh worker BEFORE
+                # it is cached/handed out, so no caller ever sees an unprovisioned
+                # worker (v1: synchronous under the lock — acceptable for the
+                # low-concurrency per-session workbench; a failure leaves the
+                # worker usable, just without those modules).
+                self._provision_worker(ws, worker)
                 self._entries[key] = _Entry(worker)
         for w in to_close:
             _safe_close(w)
         return worker
+
+    def _provision_worker(self, ws: str, worker: EnvWorker) -> None:
+        """Push the workspace's declared module install specs to a fresh worker.
+
+        Best-effort and never raises: a provisioning failure leaves the worker
+        fully usable (composites needing those modules simply won't register,
+        exactly as before this feature). Modules the user installed through the
+        Catalog tab land in the workbench PVC, which the worker cannot see; this
+        is how they reach the worker's environment.
+        """
+        try:
+            specs = install_specs_from_workspace(ws)
+        except Exception:  # noqa: BLE001
+            return
+        if not specs:
+            return
+        try:
+            res = worker.call("install_modules", {"modules": specs})
+            failed = [r for r in (res or {}).get("results", []) if not r.get("ok")]
+            if failed:
+                logger.warning("env-worker provisioning: %d module(s) failed: %s",
+                               len(failed), ", ".join(f"{r['name']} ({r['detail']})" for r in failed))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("env-worker provisioning call failed (worker still usable): %s", e)
 
     def _drop(self, ws: str, interp: str, kind: str = "local") -> None:
         with self._lock:
