@@ -809,3 +809,39 @@ def remote_run_chain_progress(params: dict) -> tuple[dict, int]:
             "reason": "sms-api unreachable (is the tunnel up?)", "error": msg,
             "simulation_id": int(sim_id),
         }, 502
+
+
+def remote_run_cancel(body: dict) -> tuple[dict, int]:
+    """Backlog item 53: cancel a real remote simulation/campaign, proxying
+    viva-api's ``DELETE /api/v1/simulations/{id}/cancel`` (``SmsApiClient.
+    cancel_simulation``) the same way ``remote_run_chain_progress`` proxies
+    ``chain-progress`` — on-demand, no in-process state.
+
+    For a chain-dispatch campaign row, viva-api's own handler walks every
+    seed's own dependsOn chain and cancels/terminates whichever job is
+    actually non-terminal per seed (see that handler's own docstring/item 53's
+    backlog file for the full design) — this function does no walk-back logic
+    itself, it is a thin proxy, same division of responsibility as every other
+    function in this file.
+
+    ``simulation_id`` required in ``body``. 404 (unknown simulation) passes
+    through distinctly, matching ``remote_run_chain_progress``'s own
+    convention of not collapsing every viva-api error into one generic
+    message."""
+    body = body or {}
+    sim_id = body.get("simulation_id")
+    if not sim_id:
+        return {"error": "simulation_id required"}, 400
+    client = SmsApiClient(_sms_api_base())
+    try:
+        result = client.cancel_simulation(int(sim_id))
+        return {"kind": "cancel", "simulation_id": int(sim_id), **result}, 200
+    except SmsApiError as e:
+        msg = str(e)
+        if msg.endswith("-> 404"):
+            return {"kind": "cancel", "error": msg, "simulation_id": int(sim_id)}, 404
+        return {
+            "kind": "cancel", "reachable": False,
+            "reason": "sms-api unreachable (is the tunnel up?)", "error": msg,
+            "simulation_id": int(sim_id),
+        }, 502
