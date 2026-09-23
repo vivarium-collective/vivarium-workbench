@@ -102,3 +102,59 @@ def test_install_modules_rpc(tmp_path, monkeypatch):
                                            "pypi_name": "viva-munk"}]})
     assert out["ok"] is True
     assert out["results"][0] == {"name": "viva-munk", "ok": True, "detail": "installed"}
+
+
+# ---- _provision_target: writable default for non-root single-pod ----------
+
+def test_provision_target_honours_env_override(monkeypatch):
+    monkeypatch.setenv("VIVARIUM_ENV_WORKER_SITE", "/some/explicit/dir")
+    assert env_worker._provision_target() == "/some/explicit/dir"
+
+
+def test_provision_target_default_is_writable_tempdir_when_no_scratch(monkeypatch):
+    # Single-pod HeLx: env_worker runs as a non-root in-pod subprocess with no
+    # /scratch emptyDir. The default must not point at an unwritable /scratch
+    # (which raised PermissionError on Phil's cluster) — it falls back to a
+    # user-writable temp dir.
+    monkeypatch.delenv("VIVARIUM_ENV_WORKER_SITE", raising=False)
+    monkeypatch.setattr(env_worker.os.path, "isdir",
+                        lambda p: False if p == "/scratch" else os.path.isdir(p))
+    target = env_worker._provision_target()
+    import tempfile
+    assert target.startswith(tempfile.gettempdir())
+    assert "env-worker-site" in target
+
+
+def test_provision_target_prefers_scratch_when_writable(monkeypatch):
+    # Two-pod (Stanford) env-worker Job mounts a writable /scratch emptyDir —
+    # keep using it there.
+    monkeypatch.delenv("VIVARIUM_ENV_WORKER_SITE", raising=False)
+    monkeypatch.setattr(env_worker.os.path, "isdir",
+                        lambda p: True if p == "/scratch" else os.path.isdir(p))
+    monkeypatch.setattr(env_worker.os, "access",
+                        lambda p, m: True if p == "/scratch" else os.access(p, m))
+    assert env_worker._provision_target() == "/scratch/env-worker-site"
+
+
+# ---- _DISCOVERED reset: runtime installs become visible in a warm worker --
+
+def test_install_modules_resets_discovery_gate(tmp_path, monkeypatch):
+    # The single-pod warm-worker race: env_worker is long-lived and has already
+    # run discovery (_DISCOVERED=True). A runtime Catalog install pushes
+    # install_modules; without resetting the gate, _ensure_generators_discovered
+    # early-returns forever and the freshly installed @composite_generators never
+    # register. Pushing modules must re-arm discovery.
+    monkeypatch.setattr(env_worker.subprocess, "run", _fake_run(returncode=0))
+    monkeypatch.setenv("VIVARIUM_ENV_WORKER_SITE", str(tmp_path / "site"))
+    monkeypatch.setattr(env_worker, "_DISCOVERED", True)
+    env_worker._handle("install_modules",
+                       {"modules": [{"name": "viva-munk", "mode": "pypi",
+                                     "pypi_name": "viva-munk"}]})
+    assert env_worker._DISCOVERED is False
+
+
+def test_install_modules_empty_does_not_reset_discovery(monkeypatch):
+    # No modules pushed → nothing changed → don't pay for a re-scan.
+    monkeypatch.setattr(env_worker, "_DISCOVERED", True)
+    env_worker._handle("install_modules", {"modules": []})
+    assert env_worker._DISCOVERED is True

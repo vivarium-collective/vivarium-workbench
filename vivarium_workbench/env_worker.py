@@ -34,6 +34,7 @@ import importlib
 import json
 import os
 import socket
+import tempfile
 import contextlib
 import struct
 import subprocess
@@ -2977,6 +2978,24 @@ def _ensure_generators_discovered() -> None:
     _DISCOVERED = True
 
 
+def _reset_generator_discovery() -> None:
+    """Re-arm the once-per-process generator scan after a runtime install.
+
+    ``_ensure_generators_discovered`` runs the global ``discover_generators``
+    scan exactly once and latches ``_DISCOVERED`` for the process's life. That is
+    correct for a fresh worker, but this worker is long-lived: in the single-pod
+    HeLx topology env_worker is an in-pod subprocess that has usually already
+    scanned before the user installs anything. When the workbench then pushes a
+    Catalog install via ``install_modules``, the latched gate would swallow the
+    new package's ``@composite_generator``s forever. Clearing the gate (and the
+    import caches) makes the next ``_ensure_generators_discovered`` re-scan, so a
+    just-installed composite becomes resolvable without restarting the pod.
+    """
+    global _DISCOVERED
+    _DISCOVERED = False
+    importlib.invalidate_caches()
+
+
 def _import_workspace_package(workspace: str) -> None:
     """Import the workspace's own package so its ``@composite_generator``s register
     into *this worker's* process registry. Best-effort — a workspace without a
@@ -3260,12 +3279,28 @@ def _run_process(params: dict) -> dict:
 # failed install is a reported result, never a worker crash (mirrors the
 # discovery soft-degrade).
 
-_PROVISION_DEFAULT_SITE = "/scratch/env-worker-site"
+_PROVISION_SITE_DIRNAME = "env-worker-site"
+
+
+def _default_provision_target() -> str:
+    """Pick a writable install dir for the running topology.
+
+    Two-pod (Stanford) env-worker Jobs mount a writable ``/scratch`` emptyDir, so
+    prefer it when it actually exists and is writable. Single-pod HeLx (RENCI)
+    runs env_worker as a **non-root in-pod subprocess** with no ``/scratch`` — a
+    hardcoded ``/scratch`` default raised ``PermissionError`` there, so fall back
+    to a user-writable temp dir. Either topology can still pin an explicit path
+    via ``VIVARIUM_ENV_WORKER_SITE``.
+    """
+    scratch = "/scratch"
+    if os.path.isdir(scratch) and os.access(scratch, os.W_OK):
+        return os.path.join(scratch, _PROVISION_SITE_DIRNAME)
+    return os.path.join(tempfile.gettempdir(), _PROVISION_SITE_DIRNAME)
 
 
 def _provision_target() -> str:
     """Writable dir the pushed modules install into (overridable for tests/dev)."""
-    return os.environ.get("VIVARIUM_ENV_WORKER_SITE") or _PROVISION_DEFAULT_SITE
+    return os.environ.get("VIVARIUM_ENV_WORKER_SITE") or _default_provision_target()
 
 
 def _pip_target_for_spec(spec: dict) -> "str | None":
@@ -3407,8 +3442,18 @@ def _handle(method: str, params: dict) -> dict:
     if method == "install_modules":
         # Runtime provisioning: the workbench pushes the workspace's declared
         # module install specs so composites that reference them can register
-        # here. Called once on a cold worker before any discovery. Idempotent.
-        return {"ok": True, "results": _provision_modules(params.get("modules") or [])}
+        # here. Works both cold (two-pod, before any discovery) and warm
+        # (single-pod, after discovery already latched) — see below. Idempotent.
+        mods = params.get("modules") or []
+        results = _provision_modules(mods)
+        # Any push of modules means the workspace's importable set may have
+        # changed, so re-arm discovery for the next query. Guard on a non-empty
+        # push so an empty call stays a cheap no-op. This also covers single-pod,
+        # where the package is already in the shared venv and the only thing
+        # missing was the re-scan (the pip-to-target install may even no-op).
+        if mods:
+            _reset_generator_discovery()
+        return {"ok": True, "results": results}
     if method == "shutdown":
         return {"ok": True}
     raise _MethodError(-32601, f"unknown method: {method!r}")

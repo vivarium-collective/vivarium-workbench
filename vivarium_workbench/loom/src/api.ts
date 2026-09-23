@@ -283,8 +283,36 @@ export interface RunStatus {
   downloadable?: boolean;
 }
 
+/** The server root the loom SPA is served under.
+ *
+ * The loom runs in an iframe whose src is base-path-prefixed
+ * (`<prefix>/bigraph-loom/index.html`), so under a HeLx / notebook sub-path
+ * ingress a bare `/api/...` URL resolves against the ORIGIN root — escaping the
+ * sub-path and hitting the ingress UI (which returns HTML, not the file). The
+ * base-path fetch shim only rewrites the parent page's `fetch()`, so an
+ * `<a href>` download navigation from inside the iframe is not covered. Recover
+ * the prefix so download links stay inside the sub-path: prefer an explicit
+ * `?apiBase=` (published static bundles set it, same as the inner-state fetch
+ * above), else strip the `/bigraph-loom/...` suffix off our own path. */
+export function apiRoot(): string {
+  // 1. The workbench's own base-path global, IF a host injected it into this
+  //    document (the parent dashboard uses window.__BASE_PATH__ everywhere; some
+  //    HeLx builds thread it into the loom too). 2. an explicit ?apiBase=
+  //    (published static bundles set it, same as the inner-state fetch). 3. recover
+  //    the prefix from our own iframe path — which is served base-path-prefixed
+  //    (apiUrl('/bigraph-loom/index.html')) — so this works even when no global
+  //    reaches the iframe, which is the stock case.
+  const g = (window as unknown as { __BASE_PATH__?: string }).__BASE_PATH__;
+  if (g) return g;
+  const explicit = new URLSearchParams(window.location.search).get('apiBase');
+  if (explicit) return explicit;
+  const path = window.location.pathname;
+  const i = path.indexOf('/bigraph-loom/');
+  return i >= 0 ? path.slice(0, i) : '';
+}
+
 export function runDownloadUrl(runId: string): string {
-  return `/api/composite-run/${runId}/download`;
+  return `${apiRoot()}/api/composite-run/${runId}/download`;
 }
 
 export interface RunTrajectory {
