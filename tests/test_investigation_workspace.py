@@ -117,4 +117,50 @@ def test_showworkspace_activates_investigations_page():
     w = JS[JS.index("function _showWorkspace"): JS.index("function _showWorkspace") + 900]
     assert "page-investigations" in w
     assert "classList.add('active')" in w
-    assert "classList.remove('active')" in w
+
+
+# ── item 69 phase 2 — analyses-to-run: free-text textarea -> multi-select ────
+# Lives in the legacy _openInvestigation/#investigation-detail tabbed panel
+# (see test_showworkspace_renders_graph_not_legacy_icon_view above) — the
+# primary card/rail entry points route to _showInvestigationWorkspace instead,
+# which has no analyses-editing surface of its own, and (live-verified,
+# corrected from an earlier assumption here) neither does the "Begin Study"
+# flow reach this panel: it creates the new studies/<auto>/spec.yaml shape via
+# /api/study-create-from-composite, so _openInvestigation 404s on it exactly
+# like it does for any other flat study (no investigation.yaml). This panel is
+# real for the workspace's grouped "investigations" only (real
+# investigation.yaml under the workspace.yaml layout: remap) — narrower than
+# the primary nav, but not the workspace's only reachable analyses surface
+# either: item 69 (#3) separately restored the study-level
+# _saveStudyAnalyses/#study-analyses-list pair (see
+# test_compose_unification.py::test_analyses_section_present_and_reachable_on_the_study_page
+# and test_study_overview_structure.py::test_analyses_box_restored_to_model_tab),
+# which is what actually covers flat studies.
+
+def test_analyses_field_is_a_checklist_not_a_textarea():
+    # Real UX testing found the original <select multiple> unusable
+    # (undiscoverable Cmd/Ctrl+click, no selected-state feedback) — replaced
+    # with checklist-select.js's filterable checkbox list, a plain mount div.
+    assert '<textarea id="inv-analyses-list"' not in JS
+    assert '<select id="inv-analyses-list"' not in JS
+    assert 'id="inv-analyses-list"' in JS
+
+
+def test_load_inv_analyses_populates_from_visualization_classes():
+    i = JS.index("function _loadInvAnalyses")
+    block = JS[i:JS.index("window._loadInvAnalyses = _loadInvAnalyses")]
+    assert "/api/visualization-classes" in block
+    assert "kind === 'analysis'" in block
+    # honest-degrade: a name already in spec.yaml must survive even if the
+    # currently-loaded registry doesn't have it (same convention as the
+    # baseline-composite select from phase 1) — never silently drop it.
+    assert "flagged: true" in block
+    assert "ChecklistSelect.render" in block
+
+
+def test_save_analyses_reads_checklist_selection():
+    i = JS.index("function _saveAnalyses")
+    block = JS[i:i + 700]
+    assert "ChecklistSelect.selected" in block
+    assert ".value.split" not in block   # the old free-text parsing is gone
+    assert "o.selected" not in block     # the old <select>-options reading is gone
