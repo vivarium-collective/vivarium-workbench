@@ -48,6 +48,20 @@ from vivarium_workbench.lib import workspace_yaml as _workspace_yaml
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
+def _install_cache_env() -> dict:
+    """Subprocess env with a persistent pip/uv download cache, so re-installs
+    reuse wheels instead of re-downloading every time. Honors a deployment-set
+    ``UV_CACHE_DIR``/``PIP_CACHE_DIR`` (point those at the PVC to survive pod
+    restarts); otherwise a writable-fallback dir that is safe on a non-root pod
+    (reuses the #1176 ``home_or_tmp_default`` helper)."""
+    from vivarium_workbench.lib.env_compat import home_or_tmp_default
+    cache = str(home_or_tmp_default(".cache", "vivarium-workbench", "uv"))
+    env = dict(os.environ)
+    env.setdefault("UV_CACHE_DIR", cache)
+    env.setdefault("PIP_CACHE_DIR", cache)
+    return env
+
+
 #: Default per-step timeout (seconds) for catalog-install subprocesses. Generous
 #: because a ``git submodule add`` of a large repo, or a ``pip install`` of a heavy
 #: scientific stack, over a slow or proxied network routinely exceeds a short cap
@@ -125,6 +139,7 @@ def _install_locked_deps_with_uv(
             [uv_path, "pip", "install", "--python", str(venv_py), "-r", "-"],
             input=exported.stdout, cwd=project_dir, capture_output=True,
             encoding="utf-8", errors="replace", timeout=timeout,
+            env=_install_cache_env(),
         )
         tail = (installed.stdout + "\n" + installed.stderr).strip()[-500:]
         log_holder.append(
@@ -216,6 +231,7 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     venv_pip = ws_root / ".venv" / "bin" / "pip"
     venv_py = ws_root / ".venv" / "bin" / "python3"
     uv_path = shutil.which("uv")
+    _install_env = _install_cache_env()
 
     if use_pypi:
         # PyPI path: use uv exclusively (faster, no submodule needed).
@@ -250,6 +266,7 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                     pypi_install_cmd,
                     cwd=ws_root, capture_output=True,
                     encoding="utf-8", errors="replace", timeout=timeout,
+                    env=_install_env,
                 )
             except subprocess.TimeoutExpired:
                 raise RuntimeError(
@@ -316,10 +333,16 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                 timeout = _install_timeout()
                 try:
                     r = subprocess.run(
-                        ["git", "submodule", "add", "-b", catalog_entry["ref"],
+                        # --depth 1: a shallow, branch-tip clone of the submodule.
+                        # These catalog refs are branches, and we only need the
+                        # working tree at that ref — full history was the #1 clone
+                        # timeout on large repos over a proxied network.
+                        ["git", "submodule", "add", "--depth", "1",
+                         "-b", catalog_entry["ref"],
                          catalog_entry["source"], target_path],
                         cwd=ws_root, capture_output=True,
                         encoding="utf-8", errors="replace", timeout=timeout,
+                        env=_install_env,
                     )
                 except subprocess.TimeoutExpired:
                     raise RuntimeError(
@@ -352,6 +375,7 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                     pip_cmd_base + [str(abs_target)],
                     cwd=ws_root, capture_output=True,
                     encoding="utf-8", errors="replace", timeout=timeout,
+                    env=_install_env,
                 )
             except subprocess.TimeoutExpired:
                 raise RuntimeError(
