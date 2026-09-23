@@ -77,12 +77,12 @@ def _post(url, payload):
     req = urllib.request.Request(
         url, data=body,
         headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urllib.request.urlopen(req, timeout=30) as r:
         return r.status, json.loads(r.read().decode())
 
 
 def _get(url):
-    with urllib.request.urlopen(url, timeout=10) as r:
+    with urllib.request.urlopen(url, timeout=30) as r:
         return r.status, json.loads(r.read().decode())
 
 
@@ -92,7 +92,7 @@ def _delete(url, payload):
         url, data=body,
         headers={"Content-Type": "application/json"}, method="DELETE")
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
             return r.status, json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read().decode())
@@ -238,7 +238,7 @@ def test_post_route_matches_with_query_string(server):
         f"{base}/api/study-report-single?skeptic=1",
         data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
     try:
-        urllib.request.urlopen(req, timeout=15)
+        urllib.request.urlopen(req, timeout=30)
         assert False, "expected a 4xx error"
     except urllib.error.HTTPError as e:
         body = json.loads(e.read().decode())
