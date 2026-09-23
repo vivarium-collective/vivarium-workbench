@@ -33,9 +33,24 @@ _REGISTRY_CACHE: dict = {}
 _REGISTRY_TTL = 30.0  # seconds
 
 
-def clear_registry_cache() -> None:
-    """Invalidate the registry cache so the next call rebuilds from scratch."""
+def clear_registry_cache(ws_root: "Path | str | None" = None) -> None:
+    """Invalidate the registry cache so the next call rebuilds from scratch.
+
+    Always clears the in-memory TTL cache (``_REGISTRY_CACHE``, every
+    workspace). When ``ws_root`` is given, also clears that workspace's
+    on-disk catalog cache (``lib.catalog_disk_cache``) — pass it from any
+    call site that just changed what's installed (catalog install/uninstall,
+    a generated visualization import-verify) so the next build re-imports
+    instead of replaying a now-stale disk snapshot. Best-effort: a disk-cache
+    failure here never raises.
+    """
     _REGISTRY_CACHE.clear()
+    if ws_root is not None:
+        try:
+            from vivarium_workbench.lib import catalog_disk_cache
+            catalog_disk_cache.clear(ws_root)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -473,12 +488,23 @@ def build_registry(ws_root: Path, *, bypass_cache: bool = False) -> dict:
     Never raises.  Parameterised on ``ws_root`` so the FastAPI route can pass
     the workspace path directly without touching the ``WORKSPACE`` global.
 
+    Two cache layers sit in front of the env-worker call: the 30s in-memory
+    ``_REGISTRY_CACHE`` above, and underneath it a persistent on-disk cache
+    (``lib.catalog_disk_cache``) keyed by a signature of the installed
+    process-lib distributions + workspace package/config — so a cold
+    worker/pod with an unchanged venv skips the import walk entirely instead
+    of just the 30s in-memory window. See ``warm-catalog`` in ``cli.py`` to
+    pre-populate it at image-build time.
+
     Parameters
     ----------
     ws_root:
         Workspace root directory (must contain ``workspace.yaml``).
     bypass_cache:
-        When ``True`` forces a fresh subprocess run even if the cache is warm.
+        When ``True`` forces a fresh worker call even if the in-memory OR
+        disk cache is warm. The fresh result is still written to the disk
+        cache (so ``warm-catalog --bypass`` semantics stay useful for
+        re-baking after a change the signature happens not to catch).
     """
     now = time.time()
     _cache_key = str(ws_root)
@@ -490,18 +516,40 @@ def build_registry(ws_root: Path, *, bypass_cache: bool = False) -> dict:
     try:
         import yaml
 
+        from vivarium_workbench.lib import catalog_disk_cache
+
         ws_yaml = ws_root / "workspace.yaml"
         ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8"))
-        # Query the pooled env worker for the raw {processes, types, workspace_pkgs}.
-        # This was an embedded ``sys.executable`` subprocess running build_core +
-        # introspection on EVERY call (15s timeout). The same introspection now lives
-        # in ``env_worker._registry_catalog`` (ported verbatim, verified byte-equivalent
-        # in #502) and runs in a WARM pooled worker — so build_core is amortized
-        # (measured 8s cold -> 0s warm on v2ecoli) instead of paid per request. Same
-        # interpreter (sys.executable) as the old subprocess; the per-workspace venv
-        # interpreter arrives with EnvironmentResolver.
-        from vivarium_workbench.lib.env_worker_pool import get_pool
-        data = get_pool().call(ws_root, "registry_catalog")
+
+        # Persistent on-disk cache UNDER the 30s in-memory one: the worker call
+        # below imports every installed process package (multi-minute on some
+        # workspaces), and the in-memory cache only survives within one
+        # worker/pod's lifetime. Keyed by a signature of "what could change the
+        # catalog" (installed process-lib dists + source, workspace package +
+        # workspace.yaml) so a cold worker/pod restart with an UNCHANGED venv
+        # serves the disk snapshot instead of re-paying the import walk. See
+        # ``lib/catalog_disk_cache.py``. Best-effort throughout: any failure
+        # here degrades to the live worker call below, never breaks the panel.
+        sig = catalog_disk_cache.catalog_signature(ws_root)
+        raw = None if bypass_cache else catalog_disk_cache.load(ws_root, "registry", sig)
+
+        if raw is not None:
+            data = raw
+        else:
+            # Query the pooled env worker for the raw {processes, types, workspace_pkgs}.
+            # This was an embedded ``sys.executable`` subprocess running build_core +
+            # introspection on EVERY call (15s timeout). The same introspection now lives
+            # in ``env_worker._registry_catalog`` (ported verbatim, verified byte-equivalent
+            # in #502) and runs in a WARM pooled worker — so build_core is amortized
+            # (measured 8s cold -> 0s warm on v2ecoli) instead of paid per request. Same
+            # interpreter (sys.executable) as the old subprocess; the per-workspace venv
+            # interpreter arrives with EnvironmentResolver.
+            from vivarium_workbench.lib.env_worker_pool import get_pool
+            data = get_pool().call(ws_root, "registry_catalog")
+            # Cache the RAW worker payload (pre-annotation) so the signature maps
+            # to the stable, worker-produced output — annotation (below) always
+            # re-runs on load, cached or not.
+            catalog_disk_cache.store(ws_root, "registry", sig, data)
 
         # Annotate emitter entries with is_workspace_default per
         # workspace.yaml::runtime.default_emitter. ws_data was loaded above;

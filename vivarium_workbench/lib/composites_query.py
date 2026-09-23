@@ -32,9 +32,20 @@ _COMPOSITES_CACHE: dict = {}
 _COMPOSITES_TTL = 30.0  # seconds
 
 
-def clear_composites_cache() -> None:
-    """Invalidate the composite-discovery cache (call on workspace switch)."""
+def clear_composites_cache(ws_root: "Path | str | None" = None) -> None:
+    """Invalidate the composite-discovery cache (call on workspace switch).
+
+    Always clears the in-memory TTL cache (every workspace). When ``ws_root``
+    is given, also clears the on-disk catalog cache (``lib.catalog_disk_cache``)
+    for that workspace — best-effort, never raises.
+    """
     _COMPOSITES_CACHE.clear()
+    if ws_root is not None:
+        try:
+            from vivarium_workbench.lib import catalog_disk_cache
+            catalog_disk_cache.clear(ws_root)
+        except Exception:
+            pass
 
 # Fence markers — chosen to be unlikely to appear in real Python output.
 _START = "@@@C_START@@@"
@@ -67,6 +78,20 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
     if not bypass_cache and _slot is not None and now - _slot["ts"] < _COMPOSITES_TTL:
         return _slot["data"]
 
+    # Persistent on-disk cache UNDER the in-memory one, mirroring the registry
+    # (see lib/catalog_disk_cache.py + lib/registry.py::build_registry). Keyed
+    # by the same "what could change the catalog" signature, so a cold
+    # worker/pod with an unchanged venv skips both the pooled call AND the
+    # fresh-subprocess fallback below entirely. Best-effort: any failure here
+    # just falls through to the live paths.
+    from vivarium_workbench.lib import catalog_disk_cache
+    sig = catalog_disk_cache.catalog_signature(ws_root)
+    if not bypass_cache:
+        cached = catalog_disk_cache.load(ws_root, "composites", sig)
+        if cached is not None:
+            _COMPOSITES_CACHE[ws_root_str] = {"data": cached, "ts": now}
+            return cached
+
     # Prefer the WARM pooled env-worker (build_core + workspace imports amortized,
     # like the registry) over a fresh subprocess that re-imports everything (~8s
     # cold — the recurring CI timeout). Fall back to the subprocess if the pool is
@@ -85,6 +110,7 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
         if (isinstance(_pooled, dict) and _pooled.get("composites")
                 and not _pooled.get("error")):
             _COMPOSITES_CACHE[ws_root_str] = {"data": _pooled, "ts": now}
+            catalog_disk_cache.store(ws_root, "composites", sig, _pooled)
             return _pooled
     except Exception:
         pass
@@ -127,6 +153,7 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
     # Cache successful discovery only; failures (None above) are never cached so
     # a transient import error re-tries on the next request.
     _COMPOSITES_CACHE[ws_root_str] = {"data": data, "ts": now}
+    catalog_disk_cache.store(ws_root, "composites", sig, data)
     return data
 
 

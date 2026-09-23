@@ -61,7 +61,7 @@ def visualization_accept(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
 
     # Invalidate the module-level registry cache so the next registry
     # fetch will rebuild from disk. (Workbench-process cache — stays here.)
-    clear_registry_cache()
+    clear_registry_cache(ws_root)
 
     # Import-verify + build_core() smoke-test + class discovery run in the
     # workspace's env worker (importing the generated module + build_core is
