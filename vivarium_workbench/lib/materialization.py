@@ -30,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vivarium_workbench.lib.env_compat import get_env
+from vivarium_workbench.lib.env_compat import get_env, home_or_tmp_default
 
 # Long timeout — a ``uv sync`` on a v2ecoli-scale repo is minutes, a different cost
 # class from the env-worker 60 s query timeout (lifecycle §1). Config-overridable.
@@ -56,11 +56,13 @@ class MaterializationError(Exception):
 
 def store_root() -> Path:
     """The venv store directory (§5) — coordinate-keyed venvs live under here.
-    Override with ``VIVARIUM_WORKBENCH_VENV_STORE``; defaults under the user cache."""
+    Override with ``VIVARIUM_WORKBENCH_VENV_STORE``; defaults under the user
+    cache, falling back to a writable temp dir when HOME isn't writable (e.g. a
+    non-root single-pod HeLx deployment — see ``home_or_tmp_default``)."""
     override = get_env("VENV_STORE")
     if override:
         return Path(override)
-    return Path.home() / ".cache" / "vivarium-workbench" / "venvs"
+    return home_or_tmp_default(".cache", "vivarium-workbench", "venvs")
 
 
 def environment_coordinate(source: Path) -> str:
@@ -144,7 +146,16 @@ def materialize(source: Path, *, timeout: float = _DEFAULT_TIMEOUT_S) -> str:
     # checkout is never mutated). `--frozen` installs from the existing lock
     # (reproducible) when one is present; without a lock, let uv resolve.
     import os
-    env = dict(os.environ, UV_PROJECT_ENVIRONMENT=str(venv_dir))
+    # UV_CACHE_DIR: without it, uv falls back to its own default (~/.cache/uv)
+    # regardless of where UV_PROJECT_ENVIRONMENT points — a second HOME write
+    # that store_root()'s own writable-temp-dir fallback doesn't cover on its
+    # own. Keep uv's download cache under the same store root so it inherits
+    # the same fallback.
+    env = dict(
+        os.environ,
+        UV_PROJECT_ENVIRONMENT=str(venv_dir),
+        UV_CACHE_DIR=str(store_root() / ".uv-cache"),
+    )
     cmd = ["uv", "sync"]
     if (src / "uv.lock").is_file():
         cmd.append("--frozen")

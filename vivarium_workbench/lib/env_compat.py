@@ -11,7 +11,9 @@ Remove the old-prefix fallback in Phase 3.
 from __future__ import annotations
 
 import os
+import tempfile
 import warnings
+from pathlib import Path
 from typing import Mapping
 
 NEW_PREFIX = "VIVARIUM_WORKBENCH_"
@@ -57,3 +59,38 @@ def get_env(name: str, default: str | None = None,
         _warn_once(old_key, new_key)
         return source[old_key]
     return default
+
+
+def _nearest_existing_ancestor(path: Path) -> Path:
+    """Walk up from ``path`` to the nearest dir that actually exists (``path``
+    itself, or the first parent that does) — the dir whose write-permission bit
+    governs whether ``path`` (and any of its not-yet-created parents) can be
+    created."""
+    for candidate in (path, *path.parents):
+        if candidate.exists():
+            return candidate
+    return path  # unreachable: the filesystem root always exists
+
+
+def home_or_tmp_default(*parts: str) -> Path:
+    """``Path.home().joinpath(*parts)``, falling back to a writable temp dir
+    when that HOME-based default isn't writable.
+
+    Mirrors ``env_worker._default_provision_target``: a non-root single-pod
+    HeLx deployment runs this process with a HOME it can't write to (or that
+    doesn't exist), so a hardcoded HOME-based cache/store default raises
+    ``PermissionError`` on first use there. Prefer the HOME default when its
+    nearest existing ancestor dir is writable (the common case, and unchanged
+    from today); otherwise fall back to
+    ``tempfile.gettempdir() / "vivarium-workbench" / *parts``. Callers keep
+    their own env-var override checked first, so an explicit pin always wins
+    over both of these.
+    """
+    home_default = Path.home().joinpath(*parts)
+    try:
+        writable = os.access(_nearest_existing_ancestor(home_default), os.W_OK)
+    except OSError:
+        writable = False
+    if writable:
+        return home_default
+    return Path(tempfile.gettempdir()) / "vivarium-workbench" / Path(*parts)
