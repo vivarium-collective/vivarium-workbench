@@ -78,3 +78,45 @@ def test_format_report_flags_problems(tmp_path):
     report = format_report(ws_root=tmp_path)
     assert "fail to import" in report
     assert "installed ≠ importable" in report
+
+
+# ---- perf hardening (parallel + wall-clock budget + cache) -----------------
+
+def test_all_declared_modules_present_even_when_budget_exceeded(tmp_path, monkeypatch):
+    """A slow/hung probe must not sum into a request-timeout: the whole call is
+    capped by total_budget and any unfinished module is reported as skipped, never
+    silently dropped."""
+    import time as _t
+    import vivarium_workbench.lib.module_import_doctor as doc
+    _write_ws(tmp_path, {"slowmod": {}, "fastmod": {}})
+
+    def fake_probe(module, ws_root, timeout):
+        if module == "slowmod":
+            _t.sleep(2.0)
+        return True, "importable"
+
+    monkeypatch.setattr(doc, "_probe", fake_probe)
+    findings = doc.diagnose_module_imports(
+        tmp_path, total_budget=0.3, use_cache=False)
+    by = {f["module"]: f for f in findings}
+    assert set(by) == {"slowmod", "fastmod"}          # every declared module present
+    assert by["slowmod"]["ok"] is False
+    assert "budget" in by["slowmod"]["detail"]
+    assert by["fastmod"]["ok"] is True                 # the fast one still resolved
+
+
+def test_findings_cached_by_workspace_yaml_mtime(tmp_path, monkeypatch):
+    import vivarium_workbench.lib.module_import_doctor as doc
+    doc.clear_diagnostics_cache()
+    _write_ws(tmp_path, {"json": {}})
+    calls: list = []
+
+    def counting(module, ws_root, timeout):
+        calls.append(module)
+        return True, "importable"
+
+    monkeypatch.setattr(doc, "_probe", counting)
+    doc.diagnose_module_imports(tmp_path)
+    doc.diagnose_module_imports(tmp_path)   # second call served from cache
+    assert calls == ["json"]                # probed exactly once
+    doc.clear_diagnostics_cache()
