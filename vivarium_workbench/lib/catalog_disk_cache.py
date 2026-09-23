@@ -151,12 +151,52 @@ def _workspace_package_import_name(ws_root: Path) -> str | None:
     return None
 
 
+def _stable_content_signature(pairs: "list[tuple[str, Path]]") -> str:
+    """Copy-stable content hash of ``(relpath, file)`` pairs — hashes each file's
+    BYTES, never its mtime, so a file copied to a new path/time (e.g. an image
+    seed copied into a user workspace) yields the SAME signature. A missing or
+    unreadable file contributes a sentinel rather than raising."""
+    h = hashlib.sha1()
+    for rel, p in sorted(pairs, key=lambda t: t[0]):
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        try:
+            h.update(hashlib.sha1(p.read_bytes()).digest())
+        except OSError:
+            h.update(b"<unreadable>")
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def _workspace_source_signature(ws_root: Path, pkg_name: "str | None") -> str:
+    """Copy-stable content signature of the workspace's OWN package source under
+    ``ws_root`` — the part a per-user seed copy duplicates. Uses the symlink-safe
+    walk so it never descends into ``.venv``. When the package is NOT under
+    ``ws_root`` (e.g. installed into the image venv) it is already covered by the
+    installed-distribution signature, so this returns a stable marker instead."""
+    if not pkg_name:
+        return "ws_src=none"
+    pkg_dir = ws_root / pkg_name
+    if not pkg_dir.is_dir():
+        return "ws_src=not-in-ws"
+    try:
+        from vivarium_workbench.lib.workspace_walk import iter_workspace_files
+        pairs = [
+            (f.relative_to(pkg_dir).as_posix(), f)
+            for f in iter_workspace_files(pkg_dir, suffixes=(".py",))
+        ]
+    except Exception:  # noqa: BLE001
+        return "ws_src=error"
+    return "ws_src=" + _stable_content_signature(pairs)
+
+
 def catalog_signature(ws_root: Path | str) -> str:
     """A signature string identifying "what could change the catalog" for
     ``ws_root``: the installed process-library distributions + their source
     (reusing bigraph-schema's own discovery-index cache-key helpers) plus the
-    workspace's own package path, ``workspace.yaml`` mtime, and that
-    package's source signature.
+    workspace's own package path and the CONTENT hashes of its ``workspace.yaml``
+    and package source. Content (not mtime) so a cache baked at image-build time
+    still matches after the workspace is seed-copied into a user's pod.
 
     Best-effort: ANY failure returns :data:`DISABLED`, which callers treat as
     "never read or write the disk cache" — rebuilding live beats risking a
@@ -171,17 +211,21 @@ def catalog_signature(ws_root: Path | str) -> str:
         else:
             tokens.append(_fallback_installed_signature())
 
+        # CONTENT hashes (not mtimes) for the per-user-copied workspace files, so
+        # a cache baked at image-build time still HITS after the workspace is
+        # seed-copied into a user's pod: a copy changes mtimes but not content,
+        # and an mtime-keyed signature would silently miss (defeating the whole
+        # point of the pre-baked cache).
         ws_yaml = ws_root / "workspace.yaml"
         try:
-            mtime: int | None = ws_yaml.stat().st_mtime_ns
+            ws_yaml_hash = hashlib.sha1(ws_yaml.read_bytes()).hexdigest()
         except OSError:
-            mtime = None
-        tokens.append(f"ws_yaml_mtime={mtime}")
+            ws_yaml_hash = "none"
+        tokens.append(f"ws_yaml={ws_yaml_hash}")
 
         pkg_name = _workspace_package_import_name(ws_root)
         tokens.append(f"package_path={pkg_name}")
-        if pkg_name and _bgs_package_source_signature is not None:
-            tokens.append(_bgs_package_source_signature(pkg_name))
+        tokens.append(_workspace_source_signature(ws_root, pkg_name))
 
         return hashlib.sha1("\n".join(tokens).encode("utf-8")).hexdigest()
     except Exception:
