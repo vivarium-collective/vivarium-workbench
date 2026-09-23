@@ -158,7 +158,7 @@ def uninstall_unmanaged_or_404(ws_root: Path, name: str) -> tuple[dict, int]:
             except Exception as e:
                 log.append(f"rm external/{name} failed: {e}")
 
-    _registry.clear_registry_cache()
+    _registry.clear_registry_cache(ws_root)
 
     return {
         "ok": True,
@@ -308,14 +308,14 @@ def catalog_uninstall(ws_root: Path, body: dict) -> tuple[dict, int]:
     try:
         action()
     except Exception as inner:
-        _registry.clear_registry_cache()
+        _registry.clear_registry_cache(ws_root)
         return {"error": f"action failed: {inner}"}, 500
 
     log_excerpt = "\n".join(log_holder)[-500:]
     uninstall_mode = uninstall_mode_holder[0] if uninstall_mode_holder else mode
 
     # Invalidate registry cache.
-    _registry.clear_registry_cache()
+    _registry.clear_registry_cache(ws_root)
 
     return {
         "ok": True,

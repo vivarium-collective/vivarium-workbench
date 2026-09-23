@@ -130,7 +130,7 @@ class TestSystemDepsGate:
                                 cmd, 0, stdout="installed", stderr=""))
         _patch_yaml_io(monkeypatch)
         _patch_pyproject_noops(monkeypatch)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(
             tmp_path, {"name": "foo", "skip_system_deps_check": True})
@@ -165,7 +165,7 @@ class TestPyPiInstall:
         _patch_pyproject_noops(monkeypatch)
         cleared = {"n": 0}
         monkeypatch.setattr(registry, "clear_registry_cache",
-                            lambda: cleared.update(n=cleared["n"] + 1))
+                            lambda *a, **k: cleared.update(n=cleared["n"] + 1))
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -210,7 +210,7 @@ class TestGitSubmoduleInstall:
         _patch_pyproject_noops(monkeypatch)
         cleared = {"n": 0}
         monkeypatch.setattr(registry, "clear_registry_cache",
-                            lambda: cleared.update(n=cleared["n"] + 1))
+                            lambda *a, **k: cleared.update(n=cleared["n"] + 1))
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -261,7 +261,7 @@ class TestGitSubmoduleInstall:
             or subprocess.CompletedProcess(cmd, 0, stdout="editable install ok", stderr=""))
         _patch_yaml_io(monkeypatch)
         _patch_pyproject_noops(monkeypatch)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo", "full_repo": True})
         assert status == 200
@@ -293,7 +293,7 @@ class TestGitSubmoduleInstall:
         monkeypatch.setattr(views.subprocess, "run", _fake_run)
         _patch_yaml_io(monkeypatch)
         _patch_pyproject_noops(monkeypatch)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -322,7 +322,7 @@ class TestGitSubmoduleInstall:
             or subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr=""))
         _patch_yaml_io(monkeypatch)
         _patch_pyproject_noops(monkeypatch)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -350,7 +350,7 @@ class TestGitSubmoduleInstall:
             or subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr=""))
         _patch_yaml_io(monkeypatch)
         _patch_pyproject_noops(monkeypatch)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -394,7 +394,7 @@ class TestUvLockedDeps:
         monkeypatch.setattr(views.subprocess, "run", _fake_run)
         _patch_yaml_io(monkeypatch)
         _patch_pyproject_noops(monkeypatch)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -427,7 +427,7 @@ class TestUvLockedDeps:
             or subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr=""))
         _patch_yaml_io(monkeypatch)
         _patch_pyproject_noops(monkeypatch)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -526,7 +526,7 @@ class TestInstallFailure:
         monkeypatch.setattr(install_errors, "diagnose", lambda log: diag)
         cleared = {"n": 0}
         monkeypatch.setattr(registry, "clear_registry_cache",
-                            lambda: cleared.update(n=cleared["n"] + 1))
+                            lambda *a, **k: cleared.update(n=cleared["n"] + 1))
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 500
@@ -547,7 +547,7 @@ class TestInstallFailure:
             views.subprocess, "run",
             lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom"))
         monkeypatch.setattr(install_errors, "diagnose", lambda log: None)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 500
@@ -567,7 +567,7 @@ class TestInstallFailure:
             raise subprocess.TimeoutExpired(cmd, 600)
 
         monkeypatch.setattr(views.subprocess, "run", _raise)
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.catalog_install(tmp_path, {"name": "foo"})
         assert status == 500

@@ -180,7 +180,7 @@ class TestImportInstall:
                             lambda p: yaml.safe_load(Path(p).read_text()))
         monkeypatch.setattr(workspace_yaml, "save_workspace",
                             lambda p, d: Path(p).write_text(yaml.safe_dump(d, sort_keys=False)))
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.import_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -204,7 +204,7 @@ class TestImportInstall:
                             lambda p: yaml.safe_load(Path(p).read_text()))
         monkeypatch.setattr(workspace_yaml, "save_workspace",
                             lambda p, d: Path(p).write_text(yaml.safe_dump(d, sort_keys=False)))
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.import_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -304,7 +304,7 @@ class TestImportInstall:
         monkeypatch.setattr(workspace_yaml, "save_workspace",
                             lambda p, d: Path(p).write_text(yaml.safe_dump(d, sort_keys=False)))
         monkeypatch.setattr(registry, "clear_registry_cache",
-                            lambda: cleared.update(n=cleared["n"] + 1))
+                            lambda *a, **k: cleared.update(n=cleared["n"] + 1))
 
         body, status = views.import_install(tmp_path, {"name": "foo"})
         assert status == 200
@@ -333,7 +333,7 @@ class TestImportInstall:
                             lambda p: yaml.safe_load(Path(p).read_text()))
         monkeypatch.setattr(workspace_yaml, "save_workspace",
                             lambda p, d: Path(p).write_text(yaml.safe_dump(d, sort_keys=False)))
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.import_install(tmp_path, {"name": "foo", "target": "override"})
         assert status == 200
@@ -357,7 +357,7 @@ class TestImportInstall:
                             lambda p: yaml.safe_load(Path(p).read_text()))
         monkeypatch.setattr(workspace_yaml, "save_workspace",
                             lambda p, d: Path(p).write_text(yaml.safe_dump(d, sort_keys=False)))
-        monkeypatch.setattr(registry, "clear_registry_cache", lambda: None)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
 
         body, status = views.import_install(tmp_path, {"name": "foo"})
         assert status == 200

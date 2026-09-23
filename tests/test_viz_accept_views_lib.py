@@ -109,7 +109,7 @@ def spy_clear(monkeypatch):
     """Replace clear_registry_cache with a recorder; assert it is invoked."""
     calls = {"n": 0}
 
-    def _rec() -> None:
+    def _rec(*args, **kwargs) -> None:
         calls["n"] += 1
 
     monkeypatch.setattr(vav, "clear_registry_cache", _rec)

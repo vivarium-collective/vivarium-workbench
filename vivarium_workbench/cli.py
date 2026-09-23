@@ -524,6 +524,50 @@ def cmd_sync(args) -> int:
     return 1
 
 
+def cmd_warm_catalog(args: argparse.Namespace) -> int:
+    """Pre-build the persistent on-disk Registry + Composites catalog cache
+    for a workspace (``lib.catalog_disk_cache``) so a cold worker/pod never
+    pays the multi-minute "import every installed process package" walk on
+    its first request — run this as a Dockerfile ``RUN`` step at image-build
+    time.
+    """
+    ws = Path(args.workspace).resolve()
+    if not (ws / "workspace.yaml").is_file():
+        print(f"error: not a workspace (no workspace.yaml): {ws}", file=sys.stderr)
+        return 2
+
+    # Make the workspace's own package importable, same as `serve` does, so
+    # build_registry/composites_via_subprocess (and the framework's own
+    # source-signature walk) see the real workspace package.
+    ws_str = str(ws)
+    if ws_str not in sys.path:
+        sys.path.insert(0, ws_str)
+    from vivarium_workbench.lib._root import set_workspace_root
+    set_workspace_root(ws)
+
+    from vivarium_workbench.lib import catalog_disk_cache
+    from vivarium_workbench.lib.composites_query import composites_via_subprocess
+    from vivarium_workbench.lib.registry import build_registry
+
+    reg = build_registry(ws, bypass_cache=True)
+    comps = composites_via_subprocess(ws, bypass_cache=True)
+
+    n_processes = len((reg or {}).get("processes") or []) if isinstance(reg, dict) else 0
+    n_composites = len((comps or {}).get("composites") or []) if isinstance(comps, dict) else 0
+    cache_files = sorted(p.name for p in catalog_disk_cache.cache_dir(ws).glob("*.json"))
+
+    if isinstance(reg, dict) and reg.get("error"):
+        print(f"warning: registry build reported an error: {reg['error']}", file=sys.stderr)
+    if comps is None:
+        print("warning: composites build returned no result", file=sys.stderr)
+    elif isinstance(comps, dict) and comps.get("error"):
+        print(f"warning: composites build reported an error: {comps['error']}", file=sys.stderr)
+
+    print(f"warmed catalog: {n_processes} process(es), {n_composites} composite(s), "
+          f"{len(cache_files)} cache file(s) written -> {catalog_disk_cache.cache_dir(ws)}")
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Report on framework-dependency health; exit non-zero if any are stale."""
     from vivarium_workbench.lib import dep_doctor
@@ -1256,6 +1300,15 @@ def main(argv: list[str] | None = None) -> int:
     p_doctor = sub.add_parser(
         "doctor", help="Check framework-dependency health (stale process-bigraph / viva-superpowers)")
     p_doctor.set_defaults(func=cmd_doctor)
+
+    p_warm = sub.add_parser(
+        "warm-catalog",
+        help="Pre-build the Registry + Composites on-disk catalog cache for a "
+             "workspace (run at image-build time so a cold pod never pays the "
+             "multi-minute process-package import walk)",
+    )
+    p_warm.add_argument("--workspace", default=".", help="Path to workspace root (default: cwd)")
+    p_warm.set_defaults(func=cmd_warm_catalog)
 
     p_smoke = sub.add_parser(
         "smoke",

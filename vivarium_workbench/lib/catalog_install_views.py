@@ -411,7 +411,7 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     except Exception as inner:
         log_excerpt = log_holder[0] if log_holder else ""
         install_mode = install_mode_holder[0] if install_mode_holder else install_mode
-        _registry.clear_registry_cache()
+        _registry.clear_registry_cache(ws_root)
         resp: dict = {"error": f"action failed: {inner}"}
         # Live enriches the 500 only when log_excerpt is truthy.
         if log_excerpt:
@@ -427,7 +427,7 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     install_mode = install_mode_holder[0] if install_mode_holder else install_mode
 
     # Invalidate registry cache so next /api/registry call sees fresh data.
-    _registry.clear_registry_cache()
+    _registry.clear_registry_cache(ws_root)
 
     return {
         "ok": True,

@@ -240,6 +240,6 @@ def import_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     _workspace_yaml.save_workspace(ws_file, ws)
 
     # Invalidate registry cache so next /api/registry call sees fresh data.
-    _registry.clear_registry_cache()
+    _registry.clear_registry_cache(ws_root)
 
     return {"ok": True, "log": log_excerpt[-500:]}, 200

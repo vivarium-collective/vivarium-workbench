@@ -52,10 +52,11 @@ class _FakeCompleted:
 
 
 def _patch_no_clear(monkeypatch) -> dict:
-    """Track clear_registry_cache invocations."""
+    """Track clear_registry_cache invocations. Accepts the optional ws_root
+    positional arg the call sites now pass (for on-disk cache invalidation)."""
     calls = {"n": 0}
     monkeypatch.setattr(registry, "clear_registry_cache",
-                        lambda: calls.__setitem__("n", calls["n"] + 1))
+                        lambda *a, **k: calls.__setitem__("n", calls["n"] + 1))
     return calls
 
 
