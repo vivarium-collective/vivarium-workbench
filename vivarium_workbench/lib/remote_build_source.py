@@ -78,10 +78,17 @@ def build_cache_root() -> Path:
     jsonpath='{.spec.template.spec.volumes}'``, the same check #227's own
     kustomization.yaml comment used) before assuming this path is durable on any
     given deployment; this function has no way to know from inside the process.
+
+    Single-pod HeLx (RENCI) runs this process as a non-root in-pod subprocess
+    with no ``uid 0`` / ``/root`` — the ``Path.home() / ".pbg" / "build-cache"``
+    default above raises ``PermissionError`` there (the same class of bug
+    ``env_worker._default_provision_target`` already fixed for ``/scratch``).
+    Fall back to a writable temp dir when HOME isn't writable; see
+    ``home_or_tmp_default``.
     """
-    from vivarium_workbench.lib.env_compat import get_env
+    from vivarium_workbench.lib.env_compat import get_env, home_or_tmp_default
     env = get_env("BUILD_CACHE")
-    return Path(env) if env else Path.home() / ".pbg" / "build-cache"
+    return Path(env) if env else home_or_tmp_default(".pbg", "build-cache")
 
 
 def cache_dir_for(simulator_id: int, commit: str) -> Path:

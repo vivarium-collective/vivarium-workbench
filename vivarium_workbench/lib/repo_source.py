@@ -26,7 +26,7 @@ import hashlib
 import subprocess
 from pathlib import Path
 
-from vivarium_workbench.lib.env_compat import get_env
+from vivarium_workbench.lib.env_compat import get_env, home_or_tmp_default
 
 # Clone/fetch of a large repo can be minutes (a different cost class from a query,
 # §1) — a long, separate timeout. Config-overridable.
@@ -59,11 +59,13 @@ class StagingResult:
 
 def store_root() -> Path:
     """The repo store — bare mirrors + staging worktrees live under here.
-    Override with ``VIVARIUM_WORKBENCH_REPO_STORE``; defaults under the user cache."""
+    Override with ``VIVARIUM_WORKBENCH_REPO_STORE``; defaults under the user
+    cache, falling back to a writable temp dir when HOME isn't writable (e.g. a
+    non-root single-pod HeLx deployment — see ``home_or_tmp_default``)."""
     override = get_env("REPO_STORE")
     if override:
         return Path(override)
-    return Path.home() / ".cache" / "vivarium-workbench" / "repos"
+    return home_or_tmp_default(".cache", "vivarium-workbench", "repos")
 
 
 def _repo_key(repo: str) -> str:
