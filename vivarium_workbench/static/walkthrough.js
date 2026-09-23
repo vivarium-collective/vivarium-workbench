@@ -8474,7 +8474,7 @@
           'onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
           '<div style="display:flex;align-items:center;gap:8px">' +
             '<span style="width:7px;height:7px;border-radius:50%;background:' + m.color + '"></span>' +
-            '<a href="/studies/' + encodeURIComponent(slug) + '" onclick="event.stopPropagation()" style="text-decoration:none">' +
+            '<a href="' + (window.__BASE_PATH__ || '') + '/studies/' + encodeURIComponent(slug) + '" onclick="event.stopPropagation()" style="text-decoration:none">' +
               '<code style="font-size:0.92em;color:#475569">' + _esc(slug) + '</code></a>' +
             (title ? '<span style="font-size:0.86em;color:#334155">' + _esc(title) + '</span>' : '') +
             '<span style="margin-left:auto;color:#94a3b8;font-size:0.82em">' + _esc(m.label) + '</span>' +
@@ -13095,7 +13095,7 @@
           '<button class="btn-mini js-authoring" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
           vizFiles.map(function(v) {
             return '<h4 style="margin-bottom:4px">' + _esc(v.name) + '</h4>' +
-                   '<iframe class="viz-frame" src="/' + _esc(v.path) + '?ts=' + Date.now() + '"></iframe>';
+                   '<iframe class="viz-frame" src="' + (window.__BASE_PATH__ || '') + '/' + _esc(v.path) + '?ts=' + Date.now() + '"></iframe>';
           }).join('') :
           '<p class="empty-state">No visualizations declared in <code>spec.yaml</code> yet. ' +
             'Click <em>Add visualization</em> to scaffold one, or edit ' +
@@ -14680,9 +14680,9 @@
           return '<figure style="margin:0 0 14px 0">' +
             '<figcaption style="font-size:0.85em;color:#555;margin-bottom:4px">' +
               _esc(f.name) +
-              ' <small><a href="/' + _esc(f.html_path) + '" target="_blank">open ↗</a></small>' +
+              ' <small><a href="' + (window.__BASE_PATH__ || '') + '/' + _esc(f.html_path) + '" target="_blank">open ↗</a></small>' +
             '</figcaption>' +
-            '<iframe src="/' + _esc(f.html_path) + '" sandbox="allow-scripts" ' +
+            '<iframe src="' + (window.__BASE_PATH__ || '') + '/' + _esc(f.html_path) + '" sandbox="allow-scripts" ' +
               'style="width:100%;height:380px;border:1px solid #eee;background:#fff"></iframe>' +
           '</figure>';
         }).join('');

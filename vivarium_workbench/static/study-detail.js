@@ -1593,7 +1593,7 @@
     // Enforcement: the run opens in the Composite Explorer only when its
     // composite is a registered composite; otherwise we surface the gap.
     var explore = (runId && row.spec_id && row.composite_registered)
-      ? '<a class="action-btn" href="/?focus=composite-explore&id=' + encodeURIComponent(row.spec_id) + '&run_id=' + encodeURIComponent(runId) + '#composite-explore">↗ Open run in Composite Explorer</a>'
+      ? '<a class="action-btn" href="' + (window.__BASE_PATH__ || '') + '/?focus=composite-explore&id=' + encodeURIComponent(row.spec_id) + '&run_id=' + encodeURIComponent(runId) + '#composite-explore">↗ Open run in Composite Explorer</a>'
       : '<span style="color:#b91c1c;font-size:0.85em">⚠ ' + (row.spec_id
           ? 'composite <code>' + e(row.spec_id) + '</code> is not registered — cannot open in the Explorer'
           : 'no composite associated with this run') + '</span>';
@@ -1975,7 +1975,7 @@
     // study-rename handler (_post_study_rename_for_test) uses body key "study"
     api('POST', '/api/study-rename', {study: studyName(), new_name: n})
       .then(function(res) {
-        if (res.status === 200) window.location = '/studies/' + n;
+        if (res.status === 200) window.location = (window.__BASE_PATH__ || '') + '/studies/' + n;
         else alert(res.body.error || 'Rename failed');
       });
   });
@@ -2783,7 +2783,7 @@
     if (!btn.dataset.study) return;
     if (!confirm('Delete this study and all its runs?')) return;
     api('POST', '/api/investigation-delete', {name: studyName()})
-      .then(function() { window.location = '/studies'; });
+      .then(function() { window.location = (window.__BASE_PATH__ || '') + '/studies'; });
   });
 
   // --- Baseline ---
