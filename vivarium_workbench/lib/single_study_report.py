@@ -62,6 +62,18 @@ def _load_study_spec(ws_root: Path, study_slug: str) -> dict:
         # Legacy fallback: investigations/<slug>/spec.yaml (pre-studies layout)
         p = wp.investigations / study_slug / "spec.yaml"
     if not p.is_file():
+        # Federation fallback: a read-only study shipped by a linked
+        # workspace (installed under external/<repo>/) is surfaced by the
+        # federation-aware listing (federated_studies) as a card keyed by its
+        # bare name -- but this report loader used to look only under the
+        # host studies/investigations dirs, so a federated study's report
+        # 404'd. Resolve against the linked workspace instead. Mirrors
+        # report_views.build_iset_detail (#1164).
+        from vivarium_workbench.lib import federation as _fed  # noqa: PLC0415
+        _hit = _fed.find_federated_study(ws_root, study_slug)
+        if _hit is not None:
+            _dir, _lw, p = _hit
+    if not p.is_file():
         raise FileNotFoundError(
             f"study.yaml not found for {study_slug!r} (looked under studies/ and investigations/)"
         )
@@ -79,6 +91,15 @@ def _collect_viz_html(ws_root: Path, study_slug: str) -> list[dict]:
     without needing the dashboard server to be running.
     """
     viz_dir = WorkspacePaths.load(ws_root).studies / study_slug / "viz"
+    if not viz_dir.is_dir():
+        # Federation fallback -- see _load_study_spec. Best-effort: a
+        # malformed/absent linked workspace just leaves viz_dir missing and
+        # this returns [] as before.
+        from vivarium_workbench.lib import federation as _fed  # noqa: PLC0415
+        _hit = _fed.find_federated_study(ws_root, study_slug)
+        if _hit is not None:
+            _dir, _lw, _spec_path = _hit
+            viz_dir = _dir / "viz"
     if not viz_dir.is_dir():
         return []
     entries = []

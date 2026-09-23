@@ -25,10 +25,36 @@ def grade_study(ws_root: Path, slug: str) -> tuple[dict, int]:
     ws_root = Path(ws_root)
     study_dir = WorkspacePaths.load(ws_root).studies / slug
     spec_path = study_dir / "study.yaml"
+    read_only = False
     if not spec_path.exists():
-        return {"error": f"study not found: {slug}"}, 404
+        # Federation fallback: a read-only study shipped by a linked
+        # workspace (installed under external/<repo>/) is surfaced by the
+        # federation-aware listing (federated_studies) as a card keyed by its
+        # bare name -- but this grader used to look only under the host
+        # studies/ dir, so "Run tests" 404'd on a federated study. Resolve
+        # the spec against the linked workspace instead -- mirrors
+        # report_views.build_iset_detail (#1164). Below, grading WRITES
+        # runs[].outcomes / the behavior-test card back to study.yaml, which
+        # must never touch a linked workspace's files, so a federated study
+        # is graded read-only: return its already-persisted rollup rather
+        # than (re)computing + persisting a new one.
+        from vivarium_workbench.lib import federation as _fed  # noqa: PLC0415
+        _hit = _fed.find_federated_study(ws_root, slug)
+        if _hit is None:
+            return {"error": f"study not found: {slug}"}, 404
+        study_dir, _lw, spec_path = _hit
+        read_only = True
 
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+    if read_only:
+        rollup = _rollup(spec)
+        return {
+            "graded": bool(rollup.get("total")),
+            "outcome_rollup": rollup,
+            "read_only": True,
+            "origin_repo": _lw.repo,
+        }, 200
+
     run = canonical_run(spec)
     if run is None:
         # No simulation run. Grade store-less ONLY when every declared test can

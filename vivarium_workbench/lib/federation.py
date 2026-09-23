@@ -73,6 +73,42 @@ def _iter_study_specs(lw: LinkedWorkspace):
         yield name, spec
 
 
+def find_federated_study(ws_root: Path, name: str):
+    """Locate a read-only study named ``name`` in a linked workspace.
+
+    Returns ``(study_dir, LinkedWorkspace, spec_path)`` or ``None``. Matches
+    on the study directory name OR the spec's ``name`` field -- the same bare
+    name :func:`federated_studies` renders its card by. ``name`` may also be
+    the qualified id ``<repo>::<name>`` (split on ``::`` and matched only
+    within that repo). Shared by every STUDY read builder that needs to fall
+    back off a host-path miss (study detail, report, grade, download) --
+    mirrors ``report_views._federated_investigation_detail`` (#1164).
+    Best-effort: a malformed linked workspace is skipped, never raising.
+    """
+    ws_root = Path(ws_root)
+    repo_filter, bare = (name.split("::", 1) if "::" in name else (None, name))
+    for lw in linked_workspaces(ws_root):
+        if repo_filter is not None and lw.repo != repo_filter:
+            continue
+        try:
+            sdir = lw.layout.studies
+            if not sdir.is_dir():
+                continue
+            for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
+                f = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
+                if not f.is_file():
+                    continue
+                try:
+                    spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+                except Exception:
+                    continue
+                if d.name == bare or spec.get("name") == bare:
+                    return d, lw, f
+        except Exception:
+            continue
+    return None
+
+
 def federated_studies(ws_root: Path) -> list[dict]:
     out: list[dict] = []
     for lw in linked_workspaces(ws_root):
