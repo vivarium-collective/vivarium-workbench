@@ -160,7 +160,7 @@ def _evaluator_test_runner(
     (code path carries ``result``; the agent / needs_rerun buckets carry no
     ``result`` and normalize to ``SKIP``). Raises :class:`StoreUnresolved`
     when the run has no openable emitter store, and ``ImportError`` when the
-    optional ``[evaluator]`` extra (``pbg_emitters.RunReader``) is absent — the
+    optional ``[evaluator]`` extra (``viva_emitters.RunReader``) is absent — the
     orchestrator turns both into a clean ``status`` rather than a crash.
     """
     from viva_superpowers.study_evaluator import _resolve_run_store, evaluate_study  # noqa: PLC0415

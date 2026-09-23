@@ -197,7 +197,7 @@ def test_emit_paths_from_state_recovers_nested_emitter_wires():
     rebrand-proof source that needs no generator registry. Internal '_'-ports skip."""
     from vivarium_workbench.lib.run_runner import _emit_paths_from_state
     state = {"global_time": 0.0, "agents": {"0": {"emitter": {
-        "address": "local:pbg_emitters.parquet_emitter.ParquetEmitter",
+        "address": "local:viva_emitters.parquet_emitter.ParquetEmitter",
         "inputs": {"global_time": ["global_time"], "bulk": ["bulk"],
                    "listeners": ["listeners"], "_layer_in_7": ["_loom"]}}}}}
     assert _emit_paths_from_state(state) == ["global_time", "bulk", "listeners"]

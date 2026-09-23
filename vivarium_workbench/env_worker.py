@@ -99,7 +99,7 @@ _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
-    "viva_superpowers", "vivarium_workbench", "pbg_emitters",
+    "viva_superpowers", "vivarium_workbench",
 }
 
 

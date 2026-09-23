@@ -63,9 +63,9 @@ _GENERIC_LEAF = {"count", "id", "value"}
 # (``_run_xarray`` / ``run_with_emitter``) — never fabricated, just named
 # after where the dashboard's own write path imports each emitter from.
 _EMITTER_CLASS_MODULE = {
-    "xarray": ("XArrayEmitter", "pbg_emitters.xarray_emitter"),
-    "sqlite": ("SQLiteEmitter", "pbg_emitters.sqlite_emitter"),
-    "parquet": ("ParquetEmitter", "pbg_emitters.parquet_emitter"),
+    "xarray": ("XArrayEmitter", "viva_emitters.xarray_emitter"),
+    "sqlite": ("SQLiteEmitter", "viva_emitters.sqlite_emitter"),
+    "parquet": ("ParquetEmitter", "viva_emitters.parquet_emitter"),
     "ram": ("RAMEmitter", "process_bigraph.emitter"),
 }
 

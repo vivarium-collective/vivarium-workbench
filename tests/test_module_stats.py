@@ -49,7 +49,7 @@ _FAKE_REGISTRY = {
         # a module card.
         {"name": "Emitter", "kind": "process", "address": "process_bigraph.emitter.Emitter"},
         # Non-process kinds must be excluded from the count.
-        {"name": "ParquetEmitter", "kind": "emitter", "address": "pbg_emitters.parquet.ParquetEmitter"},
+        {"name": "ParquetEmitter", "kind": "emitter", "address": "viva_emitters.parquet.ParquetEmitter"},
         {"name": "SomeChart", "kind": "visualization", "address": "viva_copasi.viz.SomeChart"},
         {"name": "AType", "kind": "type", "address": "viva_ketchup.types.AType"},
     ]

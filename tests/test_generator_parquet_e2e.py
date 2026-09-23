@@ -20,7 +20,7 @@ which is precisely why the bug was invisible.
 Uses a synthetic ``GeneratorEntry`` rather than v2ecoli's baseline so it runs in
 CI and in a clean checkout (v2ecoli is a workspace repo, not a dependency).
 Needs the parquet reader/writer stack, which lives in the optional ``test``
-extra plus ``pbg-emitters[parquet]`` — skipped, not failed, when absent.
+extra plus ``viva-emitters[parquet]`` — skipped, not failed, when absent.
 """
 from pathlib import Path
 
@@ -34,12 +34,12 @@ SPEC_ID = "fake.composites.declares_parquet"
 def _parquet_emitter_cls():
     """The ParquetEmitter class, or skip if its optional extra isn't installed."""
     try:
-        from pbg_emitters.parquet_emitter import ParquetEmitter
+        from viva_emitters.parquet_emitter import ParquetEmitter
     except ImportError:  # process-bigraph < 1.4.17 kept it here
         try:
             from process_bigraph.emitter import ParquetEmitter
         except ImportError:
-            pytest.skip("pbg-emitters[parquet] not installed")
+            pytest.skip("viva-emitters[parquet] not installed")
     return ParquetEmitter
 
 

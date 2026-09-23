@@ -49,7 +49,7 @@ def iter_zarr_stores(study_dir: Path | str) -> list[Path]:
 def detect_kind(store_path: Path | str | None) -> str | None:
     """Emitter/store kind from a store path: ``"zarr" | "parquet" | "sqlite" | None``.
 
-    Uses pbg-emitters' ``EmitterContract.output_kind`` vocabulary. ``None`` means
+    Uses viva-emitters' ``EmitterContract.output_kind`` vocabulary. ``None`` means
     "unknown / the run's data lives in the ``runs.db`` SQLite" — callers fall back
     to the db path. This is the single place the kind is inferred from a path, so
     the substring heuristic lives here rather than being re-implemented per view.

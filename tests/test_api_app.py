@@ -760,7 +760,7 @@ def test_registry_typed_passthrough(client, monkeypatch):
             },
             {
                 "name": "ParquetEmitter",
-                "address": "pbg_emitters.parquet.ParquetEmitter",
+                "address": "viva_emitters.parquet.ParquetEmitter",
                 "kind": "emitter",
                 "schema_preview": "",
                 "aliases": [],
