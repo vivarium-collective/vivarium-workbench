@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import json
 import os
 import socket
@@ -3325,11 +3326,44 @@ def _pip_target_for_spec(spec: dict) -> "str | None":
     return None
 
 
+def _import_name_for_spec(spec: dict) -> "str | None":
+    """The top-level importable module name for a spec — for a cheap "is this
+    already importable in THIS worker?" probe. Prefer an explicit ``package``;
+    else normalize a pypi/name (``viva-munk`` -> ``viva_munk``). Best-effort:
+    a wrong guess just means we don't skip and fall through to installing."""
+    pkg = spec.get("package")
+    if pkg:
+        return str(pkg)
+    nm = spec.get("pypi_name") or spec.get("name")
+    return str(nm).replace("-", "_") if nm else None
+
+
+def _provision_cache_dir() -> "str | None":
+    """A pip/uv download cache dir so a re-provision (pod restart / fresh worker)
+    reuses wheels instead of re-downloading. Honors an existing
+    ``UV_CACHE_DIR``/``PIP_CACHE_DIR`` (a deployment can point those at the PVC to
+    survive restarts); otherwise a dir alongside the provision target."""
+    for env in ("UV_CACHE_DIR", "PIP_CACHE_DIR"):
+        v = os.environ.get(env)
+        if v:
+            return v
+    try:
+        return os.path.join(os.path.dirname(_provision_target()), "pkg-cache")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = None,
                        timeout: float = 600.0) -> "list[dict]":
     """pip-install each spec into ``target`` and make them importable.
 
     Returns one ``{name, ok, detail}`` per spec. Never raises.
+
+    A spec that is ALREADY importable in this worker is skipped (no reinstall):
+    on single-pod HeLx the worker runs the workspace venv the Catalog install
+    already populated, so a ``pip --target`` reinstall would re-download and even
+    re-clone a package that is already present. A shared pip/uv cache dir makes
+    any real install reuse wheels across restarts.
     """
     target = target or _provision_target()
     results: list[dict] = []
@@ -3338,8 +3372,28 @@ def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = Non
     except Exception as e:  # noqa: BLE001
         return [{"name": (s.get("name") or "?"), "ok": False,
                  "detail": f"target unusable: {type(e).__name__}: {e}"} for s in (specs or [])]
+    cache_dir = _provision_cache_dir()
+    if cache_dir:
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+        except Exception:  # noqa: BLE001
+            cache_dir = None
+    sub_env = dict(os.environ)
+    if cache_dir:
+        sub_env.setdefault("PIP_CACHE_DIR", cache_dir)
+        sub_env.setdefault("UV_CACHE_DIR", cache_dir)
     for spec in specs or []:
         name = spec.get("name") or spec.get("package") or "?"
+        imp = _import_name_for_spec(spec)
+        if imp:
+            try:
+                if importlib.util.find_spec(imp) is not None:
+                    # Already importable here — no reinstall needed; the
+                    # install_modules handler still re-scans discovery.
+                    results.append({"name": name, "ok": True, "detail": "already importable"})
+                    continue
+            except Exception:  # noqa: BLE001 — a half-broken pkg can raise; install it
+                pass
         pkg = _pip_target_for_spec(spec)
         if not pkg:
             results.append({"name": name, "ok": False, "detail": "no installable form (skipped)"})
@@ -3347,7 +3401,7 @@ def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = Non
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "--target", target, pkg],
-                capture_output=True, text=True, timeout=timeout,
+                capture_output=True, text=True, timeout=timeout, env=sub_env,
             )
         except subprocess.TimeoutExpired:
             results.append({"name": name, "ok": False, "detail": f"install timed out after {timeout:.0f}s"})

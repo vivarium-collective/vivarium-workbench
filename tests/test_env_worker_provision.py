@@ -50,6 +50,9 @@ def test_provision_installs_and_prepends_syspath(tmp_path, monkeypatch):
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
     monkeypatch.setattr(env_worker.subprocess, "run", run)
 
+    # Force the install path (Q1 would otherwise skip a module already
+    # importable in this dev venv).
+    monkeypatch.setattr(env_worker.importlib.util, "find_spec", lambda name: None)
     target = str(tmp_path / "site")
     res = env_worker._provision_modules(
         [{"name": "viva-munk", "mode": "pypi", "pypi_name": "viva-munk"}], target=target)
@@ -96,6 +99,7 @@ def test_provision_timeout_is_reported(tmp_path, monkeypatch):
 
 def test_install_modules_rpc(tmp_path, monkeypatch):
     monkeypatch.setattr(env_worker.subprocess, "run", _fake_run(returncode=0))
+    monkeypatch.setattr(env_worker.importlib.util, "find_spec", lambda name: None)
     monkeypatch.setenv("VIVARIUM_ENV_WORKER_SITE", str(tmp_path / "site"))
     out = env_worker._handle("install_modules",
                              {"modules": [{"name": "viva-munk", "mode": "pypi",
@@ -158,3 +162,62 @@ def test_install_modules_empty_does_not_reset_discovery(monkeypatch):
     monkeypatch.setattr(env_worker, "_DISCOVERED", True)
     env_worker._handle("install_modules", {"modules": []})
     assert env_worker._DISCOVERED is True
+
+
+# ---- Q1: skip reinstall of an already-importable module (single-pod) --------
+
+def test_provision_skips_already_importable(tmp_path, monkeypatch):
+    # On single-pod the worker runs the workspace venv the Catalog install
+    # populated; a module already importable must NOT be reinstalled (that would
+    # re-download / re-clone something already present).
+    calls = []
+    def run(cmd, **kw):
+        calls.append(cmd)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(env_worker.subprocess, "run", run)
+    monkeypatch.setattr(env_worker.importlib.util, "find_spec",
+                        lambda name: object() if name == "viva_munk" else None)
+    res = env_worker._provision_modules(
+        [{"name": "viva-munk", "mode": "pypi", "pypi_name": "viva-munk", "package": "viva_munk"}],
+        target=str(tmp_path / "site"))
+    assert res == [{"name": "viva-munk", "ok": True, "detail": "already importable"}]
+    assert calls == []  # no pip subprocess ran
+
+
+def test_provision_installs_when_not_importable(tmp_path, monkeypatch):
+    calls = []
+    def run(cmd, **kw):
+        calls.append(cmd)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(env_worker.subprocess, "run", run)
+    monkeypatch.setattr(env_worker.importlib.util, "find_spec", lambda name: None)
+    res = env_worker._provision_modules(
+        [{"name": "nope", "mode": "pypi", "pypi_name": "nope", "package": "nope_pkg"}],
+        target=str(tmp_path / "site"))
+    assert res[0]["ok"] is True and res[0]["detail"] == "installed"
+    assert calls and "--target" in calls[0]
+
+
+def test_import_name_for_spec():
+    assert env_worker._import_name_for_spec({"package": "viva_munk"}) == "viva_munk"
+    assert env_worker._import_name_for_spec({"pypi_name": "viva-munk"}) == "viva_munk"
+    assert env_worker._import_name_for_spec({"name": "spatio-flux"}) == "spatio_flux"
+    assert env_worker._import_name_for_spec({}) is None
+
+
+# ---- Q3: a persistent pip/uv download cache is passed to the install --------
+
+def test_provision_passes_cache_env(tmp_path, monkeypatch):
+    captured = {}
+    def run(cmd, **kw):
+        captured["env"] = kw.get("env")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(env_worker.subprocess, "run", run)
+    monkeypatch.setattr(env_worker.importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uvc"))
+    env_worker._provision_modules(
+        [{"name": "x", "mode": "pypi", "pypi_name": "x", "package": "x_absent"}],
+        target=str(tmp_path / "site"))
+    assert captured["env"] is not None
+    # Honors a deployment-set UV_CACHE_DIR and mirrors it to PIP_CACHE_DIR.
+    assert captured["env"].get("PIP_CACHE_DIR") == str(tmp_path / "uvc")

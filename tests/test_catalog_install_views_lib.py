@@ -299,6 +299,9 @@ class TestGitSubmoduleInstall:
         assert status == 200
         # Two subprocess calls: git submodule add, then pip install -e.
         assert cmds[0][:3] == ["git", "submodule", "add"]
+        # Q2: the submodule clone is shallow (branch tip only) to avoid the
+        # full-history clone that timed out on large repos.
+        assert cmds[0][3:5] == ["--depth", "1"]
         assert cmds[1][:3] == [str(tmp_path / ".venv" / "bin" / "pip"), "install", "-e"]
 
     def test_git_runs_submodule_add_when_dir_is_empty(self, tmp_path, monkeypatch):
@@ -575,3 +578,22 @@ class TestInstallFailure:
             "error": "action failed: pip install from PyPI timed out after 600s "
             "(raise VIVARIUM_WORKBENCH_INSTALL_TIMEOUT to allow longer)"
         }
+
+
+# ---- Q3: install subprocesses carry a persistent pip/uv download cache ------
+
+def test_install_cache_env_sets_cache_defaults(monkeypatch):
+    from vivarium_workbench.lib.catalog_install_views import _install_cache_env
+    monkeypatch.delenv("UV_CACHE_DIR", raising=False)
+    monkeypatch.delenv("PIP_CACHE_DIR", raising=False)
+    env = _install_cache_env()
+    assert "vivarium-workbench" in env["UV_CACHE_DIR"]
+    assert env["PIP_CACHE_DIR"] == env["UV_CACHE_DIR"]
+
+
+def test_install_cache_env_honors_deployment_override(monkeypatch):
+    from vivarium_workbench.lib.catalog_install_views import _install_cache_env
+    monkeypatch.setenv("UV_CACHE_DIR", "/pvc/uv-cache")
+    env = _install_cache_env()
+    # A deployment pointing the cache at the PVC (to survive restarts) wins.
+    assert env["UV_CACHE_DIR"] == "/pvc/uv-cache"
