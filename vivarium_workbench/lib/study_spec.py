@@ -667,6 +667,19 @@ def discover_viz_html_files(ws_root: Path, name: str) -> list[dict]:
 # The full run-merging study-detail loader
 # ---------------------------------------------------------------------------
 
+def _federated_study_resolution(ws_root: Path, name: str):
+    """Locate a read-only study named ``name`` in a linked workspace.
+
+    Returns ``(study_dir, LinkedWorkspace, spec_path)`` or ``None``. Thin
+    delegate to :func:`~vivarium_workbench.lib.federation.find_federated_study`
+    (the DETAIL route's SLUG_RE rejects ``::``, so in practice click-through
+    always passes the bare name -- mirrors
+    ``report_views._federated_investigation_detail``, #1164).
+    """
+    from vivarium_workbench.lib import federation as _fed  # noqa: PLC0415
+    return _fed.find_federated_study(ws_root, name)
+
+
 def _card_html_stub(html_path, verdict) -> bool:
     """Whether a report card's HTML is an unrendered stub (Phase 2c).
 
@@ -710,9 +723,35 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         collect_study_feedback,
         study_acceptance_criterion,
     )
-    spec_path = study_spec_path(ws_root, name)
+    read_only = False
+    origin_repo: Optional[str] = None
+    # `resolved_root` is the workspace root that `resolved_dir` (and any
+    # per-run artifact under its `.pbg/`) actually lives under -- ws_root for
+    # a native study, the LINKED workspace's root for a federated one.
+    resolved_root = ws_root
+    resolved_dir = study_dir(ws_root, name)
+    spec_path = study_spec_file(resolved_dir)
     if not spec_path.is_file():
-        return None
+        # Federation fallback. A read-only study shipped by a linked
+        # workspace (installed under external/<repo>/) is surfaced by the
+        # federation-aware listing (federated_studies) as a card keyed by its
+        # bare name -- but this DETAIL loader used to look only under the
+        # host studies/investigations dirs, so clicking that card 404'd
+        # ("shows in the list, fails to load"). Resolve the spec against the
+        # linked workspace instead; `resolved_dir`/`resolved_root` below are
+        # reused for every other study_dir()-relative lookup in this function
+        # (viz, report-card urls, runs.db-adjacent files) so they resolve too.
+        # Host-oriented run/feedback enrichment further down still reads
+        # `ws_root` and harmlessly finds nothing for a read-only federated
+        # study (no host runs), which is the correct read-only view (mirrors
+        # report_views.build_iset_detail, #1164).
+        _fed = _federated_study_resolution(ws_root, name)
+        if _fed is None:
+            return None
+        resolved_dir, _lw, spec_path = _fed
+        resolved_root = _lw.root
+        read_only = True
+        origin_repo = _lw.repo
     spec = load_spec(spec_path)
     if isinstance(spec, dict):
         # Normalized execution interface (composite/config/inputs/outputs/
@@ -954,7 +993,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # Resolve via study_dir() so NESTED investigations/<inv>/studies/<slug>/
         # layouts (e.g. the v2ecoli↔vEcoli comparison) are found too — the flat
         # ws_root/studies/<name> path misses them and left report_card_urls empty.
-        rc_dir = study_dir(ws_root, name) / "viz" / "report_card"
+        rc_dir = resolved_dir / "viz" / "report_card"
         rc_urls: dict = {}
         if rc_dir.is_dir():
             for html in sorted(rc_dir.glob("*.html")):
@@ -977,7 +1016,17 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                 # a computed verdict wins, else flag tiny files so the frontend
                 # renders the verdict table rather than an empty iframe.
                 html_stub = _card_html_stub(html, verdict)
-                rc_urls[card] = {"url": "/" + html.relative_to(ws_root).as_posix(),
+                # ``relative_to(ws_root)`` normally succeeds even for federated
+                # content, since a linked workspace lives under
+                # ws_root/external/<repo>/ -- but a workspace editable-installed
+                # to a repo root elsewhere (a symlink under external/) can
+                # resolve outside ws_root's tree; skip that url rather than
+                # break the whole detail response.
+                try:
+                    _url = "/" + html.relative_to(ws_root).as_posix()
+                except ValueError:
+                    continue
+                rc_urls[card] = {"url": _url,
                                  "verdict": verdict, "groups": groups,
                                  "html_stub": html_stub}
         spec["report_card_urls"] = rc_urls
@@ -992,9 +1041,9 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # (first run) -> leave spec["test_diff"] unset.
         try:
             from vivarium_workbench.lib.study_charts import latest_run_row
-            _latest = latest_run_row(study_dir(ws_root, name) / "runs.db")
+            _latest = latest_run_row(resolved_dir / "runs.db")
             if _latest and _latest.get("run_id"):
-                _tdf = (WorkspacePaths.load(ws_root).pbg / "runs"
+                _tdf = (WorkspacePaths.load(resolved_root).pbg / "runs"
                         / _latest["run_id"] / "test_diff.json")
                 if _tdf.is_file():
                     spec["test_diff"] = _json.loads(_tdf.read_text(encoding="utf-8"))
@@ -1008,9 +1057,9 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # fail; soft/drift warn; directional never gates. Best-effort.
         try:
             from vivarium_workbench.lib.study_charts import latest_run_row
-            _latest = latest_run_row(study_dir(ws_root, name) / "runs.db")
+            _latest = latest_run_row(resolved_dir / "runs.db")
             if _latest and _latest.get("run_id"):
-                _rf = (WorkspacePaths.load(ws_root).pbg / "runs"
+                _rf = (WorkspacePaths.load(resolved_root).pbg / "runs"
                        / _latest["run_id"] / "report.json")
                 if _rf.is_file():
                     _rep = _json.loads(_rf.read_text(encoding="utf-8"))
@@ -1043,9 +1092,12 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # Interactive plotly comparison (v2ecoli vs vEcoli overlays), rendered
         # into <study>/viz/comparison_plotly.html — surfaced above the scorecards
         # in the Report Cards tab. Absent for studies that don't have one.
-        _plotly = study_dir(ws_root, name) / "viz" / "comparison_plotly.html"
+        _plotly = resolved_dir / "viz" / "comparison_plotly.html"
         if _plotly.is_file():
-            spec["comparison_plotly_url"] = "/" + _plotly.relative_to(ws_root).as_posix()
+            try:
+                spec["comparison_plotly_url"] = "/" + _plotly.relative_to(ws_root).as_posix()
+            except ValueError:
+                pass
     if isinstance(spec, dict):
         # Single source of truth for per-test outcomes. The template (per-row
         # pills), the Tests-tab JS summary, and the Conclusions rollup all used to
@@ -1068,7 +1120,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
     # the live recompute entirely when no card has been persisted yet, or on
     # any read/parse failure — this must never break the study-detail render.
     try:
-        _cv_path = study_dir(ws_root, name) / "viz" / "report_card" / "conclusion.verdict.json"
+        _cv_path = resolved_dir / "viz" / "report_card" / "conclusion.verdict.json"
         if _cv_path.is_file():
             _persisted = _json.loads(_cv_path.read_text(encoding="utf-8"))
             # G8: the file's mere existence as a parsed dict IS the freeze
@@ -1105,6 +1157,9 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                     spec["derived"]["conclusion_verdicts"] = _merged
     except Exception:  # noqa: BLE001 — render must never break on a bad card
         pass
+    if isinstance(spec, dict):
+        spec["read_only"] = read_only
+        spec["origin_repo"] = origin_repo
     return spec
 
 

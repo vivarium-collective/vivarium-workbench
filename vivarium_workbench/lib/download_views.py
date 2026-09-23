@@ -77,6 +77,20 @@ _DATA_SOURCE_MIME: dict[str, tuple[str, bool]] = {
 # study-export
 # ---------------------------------------------------------------------------
 
+def _zip_dir(src: Path, arc_root: Optional[Path] = None) -> bytes:
+    """Zip *src* to bytes, archiving paths relative to *arc_root* (or
+    ``src.parent`` when omitted -- matches the original ``study_export_zip``
+    layout, where the zip's top-level entry is ``<name>/...``).
+    """
+    arc_root = arc_root or src.parent
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in src.rglob("*"):
+            if path.is_file():
+                zf.write(path, path.relative_to(arc_root))
+    return buf.getvalue()
+
+
 def study_export_zip(ws_root: Path, name: str) -> bytes:
     """Zip ``studies/<name>/`` to bytes and return the zip content.
 
@@ -84,12 +98,7 @@ def study_export_zip(ws_root: Path, name: str) -> bytes:
     re-export shim for its existing call-sites / tests).
     """
     src = ws_root / "studies" / name
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in src.rglob("*"):
-            if path.is_file():
-                zf.write(path, path.relative_to(src.parent))
-    return buf.getvalue()
+    return _zip_dir(src)
 
 
 def build_study_export(ws_root: Path, name: str) -> tuple[bytes, str, str]:
@@ -100,7 +109,8 @@ def build_study_export(ws_root: Path, name: str) -> tuple[bytes, str, str]:
 
     Raises ``DownloadError``:
     - 400 ``{"error": "missing study"}`` when ``name`` is empty.
-    - 404 ``{"error": "study not found"}`` when the study dir does not exist.
+    - 404 ``{"error": "study not found"}`` when the study dir does not exist
+      on the host AND in no linked workspace.
 
     Mirrors ``server.Handler._get_study_export``.
     """
@@ -109,8 +119,21 @@ def build_study_export(ws_root: Path, name: str) -> tuple[bytes, str, str]:
         raise DownloadError({"error": "missing study"}, 400)
     src = WorkspacePaths.load(ws_root).studies / name
     if not src.is_dir():
+        # Federation fallback: a read-only study shipped by a linked
+        # workspace (installed under external/<repo>/) is surfaced by the
+        # federation-aware listing (federated_studies) as a card keyed by its
+        # bare name -- but this export used to look only under the host
+        # studies/ dir, 404-ing on a federated study's download. Zip its
+        # content dir from the linked workspace instead (read-only -- this
+        # only reads bytes into memory, never writes). Mirrors
+        # report_views.build_iset_detail (#1164).
+        from vivarium_workbench.lib import federation as _fed  # noqa: PLC0415
+        _hit = _fed.find_federated_study(ws_root, name)
+        if _hit is not None:
+            src, _lw, _spec_path = _hit
+    if not src.is_dir():
         raise DownloadError({"error": "study not found"}, 404)
-    data = study_export_zip(ws_root, name)
+    data = _zip_dir(src)
     return data, "application/zip", f"{name}.zip"
 
 
