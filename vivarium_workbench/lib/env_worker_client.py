@@ -127,15 +127,30 @@ class EnvWorker:
         return self
 
     # -- protocol -----------------------------------------------------------
-    def call(self, method: str, params: dict | None = None) -> Any:
+    def call(self, method: str, params: dict | None = None,
+             *, timeout: float | None = None) -> Any:
         """Send one request, return its ``result`` (or raise on error). Serial:
-        holds the lock so the next frame read is unambiguously this call's reply."""
+        holds the lock so the next frame read is unambiguously this call's reply.
+
+        ``timeout`` overrides the socket read timeout for THIS call only (restored
+        after), so a heavy catalog build (minutes) is not cut by the interactive
+        default. The socket timeout only bounds a *live but slow* worker; a dead
+        worker closes the socket and surfaces immediately regardless."""
         with self._lock:
-            self._id += 1
-            rid = self._id
-            self._send({"jsonrpc": "2.0", "id": rid, "method": method,
-                        "params": params or {}})
-            resp = self._recv()
+            sock = self._sock
+            prev_timeout = None
+            if timeout is not None and sock is not None:
+                prev_timeout = sock.gettimeout()
+                sock.settimeout(timeout)
+            try:
+                self._id += 1
+                rid = self._id
+                self._send({"jsonrpc": "2.0", "id": rid, "method": method,
+                            "params": params or {}})
+                resp = self._recv()
+            finally:
+                if prev_timeout is not None and sock is not None:
+                    sock.settimeout(prev_timeout)
             if resp is None:
                 raise EnvWorkerUnavailable("worker closed the connection")
             if resp.get("id") != rid:

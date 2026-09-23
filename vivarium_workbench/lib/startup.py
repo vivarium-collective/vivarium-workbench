@@ -154,22 +154,48 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     except Exception as e:  # noqa: BLE001
         print(f"warning: source-provenance backfill failed: {e}", file=sys.stderr)
 
-    # Warm the composite-discovery cache (~8s cold: a fresh subprocess importing
-    # the whole workspace package) in a background thread so the FIRST user
-    # navigation isn't stuck paying it — which, fired alongside other boot
-    # fetches, saturated the browser connection pool and stalled tabs like
-    # Sources ("Loading…"). Best-effort; daemon thread, never blocks boot.
+    # Pre-warm AND keep warm the heavy catalog caches OFF the request path.
+    #
+    # On a large venv (RENCI: ~99 installed process packages) the first
+    # registry_catalog / composites_full call in a fresh env-worker forces the
+    # full process-module import walk — minutes, not the ~8s of a small workspace.
+    # Paid inline on a request that a 180s ingress fronts, that is a guaranteed 504
+    # (the Processes/Composites tabs come back empty). Two things fix it here:
+    #   1. Pre-warm: the first pass below pays that cold build in THIS daemon
+    #      thread, so the first real request hits an already-warm worker (~ms).
+    #   2. Keep warm: looping at an interval below the pool's idle-TTL keeps the
+    #      pooled worker alive, so a later request never finds a cold worker and
+    #      re-pays the walk. (The pool now gives catalog-class methods a long
+    #      socket timeout — env_worker_routing.is_catalog_class — so the cold build
+    #      completes instead of being killed at 60s and respawned cold.)
+    # Best-effort; daemon thread, never blocks boot.
     try:
         import threading
+        import time as _time
 
-        def _warm_read_caches():
+        def _keep_warm():
             try:
-                from vivarium_workbench.lib.composites_query import composites_via_subprocess
-                composites_via_subprocess(workspace)
-            except Exception:
-                pass
+                interval = int(os.environ.get("VIVARIUM_WORKBENCH_KEEP_WARM_INTERVAL", "600"))
+            except (TypeError, ValueError):
+                interval = 600
+            while True:
+                # bypass_cache=True forces a real worker call each cycle so the
+                # pooled worker is kept alive (not just the HTTP cache refreshed).
+                try:
+                    from vivarium_workbench.lib.registry import build_registry
+                    build_registry(workspace, bypass_cache=True)
+                except Exception:
+                    pass
+                try:
+                    from vivarium_workbench.lib.composites_query import composites_via_subprocess
+                    composites_via_subprocess(workspace, bypass_cache=True)
+                except Exception:
+                    pass
+                if interval <= 0:
+                    return  # single pre-warm, no keep-alive loop
+                _time.sleep(interval)
 
-        threading.Thread(target=_warm_read_caches, daemon=True, name="cache-warmer").start()
+        threading.Thread(target=_keep_warm, daemon=True, name="cache-warmer").start()
     except Exception as e:  # noqa: BLE001
         print(f"warning: cache warm failed to start: {e}", file=sys.stderr)
 

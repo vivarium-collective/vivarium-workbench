@@ -176,14 +176,20 @@ class ProxyEnvWorker:
         self._timeout = timeout
         self._alive = True
 
-    def call(self, method: str, params: dict | None = None):
+    def call(self, method: str, params: dict | None = None,
+             *, timeout: float | None = None):
         """Forward one call. viva-api holds the per-worker lock, so the FIFO
-        contract is preserved on its side and needs no lock here."""
+        contract is preserved on its side and needs no lock here.
+
+        ``timeout`` overrides the relay's per-worker default for THIS call (so a
+        heavy catalog build gets the long budget the pool assigns it), matching
+        ``EnvWorker.call``'s contract for the local transport."""
         if not self._alive:
             raise EnvWorkerUnavailable(f"relayed worker {self._job_name} is closed")
         try:
             resp = self._client.call_relayed_env_worker(
-                self._job_name, method=method, params=params, timeout=self._timeout)
+                self._job_name, method=method, params=params,
+                timeout=timeout if timeout is not None else self._timeout)
         except Exception as e:  # noqa: BLE001 — normalized below
             # A relayed worker that has gone away must look to the pool exactly
             # like a dead local one, or the pool will keep handing it out. 404

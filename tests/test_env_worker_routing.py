@@ -30,7 +30,7 @@ class _FakeWorker:
     def alive(self):
         return True
 
-    def call(self, method, params=None):
+    def call(self, method, params=None, *, timeout=None):
         return {"served_by": self.kind, "method": method}
 
     def close(self):
