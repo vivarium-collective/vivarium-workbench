@@ -59,13 +59,15 @@ def test_signature_stable_across_calls_with_unchanged_workspace(tmp_path):
     assert len(sig1) == 40  # sha1 hexdigest
 
 
-def test_signature_changes_when_workspace_yaml_mtime_changes(tmp_path):
+def test_signature_changes_when_workspace_yaml_content_changes(tmp_path):
+    # The signature is keyed on workspace.yaml CONTENT, not mtime (so a baked
+    # cache survives a seed-copy — see test_signature_is_copy_stable_across_mtime
+    # _changes). A real content change must still invalidate it.
     ws = _make_workspace(tmp_path)
     sig1 = cdc.catalog_signature(ws)
 
     wy = ws / "workspace.yaml"
-    future = time.time() + 5
-    os.utime(wy, (future, future))
+    wy.write_text(wy.read_text(encoding="utf-8") + "\n# a real edit\n", encoding="utf-8")
 
     sig2 = cdc.catalog_signature(ws)
     assert sig1 != sig2
@@ -333,3 +335,39 @@ def test_composites_disk_cache_miss_calls_pool_and_writes(tmp_path, monkeypatch)
     data = composites_query.composites_via_subprocess(ws)
     assert data == payload
     assert cdc.load(ws, "composites", sig) == payload
+
+
+# ---- copy-stable signature (image-baked cache survives a seed-copy) ---------
+
+def _mk_ws(tmp_path):
+    (tmp_path / "workspace.yaml").write_text(
+        "name: ws\npackage_path: pbg_x\nimports: {}\n", encoding="utf-8")
+    (tmp_path / "pbg_x").mkdir()
+    (tmp_path / "pbg_x" / "__init__.py").write_text("# pkg\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_signature_is_copy_stable_across_mtime_changes(tmp_path):
+    # A pre-baked cache is keyed on the seed workspace; the entrypoint copies the
+    # seed into the user's pod, which changes file mtimes but NOT content. The
+    # signature must be content-based so the baked cache still HITS (Fix 0).
+    import os
+    from vivarium_workbench.lib import catalog_disk_cache as c
+    ws = _mk_ws(tmp_path)
+    before = c.catalog_signature(ws)
+    assert before != c.DISABLED
+    os.utime(ws / "workspace.yaml", None)
+    os.utime(ws / "pbg_x" / "__init__.py", None)
+    assert c.catalog_signature(ws) == before
+
+
+def test_signature_still_changes_on_real_content_change(tmp_path):
+    from vivarium_workbench.lib import catalog_disk_cache as c
+    ws = _mk_ws(tmp_path)
+    before = c.catalog_signature(ws)
+    (ws / "pbg_x" / "__init__.py").write_text("# pkg CHANGED\n", encoding="utf-8")
+    assert c.catalog_signature(ws) != before
+    after_pkg = c.catalog_signature(ws)
+    (ws / "workspace.yaml").write_text(
+        "name: ws\npackage_path: pbg_x\nimports: {foo: {}}\n", encoding="utf-8")
+    assert c.catalog_signature(ws) != after_pkg
