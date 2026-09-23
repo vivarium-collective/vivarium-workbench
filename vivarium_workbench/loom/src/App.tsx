@@ -52,7 +52,7 @@ import { OutputsPanel } from './panels/OutputsPanel';
 import { EmitContext } from './EmitContext';
 import {
   postReady, postInspect, postEmitChanged, postAutoHeight, postCollapseCard, onCompositeLoad, decodeUrlComposite,
-  resolveComposite, fetchInnerComposite, parseUrlOverrides,
+  resolveComposite, fetchInnerComposite, parseUrlOverrides, apiRoot,
 } from './api';
 import type { ExploreInspectMsg, ParameterDecl } from './api';
 
@@ -528,9 +528,11 @@ export default function App() {
 
   // "Pop into" the full workbench view (Modules card + rail) for this composite.
   const openInWorkbench = useCallback(() => {
-    // The loom is served under the workbench origin (/bigraph-loom/…); the
-    // workbench SPA is the origin root. Carry the composite id so it can focus.
-    const url = '/' + (compositeId ? ('?composite=' + encodeURIComponent(compositeId)) : '');
+    // The loom is served under the workbench root (<base>/bigraph-loom/…); the
+    // workbench SPA is that same root. Under a HeLx sub-path ingress the root is
+    // NOT the origin root, so derive it via apiRoot() (same helper the download
+    // URL uses) rather than a bare "/". Carry the composite id so it can focus.
+    const url = apiRoot() + '/' + (compositeId ? ('?composite=' + encodeURIComponent(compositeId)) : '');
     window.open(url, '_blank', 'noopener');
   }, [compositeId]);
 
