@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from vivarium_workbench.lib import emitters
+from vivarium_workbench.lib import env_compat
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +31,28 @@ from vivarium_workbench.lib import emitters
 # specific (the workspace's own package + declared imports), so it must key on
 # the workspace.
 _REGISTRY_CACHE: dict = {}
-_REGISTRY_TTL = 30.0  # seconds
+
+# Default 1h: registry contents (processes/types/use-counts) only change when
+# modules are installed/removed or the workspace's own source changes, both of
+# which call ``clear_registry_cache()`` explicitly -- so the TTL only needs to
+# bound staleness between those events, not double as the primary invalidation
+# path. A short TTL (previously a hardcoded 30s) instead meant every page load
+# more than 30s after the last one re-paid the full post-processing cost
+# (``_annotate_use_counts`` + ``process_study_stats``), which on an NFS-backed
+# workspace was itself minutes -- see workspace_walk.py. Overridable per
+# deployment via ``VIVARIUM_WORKBENCH_REGISTRY_TTL`` (seconds).
+_REGISTRY_TTL_DEFAULT = 3600.0
+
+
+def _registry_ttl() -> float:
+    """Current registry-cache TTL in seconds (env-overridable; see above)."""
+    raw = env_compat.get_env("REGISTRY_TTL")
+    if raw is not None:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    return _REGISTRY_TTL_DEFAULT
 
 
 def clear_registry_cache(ws_root: "Path | str | None" = None) -> None:
@@ -233,6 +255,8 @@ def _annotate_use_counts(data: dict, ws_root: "Path") -> None:
     import re as _re
     from pathlib import Path as _Path
 
+    from vivarium_workbench.lib.workspace_walk import iter_workspace_files
+
     procs = data.get("processes") or []
     if not procs:
         return
@@ -241,29 +265,35 @@ def _annotate_use_counts(data: dict, ws_root: "Path") -> None:
     _SKIP = ("/.venv/", "/node_modules/", "/.git/", "/out/", "/build-cache/",
              "/__pycache__/", "/.pbg/")
 
-    def _collect(patterns):
-        out: list[str] = []
-        seen: set[str] = set()
-        for pat in patterns:
-            try:
-                for f in ws_root.glob(pat):
-                    sp = str(f)
-                    if sp in seen or any(s in sp for s in _SKIP):
-                        continue
-                    seen.add(sp)
-                    try:
-                        out.append(f.read_text(encoding="utf-8", errors="ignore"))
-                    except OSError:
-                        continue
-            except Exception:
+    # The old code globbed with separate pattern sets for composite generator
+    # sources (`*/composites/*.py`, `*/composites/**/*.py`, `**/composites/*.py`)
+    # and study runner scripts (`scripts/**/*.py`, `workspace/**/scripts/*.py`,
+    # `workspace/studies/**/*.py`, `studies/**/*.py`). Both pattern sets reduce
+    # to the same shape: any `.py` file with a `composites` (resp. `scripts` /
+    # `studies`) directory anywhere among its ancestor path components.
+    # `iter_workspace_files` walks the tree once, never following symlinked
+    # dirs (so a symlinked `.venv` is never entered) -- bucket by that
+    # ancestor-dir check instead of re-globbing per pattern.
+    composite_texts: list[str] = []
+    study_texts: list[str] = []
+    try:
+        for f in iter_workspace_files(ws_root, suffixes=(".py",)):
+            sp = str(f)
+            if any(s in sp for s in _SKIP):
                 continue
-        return out
-
-    # Split the scan so we can report usage-across-composites vs usage-across-
-    # studies separately: composite generator sources vs study runner scripts.
-    composite_texts = _collect(("*/composites/*.py", "*/composites/**/*.py", "**/composites/*.py"))
-    study_texts = _collect(("scripts/**/*.py", "workspace/**/scripts/*.py",
-                            "workspace/studies/**/*.py", "studies/**/*.py"))
+            rel_parts = set(f.relative_to(ws_root).parts[:-1])
+            if not (rel_parts & {"composites", "scripts", "studies"}):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if "composites" in rel_parts:
+                composite_texts.append(text)
+            if rel_parts & {"scripts", "studies"}:
+                study_texts.append(text)
+    except Exception:
+        pass
 
     for p in procs:
         addr = (p.get("address") or "")
@@ -510,7 +540,7 @@ def build_registry(ws_root: Path, *, bypass_cache: bool = False) -> dict:
     _cache_key = str(ws_root)
     _slot = _REGISTRY_CACHE.get(_cache_key)
     if not bypass_cache and _slot is not None:
-        if now - _slot["ts"] < _REGISTRY_TTL:
+        if now - _slot["ts"] < _registry_ttl():
             return _slot["data"]
 
     try:

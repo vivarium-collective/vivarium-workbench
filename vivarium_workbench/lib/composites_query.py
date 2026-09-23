@@ -22,14 +22,34 @@ import sys
 import time
 from pathlib import Path
 
+from vivarium_workbench.lib import env_compat
+
 # Module-level cache: composite discovery spawns a fresh Python subprocess that
 # re-imports the whole workspace package (~8s cold on v2ecoli). Without a cache
 # every /api/composites hit paid that in full — and, fired at page boot, the
 # slow calls saturated the browser's connection pool and stalled other tabs
-# (Sources' "Loading…"). A short TTL keeps discovery fresh while making
-# repeated loads instant. Keyed by str(ws_root); cleared on workspace switch.
+# (Sources' "Loading…"). Keyed by str(ws_root); cleared on workspace switch.
 _COMPOSITES_CACHE: dict = {}
-_COMPOSITES_TTL = 30.0  # seconds
+
+# Default 1h: composite discovery only changes when modules are installed/
+# removed or workspace source changes -- both invalidate the cache explicitly
+# (see clear_composites_cache()) -- so the TTL just bounds staleness between
+# those events. A short TTL (previously a hardcoded 30s) meant every request
+# past 30s re-ran discovery, including composite_study_stats()'s workspace
+# scan (minutes on an NFS-backed workspace before workspace_walk.py). Override
+# per deployment via ``VIVARIUM_WORKBENCH_COMPOSITES_TTL`` (seconds).
+_COMPOSITES_TTL_DEFAULT = 3600.0
+
+
+def _composites_ttl() -> float:
+    """Current composites-cache TTL in seconds (env-overridable; see above)."""
+    raw = env_compat.get_env("COMPOSITES_TTL")
+    if raw is not None:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    return _COMPOSITES_TTL_DEFAULT
 
 
 def clear_composites_cache(ws_root: "Path | str | None" = None) -> None:
@@ -75,7 +95,7 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
     ws_root_str = str(ws_root)
     now = time.time()
     _slot = _COMPOSITES_CACHE.get(ws_root_str)
-    if not bypass_cache and _slot is not None and now - _slot["ts"] < _COMPOSITES_TTL:
+    if not bypass_cache and _slot is not None and now - _slot["ts"] < _composites_ttl():
         return _slot["data"]
 
     # Persistent on-disk cache UNDER the in-memory one, mirroring the registry
