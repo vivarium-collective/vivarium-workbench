@@ -14,8 +14,14 @@ from pathlib import Path
 
 import yaml
 
+from vivarium_workbench.lib.workspace_walk import iter_workspace_files
+
 # Directories never scanned for studies (vendored/worktree/venv copies would
-# double-count and are not the live workspace).
+# double-count and are not the live workspace). ``.venv``/``.pbg``/``.claude``/
+# ``.git``/``node_modules`` are already pruned by ``iter_workspace_files``
+# (hidden dirs + the fixed skip set, and never followed if symlinked -- the
+# NFS ``.venv`` case); ``out`` is kept here as the one extra exclusion it
+# doesn't know about.
 _SKIP_DIRS = {".venv", ".pbg", ".claude", ".git", "node_modules", "out"}
 
 
@@ -54,7 +60,7 @@ def tally_outcomes(runs: "list") -> "dict[str, int]":
 
 
 def _iter_study_yamls(ws_root: Path):
-    for p in ws_root.rglob("study.yaml"):
+    for p in iter_workspace_files(Path(ws_root), names=("study.yaml",)):
         if any(part in _SKIP_DIRS or part.endswith(".worktrees") for part in p.parts):
             continue
         yield p

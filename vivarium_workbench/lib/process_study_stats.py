@@ -20,6 +20,7 @@ import yaml
 from vivarium_workbench.lib.composite_study_stats import (
     _iter_study_yamls, tally_outcomes,
 )
+from vivarium_workbench.lib.workspace_walk import iter_workspace_files
 
 _SKIP = ("/.venv/", "/node_modules/", "/.git/", "/out/", "/build-cache/",
          "/__pycache__/", "/.pbg/")
@@ -31,21 +32,27 @@ _GEN_NAME_RE = re.compile(
 
 
 def _composite_files(ws_root: Path) -> "dict[Path, str]":
+    # Same path-shape the old glob patterns (`*/composites/*.py`,
+    # `*/composites/**/*.py`, `**/composites/*.py`) approximated: any `.py`
+    # file with a `composites` directory anywhere among its ancestor path
+    # components. `iter_workspace_files` never follows symlinked dirs, so a
+    # symlinked `.venv` is never entered (see registry.py::_annotate_use_counts
+    # for the identical pattern used there).
     files: dict[Path, str] = {}
-    seen: set[str] = set()
-    for pat in ("*/composites/*.py", "*/composites/**/*.py", "**/composites/*.py"):
-        try:
-            for f in ws_root.glob(pat):
-                sp = str(f)
-                if sp in seen or any(s in sp for s in _SKIP):
-                    continue
-                seen.add(sp)
-                try:
-                    files[f] = f.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
-                    continue
-        except Exception:  # noqa: BLE001
-            continue
+    try:
+        for f in iter_workspace_files(ws_root, suffixes=(".py",)):
+            sp = str(f)
+            if any(s in sp for s in _SKIP):
+                continue
+            rel_parts = f.relative_to(ws_root).parts[:-1]
+            if "composites" not in rel_parts:
+                continue
+            try:
+                files[f] = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001
+        pass
     return files
 
 
