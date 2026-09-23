@@ -40,12 +40,27 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vivarium_workbench.lib import active_workspace as _active_workspace
 from vivarium_workbench.lib import install_errors as _install_errors
 from vivarium_workbench.lib import pyproject_edit as _pyproject_edit
 from vivarium_workbench.lib import registry as _registry
 from vivarium_workbench.lib import workspace_deps_views as _workspace_deps
+from vivarium_workbench.lib import workspace_heal as _workspace_heal
 from vivarium_workbench.lib import workspace_yaml as _workspace_yaml
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+
+def _invalidate_catalog_caches(ws_root: Path) -> None:
+    """A catalog change makes every workspace-derived cache stale, not just the
+    registry: composites, data sources, observables, viewers and reports can all
+    gain or lose entries. ``clear_registry_cache`` handles the registry in-memory
+    cache *and* the on-disk catalog cache (both kinds); ``active_workspace.
+    invalidate`` then fires every other registered cache-clear callback so no tab
+    keeps serving pre-install data. (Before this, only the registry was cleared,
+    so the Composites tab stayed stale for up to the composites TTL after an
+    install/uninstall.)"""
+    _registry.clear_registry_cache(ws_root)
+    _active_workspace.invalidate()
 
 
 def _install_cache_env() -> dict:
@@ -429,13 +444,24 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     # branch). Here the commit is DEFERRED — run ``action`` directly. A raised
     # ``action`` maps to the live ``_commit_or_run`` no-commit fallback
     # ``{"error": f"action failed: {inner}"}, 500``; success maps to code 200.
+    # Heal a legacy-corrupted workspace.yaml before the install re-validates the
+    # whole file: a single pre-existing imports entry with a blank source/ref
+    # (left by older provisioning-skip tooling) would otherwise 500 every install
+    # with an opaque "'ref' is a required property". Best-effort; backfills only
+    # authentic catalog values (see lib/workspace_heal.py).
+    healed_imports: list[str] = []
+    try:
+        healed_imports = _workspace_heal.heal_workspace_imports(ws_root)
+    except Exception:
+        healed_imports = []
+
     install_mode = "pypi" if use_pypi else "git"
     try:
         action()
     except Exception as inner:
         log_excerpt = log_holder[0] if log_holder else ""
         install_mode = install_mode_holder[0] if install_mode_holder else install_mode
-        _registry.clear_registry_cache(ws_root)
+        _invalidate_catalog_caches(ws_root)
         resp: dict = {"error": f"action failed: {inner}"}
         # Live enriches the 500 only when log_excerpt is truthy.
         if log_excerpt:
@@ -450,12 +476,15 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     log_excerpt = log_holder[0] if log_holder else ""
     install_mode = install_mode_holder[0] if install_mode_holder else install_mode
 
-    # Invalidate registry cache so next /api/registry call sees fresh data.
-    _registry.clear_registry_cache(ws_root)
+    # Invalidate all workspace-derived caches so every tab sees fresh data.
+    _invalidate_catalog_caches(ws_root)
 
-    return {
+    resp_ok: dict = {
         "ok": True,
         "module": name,
         "install_mode": install_mode,
         "log": log_excerpt[-500:],
-    }, 200
+    }
+    if healed_imports:
+        resp_ok["healed_imports"] = healed_imports
+    return resp_ok, 200

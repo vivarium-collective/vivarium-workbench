@@ -44,11 +44,24 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vivarium_workbench.lib import active_workspace as _active_workspace
 from vivarium_workbench.lib import catalog as _catalog
 from vivarium_workbench.lib import pyproject_edit as _pyproject_edit
 from vivarium_workbench.lib import registry as _registry
 from vivarium_workbench.lib import workspace_deps_views as _workspace_deps
+from vivarium_workbench.lib import workspace_heal as _workspace_heal
 from vivarium_workbench.lib import workspace_yaml as _workspace_yaml
+
+
+def _invalidate_catalog_caches(ws_root: Path) -> None:
+    """A catalog change (here, an uninstall) makes every workspace-derived cache
+    stale, not just the registry. ``clear_registry_cache`` handles the registry
+    in-memory cache and the on-disk catalog cache; ``active_workspace.invalidate``
+    fires every other registered cache-clear callback (composites, data sources,
+    observables, viewers, reports) so no tab keeps serving the removed module's
+    entries."""
+    _registry.clear_registry_cache(ws_root)
+    _active_workspace.invalidate()
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
@@ -158,7 +171,7 @@ def uninstall_unmanaged_or_404(ws_root: Path, name: str) -> tuple[dict, int]:
             except Exception as e:
                 log.append(f"rm external/{name} failed: {e}")
 
-    _registry.clear_registry_cache(ws_root)
+    _invalidate_catalog_caches(ws_root)
 
     return {
         "ok": True,
@@ -305,17 +318,25 @@ def catalog_uninstall(ws_root: Path, body: dict) -> tuple[dict, int]:
     # branch). Here the commit is DEFERRED — run ``action`` directly. A raised
     # ``action`` maps to the live ``_commit_or_run`` no-commit fallback
     # ``{"error": f"action failed: {inner}"}, 500``; success maps to code 200.
+    # Heal a legacy-corrupted workspace.yaml before the uninstall re-validates
+    # the whole file (a blank source/ref on any pre-existing imports entry would
+    # otherwise 500). Best-effort; backfills only authentic catalog values.
+    try:
+        _workspace_heal.heal_workspace_imports(ws_root)
+    except Exception:
+        pass
+
     try:
         action()
     except Exception as inner:
-        _registry.clear_registry_cache(ws_root)
+        _invalidate_catalog_caches(ws_root)
         return {"error": f"action failed: {inner}"}, 500
 
     log_excerpt = "\n".join(log_holder)[-500:]
     uninstall_mode = uninstall_mode_holder[0] if uninstall_mode_holder else mode
 
-    # Invalidate registry cache.
-    _registry.clear_registry_cache(ws_root)
+    # Invalidate all workspace-derived caches so every tab sees fresh data.
+    _invalidate_catalog_caches(ws_root)
 
     return {
         "ok": True,
