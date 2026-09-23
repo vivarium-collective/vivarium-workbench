@@ -5,6 +5,13 @@
 <link rel="stylesheet" href="assets/snapshot-readonly.css">
 <!-- Apply the saved light/dark theme before first paint (no flash of light). -->
 <script>(function(){try{var t=localStorage.getItem('viv.theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<!-- item 41: when this tab was spawned via ?workspace=/?build= (workspace-picker.js's
+     openWs()), the first paint would otherwise render the WRONG (default) workspace for
+     the ~seconds session.js's bootstrapSpawn() takes to bind + reload. Stamp the boot
+     attribute synchronously, before first paint, so CSS below can hide that wrong paint
+     behind a full-page overlay instead. Mirrors the theme script above (sync, pre-paint,
+     read-only of location.search — no coupling to session.js's own param parsing). -->
+<script>(function(){try{var p=new URLSearchParams(window.location.search||"");if(p.get('workspace')||p.get('build'))document.documentElement.setAttribute('data-ws-boot','1');}catch(e){}})();</script>
 <!-- Per-tab session identity (session-per-tab). Loaded FIRST, as a classic
      blocking script, so the window.fetch override is in place before any other
      script or inline fetch runs — every same-origin request then carries this
@@ -32,6 +39,55 @@ window.addEventListener('pageshow', function (e) {
 <script src="https://cdn.jsdelivr.net/npm/d3-voronoi-treemap@1"></script>
 <script src="https://unpkg.com/escher@1.7.3/dist/escher.min.js"></script>
 <style>
+/* item 41: workspace-spawn boot overlay. Shown only via the [data-ws-boot="1"]
+ * attribute the pre-paint script above stamps on <html> — never toggled by JS,
+ * so it can't collide with walkthrough.js's document-level "click a
+ * .modal-overlay backdrop to dismiss" handler (deliberately a DIFFERENT class
+ * from .modal-overlay for that reason; this overlay must not be
+ * click-dismissible mid-bind). session.js clears the attribute on a failed
+ * bind; a successful bind reloads the page, which re-runs the pre-paint
+ * script and finds no ?workspace=/?build= left (already stripped), so no
+ * explicit "success" removal is needed.
+ */
+html:not([data-ws-boot]) #viv-boot-overlay { display: none; }
+#viv-boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+:root[data-theme="dark"] #viv-boot-overlay { background: var(--surface, #1b1420); }
+.viv-boot-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.viv-boot-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid rgba(0,0,0,0.12);
+  border-top-color: #157a70;
+  border-radius: 50%;
+  animation: viv-boot-spin 0.8s linear infinite;
+}
+:root[data-theme="dark"] .viv-boot-spinner {
+  border-color: rgba(255,255,255,0.16);
+  border-top-color: #2dd4bf;
+}
+@keyframes viv-boot-spin { to { transform: rotate(360deg); } }
+.viv-boot-label {
+  font: 14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;
+  color: #374151;
+}
+:root[data-theme="dark"] .viv-boot-label { color: var(--text, #e5e7eb); }
+@media (prefers-reduced-motion: reduce) {
+  .viv-boot-spinner { animation: none; opacity: 0.85; }
+}
+
 /* Modal overlay */
 .modal-overlay {
   display: none;
@@ -690,6 +746,16 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 :root[data-theme="dark"] .viv-bs-busy { color: #93c5fd; background: rgba(59,130,246,0.16); border-color: rgba(59,130,246,0.4); }
 </style>
 </head><body>
+
+<!-- item 41: hidden unless <html data-ws-boot="1"> (set pre-paint, above, when this
+     tab was spawned via ?workspace=/?build=). Covers the wrong first paint while
+     session.js's bootstrapSpawn() binds the real workspace. -->
+<div id="viv-boot-overlay" role="status" aria-live="polite">
+  <div class="viv-boot-box">
+    <div class="viv-boot-spinner" aria-hidden="true"></div>
+    <div class="viv-boot-label">Opening workspace…</div>
+  </div>
+</div>
 
 <div class="viv-layout">
 
