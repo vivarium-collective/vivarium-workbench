@@ -31,7 +31,7 @@ from vivarium_workbench.lib.env_worker_provision import install_specs_from_works
 
 logger = logging.getLogger(__name__)
 from vivarium_workbench.lib.env_worker_client import EnvWorker, EnvWorkerUnavailable
-from vivarium_workbench.lib.env_worker_routing import is_job_class
+from vivarium_workbench.lib.env_worker_routing import is_catalog_class, is_job_class
 
 if TYPE_CHECKING:  # launchers import the pool's callers; keep it type-only
     from vivarium_workbench.lib.env_worker_launcher import WorkerLauncher
@@ -113,12 +113,20 @@ class WorkerPool:
         # EnvWorkerUnavailable → one respawn → fail. Config-overridable so such
         # workloads can raise it; default unchanged (backward-compatible).
         self.call_timeout = call_timeout if call_timeout is not None else _int_env("ENV_WORKER_CALL_TIMEOUT", 60)
+        # Catalog-class methods (registry_catalog / composites_full /
+        # discover_composites) trigger the full process-module import walk on a
+        # cold worker — minutes on a large venv. The 60s interactive timeout would
+        # kill the worker mid-import and respawn cold every call (RENCI /api/registry
+        # ~480s / 504). Give them a much longer socket timeout so the ONE cold build
+        # completes and the worker stays warm for subsequent ~ms calls. Config-
+        # overridable; pre-warm at serve time keeps the cold build off the request path.
+        self.catalog_timeout = _int_env("ENV_WORKER_CATALOG_TIMEOUT", 1200)
         self._entries: dict[tuple[str, str, str], _Entry] = {}
         self._lock = threading.Lock()
 
     # -- public -------------------------------------------------------------
     def call(self, workspace, method: str, params: dict | None = None,
-             *, interpreter: str | None = None) -> dict:
+             *, interpreter: str | None = None, timeout: float | None = None) -> dict:
         """Query the warm worker for this environment. On a worker that died or
         was evicted mid-flight, drop it and respawn once (protocol §9).
 
@@ -149,8 +157,19 @@ class WorkerPool:
         if is_job_class(method) and task_worker is not None:
             return task_worker.call_task(method, params)
 
+        # A catalog-class method's first cold call needs minutes, not the 60s
+        # interactive default — otherwise the socket times out mid-import and the
+        # worker is killed + respawned cold on every call. An explicit `timeout`
+        # from the caller (e.g. serve-time pre-warm) still wins.
+        eff_timeout = timeout
+        if eff_timeout is None and is_catalog_class(method):
+            eff_timeout = self.catalog_timeout
+        # Only thread `timeout` when we actually have one, so a plain interactive
+        # call keeps the historical ``worker.call(method, params)`` signature.
+        _call_kw = {"timeout": eff_timeout} if eff_timeout is not None else {}
+
         try:
-            return worker.call(method, params)
+            return worker.call(method, params, **_call_kw)
         except EnvWorkerUnavailable:
             # Respawn-and-retry is protocol §9 for a worker that died or was
             # evicted mid-flight, and it is right for an interactive call: the
@@ -177,7 +196,7 @@ class WorkerPool:
                     f"runs.db before resubmitting."
                 ) from None
             self._drop(ws, interp, launcher.kind)
-            return self._acquire(ws, interp, launcher).call(method, params)
+            return self._acquire(ws, interp, launcher).call(method, params, **_call_kw)
 
     def _launcher_for(self, method: str, ws: str):
         """EVERY method runs in the active context's own environment.

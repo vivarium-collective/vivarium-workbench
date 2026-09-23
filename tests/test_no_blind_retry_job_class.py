@@ -27,7 +27,7 @@ class _Worker:
         self._log = log
         self._fail_first = fail_first
 
-    def call(self, method, params=None):
+    def call(self, method, params=None, *, timeout=None):
         self._log.append(method)
         if self._fail_first and len(self._log) == 1:
             raise EnvWorkerUnavailable("socket timed out")

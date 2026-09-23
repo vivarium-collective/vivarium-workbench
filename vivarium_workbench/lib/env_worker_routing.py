@@ -21,7 +21,10 @@ the split. Pre-classifying them would be exactly the guess this design rules out
 """
 from __future__ import annotations
 
-__all__ = ["JOB_CLASS_METHODS", "is_job_class"]
+__all__ = [
+    "JOB_CLASS_METHODS", "is_job_class",
+    "CATALOG_CLASS_METHODS", "is_catalog_class",
+]
 
 #: Methods that *execute the science* rather than answer a question about it.
 #: These run a composite: a simulation, a post-run analysis pass, or an
@@ -67,3 +70,28 @@ def is_job_class(method: str) -> bool:
     that test rather than silently inherit the interactive path.
     """
     return method in JOB_CLASS_METHODS
+
+
+#: Interactive queries that are nonetheless EXPENSIVE the first time in a fresh
+#: worker: they force the full ``@composite_generator`` / process-module import
+#: walk (materializing a ``LazyLinkRegistry`` of hundreds of pending modules) to
+#: answer. On a large venv (~99 installed process packages) that cold walk runs
+#: for minutes — far past the 60s default socket ``call_timeout`` — so the pool
+#: would kill the worker mid-import and respawn cold on the next call, making
+#: EVERY call re-pay the cold cost (the RENCI /api/registry ~480s / 504). They
+#: are NOT job-class (they answer a question, they don't run a simulation), but
+#: they need the long timeout job-class work would otherwise monopolize. The pool
+#: gives these a separate, larger ``catalog_timeout`` so the one cold build
+#: completes and the worker stays warm (subsequent calls are ~ms).
+CATALOG_CLASS_METHODS = frozenset({
+    "registry_catalog",     # GET /api/registry (+ /api/catalog, /api/marketplace)
+    "composites_full",      # GET /api/composites
+    "discover_composites",  # generator discovery for the Composites tab
+})
+
+
+def is_catalog_class(method: str) -> bool:
+    """True when ``method`` is an interactive query whose FIRST call in a fresh
+    worker triggers the heavy process-module import walk, so it needs the pool's
+    longer ``catalog_timeout`` rather than the interactive default."""
+    return method in CATALOG_CLASS_METHODS

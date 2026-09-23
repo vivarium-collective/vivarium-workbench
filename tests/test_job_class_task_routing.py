@@ -27,7 +27,7 @@ class _TaskWorker:
     def __init__(self, log: list[str]):
         self._log = log
 
-    def call(self, method, params=None):
+    def call(self, method, params=None, *, timeout=None):
         self._log.append(f"sync:{method}")
         return {"via": "sync"}
 
