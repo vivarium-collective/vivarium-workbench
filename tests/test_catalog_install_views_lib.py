@@ -597,3 +597,30 @@ def test_install_cache_env_honors_deployment_override(monkeypatch):
     env = _install_cache_env()
     # A deployment pointing the cache at the PVC (to survive restarts) wins.
     assert env["UV_CACHE_DIR"] == "/pvc/uv-cache"
+
+
+# ---- Issue 1: a catalog install invalidates ALL workspace-derived caches ----
+# (not just the registry) so the Composites tab et al. stop serving pre-install
+# data — active_workspace.invalidate() fires every registered cache-clear cb,
+# including composites_query.clear_composites_cache.
+
+def test_install_success_invalidates_all_caches(tmp_path, monkeypatch):
+    from vivarium_workbench.lib import active_workspace
+    entry = {"name": "foo", "source": "https://pypi.org/foo", "ref": "1.2.3",
+             "pypi_name": "foo-pkg"}
+    _write_ws(tmp_path, {"name": "ws", "imports": {}})
+    _make_venv_pip(tmp_path)
+    monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
+    monkeypatch.setattr(views.shutil, "which", lambda x: None)
+    monkeypatch.setattr(views.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr=""))
+    _patch_yaml_io(monkeypatch)
+    _patch_pyproject_noops(monkeypatch)
+    monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
+    invalidated = {"n": 0}
+    monkeypatch.setattr(active_workspace, "invalidate",
+                        lambda: invalidated.update(n=invalidated["n"] + 1))
+
+    body, status = views.catalog_install(tmp_path, {"name": "foo"})
+    assert status == 200
+    assert invalidated["n"] == 1
