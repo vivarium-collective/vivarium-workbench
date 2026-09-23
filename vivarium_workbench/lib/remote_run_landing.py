@@ -23,7 +23,7 @@ items 26/27), since that path never restructures its own output the way
 scripts/run_batch_baseline_ray.py used to. Unlike the seed_NN convention,
 EVERY lineage in one batch shares the SAME experiment_id, so uniqueness only
 appears two levels inside each store (`experiment_id=X/variant=Y/lineage_seed=Z`
-— confirmed against a real fixture, `pbg_emitters`' XArrayEmitter always nests
+— confirmed against a real fixture, `viva_emitters`' XArrayEmitter always nests
 this 3-level partition path). A plain top-level union would keep only the
 first-processed lineage and silently drop every other seed's data — the exact
 shape of bug #674, recurring one convention later. `_merge_zarr_tree` recurses

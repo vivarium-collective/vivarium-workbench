@@ -104,7 +104,7 @@ def _filter_catalog_modules(modules: list, ws_data: dict | None) -> list:
     # workspace appear at the top" is its stated contract. The include allow-list
     # only governs which *non-installed* (available-to-install) modules also
     # surface. (Without this, `registry.include: [v2ecoli]` hid the workspace's
-    # own installed deps — pbg-emitters, viva-munk, … — leaving only v2ecoli.)
+    # own installed deps — viva-emitters, viva-munk, … — leaving only v2ecoli.)
     return [m for m in modules if _allowed(m) or m.get("installed")]
 
 

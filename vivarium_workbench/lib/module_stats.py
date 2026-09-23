@@ -369,7 +369,7 @@ def _deep_module_usage(ws_root: Path, study_refs: dict[str, set[str]]) -> dict[s
        module's package name and credit the study.
     2. **Runtime default emitter** -- every run emits through
        ``workspace.yaml::runtime.default_emitter`` (the emitter classes live in
-       ``pbg_emitters`` / ``viva-emitters``, a base dep). So the emitter module
+       ``viva_emitters`` / ``viva-emitters``, a base dep). So the emitter module
        is used by EVERY study. Credit it to all of them.
 
     Returns ``used_by_studies``-shaped ``dict[norm] -> set(study_slug)``. Coarse
@@ -422,10 +422,10 @@ def _deep_module_usage(ws_root: Path, study_refs: dict[str, set[str]]) -> dict[s
                 all_slugs.add(sdir.name)
         except Exception:
             pass
-        # The emitter framework module (pbg-emitters / viva-emitters) provides the
-        # default emitter every run uses. ``candidates`` are alias-collapsed, so
-        # both spellings land on the ``emitters`` key; credit it to every study.
-        emitter_key = _norm("pbg_emitters")  # -> "emitters"
+        # The emitter framework module (viva-emitters) provides the default
+        # emitter every run uses. ``candidates`` are alias-collapsed, so the
+        # emitter package lands on the ``emitters`` key; credit it to every study.
+        emitter_key = _norm("viva_emitters")  # -> "emitters"
         if emitter_key in candidates and all_slugs:
             out.setdefault(emitter_key, set()).update(all_slugs)
 
@@ -623,7 +623,7 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
 
     # Deeper usage: composite-source scan (a composite wiring another module's
     # processes, e.g. ecoli_colony -> viva_munk) + the runtime default emitter
-    # (pbg-emitters/viva-emitters, used by every run). Merge in.
+    # (viva-emitters, used by every run). Merge in.
     try:
         for nk, slugs in _deep_module_usage(ws_root, study_refs).items():
             if nk:

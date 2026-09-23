@@ -293,19 +293,19 @@ def test_registry_imports_missing_or_none(tmp_path, dashboard_client):
 def test_filter_catalog_keeps_installed_modules_outside_include():
     """`dashboard.registry.include` limits which *available* modules surface, but
     INSTALLED modules (the workspace's active deps) must always be kept — else a
-    narrow include like [v2ecoli] hides pbg-emitters/viva-munk/etc."""
+    narrow include like [v2ecoli] hides viva-emitters/viva-munk/etc."""
     from vivarium_workbench.lib import catalog
 
     modules = [
         {"name": "v2ecoli", "installed": True},
-        {"name": "pbg-emitters", "package": "pbg_emitters", "installed": True},
+        {"name": "viva-emitters", "package": "viva_emitters", "installed": True},
         {"name": "viva-munk", "package": "viva_munk", "installed": True},
         {"name": "pbg-cellpack", "package": "pbg_cellpack", "installed": False},
     ]
     ws_data = {"dashboard": {"registry": {"include": ["v2ecoli"]}}}
     kept = {m["name"] for m in catalog._filter_catalog_modules(modules, ws_data)}
 
-    assert kept == {"v2ecoli", "pbg-emitters", "viva-munk"}, (
+    assert kept == {"v2ecoli", "viva-emitters", "viva-munk"}, (
         "installed modules must survive the include filter; available "
         "(not-installed) modules outside the include must be dropped"
     )
@@ -331,7 +331,7 @@ def test_registry_filter_always_keeps_emitters(tmp_path, monkeypatch):
     data = {"processes": [
         {"name": "EcoliWCM", "address": "v2ecoli.bridge.EcoliWCM", "kind": "process"},
         {"name": "Foreign", "address": "viva_munk.x.Foreign", "kind": "process"},
-        {"name": "XArrayEmitter", "address": "pbg_emitters.x.XArrayEmitter", "kind": "emitter"},
+        {"name": "XArrayEmitter", "address": "viva_emitters.x.XArrayEmitter", "kind": "emitter"},
         {"name": "ConsoleEmitter", "address": "process_bigraph.emitter.ConsoleEmitter", "kind": "emitter"},
     ]}
     registry._apply_registry_include_filter(data, {"dashboard": {"registry": {"include": ["v2ecoli"]}}}, tmp_path)

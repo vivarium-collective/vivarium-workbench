@@ -66,7 +66,7 @@ def _skip_if_unavailable(kind: str):
         pytest.importorskip("xarray")
         pytest.importorskip("zarr")
     elif kind == "parquet":
-        # The ParquetEmitter needs the full pbg-emitters [parquet] extra.
+        # The ParquetEmitter needs the full viva-emitters [parquet] extra.
         for mod in ("polars", "duckdb", "pyarrow", "fsspec", "tqdm"):
             pytest.importorskip(mod)
 

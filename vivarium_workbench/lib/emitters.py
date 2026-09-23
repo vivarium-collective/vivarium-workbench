@@ -4,7 +4,7 @@ Before this module the dashboard chose readers, emitter labels, and chart
 sources with inline ``if kind == "xarray"/"parquet"/"sqlite"`` branches scattered
 across ``study_charts``, ``simulations_index``, ``explorer_data`` and ``registry``.
 This broker centralizes that dispatch: it resolves each emitter's CONTRACT from
-``pbg-emitters`` (Task 1) and maps a store's ``output_kind`` to the EXISTING
+``viva-emitters`` (Task 1) and maps a store's ``output_kind`` to the EXISTING
 reader / label / chart-source functions — never reimplementing a reader body or
 changing any output.
 
@@ -45,9 +45,9 @@ _ACCEPTED_EMITTERS = ("xarray", "sqlite", "parquet")
 # ---------------------------------------------------------------------------
 
 def resolve_contract(name) -> "object":
-    """Return the ``pbg_emitters.EmitterContract`` for an emitter name/class.
+    """Return the ``viva_emitters.EmitterContract`` for an emitter name/class.
 
-    Thin delegate to ``pbg_emitters.contract_for`` (Task 1). Raises whatever
+    Thin delegate to ``viva_emitters.contract_for`` (Task 1). Raises whatever
     that raises (``KeyError`` for an unregistered name).
     """
     from viva_emitters import contract_for
@@ -57,7 +57,7 @@ def resolve_contract(name) -> "object":
 def output_kind(name: str) -> str:
     """Store kind a named emitter writes: ``sqlite`` / ``zarr`` / ``parquet`` / ``ram``.
 
-    Resolves through the pbg-emitters contract when the emitter is registered
+    Resolves through the viva-emitters contract when the emitter is registered
     (this is where ``xarray → zarr`` comes from canonically). For unknown /
     unregistered names — e.g. when the optional emitter extra isn't installed —
     fall back to the static alias map / lowercased name so callers still get a
@@ -538,12 +538,8 @@ def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
 
     from process_bigraph import Composite
     from process_bigraph.emitter import collect_input_ports
-    try:  # package renamed pbg_emitters -> viva_emitters; support both
-        from viva_emitters.xarray_emitter import XArrayEmitter
-        from viva_emitters.xarray_emitter.view import view_from_emit_paths
-    except ImportError:
-        from pbg_emitters.xarray_emitter import XArrayEmitter
-        from pbg_emitters.xarray_emitter.view import view_from_emit_paths
+    from viva_emitters.xarray_emitter import XArrayEmitter
+    from viva_emitters.xarray_emitter.view import view_from_emit_paths
 
     core.register_link("XArrayEmitter", XArrayEmitter)
     composite = Composite({"state": state}, core=core)
@@ -629,11 +625,12 @@ def _inject_ram_for_paths(state: dict, emit_paths) -> dict:
 
 
 def _register_sqlite_emitter_link(core) -> None:
-    """Register the ``SQLiteEmitter`` link class, handling the pbg_emitters rename
-    (extracted from process-bigraph at 1.4.17 into the focused emitters library;
-    older process-bigraph still exposes it via ``process_bigraph.emitter``)."""
+    """Register the ``SQLiteEmitter`` link class from the emitters library
+    (``SQLiteEmitter`` was extracted from process-bigraph at 1.4.17 into the
+    focused emitters library; older process-bigraph still exposes it via
+    ``process_bigraph.emitter``)."""
     try:
-        from pbg_emitters.sqlite_emitter import SQLiteEmitter
+        from viva_emitters.sqlite_emitter import SQLiteEmitter
     except ImportError:  # process-bigraph < 1.4.17 (legacy location)
         from process_bigraph.emitter import SQLiteEmitter
     core.register_link("SQLiteEmitter", SQLiteEmitter)
@@ -769,7 +766,7 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
                 st = cr.inject_analysis_parquet_emitters(
                     st, run_id=run_id, out_dir=parquet_dir)
                 try:
-                    from pbg_emitters.parquet_emitter import ParquetEmitter
+                    from viva_emitters.parquet_emitter import ParquetEmitter
                     core.register_link("ParquetEmitter", ParquetEmitter)
                 except ImportError:
                     pass

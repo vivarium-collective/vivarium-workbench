@@ -312,7 +312,7 @@ def run_remote(
 # The process-bigraph framework packages a workspace pins in its own uv.lock. We
 # forward these pins to the remote runner image (§3.12) so it doesn't float to the
 # latest PyPI release at container-build time and silently mismatch the workspace.
-_PINNED_FRAMEWORK_PKGS = ("process-bigraph", "bigraph-schema", "pbg-emitters", "pbg-superpowers")
+_PINNED_FRAMEWORK_PKGS = ("process-bigraph", "bigraph-schema", "viva-emitters", "pbg-superpowers")
 
 
 def workspace_pinned_deps(ws_root: "Path | str") -> list[str]:

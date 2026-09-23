@@ -402,7 +402,7 @@ def _apply_registry_include_filter(data: dict, ws_data: dict | None, ws_root: Pa
         # Always surface emitters regardless of the include allow-list. They are
         # the workspace's I/O backends (the configured runtime.default_emitter is
         # one of them) and live in framework/env packages (process_bigraph,
-        # pbg_emitters) outside the include list — so a repo-scoped include like
+        # viva_emitters) outside the include list — so a repo-scoped include like
         # [v2ecoli] would otherwise leave the Registry's Emitters section empty.
         if p.get("kind") == "emitter":
             kept.append(p)

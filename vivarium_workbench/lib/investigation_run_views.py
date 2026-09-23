@@ -200,7 +200,7 @@ def investigation_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
                 from {pkg}.core import build_core
                 from process_bigraph import Composite
                 try:
-                    from pbg_emitters.sqlite_emitter import SQLiteEmitter
+                    from viva_emitters.sqlite_emitter import SQLiteEmitter
                 except ImportError:  # process-bigraph < 1.4.17 (legacy location)
                     from process_bigraph.emitter import SQLiteEmitter
                 core = build_core()

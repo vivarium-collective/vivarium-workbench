@@ -35,7 +35,7 @@ from viva_superpowers.readout_resolver import (
 )
 
 # Default emit observable for catalog-backed index_by types, mirroring
-# pbg_emitters.RunReader._SELECT_TYPE_MAP so validation and resolution agree
+# viva_emitters.RunReader._SELECT_TYPE_MAP so validation and resolution agree
 # on where a given id type lives.
 _TYPE_OBSERVABLE: dict[str, str] = {
     "bulk_id": "bulk",

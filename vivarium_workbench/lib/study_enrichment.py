@@ -39,7 +39,7 @@ def _run_store_summary(store_abs: Path) -> dict:
         return _RUN_STORE_SUMMARY_CACHE[key]
     out: dict = {}
     try:
-        from pbg_emitters.run_reader import RunReader  # noqa: PLC0415
+        from viva_emitters.run_reader import RunReader  # noqa: PLC0415
         out = RunReader.open(str(store_abs)).summary() or {}
     except Exception:  # noqa: BLE001 — never break the study page
         out = {}
