@@ -1358,6 +1358,46 @@ def create_app() -> FastAPI:
             return {"ok": False, "error": str(e)}
 
     @app.get(
+        "/api/registry/process-source",
+        tags=["Registry & catalog"],
+        summary="Source of the file defining a process/step, for the code rail",
+    )
+    def registry_process_source(
+        address: str, ws: Path = Depends(get_workspace)
+    ) -> dict:
+        """Whole-file source of the module defining the class at ``address``, plus
+        ``editable`` (whether it lives in the writable workspace tree), ``path``,
+        ``package`` and the class's ``first_line``. Runs in the warm env-worker so
+        it resolves against the workspace's own core and sees editable-installed
+        source. Best-effort — a structured ``{ok: False, error}`` never 500s."""
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        try:
+            return get_pool().call(ws, "process_source", {"address": address})
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    @app.post(
+        "/api/registry/process-source",
+        tags=["Registry & catalog"],
+        summary="Save edited process/step source back to the workspace file",
+    )
+    def registry_process_source_write(
+        payload: dict = Body(default={}), ws: Path = Depends(get_workspace)
+    ) -> dict:
+        """Write ``payload.source`` back to the file defining ``payload.address``.
+        The env-worker refuses unless the file is inside the editable workspace
+        tree (not a ``.venv``/``site-packages`` dependency) and the new text
+        compiles; on success it writes the whole file verbatim. No auto-reload and
+        no git commit — the user commits via their own flow, and the next
+        env-worker spawn picks up the change. Returns ``{ok, path, bytes}`` or a
+        structured ``{ok: False, error}``."""
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        try:
+            return get_pool().call(ws, "process_source_write", payload)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    @app.get(
         "/api/composites",
         response_model=CompositesPayload,
         tags=["Composites"],

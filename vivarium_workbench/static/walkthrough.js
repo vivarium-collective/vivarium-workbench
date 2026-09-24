@@ -2506,8 +2506,13 @@
           '</div>';
       }).join('');
     }
+    var codeBtn = p.address
+      ? '<button class="btn-mini js-code-btn" title="View / edit the source of this process"' +
+        ' onclick="window.ProcessCode&&ProcessCode.open(\'' + _esc(p.address) + '\')">&lt;/&gt; Code</button>'
+      : '';
     var bodyHead =
-      '<div class="loom-body-head"><span class="loom-name">' + _esc(p.name) + '</span>' + _procKindBadge(kind) + _regUseBadge(p) + '</div>' +
+      '<div class="loom-body-head"><span class="loom-name">' + _esc(p.name) + '</span>' + _procKindBadge(kind) + _regUseBadge(p) +
+      (codeBtn ? '<span class="loom-body-head-actions">' + codeBtn + '</span>' : '') + '</div>' +
       '<code class="loom-addr">' + _esc(p.address || kind) + '</code>' +
       (desc ? '<p class="loom-desc">' + _esc(desc) + '</p>' : '');
 

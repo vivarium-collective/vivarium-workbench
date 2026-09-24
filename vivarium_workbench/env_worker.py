@@ -93,7 +93,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 
 
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
-                 "run_process", "process_template",
+                 "run_process", "process_template", "process_source", "process_source_write",
                  "viz_classes", "resolve_composite_state", "config_to_composite", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites", "composites_full",
                  "validate_generated_visualization", "study_precheck", "run_study_analyses", "run_study", "run_investigation_analysis", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "data_sources_provider", "analysis_viewers", "shutdown"]
@@ -3181,6 +3181,137 @@ def _process_template(params: dict) -> dict:
     }
 
 
+_SOURCE_DEP_DIR_PARTS = {".venv", "venv", "site-packages", "dist-packages", "__pypackages__"}
+
+
+def _source_path_editable(path: str, workspace: str) -> bool:
+    """True iff ``path`` is a file we may write process edits back to.
+
+    The rule (the safety gate for save-back): the resolved source file must live
+    INSIDE the workspace tree and NOT inside an installed-dependency directory.
+    A dependency editable/pip-installed into the workspace's own ``.venv`` is
+    under the workspace root but must still be refused — otherwise an edit to a
+    framework class would corrupt ``site-packages``. Any resolution failure is
+    treated as not-editable (fail closed)."""
+    from pathlib import Path
+    if not path or not workspace:
+        return False
+    try:
+        p = Path(path).resolve()
+        ws = Path(workspace).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    try:
+        rel = p.relative_to(ws)
+    except ValueError:
+        return False  # outside the workspace tree
+    return not (_SOURCE_DEP_DIR_PARTS & set(rel.parts))
+
+
+def _validate_python(source: str, filename: str) -> "tuple[bool, str]":
+    """Compile ``source`` to check syntax WITHOUT touching disk. Returns
+    ``(ok, error_message)``; a rejected write never reaches the file."""
+    try:
+        compile(source, filename or "<edited>", "exec")
+        return True, ""
+    except SyntaxError as e:
+        loc = f" (line {e.lineno})" if e.lineno else ""
+        return False, f"{e.msg}{loc}"
+
+
+def _source_file_for_address(address: str) -> "tuple[object, str | None, str | None]":
+    """Resolve ``address`` → ``(cls, source_path, error)``. ``cls``/``path`` are
+    ``None`` on failure and ``error`` is a human message; on success ``error`` is
+    ``None``. Shared by the read and write methods."""
+    import inspect
+
+    try:
+        core = _get_workspace_core()
+    except Exception as e:  # noqa: BLE001
+        return None, None, f"build_core failed: {e}"
+    if core is None:
+        return None, None, "workspace core unavailable"
+    # Registry cards send a dotted ``module.qualname`` address; composite nodes
+    # send a bare ``local:Name``. Try the address verbatim, then without the
+    # scheme prefix so both forms resolve.
+    cls = _resolve_registry_class(core, address or "")
+    if cls is None and ":" in (address or ""):
+        cls = _resolve_registry_class(core, address.split(":", 1)[1])
+    if cls is None:
+        return None, None, f"class not found: {address}"
+    try:
+        path = inspect.getsourcefile(cls) or inspect.getfile(cls)
+    except (TypeError, OSError) as e:
+        return cls, None, f"source unavailable: {e}"
+    if not path:
+        return cls, None, "source file not found"
+    return cls, path, None
+
+
+def _process_source(params: dict) -> dict:
+    """Return the source of the file defining the process/step at ``address``.
+
+    Reads the WHOLE module file (not just the class body) so the editor can save
+    the file back coherently. ``editable`` reflects the save-back safety gate."""
+    from pathlib import Path
+    address = (params or {}).get("address") or ""
+    cls, path, err = _source_file_for_address(address)
+    if err is not None:
+        return {"ok": False, "error": err}
+    try:
+        source = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": f"read failed: {e}"}
+    first_line = None
+    try:
+        import inspect
+        first_line = inspect.getsourcelines(cls)[1]
+    except (OSError, TypeError):
+        pass
+    return {
+        "ok": True,
+        "address": address,
+        "path": path,
+        "source": source,
+        "editable": _source_path_editable(path, _workspace),
+        "package": str(getattr(cls, "__module__", "")).split(".")[0],
+        "qualname": getattr(cls, "__qualname__", getattr(cls, "__name__", "")),
+        "first_line": first_line,
+    }
+
+
+def _process_source_write(params: dict) -> dict:
+    """Write edited source back to the process/step file at ``address``.
+
+    Refuses unless the resolved file passes ``_source_path_editable`` (inside the
+    workspace, not a dependency) and the new text compiles. Writes the whole file
+    verbatim; no auto-reload, no git commit — the user commits via their own
+    flow. Edits are picked up by the next env-worker spawn."""
+    p = params or {}
+    address = p.get("address") or ""
+    new_source = p.get("source")
+    if not isinstance(new_source, str):
+        return {"ok": False, "error": "missing source"}
+    cls, path, err = _source_file_for_address(address)
+    if err is not None:
+        return {"ok": False, "error": err}
+    if not _source_path_editable(path, _workspace):
+        return {
+            "ok": False,
+            "error": "refused: source file is not inside the editable workspace tree",
+            "path": path,
+        }
+    ok, verr = _validate_python(new_source, path)
+    if not ok:
+        return {"ok": False, "error": f"syntax error: {verr}"}
+    from pathlib import Path
+    try:
+        Path(path).write_text(new_source, encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": f"write failed: {e}"}
+    return {"ok": True, "path": path, "bytes": len(new_source.encode("utf-8"))}
+
+
 def _run_process(params: dict) -> dict:
     """Instantiate a registry Process/Step with the given config, validate + fill
     the provided input-port values, and run one update() — returning outputs.
@@ -3451,6 +3582,10 @@ def _handle(method: str, params: dict) -> dict:
         return _run_process(params)
     if method == "process_template":
         return _process_template(params)
+    if method == "process_source":
+        return _process_source(params)
+    if method == "process_source_write":
+        return _process_source_write(params)
     if method == "viz_classes":
         return _list_visualizations()
     if method == "resolve_composite_state":

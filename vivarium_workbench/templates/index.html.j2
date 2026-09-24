@@ -2028,6 +2028,49 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 </main>
 
   </div> <!-- /.viv-main -->
+
+  <!-- RIGHT RAIL: process code — collapsible editable Python source for the
+       selected registry process/step. Global across tabs; collapsed by default
+       to a thin edge tab (see .viv-code-collapsed CSS + process-code.js). -->
+  <aside id="viv-code-rail" class="viv-code-rail viv-code-collapsed" aria-label="Process code">
+    <button class="viv-code-edge" id="viv-code-edge" type="button"
+            title="Show process code" aria-label="Show process code"
+            onclick="window.ProcessCode&&ProcessCode.toggle()">
+      <span class="viv-code-edge-label">&lt;/&gt; Code</span>
+    </button>
+    <div class="viv-code-panel">
+      <div class="viv-code-resize-handle" id="viv-code-resize-handle"
+           role="separator" aria-orientation="vertical" aria-label="Resize code panel"
+           title="Drag to resize"></div>
+      <div class="viv-code-head">
+        <div class="viv-code-title">
+          <strong id="viv-code-name">Process code</strong>
+          <code id="viv-code-addr" class="viv-code-addr"></code>
+        </div>
+        <button class="viv-code-close" type="button" title="Collapse"
+                aria-label="Collapse code panel"
+                onclick="window.ProcessCode&&ProcessCode.toggle()">&times;</button>
+      </div>
+      <div class="viv-code-meta">
+        <span id="viv-code-badge" class="viv-code-badge"></span>
+        <code id="viv-code-path" class="viv-code-path"></code>
+      </div>
+      <div class="viv-code-editor-wrap" id="viv-code-editor-wrap">
+        <p class="viv-code-empty" id="viv-code-empty">Open a process/step in the Registry and press <strong>&lt;/&gt; Code</strong> to view its source here.</p>
+        <textarea id="viv-code-textarea" class="viv-code-textarea" spellcheck="false" hidden></textarea>
+      </div>
+      <div class="viv-code-foot">
+        <span id="viv-code-status" class="viv-code-status"></span>
+        <div class="viv-code-actions">
+          <button class="btn-mini" id="viv-code-revert" type="button"
+                  onclick="window.ProcessCode&&ProcessCode.revert()" disabled>Revert</button>
+          <button class="btn-mini btn-primary" id="viv-code-save" type="button"
+                  onclick="window.ProcessCode&&ProcessCode.save()" disabled>Save</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
 </div> <!-- /.viv-layout -->
 
 <!-- ============================================================ -->
@@ -2369,6 +2412,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/aig-graph.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* aig-graph unavailable */"></script>
 <script src="assets/audit.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* audit view unavailable */"></script>
 <script src="assets/col-resize.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<script src="assets/process-code.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* process-code panel unavailable */"></script>
 <script src="assets/sim-table.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <!-- composite-card.js: the shared composite-card renderer (extracted from
      walkthrough.js, study-spine-reorg Task 6) — MUST load before
