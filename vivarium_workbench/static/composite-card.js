@@ -204,6 +204,20 @@
   }
   window._compositeJsonBtn = _compositeJsonBtn;
 
+  // "</> Code" — open the code rail for this card. Header-styled variant, used by
+  // the full cards; the grid/table views inline their own smaller buttons.
+  function _compositeCodeBtn(id) {
+    return '<button class="pcard-json-btn" type="button" title="View / edit this composite\'s source" ' +
+      'onclick="event.stopPropagation();_openCompositeCode(\'' + _esc(id) + '\')">&lt;/&gt; Code</button>';
+  }
+  window._compositeCodeBtn = _compositeCodeBtn;
+  function _processCodeBtn(address) {
+    if (!address) return '';
+    return '<button class="pcard-json-btn" type="button" title="View / edit this process\'s source" ' +
+      'onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + _esc(address) + '\')">&lt;/&gt; Code</button>';
+  }
+  window._processCodeBtn = _processCodeBtn;
+
   // "🔗 Share" — copy a shareable link to this composite's interactive
   // bigraph view. The onclick references _shareCompositeFromHeader
   // (Modules-page-only) — inert elsewhere.
@@ -937,6 +951,7 @@
             '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⌃</button>' +
             _shareCompositeBtn() +
             _compositeJsonBtn() +
+            _compositeCodeBtn(c.id) +
             _cardMaximizeBtn() +
             _cardPopoutBtn(c.id, 'composite') +
           '</div>' +
