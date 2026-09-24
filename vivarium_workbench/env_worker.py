@@ -4004,8 +4004,19 @@ def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = Non
             results.append({"name": name, "ok": False, "detail": "no installable form (skipped)"})
             continue
         try:
+            # ``--no-deps``: provisioning only needs the module ITSELF importable
+            # in the worker; its dependencies are already present in the pod's
+            # base venv (the image build / Catalog install put them there) and
+            # resolve from ``sys.path``. Resolving deps here is not only redundant,
+            # it HANGS: an ecosystem dep that isn't on PyPI (e.g. a module that
+            # depends on ``vivarium-workbench``, which is git-only) sends pip into
+            # repeated index lookups that burn the whole ``timeout`` — turning a
+            # no-op re-provision of an already-installed module into a multi-minute
+            # pod-startup stall. The find_spec skip above catches the common case;
+            # ``--no-deps`` makes the fallback install cheap and hang-proof when a
+            # package's import name doesn't match its spec (so the skip misses).
             proc = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--target", target, pkg],
+                [sys.executable, "-m", "pip", "install", "--no-deps", "--target", target, pkg],
                 capture_output=True, text=True, timeout=timeout, env=sub_env,
             )
         except subprocess.TimeoutExpired:
