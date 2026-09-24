@@ -94,6 +94,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "run_process", "process_template", "process_source", "process_source_write",
+                 "composite_source", "composite_source_write",
                  "viz_classes", "resolve_composite_state", "config_to_composite", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites", "composites_full",
                  "validate_generated_visualization", "study_precheck", "run_study_analyses", "run_study", "run_investigation_analysis", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "data_sources_provider", "analysis_viewers", "shutdown"]
@@ -3219,6 +3220,38 @@ def _validate_python(source: str, filename: str) -> "tuple[bool, str]":
         return False, f"{e.msg}{loc}"
 
 
+def _lang_for_path(path: str) -> str:
+    """Editor language for a source file, by extension."""
+    ext = ("." + str(path).rsplit(".", 1)[-1].lower()) if "." in str(path) else ""
+    if ext in (".yaml", ".yml"):
+        return "yaml"
+    if ext == ".json":
+        return "json"
+    return "python"
+
+
+def _validate_source(source: str, lang: str, filename: str) -> "tuple[bool, str]":
+    """Validate edited source before it reaches disk, by language. Python is
+    syntax-checked with ``compile``; YAML/JSON are parsed. Returns
+    ``(ok, error_message)``."""
+    if lang == "yaml":
+        try:
+            import yaml
+            yaml.safe_load(source)
+            return True, ""
+        except Exception as e:  # noqa: BLE001
+            return False, f"yaml error: {e}"
+    if lang == "json":
+        try:
+            import json as _json
+            _json.loads(source)
+            return True, ""
+        except Exception as e:  # noqa: BLE001
+            return False, f"json error: {e}"
+    ok, err = _validate_python(source, filename)
+    return ok, (f"syntax error: {err}" if not ok else "")
+
+
 def _source_file_for_address(address: str) -> "tuple[object, str | None, str | None]":
     """Resolve ``address`` → ``(cls, source_path, error)``. ``cls``/``path`` are
     ``None`` on failure and ``error`` is a human message; on success ``error`` is
@@ -3305,6 +3338,92 @@ def _process_source_write(params: dict) -> dict:
     if not ok:
         return {"ok": False, "error": f"syntax error: {verr}"}
     from pathlib import Path
+    try:
+        Path(path).write_text(new_source, encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": f"write failed: {e}"}
+    return {"ok": True, "path": path, "bytes": len(new_source.encode("utf-8"))}
+
+
+def _composite_source_path(params: dict) -> "tuple[str | None, str | None, str | None]":
+    """Resolve a composite record to ``(path, lang, error)``.
+
+    Two kinds, deterministically (never trusting a client-supplied path):
+      * ``source`` given → a declarative spec file, resolved under the workspace.
+      * else ``module`` → the ``@composite_generator``'s module file (shows the
+        whole module = all the composite code defined there)."""
+    from pathlib import Path
+    p = params or {}
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    # ``source_path`` is the spec file's workspace-relative path. (Not ``source``
+    # — on a write that key carries the NEW file content, not a path.)
+    source_rel = p.get("source_path")
+    if source_rel:
+        path = (Path(_workspace) / str(source_rel)).resolve()
+        if not path.is_file():
+            return None, None, f"spec file not found: {source_rel}"
+        return str(path), _lang_for_path(str(path)), None
+    module = p.get("module")
+    if not module:
+        cid = str(p.get("id") or "")
+        module = cid.rsplit(".", 1)[0] if "." in cid else cid
+    if not module:
+        return None, None, "composite has no module or source"
+    try:
+        import importlib
+        mod = importlib.import_module(str(module))
+    except Exception as e:  # noqa: BLE001
+        return None, None, f"import failed: {module}: {e}"
+    f = getattr(mod, "__file__", None)
+    if not f:
+        return None, None, f"module file unavailable: {module}"
+    return str(Path(f).resolve()), "python", None
+
+
+def _composite_source(params: dict) -> dict:
+    """Return the source defining a composite (its spec YAML, or its generator's
+    module file). ``editable`` reflects the same save-back safety gate as
+    processes."""
+    from pathlib import Path
+    path, lang, err = _composite_source_path(params)
+    if err is not None:
+        return {"ok": False, "error": err}
+    try:
+        source = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": f"read failed: {e}"}
+    p = params or {}
+    return {
+        "ok": True,
+        "id": p.get("id"),
+        "path": path,
+        "source": source,
+        "lang": lang,
+        "editable": _source_path_editable(path, _workspace),
+    }
+
+
+def _composite_source_write(params: dict) -> dict:
+    """Write edited composite source back. Re-resolves the file from the record
+    (never a client path), enforces ``_source_path_editable``, and validates by
+    language (YAML/JSON parsed, Python compiled) before touching disk."""
+    from pathlib import Path
+    p = params or {}
+    new_source = p.get("source")
+    if not isinstance(new_source, str):
+        return {"ok": False, "error": "missing source"}
+    path, lang, err = _composite_source_path(params)
+    if err is not None:
+        return {"ok": False, "error": err}
+    if not _source_path_editable(path, _workspace):
+        return {"ok": False,
+                "error": "refused: source file is not inside the editable workspace tree",
+                "path": path}
+    use_lang = p.get("lang") or lang
+    ok, verr = _validate_source(new_source, use_lang, path)
+    if not ok:
+        return {"ok": False, "error": verr}
     try:
         Path(path).write_text(new_source, encoding="utf-8")
     except OSError as e:
@@ -3586,6 +3705,10 @@ def _handle(method: str, params: dict) -> dict:
         return _process_source(params)
     if method == "process_source_write":
         return _process_source_write(params)
+    if method == "composite_source":
+        return _composite_source(params)
+    if method == "composite_source_write":
+        return _composite_source_write(params)
     if method == "viz_classes":
         return _list_visualizations()
     if method == "resolve_composite_state":

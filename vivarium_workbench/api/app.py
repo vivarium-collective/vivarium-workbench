@@ -1398,6 +1398,48 @@ def create_app() -> FastAPI:
             return {"ok": False, "error": str(e)}
 
     @app.get(
+        "/api/composites/source",
+        tags=["Composites"],
+        summary="Source of a composite (spec YAML or its generator's module)",
+    )
+    def composite_source_get(
+        id: str = "",
+        module: str = "",
+        source_path: str = "",
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Source defining a composite, for the code rail. A ``spec`` composite
+        resolves to its ``source_path`` (a ``*.composite.yaml`` under the
+        workspace); a ``generator`` composite resolves to its ``module`` file
+        (the whole module = all its composite code). Returns ``{ok, source, lang,
+        path, editable}`` or a structured error; runs in the warm env-worker."""
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        params = {"id": id, "module": module, "source_path": source_path}
+        try:
+            return get_pool().call(ws, "composite_source", params)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    @app.post(
+        "/api/composites/source",
+        tags=["Composites"],
+        summary="Save edited composite source back to the workspace file",
+    )
+    def composite_source_write(
+        payload: dict = Body(default={}), ws: Path = Depends(get_workspace)
+    ) -> dict:
+        """Write ``payload.source`` back to the composite file identified by
+        ``payload`` (``source_path`` for a spec, else ``module`` for a
+        generator). The env-worker re-resolves the file itself, refuses anything
+        outside the editable workspace tree, and validates by ``payload.lang``
+        (YAML/JSON parsed, Python compiled) before writing."""
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        try:
+            return get_pool().call(ws, "composite_source_write", payload)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    @app.get(
         "/api/composites",
         response_model=CompositesPayload,
         tags=["Composites"],

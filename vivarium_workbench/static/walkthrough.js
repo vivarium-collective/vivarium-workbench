@@ -2464,6 +2464,10 @@
       ? '<button type="button" class="reg-cfgports-btn" onclick="event.stopPropagation();_showConfigPorts(event,\'' + addr + '\')" title="See config &amp; ports">' +
         'config &amp; ports <span class="reg-mid-sum">' + nCfg + ' config · ' + nIn + ' in · ' + nOut + ' out</span></button>'
       : '';
+    var codeBtnGrid = (/^(process|step)$/.test(p.kind || 'process') && p.address)
+      ? '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this process\'s source"' +
+        ' onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + addr + '\')">&lt;/&gt; Code</button>'
+      : '';
     var selCls = (window._registrySelected && window._registrySelected === p.address) ? ' reg-selected' : '';
     return '<div class="registry-card' + selCls + '"' + sourceAttr + ' data-address="' + addr + '"' +
         ' onclick="_selectRegistryEntry(\'' + addr + '\')" ondblclick="_zoomInOn(\'' + addr + '\')"' +
@@ -2478,6 +2482,7 @@
       '</div>' +
       _successBar(sp) +
       cfgPortsBtn +
+      codeBtnGrid +
       _runCmdChip(p.run_command) +
     '</div>';
   }
