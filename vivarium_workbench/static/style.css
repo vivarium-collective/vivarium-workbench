@@ -5117,7 +5117,7 @@ body.col-resizing .registry-table.reg-table-fill th, body.col-resizing .registry
   color:var(--text-muted, #64748b);
 }
 .viv-code-rail.viv-code-collapsed .viv-code-edge{ display:flex; align-items:center; justify-content:center; }
-.viv-code-edge:hover{ background:var(--hover, #f1f5f9); color:var(--accent, #3a8); }
+.viv-code-edge:hover{ background:var(--hover, #f1f5f9); color:#2563eb; }
 .viv-code-edge-label{
   writing-mode:vertical-rl; transform:rotate(180deg);
   font-size:0.78rem; font-weight:600; letter-spacing:.06em; white-space:nowrap;
@@ -5173,7 +5173,8 @@ body.col-resizing .registry-table.reg-table-fill th, body.col-resizing .registry
 .viv-code-status-ok{ color:#166534; }
 .viv-code-status-error{ color:#b91c1c; }
 .viv-code-actions{ display:flex; gap:8px; flex:0 0 auto; }
-.viv-code-actions .btn-primary{ background:var(--accent, #3a8); color:#fff; border-color:transparent; }
+.viv-code-actions .btn-primary{ background:#2563eb; color:#fff; border-color:transparent; }
+.viv-code-actions .btn-primary:hover:not(:disabled){ background:#1d4ed8; }
 .viv-code-actions .btn-primary:disabled{ opacity:.5; cursor:not-allowed; }
 
 .loom-body-head-actions{ margin-left:auto; }
@@ -5188,11 +5189,18 @@ body.focus-mode .viv-code-rail{ display:none !important; }
 
 /* + New authoring flow */
 .registry-new-actions{ display:inline-flex; gap:6px; margin-left:8px; }
+/* Neutral outlined button matching the workbench's other secondary controls
+   (.pcard-json-btn / Full card / copy), with the workbench's blue hover accent —
+   not the off-brand green. */
 .reg-new-btn{
-  height:28px; padding:0 11px; font-size:12px; font-weight:600; cursor:pointer;
-  background:var(--accent, #3a8); color:#fff; border:1px solid transparent; border-radius:6px;
+  height:28px; padding:0 12px; font-size:12px; font-weight:600; cursor:pointer;
+  background:var(--panel, #fff); color:#374151;
+  border:1px solid var(--border, #e2e8f0); border-radius:6px;
+  transition:background .12s ease, color .12s ease, border-color .12s ease;
 }
-.reg-new-btn:hover{ filter:brightness(1.05); }
+.reg-new-btn:hover{ background:#eff6ff; color:#2563eb; border-color:#bfdbfe; }
+:root[data-theme="dark"] .reg-new-btn{ background:var(--surface-3); color:var(--text); border-color:var(--border-2); }
+:root[data-theme="dark"] .reg-new-btn:hover{ background:var(--active); color:#c7d2fe; border-color:var(--border-2); }
 
 .viv-code-newbar{
   display:flex; align-items:center; gap:10px; flex-wrap:wrap;
