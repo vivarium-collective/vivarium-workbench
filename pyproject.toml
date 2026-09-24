@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vivarium-workbench"
-version = "0.3.87"
+version = "0.3.88"
 description = "Web-based workbench for Vivarium / process-bigraph workspaces"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.11"
@@ -69,8 +69,11 @@ dependencies = [
     # predates that migration and would drag pbg-emitters back in, so it is NOT
     # used; declare BARE here + git `main` via [tool.uv.sources] (same
     # keep-URL-out-of-published-metadata pattern as the deps below). Bump to a
-    # PyPI floor once viva-superpowers publishes a viva-emitters release.
-    "viva-superpowers>=0.22.0",
+    # PyPI floor once viva-superpowers publishes a viva-emitters release — DONE:
+    # 0.23.0 declares viva-emitters>=0.2.3, so the floor is bumped here. The
+    # [tool.uv.sources] git pin below stays for main-branch unification with the
+    # sibling process-packages (see that section).
+    "viva-superpowers>=0.23.0",
     # viva-superpowers requires pbg-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in

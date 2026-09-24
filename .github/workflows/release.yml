@@ -1,0 +1,29 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  id-token: write   # for PyPI trusted publishing
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Node is needed because the hatchling build hook (hatch_build.py) builds
+      # the vendored bigraph-loom bundle (vivarium_workbench/loom/_dist) into the
+      # wheel. VIVARIUM_WORKBENCH_REQUIRE_LOOM=1 (below) makes a missing bundle a
+      # hard error on the publish path, so the shipped Explorer is never blank.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        run: pip install uv
+      - name: Build (loom bundle required)
+        env:
+          VIVARIUM_WORKBENCH_REQUIRE_LOOM: "1"
+        run: uv build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
