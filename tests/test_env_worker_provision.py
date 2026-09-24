@@ -65,6 +65,25 @@ def test_provision_installs_and_prepends_syspath(tmp_path, monkeypatch):
     assert sys.path[0] == target
 
 
+def test_provision_install_uses_no_deps(tmp_path, monkeypatch):
+    # Deps are already present in the pod's base venv (resolve from sys.path);
+    # ``--no-deps`` keeps the fallback install cheap and, crucially, hang-proof
+    # when a package depends on something that isn't on PyPI (e.g. a module that
+    # requires the git-only ``vivarium-workbench``) — that otherwise burned the
+    # whole timeout re-resolving on every pod start.
+    calls = []
+    monkeypatch.setattr(env_worker.subprocess, "run",
+                        lambda cmd, **kw: calls.append(cmd) or types.SimpleNamespace(
+                            returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(env_worker.importlib.util, "find_spec", lambda name: None)
+    env_worker._provision_modules(
+        [{"name": "viva-cpm", "mode": "reference",
+          "source": "https://github.com/vivarium-collective/viva-cpm.git", "ref": "main",
+          "package": "viva_cpm"}],  # import name doesn't match the real module -> skip misses
+        target=str(tmp_path / "site"))
+    assert calls and "--no-deps" in calls[0]
+
+
 def test_provision_reports_failure_without_raising(tmp_path, monkeypatch):
     monkeypatch.setattr(env_worker.subprocess, "run",
                         _fake_run(returncode=1, stderr="ERROR: Could not find a version"))
