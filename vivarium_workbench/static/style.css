@@ -5185,3 +5185,39 @@ body.focus-mode .viv-code-rail{ display:none !important; }
 :root[data-theme="dark"] .viv-code-badge-ro{ background:#3a2d0c; color:#fcd34d; }
 :root[data-theme="dark"] .viv-code-status-ok{ color:#86efac; }
 :root[data-theme="dark"] .viv-code-status-error{ color:#fca5a5; }
+
+/* + New authoring flow */
+.registry-new-actions{ display:inline-flex; gap:6px; margin-left:8px; }
+.reg-new-btn{
+  height:28px; padding:0 11px; font-size:12px; font-weight:600; cursor:pointer;
+  background:var(--accent, #3a8); color:#fff; border:1px solid transparent; border-radius:6px;
+}
+.reg-new-btn:hover{ filter:brightness(1.05); }
+
+.viv-code-newbar{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:10px 14px; border-bottom:1px solid var(--border, #e2e6eb);
+  background:var(--surface-2, #f6f8fa);
+}
+.viv-code-newname-label{ display:flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color:var(--text-muted, #64748b); }
+.viv-code-newname{
+  font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.85rem;
+  padding:4px 8px; border:1px solid var(--border-2, #cbd5e1); border-radius:5px;
+  background:var(--field, #fff); color:var(--text, #1f2937); min-width:180px;
+}
+.viv-code-target{ font-size:0.72rem; color:var(--text-muted, #64748b); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; word-break:break-all; }
+
+.viv-code-checks{
+  border-top:1px solid var(--border, #e2e6eb); padding:8px 14px; max-height:34%; overflow:auto;
+  font-size:0.8rem; background:var(--surface-2, #f6f8fa);
+}
+.viv-code-checks-head{ font-weight:700; margin-bottom:6px; }
+.viv-code-checks-head.ok{ color:#166534; }
+.viv-code-checks-head.bad{ color:#b91c1c; }
+.viv-code-check{ padding:2px 0; line-height:1.5; }
+.viv-code-check.ok{ color:#166534; }
+.viv-code-check.bad{ color:#b91c1c; }
+.viv-code-check-detail{ color:var(--text-muted, #64748b); }
+
+:root[data-theme="dark"] .viv-code-checks-head.ok, :root[data-theme="dark"] .viv-code-check.ok{ color:#86efac; }
+:root[data-theme="dark"] .viv-code-checks-head.bad, :root[data-theme="dark"] .viv-code-check.bad{ color:#fca5a5; }

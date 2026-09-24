@@ -1150,18 +1150,19 @@ def create_app() -> FastAPI:
         tags=["Registry & catalog"],
         summary="Process/type/emitter registry for this workspace",
     )
-    def registry(ws: Path = Depends(get_workspace)) -> RegistryPayload:
+    def registry(refresh: bool = False, ws: Path = Depends(get_workspace)) -> RegistryPayload:
         """Process/type registry for this workspace.
 
         Mirrors ``GET /api/registry`` from the stdlib server.  Runs
         ``build_core()`` in a subprocess to discover registered processes,
         steps, emitters and visualization classes without polluting the
-        server's import state.  The response is cached for 30 s.
+        server's import state.  The response is cached for 30 s; ``?refresh=1``
+        bypasses that cache (used right after authoring a new process/composite).
 
         Library-backed via ``lib.registry.build_registry`` — the single
         implementation the stdlib ``_get_registry_data`` now forwards to.
         """
-        return RegistryPayload.model_validate(build_registry(ws))
+        return RegistryPayload.model_validate(build_registry(ws, bypass_cache=refresh))
 
     @app.get(
         "/api/composite-layout",
@@ -1396,6 +1397,78 @@ def create_app() -> FastAPI:
             return get_pool().call(ws, "process_source_write", payload)
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)}
+
+    @app.get(
+        "/api/registry/scaffold",
+        tags=["Registry & catalog"],
+        summary="Starter template + target path for a new process/step/composite",
+    )
+    def registry_scaffold(
+        kind: str, name: str = "", ws: Path = Depends(get_workspace)
+    ) -> dict:
+        """A starter template for a new artifact of ``kind`` (process/step/
+        generator/spec) named ``name``, plus the conventional target path it
+        would be created at. Does not write anything."""
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        try:
+            return get_pool().call(ws, "scaffold_template", {"kind": kind, "name": name})
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    @app.post(
+        "/api/registry/validate",
+        tags=["Registry & catalog"],
+        summary="Parse + import & register checks for candidate source",
+    )
+    def registry_validate(
+        payload: dict = Body(default={}), ws: Path = Depends(get_workspace)
+    ) -> dict:
+        """Validate candidate source (``payload.kind/name/source``) without
+        writing: parse, then import it in the workspace venv and confirm it
+        defines + registers a valid process/step/generator (or, for a spec, that
+        it parses and its referenced processes resolve). Returns a checklist."""
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        try:
+            return get_pool().call(ws, "authoring_validate", payload)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    @app.post(
+        "/api/registry/create",
+        tags=["Registry & catalog"],
+        summary="Create a new process/step/composite in the workspace + register it",
+    )
+    def registry_create(
+        payload: dict = Body(default={}), ws: Path = Depends(get_workspace)
+    ) -> dict:
+        """Write ``payload.source`` into the workspace at the conventional path
+        for ``payload.kind``/``name`` and auto-register it (a process/step is
+        wired into ``core.py``'s ``build_core``; a generator module is imported
+        from ``composites/__init__.py``; a spec is discovered by presence).
+        Refuses on name/target collision or parse failure. Returns the created
+        path + how to open it (``address`` for a process, ``id``/``source_path``
+        for a composite)."""
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        try:
+            result = get_pool().call(ws, "authoring_create", payload)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+        # A successful create changed what the workspace registers/discovers —
+        # drop the registry cache so the next /api/registry rebuilds and the new
+        # entry shows up immediately.
+        if isinstance(result, dict) and result.get("ok"):
+            try:
+                from vivarium_workbench.lib.registry import clear_registry_cache
+                clear_registry_cache(ws)
+            except Exception:  # noqa: BLE001
+                pass
+            # The warm worker already imported the workspace's modules; drop it so
+            # the next registry build re-imports and sees the new file.
+            try:
+                get_pool().evict(ws)
+            except Exception:  # noqa: BLE001
+                pass
+        return result
 
     @app.get(
         "/api/composites/source",

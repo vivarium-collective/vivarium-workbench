@@ -4062,8 +4062,24 @@
     // Re-apply filter to the now-visible panel.
     var q = (document.getElementById('registry-search') || {value: ''}).value;
     _filterRegistry(q);
+    _renderRegistryNewActions(kind);
   }
   window._setRegistryTab = _setRegistryTab;
+
+  // Context-aware "+ New" buttons for the active sub-tab. Only process/step and
+  // composite/generator are authorable from here (emitters/viz/types/tests are
+  // framework- or discovery-defined).
+  function _renderRegistryNewActions(kind) {
+    var host = document.getElementById('registry-new-actions');
+    if (!host || !window.ProcessCode) { if (host) host.innerHTML = ''; return; }
+    var btn = function (k, label) {
+      return '<button type="button" class="reg-new-btn" onclick="ProcessCode.openNew(\'' + k + '\')">+ New ' + label + '</button>';
+    };
+    if (kind === 'process') host.innerHTML = btn('process', 'process') + btn('step', 'step');
+    else if (kind === 'composite') host.innerHTML = btn('spec', 'composite') + btn('generator', 'generator');
+    else host.innerHTML = '';
+  }
+  window._renderRegistryNewActions = _renderRegistryNewActions;
 
   // Data-driven filter: store the query and re-render so it works uniformly
   // across the Table / Cards / Full layouts (the old per-.registry-entry DOM

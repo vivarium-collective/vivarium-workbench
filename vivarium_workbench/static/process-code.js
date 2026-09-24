@@ -132,6 +132,7 @@
   // ctx: { title, subtitle, getUrl, lang, save:{url, base} }
   function load(ctx) {
     open();
+    setNewMode(false);
     state.loading = true;
     state.save = ctx.save || null;
     state.lang = ctx.lang || 'python';
@@ -218,6 +219,126 @@
     });
   }
 
+  // ── authoring a new artifact ────────────────────────────────────────────
+  var enc = encodeURIComponent;
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+  function setNewMode(on) {
+    state.newMode = !!on;
+    var nb = $('viv-code-newbar'); if (nb) nb.hidden = !on;
+    document.querySelectorAll('.viv-code-newact').forEach(function (b) { b.hidden = !on; });
+    document.querySelectorAll('.viv-code-editact').forEach(function (b) { b.hidden = !!on; });
+    if (!on) renderChecks(null);
+  }
+  function renderChecks(res) {
+    var host = $('viv-code-checks'); if (!host) return;
+    if (!res || !res.checks || !res.checks.length) { host.hidden = true; host.innerHTML = ''; return; }
+    host.hidden = false;
+    host.innerHTML = '<div class="viv-code-checks-head ' + (res.valid ? 'ok' : 'bad') + '">' +
+      (res.valid ? '✓ Ready to create' : 'Resolve these first') + '</div>' +
+      res.checks.map(function (c) {
+        return '<div class="viv-code-check ' + (c.ok ? 'ok' : 'bad') + '">' +
+          (c.ok ? '✓' : '✕') + ' ' + esc(c.label) +
+          (c.detail ? ' <span class="viv-code-check-detail">— ' + esc(c.detail) + '</span>' : '') + '</div>';
+      }).join('');
+  }
+  function _newNameEl() { return $('viv-code-newname'); }
+  function _newName() { var e = _newNameEl(); return e ? e.value.trim() : ''; }
+  function _syncCreateEnabled() {
+    var b = $('viv-code-create'); if (b) b.disabled = !_newName();
+  }
+
+  function openNew(kind) {
+    open();
+    setNewMode(true);
+    state.newKind = kind;
+    state.editable = true;
+    var placeholders = { spec: 'my-composite', generator: 'my_composite', step: 'MyStep', process: 'MyProcess' };
+    var title = $('viv-code-name'); if (title) title.textContent = 'New ' + kind;
+    var addrEl = $('viv-code-addr'); if (addrEl) addrEl.textContent = '';
+    var badge = $('viv-code-badge'); if (badge) { badge.textContent = ''; badge.className = 'viv-code-badge'; }
+    var pathEl = $('viv-code-path'); if (pathEl) pathEl.textContent = '';
+    var nameEl = _newNameEl();
+    if (nameEl) { nameEl.value = ''; nameEl.placeholder = placeholders[kind] || 'Name'; }
+    var empty = $('viv-code-empty'); if (empty) empty.hidden = true;
+    var ta = textarea(); if (ta) ta.hidden = false;
+    renderChecks(null);
+    _syncCreateEnabled();
+    ensureCore()
+      .then(function () { return fetch(_api('/api/registry/scaffold?kind=' + enc(kind) + '&name=')).then(function (r) { return r.json(); }); })
+      .then(function (j) {
+        if (!j || !j.ok) { setStatus((j && j.error) || 'template unavailable', 'error'); return; }
+        state.lang = j.lang;
+        state.lastTemplate = j.source;
+        return ensureMode(j.lang).then(function () {
+          upgradeEditor(); setMode(j.lang); setValue(j.source); setReadOnly(false);
+          var tgt = $('viv-code-target'); if (tgt) tgt.textContent = j.target ? '→ ' + j.target : '';
+          setStatus('Fill in the template, Check, then Create.');
+          if (nameEl) nameEl.focus();
+          if (state.cm) setTimeout(function () { try { state.cm.refresh(); } catch (e) {} }, 20);
+        });
+      })
+      .catch(function (e) { setStatus('Template load failed: ' + e, 'error'); });
+  }
+
+  // Keep the class/target tracking the name field until the author edits the body.
+  function onNameInput(name) {
+    var title = $('viv-code-name'); if (title) title.textContent = 'New ' + state.newKind + (name ? ' · ' + name : '');
+    _syncCreateEnabled();
+    clearTimeout(state._nameT);
+    state._nameT = setTimeout(function () {
+      fetch(_api('/api/registry/scaffold?kind=' + enc(state.newKind) + '&name=' + enc(name)))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) return;
+          var tgt = $('viv-code-target'); if (tgt) tgt.textContent = j.target ? '→ ' + j.target : '';
+          if (getValue() === state.lastTemplate) {   // editor still pristine → track the name
+            state.lastTemplate = j.source; state.lang = j.lang; setMode(j.lang); setValue(j.source);
+          }
+        }).catch(function () {});
+    }, 250);
+  }
+
+  function check() {
+    var name = _newName();
+    setStatus('Checking…');
+    fetch(_api('/api/registry/validate'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: state.newKind, name: name, source: getValue(), lang: state.lang }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.ok === false && res.error) { setStatus(res.error, 'error'); return; }
+        renderChecks(res);
+        setStatus(res.valid ? 'Valid ✓' : 'Not valid yet', res.valid ? 'ok' : 'error');
+      })
+      .catch(function (e) { setStatus('Check failed: ' + e, 'error'); });
+  }
+
+  function create() {
+    var name = _newName();
+    if (!name) { setStatus('Enter a name first.', 'error'); return; }
+    setStatus('Creating…');
+    fetch(_api('/api/registry/create'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: state.newKind, name: name, source: getValue(), lang: state.lang }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res || res.ok !== true) { setStatus((res && res.error) || 'Create failed.', 'error'); return; }
+        setStatus('Created ✓ ' + (res.note || ''), 'ok');
+        try { if (window._loadRegistry) window._loadRegistry(true); if (window._loadComposites) window._loadComposites(); } catch (e) {}
+        setTimeout(function () {
+          if (res.address) openProcess(res.address);
+          else if (res.id) openComposite({ id: res.id, module: res.id.split('.').slice(0, -1).join('.'), source_path: res.source_path || '' });
+        }, 500);
+      })
+      .catch(function (e) { setStatus('Create failed: ' + e, 'error'); });
+  }
+
   function revert() { setValue(state.original); setStatus('Reverted.'); refreshDirty(); }
 
   function save() {
@@ -280,6 +401,10 @@
   window.ProcessCode = {
     open: openProcess,        // process/step by registry address
     openComposite: openComposite,
+    openNew: openNew,         // author a new artifact of a given kind
+    onNameInput: onNameInput,
+    check: check,
+    create: create,
     toggle: toggle,
     collapse: collapse,
     save: save,

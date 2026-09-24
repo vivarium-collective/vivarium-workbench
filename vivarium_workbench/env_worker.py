@@ -95,6 +95,7 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "run_process", "process_template", "process_source", "process_source_write",
                  "composite_source", "composite_source_write",
+                 "scaffold_template", "authoring_validate", "authoring_create",
                  "viz_classes", "resolve_composite_state", "config_to_composite", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites", "composites_full",
                  "validate_generated_visualization", "study_precheck", "run_study_analyses", "run_study", "run_investigation_analysis", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "data_sources_provider", "analysis_viewers", "shutdown"]
@@ -3431,6 +3432,289 @@ def _composite_source_write(params: dict) -> dict:
     return {"ok": True, "path": path, "bytes": len(new_source.encode("utf-8"))}
 
 
+# ── Authoring: scaffold + validate + create new processes/steps/composites ────
+
+def _authoring_slug(s: str) -> str:
+    import re
+    return re.sub(r"[^A-Za-z0-9_]+", "_", str(s or "")).strip("_") or "new_item"
+
+
+def _ws_pkg_dir() -> "tuple":
+    from pathlib import Path
+    pkg, _pkgs, _ws = _workspace_meta(_workspace)
+    return Path(_workspace) / pkg, pkg
+
+
+def _scaffold_target(kind: str, name: str):
+    """Conventional (path, package) for a new artifact of ``kind`` named ``name``."""
+    pkg_dir, pkg = _ws_pkg_dir()
+    if kind in ("process", "step"):
+        return pkg_dir / "processes.py", pkg
+    if kind == "generator":
+        return pkg_dir / "composites" / (_authoring_slug(name) + ".py"), pkg
+    return pkg_dir / "composites" / (_authoring_slug(name) + ".composite.yaml"), pkg
+
+
+def _authoring_template_text(kind: str, name: str) -> "tuple[str | None, str | None]":
+    name = (name or "").strip()
+    if kind in ("process", "step"):
+        base = "Process" if kind == "process" else "Step"
+        cls = name or ("MyProcess" if kind == "process" else "MyStep")
+        update_sig = ("def update(self, state, interval):" if kind == "process"
+                      else "def update(self, state):")
+        src = (
+            f"from process_bigraph import {base}\n\n\n"
+            f"class {cls}({base}):\n"
+            f'    """TODO: describe what {cls} does."""\n\n'
+            "    config_schema = {\n"
+            "        # 'rate': {'_type': 'float', '_default': 1.0},\n"
+            "    }\n\n"
+            "    def inputs(self):\n"
+            "        return {\n"
+            "            # 'level': 'float',\n"
+            "        }\n\n"
+            "    def outputs(self):\n"
+            "        return {\n"
+            "            # 'level': 'float',\n"
+            "        }\n\n"
+            f"    {update_sig}\n"
+            "        # Return the update for your output ports.\n"
+            "        return {}\n"
+        )
+        return src, "python"
+    if kind == "generator":
+        fn = _authoring_slug(name) if name else "my_composite"
+        src = (
+            "from process_bigraph.composite_generator import composite_generator\n\n\n"
+            f'@composite_generator(name="{fn}", description="TODO: describe this composite.",\n'
+            "                     parameters={})\n"
+            f"def {fn}(core=None):\n"
+            '    """Return the composite state tree."""\n'
+            "    return {\n"
+            "        # 'my_process': {\n"
+            "        #     '_type': 'process',\n"
+            "        #     'address': 'local:MyProcess',\n"
+            "        #     'config': {},\n"
+            "        #     'inputs': {},\n"
+            "        #     'outputs': {},\n"
+            "        # },\n"
+            "    }\n"
+        )
+        return src, "python"
+    if kind in ("composite", "spec"):
+        nm = name or "my-composite"
+        src = (
+            f"name: {nm}\n"
+            'description: "TODO: describe this composite."\n'
+            "requires:\n"
+            "  processes: []\n"
+            "parameters: {}\n"
+            "state:\n"
+            "  # store: value\n"
+        )
+        return src, "yaml"
+    return None, None
+
+
+def _scaffold_template(params: dict) -> dict:
+    """A starter template + the conventional target path for a new artifact.
+    Does not write anything."""
+    from pathlib import Path
+    kind = (params or {}).get("kind") or "process"
+    name = (params or {}).get("name") or ""
+    src, lang = _authoring_template_text(kind, name)
+    if src is None:
+        return {"ok": False, "error": f"unknown kind: {kind}"}
+    try:
+        target, _pkg = _scaffold_target(kind, name)
+        rel = str(Path(target).relative_to(Path(_workspace)))
+    except Exception:  # noqa: BLE001
+        rel = ""
+    return {"ok": True, "kind": kind, "name": name, "source": src, "lang": lang, "target": rel}
+
+
+def _class_has_ancestor(cls, ancestor_name: str) -> bool:
+    return any(a.__name__ == ancestor_name for a in getattr(cls, "__mro__", []))
+
+
+def _defines_own_method(cls, name: str) -> bool:
+    """True iff ``name`` is defined on ``cls`` or a non-framework ancestor —
+    i.e. the author actually implemented it, not inherited from the Process/Step
+    base (whose ``update`` typically raises NotImplementedError)."""
+    fn = getattr(cls, name, None)
+    if not callable(fn):
+        return False
+    owner = getattr(fn, "__qualname__", "").split(".")[0]
+    return owner not in ("Process", "Step", "ProcessInterface", "Edge", "")
+
+
+def _authoring_validate(params: dict) -> dict:
+    """Parse + import & register checks for a candidate artifact. Returns
+    ``{ok, valid, checks:[{label, ok, detail}]}`` — a checklist the panel renders.
+    Imports happen in a fresh namespace with the workspace on ``sys.path``."""
+    p = params or {}
+    kind = p.get("kind") or "process"
+    name = (p.get("name") or "").strip()
+    source = p.get("source") or ""
+    lang = p.get("lang") or ("yaml" if kind in ("composite", "spec") else "python")
+    checks: list = []
+
+    def add(label, ok, detail=""):
+        checks.append({"label": label, "ok": bool(ok), "detail": str(detail or "")})
+
+    def done():
+        return {"ok": True, "valid": all(c["ok"] for c in checks), "checks": checks}
+
+    okp, perr = _validate_source(source, lang, name or "<new>")
+    add("Parses", okp, perr)
+    if not okp:
+        return done()
+
+    if lang == "yaml":
+        import yaml
+        try:
+            data = yaml.safe_load(source) or {}
+        except Exception as e:  # noqa: BLE001
+            add("Parses", False, str(e))
+            return done()
+        add("Has a name", bool(data.get("name")))
+        st = data.get("state")
+        add("Has a non-empty state tree", isinstance(st, dict) and bool(st))
+        reqs = ((data.get("requires") or {}).get("processes")) or []
+        if reqs:
+            try:
+                core = _get_workspace_core()
+            except Exception:  # noqa: BLE001
+                core = None
+            reg = (getattr(core, "link_registry", {}) or {}) if core is not None else {}
+            missing = [r for r in reqs if r not in reg]
+            add("Required processes resolve", not missing,
+                ("missing: " + ", ".join(map(str, missing))) if missing else "")
+        return done()
+
+    # Python kinds — exec in a throwaway namespace.
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    ns: dict = {}
+    try:
+        exec(compile(source, name or "<new>", "exec"), ns)  # noqa: S102 — local authoring tool
+        add("Imports cleanly", True)
+    except Exception as e:  # noqa: BLE001
+        add("Imports cleanly", False, f"{type(e).__name__}: {e}")
+        return done()
+
+    if kind in ("process", "step"):
+        cls = ns.get(name)
+        add(f"Defines class {name}", isinstance(cls, type),
+            "" if isinstance(cls, type) else "class name not found in the file")
+        if isinstance(cls, type):
+            want = "Process" if kind == "process" else "Step"
+            add(f"Subclasses {want}", _class_has_ancestor(cls, want))
+            add("Has inputs()", callable(getattr(cls, "inputs", None)))
+            add("Has outputs()", callable(getattr(cls, "outputs", None)))
+            add("Has update()", _defines_own_method(cls, "update"))
+            try:
+                from process_bigraph import allocate_core
+                c = allocate_core()
+                c.register_link(name, cls)
+                reg = getattr(c, "link_registry", {}) or {}
+                add("Registers + resolves", reg.get(name) is cls)
+            except Exception as e:  # noqa: BLE001
+                add("Registers + resolves", False, str(e))
+    elif kind == "generator":
+        fn = ns.get(name)
+        add(f"Defines {name}", callable(fn), "" if callable(fn) else "function name not found")
+        try:
+            from process_bigraph.composite_generator import _REGISTRY
+            add("Registered as a composite generator", name in _REGISTRY,
+                "" if name in _REGISTRY else "the @composite_generator name must match the function name you entered")
+        except Exception as e:  # noqa: BLE001
+            add("Registered as a composite generator", False, str(e))
+    return done()
+
+
+def _register_process_in_core(pkg: str, pkg_dir, cls_name: str) -> "tuple[bool, str]":
+    """Best-effort: add an import + ``register_link`` for ``cls_name`` to
+    ``<pkg>/core.py``'s ``build_core``. Returns ``(registered, note)``."""
+    import re
+    core_py = pkg_dir / "core.py"
+    if not core_py.is_file():
+        return False, "core.py not found — add register_link manually"
+    text = core_py.read_text(encoding="utf-8")
+    if re.search(rf"register_link\(\s*['\"]{re.escape(cls_name)}['\"]", text):
+        return True, "already registered"
+    import_line = f"from {pkg}.processes import {cls_name}"
+    if import_line not in text:
+        m = re.search(rf"^from {re.escape(pkg)}\.processes import (.+)$", text, re.M)
+        if m:
+            text = text[:m.start()] + f"from {pkg}.processes import {m.group(1).rstrip()}, {cls_name}" + text[m.end():]
+        else:
+            text = import_line + "\n" + text
+    m = re.search(r"^([ \t]*)return core\b", text, re.M)
+    if not m:
+        core_py.write_text(text, encoding="utf-8")
+        return False, "wrote import but could not find 'return core' — add core.register_link manually"
+    indent = m.group(1)
+    reg = f"{indent}core.register_link('{cls_name}', {cls_name})\n"
+    text = text[:m.start()] + reg + text[m.start():]
+    core_py.write_text(text, encoding="utf-8")
+    return True, "registered in build_core"
+
+
+def _authoring_create(params: dict) -> dict:
+    """Write a new artifact into the workspace and auto-register it. Refuses if
+    the target/name already exists or the source fails to parse."""
+    from pathlib import Path
+    p = params or {}
+    kind = p.get("kind") or "process"
+    name = (p.get("name") or "").strip()
+    source = p.get("source") or ""
+    lang = p.get("lang") or ("yaml" if kind in ("composite", "spec") else "python")
+    if not name:
+        return {"ok": False, "error": "a name is required"}
+    ok, err = _validate_source(source, lang, name)
+    if not ok:
+        return {"ok": False, "error": err}
+    try:
+        target, pkg = _scaffold_target(kind, name)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"could not resolve target: {e}"}
+    if not _source_path_editable(str(target), _workspace):
+        return {"ok": False, "error": "target is outside the editable workspace tree"}
+
+    if kind in ("process", "step"):
+        pf = target
+        pf.parent.mkdir(parents=True, exist_ok=True)
+        existing = pf.read_text(encoding="utf-8") if pf.is_file() else ""
+        if f"class {name}(" in existing:
+            return {"ok": False, "error": f"{name} already exists in {pf.name}"}
+        new_text = (existing.rstrip() + "\n\n\n" + source) if existing.strip() else source
+        pf.write_text(new_text, encoding="utf-8")
+        registered, note = _register_process_in_core(pkg, pf.parent, name)
+        return {"ok": True, "path": str(pf), "registered": registered, "note": note,
+                "address": f"{pkg}.processes.{name}", "lang": "python"}
+
+    if target.exists():
+        return {"ok": False, "error": f"{target.name} already exists"}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    if kind == "generator":
+        init = target.parent / "__init__.py"
+        line = f"from . import {target.stem}  # noqa: F401"
+        prev = init.read_text(encoding="utf-8") if init.is_file() else ""
+        if f"import {target.stem}" not in prev:
+            init.write_text((prev.rstrip() + "\n" + line + "\n") if prev.strip() else line + "\n",
+                            encoding="utf-8")
+        return {"ok": True, "path": str(target), "registered": True,
+                "note": "generator module wired into composites/__init__.py for discovery",
+                "id": f"{pkg}.composites.{target.stem}", "lang": "python"}
+    # spec
+    return {"ok": True, "path": str(target), "registered": True,
+            "note": "composite spec discovered by presence",
+            "id": f"{pkg}.composites.{name}", "source_path": str(target.relative_to(Path(_workspace))),
+            "lang": "yaml"}
+
+
 def _run_process(params: dict) -> dict:
     """Instantiate a registry Process/Step with the given config, validate + fill
     the provided input-port values, and run one update() — returning outputs.
@@ -3709,6 +3993,12 @@ def _handle(method: str, params: dict) -> dict:
         return _composite_source(params)
     if method == "composite_source_write":
         return _composite_source_write(params)
+    if method == "scaffold_template":
+        return _scaffold_template(params)
+    if method == "authoring_validate":
+        return _authoring_validate(params)
+    if method == "authoring_create":
+        return _authoring_create(params)
     if method == "viz_classes":
         return _list_visualizations()
     if method == "resolve_composite_state":
