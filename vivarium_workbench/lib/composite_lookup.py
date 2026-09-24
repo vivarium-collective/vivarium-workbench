@@ -17,8 +17,10 @@ import difflib
 import importlib.metadata as metadata
 import importlib.util
 import json
+import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -322,6 +324,33 @@ def _cast(value: Any, declared_type: str | None) -> Any:
     return value
 
 
+# Memoize the "known composite ids" set. Computing it runs a workspace/installed
+# FS scan, a federation scan, AND an env_worker discover_composites call — the
+# same discovery cost as the Composites tab. /api/simulations calls this on EVERY
+# request (to annotate whether each run maps to a registered composite), and the
+# Runs tab re-hits /api/simulations on a 15s poll, so an uncached call hammered
+# the single env_worker just to flag a handful of runs. The set is composite-set
+# stable (changes only when composites/installs change): memoize per (workspace,
+# package_path) with a TTL, and clear it on any catalog change via
+# active_workspace.invalidate (registered below). The TTL bounds drift from a
+# freshly authored composite that doesn't go through the catalog path.
+_KNOWN_COMPOSITES_CACHE: dict = {}
+
+
+def _known_composites_ttl() -> float:
+    try:
+        return float(os.environ.get("VIVARIUM_WORKBENCH_KNOWN_COMPOSITES_TTL", "60"))
+    except (TypeError, ValueError):
+        return 60.0
+
+
+def clear_known_composites_cache(ws_root: "Path | str | None" = None) -> None:
+    """Drop the memoized known-composite-ids sets. Registered as an
+    ``active_workspace`` clear callback so a catalog install/uninstall refreshes
+    it immediately (same signal used by the registry/composites/catalog caches)."""
+    _KNOWN_COMPOSITES_CACHE.clear()
+
+
 def known_composite_ids(ws_root: Path, package_path: str | None = None) -> set[str]:
     """All composite spec ids resolvable in this workspace.
 
@@ -329,6 +358,10 @@ def known_composite_ids(ws_root: Path, package_path: str | None = None) -> set[s
     package specs, AND the live ``@composite_generator`` registry. This is the
     "known set" the composite-resolution lint checks a study's declared refs
     against. Tolerant: returns whatever it can discover; never raises.
+
+    Memoized per (workspace, resolved package_path) with a TTL — the underlying
+    discovery is expensive (FS + federation scans + an env_worker call) and this
+    is called on every /api/simulations request. Invalidated on catalog changes.
     """
     ws_root = Path(ws_root)
     if package_path is None:
@@ -338,6 +371,12 @@ def known_composite_ids(ws_root: Path, package_path: str | None = None) -> set[s
                 "pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
         except Exception:  # noqa: BLE001
             package_path = ""
+
+    cache_key = (str(ws_root), package_path or "")
+    slot = _KNOWN_COMPOSITES_CACHE.get(cache_key)
+    if slot and (time.time() - slot["ts"]) < _known_composites_ttl():
+        return set(slot["ids"])
+
     ids: set[str] = set()
     try:
         # discover_all_composites now includes the generator registry (via the
@@ -346,6 +385,7 @@ def known_composite_ids(ws_root: Path, package_path: str | None = None) -> set[s
         ids.update(discover_all_composites(ws_root, package_path or "").keys())
     except Exception:  # noqa: BLE001
         pass
+    _KNOWN_COMPOSITES_CACHE[cache_key] = {"ids": set(ids), "ts": time.time()}
     return ids
 
 
@@ -634,3 +674,10 @@ def substitute_parameters(state: Any, params: dict, overrides: dict | None = Non
                 state,
             )
     return state
+
+
+# A catalog install/uninstall (or any workspace switch) makes the known-composite
+# set stale; register the cache so active_workspace.invalidate() clears it on the
+# same signal the registry/composites/catalog caches already use.
+from vivarium_workbench.lib import active_workspace as _aw  # noqa: E402
+_aw.register_clear_cb(clear_known_composites_cache)
