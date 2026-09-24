@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -413,6 +415,9 @@ def _detect_workspace_venv_distributions(ws_root: Path) -> dict[str, dict]:
     venv_py = ws_root / ".venv" / "bin" / "python3"
     if not venv_py.is_file():
         return {}
+    _slot = _VENV_DIST_CACHE.get(str(ws_root))
+    if _slot and (time.time() - _slot["ts"]) < _catalog_probe_ttl():
+        return copy.deepcopy(_slot["data"])
     try:
         result = subprocess.run(
             [str(venv_py), "-c", _CATALOG_VENV_PROBE_SCRIPT],
@@ -430,7 +435,96 @@ def _detect_workspace_venv_distributions(ws_root: Path) -> dict[str, dict]:
             rev.setdefault(req, []).append(name)
     for name, info in data.items():
         info["requires_by"] = sorted(rev.get(name, []))
+    _VENV_DIST_CACHE[str(ws_root)] = {"data": copy.deepcopy(data), "ts": time.time()}
     return data
+
+
+# ---------------------------------------------------------------------------
+# Install-stable probe caches
+# ---------------------------------------------------------------------------
+# ``build_catalog`` runs two venv subprocess probes that only change when the
+# venv changes: the bulk distribution scan (``_detect_workspace_venv_distributions``)
+# and the per-module importability check. Both were re-run on every ``/api/catalog``
+# AND ``/api/marketplace`` call — and with the venv on NFS the importability check
+# spawned ONE Python interpreter per installed module. We now (a) batch that check
+# into a single subprocess (``_batch_import_check``) and (b) memoize both probes
+# per workspace with a TTL. Any catalog change (install/uninstall) fires
+# ``active_workspace.invalidate`` → ``clear_catalog_probe_cache`` for immediate
+# freshness; the TTL only bounds drift from an out-of-band ``pip install`` (same
+# model as the registry cache).
+_VENV_DIST_CACHE: dict = {}
+_IMPORT_CHECK_CACHE: dict = {}
+
+
+def _catalog_probe_ttl() -> float:
+    try:
+        return float(os.environ.get("VIVARIUM_WORKBENCH_CATALOG_PROBE_TTL", "3600"))
+    except (TypeError, ValueError):
+        return 3600.0
+
+
+def clear_catalog_probe_cache(ws_root: "Path | str | None" = None) -> None:
+    """Drop the memoized venv-dist + importability probes. Registered as an
+    ``active_workspace`` clear callback, so a catalog install/uninstall (which
+    calls ``active_workspace.invalidate``) refreshes them immediately."""
+    _VENV_DIST_CACHE.clear()
+    _IMPORT_CHECK_CACHE.clear()
+
+
+def _batch_import_check(ws_root: Path, pkg_names) -> set[str]:
+    """Return the lowercased names in ``pkg_names`` that FAIL to import in the
+    workspace venv — in ONE subprocess (previously one per module). Each name is
+    tried as given and lowercased; a name importable under either is in sync.
+
+    Returns an empty set when there's nothing to check or the probe can't run
+    (missing venv / timeout / bad output) — callers then treat every module as
+    in-sync, matching the pre-batch degrade-to-``None`` behaviour. Memoized per
+    workspace with the same TTL + invalidation as the venv-dist probe."""
+    names = sorted({str(n).strip() for n in pkg_names if n and str(n).strip()})
+    if not names:
+        return set()
+    venv_py = ws_root / ".venv" / "bin" / "python3"
+    if not venv_py.is_file():
+        return set()
+    key = tuple(names)
+    slot = _IMPORT_CHECK_CACHE.get(str(ws_root))
+    if slot and slot.get("key") == key and (time.time() - slot["ts"]) < _catalog_probe_ttl():
+        return set(slot["failed"])
+    probe = (
+        "import importlib, json, sys\n"
+        "failed = []\n"
+        "for n in json.loads(sys.argv[1]):\n"
+        "    ok = False\n"
+        "    for c in (n, n.lower()):\n"
+        "        try:\n"
+        "            importlib.import_module(c); ok = True; break\n"
+        "        except Exception: pass\n"
+        "    if not ok: failed.append(n.lower())\n"
+        "json.dump(failed, sys.stdout)\n"
+    )
+    try:
+        result = subprocess.run(
+            [str(venv_py), "-c", probe, json.dumps(names)],
+            cwd=ws_root, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return set()
+        failed = set(json.loads(result.stdout))
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        return set()
+    _IMPORT_CHECK_CACHE[str(ws_root)] = {"key": key, "failed": failed, "ts": time.time()}
+    return failed
+
+
+def _sync_reason(pkg_name: str | None, import_failures: set) -> str | None:
+    """One-line drift reason if ``pkg_name`` is in the batched import-failure set,
+    else ``None`` — the annotation ``_check_installed_module_sync`` produced per
+    module, now sourced from the single batched probe."""
+    if not pkg_name:
+        return None
+    if pkg_name.lower() in import_failures:
+        return f"Python import of '{pkg_name}' failed (was the venv updated?)"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +630,28 @@ def build_catalog(ws_root: Path, full: bool = False) -> dict:
     pyproject_deps = _read_workspace_pyproject_deps(ws_root)
     venv_dists = _detect_workspace_venv_distributions(ws_root)
 
+    # Batch the per-module importability probe into ONE subprocess. Collect every
+    # package name build_catalog might sync-check — the catalog modules, the
+    # workspace.yaml imports, and the workspace's own package — and probe them
+    # together, instead of spawning one interpreter per module (the dominant
+    # /api/catalog cost with the venv on NFS). A superset is fine: extra names
+    # (e.g. reference-mode modules never actually checked) cost nothing beyond one
+    # import attempt, and their results are simply not consulted.
+    _probe_pkgs: set = set()
+    for _m in modules:
+        if isinstance(_m, dict):
+            _probe_pkgs.add((_m.get("package") or str(_m.get("name") or "")).replace("-", "_"))
+    if isinstance(imports, dict):
+        for _in, _iv in imports.items():
+            _iv = _iv or {}
+            _probe_pkgs.add((_iv.get("package") or str(_in)).replace("-", "_"))
+    _ws_slug_probe = (ws_data or {}).get("name", "") or ""
+    _ws_pkg_probe = (ws_data or {}).get("package_path") or (
+        "pbg_" + _ws_slug_probe.replace("-", "_") if _ws_slug_probe else None)
+    if _ws_pkg_probe:
+        _probe_pkgs.add(_ws_pkg_probe)
+    import_failures = _batch_import_check(ws_root, _probe_pkgs)
+
     # Normalized import lookup: key each declared import by its lowercased
     # dash- AND underscore-forms so a curated module named "pbg-oxidizeme"
     # matches an import declared as "pbg_oxidizeme" (the dash/underscore
@@ -588,9 +704,7 @@ def build_catalog(ws_root: Path, full: bool = False) -> dict:
                 and str(m.get("mode") or "").lower() != "reference"
             ):
                 pkg_name = m.get("package") or m["name"].replace("-", "_")
-                sync_reason = _check_installed_module_sync(
-                    ws_root, pkg_name, m.get("install_path")
-                )
+                sync_reason = _sync_reason(pkg_name, import_failures)
                 if sync_reason:
                     m["out_of_sync"] = True
                     m["out_of_sync_reason"] = sync_reason
@@ -633,9 +747,7 @@ def build_catalog(ws_root: Path, full: bool = False) -> dict:
             # imported-but-unimportable package is flagged here too — but skip
             # reference-mode modules, which are browse-only by design.
             if not is_reference:
-                sync_reason = _check_installed_module_sync(
-                    ws_root, pkg, mod.get("install_path")
-                )
+                sync_reason = _sync_reason(pkg, import_failures)
                 if sync_reason:
                     mod["out_of_sync"] = True
                     mod["out_of_sync_reason"] = sync_reason
@@ -654,7 +766,7 @@ def build_catalog(ws_root: Path, full: bool = False) -> dict:
     if ws_pkg:
         pkg_dir = ws_root / ws_pkg
         if pkg_dir.is_dir():
-            sync_reason = _check_installed_module_sync(ws_root, ws_pkg, ws_pkg)
+            sync_reason = _sync_reason(ws_pkg, import_failures)
             try:
                 result = subprocess.run(
                     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -722,3 +834,10 @@ def build_catalog(ws_root: Path, full: bool = False) -> dict:
             m["display_name"] = _viva_display_name(name)
 
     return {"modules": modules}
+
+
+# A catalog install/uninstall invalidates the workspace-derived caches via
+# active_workspace.invalidate() (see catalog_install_views); register the
+# install-stable probe caches so they refresh on the same signal.
+from vivarium_workbench.lib import active_workspace as _aw  # noqa: E402
+_aw.register_clear_cb(clear_catalog_probe_cache)

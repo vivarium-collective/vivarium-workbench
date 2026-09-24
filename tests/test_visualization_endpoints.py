@@ -1780,7 +1780,10 @@ def test_get_catalog_marks_out_of_sync_when_import_fails(workspace_server, monke
     ws.setdefault("imports", {})["foo"] = {
         "source": "https://example.invalid/foo.git",
         "ref": "main",
-        "mode": "reference",
+        # NOT reference mode: reference-mode imports are browse-only and are
+        # deliberately never sync-checked, so the module must be a real
+        # (non-reference) install for the importability check to run.
+        "mode": "pypi",
         "path": "external/foo",
         "description": "Fake module for sync test",
         "installed": True,

@@ -204,6 +204,7 @@ def test_build_catalog_merges_stats_via_normalized_name(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_catalog, "_detect_workspace_venv_distributions", lambda _w: {})
     monkeypatch.setattr(_catalog, "_check_installed_module_sync", lambda ws, pkg, path: None)
+    monkeypatch.setattr(_catalog, "_batch_import_check", lambda ws, pkgs: set())
     monkeypatch.setattr("viva_superpowers.catalog.load_registry", lambda _w: [
         {"name": "pbg-copasi", "package": "pbg_copasi", "description": "c"},
         {"name": "pbg_ketchup", "package": "pbg_ketchup", "description": "k"},
@@ -327,6 +328,7 @@ def test_build_catalog_surfaces_n_processes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_catalog, "_detect_workspace_venv_distributions", lambda _w: {})
     monkeypatch.setattr(_catalog, "_check_installed_module_sync", lambda ws, pkg, path: None)
+    monkeypatch.setattr(_catalog, "_batch_import_check", lambda ws, pkgs: set())
     monkeypatch.setattr("viva_superpowers.catalog.load_registry", lambda _w: [
         {"name": "viva-ketchup", "package": "pbg_ketchup", "description": "k"},
     ])

@@ -135,6 +135,7 @@ def _patched_ws(monkeypatch, _ws_with_catalog):
     # Stub the sync-check so it never shells out to a real venv.
     monkeypatch.setattr(_catalog, "_check_installed_module_sync",
                         lambda ws, pkg, path: None)
+    monkeypatch.setattr(_catalog, "_batch_import_check", lambda ws, pkgs: set())
     fixture_modules = json.loads(
         (_ws_with_catalog / "scripts" / "_catalog" / "modules.json").read_text())
     monkeypatch.setattr("viva_superpowers.catalog.load_registry",
@@ -239,6 +240,7 @@ def test_uncurated_declared_import_surfaces_in_catalog(tmp_path, monkeypatch):
     monkeypatch.setattr(_catalog, "_read_workspace_pyproject_deps", lambda _w: set())
     monkeypatch.setattr(_catalog, "_detect_workspace_venv_distributions", lambda _w: {})
     monkeypatch.setattr(_catalog, "_check_installed_module_sync", lambda ws, pkg, path: None)
+    monkeypatch.setattr(_catalog, "_batch_import_check", lambda ws, pkgs: set())
     monkeypatch.setattr("viva_superpowers.catalog.load_registry",
                         lambda _w: [{"name": "pbg-copasi", "package": "pbg_copasi",
                                      "description": "c"}])
