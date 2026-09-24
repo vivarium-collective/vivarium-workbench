@@ -287,6 +287,18 @@ class WorkerPool:
         for w in workers:
             _safe_close(w)
 
+    def evict(self, workspace) -> None:
+        """Drop any pooled worker(s) for ``workspace`` so the next call spawns a
+        fresh one. Used after authoring changes the workspace's OWN source: a
+        warm worker has already imported those modules and would keep serving the
+        stale versions (a re-run of ``build_core`` reuses ``sys.modules``)."""
+        ws = str(Path(workspace))
+        with self._lock:
+            keys = [k for k in self._entries if k[0] == ws]
+            to_close = [self._entries.pop(k).worker for k in keys]
+        for w in to_close:
+            _safe_close(w)
+
     # -- internals ----------------------------------------------------------
     def _acquire(self, ws: str, interp: str, launcher) -> EnvWorker:
         # Keyed by kind as well: a local and a remote worker for the same

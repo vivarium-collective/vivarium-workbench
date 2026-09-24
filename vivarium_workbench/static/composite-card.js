@@ -204,6 +204,20 @@
   }
   window._compositeJsonBtn = _compositeJsonBtn;
 
+  // "</> Code" — open the code rail for this card. Header-styled variant, used by
+  // the full cards; the grid/table views inline their own smaller buttons.
+  function _compositeCodeBtn(id) {
+    return '<button class="pcard-json-btn" type="button" title="View / edit this composite\'s source" ' +
+      'onclick="event.stopPropagation();_openCompositeCode(\'' + _esc(id) + '\')">&lt;/&gt; Code</button>';
+  }
+  window._compositeCodeBtn = _compositeCodeBtn;
+  function _processCodeBtn(address) {
+    if (!address) return '';
+    return '<button class="pcard-json-btn" type="button" title="View / edit this process\'s source" ' +
+      'onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + _esc(address) + '\')">&lt;/&gt; Code</button>';
+  }
+  window._processCodeBtn = _processCodeBtn;
+
   // "🔗 Share" — copy a shareable link to this composite's interactive
   // bigraph view. The onclick references _shareCompositeFromHeader
   // (Modules-page-only) — inert elsewhere.
@@ -748,6 +762,9 @@
       '<button type="button" onclick="event.stopPropagation();_setRegistryZoom(\'full\')" ' +
         'title="Open the full card (Configure · Inputs · Run)" ' +
         'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">Full card</button>' +
+      '<button type="button" onclick="event.stopPropagation();_openCompositeCode(\'' + idA + '\')" ' +
+        'title="View / edit this composite\'s source (spec YAML or its generator)" ' +
+        'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">&lt;/&gt; Code</button>' +
     '</div>';
     return '<div class="registry-card' + selCls + '" data-address="' + idA + '" data-kind="composite"' +
         ' onclick="_selectRegistryEntry(\'' + idA + '\')" ondblclick="_enterMaxcardMode(\'' + idA + '\',\'composite\')"' +
@@ -767,6 +784,21 @@
     '</div>';
   }
   window._renderCompositeCardGrid = _renderCompositeCardGrid;
+
+  // Open the code panel for a composite: a spec composite → its YAML file, a
+  // generator composite → its @composite_generator module. Looks the record up
+  // in the composites cache so we pass structured fields, not embedded strings.
+  function _openCompositeCode(id) {
+    var c = (window._compositesById || {})[id] || { id: id };
+    if (!window.ProcessCode) return;
+    window.ProcessCode.openComposite({
+      id: c.id || id,
+      name: c.name,
+      module: c.module || '',
+      source_path: c.source || '',   // spec relpath; empty ⇒ resolve via module
+    });
+  }
+  window._openCompositeCode = _openCompositeCode;
 
   // --- Run-target badge -----------------------------------------------------
   // Show whether a composite ▶ Run will execute Local or on the Cloud (GovCloud)
@@ -919,6 +951,7 @@
             '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⌃</button>' +
             _shareCompositeBtn() +
             _compositeJsonBtn() +
+            _compositeCodeBtn(c.id) +
             _cardMaximizeBtn() +
             _cardPopoutBtn(c.id, 'composite') +
           '</div>' +

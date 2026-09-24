@@ -2464,6 +2464,10 @@
       ? '<button type="button" class="reg-cfgports-btn" onclick="event.stopPropagation();_showConfigPorts(event,\'' + addr + '\')" title="See config &amp; ports">' +
         'config &amp; ports <span class="reg-mid-sum">' + nCfg + ' config · ' + nIn + ' in · ' + nOut + ' out</span></button>'
       : '';
+    var codeBtnGrid = (/^(process|step)$/.test(p.kind || 'process') && p.address)
+      ? '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this process\'s source"' +
+        ' onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + addr + '\')">&lt;/&gt; Code</button>'
+      : '';
     var selCls = (window._registrySelected && window._registrySelected === p.address) ? ' reg-selected' : '';
     return '<div class="registry-card' + selCls + '"' + sourceAttr + ' data-address="' + addr + '"' +
         ' onclick="_selectRegistryEntry(\'' + addr + '\')" ondblclick="_zoomInOn(\'' + addr + '\')"' +
@@ -2478,6 +2482,7 @@
       '</div>' +
       _successBar(sp) +
       cfgPortsBtn +
+      codeBtnGrid +
       _runCmdChip(p.run_command) +
     '</div>';
   }
@@ -2787,6 +2792,7 @@
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" title="Click to pin to top">' +
             '<span class="loom-name">' + _esc(p.name) + '</span>' + kindBadge + _regUseBadge(p) +
             '<code class="loom-addr">' + _esc(p.address || kind) + '</code>' +
+            (/^(process|step)$/.test(kind) ? _processCodeBtn(p.address) : '') +
             _cardPopoutBtn(p.address || kind, kind) +
           '</div>' +
           '<div class="pcard-summary">' +
@@ -2829,10 +2835,12 @@
         '<td class="num">' + nr + '</td>' +
         '<td class="num">' + (sp.studies || 0) + '</td>' +
         '<td class="num">' + _successCell(sp) + '</td>' +
+        '<td><button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this composite\'s source"' +
+          ' onclick="event.stopPropagation();_openCompositeCode(\'' + _esc(c.id) + '\')">&lt;/&gt; Code</button></td>' +
       '</tr>';
     }).join('');
     return '<div class="registry-table-wrap"><table class="registry-table"><thead><tr>' +
-      '<th>Name</th><th>Module</th><th class="num">Params</th><th class="num">Needs</th><th class="num">Studies</th><th class="num">Success</th>' +
+      '<th>Name</th><th>Module</th><th class="num">Params</th><th class="num">Needs</th><th class="num">Studies</th><th class="num">Success</th><th>Code</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
@@ -3701,10 +3709,10 @@
       return sortDir === 'desc' ? -c : c;
     });
     // Per-column widths (%), persisted across re-renders so a resize sticks.
-    var COLS = ['name', 'kind', 'module', 'use', 'studies', 'success', 'in', 'out', 'source'];
+    var COLS = ['name', 'kind', 'module', 'use', 'studies', 'success', 'in', 'out', 'source', 'code'];
     var W = (window._registryColWidths && window._registryColWidths.length === COLS.length)
       ? window._registryColWidths
-      : [30, 9, 13, 8, 9, 10, 6, 6, 9];
+      : [24, 9, 13, 8, 9, 10, 6, 6, 7, 8];
     window._registryColWidths = W;
     var colgroup = '<colgroup>' + W.map(function (w) { return '<col style="width:' + w + '%">'; }).join('') + '</colgroup>';
     function th(key, label, cls, idx) {
@@ -3731,12 +3739,16 @@
         '<td class="num">' + _nPorts(p.inputs) + '</td>' +
         '<td class="num">' + _nPorts(p.outputs) + '</td>' +
         '<td class="reg-td-src">' + _esc(p.source || '') + '</td>' +
+        '<td>' + (/^(process|step)$/.test(p.kind || 'process') && p.address
+          ? '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this process\'s source"' +
+            ' onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + _esc(p.address) + '\')">&lt;/&gt; Code</button>'
+          : '') + '</td>' +
       '</tr>';
     }).join('');
     el.innerHTML = '<div class="registry-table-wrap"><table class="registry-table reg-table-fill">' + colgroup + '<thead><tr>' +
       th('name', 'Name', '', 0) + th('kind', 'Type', '', 1) + th('module', 'Module', '', 2) + th('use', 'Uses', 'num', 3) +
       th('studies', 'Studies', 'num', 4) + th('success', 'Success', 'num', 5) +
-      th('in', 'In', 'num', 6) + th('out', 'Out', 'num', 7) + th('source', 'Source', '', 8) +
+      th('in', 'In', 'num', 6) + th('out', 'Out', 'num', 7) + th('source', 'Source', '', 8) + th('code', 'Code', '', 9) +
       '</tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
@@ -4050,8 +4062,24 @@
     // Re-apply filter to the now-visible panel.
     var q = (document.getElementById('registry-search') || {value: ''}).value;
     _filterRegistry(q);
+    _renderRegistryNewActions(kind);
   }
   window._setRegistryTab = _setRegistryTab;
+
+  // Context-aware "+ New" buttons for the active sub-tab. Only process/step and
+  // composite/generator are authorable from here (emitters/viz/types/tests are
+  // framework- or discovery-defined).
+  function _renderRegistryNewActions(kind) {
+    var host = document.getElementById('registry-new-actions');
+    if (!host || !window.ProcessCode) { if (host) host.innerHTML = ''; return; }
+    var btn = function (k, label) {
+      return '<button type="button" class="reg-new-btn" onclick="ProcessCode.openNew(\'' + k + '\')">+ New ' + label + '</button>';
+    };
+    if (kind === 'process') host.innerHTML = btn('process', 'process') + btn('step', 'step');
+    else if (kind === 'composite') host.innerHTML = btn('spec', 'composite') + btn('generator', 'generator');
+    else host.innerHTML = '';
+  }
+  window._renderRegistryNewActions = _renderRegistryNewActions;
 
   // Data-driven filter: store the query and re-render so it works uniformly
   // across the Table / Cards / Full layouts (the old per-.registry-entry DOM

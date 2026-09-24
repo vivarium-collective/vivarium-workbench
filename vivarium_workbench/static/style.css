@@ -5093,3 +5093,141 @@ body.col-resizing .registry-table.reg-table-fill th, body.col-resizing .registry
   color:var(--text, #1f2328); max-height:420px; overflow-y:auto;
 }
 :root[data-theme="dark"] .model-source-pre{ background:#0f141b; color:#d5dae2; }
+
+/* ── Right rail: editable process code panel (process-code.js) ─────────────── */
+.viv-code-rail{
+  --viv-code-w:460px;
+  flex:0 0 var(--viv-code-w); width:var(--viv-code-w);
+  display:flex; flex-direction:column;
+  background:var(--panel, #fff); border-left:1px solid var(--border, #e2e6eb);
+  position:relative; overflow:hidden;
+  transition:flex-basis .18s ease, width .18s ease;
+}
+/* Collapsed → a thin edge with a vertical "Code" tab. */
+.viv-code-rail.viv-code-collapsed{
+  --viv-code-w:34px; flex-basis:34px; width:34px;
+}
+.viv-code-rail .viv-code-panel{ display:flex; flex-direction:column; height:100%; min-width:0; flex:1; }
+.viv-code-rail.viv-code-collapsed .viv-code-panel{ display:none; }
+
+/* Edge tab — only visible when collapsed. */
+.viv-code-edge{
+  display:none; position:absolute; inset:0; width:34px;
+  border:0; background:transparent; cursor:pointer; padding:0;
+  color:var(--text-muted, #64748b);
+}
+.viv-code-rail.viv-code-collapsed .viv-code-edge{ display:flex; align-items:center; justify-content:center; }
+.viv-code-edge:hover{ background:var(--hover, #f1f5f9); color:#2563eb; }
+.viv-code-edge-label{
+  writing-mode:vertical-rl; transform:rotate(180deg);
+  font-size:0.78rem; font-weight:600; letter-spacing:.06em; white-space:nowrap;
+  font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.viv-code-resize-handle{
+  position:absolute; top:0; left:0; bottom:0; width:6px;
+  cursor:col-resize; z-index:6; background:transparent; transition:background .12s ease;
+}
+.viv-code-resize-handle:hover{ background:#c7d2fe; }
+
+.viv-code-head{
+  display:flex; align-items:flex-start; justify-content:space-between; gap:8px;
+  padding:12px 14px 8px; border-bottom:1px solid var(--border, #e2e6eb);
+}
+.viv-code-title{ min-width:0; }
+.viv-code-title strong{ display:block; font-size:0.95rem; }
+.viv-code-addr{
+  display:block; font-size:0.72rem; color:var(--text-muted, #64748b);
+  word-break:break-all; margin-top:2px;
+}
+.viv-code-close{
+  border:0; background:transparent; font-size:1.3rem; line-height:1; cursor:pointer;
+  color:var(--text-muted, #64748b); padding:0 4px;
+}
+.viv-code-close:hover{ color:var(--text, #1f2937); }
+
+.viv-code-meta{ padding:8px 14px; display:flex; flex-direction:column; gap:4px; }
+.viv-code-badge{
+  align-self:flex-start; font-size:0.72rem; font-weight:600;
+  padding:2px 8px; border-radius:10px;
+}
+.viv-code-badge-edit{ background:#dcfce7; color:#166534; }
+.viv-code-badge-ro{ background:#fef3c7; color:#92400e; }
+.viv-code-path{ font-size:0.7rem; color:var(--text-muted, #64748b); word-break:break-all; }
+
+.viv-code-editor-wrap{ flex:1; min-height:0; overflow:auto; position:relative; padding:0 2px; }
+.viv-code-empty{ padding:16px 14px; color:var(--text-muted, #64748b); font-size:0.85rem; }
+.viv-code-textarea{
+  width:100%; height:100%; box-sizing:border-box; border:0; resize:none;
+  font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px;
+  line-height:1.5; padding:10px 12px; background:var(--surface-2, #f6f8fa);
+  color:var(--text, #1f2328);
+}
+.viv-code-editor-wrap .CodeMirror{ height:100%; font-size:12.5px; }
+
+.viv-code-foot{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:10px 14px; border-top:1px solid var(--border, #e2e6eb);
+}
+.viv-code-status{ font-size:0.78rem; color:var(--text-muted, #64748b); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.viv-code-status-ok{ color:#166534; }
+.viv-code-status-error{ color:#b91c1c; }
+.viv-code-actions{ display:flex; gap:8px; flex:0 0 auto; }
+.viv-code-actions .btn-primary{ background:#2563eb; color:#fff; border-color:transparent; }
+.viv-code-actions .btn-primary:hover:not(:disabled){ background:#1d4ed8; }
+.viv-code-actions .btn-primary:disabled{ opacity:.5; cursor:not-allowed; }
+
+.loom-body-head-actions{ margin-left:auto; }
+
+/* Focus mode hides the left rail; hide the code rail too. */
+body.focus-mode .viv-code-rail{ display:none !important; }
+
+:root[data-theme="dark"] .viv-code-badge-edit{ background:#14351f; color:#86efac; }
+:root[data-theme="dark"] .viv-code-badge-ro{ background:#3a2d0c; color:#fcd34d; }
+:root[data-theme="dark"] .viv-code-status-ok{ color:#86efac; }
+:root[data-theme="dark"] .viv-code-status-error{ color:#fca5a5; }
+
+/* + New authoring flow */
+.registry-new-actions{ display:inline-flex; gap:6px; margin-left:8px; }
+/* Neutral outlined button matching the workbench's other secondary controls
+   (.pcard-json-btn / Full card / copy), with the workbench's blue hover accent —
+   not the off-brand green. */
+.reg-new-btn{
+  height:28px; padding:0 12px; font-size:12px; font-weight:600; cursor:pointer;
+  background:var(--panel, #fff); color:#374151;
+  border:1px solid var(--border, #e2e8f0); border-radius:6px;
+  transition:background .12s ease, color .12s ease, border-color .12s ease;
+}
+.reg-new-btn:hover{ background:#eff6ff; color:#2563eb; border-color:#bfdbfe; }
+:root[data-theme="dark"] .reg-new-btn{ background:var(--surface-3); color:var(--text); border-color:var(--border-2); }
+:root[data-theme="dark"] .reg-new-btn:hover{ background:var(--active); color:#c7d2fe; border-color:var(--border-2); }
+
+.viv-code-newbar{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:10px 14px; border-bottom:1px solid var(--border, #e2e6eb);
+  background:var(--surface-2, #f6f8fa);
+}
+.viv-code-newname-label{ display:flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color:var(--text-muted, #64748b); }
+.viv-code-newname{
+  font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.85rem;
+  padding:4px 8px; border:1px solid var(--border-2, #cbd5e1); border-radius:5px;
+  background:var(--field, #fff); color:var(--text, #1f2937); min-width:180px;
+}
+.viv-code-target{ font-size:0.72rem; color:var(--text-muted, #64748b); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; word-break:break-all; }
+
+.viv-code-checks{
+  border-top:1px solid var(--border, #e2e6eb); padding:8px 14px; max-height:34%; overflow:auto;
+  font-size:0.8rem; background:var(--surface-2, #f6f8fa);
+}
+.viv-code-checks-head{ font-weight:700; margin-bottom:6px; }
+.viv-code-checks-head.ok{ color:#166534; }
+.viv-code-checks-head.bad{ color:#b91c1c; }
+.viv-code-check{ padding:2px 0; line-height:1.5; }
+.viv-code-check.ok{ color:#166534; }
+.viv-code-check.bad{ color:#b91c1c; }
+.viv-code-check.warn{ color:#92400e; }
+.viv-code-check-detail{ color:var(--text-muted, #64748b); }
+
+:root[data-theme="dark"] .viv-code-checks-head.ok, :root[data-theme="dark"] .viv-code-check.ok{ color:#86efac; }
+:root[data-theme="dark"] .viv-code-checks-head.bad, :root[data-theme="dark"] .viv-code-check.bad{ color:#fca5a5; }
+:root[data-theme="dark"] .viv-code-check.warn{ color:#fcd34d; }

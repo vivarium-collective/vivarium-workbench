@@ -889,7 +889,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
             <path d="M20 9.5 L22.5 12 L20 14.5"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Processes</span>
+        <span class="viv-rail-link-label">Registry</span>
       </a>
       <!-- Studies: the investigations overview. Sits directly under Composites; the
            per-investigation study list lives in the search section below. Branching-fan (DAG) icon. -->
@@ -1212,6 +1212,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
       <div class="registry-view-toolbar">
         <input type="search" class="registry-search viv-search" id="registry-search" placeholder="Search&hellip;" oninput="_filterRegistry(this.value)">
+        <span class="registry-new-actions" id="registry-new-actions"></span>
         {# Three zoom levels: Table (sortable) → Cards (multi-column grid) → Full
            (runnable process). Double-clicking a card also drills in one level. #}
         <span class="cols-ctl-slot" data-cols-surface="registry" title="Cards columns"></span>
@@ -2028,6 +2029,65 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 </main>
 
   </div> <!-- /.viv-main -->
+
+  <!-- RIGHT RAIL: process code — collapsible editable Python source for the
+       selected registry process/step. Global across tabs; collapsed by default
+       to a thin edge tab (see .viv-code-collapsed CSS + process-code.js). -->
+  <aside id="viv-code-rail" class="viv-code-rail viv-code-collapsed" aria-label="Process code">
+    <button class="viv-code-edge" id="viv-code-edge" type="button"
+            title="Show process code" aria-label="Show process code"
+            onclick="window.ProcessCode&&ProcessCode.toggle()">
+      <span class="viv-code-edge-label">&lt;/&gt; Code</span>
+    </button>
+    <div class="viv-code-panel">
+      <div class="viv-code-resize-handle" id="viv-code-resize-handle"
+           role="separator" aria-orientation="vertical" aria-label="Resize code panel"
+           title="Drag to resize"></div>
+      <div class="viv-code-head">
+        <div class="viv-code-title">
+          <strong id="viv-code-name">Code</strong>
+          <code id="viv-code-addr" class="viv-code-addr"></code>
+        </div>
+        <button class="viv-code-close" type="button" title="Collapse"
+                aria-label="Collapse code panel"
+                onclick="window.ProcessCode&&ProcessCode.toggle()">&times;</button>
+      </div>
+      <!-- New-file bar: shown only while authoring a new artifact. -->
+      <div class="viv-code-newbar" id="viv-code-newbar" hidden>
+        <label class="viv-code-newname-label">Name
+          <input type="text" id="viv-code-newname" class="viv-code-newname" spellcheck="false"
+                 placeholder="MyProcess" oninput="window.ProcessCode&&ProcessCode.onNameInput(this.value)">
+        </label>
+        <span class="viv-code-target" id="viv-code-target"></span>
+      </div>
+      <div class="viv-code-meta">
+        <span id="viv-code-badge" class="viv-code-badge"></span>
+        <code id="viv-code-path" class="viv-code-path"></code>
+      </div>
+      <div class="viv-code-editor-wrap" id="viv-code-editor-wrap">
+        <p class="viv-code-empty" id="viv-code-empty">No code loaded yet. In the <strong>Registry</strong>, click the <strong>&lt;/&gt; Code</strong> button on any process, step, or composite card to view and edit its source here — or <strong>+ New</strong> to author one. Composites show their spec YAML, or the generator&rsquo;s Python module.</p>
+        <textarea id="viv-code-textarea" class="viv-code-textarea" spellcheck="false" hidden></textarea>
+      </div>
+      <!-- Validation checklist (Check results). -->
+      <div class="viv-code-checks" id="viv-code-checks" hidden></div>
+      <div class="viv-code-foot">
+        <span id="viv-code-status" class="viv-code-status"></span>
+        <div class="viv-code-actions">
+          <!-- Edit-mode actions -->
+          <button class="btn-mini viv-code-editact" id="viv-code-revert" type="button"
+                  onclick="window.ProcessCode&&ProcessCode.revert()" disabled>Revert</button>
+          <button class="btn-mini btn-primary viv-code-editact" id="viv-code-save" type="button"
+                  onclick="window.ProcessCode&&ProcessCode.save()" disabled>Save</button>
+          <!-- New-mode actions -->
+          <button class="btn-mini viv-code-newact" id="viv-code-check" type="button" hidden
+                  onclick="window.ProcessCode&&ProcessCode.check()">Check</button>
+          <button class="btn-mini btn-primary viv-code-newact" id="viv-code-create" type="button" hidden
+                  onclick="window.ProcessCode&&ProcessCode.create()">Create</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
 </div> <!-- /.viv-layout -->
 
 <!-- ============================================================ -->
@@ -2369,6 +2429,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/aig-graph.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* aig-graph unavailable */"></script>
 <script src="assets/audit.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* audit view unavailable */"></script>
 <script src="assets/col-resize.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<script src="assets/process-code.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* process-code panel unavailable */"></script>
 <script src="assets/sim-table.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <!-- composite-card.js: the shared composite-card renderer (extracted from
      walkthrough.js, study-spine-reorg Task 6) — MUST load before

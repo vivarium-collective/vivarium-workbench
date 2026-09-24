@@ -93,7 +93,9 @@ def _write_frame(sock: socket.socket, obj: dict) -> None:
 
 
 _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
-                 "run_process", "process_template",
+                 "run_process", "process_template", "process_source", "process_source_write",
+                 "composite_source", "composite_source_write",
+                 "scaffold_template", "authoring_validate", "authoring_create",
                  "viz_classes", "resolve_composite_state", "config_to_composite", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites", "composites_full",
                  "validate_generated_visualization", "study_precheck", "run_study_analyses", "run_study", "run_investigation_analysis", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "data_sources_provider", "analysis_viewers", "shutdown"]
@@ -3181,6 +3183,609 @@ def _process_template(params: dict) -> dict:
     }
 
 
+_SOURCE_DEP_DIR_PARTS = {".venv", "venv", "site-packages", "dist-packages", "__pypackages__"}
+
+
+def _source_path_editable(path: str, workspace: str) -> bool:
+    """True iff ``path`` is a file we may write process edits back to.
+
+    The rule (the safety gate for save-back): the resolved source file must live
+    INSIDE the workspace tree and NOT inside an installed-dependency directory.
+    A dependency editable/pip-installed into the workspace's own ``.venv`` is
+    under the workspace root but must still be refused — otherwise an edit to a
+    framework class would corrupt ``site-packages``. Any resolution failure is
+    treated as not-editable (fail closed)."""
+    from pathlib import Path
+    if not path or not workspace:
+        return False
+    try:
+        p = Path(path).resolve()
+        ws = Path(workspace).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    try:
+        rel = p.relative_to(ws)
+    except ValueError:
+        return False  # outside the workspace tree
+    return not (_SOURCE_DEP_DIR_PARTS & set(rel.parts))
+
+
+def _validate_python(source: str, filename: str) -> "tuple[bool, str]":
+    """Compile ``source`` to check syntax WITHOUT touching disk. Returns
+    ``(ok, error_message)``; a rejected write never reaches the file."""
+    try:
+        compile(source, filename or "<edited>", "exec")
+        return True, ""
+    except SyntaxError as e:
+        loc = f" (line {e.lineno})" if e.lineno else ""
+        return False, f"{e.msg}{loc}"
+
+
+def _lang_for_path(path: str) -> str:
+    """Editor language for a source file, by extension."""
+    ext = ("." + str(path).rsplit(".", 1)[-1].lower()) if "." in str(path) else ""
+    if ext in (".yaml", ".yml"):
+        return "yaml"
+    if ext == ".json":
+        return "json"
+    return "python"
+
+
+def _validate_source(source: str, lang: str, filename: str) -> "tuple[bool, str]":
+    """Validate edited source before it reaches disk, by language. Python is
+    syntax-checked with ``compile``; YAML/JSON are parsed. Returns
+    ``(ok, error_message)``."""
+    if lang == "yaml":
+        try:
+            import yaml
+            yaml.safe_load(source)
+            return True, ""
+        except Exception as e:  # noqa: BLE001
+            return False, f"yaml error: {e}"
+    if lang == "json":
+        try:
+            import json as _json
+            _json.loads(source)
+            return True, ""
+        except Exception as e:  # noqa: BLE001
+            return False, f"json error: {e}"
+    ok, err = _validate_python(source, filename)
+    return ok, (f"syntax error: {err}" if not ok else "")
+
+
+def _source_file_for_address(address: str) -> "tuple[object, str | None, str | None]":
+    """Resolve ``address`` → ``(cls, source_path, error)``. ``cls``/``path`` are
+    ``None`` on failure and ``error`` is a human message; on success ``error`` is
+    ``None``. Shared by the read and write methods."""
+    import inspect
+
+    try:
+        core = _get_workspace_core()
+    except Exception as e:  # noqa: BLE001
+        return None, None, f"build_core failed: {e}"
+    if core is None:
+        return None, None, "workspace core unavailable"
+    # Registry cards send a dotted ``module.qualname`` address; composite nodes
+    # send a bare ``local:Name``. Try the address verbatim, then without the
+    # scheme prefix so both forms resolve.
+    cls = _resolve_registry_class(core, address or "")
+    if cls is None and ":" in (address or ""):
+        cls = _resolve_registry_class(core, address.split(":", 1)[1])
+    if cls is None:
+        return None, None, f"class not found: {address}"
+    try:
+        path = inspect.getsourcefile(cls) or inspect.getfile(cls)
+    except (TypeError, OSError) as e:
+        return cls, None, f"source unavailable: {e}"
+    if not path:
+        return cls, None, "source file not found"
+    return cls, path, None
+
+
+def _process_source(params: dict) -> dict:
+    """Return the source of the file defining the process/step at ``address``.
+
+    Reads the WHOLE module file (not just the class body) so the editor can save
+    the file back coherently. ``editable`` reflects the save-back safety gate."""
+    from pathlib import Path
+    address = (params or {}).get("address") or ""
+    cls, path, err = _source_file_for_address(address)
+    if err is not None:
+        return {"ok": False, "error": err}
+    try:
+        source = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": f"read failed: {e}"}
+    first_line = None
+    try:
+        import inspect
+        first_line = inspect.getsourcelines(cls)[1]
+    except (OSError, TypeError):
+        pass
+    return {
+        "ok": True,
+        "address": address,
+        "path": path,
+        "source": source,
+        "editable": _source_path_editable(path, _workspace),
+        "package": str(getattr(cls, "__module__", "")).split(".")[0],
+        "qualname": getattr(cls, "__qualname__", getattr(cls, "__name__", "")),
+        "first_line": first_line,
+    }
+
+
+def _process_source_write(params: dict) -> dict:
+    """Write edited source back to the process/step file at ``address``.
+
+    Refuses unless the resolved file passes ``_source_path_editable`` (inside the
+    workspace, not a dependency) and the new text compiles. Writes the whole file
+    verbatim; no auto-reload, no git commit — the user commits via their own
+    flow. Edits are picked up by the next env-worker spawn."""
+    p = params or {}
+    address = p.get("address") or ""
+    new_source = p.get("source")
+    if not isinstance(new_source, str):
+        return {"ok": False, "error": "missing source"}
+    cls, path, err = _source_file_for_address(address)
+    if err is not None:
+        return {"ok": False, "error": err}
+    if not _source_path_editable(path, _workspace):
+        return {
+            "ok": False,
+            "error": "refused: source file is not inside the editable workspace tree",
+            "path": path,
+        }
+    ok, verr = _validate_python(new_source, path)
+    if not ok:
+        return {"ok": False, "error": f"syntax error: {verr}"}
+    from pathlib import Path
+    try:
+        Path(path).write_text(new_source, encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": f"write failed: {e}"}
+    return {"ok": True, "path": path, "bytes": len(new_source.encode("utf-8"))}
+
+
+def _composite_source_path(params: dict) -> "tuple[str | None, str | None, str | None]":
+    """Resolve a composite record to ``(path, lang, error)``.
+
+    Two kinds, deterministically (never trusting a client-supplied path):
+      * ``source`` given → a declarative spec file, resolved under the workspace.
+      * else ``module`` → the ``@composite_generator``'s module file (shows the
+        whole module = all the composite code defined there)."""
+    from pathlib import Path
+    p = params or {}
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    # ``source_path`` is the spec file's workspace-relative path. (Not ``source``
+    # — on a write that key carries the NEW file content, not a path.)
+    source_rel = p.get("source_path")
+    if source_rel:
+        path = (Path(_workspace) / str(source_rel)).resolve()
+        if not path.is_file():
+            return None, None, f"spec file not found: {source_rel}"
+        return str(path), _lang_for_path(str(path)), None
+    module = p.get("module")
+    if not module:
+        cid = str(p.get("id") or "")
+        module = cid.rsplit(".", 1)[0] if "." in cid else cid
+    if not module:
+        return None, None, "composite has no module or source"
+    try:
+        import importlib
+        mod = importlib.import_module(str(module))
+    except Exception as e:  # noqa: BLE001
+        return None, None, f"import failed: {module}: {e}"
+    f = getattr(mod, "__file__", None)
+    if not f:
+        return None, None, f"module file unavailable: {module}"
+    return str(Path(f).resolve()), "python", None
+
+
+def _composite_source(params: dict) -> dict:
+    """Return the source defining a composite (its spec YAML, or its generator's
+    module file). ``editable`` reflects the same save-back safety gate as
+    processes."""
+    from pathlib import Path
+    path, lang, err = _composite_source_path(params)
+    if err is not None:
+        return {"ok": False, "error": err}
+    try:
+        source = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": f"read failed: {e}"}
+    p = params or {}
+    return {
+        "ok": True,
+        "id": p.get("id"),
+        "path": path,
+        "source": source,
+        "lang": lang,
+        "editable": _source_path_editable(path, _workspace),
+    }
+
+
+def _composite_source_write(params: dict) -> dict:
+    """Write edited composite source back. Re-resolves the file from the record
+    (never a client path), enforces ``_source_path_editable``, and validates by
+    language (YAML/JSON parsed, Python compiled) before touching disk."""
+    from pathlib import Path
+    p = params or {}
+    new_source = p.get("source")
+    if not isinstance(new_source, str):
+        return {"ok": False, "error": "missing source"}
+    path, lang, err = _composite_source_path(params)
+    if err is not None:
+        return {"ok": False, "error": err}
+    if not _source_path_editable(path, _workspace):
+        return {"ok": False,
+                "error": "refused: source file is not inside the editable workspace tree",
+                "path": path}
+    use_lang = p.get("lang") or lang
+    ok, verr = _validate_source(new_source, use_lang, path)
+    if not ok:
+        return {"ok": False, "error": verr}
+    try:
+        Path(path).write_text(new_source, encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": f"write failed: {e}"}
+    return {"ok": True, "path": path, "bytes": len(new_source.encode("utf-8"))}
+
+
+# ── Authoring: scaffold + validate + create new processes/steps/composites ────
+
+def _authoring_slug(s: str) -> str:
+    import re
+    return re.sub(r"[^A-Za-z0-9_]+", "_", str(s or "")).strip("_") or "new_item"
+
+
+def _ws_pkg_dir() -> "tuple":
+    from pathlib import Path
+    pkg, _pkgs, _ws = _workspace_meta(_workspace)
+    return Path(_workspace) / pkg, pkg
+
+
+def _scaffold_target(kind: str, name: str):
+    """Conventional (path, package) for a new artifact of ``kind`` named ``name``."""
+    pkg_dir, pkg = _ws_pkg_dir()
+    if kind in ("process", "step"):
+        return pkg_dir / "processes.py", pkg
+    if kind == "generator":
+        return pkg_dir / "composites" / (_authoring_slug(name) + ".py"), pkg
+    return pkg_dir / "composites" / (_authoring_slug(name) + ".composite.yaml"), pkg
+
+
+def _authoring_template_text(kind: str, name: str) -> "tuple[str | None, str | None]":
+    name = (name or "").strip()
+    if kind in ("process", "step"):
+        base = "Process" if kind == "process" else "Step"
+        cls = name or ("MyProcess" if kind == "process" else "MyStep")
+        if kind == "process":
+            update = (
+                "    def update(self, state, interval):\n"
+                "        # Compute and return the update for your output ports.\n"
+                "        rate = (self.config or {}).get('rate', 1.0)\n"
+                "        return {'level': state['level'] * rate * interval}\n"
+            )
+            in_ports, out_ports = "'level': 'float',", "'level': 'float',"
+            cfg = "        'rate': {'_type': 'float', '_default': 1.0},  # e.g. growth rate (1/s)\n"
+        else:
+            update = (
+                "    def update(self, state):\n"
+                "        # Steps run to a fixed point (no interval) — derive outputs.\n"
+                "        threshold = (self.config or {}).get('threshold', 0.0)\n"
+                "        return {'above': state['value'] > threshold}\n"
+            )
+            in_ports, out_ports = "'value': 'float',", "'above': 'boolean',"
+            cfg = "        'threshold': {'_type': 'float', '_default': 0.0},\n"
+        src = (
+            f"from process_bigraph import {base}\n\n\n"
+            f"class {cls}({base}):\n"
+            f'    """One-line summary of what {cls} does (docstring = fallback description)."""\n\n'
+            "    # Formal description — the ecosystem `describe()` standard. Tooling (the\n"
+            "    # Registry, viz inspectors) surfaces this; markdown / unicode equations OK.\n"
+            f'    description = """\n    TODO: describe {cls} — governing equations, assumptions, units.\n    """\n\n'
+            "    # Config: typed parameters with defaults (the inline notes document them).\n"
+            "    config_schema = {\n"
+            f"{cfg}"
+            "    }\n\n"
+            "    # Metadata for categorization + future features (grouping, provenance).\n"
+            "    metadata = {\n"
+            "        'tags': [],\n"
+            "    }\n\n"
+            "    def inputs(self):\n"
+            "        # The input contract: typed ports this reads.\n"
+            "        return {\n"
+            f"            {in_ports}\n"
+            "        }\n\n"
+            "    def outputs(self):\n"
+            "        # The output contract: typed ports this writes.\n"
+            "        return {\n"
+            f"            {out_ports}\n"
+            "        }\n\n"
+            f"{update}"
+        )
+        return src, "python"
+    if kind == "generator":
+        fn = _authoring_slug(name) if name else "my_composite"
+        src = (
+            "from process_bigraph.composite_generator import composite_generator\n\n\n"
+            "@composite_generator(\n"
+            f'    name="{fn}",\n'
+            '    description="TODO: describe this composite — what it models and why.",\n'
+            "    parameters={\n"
+            "        # 'rate': {'type': 'float', 'default': 1.0, 'description': 'growth rate'},\n"
+            "    },\n"
+            ")\n"
+            f"def {fn}(core=None):\n"
+            '    """Return the composite state tree wiring processes + stores together."""\n'
+            "    return {\n"
+            "        # 'my_process': {\n"
+            "        #     '_type': 'process',\n"
+            "        #     'address': 'local:MyProcess',\n"
+            "        #     'config': {},\n"
+            "        #     'inputs': {'level': ['stores', 'level']},\n"
+            "        #     'outputs': {'level': ['stores', 'level']},\n"
+            "        # },\n"
+            "        # 'stores': {'level': 1.0},\n"
+            "    }\n"
+        )
+        return src, "python"
+    if kind in ("composite", "spec"):
+        nm = name or "my-composite"
+        src = (
+            f"name: {nm}\n"
+            'description: "TODO: describe this composite — what it models and why."\n'
+            "tags: []\n"
+            "requires:\n"
+            "  processes: []          # e.g. [IncreaseProcess]\n"
+            "parameters:\n"
+            "  rate:\n"
+            "    type: float\n"
+            "    default: 1.0\n"
+            '    description: "TODO: describe this parameter."\n'
+            "state:\n"
+            "  # Wire processes + stores together. Example:\n"
+            "  # my_process:\n"
+            "  #   _type: process\n"
+            '  #   address: "local:IncreaseProcess"\n'
+            '  #   config: {rate: "${rate}"}\n'
+            '  #   inputs: {level: ["stores", "level"]}\n'
+            '  #   outputs: {level: ["stores", "level"]}\n'
+            "  # stores:\n"
+            "  #   level: 1.0\n"
+        )
+        return src, "yaml"
+    return None, None
+
+
+def _scaffold_template(params: dict) -> dict:
+    """A starter template + the conventional target path for a new artifact.
+    Does not write anything."""
+    from pathlib import Path
+    kind = (params or {}).get("kind") or "process"
+    name = (params or {}).get("name") or ""
+    src, lang = _authoring_template_text(kind, name)
+    if src is None:
+        return {"ok": False, "error": f"unknown kind: {kind}"}
+    try:
+        target, _pkg = _scaffold_target(kind, name)
+        rel = str(Path(target).relative_to(Path(_workspace)))
+    except Exception:  # noqa: BLE001
+        rel = ""
+    return {"ok": True, "kind": kind, "name": name, "source": src, "lang": lang, "target": rel}
+
+
+def _class_has_ancestor(cls, ancestor_name: str) -> bool:
+    return any(a.__name__ == ancestor_name for a in getattr(cls, "__mro__", []))
+
+
+def _defines_own_method(cls, name: str) -> bool:
+    """True iff ``name`` is defined on ``cls`` or a non-framework ancestor —
+    i.e. the author actually implemented it, not inherited from the Process/Step
+    base (whose ``update`` typically raises NotImplementedError)."""
+    fn = getattr(cls, name, None)
+    if not callable(fn):
+        return False
+    owner = getattr(fn, "__qualname__", "").split(".")[0]
+    return owner not in ("Process", "Step", "ProcessInterface", "Edge", "")
+
+
+def _authoring_validate(params: dict) -> dict:
+    """Parse + import & register checks for a candidate artifact. Returns
+    ``{ok, valid, checks:[{label, ok, detail}]}`` — a checklist the panel renders.
+    Imports happen in a fresh namespace with the workspace on ``sys.path``."""
+    p = params or {}
+    kind = p.get("kind") or "process"
+    name = (p.get("name") or "").strip()
+    source = p.get("source") or ""
+    lang = p.get("lang") or ("yaml" if kind in ("composite", "spec") else "python")
+    checks: list = []
+
+    def add(label, ok, detail="", level="error"):
+        checks.append({"label": label, "ok": bool(ok), "detail": str(detail or ""), "level": level})
+
+    def rec(label, ok, detail=""):
+        add(label, ok, detail, level="warn")
+
+    def done():
+        # Only error-level checks gate validity; recommendations (warn) never block.
+        errs = [c for c in checks if c.get("level") != "warn"]
+        return {"ok": True, "valid": all(c["ok"] for c in errs), "checks": checks}
+
+    okp, perr = _validate_source(source, lang, name or "<new>")
+    add("Parses", okp, perr)
+    if not okp:
+        return done()
+
+    if lang == "yaml":
+        import yaml
+        try:
+            data = yaml.safe_load(source) or {}
+        except Exception as e:  # noqa: BLE001
+            add("Parses", False, str(e))
+            return done()
+        add("Has a name", bool(data.get("name")))
+        st = data.get("state")
+        rec("Has a non-empty state tree", isinstance(st, dict) and bool(st),
+            "add process/store nodes under `state:`")
+        rec("Has a description", bool(str(data.get("description") or "").strip()) and "TODO" not in str(data.get("description") or ""),
+            "describe what this composite models")
+        reqs = ((data.get("requires") or {}).get("processes")) or []
+        if reqs:
+            try:
+                core = _get_workspace_core()
+            except Exception:  # noqa: BLE001
+                core = None
+            reg = (getattr(core, "link_registry", {}) or {}) if core is not None else {}
+            missing = [r for r in reqs if r not in reg]
+            add("Required processes resolve", not missing,
+                ("missing: " + ", ".join(map(str, missing))) if missing else "")
+        return done()
+
+    # Python kinds — exec in a throwaway namespace.
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    ns: dict = {}
+    try:
+        exec(compile(source, name or "<new>", "exec"), ns)  # noqa: S102 — local authoring tool
+        add("Imports cleanly", True)
+    except Exception as e:  # noqa: BLE001
+        add("Imports cleanly", False, f"{type(e).__name__}: {e}")
+        return done()
+
+    if kind in ("process", "step"):
+        cls = ns.get(name)
+        add(f"Defines class {name}", isinstance(cls, type),
+            "" if isinstance(cls, type) else "class name not found in the file")
+        if isinstance(cls, type):
+            want = "Process" if kind == "process" else "Step"
+            add(f"Subclasses {want}", _class_has_ancestor(cls, want))
+            add("Has inputs()", callable(getattr(cls, "inputs", None)))
+            add("Has outputs()", callable(getattr(cls, "outputs", None)))
+            add("Has update()", _defines_own_method(cls, "update"))
+            try:
+                from process_bigraph import allocate_core
+                c = allocate_core()
+                c.register_link(name, cls)
+                reg = getattr(c, "link_registry", {}) or {}
+                add("Registers + resolves", reg.get(name) is cls)
+            except Exception as e:  # noqa: BLE001
+                add("Registers + resolves", False, str(e))
+            # Recommendations (non-blocking): description + a typed contract.
+            # Own description/docstring only — inspect.getdoc would inherit the
+            # base Process/Edge docstring and mask a missing one.
+            _desc = str(cls.__dict__.get("description", "") or "").strip()
+            _doc = str(cls.__dict__.get("__doc__", "") or "").strip()
+            rec("Has a description", bool(_desc or _doc) and "TODO" not in _desc,
+                "set a `description` attribute (the describe() standard)")
+            try:
+                from process_bigraph import allocate_core as _ac
+                inst = cls({}, _ac())
+                nin = len(inst.inputs() or {}) if callable(getattr(inst, "inputs", None)) else 0
+                nout = len(inst.outputs() or {}) if callable(getattr(inst, "outputs", None)) else 0
+                rec("Declares typed ports", (nin + nout) > 0,
+                    "define input/output ports so its contract is explicit")
+            except Exception:  # noqa: BLE001 — can't instantiate to inspect ports; skip the rec
+                pass
+    elif kind == "generator":
+        fn = ns.get(name)
+        add(f"Defines {name}", callable(fn), "" if callable(fn) else "function name not found")
+        try:
+            from process_bigraph.composite_generator import _REGISTRY
+            add("Registered as a composite generator", name in _REGISTRY,
+                "" if name in _REGISTRY else "the @composite_generator name must match the function name you entered")
+        except Exception as e:  # noqa: BLE001
+            add("Registered as a composite generator", False, str(e))
+        import re as _re
+        m = _re.search(r"description\s*=\s*['\"](.+?)['\"]", source)
+        rec("Has a description", bool(m and m.group(1).strip() and "TODO" not in m.group(1)),
+            "pass description=... to @composite_generator")
+    return done()
+
+
+def _register_process_in_core(pkg: str, pkg_dir, cls_name: str) -> "tuple[bool, str]":
+    """Best-effort: add an import + ``register_link`` for ``cls_name`` to
+    ``<pkg>/core.py``'s ``build_core``. Returns ``(registered, note)``."""
+    import re
+    core_py = pkg_dir / "core.py"
+    if not core_py.is_file():
+        return False, "core.py not found — add register_link manually"
+    text = core_py.read_text(encoding="utf-8")
+    if re.search(rf"register_link\(\s*['\"]{re.escape(cls_name)}['\"]", text):
+        return True, "already registered"
+    import_line = f"from {pkg}.processes import {cls_name}"
+    if import_line not in text:
+        m = re.search(rf"^from {re.escape(pkg)}\.processes import (.+)$", text, re.M)
+        if m:
+            text = text[:m.start()] + f"from {pkg}.processes import {m.group(1).rstrip()}, {cls_name}" + text[m.end():]
+        else:
+            text = import_line + "\n" + text
+    m = re.search(r"^([ \t]*)return core\b", text, re.M)
+    if not m:
+        core_py.write_text(text, encoding="utf-8")
+        return False, "wrote import but could not find 'return core' — add core.register_link manually"
+    indent = m.group(1)
+    reg = f"{indent}core.register_link('{cls_name}', {cls_name})\n"
+    text = text[:m.start()] + reg + text[m.start():]
+    core_py.write_text(text, encoding="utf-8")
+    return True, "registered in build_core"
+
+
+def _authoring_create(params: dict) -> dict:
+    """Write a new artifact into the workspace and auto-register it. Refuses if
+    the target/name already exists or the source fails to parse."""
+    from pathlib import Path
+    p = params or {}
+    kind = p.get("kind") or "process"
+    name = (p.get("name") or "").strip()
+    source = p.get("source") or ""
+    lang = p.get("lang") or ("yaml" if kind in ("composite", "spec") else "python")
+    if not name:
+        return {"ok": False, "error": "a name is required"}
+    ok, err = _validate_source(source, lang, name)
+    if not ok:
+        return {"ok": False, "error": err}
+    try:
+        target, pkg = _scaffold_target(kind, name)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"could not resolve target: {e}"}
+    if not _source_path_editable(str(target), _workspace):
+        return {"ok": False, "error": "target is outside the editable workspace tree"}
+
+    if kind in ("process", "step"):
+        pf = target
+        pf.parent.mkdir(parents=True, exist_ok=True)
+        existing = pf.read_text(encoding="utf-8") if pf.is_file() else ""
+        if f"class {name}(" in existing:
+            return {"ok": False, "error": f"{name} already exists in {pf.name}"}
+        new_text = (existing.rstrip() + "\n\n\n" + source) if existing.strip() else source
+        pf.write_text(new_text, encoding="utf-8")
+        registered, note = _register_process_in_core(pkg, pf.parent, name)
+        return {"ok": True, "path": str(pf), "registered": registered, "note": note,
+                "address": f"{pkg}.processes.{name}", "lang": "python"}
+
+    if target.exists():
+        return {"ok": False, "error": f"{target.name} already exists"}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    if kind == "generator":
+        init = target.parent / "__init__.py"
+        line = f"from . import {target.stem}  # noqa: F401"
+        prev = init.read_text(encoding="utf-8") if init.is_file() else ""
+        if f"import {target.stem}" not in prev:
+            init.write_text((prev.rstrip() + "\n" + line + "\n") if prev.strip() else line + "\n",
+                            encoding="utf-8")
+        return {"ok": True, "path": str(target), "registered": True,
+                "note": "generator module wired into composites/__init__.py for discovery",
+                "id": f"{pkg}.composites.{target.stem}", "lang": "python"}
+    # spec
+    return {"ok": True, "path": str(target), "registered": True,
+            "note": "composite spec discovered by presence",
+            "id": f"{pkg}.composites.{name}", "source_path": str(target.relative_to(Path(_workspace))),
+            "lang": "yaml"}
+
+
 def _run_process(params: dict) -> dict:
     """Instantiate a registry Process/Step with the given config, validate + fill
     the provided input-port values, and run one update() — returning outputs.
@@ -3451,6 +4056,20 @@ def _handle(method: str, params: dict) -> dict:
         return _run_process(params)
     if method == "process_template":
         return _process_template(params)
+    if method == "process_source":
+        return _process_source(params)
+    if method == "process_source_write":
+        return _process_source_write(params)
+    if method == "composite_source":
+        return _composite_source(params)
+    if method == "composite_source_write":
+        return _composite_source_write(params)
+    if method == "scaffold_template":
+        return _scaffold_template(params)
+    if method == "authoring_validate":
+        return _authoring_validate(params)
+    if method == "authoring_create":
+        return _authoring_create(params)
     if method == "viz_classes":
         return _list_visualizations()
     if method == "resolve_composite_state":
