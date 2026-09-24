@@ -5225,7 +5225,9 @@ body.focus-mode .viv-code-rail{ display:none !important; }
 .viv-code-check{ padding:2px 0; line-height:1.5; }
 .viv-code-check.ok{ color:#166534; }
 .viv-code-check.bad{ color:#b91c1c; }
+.viv-code-check.warn{ color:#92400e; }
 .viv-code-check-detail{ color:var(--text-muted, #64748b); }
 
 :root[data-theme="dark"] .viv-code-checks-head.ok, :root[data-theme="dark"] .viv-code-check.ok{ color:#86efac; }
 :root[data-theme="dark"] .viv-code-checks-head.bad, :root[data-theme="dark"] .viv-code-check.bad{ color:#fca5a5; }
+:root[data-theme="dark"] .viv-code-check.warn{ color:#fcd34d; }

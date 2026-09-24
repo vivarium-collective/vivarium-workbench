@@ -237,11 +237,16 @@
     var host = $('viv-code-checks'); if (!host) return;
     if (!res || !res.checks || !res.checks.length) { host.hidden = true; host.innerHTML = ''; return; }
     host.hidden = false;
-    host.innerHTML = '<div class="viv-code-checks-head ' + (res.valid ? 'ok' : 'bad') + '">' +
-      (res.valid ? '✓ Ready to create' : 'Resolve these first') + '</div>' +
+    var unmet = res.checks.filter(function (c) { return c.level === 'warn' && !c.ok; }).length;
+    var head = res.valid
+      ? ('✓ Ready to create' + (unmet ? ' · ' + unmet + ' recommendation' + (unmet > 1 ? 's' : '') : ''))
+      : 'Resolve these first';
+    host.innerHTML = '<div class="viv-code-checks-head ' + (res.valid ? 'ok' : 'bad') + '">' + head + '</div>' +
       res.checks.map(function (c) {
-        return '<div class="viv-code-check ' + (c.ok ? 'ok' : 'bad') + '">' +
-          (c.ok ? '✓' : '✕') + ' ' + esc(c.label) +
+        var warn = c.level === 'warn';
+        var cls = c.ok ? 'ok' : (warn ? 'warn' : 'bad');
+        var icon = c.ok ? '✓' : (warn ? '⚠' : '✕');
+        return '<div class="viv-code-check ' + cls + '">' + icon + ' ' + esc(c.label) +
           (c.detail ? ' <span class="viv-code-check-detail">— ' + esc(c.detail) + '</span>' : '') + '</div>';
       }).join('');
   }

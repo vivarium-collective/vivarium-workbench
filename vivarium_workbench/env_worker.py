@@ -3460,44 +3460,74 @@ def _authoring_template_text(kind: str, name: str) -> "tuple[str | None, str | N
     if kind in ("process", "step"):
         base = "Process" if kind == "process" else "Step"
         cls = name or ("MyProcess" if kind == "process" else "MyStep")
-        update_sig = ("def update(self, state, interval):" if kind == "process"
-                      else "def update(self, state):")
+        if kind == "process":
+            update = (
+                "    def update(self, state, interval):\n"
+                "        # Compute and return the update for your output ports.\n"
+                "        rate = (self.config or {}).get('rate', 1.0)\n"
+                "        return {'level': state['level'] * rate * interval}\n"
+            )
+            in_ports, out_ports = "'level': 'float',", "'level': 'float',"
+            cfg = "        'rate': {'_type': 'float', '_default': 1.0},  # e.g. growth rate (1/s)\n"
+        else:
+            update = (
+                "    def update(self, state):\n"
+                "        # Steps run to a fixed point (no interval) — derive outputs.\n"
+                "        threshold = (self.config or {}).get('threshold', 0.0)\n"
+                "        return {'above': state['value'] > threshold}\n"
+            )
+            in_ports, out_ports = "'value': 'float',", "'above': 'boolean',"
+            cfg = "        'threshold': {'_type': 'float', '_default': 0.0},\n"
         src = (
             f"from process_bigraph import {base}\n\n\n"
             f"class {cls}({base}):\n"
-            f'    """TODO: describe what {cls} does."""\n\n'
+            f'    """One-line summary of what {cls} does (docstring = fallback description)."""\n\n'
+            "    # Formal description — the ecosystem `describe()` standard. Tooling (the\n"
+            "    # Registry, viz inspectors) surfaces this; markdown / unicode equations OK.\n"
+            f'    description = """\n    TODO: describe {cls} — governing equations, assumptions, units.\n    """\n\n'
+            "    # Config: typed parameters with defaults (the inline notes document them).\n"
             "    config_schema = {\n"
-            "        # 'rate': {'_type': 'float', '_default': 1.0},\n"
+            f"{cfg}"
+            "    }\n\n"
+            "    # Metadata for categorization + future features (grouping, provenance).\n"
+            "    metadata = {\n"
+            "        'tags': [],\n"
             "    }\n\n"
             "    def inputs(self):\n"
+            "        # The input contract: typed ports this reads.\n"
             "        return {\n"
-            "            # 'level': 'float',\n"
+            f"            {in_ports}\n"
             "        }\n\n"
             "    def outputs(self):\n"
+            "        # The output contract: typed ports this writes.\n"
             "        return {\n"
-            "            # 'level': 'float',\n"
+            f"            {out_ports}\n"
             "        }\n\n"
-            f"    {update_sig}\n"
-            "        # Return the update for your output ports.\n"
-            "        return {}\n"
+            f"{update}"
         )
         return src, "python"
     if kind == "generator":
         fn = _authoring_slug(name) if name else "my_composite"
         src = (
             "from process_bigraph.composite_generator import composite_generator\n\n\n"
-            f'@composite_generator(name="{fn}", description="TODO: describe this composite.",\n'
-            "                     parameters={})\n"
+            "@composite_generator(\n"
+            f'    name="{fn}",\n'
+            '    description="TODO: describe this composite — what it models and why.",\n'
+            "    parameters={\n"
+            "        # 'rate': {'type': 'float', 'default': 1.0, 'description': 'growth rate'},\n"
+            "    },\n"
+            ")\n"
             f"def {fn}(core=None):\n"
-            '    """Return the composite state tree."""\n'
+            '    """Return the composite state tree wiring processes + stores together."""\n'
             "    return {\n"
             "        # 'my_process': {\n"
             "        #     '_type': 'process',\n"
             "        #     'address': 'local:MyProcess',\n"
             "        #     'config': {},\n"
-            "        #     'inputs': {},\n"
-            "        #     'outputs': {},\n"
+            "        #     'inputs': {'level': ['stores', 'level']},\n"
+            "        #     'outputs': {'level': ['stores', 'level']},\n"
             "        # },\n"
+            "        # 'stores': {'level': 1.0},\n"
             "    }\n"
         )
         return src, "python"
@@ -3505,12 +3535,25 @@ def _authoring_template_text(kind: str, name: str) -> "tuple[str | None, str | N
         nm = name or "my-composite"
         src = (
             f"name: {nm}\n"
-            'description: "TODO: describe this composite."\n'
+            'description: "TODO: describe this composite — what it models and why."\n'
+            "tags: []\n"
             "requires:\n"
-            "  processes: []\n"
-            "parameters: {}\n"
+            "  processes: []          # e.g. [IncreaseProcess]\n"
+            "parameters:\n"
+            "  rate:\n"
+            "    type: float\n"
+            "    default: 1.0\n"
+            '    description: "TODO: describe this parameter."\n'
             "state:\n"
-            "  # store: value\n"
+            "  # Wire processes + stores together. Example:\n"
+            "  # my_process:\n"
+            "  #   _type: process\n"
+            '  #   address: "local:IncreaseProcess"\n'
+            '  #   config: {rate: "${rate}"}\n'
+            '  #   inputs: {level: ["stores", "level"]}\n'
+            '  #   outputs: {level: ["stores", "level"]}\n'
+            "  # stores:\n"
+            "  #   level: 1.0\n"
         )
         return src, "yaml"
     return None, None
@@ -3559,11 +3602,16 @@ def _authoring_validate(params: dict) -> dict:
     lang = p.get("lang") or ("yaml" if kind in ("composite", "spec") else "python")
     checks: list = []
 
-    def add(label, ok, detail=""):
-        checks.append({"label": label, "ok": bool(ok), "detail": str(detail or "")})
+    def add(label, ok, detail="", level="error"):
+        checks.append({"label": label, "ok": bool(ok), "detail": str(detail or ""), "level": level})
+
+    def rec(label, ok, detail=""):
+        add(label, ok, detail, level="warn")
 
     def done():
-        return {"ok": True, "valid": all(c["ok"] for c in checks), "checks": checks}
+        # Only error-level checks gate validity; recommendations (warn) never block.
+        errs = [c for c in checks if c.get("level") != "warn"]
+        return {"ok": True, "valid": all(c["ok"] for c in errs), "checks": checks}
 
     okp, perr = _validate_source(source, lang, name or "<new>")
     add("Parses", okp, perr)
@@ -3579,7 +3627,10 @@ def _authoring_validate(params: dict) -> dict:
             return done()
         add("Has a name", bool(data.get("name")))
         st = data.get("state")
-        add("Has a non-empty state tree", isinstance(st, dict) and bool(st))
+        rec("Has a non-empty state tree", isinstance(st, dict) and bool(st),
+            "add process/store nodes under `state:`")
+        rec("Has a description", bool(str(data.get("description") or "").strip()) and "TODO" not in str(data.get("description") or ""),
+            "describe what this composite models")
         reqs = ((data.get("requires") or {}).get("processes")) or []
         if reqs:
             try:
@@ -3621,6 +3672,22 @@ def _authoring_validate(params: dict) -> dict:
                 add("Registers + resolves", reg.get(name) is cls)
             except Exception as e:  # noqa: BLE001
                 add("Registers + resolves", False, str(e))
+            # Recommendations (non-blocking): description + a typed contract.
+            # Own description/docstring only — inspect.getdoc would inherit the
+            # base Process/Edge docstring and mask a missing one.
+            _desc = str(cls.__dict__.get("description", "") or "").strip()
+            _doc = str(cls.__dict__.get("__doc__", "") or "").strip()
+            rec("Has a description", bool(_desc or _doc) and "TODO" not in _desc,
+                "set a `description` attribute (the describe() standard)")
+            try:
+                from process_bigraph import allocate_core as _ac
+                inst = cls({}, _ac())
+                nin = len(inst.inputs() or {}) if callable(getattr(inst, "inputs", None)) else 0
+                nout = len(inst.outputs() or {}) if callable(getattr(inst, "outputs", None)) else 0
+                rec("Declares typed ports", (nin + nout) > 0,
+                    "define input/output ports so its contract is explicit")
+            except Exception:  # noqa: BLE001 — can't instantiate to inspect ports; skip the rec
+                pass
     elif kind == "generator":
         fn = ns.get(name)
         add(f"Defines {name}", callable(fn), "" if callable(fn) else "function name not found")
@@ -3630,6 +3697,10 @@ def _authoring_validate(params: dict) -> dict:
                 "" if name in _REGISTRY else "the @composite_generator name must match the function name you entered")
         except Exception as e:  # noqa: BLE001
             add("Registered as a composite generator", False, str(e))
+        import re as _re
+        m = _re.search(r"description\s*=\s*['\"](.+?)['\"]", source)
+        rec("Has a description", bool(m and m.group(1).strip() and "TODO" not in m.group(1)),
+            "pass description=... to @composite_generator")
     return done()
 
 

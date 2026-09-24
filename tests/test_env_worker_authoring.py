@@ -51,8 +51,29 @@ def test_validate_fresh_process_template_is_valid(ws_copy):
     with EnvWorker(ws_copy) as w:
         tpl = w.call("scaffold_template", {"kind": "process", "name": "Foo"})
         out = w.call("authoring_validate", {"kind": "process", "name": "Foo", "source": tpl["source"]})
+    # No hard errors → valid; every error-level check passes.
     assert out["valid"] is True
-    assert all(c["ok"] for c in out["checks"])
+    assert all(c["ok"] for c in out["checks"] if c.get("level") != "warn")
+    # The enriched template declares typed ports (a recommendation that passes)…
+    warns = {c["label"]: c["ok"] for c in out["checks"] if c.get("level") == "warn"}
+    assert warns.get("Declares typed ports") is True
+    # …but its description is still a TODO placeholder → a non-blocking rec fires.
+    assert warns.get("Has a description") is False
+
+
+def test_recommendations_are_non_blocking(ws_copy):
+    """A process with no description/ports is still VALID (recommendations only)."""
+    src = ("from process_bigraph import Process\n"
+           "class Bare(Process):\n"
+           "    def inputs(self): return {}\n"
+           "    def outputs(self): return {}\n"
+           "    def update(self, state, interval): return {}\n")
+    with EnvWorker(ws_copy) as w:
+        out = w.call("authoring_validate", {"kind": "process", "name": "Bare", "source": src})
+    assert out["valid"] is True  # not blocked
+    warns = {c["label"]: c["ok"] for c in out["checks"] if c.get("level") == "warn"}
+    assert warns.get("Has a description") is False
+    assert warns.get("Declares typed ports") is False
 
 
 def test_validate_non_process_class_fails_subclass(ws_copy):
