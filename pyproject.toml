@@ -83,12 +83,14 @@ dependencies = [
     # depends on vivarium-dashboard transitively.
     "pbg-basic-processes",
     "investigation-contracts",
-    # The ecosystem ledger. viva_superpowers.catalog.canonical_registry reads
-    # viva_marketplace's topic-discovered modules.json when installed (single
-    # source of truth for the Registry/Marketplace tab); without it the dashboard
-    # falls back to pbg-superpowers' stale bundled copy. Not on PyPI → bare here,
+    # The ecosystem ledger. Distribution renamed viva-marketplace → viva-catalog
+    # (it still ships the viva_marketplace import package as a shim).
+    # viva_superpowers.catalog.canonical_registry reads viva_marketplace's
+    # topic-discovered modules.json when installed (single source of truth for the
+    # Registry/Marketplace tab); without it the dashboard falls back to
+    # pbg-superpowers' stale bundled copy. Not on PyPI → bare here,
     # git URL via [tool.uv.sources] below (same pattern as pbg-basic-processes).
-    "viva-marketplace",
+    "viva-catalog",
     # Shared workspace-layout source of truth (WorkspacePaths, find_workspace_root,
     # study_dir, canonical-run outcomes, package naming). vivarium-workbench's
     # lib/workspace_paths.py is now a thin shim re-exporting from here instead of
@@ -152,7 +154,7 @@ environments = ["python_full_version == '3.12.12'"]
 # viva-superpowers ships a release that requires viva-emitters.
 viva-superpowers = { git = "https://github.com/vivarium-collective/viva-superpowers.git", branch = "main" }
 pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git", branch = "main" }
-viva-marketplace = { git = "https://github.com/vivarium-collective/viva-marketplace.git", branch = "main" }
+viva-catalog = { git = "https://github.com/vivarium-collective/viva-marketplace.git", branch = "main" }
 viva-workspace = { git = "https://github.com/vivarium-collective/viva-workspace.git", branch = "main" }
 # investigation-contracts is declared bare in [project.dependencies] (kept out
 # of published metadata) and is not on PyPI; supply its git URL here so `uv

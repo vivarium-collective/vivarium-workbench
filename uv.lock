@@ -7399,9 +7399,9 @@ xarray = [
 ]
 
 [[package]]
-name = "viva-marketplace"
+name = "viva-catalog"
 version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?branch=main#317764269a38a5dff255ce73a1f667032d393248" }
+source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?branch=main#4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
 
 [[package]]
 name = "viva-munk"
@@ -7480,7 +7480,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "uvicorn" },
     { name = "viva-emitters", extra = ["xarray"] },
-    { name = "viva-marketplace" },
+    { name = "viva-catalog" },
     { name = "viva-superpowers" },
     { name = "viva-workspace" },
     { name = "xarray" },
@@ -7545,7 +7545,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.29" },
     { name = "v2ecoli", marker = "extra == 'demo'", editable = "../v2ecoli" },
     { name = "viva-emitters", extras = ["sqlite", "xarray"], specifier = ">=0.2.3" },
-    { name = "viva-marketplace", git = "https://github.com/vivarium-collective/viva-marketplace.git?branch=main" },
+    { name = "viva-catalog", git = "https://github.com/vivarium-collective/viva-marketplace.git?branch=main" },
     { name = "viva-superpowers", git = "https://github.com/vivarium-collective/viva-superpowers.git?rev=9e4e740f4f65381c2e00fc8e05e268bb8b344c82" },
     { name = "viva-workspace", git = "https://github.com/vivarium-collective/viva-workspace.git?branch=main" },
     { name = "xarray", specifier = ">=2026.4" },
