@@ -5207,6 +5207,10 @@ body.focus-mode .viv-code-rail{ display:none !important; }
   padding:10px 14px; border-bottom:1px solid var(--border, #e2e6eb);
   background:var(--surface-2, #f6f8fa);
 }
+/* The explicit display above would otherwise override the `hidden` attribute
+   (UA `[hidden]{display:none}` loses to an author display rule), leaving the
+   Name bar visible when not authoring — keep it hidden until new-file mode. */
+.viv-code-newbar[hidden]{ display:none; }
 .viv-code-newname-label{ display:flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color:var(--text-muted, #64748b); }
 .viv-code-newname{
   font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.85rem;
