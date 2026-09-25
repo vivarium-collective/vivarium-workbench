@@ -109,6 +109,43 @@ def _resolve_study_dir(ws_root, name):
         return flat if flat.is_dir() else ws_root / "investigations" / name
 
 
+def _materialize_federated_study(ws_root, name):
+    """Make a read-only FEDERATED study runnable by copying its ``study.yaml``
+    into the host ``studies/<name>/``.
+
+    A study shipped inside an installed module (or under ``external/<repo>/``)
+    resolves for browsing/detail (federation, #1177/#1189) but its own dir is
+    read-only, so a run can't write ``runs.db``/outputs there. When the host has
+    no spec for ``name`` but a federated one exists, copy just the spec into the
+    host workspace: the run then reads the spec and writes its outputs into the
+    host ``studies/<name>/``. The run's composite is resolved from the workspace
+    ``build_core`` (which, with catalog-imports chaining, sees the installed
+    module's composite), so only the spec needs materializing. No-op for a native
+    study or when nothing federated matches; best-effort — any failure just leaves
+    the caller to 404 as before.
+    """
+    from pathlib import Path
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    if study_spec.study_spec_file(_resolve_study_dir(ws_root, name)).is_file():
+        return  # already a host study
+    try:
+        from vivarium_workbench.lib import federation as _fed
+        found = _fed.find_federated_study(ws_root, name)
+    except Exception:  # noqa: BLE001
+        found = None
+    if not found:
+        return
+    _fed_dir, _lw, fed_spec = found
+    try:
+        host_dir = WorkspacePaths.load(ws_root).studies / name
+        host_dir.mkdir(parents=True, exist_ok=True)
+        dest = host_dir / "study.yaml"
+        if not dest.exists():
+            dest.write_text(Path(fed_spec).read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _load_study_spec_for_flush(study_dir):
     """Best-effort reload + migrate of a study's spec for the post-run flush
     stages (viz / post-run-scripts / analyses operate against the study's
@@ -597,6 +634,9 @@ def run_study_baseline(ws_root, body):
     name = _study_name_from_body(body)
     if not name:
         return {"error": "missing study"}, 400
+    # A read-only federated study (from an installed module / external/<repo>/) is
+    # copied into the host workspace so the run can write its outputs there.
+    _materialize_federated_study(ws_root, name)
     # Resolve study dir from ws_root so _for_test callers don't need WORKSPACE patched.
     study_dir = _resolve_study_dir(ws_root, name)
     sf = study_spec.study_spec_file(study_dir)
@@ -761,6 +801,9 @@ def run_study_variant(ws_root, body):
     skip_analyses = bool(body.get("skip_analyses"))
     if not name or not variant_name:
         return {"error": "missing study or variant"}, 400
+    # A read-only federated study is copied into the host workspace so the run
+    # can write its outputs there (see run_study_baseline).
+    _materialize_federated_study(ws_root, name)
     # Resolve study dir from ws_root (honors layout:; supports standalone tests
     # without monkeypatching WORKSPACE).
     study_dir = _resolve_study_dir(ws_root, name)
