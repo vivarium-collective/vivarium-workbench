@@ -1921,13 +1921,13 @@ def create_app() -> FastAPI:
         composites / studies / investigations (name + description), so the
         Registry can surface artifacts from repos that aren't installed here.
 
-        Served from the installed ``viva_marketplace`` package (best-effort —
+        Served from the installed ``viva_catalog`` package (best-effort —
         returns an empty index when it isn't installed). Server-side so the live
         workbench dodges the cross-origin fetch to github.io.
         """
         try:
-            import viva_marketplace  # noqa: PLC0415
-            return viva_marketplace.load_ecosystem_index()
+            import viva_catalog  # noqa: PLC0415
+            return viva_catalog.load_ecosystem_index()
         except Exception:  # noqa: BLE001
             return {"repos": []}
 
