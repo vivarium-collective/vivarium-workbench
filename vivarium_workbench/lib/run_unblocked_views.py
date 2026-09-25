@@ -94,6 +94,10 @@ def investigation_run_unblocked(ws_root: Path, body: dict) -> tuple[dict, int]:
             continue
         if studies_filter and member_name not in studies_filter:
             continue
+        # A federated member (study shipped inside an installed module) has no
+        # host study.yaml; copy it into the host workspace so it isn't skipped and
+        # its run can write outputs there.
+        study_runs._materialize_federated_study(ws_root, member_name)
         spec_path = WorkspacePaths.load(ws_root).studies / member_name / "study.yaml"
         if not spec_path.is_file():
             # legacy: investigations/<name>/spec.yaml
