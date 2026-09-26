@@ -1252,13 +1252,29 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
         # the legacy top-level baseline list) — v4 studies otherwise bake nothing.
         from vivarium_workbench.lib.investigation_report import _baseline_composite_id
         comp = _baseline_composite_id(spec)
-        # Per-study render style: `loom: {style: minimal}` in study.yaml opts a
-        # study into a render style, so one `render-loom` pass renders every
-        # study in its intended style. --style overrides it for all.
+        # Per-study render intent, declared under `loom:` in study.yaml, so ONE
+        # bare `render-loom` pass (which is exactly what the test suite calls)
+        # reproduces each study's intended figure — no CLI flags to remember, and
+        # the intent is persisted + version-controlled instead of living in shell
+        # history. The matching CLI flag still overrides it for the whole pass.
+        #   loom:
+        #     style: minimal        # ?style=  (the original mechanism)
+        #     layout: hierarchy     # --layout / ?layout=
+        #     figure: true          # --figure / ?figure=1
+        #     compact: true         # --compact / ?compact=1
         loom_cfg = spec.get("loom") if isinstance(spec.get("loom"), dict) else {}
-        style = getattr(args, "style", None) or (loom_cfg or {}).get("style")
+        loom_cfg = loom_cfg or {}
+        opts = {
+            "style": getattr(args, "style", None) or loom_cfg.get("style"),
+            "layout": getattr(args, "layout", None) or loom_cfg.get("layout"),
+            # store_true CLI flags force the option ON for every study; absent,
+            # the per-study loom.<key> decides. (There's no CLI way to force OFF
+            # a study that opts in — same one-way precedence as --style.)
+            "figure": bool(getattr(args, "figure", False)) or bool(loom_cfg.get("figure", False)),
+            "compact": bool(getattr(args, "compact", False)) or bool(loom_cfg.get("compact", False)),
+        }
         if comp:
-            jobs.append((sd.name, comp, style))
+            jobs.append((sd.name, comp, opts))
     if not jobs:
         print("no studies with a baseline composite found")
         return 0
@@ -1277,37 +1293,37 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
         page = browser.new_page(
             viewport={"width": int(args.width), "height": int(args.height)},
             device_scale_factor=float(args.device_scale))
-        for slug, comp, style in jobs:
+        for slug, comp, opts in jobs:
             out = wp.studies / slug / "viz" / "model-loom.png"
             loom_url = (f"{url}/bigraph-loom/?id={quote(comp)}"
                         "&tabs=explore,document&nopersist=1")
-            # Per-study (or --style) render style, e.g. ?style=minimal.
-            if style:
-                loom_url += f"&style={quote(str(style))}"
+            # Render style (--style / loom.style), e.g. ?style=minimal.
+            if opts["style"]:
+                loom_url += f"&style={quote(str(opts['style']))}"
             # --fresh-layout: ignore any committed default view / saved positions
             # and lay the graph out from scratch with the current layout engine
             # (use after a renderer/layout change so figures aren't pinned to
-            # stale saved positions).
+            # stale saved positions). CLI-only — a re-layout escape hatch, not a
+            # persistent per-study intent.
             if getattr(args, "fresh_layout", False):
                 loom_url += "&fresh=1"
-            # --layout: force a specific layout engine. 'hierarchy' (compact 2-D
+            # Layout engine (--layout / loom.layout). 'hierarchy' (compact 2-D
             # packing) reads best for a multi-process composite in print — a
             # roughly-square grid instead of one long horizontal strip.
-            if getattr(args, "layout", None):
-                loom_url += f"&layout={quote(args.layout)}"
+            if opts["layout"]:
+                loom_url += f"&layout={quote(str(opts['layout']))}"
             # --hide-address: drop the "local:Foo" registry address from each
-            # process card (useful interactively, clutter in a book figure).
+            # process card. CLI-only — --figure already implies it.
             if getattr(args, "hide_address", False):
                 loom_url += "&address=off"
-            # --compact: print preset for BUSY multi-process composites — narrow
-            # cards, drop config/symbols/address so name+equation lead, and pack
-            # the grid tight so the figure fits a page legibly.
-            if getattr(args, "compact", False):
+            # Compact (--compact / loom.compact): print preset for BUSY
+            # multi-process composites — narrow cards, drop config/symbols/address
+            # so name+equation lead, and pack the grid tight to fit a page.
+            if opts["compact"]:
                 loom_url += "&compact=1"
-            # --figure: clean print figure — drop the per-port reads/writes
-            # direction words, the store "N read · M write" counts, and the
+            # Figure (--figure / loom.figure): clean print figure — drop the
             # process address, keeping names / types / equation / config / wires.
-            if getattr(args, "figure", False):
+            if opts["figure"]:
                 loom_url += "&figure=1"
             try:
                 page.goto(loom_url, wait_until="domcontentloaded", timeout=60_000)

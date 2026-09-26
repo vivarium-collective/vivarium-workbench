@@ -112,11 +112,6 @@ function StoreNode({ data }: NodeProps & { data: StoreNodeData }) {
   // zoom comes from dropping content, never from shrinking text. A row with no
   // data is omitted, never rendered empty.
   const tier = tierRaw;
-  const readers: string[] = (data as any)._readers ?? [];
-  const writers: string[] = (data as any)._writers ?? [];
-  // A hub store's wire fan is hidden in hierarchy mode; App flags it so the
-  // reader/writer count can stand in for the wires at EVERY tier, not just
-  // contract+ (where ordinary stores surface their wiring).
   const isHub: boolean = (data as any)._isHub === true;
   // Lineage spotlight: App flags a store on the selected node's containment path
   // (`is-lineage`, highlighted) or off it (`is-dim`, faded) so the hierarchy
@@ -129,7 +124,6 @@ function StoreNode({ data }: NodeProps & { data: StoreNodeData }) {
   const show = {
     value: tier !== "glyph",
     type: tier === "types" || tier === "config" || tier === "contract" || tier === "full",
-    wiring: tier === "contract" || tier === "full" || isHub,
     full: tier === "full",
   };
   // Stores Detail override (the Detail menu) controls how much of a store shows:
@@ -174,13 +168,6 @@ function StoreNode({ data }: NodeProps & { data: StoreNodeData }) {
           {figure!.trimStart().startsWith("<svg")
             ? <span className="node-figure-svg" dangerouslySetInnerHTML={{ __html: figure! }} />
             : <img className="node-figure-img" src={figure} alt="" draggable={false} />}
-        </div>
-      )}
-      {show.wiring && !(data as { _figureClean?: boolean })._figureClean && (readers.length > 0 || writers.length > 0) && (
-        <div className="store-node-wiring">
-          {readers.length > 0 && <span>{readers.length} read</span>}
-          {readers.length > 0 && writers.length > 0 && <span> · </span>}
-          {writers.length > 0 && <span>{writers.length} write</span>}
         </div>
       )}
       {show.full && (data as any)._emitted && (

@@ -82,12 +82,8 @@ export type DetailOverrides = {
   // clutter in a print figure — 'auto' shows it (from the types tier up); 'off'
   // hides it. Driven by `?address=off` / render-loom --hide-address.
   address: TriDetail;
-  // The per-port "▸ reads / ○ writes" direction words. Direction is also conveyed
-  // by port side (left=read/right=write) + arrowheads, so the words are optional —
-  // 'auto' shows them, 'off' hides them. Driven by `?direction=off` / ?figure=1.
-  direction: TriDetail;
 };
-export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto', direction: 'auto' };
+export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto' };
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 // `light` is the cheap default wire (straight, no floating anchors / labels);
 // `floating` is the rich labelled edge, used only for FOCUSED wires. Non-wire
@@ -742,11 +738,6 @@ export default function App() {
   // per-store — teal reads, gold writes — so the read+write loop on a shared
   // store reads as the grammar the opening figure teaches.
   const [minimalStyle, setMinimalStyle] = useState(false);
-  // ?figure=1 — a "clean print figure" toggle that strips interactive-only chrome
-  // (the per-port ▸reads/○writes direction words, and the store "N read · M write"
-  // counts), keeping the substance (names, types, equation, config, wires). The
-  // process address is hidden via the address override it also sets.
-  const [figureClean, setFigureClean] = useState(false);
   // Node text scale (Font control). Multiplies every node font size via the
   // --loom-fs CSS var on the canvas; saved in the view so a headless render of a
   // default view keeps the chosen size. Clamped to a sane range.
@@ -1322,7 +1313,7 @@ export default function App() {
           ...n,
           zIndex: L.z,
           data: {
-            ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle, _figureClean: figureClean,
+            ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle,
             _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
             // Full-detail ("open") card = explicitly kept-open ONLY. A plain
             // single click just SELECTS (drives the Inspector + wire highlight)
@@ -1350,14 +1341,14 @@ export default function App() {
         ...n,
         zIndex: L.z,
         data: {
-          ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle, _figureClean: figureClean, _isHub: isHub,
+          ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle, _isHub: isHub,
           _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
           _readers: wiring.readers, _writers: wiring.writers, _commitSize: commitNodeSize,
           _commitPortCol: commitPortCol,
         },
       };
     });
-  }, [nodes, edges, effTier, detailOverrides, minimalStyle, figureClean, focus.keptOpen, focus.selected, focus.locked, lineage, layoutMode.modeId, hubIds, drillHops, commitNodeSize]);
+  }, [nodes, edges, effTier, detailOverrides, minimalStyle, focus.keptOpen, focus.selected, focus.locked, lineage, layoutMode.modeId, hubIds, drillHops, commitNodeSize]);
 
   // Map from node id to node, for the edge stamp below (which needs the process
   // end's port-type schema and derived contract). Rebuilt only when `nodes`
@@ -1617,7 +1608,6 @@ export default function App() {
       contract: (view.detailOverrides?.contract ?? 'auto') as ContractDetail,
       figures: ((view.detailOverrides as { figures?: string } | undefined)?.figures ?? 'auto') as TriDetail,
       address: ((view.detailOverrides as { address?: string } | undefined)?.address ?? 'auto') as TriDetail,
-      direction: ((view.detailOverrides as { direction?: string } | undefined)?.direction ?? 'auto') as TriDetail,
     });
     // Restore the node text scale (absent = 1).
     setFontScale((view as { fontScale?: number }).fontScale ?? 1);
@@ -1705,8 +1695,7 @@ export default function App() {
       const pContract = params.get('contract');
       const pFigures = params.get('figures');
       const pAddress = params.get('address');
-      const pDirection = params.get('direction');
-      if (pPorts || pStores || pConfig || pContract || pFigures || pAddress || pDirection) {
+      if (pPorts || pStores || pConfig || pContract || pFigures || pAddress) {
         setDetailOverrides((o) => ({
           ports: (['none', 'plain', 'types'].includes(pPorts || '') ? pPorts : o.ports) as PortsDetail,
           stores: (['name', 'value', 'type'].includes(pStores || '') ? pStores : o.stores) as StoresDetail,
@@ -1714,7 +1703,6 @@ export default function App() {
           contract: (['on', 'off', 'full'].includes(pContract || '') ? pContract : o.contract) as ContractDetail,
           figures: (['on', 'off'].includes(pFigures || '') ? pFigures : o.figures) as TriDetail,
           address: (['on', 'off'].includes(pAddress || '') ? pAddress : o.address) as TriDetail,
-          direction: (['on', 'off'].includes(pDirection || '') ? pDirection : o.direction) as TriDetail,
         }));
       }
       // ?layout=<modeId> forces a specific layout engine (clusterGrid 'hierarchy',
@@ -1737,12 +1725,11 @@ export default function App() {
           config: 'off', contract: 'off', figures: 'off', address: 'off',
         }));
       }
-      // ?figure=1 — clean print figure: hide the port direction words + store
-      // read/write counts, and hide the process address. (Explicit ?address
-      // still wins via the override merge below.)
+      // ?figure=1 — clean print figure: hide the process address. (The reads/writes
+      // text is always off now, so this only needs to drop the address. Explicit
+      // ?address still wins via the override merge above.)
       if (params.get('figure') === '1') {
-        setFigureClean(true);
-        setDetailOverrides((o) => ({ ...o, address: 'off', direction: 'off' }));
+        setDetailOverrides((o) => ({ ...o, address: 'off' }));
       }
     })();
   }, [state, compositeId, applyView, layoutMode]);
