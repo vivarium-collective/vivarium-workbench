@@ -255,7 +255,12 @@ function FloatingStoreEdge({
   //    just above or below the card, travels along that lane clear of the
   //    body, and drops into the store's near face — an orthogonal C around the
   //    process, instead of a bezier that cuts under it.
-  const EXIT_GAP = 24, LANE_GAP = 22, CORNER = 12;
+  // Fan this process's same-side wires into distinct lanes so parallel wires
+  // never share pixels: each successive wire exits a little further out and, when
+  // it must run along a lane above/below the card, sits on its own lane (#1).
+  const laneIndex = (data as { laneIndex?: number } | undefined)?.laneIndex ?? 0;
+  const EXIT_STEP = 11, LANE_STEP = 13;
+  const EXIT_GAP = 24 + laneIndex * EXIT_STEP, LANE_GAP = 22, CORNER = 12;
   const pAbs = procNode.internals.positionAbsolute;
   const pw = procNode.measured.width ?? 0;
   const ph = procNode.measured.height ?? 0;
@@ -281,7 +286,10 @@ function FloatingStoreEdge({
     // drop into the store's near (top/bottom) face. Offset that drop OUT of the
     // place-edge column so the wire's arrow never lands on the containment line.
     const overTop = center.y < boxCy;
-    const laneY = overTop ? box.y0 - LANE_GAP : box.y1 + LANE_GAP;
+    // Each wire on this side gets its own lane offset (further from the card for
+    // later wires) so their horizontal runs stay parallel, never overlapping.
+    const laneOff = laneIndex * LANE_STEP;
+    const laneY = overTop ? box.y0 - LANE_GAP - laneOff : box.y1 + LANE_GAP + laneOff;
     // Attach on the store face the LANE actually approaches from — the wire runs
     // along `laneY`, so it should enter whichever face (top/bottom) sits on the
     // lane's side of the store, giving the shortest drop-in. Choosing by process

@@ -20,7 +20,15 @@ type RFEdge = {
   animated?: boolean;
   style?: Record<string, string | number>;
   markerEnd?: { type: MarkerType; width?: number; height?: number; color?: string };
-  data?: { edgeType: 'input' | 'output' | 'bidirectional' | 'place'; storeColor?: string };
+  data?: {
+    edgeType: 'input' | 'output' | 'bidirectional' | 'place';
+    storeColor?: string;
+    /** This wire's order among its process's SAME-side wires, and how many there
+     *  are — so the edge router can fan parallel wires into distinct lanes
+     *  instead of stacking them on one (#1). */
+    laneIndex?: number;
+    laneCount?: number;
+  };
 };
 
 /** Arrowhead used on directional wires (input + output edges).
@@ -375,7 +383,8 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
 
       // Wire edges: inputs arrive at this process node from store nodes.
       // Convention: input wires leave the store's LEFT side and enter the process's LEFT side.
-      for (const [port, target] of Object.entries(node.inputs ?? {})) {
+      const inEntries = Object.entries(node.inputs ?? {});
+      inEntries.forEach(([port, target], i) => {
         const tid = pathKey(resolveWirePath(parentPath, target));
         const col = storeColor(tid);
         portColors[port] = col;
@@ -390,12 +399,13 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           animated: false,
           style: { stroke: col, strokeDasharray: '5,4', strokeWidth: 2.5 },  // per-store hue; dashed (inline so image export captures it)
           markerEnd: { ...WIRE_ARROW, color: col },   // arrow tinted to the store
-          data: { edgeType: 'input', storeColor: col },
+          data: { edgeType: 'input', storeColor: col, laneIndex: i, laneCount: inEntries.length },
         });
-      }
+      });
       // Wire edges: outputs leave this process node to store nodes.
       // Convention: output wires leave the process's RIGHT side and enter the store's RIGHT side.
-      for (const [port, target] of Object.entries(node.outputs ?? {})) {
+      const outEntries = Object.entries(node.outputs ?? {});
+      outEntries.forEach(([port, target], i) => {
         const tid = pathKey(resolveWirePath(parentPath, target));
         const col = storeColor(tid);
         portColors[port] = col;
@@ -410,9 +420,9 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           animated: false,
           style: { stroke: col, strokeDasharray: '5,4', strokeWidth: 2.5 },  // per-store hue; dashed (inline so image export captures it)
           markerEnd: { ...WIRE_ARROW, color: col },   // arrow tinted to the store
-          data: { edgeType: 'output', storeColor: col },
+          data: { edgeType: 'output', storeColor: col, laneIndex: i, laneCount: outEntries.length },
         });
-      }
+      });
       // Attach the resolved per-port colors to the process card.
       (procData as ProcessNodeData & { portColors?: Record<string, string> }).portColors = portColors;
       return;

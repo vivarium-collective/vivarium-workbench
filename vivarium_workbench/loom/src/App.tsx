@@ -1586,30 +1586,38 @@ export default function App() {
     startupViewRef.current = compositeId;
     (async () => {
       const params = new URLSearchParams(window.location.search);
-      let view: View | null = decodeView(params.get('view'));
-      const viewUrl = params.get('viewUrl');
-      if (!view && viewUrl) view = await fetchView(viewUrl);
-      if (!view) view = getDefaultView(compositeId);
-      // Static snapshot (?static=1&stateUrl=…/composite-state/<id>.json): derive
-      // the committed default view URL from the state URL so the read-only loom
-      // applies the author's saved positions instead of a fresh auto-layout.
-      if (!view) {
-        const stateUrl = params.get('stateUrl');
-        if (stateUrl && stateUrl.includes('/composite-state/')) {
-          view = await fetchView(stateUrl.replace('/composite-state/', '/composite-default-view/'));
-        }
-      }
-      if (!view) {
-        try {
-          const r = await fetch(
-            `/api/composite-default-view?id=${encodeURIComponent(compositeId)}`);
-          if (r.ok) {
-            const raw = (await r.json())?.view;
-            if (raw) view = normalizeView(raw);
+      // ?fresh=1 forces a clean auto-layout: ignore ANY committed default view
+      // AND saved drag positions so the graph lays out from scratch. Used by
+      // `render-loom --fresh-layout` to re-render with the current layout engine
+      // (e.g. after a renderer change) instead of stale saved positions.
+      const fresh = params.get('fresh') === '1';
+      if (fresh) freshLayoutRef.current = true;
+      if (!fresh) {
+        let view: View | null = decodeView(params.get('view'));
+        const viewUrl = params.get('viewUrl');
+        if (!view && viewUrl) view = await fetchView(viewUrl);
+        if (!view) view = getDefaultView(compositeId);
+        // Static snapshot (?static=1&stateUrl=…/composite-state/<id>.json): derive
+        // the committed default view URL from the state URL so the read-only loom
+        // applies the author's saved positions instead of a fresh auto-layout.
+        if (!view) {
+          const stateUrl = params.get('stateUrl');
+          if (stateUrl && stateUrl.includes('/composite-state/')) {
+            view = await fetchView(stateUrl.replace('/composite-state/', '/composite-default-view/'));
           }
-        } catch { /* offline / static — no server default */ }
+        }
+        if (!view) {
+          try {
+            const r = await fetch(
+              `/api/composite-default-view?id=${encodeURIComponent(compositeId)}`);
+            if (r.ok) {
+              const raw = (await r.json())?.view;
+              if (raw) view = normalizeView(raw);
+            }
+          } catch { /* offline / static — no server default */ }
+        }
+        if (view) applyView(view);
       }
-      if (view) applyView(view);
       // Explicit URL params OVERRIDE the applied view: a headless
       // `?hyperedges=1` / `?collapse=1` / `?detail=` render must win over a
       // default view that was saved in the opposite mode (e.g. rendering Fig 2a
