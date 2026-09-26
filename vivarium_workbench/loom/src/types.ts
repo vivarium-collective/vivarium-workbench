@@ -8,6 +8,9 @@ export interface StoreNodeData {
   /** Optional illustrative figure — a data-URI image or inline SVG string from
    *  the spec's `_figure`. Rendered on the card when Detail → Figures allows. */
   figure?: string;
+  /** Book-palette hue for this store, shared with its wires + the port dots that
+   *  bind it, so source→target is traceable by color (see storeColor.ts). */
+  storeColor?: string;
 }
 
 export interface ProcessNodeData {
@@ -53,6 +56,9 @@ export interface ProcessNodeData {
    *  loom view. The backend sets `is_composite_process`; double-clicking such a
    *  card opens its inner composite (App's drill-down). */
   isCompositeProcess?: boolean;
+  /** port name -> book-palette hue of the store it binds, so ProcessNode can
+   *  paint each port's connection dot + swatch to match its wire (storeColor.ts). */
+  portColors?: Record<string, string>;
 }
 
 export type BigraphNodeData = StoreNodeData | ProcessNodeData;

@@ -78,12 +78,17 @@ function StoreNode({ data }: NodeProps & { data: StoreNodeData }) {
     );
   }
 
+  // The store's key color (shared with its wires + the port dots that bind it),
+  // painted as the border so "the teal store" reads as one with its teal wires (#1).
+  const accent = (data as StoreNodeData).storeColor;
+  const accentStyle = accent ? { borderColor: accent } : undefined;
+
   // Hierarchy mode never stamps a tier — render the legacy circle unchanged so
   // that mode is byte-identical to before semantic zoom existed.
   if (tierRaw == null) {
     const hasValue = data.value !== undefined && data.value !== null;
     return (
-      <div className={`store-node ${isCollapsed ? "store-node-collapsed" : ""}`} style={sizeStyle}>
+      <div className={`store-node ${isCollapsed ? "store-node-collapsed" : ""}`} style={{ ...sizeStyle, ...accentStyle }}>
         {resizer}
         <Handle type="target" position={Position.Top} id="top-place" />
         <Handle type="source" position={Position.Left} id="left-out" />
@@ -142,7 +147,7 @@ function StoreNode({ data }: NodeProps & { data: StoreNodeData }) {
   return (
     <div
       className={`store-node store-node-${tier} ${isCollapsed ? "store-node-collapsed" : ""} ${isHub ? "store-node-hub" : ""} ${isLineage ? "is-lineage" : ""} ${isWired ? "is-wired" : ""} ${isDim ? "is-dim" : ""}`}
-      style={sizeStyle}
+      style={{ ...sizeStyle, ...accentStyle }}
     >
       {resizer}
       <StoreHandles />

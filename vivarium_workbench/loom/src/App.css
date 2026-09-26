@@ -1,3 +1,36 @@
+/* ── Book palette (The Cognitive Biology of the Cell) ────────────────────
+   Tokens shared by every loom NODE and EDGE so the exported MODEL figures
+   read as pages of the book: navy display, teal accents, gold highlight,
+   muted secondary ink, warm hairlines on a white ground. App chrome (header,
+   sidebar, panels) keeps its own theme — only the graph is re-skinned, since
+   that is all the figure export (`.react-flow__viewport`) captures. */
+:root {
+  --bk-navy:   #16324f;   /* primary ink / process frame / titles */
+  --bk-teal:   #1f7a72;   /* stores + write ports + first wire hue */
+  --bk-gold:   #a9781f;   /* highlight / config accent */
+  --bk-muted:  #6b6f76;   /* secondary ink (types, meta, values) */
+  --bk-ink:    #1c1c1e;   /* body text */
+  --bk-hair:   #d9d5cc;   /* hairline strokes / dividers */
+  --bk-ground: #ffffff;   /* card ground */
+  /* Tints — quiet fills for sub-panels and framed blocks. */
+  --bk-navy-tint: #eef2f6;
+  --bk-teal-tint: #e9f3f1;
+  --bk-gold-tint: #f7f0e1;
+  --bk-paper:     #fbfaf7;   /* warm off-white (config sub-panel) */
+  /* A book-harmonious categorical ramp for per-store wire colors (#1). */
+  --bk-wire-1: #1f7a72;   /* teal    */
+  --bk-wire-2: #a9781f;   /* gold    */
+  --bk-wire-3: #4a6f8a;   /* slate-navy */
+  --bk-wire-4: #8a5a3c;   /* terracotta */
+  --bk-wire-5: #6b6f76;   /* muted   */
+  --bk-wire-6: #7a5a86;   /* plum    */
+  /* Type — Optima display, Iowan Old Style body, Menlo mono (macOS faces the
+     headless render has; graceful humanist / serif / mono fallbacks). */
+  --bk-display: 'Optima', 'Gill Sans', 'Gill Sans MT', Candara, 'Segoe UI', sans-serif;
+  --bk-body:    'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif;
+  --bk-mono:    'Menlo', ui-monospace, SFMono-Regular, 'SF Mono', monospace;
+}
+
 /* ── Layout ──────────────────────────────────────────────────────────── */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -137,8 +170,8 @@ body {
 /* ── Store nodes ─────────────────────────────────────────────────────── */
 
 .store-node {
-  background: #ffffff;
-  border: 2px solid #10b981;
+  background: var(--bk-ground);
+  border: 2px solid var(--bk-teal);
   border-radius: 50%;
   width: 72px;
   height: 72px;
@@ -178,7 +211,7 @@ body {
   pointer-events: none;
 }
 
-.store-node:hover { border-color: #059669; }
+.store-node:hover { border-color: var(--bk-navy); }
 
 /* Read-only viewer: hide the connection-handle dots on store nodes
    (top/bottom/left/right). The handles stay in the DOM so edges still anchor
@@ -195,7 +228,8 @@ body {
 }
 
 .store-label {
-  font-weight: 600; color: #1e293b; font-size: 15px; text-align: center;
+  font-family: var(--bk-display);
+  font-weight: 700; color: var(--bk-navy); font-size: 15px; text-align: center;
   /* Never break a term mid-word ("chromoso me") and never hyphenate
      ("bacteri-um") — keep every word whole. The auto-width box (above) grows to
      fit, so a name only wraps at real spaces once it hits the 360px cap. */
@@ -219,10 +253,10 @@ body {
 /* ── Store semantic-zoom tiers (process-column mode) ──────────────────────
    Font sizes stay constant across tiers, as with the process card: detail is
    revealed by adding rows, never by scaling text. */
-.store-node-value  { font-size: 10px; color: #64748b; line-height: 1.3; }
-.store-node-type   { font-size: 12px; color: #94a3b8; font-family: ui-monospace, monospace; }
-.store-node-wiring { font-size: 10px; color: #475569; }
-.store-node-emit   { font-size: 9px; color: #0d9488; font-weight: 600; }
+.store-node-value  { font-size: 10px; color: var(--bk-muted); line-height: 1.3; font-family: var(--bk-mono); }
+.store-node-type   { font-size: 12px; color: var(--bk-muted); font-family: var(--bk-mono); }
+.store-node-wiring { font-size: 10px; color: var(--bk-muted); }
+.store-node-emit   { font-size: 9px; color: var(--bk-teal); font-weight: 600; }
 
 /* Hub store: hierarchy mode hides its wire fan, so its reader/writer count on
    the card stands in for the hidden wires. A dashed accent marks it as "wires
@@ -272,18 +306,18 @@ body {
 .store-node-types .store-node-type,
 .store-node-config .store-node-type,
 .store-node-contract .store-node-type,
-.store-node-full .store-node-type { font-size: 24px; color: #64748b; }
+.store-node-full .store-node-type { font-size: 24px; color: var(--bk-muted); }
 .store-node-types .store-node-value,
 .store-node-config .store-node-value,
 .store-node-contract .store-node-value,
-.store-node-full .store-node-value { font-size: 22px; color: #475569; }
+.store-node-full .store-node-value { font-size: 22px; color: var(--bk-ink); }
 /* The `ports` tier (what the paper figures render at) had a big 30px name but
    still the tiny 10/12px base value+type — unreadable at figure scale. Give it
    value/type sizes in line with the big name. */
 .store-node-glyph .store-node-type,
-.store-node-ports .store-node-type { font-size: 21px; color: #64748b; }
+.store-node-ports .store-node-type { font-size: 21px; color: var(--bk-muted); }
 .store-node-glyph .store-node-value,
-.store-node-ports .store-node-value { font-size: 19px; color: #475569; }
+.store-node-ports .store-node-value { font-size: 19px; color: var(--bk-ink); }
 
 /* ── Edge labels (process-column semantic zoom) ─────────────────────────── */
 .loom-edge-label {
@@ -350,9 +384,9 @@ body {
 /* ── Process nodes ───────────────────────────────────────────────────── */
 
 .process-node {
-  background: #ffffff;
-  border: 2px solid #6366f1;
-  border-radius: 0;
+  background: var(--bk-ground);
+  border: 1.5px solid var(--bk-navy);
+  border-radius: 6px;
   padding: 12px 26px;
   min-width: 100px;
   min-height: 50px;
@@ -362,7 +396,7 @@ body {
   position: relative;
 }
 
-.process-node:hover { border-color: #4f46e5; }
+.process-node:hover { border-color: var(--bk-teal); }
 
 /* Snap-to-fit button — top-right corner, revealed on hover so it never clutters
    the card (and never shows in the static SVG export, which has no hover). */
@@ -410,7 +444,7 @@ body {
   align-items: center;
 }
 
-.process-label { font-weight: 600; color: #1e293b; font-size: 16px; }
+.process-label { font-family: var(--bk-display); font-weight: 600; color: var(--bk-navy); font-size: 16px; }
 
 /* DRAFT badge — interface-only process (ports + contract, no update dynamics).
    Sized in em so it scales with the title at every zoom tier. */
@@ -438,7 +472,7 @@ body {
 }
 
 .process-type {
-  color: #94a3b8;
+  color: var(--bk-muted);
   font-size: 13px;
   font-style: italic;
 }
@@ -446,15 +480,18 @@ body {
 /* ── Port handles ────────────────────────────────────────────────────── */
 
 .port-handle {
-  width: 8px !important;
-  height: 8px !important;
-  border: 2px solid #6366f1 !important;
-  background: #ffffff !important;
+  width: 9px !important;
+  height: 9px !important;
+  border: 2px solid var(--bk-navy) !important;
+  /* Filled with the bound store's wire color when known (set inline by
+     ProcessNode as --port-dot), so the port dot and its store share a hue and
+     source→target is matchable at a glance (#1). Falls back to white. */
+  background: var(--port-dot, #ffffff) !important;
 }
 
-.port-handle-input { border-color: #10b981 !important; }
-.port-handle-input:hover { background: #10b981 !important; }
-.port-handle-output:hover { background: #6366f1 !important; }
+.port-handle-input { border-color: var(--bk-teal) !important; }
+.port-handle-input:hover { background: var(--bk-teal) !important; }
+.port-handle-output:hover { background: var(--bk-navy) !important; }
 
 .port-label {
   position: absolute;
@@ -530,16 +567,43 @@ body {
 }
 .port-in-label.is-in  { left: 13px;  align-items: flex-start; text-align: left; }
 .port-in-label.is-out { right: 13px; align-items: flex-end;   text-align: right; }
+/* Name + bound-store swatch on one row; on the OUTPUT (right) column the swatch
+   sits after the name so it hugs the card edge nearest its wire. */
+.port-in-head { display: flex; align-items: center; gap: 7px; }
+.port-in-label.is-out .port-in-head { flex-direction: row-reverse; }
 .port-in-label:hover .port-in-name { text-decoration: underline; text-underline-offset: 2px; }
-.port-in-label.is-open .port-in-name { color: #4f46e5; }
+.port-in-label.is-open .port-in-name { color: var(--bk-teal); }
 .port-in-name {
-  font-size: 19px; font-weight: 650; color: #334155;
+  font-family: var(--bk-display);
+  font-size: 19px; font-weight: 600; color: var(--bk-navy);
   max-width: calc(var(--port-col, 140px) - 13px); overflow: hidden; text-overflow: ellipsis;
 }
-.port-in-label.is-out .port-in-name { color: #0f766e; }
+.port-in-label.is-out .port-in-name { color: var(--bk-teal); }
+/* Direction cue — a small glyph + word before/after the name (▸ reads / ○ writes)
+   so a reader learns what the port is FOR, not just its datatype (#2). */
+.port-in-dir {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--bk-muted); white-space: nowrap;
+}
+.port-in-label.is-in  .port-in-dir { color: var(--bk-navy); }
+.port-in-label.is-out .port-in-dir { color: var(--bk-teal); }
 .port-in-type {
-  font-family: ui-monospace, monospace; font-size: 15px; color: #94a3b8;
+  font-family: var(--bk-mono); font-size: 13px; color: var(--bk-muted);
+  opacity: 0.9;
   max-width: calc(var(--port-col, 140px) - 13px); overflow: hidden; text-overflow: ellipsis;
+}
+/* Contract meaning for a documented port — the book-body gloss that supersedes
+   the raw type when present (#2). */
+.port-in-sem {
+  font-family: var(--bk-body); font-size: 13px; color: var(--bk-muted);
+  line-height: 1.3; max-width: calc(var(--port-col, 140px) - 13px);
+  white-space: normal;
+}
+/* The bound-store swatch: a small dot matching the port's wire color, so name↔store
+   is matchable even where the wire is long or crosses others (#1). */
+.port-in-swatch {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--port-dot, var(--bk-muted)); flex: 0 0 auto;
 }
 /* Port-column resizer: a thin drag bar at the inner edge of the port columns.
    Positioned by an inline `left: var(--port-col)`; drag widens the column,
@@ -646,35 +710,38 @@ body {
    the ports sit lower, so the top strip is free). Chips flow left-to-right and
    wrap tightly so the band stays a shallow header and never pushes the contract
    math out the bottom of the card. */
+/* Config as a quiet, de-emphasized sub-panel: a compact multi-column grid on
+   warm paper, so the parameters are legible but never crowd the process NAME +
+   EQUATION, which must dominate the card (#3). Set params lead (gold key); the
+   rest are the quieter default majority. */
 .process-node-config-band {
-  display: flex; flex-wrap: wrap; align-items: center;
-  justify-content: flex-start; gap: 5px 9px;
-  /* Stay INSIDE the center channel. A negative side margin used to widen the
-     band under the port columns, but on sized cards `.process-node-center` has
-     `overflow: auto`, which CLIPPED the escaped left edge — hiding the `config`
-     caret + the start of the first chip's name (e.g. "interval" → "…val"), and
-     colliding with the top-left corner figure. Inset with the title instead. */
-  margin: 0 0 12px; padding-bottom: 9px;
-  border-bottom: 1px solid #e5e7eb;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 2px 18px; align-items: baseline;
+  margin: 12px 0 0; padding: 9px 13px 10px;
+  background: var(--bk-paper);
+  border: 1px solid var(--bk-hair); border-radius: 6px;
 }
-.config-band-caret { font-size: 15px; color: #a855f7; font-weight: 700; letter-spacing: 0.02em; flex: 0 0 auto; }
+.config-band-caret {
+  grid-column: 1 / -1;
+  font-family: var(--bk-display);
+  font-size: 12px; color: var(--bk-muted); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.09em; margin-bottom: 3px;
+}
 .config-chip {
-  display: inline-flex; align-items: baseline; gap: 5px;
-  background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 6px;
-  padding: 2px 9px; font-size: 15px; max-width: 100%;
+  display: flex; align-items: baseline; gap: 6px;
+  background: none; border: 0; border-radius: 0;
+  padding: 1px 0; font-size: 14px; max-width: 100%;
 }
-/* The value must never be shrunk below its content (a short "3.3" was being
-   flex-squeezed to "3…"); let the chip grow/wrap instead. Only genuinely long
-   values (a dict/list) ellipsize at a generous cap. */
-.config-chip .config-val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24ch; flex: 0 0 auto; }
-.config-chip .config-key { color: #7e22ce; font-weight: 600; flex: 0 0 auto; }
-.config-chip .config-val { color: #6b7280; font-family: ui-monospace, monospace; }
-/* Config param TYPE (shown once ports show types) — muted mono, like a port type. */
-.config-chip .config-type { color: #94a3b8; font-family: ui-monospace, monospace; font-size: 0.9em; }
+.config-chip .config-val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20ch; }
+.config-chip .config-key { color: var(--bk-navy); font-weight: 600; flex: 0 0 auto; }
+.config-chip .config-val { color: var(--bk-ink); font-family: var(--bk-mono); }
+/* Config param TYPE (shown once ports show types) — muted mono, quiet tertiary. */
+.config-chip .config-type { color: var(--bk-muted); font-family: var(--bk-mono); font-size: 0.85em; opacity: 0.85; }
 /* A parameter the composite explicitly SET (vs running on its default) reads
-   stronger; defaults are the quieter majority. */
-.config-chip.is-set { background: #f3e8ff; border-color: #d8b4fe; }
-.config-more { font-size: 16px; color: #a855f7; font-weight: 600; align-self: center; }
+   stronger — a gold key marks it; defaults stay navy. */
+.config-chip.is-set .config-key { color: var(--bk-gold); }
+.config-more { grid-column: 1 / -1; font-size: 13px; color: var(--bk-muted); font-weight: 600; margin-top: 2px; }
 .section-popover-row.is-set .section-popover-key { font-weight: 700; color: #6b21a8; }
 .section-popover-row.is-set .section-popover-val { color: #1e293b; }
 
@@ -682,11 +749,14 @@ body {
    No boxes/chrome — the card's own left→center→right layout (input columns →
    this → output columns) frames it. A serif recital (the "what"), then the
    equations (the "how") in one restrained indigo-accented block, then a glossary. */
-.process-contract { margin-top: 6px; }
+.process-contract { margin-top: 4px; }
+/* The role line: one restrained sentence of what the process DOES, set in the
+   book body serif directly under the title — read as a designed subtitle, not a
+   justified paragraph (which strung short lines out with river gaps). */
 .contract-recital {
-  font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
-  font-size: 18px; line-height: 1.6; color: #1e293b;
-  text-align: justify; margin: 0;
+  font-family: var(--bk-body);
+  font-size: 18px; line-height: 1.5; color: var(--bk-ink);
+  text-align: left; margin: 0;
 }
 /* Overview tiers (glyph / ports): render the process NAME large + centered,
    filling the box so it is legible when the whole graph is fit to the viewport.
@@ -712,7 +782,16 @@ body {
 .process-node-config .port-in-name { font-size: 24px; max-width: calc(var(--port-col, 158px) - 15px); }
 .process-node-ports .port-in-type,
 .process-node-types .port-in-type,
-.process-node-config .port-in-type { font-size: 17px; max-width: calc(var(--port-col, 158px) - 15px); }
+.process-node-config .port-in-type,
+.process-node-ports .port-in-sem,
+.process-node-types .port-in-sem,
+.process-node-config .port-in-sem { font-size: 17px; max-width: calc(var(--port-col, 158px) - 15px); }
+.process-node-ports .port-in-dir,
+.process-node-types .port-in-dir,
+.process-node-config .port-in-dir { font-size: 15px; }
+.process-node-ports .port-in-swatch,
+.process-node-types .port-in-swatch,
+.process-node-config .port-in-swatch { width: 11px; height: 11px; }
 /* The "draft process" line + address, enlarged to fill the body at these tiers. */
 .process-node-ports .process-node-meta,
 .process-node-types .process-node-meta,
@@ -721,8 +800,16 @@ body {
 .process-node-types .process-node-address,
 .process-node-config .process-node-address { font-size: 20px; }
 
-.process-node-title { font-size: 25px; font-weight: 700; color: #1e293b; line-height: 1.2; }
-.process-node-meta  { font-size: 17px; color: #64748b; margin-top: 4px; }
+.process-node-title {
+  font-family: var(--bk-display);
+  font-size: 30px; font-weight: 700; color: var(--bk-navy);
+  line-height: 1.16; letter-spacing: -0.005em;
+}
+.process-node-meta  {
+  font-family: var(--bk-display);
+  font-size: 15px; color: var(--bk-muted); margin-top: 3px;
+  text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600;
+}
 
 /* Composite-Process drill affordance: a subtle badge on cards whose inner model
    is itself a composite, plus a one-line hint that double-click opens it. */
@@ -813,9 +900,8 @@ body {
 .node-figure.is-corner { position: absolute; top: 7px; left: 9px; margin: 0; z-index: 1; pointer-events: none; }
 .node-figure.is-corner .node-figure-img,
 .node-figure.is-corner .node-figure-svg svg { height: 48px; max-width: 54px; }
-/* When a config band sits above the title, the top-left corner badge would
-   overlap it — drop the badge down so it rides with the name instead. */
-.process-node:has(.process-node-config-band) .node-figure.is-corner { top: 52px; }
+/* (The config band now sits BELOW the equation, not above the title, so the
+   top-left corner badge no longer needs to dodge it.) */
 /* Keep the corner badge from colliding with the title: the title becomes a
    left-aligned header sitting to the RIGHT of the icon (padding only on the
    left, so it keeps full width and long names wrap on word boundaries), tall
@@ -947,7 +1033,7 @@ body {
 .loom-crumb-link { color: #2563eb; cursor: pointer; }
 .loom-crumb-link:hover { text-decoration: underline; }
 .process-node-address {
-  font-size: 16px; color: #94a3b8; font-family: ui-monospace, monospace;
+  font-size: 15px; color: var(--bk-muted); font-family: var(--bk-mono);
   /* break-word (not `anywhere`) keeps `local:Diffusion` whole when it fits —
      only a genuinely too-long token breaks, never mid-word on a narrow box. */
   margin-top: 4px; overflow-wrap: break-word;
@@ -1035,43 +1121,46 @@ body {
 .process-node-summary { font-size: 11px; color: #334155; margin-top: 6px; line-height: 1.4; }
 /* Governing equations — one restrained block, thin indigo accent, wraps. */
 .process-node-math {
-  /* Live INSIDE the center channel (which already clears the port columns at
-     every tier) — no fixed negative margin. A fixed outward margin can't be
-     right for both port tiers (it overlapped the port labels) and the no-ports
-     tier (it overshot the 14px inset and spilled past the card border). Cards
-     are content-driven, so the card auto-widens to fit the equation at full
-     size: big math that always clears the ports and never leaves the box. */
-  margin: 8px 0 0; padding: 6px 12px;
-  background: #f7f8fb; border: 1px solid #eceefb; border-left: 3px solid #6366f1;
-  border-radius: 7px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px; color: #0f172a; line-height: 1.35;
+  /* The governing equation — the card's centrepiece: a clean framed block on a
+     faint navy-tinted ground with a teal rule, typeset large so it reads first.
+     Lives INSIDE the center channel (clears the port columns at every tier); the
+     card auto-widens to fit so big math never overlaps ports or leaves the box. */
+  margin: 12px 0 0; padding: 10px 16px;
+  background: var(--bk-navy-tint); border: 1px solid var(--bk-hair);
+  border-left: 3px solid var(--bk-teal);
+  border-radius: 6px;
+  font-family: var(--bk-mono);
+  font-size: 14px; color: var(--bk-navy); line-height: 1.35;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .process-node-math > div { margin: 0; }
 /* KaTeX-typeset equations: tight display margins; KatexBlock scales a too-wide
    equation to fit (see Katex.tsx) — bigger base so it stays legible after fit. */
 .process-node-math .katex-display { margin: 0.15em 0; overflow: visible; }
-.process-node-math .katex { font-size: 1.7em; }
+.process-node-math .katex { font-size: 1.85em; color: var(--bk-navy); }
 .katex-eq { text-align: center; }
-/* Symbol glossary — hanging-indent definition list, symbol in ink. */
+/* Symbol legend — a compact two-column glossary keyed beside the equation, so a
+   reader can decode every variable (θ, f, μ …) in place. Symbol in ink, meaning
+   muted. */
 .process-node-symbols {
-  margin-top: 11px; font-size: 15px; color: #475569; line-height: 1.55;
+  margin-top: 10px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1px 20px;
+  font-family: var(--bk-body);
+  font-size: 15px; color: var(--bk-muted); line-height: 1.5;
 }
 .process-node-symbols > div { padding-left: 1.3em; text-indent: -1.3em; margin: 1px 0; }
-.process-node-symbols em { font-style: italic; font-weight: 600; color: #1e293b; }
+.process-node-symbols em { font-style: italic; font-weight: 700; color: var(--bk-navy); }
 .process-node-description {
-  margin-top: 11px; font-size: 15px; color: #475569; line-height: 1.55;
-  font-family: Georgia, 'Times New Roman', serif;
+  margin-top: 11px; font-size: 15px; color: var(--bk-muted); line-height: 1.55;
+  font-family: var(--bk-body);
   /* Bound the extended description so a verbose workflow step (preprocess /
      analysis) can't spill past its card and collide with the next node. */
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden;
 }
-.process-node-completeness {
-  font-size: 10px; color: #94a3b8; margin-top: 10px;
-  border-top: 1px solid #f1f5f9; padding-top: 5px;
-}
-.process-node-completeness .is-warn { color: #b45309; }
+/* Documentation-coverage line ("N/M ports documented") is dev metadata — noise
+   in a print figure, so it is hidden from the card. */
+.process-node-completeness { display: none; }
 
 /* ── Inspector panel ─────────────────────────────────────────────────── */
 
