@@ -724,6 +724,11 @@ export default function App() {
   // Per-feature Detail overrides (the Detail menu) — each 'auto' follows the
   // zoom tier; anything forced layers on top of the node's tier-derived `show`.
   const [detailOverrides, setDetailOverrides] = useState<DetailOverrides>(DETAIL_AUTO);
+  // ?style=minimal — the stripped bigraph-grammar figure. Beyond hiding chrome
+  // (via the detail-override preset), it colors wires by DIRECTION rather than
+  // per-store — teal reads, gold writes — so the read+write loop on a shared
+  // store reads as the grammar the opening figure teaches.
+  const [minimalStyle, setMinimalStyle] = useState(false);
   // Node text scale (Font control). Multiplies every node font size via the
   // --loom-fs CSS var on the canvas; saved in the view so a headless render of a
   // default view keeps the chosen size. Clamped to a sane range.
@@ -1297,7 +1302,7 @@ export default function App() {
           ...n,
           zIndex: L.z,
           data: {
-            ...n.data, _tier: effTier, _detailOverrides: detailOverrides,
+            ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle,
             _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
             // Full-detail ("open") card = explicitly kept-open ONLY. A plain
             // single click just SELECTS (drives the Inspector + wire highlight)
@@ -1325,14 +1330,14 @@ export default function App() {
         ...n,
         zIndex: L.z,
         data: {
-          ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _isHub: isHub,
+          ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle, _isHub: isHub,
           _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
           _readers: wiring.readers, _writers: wiring.writers, _commitSize: commitNodeSize,
           _commitPortCol: commitPortCol,
         },
       };
     });
-  }, [nodes, edges, effTier, detailOverrides, focus.keptOpen, focus.selected, focus.locked, lineage, layoutMode.modeId, hubIds, drillHops, commitNodeSize]);
+  }, [nodes, edges, effTier, detailOverrides, minimalStyle, focus.keptOpen, focus.selected, focus.locked, lineage, layoutMode.modeId, hubIds, drillHops, commitNodeSize]);
 
   // Map from node id to node, for the edge stamp below (which needs the process
   // end's port-type schema and derived contract). Rebuilt only when `nodes`
@@ -1363,6 +1368,18 @@ export default function App() {
       return k === 'input' || k === 'output';
     }).length;
     const routeAroundAll = wireCount <= 120;
+    // Minimal style colors wires by direction (teal read / gold write) instead
+    // of per-store, so the grammar-intro figure reads the way its study spec
+    // describes ("teal read wires, gold write wires").
+    const minWire = (edge: any, kind: string) => {
+      if (!minimalStyle) return edge;
+      const col = kind === 'output' ? '#a9781f' : '#1f7a72';
+      return {
+        ...edge,
+        style: { ...(edge.style as any), stroke: col },
+        markerEnd: edge.markerEnd ? { ...edge.markerEnd, color: col } : edge.markerEnd,
+      };
+    };
     return (drawnEdges as any[]).map((e) => {
       const kind = (e.data as any)?.edgeType;
       if (kind !== 'input' && kind !== 'output') {          // place edge: default renderer
@@ -1371,6 +1388,7 @@ export default function App() {
         // Bold + raise the selected lineage's containment edges; fade the rest.
         return { ...e, zIndex: on ? 11 : undefined, data: { ...e.data, _lineage: on, _dim: !on } };
       }
+      e = minWire(e, kind);
       const focused = (e.data as any)?._focused === true;
       // Non-focused wire → straight `light` edge in big graphs (perf); in small
       // graphs, route it around the cards like the focused wires do.
@@ -1394,7 +1412,7 @@ export default function App() {
         },
       };
     });
-  }, [drawnEdges, nodeById, effTier, lineage, layoutMode.modeId]);
+  }, [drawnEdges, nodeById, effTier, lineage, layoutMode.modeId, minimalStyle]);
 
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
@@ -1678,6 +1696,20 @@ export default function App() {
       // mode — so a figure render can pick the packing that reads best in print.
       const pLayout = params.get('layout');
       if (pLayout && getMode(pLayout).id === pLayout) layoutMode.setModeId(pLayout);
+      // ?style=minimal — a stripped bigraph-grammar figure (chapter-1 opener):
+      // store NAMES + process NAMES + directed colored wires only. Everything
+      // else off (port labels/types, store value + read/write counts, the
+      // process meta line, config, contract, address). Implemented as a preset:
+      // ports:'none' also drops the meta line (gated on show.ports), and the low
+      // 'ports' detail floor keeps the store card to just its name.
+      if (params.get('style') === 'minimal') {
+        setMinimalStyle(true);
+        setDetailFloor('ports');
+        setDetailOverrides((o) => ({
+          ...o, ports: 'none', stores: 'name',
+          config: 'off', contract: 'off', figures: 'off', address: 'off',
+        }));
+      }
     })();
   }, [state, compositeId, applyView, layoutMode]);
 

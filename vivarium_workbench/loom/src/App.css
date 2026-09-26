@@ -398,6 +398,13 @@ body {
 
 .process-node:hover { border-color: var(--bk-teal); }
 
+/* Minimal grammar figure (?style=minimal): the process is just its name in a
+   clean sharp-cornered bar (warm-white ground, like the book's opening SVG),
+   name centered. Stores keep their own name-only card. */
+.process-node.is-minimal { background: #fdfcfa; }
+.process-node.is-minimal .process-node-center { display: flex; flex-direction: column; justify-content: center; }
+.process-node.is-minimal .process-node-title { text-align: center; }
+
 /* Snap-to-fit button — top-right corner, revealed on hover so it never clutters
    the card (and never shows in the static SVG export, which has no hover). */
 .process-node-fit-btn {

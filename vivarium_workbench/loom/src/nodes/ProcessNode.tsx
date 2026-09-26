@@ -202,8 +202,12 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
 
   // Per-port store hue (from convert.ts): the port's connection dot, its inside
   // swatch, and its wire all share it, so a reader can trace port → store by
-  // color (#1).
+  // color (#1). In the minimal grammar figure, dots are colored by DIRECTION
+  // (teal read / gold write) to match the direction-colored wires.
+  const isMinimal = (data as { _minimal?: boolean })._minimal === true;
   const portColors = ((data as { portColors?: Record<string, string> }).portColors) ?? {};
+  const dotColor = (port: string, isOut: boolean) =>
+    isMinimal ? (isOut ? '#a9781f' : '#1f7a72') : portColors[port];
 
   // Connection dots sit ON the card border (inputs left, outputs right) at each
   // port's vertical fraction — that's where wires attach, at every tier. The dot
@@ -218,7 +222,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
       id={port}
       className={`port-handle ${isOut ? 'port-handle-output' : 'port-handle-input'}`}
       title={handleTitle(port, isOut, types)}
-      style={{ top: topFor(i, n), ...(portColors[port] ? { ['--port-dot' as string]: portColors[port] } : {}) }}
+      style={{ top: topFor(i, n), ...(dotColor(port, isOut) ? { ['--port-dot' as string]: dotColor(port, isOut) } : {}) }}
     />
   );
 
@@ -438,7 +442,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   return (
     <div
       ref={nodeRef}
-      className={`process-node process-node-${stepKind} process-node-${t}${locked ? ' is-locked' : ''}${isLineage ? ' is-lineage' : ''}${isWired ? ' is-wired' : ''}${isDim ? ' is-dim' : ''}${!show.ports ? ' process-node-noports' : ''}${dims ? ' is-sized' : ''}`}
+      className={`process-node process-node-${stepKind} process-node-${t}${locked ? ' is-locked' : ''}${isLineage ? ' is-lineage' : ''}${isWired ? ' is-wired' : ''}${isDim ? ' is-dim' : ''}${!show.ports ? ' process-node-noports' : ''}${dims ? ' is-sized' : ''}${isMinimal ? ' is-minimal' : ''}`}
       style={{
         ...(dims ? { width: dims.width, height: dims.height, overflow: 'visible' } : {}),
         // A hand-set / saved node height wins: cap the port-driven min-height to
