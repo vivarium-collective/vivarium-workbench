@@ -1240,6 +1240,15 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
             # stale saved positions).
             if getattr(args, "fresh_layout", False):
                 loom_url += "&fresh=1"
+            # --layout: force a specific layout engine. 'hierarchy' (compact 2-D
+            # packing) reads best for a multi-process composite in print — a
+            # roughly-square grid instead of one long horizontal strip.
+            if getattr(args, "layout", None):
+                loom_url += f"&layout={quote(args.layout)}"
+            # --hide-address: drop the "local:Foo" registry address from each
+            # process card (useful interactively, clutter in a book figure).
+            if getattr(args, "hide_address", False):
+                loom_url += "&address=off"
             try:
                 page.goto(loom_url, wait_until="domcontentloaded", timeout=60_000)
                 page.wait_for_selector(".react-flow__node", timeout=40_000)
@@ -1624,6 +1633,16 @@ def main(argv: list[str] | None = None) -> int:
                                     "lay the graph out from scratch with the current layout "
                                     "engine. Use after a renderer/layout change so figures "
                                     "reflect the new layout instead of stale saved positions.")
+    p_render_loom.add_argument("--layout", default=None,
+                               choices=["hierarchy", "flow-down", "tree-grid", "flow-right"],
+                               help="Force a layout engine (with --fresh-layout). 'hierarchy' "
+                                    "= compact 2-D packing (a roughly-square grid, best for a "
+                                    "multi-process composite in print); 'flow-down' = the tree; "
+                                    "'tree-grid' = tree with processes in a grid; 'flow-right' "
+                                    "= left→right DAG.")
+    p_render_loom.add_argument("--hide-address", action="store_true",
+                               help="Hide the 'local:Foo' registry address on each process card "
+                                    "(clutter in a print figure).")
     p_render_loom.set_defaults(func=cmd_render_loom)
 
     args = parser.parse_args(argv)

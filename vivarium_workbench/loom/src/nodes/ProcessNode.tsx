@@ -163,7 +163,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   // feature is 'auto' (keep the tier value) or forced. Never applied to a pinned-
   // open card (that always shows everything).
   const ov = (data as any)._detailOverrides as
-    { ports?: string; config?: string; contract?: string; figures?: string } | undefined;
+    { ports?: string; config?: string; contract?: string; figures?: string; address?: string } | undefined;
   if (ov && !(data as any)._pinnedOpen) {
     if (ov.ports === 'none')  { show.ports = false; show.types = false; }
     else if (ov.ports === 'plain') { show.ports = true;  show.types = false; }
@@ -622,7 +622,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
           <div className="process-node-description"><MathText text={contract.description} /></div>
         )}
 
-        {show.types && (data as any).address && (
+        {show.types && (data as any).address && ov?.address !== 'off' && (
           <div className="process-node-address">{(data as any).address}</div>
         )}
 

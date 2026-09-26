@@ -78,8 +78,12 @@ export type DetailOverrides = {
   // A per-node illustrative figure (data-URI / inline SVG on the spec's `_figure`).
   // 'auto' = show when a node carries one; 'on'/'off' force it.
   figures: TriDetail;
+  // The process's registry address ("local:Chemotaxis"). Useful interactively but
+  // clutter in a print figure — 'auto' shows it (from the types tier up); 'off'
+  // hides it. Driven by `?address=off` / render-loom --hide-address.
+  address: TriDetail;
 };
-export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto' };
+export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto' };
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 // `light` is the cheap default wire (straight, no floating anchors / labels);
 // `floating` is the rich labelled edge, used only for FOCUSED wires. Non-wire
@@ -1567,6 +1571,7 @@ export default function App() {
       config: (view.detailOverrides?.config ?? 'auto') as TriDetail,
       contract: (view.detailOverrides?.contract ?? 'auto') as ContractDetail,
       figures: ((view.detailOverrides as { figures?: string } | undefined)?.figures ?? 'auto') as TriDetail,
+      address: ((view.detailOverrides as { address?: string } | undefined)?.address ?? 'auto') as TriDetail,
     });
     // Restore the node text scale (absent = 1).
     setFontScale((view as { fontScale?: number }).fontScale ?? 1);
@@ -1638,17 +1643,24 @@ export default function App() {
       const pConfig = params.get('config');
       const pContract = params.get('contract');
       const pFigures = params.get('figures');
-      if (pPorts || pStores || pConfig || pContract || pFigures) {
+      const pAddress = params.get('address');
+      if (pPorts || pStores || pConfig || pContract || pFigures || pAddress) {
         setDetailOverrides((o) => ({
           ports: (['none', 'plain', 'types'].includes(pPorts || '') ? pPorts : o.ports) as PortsDetail,
           stores: (['name', 'value', 'type'].includes(pStores || '') ? pStores : o.stores) as StoresDetail,
           config: (['on', 'off'].includes(pConfig || '') ? pConfig : o.config) as TriDetail,
           contract: (['on', 'off', 'full'].includes(pContract || '') ? pContract : o.contract) as ContractDetail,
           figures: (['on', 'off'].includes(pFigures || '') ? pFigures : o.figures) as TriDetail,
+          address: (['on', 'off'].includes(pAddress || '') ? pAddress : o.address) as TriDetail,
         }));
       }
+      // ?layout=<modeId> forces a specific layout engine (clusterGrid 'hierarchy',
+      // tree 'flow-down', grid 'tree-grid', ELK 'flow-right') over the saved view's
+      // mode — so a figure render can pick the packing that reads best in print.
+      const pLayout = params.get('layout');
+      if (pLayout && getMode(pLayout).id === pLayout) layoutMode.setModeId(pLayout);
     })();
-  }, [state, compositeId, applyView]);
+  }, [state, compositeId, applyView, layoutMode]);
 
   // Export the CURRENT layout (all nodes in their positions) to an image on a
   // WHITE background. Captures the React Flow viewport element via html-to-image,
