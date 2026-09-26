@@ -30,6 +30,44 @@ def _workspace_name(workspace: Path) -> str:
         return workspace.name
 
 
+def _warn_if_loom_dist_stale() -> None:
+    """Warn when the built loom bundle is missing or older than its source.
+
+    `vivarium_workbench/loom/_dist` is a gitignored build artifact. On an editable
+    / source checkout, pulling loom source changes does NOT rebuild it, so the
+    server silently keeps serving the OLD bundle — the only symptom is a stale
+    loom (e.g. a new render flag doing nothing). Surface it loudly at startup so
+    the fix (`scripts/build_loom.sh` + restart) is obvious. Best-effort; a wheel
+    install ships only `_dist` (no `src`), so this never false-warns there.
+    """
+    try:
+        from vivarium_workbench.loom_assets import asset_dir
+        dist = asset_dir()
+        src = dist.parent / "src"
+        if not dist.is_dir():
+            print("warning: loom bundle (loom/_dist) is missing — run "
+                  "scripts/build_loom.sh, or the Explorer / render-loom will 404.",
+                  file=sys.stderr)
+            return
+        if not src.is_dir():
+            return  # a wheel install: no source tree to compare against
+        def _newest(p: Path) -> float:
+            m = 0.0
+            for f in p.rglob("*"):
+                if f.is_file():
+                    try:
+                        m = max(m, f.stat().st_mtime)
+                    except OSError:
+                        pass
+            return m
+        if _newest(src) > _newest(dist) + 1:
+            print("warning: loom/_dist is OLDER than loom/src — the served loom "
+                  "bundle is stale. Rebuild it (scripts/build_loom.sh) and restart "
+                  "so renderer changes take effect.", file=sys.stderr)
+    except Exception:
+        pass
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Render the workspace dashboard once and start the HTTP server."""
     workspace = Path(args.workspace).resolve()
@@ -65,6 +103,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         render_dashboard(workspace, write_all=True, base_path=base_path)
     except Exception as e:
         print(f"warning: dashboard render failed: {e}", file=sys.stderr)
+
+    # Loud, early heads-up if the built loom bundle is stale/missing (editable
+    # checkouts that pulled loom changes without rebuilding serve the old renderer).
+    _warn_if_loom_dist_stale()
 
     # Pick port + write server-info ahead of boot (server.serve() also writes
     # one, but writing it here ensures the URL is printed below correctly).
