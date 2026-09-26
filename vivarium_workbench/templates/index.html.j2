@@ -774,6 +774,14 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <small>workbench</small>
         </div>
       </a>
+      <!-- Study search — a magnifier next to the collapse toggle; click to reveal
+           the search field below the nav (see _vivToggleRailSearch). -->
+      <button class="viv-rail-toggle viv-rail-search-btn" id="viv-rail-search-btn" type="button" aria-label="Search studies" title="Search studies" onclick="_vivToggleRailSearch()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+      </button>
       <!-- Rail collapse/expand toggle. Lives in the header so, when collapsed, it
            can overlay the logo and reveal on hover (see .viv-rail-collapsed CSS). -->
       <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar" onclick="_vivToggleRail()">
@@ -946,15 +954,15 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
     <!-- Studies of the active investigation, dependency-ordered. -->
     <div class="viv-rail-section" id="viv-rail-studies-section">
-      <!-- Sticky header: the label + search stay pinned at the top of the scroll
-           region while the study list scrolls beneath them. -->
-      <div class="viv-rail-studies-head">
-        <!-- Live study search: filters the grouped-by-investigation list below.
-             Lives OUTSIDE #viv-rail-investigations (which is re-rendered on every
-             keystroke) so the input keeps focus. -->
+      <!-- Sticky header: the search field (hidden until the header magnifier is
+           clicked) stays pinned at the top of the scroll region while the study
+           list scrolls beneath it. Lives OUTSIDE #viv-rail-investigations (which
+           re-renders on every keystroke) so the input keeps focus. -->
+      <div class="viv-rail-studies-head" id="viv-rail-studies-head" hidden>
         <input id="viv-rail-study-search" type="search" placeholder="Search studies…"
                autocomplete="off" spellcheck="false" aria-label="Search studies"
                oninput="window._filterRailStudies && window._filterRailStudies(this.value)"
+               onkeydown="if(event.key==='Escape'){_vivToggleRailSearch(false);}"
                style="width:calc(100% - 24px);margin:2px 12px 6px;padding:4px 8px;font-size:0.82em;
                       color:#374151;border:1px solid #e5e7eb;border-radius:4px;background:#fff;box-sizing:border-box;" />
       </div>
