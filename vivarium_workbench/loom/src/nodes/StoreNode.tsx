@@ -134,7 +134,7 @@ function StoreNode({ data }: NodeProps & { data: StoreNodeData }) {
   };
   // Stores Detail override (the Detail menu) controls how much of a store shows:
   //   'name'  → just the label   'value' → + value   'type' → + value + type
-  const _ov = (data as any)._detailOverrides as { stores?: string; figures?: string } | undefined;
+  const _ov = (data as any)._detailOverrides as { stores?: string; figures?: string; direction?: string } | undefined;
   if (_ov) {
     if (_ov.stores === "name")  { show.value = false; show.type = false; }
     else if (_ov.stores === "value") { show.value = true;  show.type = false; }
@@ -176,7 +176,7 @@ function StoreNode({ data }: NodeProps & { data: StoreNodeData }) {
             : <img className="node-figure-img" src={figure} alt="" draggable={false} />}
         </div>
       )}
-      {show.wiring && !(data as { _figureClean?: boolean })._figureClean && (readers.length > 0 || writers.length > 0) && (
+      {show.wiring && _ov?.direction !== 'off' && !(data as { _figureClean?: boolean })._figureClean && (readers.length > 0 || writers.length > 0) && (
         <div className="store-node-wiring">
           {readers.length > 0 && <span>{readers.length} read</span>}
           {readers.length > 0 && writers.length > 0 && <span> · </span>}
