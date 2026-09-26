@@ -163,7 +163,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   // feature is 'auto' (keep the tier value) or forced. Never applied to a pinned-
   // open card (that always shows everything).
   const ov = (data as any)._detailOverrides as
-    { ports?: string; config?: string; contract?: string; figures?: string; address?: string } | undefined;
+    { ports?: string; config?: string; contract?: string; figures?: string; address?: string; direction?: string } | undefined;
   if (ov && !(data as any)._pinnedOpen) {
     if (ov.ports === 'none')  { show.ports = false; show.types = false; }
     else if (ov.ports === 'plain') { show.ports = true;  show.types = false; }
@@ -266,7 +266,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
             ports don't crowd. A documented contract meaning is longer, so it
             keeps its own line below. */}
         <span className="port-in-sub">
-          {!isFigureClean && <span className="port-in-dir">{dirLabel}</span>}
+          {!isFigureClean && ov?.direction !== 'off' && <span className="port-in-dir">{dirLabel}</span>}
           {!semantic && show.types && info.type && (
             <span className="port-in-type" title={info.fullType}>{info.type}</span>
           )}

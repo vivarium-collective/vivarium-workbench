@@ -82,8 +82,12 @@ export type DetailOverrides = {
   // clutter in a print figure — 'auto' shows it (from the types tier up); 'off'
   // hides it. Driven by `?address=off` / render-loom --hide-address.
   address: TriDetail;
+  // The per-port "▸ reads / ○ writes" direction words. Direction is also conveyed
+  // by port side (left=read/right=write) + arrowheads, so the words are optional —
+  // 'auto' shows them, 'off' hides them. Driven by `?direction=off` / ?figure=1.
+  direction: TriDetail;
 };
-export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto' };
+export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto', direction: 'auto' };
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 // `light` is the cheap default wire (straight, no floating anchors / labels);
 // `floating` is the rich labelled edge, used only for FOCUSED wires. Non-wire
@@ -1613,6 +1617,7 @@ export default function App() {
       contract: (view.detailOverrides?.contract ?? 'auto') as ContractDetail,
       figures: ((view.detailOverrides as { figures?: string } | undefined)?.figures ?? 'auto') as TriDetail,
       address: ((view.detailOverrides as { address?: string } | undefined)?.address ?? 'auto') as TriDetail,
+      direction: ((view.detailOverrides as { direction?: string } | undefined)?.direction ?? 'auto') as TriDetail,
     });
     // Restore the node text scale (absent = 1).
     setFontScale((view as { fontScale?: number }).fontScale ?? 1);
@@ -1700,7 +1705,8 @@ export default function App() {
       const pContract = params.get('contract');
       const pFigures = params.get('figures');
       const pAddress = params.get('address');
-      if (pPorts || pStores || pConfig || pContract || pFigures || pAddress) {
+      const pDirection = params.get('direction');
+      if (pPorts || pStores || pConfig || pContract || pFigures || pAddress || pDirection) {
         setDetailOverrides((o) => ({
           ports: (['none', 'plain', 'types'].includes(pPorts || '') ? pPorts : o.ports) as PortsDetail,
           stores: (['name', 'value', 'type'].includes(pStores || '') ? pStores : o.stores) as StoresDetail,
@@ -1708,6 +1714,7 @@ export default function App() {
           contract: (['on', 'off', 'full'].includes(pContract || '') ? pContract : o.contract) as ContractDetail,
           figures: (['on', 'off'].includes(pFigures || '') ? pFigures : o.figures) as TriDetail,
           address: (['on', 'off'].includes(pAddress || '') ? pAddress : o.address) as TriDetail,
+          direction: (['on', 'off'].includes(pDirection || '') ? pDirection : o.direction) as TriDetail,
         }));
       }
       // ?layout=<modeId> forces a specific layout engine (clusterGrid 'hierarchy',
@@ -1735,7 +1742,7 @@ export default function App() {
       // still wins via the override merge below.)
       if (params.get('figure') === '1') {
         setFigureClean(true);
-        setDetailOverrides((o) => ({ ...o, address: 'off' }));
+        setDetailOverrides((o) => ({ ...o, address: 'off', direction: 'off' }));
       }
     })();
   }, [state, compositeId, applyView, layoutMode]);

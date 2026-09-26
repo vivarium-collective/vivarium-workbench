@@ -49,7 +49,7 @@ export default function DetailMenu(props: {
 
   const anyForced = overrides.ports !== 'auto' || overrides.stores !== 'auto'
     || overrides.config !== 'auto' || overrides.contract !== 'auto' || overrides.figures !== 'auto'
-    || overrides.address !== 'auto';
+    || overrides.address !== 'auto' || overrides.direction !== 'auto';
 
   const seg = (opts: { id: string; label: string }[], value: string, onPick: (id: string) => void) => (
     <div style={{ display: 'inline-flex', border: '1px solid #d1d5db', borderRadius: 5, overflow: 'hidden' }}>
@@ -71,7 +71,7 @@ export default function DetailMenu(props: {
     </div>
   );
 
-  const rowLabel: React.CSSProperties = { fontSize: 11.5, color: '#374151', width: 58, flexShrink: 0 };
+  const rowLabel: React.CSSProperties = { fontSize: 11.5, color: '#374151', width: 64, flexShrink: 0 };
   const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '5px 12px' };
 
   return (
@@ -106,6 +106,7 @@ export default function DetailMenu(props: {
           <div style={row}><span style={rowLabel}>Contract</span>{seg(CONTRACT, overrides.contract, (id) => setOverrides({ ...overrides, contract: id as ContractDetail }))}</div>
           <div style={row}><span style={rowLabel}>Figures</span>{seg(TRI, overrides.figures, (id) => setOverrides({ ...overrides, figures: id as TriDetail }))}</div>
           <div style={row}><span style={rowLabel}>Address</span>{seg(TRI, overrides.address, (id) => setOverrides({ ...overrides, address: id as TriDetail }))}</div>
+          <div style={row}><span style={rowLabel}>Direction</span>{seg(TRI, overrides.direction, (id) => setOverrides({ ...overrides, direction: id as TriDetail }))}</div>
           <div style={{ height: 1, background: '#e5e7eb', margin: '4px 0' }} />
           <div style={row}>
             <span style={rowLabel}>Text size</span>
