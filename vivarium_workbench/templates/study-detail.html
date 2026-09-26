@@ -767,29 +767,9 @@
     <p class="muted" style="font-size:0.85em;margin:0">Loading composite card(s)…</p>
   </div>
 
-  {# Analyses to run at dispatch time — which post-run analyses this study's
-     dispatch should trigger, translated into v2ecoli's analysis_options
-     (lib.study_run_post.build_analysis_options). Independent of `_has_build`,
-     same reasoning as model-composite-cards above: any runnable study can
-     declare analyses regardless of whether it has build-shaped fields.
-     Populated by _loadStudyAnalyses() (study-detail.js) from the live
-     /api/visualization-classes registry, preserving any name already declared
-     in this study's own spec even if the current registry doesn't have it —
-     same honest-degrade convention as the baseline-composite select above.
-     Saved via _saveStudyAnalyses(), which posts to /api/study-set-analyses
-     (metadata_mutations.set_investigation_analyses — already resolves this
-     study by name, flat studies/<name>/ preferred over legacy
-     investigations/<name>/, so no backend change was needed here). #}
-  <div class="overview-section" id="study-analyses-section">
-    <h3>Analyses to run <span class="muted" style="font-size:0.85em;font-weight:normal">— which of the workspace's <code>ANALYSIS_REGISTRY</code> entries to compute on dispatch</span></h3>
-    <div id="study-analyses-list" data-study="{{ study.name }}">
-      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading analyses…</span></div>
-    </div>
-    <div style="margin-top:8px">
-      <button class="action-btn" type="button" onclick="_saveStudyAnalyses()">Save analyses</button>
-      <span id="study-analyses-status" style="margin-left:8px;font-size:0.9em;color:#555"></span>
-    </div>
-  </div>
+  {# (The "Analyses to run" dispatch-time selector moved to the Analyses tab —
+     panel-analyses — so it sits with the analysis RESULT files it produces,
+     instead of on the Model tab which is about the composite.) #}
 
   {# Build-block visibility mirrors the pre-merge panel-build guard exactly (model_change/impl_reqs/conditions/baseline) so non-v3 studies keep their Model + Conditions sections. #}
   {% set _has_build = study.model_change or study.implementation_requirements or study.conditions or study.baseline %}
@@ -1206,6 +1186,25 @@
    as before so the existing loader (_loadAnalyses, was
    _loadAnalysisOutputs) binds unchanged; only the markup + panel moved. #}
 <section class="study-tab-panel" data-kind="analyses" id="panel-analyses" hidden>
+
+  {# Analyses to run at dispatch time — which post-run analyses this study's
+     dispatch should trigger, translated into v2ecoli's analysis_options
+     (lib.study_run_post.build_analysis_options). Populated by
+     _loadStudyAnalyses() (study-detail.js) from the live
+     /api/visualization-classes registry, preserving any name already declared
+     in this study's own spec even if the current registry doesn't have it.
+     Saved via _saveStudyAnalyses() → /api/study-set-analyses. Lives here on the
+     Analyses tab, alongside the result files these analyses produce. #}
+  <div class="overview-section" id="study-analyses-section">
+    <h3>Analyses to run <span class="muted" style="font-size:0.85em;font-weight:normal">— which of the workspace's <code>ANALYSIS_REGISTRY</code> entries to compute on dispatch</span></h3>
+    <div id="study-analyses-list" data-study="{{ study.name }}">
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading analyses…</span></div>
+    </div>
+    <div style="margin-top:8px">
+      <button class="action-btn" type="button" onclick="_saveStudyAnalyses()">Save analyses</button>
+      <span id="study-analyses-status" style="margin-left:8px;font-size:0.9em;color:#555"></span>
+    </div>
+  </div>
 
 <div class="overview-section" id="analyses-results-section">
   <h2>Analyses</h2>
