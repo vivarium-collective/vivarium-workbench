@@ -1249,6 +1249,11 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
             # process card (useful interactively, clutter in a book figure).
             if getattr(args, "hide_address", False):
                 loom_url += "&address=off"
+            # --compact: print preset for BUSY multi-process composites — narrow
+            # cards, drop config/symbols/address so name+equation lead, and pack
+            # the grid tight so the figure fits a page legibly.
+            if getattr(args, "compact", False):
+                loom_url += "&compact=1"
             try:
                 page.goto(loom_url, wait_until="domcontentloaded", timeout=60_000)
                 page.wait_for_selector(".react-flow__node", timeout=40_000)
@@ -1643,6 +1648,11 @@ def main(argv: list[str] | None = None) -> int:
     p_render_loom.add_argument("--hide-address", action="store_true",
                                help="Hide the 'local:Foo' registry address on each process card "
                                     "(clutter in a print figure).")
+    p_render_loom.add_argument("--compact", action="store_true",
+                               help="Print preset for busy multi-process composites: narrow "
+                                    "cards, drop config/symbols/address so name + governing "
+                                    "equation lead, and pack the grid tight so the whole figure "
+                                    "fits a book page legibly. Best with --layout hierarchy.")
     p_render_loom.set_defaults(func=cmd_render_loom)
 
     args = parser.parse_args(argv)

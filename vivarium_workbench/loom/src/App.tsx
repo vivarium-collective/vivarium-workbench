@@ -438,6 +438,10 @@ export default function App() {
   // keep-positions branch and any saved/dragged positions), so every snapshot is
   // a tidy tree rather than the accumulated on-screen playback arrangement.
   const freshLayoutRef = useRef(false);
+  // Print-figure compact layout (?compact=1): the layout packs tighter and sizes
+  // cards to the narrowed width. Held in a ref so the layout effects read it
+  // without a dependency (they already skip re-running on unrelated changes).
+  const compactRef = useRef(false);
   // A new topology trajectory arms the transport at frame 0 (pristine state
   // captured so we can restore it on exit).
   useEffect(() => {
@@ -1026,7 +1030,7 @@ export default function App() {
       // Always lay out at the LARGEST (full) tier so cards never overlap at any
       // zoom and positions are stable across tier changes (persistent placement).
       const { nodes: laidOut } = await layoutMode.runLayout(
-        visibleNodes as any, visibleEdges as any, compositeId, LAYOUT_TIER,
+        visibleNodes as any, visibleEdges as any, compositeId, LAYOUT_TIER, compactRef.current,
       );
       // Clean-layout snapshot export: ignore saved/dragged positions so the
       // frame lays out FRESH (a tidy tree), not the accumulated arrangement.
@@ -1452,7 +1456,7 @@ export default function App() {
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
       const { nodes: laidOut } = await layoutMode.runLayout(
-        visibleNodes as any, visibleEdges as any, compositeId, LAYOUT_TIER,
+        visibleNodes as any, visibleEdges as any, compositeId, LAYOUT_TIER, compactRef.current,
       );
       const laid = laidOut as any[];
       // Reuse unchanged node objects so consolidating the layout doesn't remount
@@ -1597,6 +1601,21 @@ export default function App() {
       // (e.g. after a renderer change) instead of stale saved positions.
       const fresh = params.get('fresh') === '1';
       if (fresh) freshLayoutRef.current = true;
+      // ?compact=1 — a print-figure preset for BUSY multi-process composites:
+      // narrow the cards, drop config/symbols/address/figures so the science
+      // (name + role + governing equation) leads, and tell the layout to pack
+      // tight. Individual ?cardw / ?detail / ?config params below still override.
+      const compact = params.get('compact') === '1';
+      if (compact) {
+        compactRef.current = true;
+        if (!params.get('cardw')) {
+          document.documentElement.style.setProperty('--proc-card-w', '440px');
+        }
+        if (!params.get('detail')) setDetailFloor('contract');
+        // Lead with the science; the explicit ?config/?address/?figures params
+        // below still win over these compact defaults.
+        setDetailOverrides((o) => ({ ...o, config: 'off', address: 'off', figures: 'off' }));
+      }
       if (!fresh) {
         let view: View | null = decodeView(params.get('view'));
         const viewUrl = params.get('viewUrl');

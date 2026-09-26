@@ -43,6 +43,10 @@ export interface LayoutContext {
   tier: ZoomTierId;
   /** Clustering granularity, 0..1. Higher means fewer, coarser clusters. */
   granularity: number;
+  /** Print-figure mode: pack tighter (shorter springs) and size cards to the
+   *  actual (possibly narrowed) card width, so a busy multi-process composite
+   *  fits a book page legibly instead of sprawling. Figure renders only. */
+  compact?: boolean;
 }
 
 export interface FocusContext {
