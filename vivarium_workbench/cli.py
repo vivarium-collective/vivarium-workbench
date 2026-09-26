@@ -1198,7 +1198,7 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
         return 1
 
     wp = WorkspacePaths.load(ws)
-    jobs: list[tuple[str, str]] = []
+    jobs: list[tuple[str, str, str | None]] = []
     for sd in sorted(wp.studies.iterdir()):
         sf = sd / "study.yaml"
         if not sf.is_file():
@@ -1210,8 +1210,13 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
         # the legacy top-level baseline list) — v4 studies otherwise bake nothing.
         from vivarium_workbench.lib.investigation_report import _baseline_composite_id
         comp = _baseline_composite_id(spec)
+        # Per-study render style: `loom: {style: minimal}` in study.yaml opts a
+        # study into a render style, so one `render-loom` pass renders every
+        # study in its intended style. --style overrides it for all.
+        loom_cfg = spec.get("loom") if isinstance(spec.get("loom"), dict) else {}
+        style = getattr(args, "style", None) or (loom_cfg or {}).get("style")
         if comp:
-            jobs.append((sd.name, comp))
+            jobs.append((sd.name, comp, style))
     if not jobs:
         print("no studies with a baseline composite found")
         return 0
@@ -1230,16 +1235,33 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
         page = browser.new_page(
             viewport={"width": int(args.width), "height": int(args.height)},
             device_scale_factor=float(args.device_scale))
-        for slug, comp in jobs:
+        for slug, comp, style in jobs:
             out = wp.studies / slug / "viz" / "model-loom.png"
             loom_url = (f"{url}/bigraph-loom/?id={quote(comp)}"
                         "&tabs=explore,document&nopersist=1")
+            # Per-study (or --style) render style, e.g. ?style=minimal.
+            if style:
+                loom_url += f"&style={quote(str(style))}"
             # --fresh-layout: ignore any committed default view / saved positions
             # and lay the graph out from scratch with the current layout engine
             # (use after a renderer/layout change so figures aren't pinned to
             # stale saved positions).
             if getattr(args, "fresh_layout", False):
                 loom_url += "&fresh=1"
+            # --layout: force a specific layout engine. 'hierarchy' (compact 2-D
+            # packing) reads best for a multi-process composite in print — a
+            # roughly-square grid instead of one long horizontal strip.
+            if getattr(args, "layout", None):
+                loom_url += f"&layout={quote(args.layout)}"
+            # --hide-address: drop the "local:Foo" registry address from each
+            # process card (useful interactively, clutter in a book figure).
+            if getattr(args, "hide_address", False):
+                loom_url += "&address=off"
+            # --compact: print preset for BUSY multi-process composites — narrow
+            # cards, drop config/symbols/address so name+equation lead, and pack
+            # the grid tight so the figure fits a page legibly.
+            if getattr(args, "compact", False):
+                loom_url += "&compact=1"
             try:
                 page.goto(loom_url, wait_until="domcontentloaded", timeout=60_000)
                 page.wait_for_selector(".react-flow__node", timeout=40_000)
@@ -1624,6 +1646,27 @@ def main(argv: list[str] | None = None) -> int:
                                     "lay the graph out from scratch with the current layout "
                                     "engine. Use after a renderer/layout change so figures "
                                     "reflect the new layout instead of stale saved positions.")
+    p_render_loom.add_argument("--layout", default=None,
+                               choices=["hierarchy", "flow-down", "tree-grid", "flow-right"],
+                               help="Force a layout engine (with --fresh-layout). 'hierarchy' "
+                                    "= compact 2-D packing (a roughly-square grid, best for a "
+                                    "multi-process composite in print); 'flow-down' = the tree; "
+                                    "'tree-grid' = tree with processes in a grid; 'flow-right' "
+                                    "= left→right DAG.")
+    p_render_loom.add_argument("--hide-address", action="store_true",
+                               help="Hide the 'local:Foo' registry address on each process card "
+                                    "(clutter in a print figure).")
+    p_render_loom.add_argument("--compact", action="store_true",
+                               help="Print preset for busy multi-process composites: narrow "
+                                    "cards, drop config/symbols/address so name + governing "
+                                    "equation lead, and pack the grid tight so the whole figure "
+                                    "fits a book page legibly. Best with --layout hierarchy.")
+    p_render_loom.add_argument("--style", default=None,
+                               help="Force a render style for ALL studies (overrides each "
+                                    "study.yaml `loom.style`). 'minimal' = a stripped "
+                                    "bigraph-grammar figure: store + process NAMES and directed "
+                                    "teal-read / gold-write wires only, everything else hidden. "
+                                    "Normally set per study via `loom: {style: minimal}`.")
     p_render_loom.set_defaults(func=cmd_render_loom)
 
     args = parser.parse_args(argv)

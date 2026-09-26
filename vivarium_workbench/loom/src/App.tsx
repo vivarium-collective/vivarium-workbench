@@ -78,8 +78,12 @@ export type DetailOverrides = {
   // A per-node illustrative figure (data-URI / inline SVG on the spec's `_figure`).
   // 'auto' = show when a node carries one; 'on'/'off' force it.
   figures: TriDetail;
+  // The process's registry address ("local:Chemotaxis"). Useful interactively but
+  // clutter in a print figure — 'auto' shows it (from the types tier up); 'off'
+  // hides it. Driven by `?address=off` / render-loom --hide-address.
+  address: TriDetail;
 };
-export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto' };
+export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto' };
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 // `light` is the cheap default wire (straight, no floating anchors / labels);
 // `floating` is the rich labelled edge, used only for FOCUSED wires. Non-wire
@@ -434,6 +438,10 @@ export default function App() {
   // keep-positions branch and any saved/dragged positions), so every snapshot is
   // a tidy tree rather than the accumulated on-screen playback arrangement.
   const freshLayoutRef = useRef(false);
+  // Print-figure compact layout (?compact=1): the layout packs tighter and sizes
+  // cards to the narrowed width. Held in a ref so the layout effects read it
+  // without a dependency (they already skip re-running on unrelated changes).
+  const compactRef = useRef(false);
   // A new topology trajectory arms the transport at frame 0 (pristine state
   // captured so we can restore it on exit).
   useEffect(() => {
@@ -716,6 +724,11 @@ export default function App() {
   // Per-feature Detail overrides (the Detail menu) — each 'auto' follows the
   // zoom tier; anything forced layers on top of the node's tier-derived `show`.
   const [detailOverrides, setDetailOverrides] = useState<DetailOverrides>(DETAIL_AUTO);
+  // ?style=minimal — the stripped bigraph-grammar figure. Beyond hiding chrome
+  // (via the detail-override preset), it colors wires by DIRECTION rather than
+  // per-store — teal reads, gold writes — so the read+write loop on a shared
+  // store reads as the grammar the opening figure teaches.
+  const [minimalStyle, setMinimalStyle] = useState(false);
   // Node text scale (Font control). Multiplies every node font size via the
   // --loom-fs CSS var on the canvas; saved in the view so a headless render of a
   // default view keeps the chosen size. Clamped to a sane range.
@@ -1022,7 +1035,7 @@ export default function App() {
       // Always lay out at the LARGEST (full) tier so cards never overlap at any
       // zoom and positions are stable across tier changes (persistent placement).
       const { nodes: laidOut } = await layoutMode.runLayout(
-        visibleNodes as any, visibleEdges as any, compositeId, LAYOUT_TIER,
+        visibleNodes as any, visibleEdges as any, compositeId, LAYOUT_TIER, compactRef.current,
       );
       // Clean-layout snapshot export: ignore saved/dragged positions so the
       // frame lays out FRESH (a tidy tree), not the accumulated arrangement.
@@ -1289,7 +1302,7 @@ export default function App() {
           ...n,
           zIndex: L.z,
           data: {
-            ...n.data, _tier: effTier, _detailOverrides: detailOverrides,
+            ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle,
             _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
             // Full-detail ("open") card = explicitly kept-open ONLY. A plain
             // single click just SELECTS (drives the Inspector + wire highlight)
@@ -1317,14 +1330,14 @@ export default function App() {
         ...n,
         zIndex: L.z,
         data: {
-          ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _isHub: isHub,
+          ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle, _isHub: isHub,
           _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
           _readers: wiring.readers, _writers: wiring.writers, _commitSize: commitNodeSize,
           _commitPortCol: commitPortCol,
         },
       };
     });
-  }, [nodes, edges, effTier, detailOverrides, focus.keptOpen, focus.selected, focus.locked, lineage, layoutMode.modeId, hubIds, drillHops, commitNodeSize]);
+  }, [nodes, edges, effTier, detailOverrides, minimalStyle, focus.keptOpen, focus.selected, focus.locked, lineage, layoutMode.modeId, hubIds, drillHops, commitNodeSize]);
 
   // Map from node id to node, for the edge stamp below (which needs the process
   // end's port-type schema and derived contract). Rebuilt only when `nodes`
@@ -1355,6 +1368,18 @@ export default function App() {
       return k === 'input' || k === 'output';
     }).length;
     const routeAroundAll = wireCount <= 120;
+    // Minimal style colors wires by direction (teal read / gold write) instead
+    // of per-store, so the grammar-intro figure reads the way its study spec
+    // describes ("teal read wires, gold write wires").
+    const minWire = (edge: any, kind: string) => {
+      if (!minimalStyle) return edge;
+      const col = kind === 'output' ? '#a9781f' : '#1f7a72';
+      return {
+        ...edge,
+        style: { ...(edge.style as any), stroke: col },
+        markerEnd: edge.markerEnd ? { ...edge.markerEnd, color: col } : edge.markerEnd,
+      };
+    };
     return (drawnEdges as any[]).map((e) => {
       const kind = (e.data as any)?.edgeType;
       if (kind !== 'input' && kind !== 'output') {          // place edge: default renderer
@@ -1363,6 +1388,7 @@ export default function App() {
         // Bold + raise the selected lineage's containment edges; fade the rest.
         return { ...e, zIndex: on ? 11 : undefined, data: { ...e.data, _lineage: on, _dim: !on } };
       }
+      e = minWire(e, kind);
       const focused = (e.data as any)?._focused === true;
       // Non-focused wire → straight `light` edge in big graphs (perf); in small
       // graphs, route it around the cards like the focused wires do.
@@ -1386,7 +1412,7 @@ export default function App() {
         },
       };
     });
-  }, [drawnEdges, nodeById, effTier, lineage, layoutMode.modeId]);
+  }, [drawnEdges, nodeById, effTier, lineage, layoutMode.modeId, minimalStyle]);
 
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
@@ -1448,7 +1474,7 @@ export default function App() {
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
       const { nodes: laidOut } = await layoutMode.runLayout(
-        visibleNodes as any, visibleEdges as any, compositeId, LAYOUT_TIER,
+        visibleNodes as any, visibleEdges as any, compositeId, LAYOUT_TIER, compactRef.current,
       );
       const laid = laidOut as any[];
       // Reuse unchanged node objects so consolidating the layout doesn't remount
@@ -1567,6 +1593,7 @@ export default function App() {
       config: (view.detailOverrides?.config ?? 'auto') as TriDetail,
       contract: (view.detailOverrides?.contract ?? 'auto') as ContractDetail,
       figures: ((view.detailOverrides as { figures?: string } | undefined)?.figures ?? 'auto') as TriDetail,
+      address: ((view.detailOverrides as { address?: string } | undefined)?.address ?? 'auto') as TriDetail,
     });
     // Restore the node text scale (absent = 1).
     setFontScale((view as { fontScale?: number }).fontScale ?? 1);
@@ -1592,6 +1619,21 @@ export default function App() {
       // (e.g. after a renderer change) instead of stale saved positions.
       const fresh = params.get('fresh') === '1';
       if (fresh) freshLayoutRef.current = true;
+      // ?compact=1 — a print-figure preset for BUSY multi-process composites:
+      // narrow the cards, drop config/symbols/address/figures so the science
+      // (name + role + governing equation) leads, and tell the layout to pack
+      // tight. Individual ?cardw / ?detail / ?config params below still override.
+      const compact = params.get('compact') === '1';
+      if (compact) {
+        compactRef.current = true;
+        if (!params.get('cardw')) {
+          document.documentElement.style.setProperty('--proc-card-w', '440px');
+        }
+        if (!params.get('detail')) setDetailFloor('contract');
+        // Lead with the science; the explicit ?config/?address/?figures params
+        // below still win over these compact defaults.
+        setDetailOverrides((o) => ({ ...o, config: 'off', address: 'off', figures: 'off' }));
+      }
       if (!fresh) {
         let view: View | null = decodeView(params.get('view'));
         const viewUrl = params.get('viewUrl');
@@ -1638,17 +1680,38 @@ export default function App() {
       const pConfig = params.get('config');
       const pContract = params.get('contract');
       const pFigures = params.get('figures');
-      if (pPorts || pStores || pConfig || pContract || pFigures) {
+      const pAddress = params.get('address');
+      if (pPorts || pStores || pConfig || pContract || pFigures || pAddress) {
         setDetailOverrides((o) => ({
           ports: (['none', 'plain', 'types'].includes(pPorts || '') ? pPorts : o.ports) as PortsDetail,
           stores: (['name', 'value', 'type'].includes(pStores || '') ? pStores : o.stores) as StoresDetail,
           config: (['on', 'off'].includes(pConfig || '') ? pConfig : o.config) as TriDetail,
           contract: (['on', 'off', 'full'].includes(pContract || '') ? pContract : o.contract) as ContractDetail,
           figures: (['on', 'off'].includes(pFigures || '') ? pFigures : o.figures) as TriDetail,
+          address: (['on', 'off'].includes(pAddress || '') ? pAddress : o.address) as TriDetail,
+        }));
+      }
+      // ?layout=<modeId> forces a specific layout engine (clusterGrid 'hierarchy',
+      // tree 'flow-down', grid 'tree-grid', ELK 'flow-right') over the saved view's
+      // mode — so a figure render can pick the packing that reads best in print.
+      const pLayout = params.get('layout');
+      if (pLayout && getMode(pLayout).id === pLayout) layoutMode.setModeId(pLayout);
+      // ?style=minimal — a stripped bigraph-grammar figure (chapter-1 opener):
+      // store NAMES + process NAMES + directed colored wires only. Everything
+      // else off (port labels/types, store value + read/write counts, the
+      // process meta line, config, contract, address). Implemented as a preset:
+      // ports:'none' also drops the meta line (gated on show.ports), and the low
+      // 'ports' detail floor keeps the store card to just its name.
+      if (params.get('style') === 'minimal') {
+        setMinimalStyle(true);
+        setDetailFloor('ports');
+        setDetailOverrides((o) => ({
+          ...o, ports: 'none', stores: 'name',
+          config: 'off', contract: 'off', figures: 'off', address: 'off',
         }));
       }
     })();
-  }, [state, compositeId, applyView]);
+  }, [state, compositeId, applyView, layoutMode]);
 
   // Export the CURRENT layout (all nodes in their positions) to an image on a
   // WHITE background. Captures the React Flow viewport element via html-to-image,

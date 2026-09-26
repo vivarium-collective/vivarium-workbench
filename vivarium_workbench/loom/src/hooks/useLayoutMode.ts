@@ -19,6 +19,7 @@ export interface UseLayoutMode {
     edges: Edge[],
     compositeId: string | null,
     tier: ZoomTierId,
+    compact?: boolean,
   ) => Promise<LayoutResult>;
 }
 
@@ -32,8 +33,8 @@ export function useLayoutMode(initialModeId = DEFAULT_MODE_ID): UseLayoutMode {
   const mode = getMode(modeId);
 
   const runLayout = useCallback(
-    async (nodes: Node[], edges: Edge[], compositeId: string | null, tier: ZoomTierId) => {
-      const result = await getMode(modeId).run(nodes, edges, { compositeId, tier, granularity });
+    async (nodes: Node[], edges: Edge[], compositeId: string | null, tier: ZoomTierId, compact?: boolean) => {
+      const result = await getMode(modeId).run(nodes, edges, { compositeId, tier, granularity, compact });
       setBands(result.bands ?? []);
       return result;
     },

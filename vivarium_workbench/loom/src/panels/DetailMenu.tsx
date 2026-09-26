@@ -8,6 +8,7 @@
 //   Contract — Show / Hide / Full             (Full = the extended description)
 // They layer on top of the zoom tier in the nodes (see ProcessNode/StoreNode).
 import { useEffect, useRef, useState } from 'react';
+import { DETAIL_AUTO } from '../App';
 import type { DetailOverrides, PortsDetail, StoresDetail, TriDetail, ContractDetail } from '../App';
 
 const PORTS: { id: PortsDetail; label: string }[] = [
@@ -47,7 +48,8 @@ export default function DetailMenu(props: {
   }, [open]);
 
   const anyForced = overrides.ports !== 'auto' || overrides.stores !== 'auto'
-    || overrides.config !== 'auto' || overrides.contract !== 'auto' || overrides.figures !== 'auto';
+    || overrides.config !== 'auto' || overrides.contract !== 'auto' || overrides.figures !== 'auto'
+    || overrides.address !== 'auto';
 
   const seg = (opts: { id: string; label: string }[], value: string, onPick: (id: string) => void) => (
     <div style={{ display: 'inline-flex', border: '1px solid #d1d5db', borderRadius: 5, overflow: 'hidden' }}>
@@ -103,6 +105,7 @@ export default function DetailMenu(props: {
           <div style={row}><span style={rowLabel}>Config</span>{seg(TRI, overrides.config, (id) => setOverrides({ ...overrides, config: id as TriDetail }))}</div>
           <div style={row}><span style={rowLabel}>Contract</span>{seg(CONTRACT, overrides.contract, (id) => setOverrides({ ...overrides, contract: id as ContractDetail }))}</div>
           <div style={row}><span style={rowLabel}>Figures</span>{seg(TRI, overrides.figures, (id) => setOverrides({ ...overrides, figures: id as TriDetail }))}</div>
+          <div style={row}><span style={rowLabel}>Address</span>{seg(TRI, overrides.address, (id) => setOverrides({ ...overrides, address: id as TriDetail }))}</div>
           <div style={{ height: 1, background: '#e5e7eb', margin: '4px 0' }} />
           <div style={row}>
             <span style={rowLabel}>Text size</span>
@@ -117,7 +120,7 @@ export default function DetailMenu(props: {
           </div>
           <div style={{ height: 1, background: '#e5e7eb', margin: '4px 0' }} />
           <button
-            onClick={() => setOverrides({ ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto' })}
+            onClick={() => setOverrides(DETAIL_AUTO)}
             disabled={!anyForced}
             style={{
               display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',

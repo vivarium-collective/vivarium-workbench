@@ -36,8 +36,32 @@ import { hubStoreIds, wireStoreEndpoint } from '../storeFacts';
 import type {
   LayoutMode, LayoutResult, LayoutContext, FocusContext,
 } from './types';
+import { deriveContract } from '../contract';
 
 const elk = new ELK();
+
+/** Reduced-height estimate for a COMPACT figure card (title + role + meta +
+ *  governing equation + port rows only — no config band, symbol legend,
+ *  description or address). Generous per-block so nothing overlaps; still far
+ *  shorter than the full-tier reservation, which is what removes the vertical
+ *  sprawl in a busy multi-process figure. */
+function compactProcHeight(n: Node): number {
+  const d = n.data as { inputPorts?: unknown; outputPorts?: unknown } | undefined;
+  const nPorts = Math.max(
+    Array.isArray(d?.inputPorts) ? d!.inputPorts.length : 0,
+    Array.isArray(d?.outputPorts) ? d!.outputPorts.length : 0,
+  );
+  const portsH = nPorts > 0 ? (nPorts + 1) * 46 : 0;
+  const contract = deriveContract(d as never);
+  const mathH = contract && contract.math.length ? contract.math.length * 92 + 24 : 0;
+  // Symbol legend renders as a ~2-column grid at the compact card width, so its
+  // height is ~one row per two symbols (must be reserved or cards overlap).
+  const nSym = contract ? Object.keys(contract.symbols).length : 0;
+  const symH = nSym ? Math.ceil(nSym / 2) * 30 + 20 : 0;
+  const roleH = contract && contract.summary ? 60 : 0;  // one-line role sentence
+  const headH = 150;  // title + meta line + padding
+  return Math.max(headH + roleH + mathH + symH, portsH) + 30;
+}
 
 /** Coarse grid retained for the exported constant (no longer used to snap the
  *  organic force result — snapping would fight the minimal-overlap spacing). */
@@ -53,6 +77,18 @@ const PORT_ROW_H = 16;
 /** Store card full-tier footprint (matches STORE_ELK_SIZE.full in hierarchy.ts). */
 const STORE_W = 168;
 const STORE_H = 150;
+
+/** The live process-card width (App sets `--proc-card-w`, e.g. narrowed for a
+ *  compact figure). Lets the layout reserve the card's ACTUAL width. Null when
+ *  unset or off-DOM (unit tests). */
+function readProcCardWidth(): number | null {
+  if (typeof document === 'undefined') return null;
+  try {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--proc-card-w').trim();
+    const px = parseFloat(raw);
+    return Number.isFinite(px) && px > 0 ? px : null;
+  } catch { return null; }
+}
 
 /** The full (largest) tier — every node is sized for this regardless of zoom. */
 const FULL = TIERS[TIERS.length - 1];
@@ -208,8 +244,22 @@ export async function clusterGridLayout(
 ): Promise<LayoutResult> {
   if (nodes.length === 0) return { nodes };
 
+  // Print-figure mode packs tighter and sizes process cards to the actual
+  // (narrowed) card width, so a busy composite fits a page. The card height
+  // estimate is left at the full-tier reservation (it over-reserves for a
+  // compact card, which only shows title+role+equation), so nothing overlaps —
+  // compact just removes the horizontal sprawl.
+  const compact = _ctx.compact === true;
+  const compactCardW = compact ? readProcCardWidth() : null;
   const footprint = new Map<string, { w: number; h: number }>(
-    nodes.map((n) => [n.id, fullFootprint(n)] as const),
+    nodes.map((n) => {
+      const f = fullFootprint(n);
+      if (compact && n.type === 'process') {
+        const w = compactCardW ? Math.min(f.w, compactCardW) : f.w;
+        return [n.id, { w, h: Math.min(f.h, compactProcHeight(n)) }] as const;
+      }
+      return [n.id, f] as const;
+    }),
   );
   const nodeIds = new Set(nodes.map((n) => n.id));
 
@@ -244,8 +294,11 @@ export async function clusterGridLayout(
         // their processes and the field packs densely (high fit-zoom). Tuned on
         // the v2ecoli baseline for aspect ~1.4 + fit-zoom ~0.3 after overlap
         // removal (see clusterGrid.test.ts MEASURE).
-        'elk.stress.desiredEdgeLength': '240',
-        'elk.spacing.nodeNode': '40',
+        // Figure mode uses much shorter springs + tighter spacing so the field
+        // packs densely for print instead of spreading for an interactive
+        // fit-zoom overview.
+        'elk.stress.desiredEdgeLength': compact ? '120' : '240',
+        'elk.spacing.nodeNode': compact ? '26' : '40',
         // Deterministic: a constant seed makes stress reproducible.
         'elk.randomSeed': '1',
       } as Record<string, string>,
@@ -265,7 +318,7 @@ export async function clusterGridLayout(
     }
 
     // ELK stress positions centers but does not separate boxes — clean up.
-    removeOverlaps(forceBoxes, NODE_GAP, 1000);
+    removeOverlaps(forceBoxes, compact ? 24 : NODE_GAP, 1000);
     // Guaranteed no-overlap fallback: if the push did not fully converge, scale
     // positions out about the centroid until nothing overlaps (monotonic, so it
     // always terminates). Rarely triggers — the push converges on real data.
