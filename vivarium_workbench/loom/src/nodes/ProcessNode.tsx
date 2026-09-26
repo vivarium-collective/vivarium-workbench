@@ -200,8 +200,14 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
 
   const topFor = (i: number, n: number) => `${((i + 1) / (n + 1)) * 100}%`;
 
+  // Per-port store hue (from convert.ts): the port's connection dot, its inside
+  // swatch, and its wire all share it, so a reader can trace port → store by
+  // color (#1).
+  const portColors = ((data as { portColors?: Record<string, string> }).portColors) ?? {};
+
   // Connection dots sit ON the card border (inputs left, outputs right) at each
-  // port's vertical fraction — that's where wires attach, at every tier.
+  // port's vertical fraction — that's where wires attach, at every tier. The dot
+  // is FILLED with the bound store's color (--port-dot) so it matches its wire.
   const borderHandle = (
     port: string, isOut: boolean, i: number, n: number, types: Record<string, unknown>,
   ) => (
@@ -212,7 +218,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
       id={port}
       className={`port-handle ${isOut ? 'port-handle-output' : 'port-handle-input'}`}
       title={handleTitle(port, isOut, types)}
-      style={{ top: topFor(i, n) }}
+      style={{ top: topFor(i, n), ...(portColors[port] ? { ['--port-dot' as string]: portColors[port] } : {}) }}
     />
   );
 
@@ -230,18 +236,29 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
     const key = `${isOut ? 'o' : 'i'}-${port}`;
     const open = openPort === key;
     const semantic = isOut ? contract?.outputs?.[port] : contract?.inputs?.[port];
+    // Lead with the port NAME + a read/write direction cue, so a reader learns
+    // what the port is FOR (#2). The bound-store swatch keys it to its wire. The
+    // secondary line is the contract meaning when documented, else the raw type
+    // as a small muted tag — never a bare "float" masquerading as the headline.
+    const dirLabel = isOut ? '○ writes' : '▸ reads';
     return (
       <div
         key={`${isOut ? 'o' : 'i'}lbl-${port}`}
         className={`port-in-label ${isOut ? 'is-out' : 'is-in'}${open ? ' is-open' : ''}`}
-        style={{ top: topFor(i, n) }}
+        style={{ top: topFor(i, n), ...(portColors[port] ? { ['--port-dot' as string]: portColors[port] } : {}) }}
         title={handleTitle(port, isOut, types)}
         onClick={(e) => { e.stopPropagation(); setOpenPort(open ? null : key); }}
       >
-        <span className="port-in-name">{port}</span>
-        {show.types && info.type && (
-          <span className="port-in-type" title={info.fullType}>{info.type}</span>
-        )}
+        <span className="port-in-head">
+          <span className="port-in-swatch" aria-hidden="true" />
+          <span className="port-in-name">{port}</span>
+        </span>
+        <span className="port-in-dir">{dirLabel}</span>
+        {semantic
+          ? <span className="port-in-sem">{semantic}</span>
+          : (show.types && info.type && (
+              <span className="port-in-type" title={info.fullType}>{info.type}</span>
+            ))}
         {open && (
           <div className={`port-popover ${isOut ? 'is-out' : 'is-in'}`} onClick={(e) => e.stopPropagation()}>
             <div className="port-popover-head">
@@ -478,27 +495,6 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
           left/right port columns supply the inputs→outputs framing spatially,
           so no abstract ƒ(inputs; config)→outputs line is needed. */}
       <div className="process-node-center">
-        {show.config && realCfg.length > 0 && (
-          <div className="process-node-config-band" title={SECTION_HINT.config}>
-            <span className="config-band-caret">config</span>
-            {realCfg.slice(0, 10).map((c) => (
-              <span key={c.name} className="config-chip" title={`${c.name}: ${c.type || '—'}${c.value ? ' = ' + c.value : ''}`}>
-                <span className="config-key">{c.name}</span>
-                {/* Show the set VALUE inline (e.g. pmf_volts = 0.15) — the numeric
-                    parametrization, not just the parameter surface. */}
-                {c.scalar && c.value && c.value !== '—' && (
-                  <span className="config-val">= {c.value}</span>
-                )}
-                {/* Types ride the port-detail level: shown once ports show types. */}
-                {show.types && c.type && <span className="config-type">{c.type}</span>}
-              </span>
-            ))}
-            {realCfg.length > 10 && (
-              <span className="config-more">+{realCfg.length - 10} more…</span>
-            )}
-          </div>
-        )}
-
         <div className="process-node-title">
           {locked && <span className="process-node-lock" title="Locked — click empty canvas to unlock">🔒</span>}
           {displayName(data.label)}
@@ -586,11 +582,36 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
           </div>
         )}
 
-        {show.full && contract && Object.keys(contract.symbols).length > 0 && (
+        {/* Symbol legend: shown whenever the equation is (tied to the contract
+            tier, not just `full`), so every variable in the math is decodable in
+            place — a designed card, not a cramped list (#4). */}
+        {show.contract && contract && Object.keys(contract.symbols).length > 0 && (
           <div className="process-node-symbols" title={SECTION_HINT.symbols}>
             {Object.entries(contract.symbols).map(([s, meaning]) => (
               <div key={s}><em><MathText text={s} symbolKey /></em> — <MathText text={meaning} /></div>
             ))}
+          </div>
+        )}
+
+        {/* Config — demoted to a quiet grid sub-panel BELOW the equation so the
+            name + math dominate the card, not the parameters (#3). */}
+        {show.config && realCfg.length > 0 && (
+          <div className="process-node-config-band" title={SECTION_HINT.config}>
+            <span className="config-band-caret">config</span>
+            {realCfg.slice(0, 10).map((c) => (
+              <span key={c.name} className={`config-chip${c.set ? ' is-set' : ''}`} title={`${c.name}: ${c.type || '—'}${c.value ? ' = ' + c.value : ''}`}>
+                <span className="config-key">{c.name}</span>
+                {/* The set VALUE inline (e.g. mut = 0.03) — the parametrization. */}
+                {c.scalar && c.value && c.value !== '—' && (
+                  <span className="config-val">= {c.value}</span>
+                )}
+                {/* Types ride the port-detail level: shown once ports show types. */}
+                {show.types && c.type && <span className="config-type">{c.type}</span>}
+              </span>
+            ))}
+            {realCfg.length > 10 && (
+              <span className="config-more">+{realCfg.length - 10} more…</span>
+            )}
           </div>
         )}
 

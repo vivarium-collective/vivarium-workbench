@@ -3,6 +3,7 @@
 
 import { MarkerType } from '@xyflow/react';
 import type { StoreNodeData, ProcessNodeData } from './types';
+import { storeColor } from './storeColor';
 
 type RFNode =
   | { id: string; type: 'store'; data: StoreNodeData; position: { x: number; y: number } }
@@ -19,7 +20,15 @@ type RFEdge = {
   animated?: boolean;
   style?: Record<string, string | number>;
   markerEnd?: { type: MarkerType; width?: number; height?: number; color?: string };
-  data?: { edgeType: 'input' | 'output' | 'bidirectional' | 'place' };
+  data?: {
+    edgeType: 'input' | 'output' | 'bidirectional' | 'place';
+    storeColor?: string;
+    /** This wire's order among its process's SAME-side wires, and how many there
+     *  are — so the edge router can fan parallel wires into distinct lanes
+     *  instead of stacking them on one (#1). */
+    laneIndex?: number;
+    laneCount?: number;
+  };
 };
 
 /** Arrowhead used on directional wires (input + output edges).
@@ -315,10 +324,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
         outputPortsTarget[port] = resolveWirePath(parentPath, target).join('.');
       }
 
-      nodes.push({
-        id,
-        type: 'process',
-        data: {
+      const procData = {
           label: path[path.length - 1] ?? '<root>',
           nodeType: 'process',
           processType: node._type ?? 'process',
@@ -360,14 +366,28 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           // Extra schema data consumed by ProcessNode (as any cast in the component)
           ...(Object.keys(inputPortsSchema).length ? { inputPortsSchema, inputPortsTarget } : {}),
           ...(Object.keys(outputPortsSchema).length ? { outputPortsSchema, outputPortsTarget } : {}),
-        } as ProcessNodeData,
+        } as ProcessNodeData;
+      nodes.push({
+        id,
+        type: 'process',
+        data: procData,
         position: { x: 0, y: 0 },
       });
 
+      // Per-port store color: every wire, its port dot, and its store share the
+      // store's hue so source→target is traceable by color even when wires are
+      // long or cross (#1). Keyed on the SAME store id (pathKey) the store node
+      // and the wire use, so the three always agree. Stamped onto the process
+      // data for ProcessNode to paint the port dots + swatches.
+      const portColors: Record<string, string> = {};
+
       // Wire edges: inputs arrive at this process node from store nodes.
       // Convention: input wires leave the store's LEFT side and enter the process's LEFT side.
-      for (const [port, target] of Object.entries(node.inputs ?? {})) {
+      const inEntries = Object.entries(node.inputs ?? {});
+      inEntries.forEach(([port, target], i) => {
         const tid = pathKey(resolveWirePath(parentPath, target));
+        const col = storeColor(tid);
+        portColors[port] = col;
         edges.push({
           id: `${id}--in--${port}`,
           source: tid,
@@ -377,15 +397,18 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           targetHandle: port,          // process's left input port
           label: port,
           animated: false,
-          style: { stroke: '#aeb8c4', strokeDasharray: '5,4', strokeWidth: 2.75 },  // wire convention: dashed, thick for legibility (inline stroke so image export captures it)
-          markerEnd: WIRE_ARROW,       // arrow at the process's input port
-          data: { edgeType: 'input' },
+          style: { stroke: col, strokeDasharray: '5,4', strokeWidth: 2.5 },  // per-store hue; dashed (inline so image export captures it)
+          markerEnd: { ...WIRE_ARROW, color: col },   // arrow tinted to the store
+          data: { edgeType: 'input', storeColor: col, laneIndex: i, laneCount: inEntries.length },
         });
-      }
+      });
       // Wire edges: outputs leave this process node to store nodes.
       // Convention: output wires leave the process's RIGHT side and enter the store's RIGHT side.
-      for (const [port, target] of Object.entries(node.outputs ?? {})) {
+      const outEntries = Object.entries(node.outputs ?? {});
+      outEntries.forEach(([port, target], i) => {
         const tid = pathKey(resolveWirePath(parentPath, target));
+        const col = storeColor(tid);
+        portColors[port] = col;
         edges.push({
           id: `${id}--out--${port}`,
           source: id,
@@ -395,11 +418,13 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           targetHandle: 'right-in',    // store's right handle
           label: port,
           animated: false,
-          style: { stroke: '#aeb8c4', strokeDasharray: '5,4', strokeWidth: 2.75 },  // wire convention: dashed, thick for legibility (inline stroke so image export captures it)
-          markerEnd: WIRE_ARROW,       // arrow at the store's incoming side
-          data: { edgeType: 'output' },
+          style: { stroke: col, strokeDasharray: '5,4', strokeWidth: 2.5 },  // per-store hue; dashed (inline so image export captures it)
+          markerEnd: { ...WIRE_ARROW, color: col },   // arrow tinted to the store
+          data: { edgeType: 'output', storeColor: col, laneIndex: i, laneCount: outEntries.length },
         });
-      }
+      });
+      // Attach the resolved per-port colors to the process card.
+      (procData as ProcessNodeData & { portColors?: Record<string, string> }).portColors = portColors;
       return;
     }
 
@@ -435,6 +460,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           valueType,
           path,
           figure: _n._figure ?? undefined,
+          storeColor: storeColor(pathKey(path)),
         } satisfies StoreNodeData,
         position: { x: 0, y: 0 },
       });
@@ -455,6 +481,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           // An optional illustration for the container itself (e.g. a `cell` /
           // `tissue` group). `_figure` is metadata, NOT a child store.
           figure: (node as { _figure?: string })._figure ?? undefined,
+          storeColor: storeColor(pathKey(path)),
         } satisfies StoreNodeData,
         position: { x: 0, y: 0 },
       });

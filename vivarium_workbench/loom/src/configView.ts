@@ -66,5 +66,8 @@ export function configParams(
     if (name.startsWith('_')) continue;  // internal metadata (e.g. _inner_view) — not a param
     out.push({ name, type: configValueType(v), value: fmtConfigValue(v), set: true, scalar: true });
   }
-  return out.sort((a, b) => (Number(b.scalar) - Number(a.scalar)) || a.name.localeCompare(b.name));
+  // Salient (explicitly-set, non-default) params lead, then scalars, then name —
+  // so a truncated band keeps the parameters the reader most needs.
+  return out.sort((a, b) =>
+    (Number(b.set) - Number(a.set)) || (Number(b.scalar) - Number(a.scalar)) || a.name.localeCompare(b.name));
 }

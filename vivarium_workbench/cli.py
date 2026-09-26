@@ -1234,6 +1234,12 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
             out = wp.studies / slug / "viz" / "model-loom.png"
             loom_url = (f"{url}/bigraph-loom/?id={quote(comp)}"
                         "&tabs=explore,document&nopersist=1")
+            # --fresh-layout: ignore any committed default view / saved positions
+            # and lay the graph out from scratch with the current layout engine
+            # (use after a renderer/layout change so figures aren't pinned to
+            # stale saved positions).
+            if getattr(args, "fresh_layout", False):
+                loom_url += "&fresh=1"
             try:
                 page.goto(loom_url, wait_until="domcontentloaded", timeout=60_000)
                 page.wait_for_selector(".react-flow__node", timeout=40_000)
@@ -1613,6 +1619,11 @@ def main(argv: list[str] | None = None) -> int:
                                help="Palette-quantize the saved PNG to this many colours "
                                     "(default 128; 0 = full colour). Loom diagrams are line "
                                     "art, so this cuts PNG size ~10x with no visible loss.")
+    p_render_loom.add_argument("--fresh-layout", action="store_true",
+                               help="Ignore any committed default view / saved positions and "
+                                    "lay the graph out from scratch with the current layout "
+                                    "engine. Use after a renderer/layout change so figures "
+                                    "reflect the new layout instead of stale saved positions.")
     p_render_loom.set_defaults(func=cmd_render_loom)
 
     args = parser.parse_args(argv)

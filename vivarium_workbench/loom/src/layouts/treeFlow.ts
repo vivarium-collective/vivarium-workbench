@@ -50,7 +50,7 @@ interface Gaps {
 // Gaps are kept tight so processes sit close to each other and close to the
 // store rows they wire — the card footprints (full tier, 620×320) already force
 // generous spacing, so small gaps read as compact, not cramped.
-const TREE_GAPS: Gaps = { rowGap: 92, colGap: 22, procGapX: 26, procGapY: 22, bandGap: 48 };
+const TREE_GAPS: Gaps = { rowGap: 58, colGap: 22, procGapX: 26, procGapY: 22, bandGap: 48 };
 const GRID_GAPS: Gaps = { rowGap: 30, colGap: 12, procGapX: 24, procGapY: 20, bandGap: 40 };
 
 /** Grow an estimated footprint to React Flow's LIVE measured box when the card
