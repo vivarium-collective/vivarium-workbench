@@ -401,9 +401,21 @@ body {
 /* Minimal grammar figure (?style=minimal): the process is just its name in a
    clean sharp-cornered bar (warm-white ground, like the book's opening SVG),
    name centered. Stores keep their own name-only card. */
-.process-node.is-minimal { background: #fdfcfa; }
+/* A compact BOX at store proportions (not a full-width bar): the layout reserves
+   a wide slot, so cap the width and centre the box + its name. Ports attach on
+   the TOP edge (see ProcessNode isMinimal), so the wires route straight up to
+   the stores instead of looping out past the card's left/right edges. */
+.process-node.is-minimal {
+  background: #fdfcfa;
+  width: auto; min-width: 176px; max-width: 260px;
+  min-height: 120px;
+  margin: 0 auto;
+  display: flex; flex-direction: column; justify-content: center;
+}
 .process-node.is-minimal .process-node-center { display: flex; flex-direction: column; justify-content: center; }
 .process-node.is-minimal .process-node-title { text-align: center; }
+/* Top-attached minimal ports: small dots spaced along the top edge. */
+.process-node.is-minimal .port-handle { top: 0 !important; }
 
 /* Snap-to-fit button — top-right corner, revealed on hover so it never clutters
    the card (and never shows in the static SVG export, which has no hover). */
@@ -558,7 +570,11 @@ body {
 /* A card can't shrink below its content OR the room its port rows need — so
    squeezing never overflows text and never overlaps ports (--ports-min-h is set
    per-card from its port count in ProcessNode). */
-.process-node { min-height: max(min-content, var(--ports-min-h, 0px)); }
+/* Give a process real vertical presence (closer to a store's proportions)
+   rather than reading as a short bar — the layout already reserves the taller
+   full-tier footprint, so this just fills it. --proc-min-h lets a specific view
+   (compact/minimal) override the floor. */
+.process-node { min-height: max(var(--proc-min-h, 168px), min-content, var(--ports-min-h, 0px)); }
 /* Border dots sit half-outside the card edge — don't clip them. */
 .process-node { overflow: visible; }
 

@@ -442,6 +442,15 @@ export default function App() {
   // cards to the narrowed width. Held in a ref so the layout effects read it
   // without a dependency (they already skip re-running on unrelated changes).
   const compactRef = useRef(false);
+  // ?style=minimal: read by the layout effects (like compactRef) so the minimal
+  // process is laid out as a compact box (centered under its stores), not a
+  // full-width bar. Initialized SYNCHRONOUSLY from the URL so the very first
+  // layout pass already sees it (the startup view effect that also sets it may
+  // run after the layout effect).
+  const minimalRef = useRef((() => {
+    try { return new URLSearchParams(window.location.search).get('style') === 'minimal'; }
+    catch { return false; }
+  })());
   // A new topology trajectory arms the transport at frame 0 (pristine state
   // captured so we can restore it on exit).
   useEffect(() => {
@@ -1002,10 +1011,12 @@ export default function App() {
     const visibleNodes = raw.nodes
       .filter((n) => !isHidden(n))
       .map((n) => {
-        if (collapsed.has(n.id)) {
-          return { ...n, data: { ...n.data, isCollapsed: true } as any };
-        }
-        return n;
+        let d: any = n.data;
+        if (collapsed.has(n.id)) d = { ...d, isCollapsed: true };
+        // Minimal figure: mark process nodes so treeFootprint sizes them as a
+        // compact box, which centers the process under its stores.
+        if (minimalRef.current && n.type === 'process') d = { ...d, _minimal: true };
+        return d === n.data ? n : ({ ...n, data: d } as any);
       });
     const visibleIds = new Set(visibleNodes.map((n) => n.id));
     // Re-target wires into collapsed branches to the nearest visible ancestor
@@ -1378,6 +1389,9 @@ export default function App() {
         ...edge,
         style: { ...(edge.style as any), stroke: col },
         markerEnd: edge.markerEnd ? { ...edge.markerEnd, color: col } : edge.markerEnd,
+        // Flag the edge so FloatingStoreEdge routes it straight UP from the
+        // process's top-edge port to the store (no side loops).
+        data: { ...(edge.data as any), _minimal: true },
       };
     };
     return (drawnEdges as any[]).map((e) => {
@@ -1468,9 +1482,12 @@ export default function App() {
       };
       const visibleNodes = raw.nodes
         .filter((n) => !isHidden(n))
-        .map((n) =>
-          collapsed.has(n.id) ? { ...n, data: { ...n.data, isCollapsed: true } as any } : n,
-        );
+        .map((n) => {
+          let d: any = n.data;
+          if (collapsed.has(n.id)) d = { ...d, isCollapsed: true };
+          if (minimalRef.current && n.type === 'process') d = { ...d, _minimal: true };
+          return d === n.data ? n : ({ ...n, data: d } as any);
+        });
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
       const { nodes: laidOut } = await layoutMode.runLayout(
@@ -1704,6 +1721,7 @@ export default function App() {
       // 'ports' detail floor keeps the store card to just its name.
       if (params.get('style') === 'minimal') {
         setMinimalStyle(true);
+        minimalRef.current = true;
         setDetailFloor('ports');
         setDetailOverrides((o) => ({
           ...o, ports: 'none', stores: 'name',

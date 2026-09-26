@@ -79,6 +79,10 @@ export function treeFootprint(n: Node): Foot {
   const saved = (n.data as { _size?: { width: number; height: number } } | undefined)?._size;
   if (saved && saved.width > 0 && saved.height > 0) return { w: saved.width, h: saved.height };
   if (n.type !== 'process') return withMeasured(n, fullFootprint(n)); // store: full-tier or real
+  // Minimal figure: the process is a compact box (name only), so reserve a
+  // box-sized footprint — the lane placement then centers it under its stores
+  // instead of parking a full-width card slot off to one side.
+  if ((n.data as { _minimal?: boolean } | undefined)?._minimal) return { w: 208, h: 160 };
 
   const d = n.data as {
     inputPorts?: unknown; outputPorts?: unknown;

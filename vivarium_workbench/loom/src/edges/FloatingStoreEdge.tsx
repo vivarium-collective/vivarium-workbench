@@ -276,8 +276,18 @@ function FloatingStoreEdge({
   // Waypoints, drawn process→store; reversed below for inputs so the arrow
   // marker still lands on the process port. The store end attaches on whichever
   // box face is nearest the approach (boxAnchor), entered perpendicular.
+  const minimal = (data as { _minimal?: boolean } | undefined)?._minimal === true;
   let way: Point[];
-  if (storeInFront) {
+  if (minimal) {
+    // Minimal grammar figure: the port is on the process's TOP edge and the
+    // store sits above — exit straight UP, then into the store's near face. A
+    // clean near-vertical wire with no side loop (nothing reaches the card's
+    // left/right edges, so nothing clips at the canvas boundary).
+    const up: Point = { x: procPoint.x, y: procPoint.y - Math.max(EXIT_GAP, 22) };
+    const anchor = boxAnchor(center, shw, shh, up);
+    const ap = boxApproach(center, shw, shh, anchor, APPROACH);
+    way = [procPoint, up, ap, anchor];
+  } else if (storeInFront) {
     const anchor = keepOutOfPlaceColumn(center, shw, shh, boxAnchor(center, shw, shh, stub), stub.x);
     const ap = boxApproach(center, shw, shh, anchor, APPROACH);
     way = [procPoint, stub, ap, anchor];
