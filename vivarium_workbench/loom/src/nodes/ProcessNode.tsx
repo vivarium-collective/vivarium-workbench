@@ -253,12 +253,17 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
           <span className="port-in-swatch" aria-hidden="true" />
           <span className="port-in-name">{port}</span>
         </span>
-        <span className="port-in-dir">{dirLabel}</span>
-        {semantic
-          ? <span className="port-in-sem">{semantic}</span>
-          : (show.types && info.type && (
-              <span className="port-in-type" title={info.fullType}>{info.type}</span>
-            ))}
+        {/* Direction + raw type share ONE sub-line ("▸ reads · float") so a
+            dense card's port labels stay two lines, not three, and adjacent
+            ports don't crowd. A documented contract meaning is longer, so it
+            keeps its own line below. */}
+        <span className="port-in-sub">
+          <span className="port-in-dir">{dirLabel}</span>
+          {!semantic && show.types && info.type && (
+            <span className="port-in-type" title={info.fullType}>{info.type}</span>
+          )}
+        </span>
+        {semantic && <span className="port-in-sem">{semantic}</span>}
         {open && (
           <div className={`port-popover ${isOut ? 'is-out' : 'is-in'}`} onClick={(e) => e.stopPropagation()}>
             <div className="port-popover-head">
