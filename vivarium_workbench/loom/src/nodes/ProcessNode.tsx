@@ -392,6 +392,11 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
     };
     inputPorts.forEach((p) => measurePort(p, false, inTypes));
     outputPorts.forEach((p) => measurePort(p, true, outTypes));
+    // Reserve room for the direction line ("○ writes") too, so on a card whose
+    // port names + types are all short (A, B, C) the direction word still fits
+    // the column instead of spilling into the card center.
+    const dirFont = `700 ${bigPorts ? 15 : 12}px Inter, system-ui, sans-serif`;
+    widestLabel = Math.max(widestLabel, measureLabel('○ writes', dirFont, bigPorts ? 10 : 8));
   }
   // 13px = the .port-in-label left/right offset; +10px clearance from the center.
   const autoCol = Math.round(13 + Math.min(labelCap, widestLabel) + 10);

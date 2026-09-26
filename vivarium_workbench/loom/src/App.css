@@ -587,7 +587,14 @@ body {
 }
 /* Direction + type on one row (wraps only if it genuinely can't fit), so a
    dense card's port labels stay compact. */
-.port-in-sub { display: flex; align-items: baseline; gap: 5px 7px; flex-wrap: wrap; }
+/* Cap the sub-line to the port column so "▸ reads float" stays one line when it
+   fits (the common case) but wraps back to two INSIDE the column instead of
+   spilling into the card's center when the type is long (e.g. "set_array" on a
+   narrow compact card). white-space:normal lets the flex items wrap. */
+.port-in-sub {
+  display: flex; align-items: baseline; gap: 3px 7px; flex-wrap: wrap;
+  max-width: calc(var(--port-col, 140px) - 13px); white-space: normal;
+}
 .port-in-label.is-out .port-in-sub { justify-content: flex-end; }
 .port-in-label.is-in  .port-in-dir { color: var(--bk-navy); }
 .port-in-label.is-out .port-in-dir { color: var(--bk-teal); }
