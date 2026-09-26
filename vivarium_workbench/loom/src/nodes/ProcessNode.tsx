@@ -163,7 +163,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   // feature is 'auto' (keep the tier value) or forced. Never applied to a pinned-
   // open card (that always shows everything).
   const ov = (data as any)._detailOverrides as
-    { ports?: string; config?: string; contract?: string; figures?: string; address?: string; direction?: string } | undefined;
+    { ports?: string; config?: string; contract?: string; figures?: string; address?: string } | undefined;
   if (ov && !(data as any)._pinnedOpen) {
     if (ov.ports === 'none')  { show.ports = false; show.types = false; }
     else if (ov.ports === 'plain') { show.ports = true;  show.types = false; }
@@ -205,9 +205,6 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   // color (#1). In the minimal grammar figure, dots are colored by DIRECTION
   // (teal read / gold write) to match the direction-colored wires.
   const isMinimal = (data as { _minimal?: boolean })._minimal === true;
-  // Clean print figure (?figure=1): drop the per-port ▸reads/○writes direction
-  // words (position + arrowheads already convey direction).
-  const isFigureClean = (data as { _figureClean?: boolean })._figureClean === true;
   const portColors = ((data as { portColors?: Record<string, string> }).portColors) ?? {};
   const dotColor = (port: string, isOut: boolean) =>
     isMinimal ? (isOut ? '#a9781f' : '#1f7a72') : portColors[port];
@@ -244,11 +241,9 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
     const key = `${isOut ? 'o' : 'i'}-${port}`;
     const open = openPort === key;
     const semantic = isOut ? contract?.outputs?.[port] : contract?.inputs?.[port];
-    // Lead with the port NAME + a read/write direction cue, so a reader learns
-    // what the port is FOR (#2). The bound-store swatch keys it to its wire. The
+    // Lead with the port NAME (the bound-store swatch keys it to its wire). The
     // secondary line is the contract meaning when documented, else the raw type
     // as a small muted tag — never a bare "float" masquerading as the headline.
-    const dirLabel = isOut ? '○ writes' : '▸ reads';
     return (
       <div
         key={`${isOut ? 'o' : 'i'}lbl-${port}`}
@@ -261,16 +256,13 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
           <span className="port-in-swatch" aria-hidden="true" />
           <span className="port-in-name">{port}</span>
         </span>
-        {/* Direction + raw type share ONE sub-line ("▸ reads · float") so a
-            dense card's port labels stay two lines, not three, and adjacent
-            ports don't crowd. A documented contract meaning is longer, so it
-            keeps its own line below. */}
-        <span className="port-in-sub">
-          {!isFigureClean && ov?.direction !== 'off' && <span className="port-in-dir">{dirLabel}</span>}
-          {!semantic && show.types && info.type && (
+        {/* The raw type sits on its own sub-line as a small muted tag. A
+            documented contract meaning is longer, so it keeps its own line below. */}
+        {!semantic && show.types && info.type && (
+          <span className="port-in-sub">
             <span className="port-in-type" title={info.fullType}>{info.type}</span>
-          )}
-        </span>
+          </span>
+        )}
         {semantic && <span className="port-in-sem">{semantic}</span>}
         {open && (
           <div className={`port-popover ${isOut ? 'is-out' : 'is-in'}`} onClick={(e) => e.stopPropagation()}>
@@ -405,11 +397,6 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
     };
     inputPorts.forEach((p) => measurePort(p, false, inTypes));
     outputPorts.forEach((p) => measurePort(p, true, outTypes));
-    // Reserve room for the direction line ("○ writes") too, so on a card whose
-    // port names + types are all short (A, B, C) the direction word still fits
-    // the column instead of spilling into the card center.
-    const dirFont = `700 ${bigPorts ? 15 : 12}px Inter, system-ui, sans-serif`;
-    widestLabel = Math.max(widestLabel, measureLabel('○ writes', dirFont, bigPorts ? 10 : 8));
   }
   // 13px = the .port-in-label left/right offset; +10px clearance from the center.
   const autoCol = Math.round(13 + Math.min(labelCap, widestLabel) + 10);

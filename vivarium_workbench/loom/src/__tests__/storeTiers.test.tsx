@@ -80,15 +80,12 @@ describe('StoreNode tiers', () => {
     expect(screen.getByText('unique_array[3 fields]')).toBeTruthy();
   });
 
-  it('contract adds the reader/writer summary', () => {
+  it('never renders a reader/writer summary (removed as clutter)', () => {
+    // The "N read · M write" wiring counts were removed: direction is already
+    // conveyed by port side, arrowheads and wire color, so the text was noise.
     renderStore('contract', { _readers: ['a', 'b'], _writers: ['a'] });
-    expect(screen.getByText(/2 read/)).toBeTruthy();
-    expect(screen.getByText(/1 write/)).toBeTruthy();
-  });
-
-  it('omits the reader/writer row when the store is unwired', () => {
-    renderStore('contract', { _readers: [], _writers: [] });
     expect(screen.queryByText(/read/)).toBeNull();
+    expect(screen.queryByText(/write/)).toBeNull();
   });
 });
 
