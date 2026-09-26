@@ -368,7 +368,12 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   // min-content can't see them — feed the room they need as a CSS var that the
   // min-height max()es against, so squeezing never overlaps the ports.
   const maxPorts = show.ports ? Math.max(inputPorts.length, outputPorts.length) : 0;
-  const portsMinH = maxPorts > 0 ? (maxPorts + 1) * 46 : 0;
+  // Each port label is now TWO lines (name + a "▸ reads · type" sub-line), and
+  // bigger at the port/types/config tiers — so the old 46px/row let stacked
+  // labels on a many-port process overlap/spill. Reserve a taller row per port
+  // (tier-aware) so the card grows with its port count and nothing overlaps.
+  const portRowH = (t === 'ports' || t === 'types' || t === 'config') ? 72 : 60;
+  const portsMinH = maxPorts > 0 ? (maxPorts + 1) * portRowH : 0;
 
   // Adaptive port-column width: reserve EXACTLY the widest port label (name, or
   // its type when types show) needs — MEASURED at the tier's real font and capped
