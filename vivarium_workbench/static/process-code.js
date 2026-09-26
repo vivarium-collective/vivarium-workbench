@@ -140,6 +140,15 @@
     var name = $('viv-code-name'), addrEl = $('viv-code-addr');
     if (name) name.textContent = ctx.title || 'Code';
     if (addrEl) addrEl.textContent = ctx.subtitle || '';
+
+    // Read-only snapshot: the source-serving endpoints (/api/composites/source,
+    // /api/registry/process-source) are live-only and are NOT baked into the
+    // static bundle. Fetching them on a static host returns the SPA's HTML 404,
+    // and r.json() on that throws "SyntaxError: The string did not match the
+    // expected pattern" (Safari) → a bare "Load failed". Degrade honestly
+    // instead: explain it and link to the source on GitHub.
+    if (_snapshot()) { _renderSnapshotNotice(ctx); return; }
+
     var empty = $('viv-code-empty'); if (empty) empty.hidden = true;
     var ta = textarea(); if (ta) ta.hidden = false;
 
@@ -171,6 +180,54 @@
         })
         .catch(function (e) { state.loading = false; setStatus('Load failed: ' + e, 'error'); });
     });
+  }
+
+  // Best-effort "view source" link for a snapshot. We link to the repo at the
+  // pinned commit rather than a guessed file path (source_path is often absent
+  // and a dotted module → file path is ambiguous re: __init__.py), so the link
+  // never 404s. The dotted ref (ctx.subtitle) is shown so the viewer can find it.
+  function _snapshotRepoLink() {
+    var prov = (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.provenance) || {};
+    var base = (prov.repo_url || '').replace(/\/+$/, '');
+    if (!base) return null;
+    var ref = prov.commit || prov.branch || '';
+    return ref ? base + '/tree/' + ref : base;
+  }
+
+  function _renderSnapshotNotice(ctx) {
+    state.loading = false;
+    state.editable = false;
+    setReadOnly(true);
+    setStatus('');
+    var badge = $('viv-code-badge');
+    if (badge) {
+      badge.textContent = 'read-only snapshot';
+      badge.className = 'viv-code-badge viv-code-badge-ro';
+    }
+    var path = $('viv-code-path');
+    if (path) path.textContent = ctx.subtitle || '';
+    // Hide the editor surface (textarea + any CodeMirror instance).
+    var ta = textarea(); if (ta) ta.hidden = true;
+    if (state.cm) { try { state.cm.getWrapperElement().style.display = 'none'; } catch (e) {} }
+    var empty = $('viv-code-empty');
+    if (empty) {
+      var link = _snapshotRepoLink();
+      empty.innerHTML =
+        '<div style="padding:16px 18px;color:#3a4657;font-size:13px;line-height:1.55">' +
+          '<p style="margin:0 0 8px">Source isn’t available in this read-only ' +
+          'snapshot — the code viewer needs the live workbench.</p>' +
+          (ctx.subtitle
+            ? '<p style="margin:0 0 10px"><code style="background:#eef1f6;padding:1px 6px;' +
+              'border-radius:4px">' + esc(ctx.subtitle) + '</code></p>'
+            : '') +
+          (link
+            ? '<a href="' + esc(link) + '" target="_blank" rel="noopener" ' +
+              'style="color:#2f57b5;text-decoration:none">View the source on GitHub →</a>'
+            : '') +
+        '</div>';
+      empty.hidden = false;
+    }
+    refreshDirty();
   }
 
   function renderMeta(j) {
