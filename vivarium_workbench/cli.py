@@ -1304,6 +1304,11 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
             # the grid tight so the figure fits a page legibly.
             if getattr(args, "compact", False):
                 loom_url += "&compact=1"
+            # --figure: clean print figure — drop the per-port reads/writes
+            # direction words, the store "N read · M write" counts, and the
+            # process address, keeping names / types / equation / config / wires.
+            if getattr(args, "figure", False):
+                loom_url += "&figure=1"
             try:
                 page.goto(loom_url, wait_until="domcontentloaded", timeout=60_000)
                 page.wait_for_selector(".react-flow__node", timeout=40_000)
@@ -1698,6 +1703,11 @@ def main(argv: list[str] | None = None) -> int:
     p_render_loom.add_argument("--hide-address", action="store_true",
                                help="Hide the 'local:Foo' registry address on each process card "
                                     "(clutter in a print figure).")
+    p_render_loom.add_argument("--figure", action="store_true",
+                               help="Clean print figure: hide the per-port reads/writes direction "
+                                    "words, the store 'N read · M write' counts, and the process "
+                                    "address — keeping names, types, equation, config, and wires. "
+                                    "Implies --hide-address.")
     p_render_loom.add_argument("--compact", action="store_true",
                                help="Print preset for busy multi-process composites: narrow "
                                     "cards, drop config/symbols/address so name + governing "

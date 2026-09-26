@@ -176,7 +176,7 @@ function StoreNode({ data }: NodeProps & { data: StoreNodeData }) {
             : <img className="node-figure-img" src={figure} alt="" draggable={false} />}
         </div>
       )}
-      {show.wiring && (readers.length > 0 || writers.length > 0) && (
+      {show.wiring && !(data as { _figureClean?: boolean })._figureClean && (readers.length > 0 || writers.length > 0) && (
         <div className="store-node-wiring">
           {readers.length > 0 && <span>{readers.length} read</span>}
           {readers.length > 0 && writers.length > 0 && <span> · </span>}
