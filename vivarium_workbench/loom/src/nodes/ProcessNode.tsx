@@ -211,25 +211,19 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
 
   // Connection dots sit ON the card border (inputs left, outputs right) at each
   // port's vertical fraction — that's where wires attach, at every tier. The dot
-  // is FILLED with the bound store's color (--port-dot) so it matches its wire.
-  // Minimal grammar figure: all ports attach on the TOP edge, spaced across it
-  // (inputs then outputs, left→right), so wires route straight UP to the stores
-  // — the SVG's top-attachment grammar, and it keeps wires off the card's
-  // left/right edges (no side loops, no canvas-edge clipping). `hFrac` is the
-  // port's horizontal position along the top; ignored in the normal side layout.
+  // is FILLED with the bound store's color (--port-dot, or the minimal direction
+  // color) so it matches its wire.
   const borderHandle = (
-    port: string, isOut: boolean, i: number, n: number, types: Record<string, unknown>, hFrac?: number,
+    port: string, isOut: boolean, i: number, n: number, types: Record<string, unknown>,
   ) => (
     <Handle
       key={`h-${isOut ? 'o' : 'i'}-${port}`}
       type={isOut ? 'source' : 'target'}
-      position={isMinimal ? Position.Top : (isOut ? Position.Right : Position.Left)}
+      position={isOut ? Position.Right : Position.Left}
       id={port}
       className={`port-handle ${isOut ? 'port-handle-output' : 'port-handle-input'}`}
       title={handleTitle(port, isOut, types)}
-      style={isMinimal
-        ? { left: `${(hFrac ?? 0.5) * 100}%`, ...(dotColor(port, isOut) ? { ['--port-dot' as string]: dotColor(port, isOut) } : {}) }
-        : { top: topFor(i, n), ...(dotColor(port, isOut) ? { ['--port-dot' as string]: dotColor(port, isOut) } : {}) }}
+      style={{ top: topFor(i, n), ...(dotColor(port, isOut) ? { ['--port-dot' as string]: dotColor(port, isOut) } : {}) }}
     />
   );
 
@@ -491,10 +485,8 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
       <Handle type="target" position={Position.Top} id="top-place" style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Bottom} id="bottom-place" style={{ opacity: 0 }} />
       {/* Connection dots on the border (all tiers, so focused wiring attaches). */}
-      {inputPorts.map((p, i) => borderHandle(p, false, i, inputPorts.length, inTypes,
-        (i + 1) / (inputPorts.length + outputPorts.length + 1)))}
-      {outputPorts.map((p, i) => borderHandle(p, true, i, outputPorts.length, outTypes,
-        (inputPorts.length + i + 1) / (inputPorts.length + outputPorts.length + 1)))}
+      {inputPorts.map((p, i) => borderHandle(p, false, i, inputPorts.length, inTypes))}
+      {outputPorts.map((p, i) => borderHandle(p, true, i, outputPorts.length, outTypes))}
 
       {/* Port-name columns INSIDE the card: inputs left, outputs right. */}
       {showPortLabels && inputPorts.map((p, i) => insideLabel(p, inTypes, false, i, inputPorts.length))}

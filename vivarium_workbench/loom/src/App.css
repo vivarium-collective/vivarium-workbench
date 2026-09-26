@@ -401,10 +401,11 @@ body {
 /* Minimal grammar figure (?style=minimal): the process is just its name in a
    clean sharp-cornered bar (warm-white ground, like the book's opening SVG),
    name centered. Stores keep their own name-only card. */
-/* A compact BOX at store proportions (not a full-width bar): the layout reserves
-   a wide slot, so cap the width and centre the box + its name. Ports attach on
-   the TOP edge (see ProcessNode isMinimal), so the wires route straight up to
-   the stores instead of looping out past the card's left/right edges. */
+/* A compact BOX at store proportions (not a full-width bar): the layout gives
+   the minimal process a box-sized footprint (treeFlow), so it sits centred under
+   its stores. Ports stay on the left/right edges (reads-left, writes-right) like
+   every full-style loom; the figure export widens its horizontal frame so the
+   side wire-loops don't clip at the canvas edge. */
 .process-node.is-minimal {
   background: #fdfcfa;
   width: auto; min-width: 176px; max-width: 260px;
@@ -414,8 +415,6 @@ body {
 }
 .process-node.is-minimal .process-node-center { display: flex; flex-direction: column; justify-content: center; }
 .process-node.is-minimal .process-node-title { text-align: center; }
-/* Top-attached minimal ports: small dots spaced along the top edge. */
-.process-node.is-minimal .port-handle { top: 0 !important; }
 
 /* Snap-to-fit button — top-right corner, revealed on hover so it never clutters
    the card (and never shows in the static SVG export, which has no hover). */

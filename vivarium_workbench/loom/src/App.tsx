@@ -1389,9 +1389,6 @@ export default function App() {
         ...edge,
         style: { ...(edge.style as any), stroke: col },
         markerEnd: edge.markerEnd ? { ...edge.markerEnd, color: col } : edge.markerEnd,
-        // Flag the edge so FloatingStoreEdge routes it straight UP from the
-        // process's top-edge port to the store (no side loops).
-        data: { ...(edge.data as any), _minimal: true },
       };
     };
     return (drawnEdges as any[]).map((e) => {
@@ -1754,7 +1751,11 @@ export default function App() {
       // process-column mode the hidden bookkeeping band's ~2,096px tail. Fall
       // back to everything if the user hid literally the whole graph.
       const framed = (nodes as any[]).filter((n) => !n.hidden);
-      const bounds = getNodesBounds((framed.length ? framed : nodes) as any);
+      const rawBounds = getNodesBounds((framed.length ? framed : nodes) as any);
+      // Extra horizontal room so side wire-loops — which bow out past the node
+      // bounds toward the canvas edge — never clip in the exported figure.
+      const HPAD = 72;
+      const bounds = { ...rawBounds, x: rawBounds.x - HPAD, width: rawBounds.width + HPAD * 2 };
       const PAD = 60, MAX = 6000;
       const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
       // Longest-side clamp (both formats).
@@ -1835,7 +1836,11 @@ export default function App() {
         const el = canvasWrapRef.current?.querySelector('.react-flow__viewport') as HTMLElement | null;
         if (!el) return null;
         const framed = (nodes as any[]).filter((n) => !n.hidden);
-        const bounds = getNodesBounds((framed.length ? framed : nodes) as any);
+        const rawBounds = getNodesBounds((framed.length ? framed : nodes) as any);
+        // Extra horizontal room so side wire-loops — which bow out past the node
+        // bounds toward the canvas edge — never clip in the exported figure.
+        const HPAD = 72;
+        const bounds = { ...rawBounds, x: rawBounds.x - HPAD, width: rawBounds.width + HPAD * 2 };
         const PAD = 60, MAX = 6000;
         const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
         const scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));
@@ -1864,7 +1869,11 @@ export default function App() {
         const el = canvasWrapRef.current?.querySelector('.react-flow__viewport') as HTMLElement | null;
         if (!el) return null;
         const framed = (nodes as any[]).filter((n) => !n.hidden);
-        const bounds = getNodesBounds((framed.length ? framed : nodes) as any);
+        const rawBounds = getNodesBounds((framed.length ? framed : nodes) as any);
+        // Extra horizontal room so side wire-loops — which bow out past the node
+        // bounds toward the canvas edge — never clip in the exported figure.
+        const HPAD = 72;
+        const bounds = { ...rawBounds, x: rawBounds.x - HPAD, width: rawBounds.width + HPAD * 2 };
         const PAD = 60, MAX = 6000;
         const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
         const scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));
