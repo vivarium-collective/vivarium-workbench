@@ -6886,6 +6886,28 @@
   }
   window._vivToggleRail = _vivToggleRail;
 
+  // Reveal / hide the study-search field (the header magnifier). `force` true/false
+  // sets it explicitly (Escape closes); otherwise it toggles. Closing clears the
+  // filter so the full list returns.
+  function _vivToggleRailSearch(force) {
+    var head = document.getElementById('viv-rail-studies-head');
+    var input = document.getElementById('viv-rail-study-search');
+    var btn = document.getElementById('viv-rail-search-btn');
+    if (!head || !input) return;
+    var show = (typeof force === 'boolean') ? force : head.hasAttribute('hidden');
+    if (show) {
+      head.removeAttribute('hidden');
+      if (btn) btn.classList.add('viv-rail-search-active');
+      input.focus();
+      input.select();
+    } else {
+      head.setAttribute('hidden', '');
+      if (btn) btn.classList.remove('viv-rail-search-active');
+      if (input.value) { input.value = ''; if (window._filterRailStudies) window._filterRailStudies(''); }
+    }
+  }
+  window._vivToggleRailSearch = _vivToggleRailSearch;
+
   function _vivRestoreRailState() {
     var stored = null;
     try { stored = localStorage.getItem('vivarium.rail-collapsed'); } catch (e) {}
@@ -12244,9 +12266,137 @@
   }
   window._toggleStudyPin = _toggleStudyPin;
 
-  // Single-row per study: [dot] name [pin]. Full status string in tooltip. The
-  // pin toggle sits at the right; clicking it pins/unpins without opening the
-  // study (stopPropagation). Used by the grouped, pinned, and ungrouped layouts.
+  // ── Rail drag-to-reorder (investigations + studies) ───────────────────────
+  // Replaces pinning: the user drags investigation groups and studies into any
+  // order; the order is remembered per-browser (localStorage, like every other
+  // rail preference). `viv.invOrder` is the investigation order (iset names);
+  // `viv.studyOrder` maps an iset name -> its studies' slug order. Items with no
+  // saved position keep the default sort (MRU / topological depth) after the
+  // explicitly-ordered ones, so a fresh workspace reads sensibly.
+  function _loadInvOrder() {
+    try { var a = JSON.parse(window.localStorage.getItem('viv.invOrder') || '[]'); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  function _saveInvOrder(order) {
+    try { window.localStorage.setItem('viv.invOrder', JSON.stringify(order)); } catch (e) { /* private mode */ }
+  }
+  function _loadStudyOrder() {
+    try { var o = JSON.parse(window.localStorage.getItem('viv.studyOrder') || '{}'); return (o && typeof o === 'object') ? o : {}; }
+    catch (e) { return {}; }
+  }
+  function _saveStudyOrder(map) {
+    try { window.localStorage.setItem('viv.studyOrder', JSON.stringify(map)); } catch (e) { /* private mode */ }
+  }
+  // Stable sort of `items` (each with `.name`) by a saved order array: names in
+  // `order` come first in that order, the rest keep `fallbackCmp`, appended.
+  function _applyUserOrder(items, order, fallbackCmp) {
+    var idx = {};
+    (order || []).forEach(function (n, i) { idx[n] = i; });
+    return items.slice().sort(function (a, b) {
+      var ia = idx[a.name], ib = idx[b.name];
+      var aIn = ia !== undefined, bIn = ib !== undefined;
+      if (aIn && bIn) return ia - ib;
+      if (aIn !== bIn) return aIn ? -1 : 1;
+      return fallbackCmp(a, b);
+    });
+  }
+
+  // The element the dragged item should be inserted BEFORE, given the pointer Y
+  // — the standard flexless HTML5 sortable computation.
+  function _dragAfterElement(container, sel, y) {
+    var els = Array.prototype.slice.call(container.querySelectorAll(sel + ':not(.viv-rail-dragging)'));
+    var closest = { offset: Number.NEGATIVE_INFINITY, el: null };
+    els.forEach(function (child) {
+      var box = child.getBoundingClientRect();
+      var offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) closest = { offset: offset, el: child };
+    });
+    return closest.el;
+  }
+  // Wire a drag-to-reorder scope: dragging any element matching `handleSel`
+  // reorders the `itemSel` items within `container` live; `onDrop` fires with the
+  // new DOM order once the drag ends. `moveSel` maps a handle to the element that
+  // actually moves (its closest itemSel ancestor).
+  function _wireSortable(container, handleSel, itemSel, onDrop) {
+    if (!container || container.__vivSortable) return;
+    container.__vivSortable = true;
+    var dragEl = null;
+    container.addEventListener('dragstart', function (e) {
+      var handle = e.target.closest ? e.target.closest(handleSel) : null;
+      if (!handle) return;
+      var item = handle.closest(itemSel);
+      if (!item || !container.contains(item)) return;
+      dragEl = item;
+      item.classList.add('viv-rail-dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', ''); } catch (_) { /* Firefox needs a payload */ }
+      e.stopPropagation();  // don't let a nested scope (studies) also start a group drag
+    });
+    container.addEventListener('dragover', function (e) {
+      if (!dragEl || !container.contains(dragEl)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var after = _dragAfterElement(container, itemSel, e.clientY);
+      if (after == null) container.appendChild(dragEl);
+      else if (after !== dragEl) container.insertBefore(dragEl, after);
+    });
+    container.addEventListener('drop', function (e) { if (dragEl) { e.preventDefault(); e.stopPropagation(); } });
+    container.addEventListener('dragend', function () {
+      if (!dragEl) return;
+      dragEl.classList.remove('viv-rail-dragging');
+      dragEl = null;
+      if (typeof onDrop === 'function') onDrop();
+    });
+  }
+  // After each rail render, make the investigation groups and each group's
+  // studies drag-sortable, persisting the new order.
+  function _wireRailDnd() {
+    var host = document.getElementById('viv-rail-investigations');
+    if (!host) return;
+    // Investigation groups (exclude the "Ungrouped" folder — it has no stable id).
+    _wireSortable(
+      host, '.viv-rail-grip-inv', '.viv-rail-investigations-group[data-iset]',
+      function () {
+        var names = Array.prototype.slice
+          .call(host.querySelectorAll('.viv-rail-investigations-group[data-iset]'))
+          .map(function (el) { return el.getAttribute('data-iset'); })
+          .filter(function (n) { return n && n !== '__ungrouped__'; });
+        _saveInvOrder(names);
+        _renderRailInvestigationGroups();
+      }
+    );
+    // Studies within each group.
+    host.querySelectorAll('.viv-rail-investigations-group[data-iset] .viv-rail-investigations-group-items')
+      .forEach(function (items) {
+        var group = items.closest('.viv-rail-investigations-group');
+        var iset = group && group.getAttribute('data-iset');
+        if (!iset || iset === '__ungrouped__') return;
+        _wireSortable(items, '.viv-rail-grip-study', '.viv-rail-sublink[data-study-name]', function () {
+          var slugs = Array.prototype.slice
+            .call(items.querySelectorAll('.viv-rail-sublink[data-study-name]'))
+            .map(function (el) { return el.getAttribute('data-study-name'); })
+            .filter(Boolean);
+          var map = _loadStudyOrder();
+          map[iset] = slugs;
+          _saveStudyOrder(map);
+          _renderRailInvestigationGroups();
+        });
+      });
+  }
+
+  // A drag grip (⠿) shown at the left of a reorderable row on hover.
+  function _railGrip(cls) {
+    return '<span class="viv-rail-grip ' + cls + '" draggable="true" aria-hidden="true"'
+      + ' title="Drag to reorder"'
+      + ' onclick="event.preventDefault();event.stopPropagation();return false;">'
+      + '<svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor">'
+      + '<circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/>'
+      + '<circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/>'
+      + '<circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></svg></span>';
+  }
+
+  // Single-row per study: [grip] [dot] name. Full status string in tooltip.
+  // Used by the grouped and ungrouped layouts.
   function _railStudyItem(s, opts) {
     opts = opts || {};
     // Unified status source (see _studyStatusMeta) so the rail dot agrees with the
@@ -12258,19 +12408,15 @@
     var indent = opts.indent ? '28px' : '12px';
     var fontSize = opts.indent ? '0.85em' : '0.86em';
     var nameColor = opts.indent ? '#64748b' : '#374151';
-    var pinned = _isStudyPinned(s.name);
     var tip = _esc(s.name) + ' — ' + _esc(status) + (s.blocked ? ' (blocked)' : '');
-    var pinBtn = '<span class="viv-rail-pin' + (pinned ? ' pinned' : '') + '" role="button" tabindex="0" ' +
-           'aria-label="' + (pinned ? 'Unpin study' : 'Pin study to top') + '" ' +
-           'title="' + (pinned ? 'Unpin' : 'Pin to top') + '" ' +
-           'onclick="event.preventDefault();event.stopPropagation();_toggleStudyPin(\'' + _esc(s.name) + '\');return false;">📌</span>';
-    return '<a class="viv-rail-sublink' + (pinned ? ' viv-rail-sublink-pinned' : '') + '" data-study-name="' + _esc(s.name) + '" ' +
+    var grip = opts.orderable ? _railGrip('viv-rail-grip-study') : '';
+    return '<a class="viv-rail-sublink" data-study-name="' + _esc(s.name) + '" draggable="false" ' +
            'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
            'href="#" title="' + tip + '" ' +
-           'style="display:flex;align-items:center;gap:8px;padding:4px 14px 4px ' + indent + ';color:' + nameColor + ';text-decoration:none;font-size:' + fontSize + ';">' +
+           'style="display:flex;align-items:center;gap:6px;padding:4px 14px 4px ' + indent + ';color:' + nameColor + ';text-decoration:none;font-size:' + fontSize + ';">' +
+             grip +
              '<span aria-hidden="true" style="flex:none;width:8px;height:8px;border-radius:50%;background:' + color + ';display:inline-block"></span>' +
              '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
-             pinBtn +
            '</a>';
   }
 
@@ -12298,15 +12444,17 @@
     // Group studies: each iset gets its members; leftovers go to "Ungrouped".
     var groups = [];   // [{name, title, studies: [study, ...]}]
     var seen = {};
+    var _studyOrderMap = _loadStudyOrder();
     window._isetIndex.forEach(function(iset) {
       var members = (iset.studies || [])
         .map(function(slug) { return window._investigations.find(function(s) { return s.name === slug; }); })
         .filter(Boolean);
       members.forEach(function(s) { seen[s.name] = true; });
-      // Sort within group by topological depth (the same map computed in
-      // _renderInvestigations); if unavailable, fall back to alpha.
+      // Order within group: the user's saved drag order first, then anything
+      // unmoved by topological depth (the same map computed in
+      // _renderInvestigations), falling back to alpha.
       var depthMap = window._investigationsDepth || {};
-      members.sort(function(a, b) {
+      members = _applyUserOrder(members, _studyOrderMap[iset.name], function(a, b) {
         var da = depthMap[a.name] || 0, db = depthMap[b.name] || 0;
         return da - db || a.name.localeCompare(b.name);
       });
@@ -12323,13 +12471,11 @@
     // Order: pinned first (in pin order), then most-recently-opened, then the
     // never-opened rest by topological depth then title. The active
     // investigation was just opened so MRU floats it to the top of the unpinned.
+    // Order: the user's saved drag order first; anything they haven't moved
+    // falls back to most-recently-opened, then topological depth / title.
     var _mru = _loadInvMru();
-    var _pins = _loadPinnedInvestigations();
-    var ordered = groups.slice().sort(function(a, b) {
-      var ap = _pins.indexOf(a.name), bp = _pins.indexOf(b.name);
-      var aP = ap !== -1, bP = bp !== -1;
-      if (aP !== bP) return aP ? -1 : 1;
-      if (aP && bP) return ap - bp;
+    var _invOrder = _loadInvOrder();
+    var ordered = _applyUserOrder(groups, _invOrder, function(a, b) {
       var am = _mru[a.name] || 0, bm = _mru[b.name] || 0;
       if (am !== bm) return bm - am;   // most-recently-opened first
       var da = railDepthMap[a.name] || 0, db = railDepthMap[b.name] || 0;
@@ -12342,7 +12488,6 @@
     var ungrouped = window._investigations.filter(function(s) { return !seen[s.name]; });
     ungrouped.sort(function(a, b) { return String(a.name).localeCompare(String(b.name)); });
 
-    if (!window._pinnedStudies) _loadPinnedStudies();
     var hasActive = ordered.some(function(g) { return g.name === currentSlug; });
 
     function _railGroupHtml(g, forceOpen) {
@@ -12358,19 +12503,15 @@
       return '<div class="viv-rail-investigations-group' + collapsed + activeCls + '" data-iset="' + _esc(g.name) + '">'
         + '<div class="viv-rail-investigations-group-header" onclick="_vivToggleInvGroup(this)"'
         + ' title="' + _esc(g.title || g.name) + (g._ungrouped ? '' : ' — open investigation') + '">'
+        + (g._ungrouped ? '' : _railGrip('viv-rail-grip-inv'))
         + '<span class="viv-rail-investigations-group-arrow viv-arrow">▾</span>'
         + '<span class="viv-rail-investigations-group-name" style="' + nameStyle + '"' + clickName + '>'
         + _esc(g.title || g.name) + '</span>'
-        + (g._ungrouped ? '' :
-            '<span class="viv-rail-pin viv-rail-inv-pin' + (_isInvestigationPinned(g.name) ? ' pinned' : '') + '"'
-            + ' role="button" tabindex="0"'
-            + ' title="' + (_isInvestigationPinned(g.name) ? 'Unpin investigation' : 'Pin investigation to top') + '"'
-            + ' onclick="event.preventDefault();event.stopPropagation();_toggleInvestigationPin(\'' + _esc(g.name) + '\');return false;">📌</span>')
         + '<span class="viv-rail-investigations-group-count">' + g.studies.length + '</span>'
         + '</div>'
         + '<div class="viv-rail-investigations-group-items">'
         + (g.studies.length
-            ? g.studies.map(function(s) { return _railStudyItem(s, { indent: true }); }).join('')
+            ? g.studies.map(function(s) { return _railStudyItem(s, { indent: true, orderable: !g._ungrouped }); }).join('')
             : '<div class="viv-rail-empty" style="font-size:0.82em;color:#94a3b8;'
               + 'padding:4px 14px 4px 28px;font-style:italic">No studies</div>')
         + '</div>'
@@ -12396,24 +12537,6 @@
       }) ||
       ungrouped.some(function(s) { return _studyMatchesQuery(s, 'Ungrouped', tokens, true); })
     );
-
-    // Pinned strip (top): duplicates of pinned studies for quick access. Hidden
-    // while searching so results stay clean. A pinned study still shows in its
-    // own group/ungrouped list below.
-    var pinnedHtml = '';
-    if (!searching && (window._pinnedStudies || []).length) {
-      var pinnedStudies = window._pinnedStudies
-        .map(function(name) {
-          return window._investigations.find(function(s) { return s.name === name; });
-        })
-        .filter(Boolean);
-      if (pinnedStudies.length) {
-        pinnedHtml = '<div class="viv-rail-pinned-section">'
-          + '<div class="viv-rail-section-subheader">Pinned</div>'
-          + pinnedStudies.map(function(s) { return _railStudyItem(s, {}); }).join('')
-          + '</div>';
-      }
-    }
 
     // Investigation groups (middle).
     var groupsHtml = ordered.map(function(g, i) {
@@ -12444,7 +12567,7 @@
       );
     }
 
-    var html = pinnedHtml + groupsHtml + ungroupedHtml;
+    var html = groupsHtml + ungroupedHtml;
 
     if (!html && searching) {
       html = '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
@@ -12454,6 +12577,9 @@
     host.innerHTML = html
       || '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
        + 'padding:6px 14px;font-style:italic">No studies yet.</div>';
+    // Make the freshly-rendered groups + their studies drag-sortable (unless
+    // we're filtering — reordering search results would be confusing).
+    if (!searching) _wireRailDnd();
   }
 
   // A study matches the rail search when EVERY whitespace-delimited token of the

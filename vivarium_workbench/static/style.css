@@ -984,6 +984,30 @@ body.viv-rail-resizing-active{ cursor:col-resize !important; user-select:none; }
 .viv-rail-pin.pinned { filter: none; opacity: 1; }
 .viv-rail-sublink:hover .viv-rail-pin.pinned { opacity: 1; }
 
+/* ── Rail drag-to-reorder grips (replace pinning) ─────────────────────────
+   A subtle 6-dot handle revealed on row / group-header hover; drag it to
+   reorder investigations, or studies within an investigation. */
+.viv-rail-grip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  color: #cbd5e1;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity .12s ease, color .12s ease;
+}
+.viv-rail-grip:active { cursor: grabbing; }
+.viv-rail-grip:hover { color: #94a3b8; }
+.viv-rail-sublink:hover .viv-rail-grip-study,
+.viv-rail-investigations-group-header:hover .viv-rail-grip-inv { opacity: 1; }
+/* The item being dragged fades; a dragged group also shows a dashed outline. */
+.viv-rail-dragging { opacity: 0.45; }
+.viv-rail-investigations-group.viv-rail-dragging { outline: 1px dashed #94a3b8; outline-offset: -1px; }
+/* Header magnifier lit while the search field is open. */
+.viv-rail-search-btn.viv-rail-search-active { color: #2563eb; }
+
 .viv-rail-section-subheader {
   font-size: 0.68em;
   text-transform: uppercase;
@@ -1066,6 +1090,10 @@ body.viv-rail-resizing-active{ cursor:col-resize !important; user-select:none; }
 .viv-rail-toggle:hover{
   background:#f3f4f6; color:#1f2937; border-color:#e5e7eb;
 }
+/* Search magnifier sits just left of the collapse toggle (both are absolutely
+   positioned in the header); it's irrelevant when the rail is collapsed. */
+.viv-rail-search-btn{ right:40px; }
+.viv-rail.viv-rail-collapsed .viv-rail-search-btn{ display:none; }
 .viv-rail-toggle-svg{
   width:16px; height:16px;
   display:block;
