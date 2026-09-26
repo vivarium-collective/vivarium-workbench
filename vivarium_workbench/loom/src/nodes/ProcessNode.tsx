@@ -205,6 +205,9 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   // color (#1). In the minimal grammar figure, dots are colored by DIRECTION
   // (teal read / gold write) to match the direction-colored wires.
   const isMinimal = (data as { _minimal?: boolean })._minimal === true;
+  // Clean print figure (?figure=1): drop the per-port ▸reads/○writes direction
+  // words (position + arrowheads already convey direction).
+  const isFigureClean = (data as { _figureClean?: boolean })._figureClean === true;
   const portColors = ((data as { portColors?: Record<string, string> }).portColors) ?? {};
   const dotColor = (port: string, isOut: boolean) =>
     isMinimal ? (isOut ? '#a9781f' : '#1f7a72') : portColors[port];
@@ -263,7 +266,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
             ports don't crowd. A documented contract meaning is longer, so it
             keeps its own line below. */}
         <span className="port-in-sub">
-          <span className="port-in-dir">{dirLabel}</span>
+          {!isFigureClean && <span className="port-in-dir">{dirLabel}</span>}
           {!semantic && show.types && info.type && (
             <span className="port-in-type" title={info.fullType}>{info.type}</span>
           )}

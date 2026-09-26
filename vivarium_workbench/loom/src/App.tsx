@@ -738,6 +738,11 @@ export default function App() {
   // per-store — teal reads, gold writes — so the read+write loop on a shared
   // store reads as the grammar the opening figure teaches.
   const [minimalStyle, setMinimalStyle] = useState(false);
+  // ?figure=1 — a "clean print figure" toggle that strips interactive-only chrome
+  // (the per-port ▸reads/○writes direction words, and the store "N read · M write"
+  // counts), keeping the substance (names, types, equation, config, wires). The
+  // process address is hidden via the address override it also sets.
+  const [figureClean, setFigureClean] = useState(false);
   // Node text scale (Font control). Multiplies every node font size via the
   // --loom-fs CSS var on the canvas; saved in the view so a headless render of a
   // default view keeps the chosen size. Clamped to a sane range.
@@ -1313,7 +1318,7 @@ export default function App() {
           ...n,
           zIndex: L.z,
           data: {
-            ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle,
+            ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle, _figureClean: figureClean,
             _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
             // Full-detail ("open") card = explicitly kept-open ONLY. A plain
             // single click just SELECTS (drives the Inspector + wire highlight)
@@ -1341,14 +1346,14 @@ export default function App() {
         ...n,
         zIndex: L.z,
         data: {
-          ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle, _isHub: isHub,
+          ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle, _figureClean: figureClean, _isHub: isHub,
           _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
           _readers: wiring.readers, _writers: wiring.writers, _commitSize: commitNodeSize,
           _commitPortCol: commitPortCol,
         },
       };
     });
-  }, [nodes, edges, effTier, detailOverrides, minimalStyle, focus.keptOpen, focus.selected, focus.locked, lineage, layoutMode.modeId, hubIds, drillHops, commitNodeSize]);
+  }, [nodes, edges, effTier, detailOverrides, minimalStyle, figureClean, focus.keptOpen, focus.selected, focus.locked, lineage, layoutMode.modeId, hubIds, drillHops, commitNodeSize]);
 
   // Map from node id to node, for the edge stamp below (which needs the process
   // end's port-type schema and derived contract). Rebuilt only when `nodes`
@@ -1724,6 +1729,13 @@ export default function App() {
           ...o, ports: 'none', stores: 'name',
           config: 'off', contract: 'off', figures: 'off', address: 'off',
         }));
+      }
+      // ?figure=1 — clean print figure: hide the port direction words + store
+      // read/write counts, and hide the process address. (Explicit ?address
+      // still wins via the override merge below.)
+      if (params.get('figure') === '1') {
+        setFigureClean(true);
+        setDetailOverrides((o) => ({ ...o, address: 'off' }));
       }
     })();
   }, [state, compositeId, applyView, layoutMode]);
