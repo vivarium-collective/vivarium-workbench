@@ -211,7 +211,8 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
 
   // Connection dots sit ON the card border (inputs left, outputs right) at each
   // port's vertical fraction — that's where wires attach, at every tier. The dot
-  // is FILLED with the bound store's color (--port-dot) so it matches its wire.
+  // is FILLED with the bound store's color (--port-dot, or the minimal direction
+  // color) so it matches its wire.
   const borderHandle = (
     port: string, isOut: boolean, i: number, n: number, types: Record<string, unknown>,
   ) => (
