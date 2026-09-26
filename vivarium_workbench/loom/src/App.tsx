@@ -82,12 +82,15 @@ export type DetailOverrides = {
   // clutter in a print figure — 'auto' shows it (from the types tier up); 'off'
   // hides it. Driven by `?address=off` / render-loom --hide-address.
   address: TriDetail;
-  // The per-port "▸ reads / ○ writes" direction words. Direction is also conveyed
-  // by port side (left=read/right=write) + arrowheads, so the words are optional —
-  // 'auto' shows them, 'off' hides them. Driven by `?direction=off` / ?figure=1.
+  // ALL the reads/writes text: the per-port "▸ reads / ○ writes" direction words
+  // AND the store "N read · M write" wiring counts. Direction is already conveyed
+  // by port side (left=read/right=write), arrowheads and wire color, so the words
+  // are redundant clutter — hence 'off' BY DEFAULT. 'on' shows them everywhere,
+  // 'auto' shows them at high detail (ports always, store counts at contract+).
+  // Driven by `?direction=on|off` / ?figure=1.
   direction: TriDetail;
 };
-export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto', direction: 'auto' };
+export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto', direction: 'off' };
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 // `light` is the cheap default wire (straight, no floating anchors / labels);
 // `floating` is the rich labelled edge, used only for FOCUSED wires. Non-wire
