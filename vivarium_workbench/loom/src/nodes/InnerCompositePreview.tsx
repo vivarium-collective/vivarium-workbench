@@ -253,7 +253,7 @@ function MiniMap(props: {
   const pad = 8;
   // Extra horizontal room for the composite-bridge connectors + their labels.
   const bgap = props.bridge ? PROC.w * 0.45 : 0;      // connector length
-  const bmargin = props.bridge ? bgap + PROC.w * 0.55 : 0;   // + port + label room
+  const bmargin = props.bridge ? bgap + PROC.w * 1.3 : 0;   // + port + label room (wide enough for long port names like "nutrients")
   const w = maxX - minX + pad * 2 + 2 * bmargin;
   const h = maxY - minY + pad * 2;
   const vbX = minX - pad - bmargin;

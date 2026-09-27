@@ -104,6 +104,7 @@ export default function DetailMenu(props: {
           <div style={row}><span style={rowLabel}>Stores</span>{seg(STORES, overrides.stores, (id) => setOverrides({ ...overrides, stores: id as StoresDetail }))}</div>
           <div style={row}><span style={rowLabel}>Config</span>{seg(TRI, overrides.config, (id) => setOverrides({ ...overrides, config: id as TriDetail }))}</div>
           <div style={row}><span style={rowLabel}>Contract</span>{seg(CONTRACT, overrides.contract, (id) => setOverrides({ ...overrides, contract: id as ContractDetail }))}</div>
+          <div style={row}><span style={rowLabel}>Symbols</span>{seg(TRI, overrides.symbols, (id) => setOverrides({ ...overrides, symbols: id as TriDetail }))}</div>
           <div style={row}><span style={rowLabel}>Figures</span>{seg(TRI, overrides.figures, (id) => setOverrides({ ...overrides, figures: id as TriDetail }))}</div>
           <div style={row}><span style={rowLabel}>Address</span>{seg(TRI, overrides.address, (id) => setOverrides({ ...overrides, address: id as TriDetail }))}</div>
           <div style={{ height: 1, background: '#e5e7eb', margin: '4px 0' }} />

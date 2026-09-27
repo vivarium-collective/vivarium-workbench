@@ -72,9 +72,13 @@ const LAYOUT_TIER: ZoomTierId = 'full';
 export type PortsDetail = 'auto' | 'none' | 'plain' | 'types';
 export type StoresDetail = 'auto' | 'name' | 'value' | 'type';
 export type TriDetail = 'auto' | 'on' | 'off';
-export type ContractDetail = 'auto' | 'on' | 'off' | 'full';
+export type ContractDetail = 'auto' | 'on' | 'off' | 'full' | 'math';
 export type DetailOverrides = {
   ports: PortsDetail; stores: StoresDetail; config: TriDetail; contract: ContractDetail;
+  // The symbol legend under a process's equations ("μ — growth rate"). 'auto'
+  // shows it with the contract; 'off' drops it (dense print panels where the
+  // legend is redundant / too small). Driven by ?symbols=off.
+  symbols: TriDetail;
   // A per-node illustrative figure (data-URI / inline SVG on the spec's `_figure`).
   // 'auto' = show when a node carries one; 'on'/'off' force it.
   figures: TriDetail;
@@ -83,7 +87,7 @@ export type DetailOverrides = {
   // hides it. Driven by `?address=off` / render-loom --hide-address.
   address: TriDetail;
 };
-export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', figures: 'auto', address: 'auto' };
+export const DETAIL_AUTO: DetailOverrides = { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', symbols: 'auto', figures: 'auto', address: 'auto' };
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 // `light` is the cheap default wire (straight, no floating anchors / labels);
 // `floating` is the rich labelled edge, used only for FOCUSED wires. Non-wire
@@ -743,7 +747,7 @@ export default function App() {
   // default view keeps the chosen size. Clamped to a sane range.
   const [fontScale, setFontScale] = useState<number>(1);
   const bumpFont = useCallback((delta: number) =>
-    setFontScale((f) => Math.min(2, Math.max(0.6, Math.round((f + delta) * 20) / 20))), []);
+    setFontScale((f) => Math.min(4, Math.max(0.6, Math.round((f + delta) * 20) / 20))), []);
   // Zoom-fight fix: applying a new tier resizes every card, and doing that on
   // EVERY wheel step mid-gesture makes React Flow re-measure growing nodes while
   // the user is still zooming — which reads as the canvas shoving back / zooming
@@ -1606,6 +1610,7 @@ export default function App() {
       stores: (view.detailOverrides?.stores ?? 'auto') as StoresDetail,
       config: (view.detailOverrides?.config ?? 'auto') as TriDetail,
       contract: (view.detailOverrides?.contract ?? 'auto') as ContractDetail,
+      symbols: ((view.detailOverrides as { symbols?: string } | undefined)?.symbols ?? 'auto') as TriDetail,
       figures: ((view.detailOverrides as { figures?: string } | undefined)?.figures ?? 'auto') as TriDetail,
       address: ((view.detailOverrides as { address?: string } | undefined)?.address ?? 'auto') as TriDetail,
     });
@@ -1686,21 +1691,23 @@ export default function App() {
       // Node text scale from the URL (?font=1.3) — a headless render can force a
       // font size over the saved view, same as the Detail overrides above.
       const pFont = parseFloat(params.get('font') || '');
-      if (pFont > 0) setFontScale(Math.min(2, Math.max(0.6, pFont)));
+      if (pFont > 0) setFontScale(Math.min(4, Math.max(0.6, pFont)));
       // Per-feature Detail overrides from the URL (?ports= / ?config= / ?contract=)
       // so a headless render can force a specific detail mix over the saved view.
       const pPorts = params.get('ports');
       const pStores = params.get('stores');
       const pConfig = params.get('config');
       const pContract = params.get('contract');
+      const pSymbols = params.get('symbols');
       const pFigures = params.get('figures');
       const pAddress = params.get('address');
-      if (pPorts || pStores || pConfig || pContract || pFigures || pAddress) {
+      if (pPorts || pStores || pConfig || pContract || pSymbols || pFigures || pAddress) {
         setDetailOverrides((o) => ({
           ports: (['none', 'plain', 'types'].includes(pPorts || '') ? pPorts : o.ports) as PortsDetail,
           stores: (['name', 'value', 'type'].includes(pStores || '') ? pStores : o.stores) as StoresDetail,
           config: (['on', 'off'].includes(pConfig || '') ? pConfig : o.config) as TriDetail,
-          contract: (['on', 'off', 'full'].includes(pContract || '') ? pContract : o.contract) as ContractDetail,
+          contract: (['on', 'off', 'full', 'math'].includes(pContract || '') ? pContract : o.contract) as ContractDetail,
+          symbols: (['on', 'off'].includes(pSymbols || '') ? pSymbols : o.symbols) as TriDetail,
           figures: (['on', 'off'].includes(pFigures || '') ? pFigures : o.figures) as TriDetail,
           address: (['on', 'off'].includes(pAddress || '') ? pAddress : o.address) as TriDetail,
         }));

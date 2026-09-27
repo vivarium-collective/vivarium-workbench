@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Handle, Position, NodeResizer, useReactFlow, useNodeId, type NodeProps } from "@xyflow/react";
 import type { ProcessNodeData } from "../types";
 import { deriveContract, contractCompleteness } from "../contract";
@@ -102,7 +102,7 @@ function LegacyBody({ data, stepKind }: {
             </span>
           )}
         </div>
-        <div className="process-type">{data.processType}</div>
+        <div className="process-type">{data.isCompositeProcess ? 'composite process' : data.processType}</div>
       </div>
 
       {outputPorts.map((port, i) => {
@@ -163,7 +163,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   // feature is 'auto' (keep the tier value) or forced. Never applied to a pinned-
   // open card (that always shows everything).
   const ov = (data as any)._detailOverrides as
-    { ports?: string; config?: string; contract?: string; figures?: string; address?: string } | undefined;
+    { ports?: string; config?: string; contract?: string; symbols?: string; figures?: string; address?: string } | undefined;
   if (ov && !(data as any)._pinnedOpen) {
     if (ov.ports === 'none')  { show.ports = false; show.types = false; }
     else if (ov.ports === 'plain') { show.ports = true;  show.types = false; }
@@ -174,8 +174,18 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
     if (ov.contract === 'on') show.contract = true;
     else if (ov.contract === 'off') show.contract = false;
     else if (ov.contract === 'full') { show.contract = true; show.full = true; }
+    else if (ov.contract === 'math') show.contract = true;  // equations + symbols, no prose
   }
 
+  // 'math' contract mode: show the governing equations + symbol legend but drop
+  // the descriptive prose (summary/description) — for dense print panels.
+  // 'math' contract mode hides the prose even on pinned-open/full-tier cards
+  // (the headless figure render pins every card open), unlike other overrides.
+  const hideSummary = ov?.contract === 'math';
+  // Symbol legend ("μ — growth rate"): 'off' drops it (redundant / too small on
+  // dense print panels); shown with the contract otherwise. Applies on pinned/
+  // full cards too (the headless figure render pins every card open).
+  const hideSymbols = ov?.symbols === 'off';
   const contract = show.contract ? deriveContract(data) : null;
   const completeness = show.full ? contractCompleteness(contract, data) : null;
   // Optional per-node illustration: shown when the node carries a `_figure`
@@ -347,6 +357,31 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
       commitSize(Math.ceil(el.offsetWidth), Math.ceil(el.offsetHeight));
     });
   };
+  // Fit-to-box: when the card has an explicit (saved) size, scale the content
+  // DOWN so it never spills past the fixed height. Keeps the author's exact card
+  // size + position while guaranteeing no clipped text — and makes the headless
+  // figure render match the interactive view (line-wrap metrics differ slightly,
+  // so a card sized to *just* fit here would otherwise clip one line there).
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [fitScale, setFitScale] = useState(1);
+  useLayoutEffect(() => {
+    const card = nodeRef.current, content = contentRef.current;
+    if (!card || !content || !dims) { setFitScale(1); return; }
+    const measure = () => {
+      const avail = card.clientHeight - content.offsetTop - 8;  // less a small margin
+      const natural = content.scrollHeight;                     // unaffected by transform
+      setFitScale(natural > avail && avail > 0 ? Math.max(0.4, avail / natural) : 1);
+    };
+    measure();
+    // Re-measure when the content re-lays-out (font load, wrap changes) — the
+    // transform doesn't change the observed box, so this can't feed back.
+    const ro = new ResizeObserver(measure);
+    ro.observe(content);
+    let cancelled = false;
+    try { (document as { fonts?: { ready?: Promise<unknown> } }).fonts?.ready?.then(() => { if (!cancelled) measure(); }); } catch { /* no font API */ }
+    const t = window.setTimeout(measure, 400);
+    return () => { cancelled = true; ro.disconnect(); window.clearTimeout(t); };
+  }, [dims?.width, dims?.height]);
   // Which port's info popover is open (click a port name). Keyed 'i-'/'o-'+port.
   const [openPort, setOpenPort] = useState<string | null>(null);
   // Which middle section's detail is expanded (click a center box). 'config'
@@ -504,7 +539,8 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
           config (from above) → title → the contract (what inputs become). The
           left/right port columns supply the inputs→outputs framing spatially,
           so no abstract ƒ(inputs; config)→outputs line is needed. */}
-      <div className="process-node-center">
+      <div className="process-node-center" ref={contentRef}
+        style={fitScale < 1 ? { transform: `scale(${fitScale})`, transformOrigin: 'top center' } : undefined}>
         <div className="process-node-title">
           {locked && <span className="process-node-lock" title="Locked — click empty canvas to unlock">🔒</span>}
           {displayName(data.label)}
@@ -532,7 +568,9 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
                 in/out counts are omitted — the port columns show the arity. */}
             {(data as any).method
               ? (data as any).method
-              : ((data as any).isDraft ? `draft ${data.processType}` : data.processType)}
+              : data.isCompositeProcess
+                ? ((data as any).isDraft ? 'draft composite process' : 'composite process')
+                : ((data as any).isDraft ? `draft ${data.processType}` : data.processType)}
             {data.interval != null && <span> · every {data.interval}</span>}
           </div>
         )}
@@ -573,7 +611,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
             governing equations. Only shown when actually documented. Click to
             reveal the full description below (when there is one to reveal).
             Composite Processes show their inner mini-map above instead. */}
-        {show.contract && !data.isCompositeProcess && contract?.summary && (
+        {show.contract && !data.isCompositeProcess && !hideSummary && contract?.summary && (
           <div
             className={`process-contract section-box${openSection === 'contract' ? ' is-open' : ''}`}
             title={SECTION_HINT.contract}
@@ -595,7 +633,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
         {/* Symbol legend: shown whenever the equation is (tied to the contract
             tier, not just `full`), so every variable in the math is decodable in
             place — a designed card, not a cramped list (#4). */}
-        {show.contract && contract && Object.keys(contract.symbols).length > 0 && (
+        {show.contract && !hideSymbols && contract && Object.keys(contract.symbols).length > 0 && (
           <div className="process-node-symbols" title={SECTION_HINT.symbols}>
             {Object.entries(contract.symbols).map(([s, meaning]) => (
               <div key={s}><em><MathText text={s} symbolKey /></em> — <MathText text={meaning} /></div>
