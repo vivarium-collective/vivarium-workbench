@@ -50,17 +50,6 @@ def test_latest_simulator_builds_query(monkeypatch):
     assert "git_repo_url=https%3A%2F%2Fgithub.com%2Fx%2Fv2ecoli" in cap["url"]
 
 
-def test_observables_repeats_names_param(monkeypatch):
-    cap = {}
-    with _patch_urlopen(monkeypatch, cap, {"time": [0.0], "series": {"mass": [1.0]}}):
-        c = SmsApiClient("http://h:8080")
-        out = c.observables(49, ["mass", "volume"], seed=0)
-    assert out["series"]["mass"] == [1.0]
-    assert "/api/v1/simulations/49/observables?" in cap["url"]
-    assert "names=mass%2Cvolume" in cap["url"]
-    assert "seed=0" in cap["url"]
-
-
 def test_non_200_raises(monkeypatch):
     cap = {}
     with _patch_urlopen(monkeypatch, cap, {}, status=404):
@@ -517,4 +506,6 @@ def test_analysis_status_gets_by_database_id(monkeypatch):
         out = c.analysis_status(7)
     assert out["status"] == "completed"
     assert cap["method"] == "GET"
-    assert cap["url"] == "http://h:8080/analyses/7/status"
+    # viva-api serves it under the SMS router's /api/v1 prefix; the old
+    # "/analyses/7/status" was a 404 the poll loop swallowed (vivarium-workbench#1150, W1).
+    assert cap["url"] == "http://h:8080/api/v1/analyses/7/status"

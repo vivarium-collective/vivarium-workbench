@@ -53,7 +53,7 @@ from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 _TERMINAL_OK = {"completed", "done", "succeeded"}
 _TERMINAL_BAD = {"failed", "cancelled", "error"}
 
-# Real completion signal now exists (GET /analyses/{id}/status, S3-exists
+# Real completion signal now exists (GET /api/v1/analyses/{id}/status, S3-exists
 # probe server-side) for Ray-backend triggers -- poll it instead of blindly
 # sleeping. Interval/attempts sized to cover a cold image pull of the multi-GB
 # v2ecoli image plus the analysis script's own (fast) run, without polling so
@@ -67,7 +67,7 @@ _ANALYSIS_TERMINAL_STATUSES = {"completed", "failed"}
 
 
 def _poll_analysis_until_terminal(client: SmsApiClient, database_id: int) -> None:
-    """Poll GET /analyses/{id}/status until COMPLETED/FAILED or the attempt
+    """Poll GET /api/v1/analyses/{id}/status until COMPLETED/FAILED or the attempt
     ceiling is reached. A miss just means the analysis isn't folded into THIS
     landing -- landing again later picks it up (see land_remote_run)."""
     for _ in range(_ANALYSIS_POLL_MAX_ATTEMPTS):
@@ -490,7 +490,7 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
 
     If the study has ``spec.analyses`` configured, also triggers standalone
     analysis on the same simulation before downloading, then polls its real
-    status (GET /analyses/{id}/status) so the download -- which streams
+    status (GET /api/v1/analyses/{id}/status) so the download -- which streams
     everything under the experiment's S3 prefix -- has a real chance of
     picking up the analysis output too. If the job hasn't finished within the
     poll ceiling, the run still lands normally; the analysis just isn't
@@ -690,7 +690,7 @@ def remote_run_status(params: dict) -> tuple[dict, int]:
     client = SmsApiClient(_sms_api_base())
     try:
         if an_id:
-            # GET /analyses/{id}/status resolves against the job's own S3
+            # GET /api/v1/analyses/{id}/status resolves against the job's own S3
             # _manifest.json, so it answers for an auto-triggered (dispatch-DAG)
             # analysis and a button-triggered one identically.
             st = client.analysis_status(int(an_id))

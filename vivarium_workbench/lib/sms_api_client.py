@@ -154,6 +154,72 @@ def caller_identity() -> str | None:
     return f"{login}@github" if login else None
 
 
+#: Capability names the path resolver keys on (viva-api's ``viva_core.api.capabilities``;
+#: the strings are the stable public API). Membership only, never a version (D14).
+#:
+#: ``viva-v1-surface``: core's routers answer under ``/viva/v1`` -- for this client,
+#: ``/viva/v1/compose`` (the interim compose spelling, dated M5).
+CAPABILITY_VIVA_V1_SURFACE = "viva-v1-surface"
+#: ``viva-v1-workers``: the env-worker surface at its final spelling, ``/viva/v1/workers``.
+CAPABILITY_VIVA_V1_WORKERS = "viva-v1-workers"
+
+#: How long one client trusts a capability advertisement before asking again. Most
+#: clients live for one request; the env-worker launchers hold one for the life of
+#: the process, and a redeployed viva-api should not need a workbench restart.
+_CAPABILITY_TTL = 600.0
+
+_COMPOSE_PREFIX = "/compose/v1"
+_ENV_WORKER_PREFIX = "/env-worker/v1"
+
+
+def _workers_path(rest: str) -> str:
+    """An ``/env-worker/v1`` path (minus that prefix) at its ``/viva/v1/workers`` spelling.
+
+    Mirrors viva-api's ``viva_core/api/routers/workers.py::PATHS``: the dial-back
+    workers ARE the family (``/workers[/{job}]`` -> ``/viva/v1/workers[/{job}]``); the
+    relay's lifecycle sits under ``/workers/relay``; everything asked OF a held worker
+    (``/call`` and the named reads) nests under the worker; the task tier is
+    ``/workers/tasks``. Returns ``None`` for a path that table does not cover, so an
+    unmapped route keeps its legacy spelling rather than being guessed at.
+    """
+    m = re.fullmatch(r"/relay/workers/([^/]+)/(.+)", rest)
+    if m:
+        return f"/viva/v1/workers/{m.group(1)}/{m.group(2)}"
+    m = re.fullmatch(r"/relay/workers(/[^/]+)?", rest)
+    if m:
+        return "/viva/v1/workers/relay" + (m.group(1) or "")
+    m = re.fullmatch(r"/workers(/[^/]+)?", rest)
+    if m:
+        return "/viva/v1/workers" + (m.group(1) or "")
+    if rest == "/tasks" or rest.startswith("/tasks/"):
+        return "/viva/v1/workers" + rest
+    return None
+
+
+def resolve_path(logical: str, capabilities: "frozenset[str] | set[str]") -> str:
+    """Where ``logical`` (a path at its legacy spelling) answers on a server advertising ``capabilities``.
+
+    The one place a viva-api path changes spelling (vivarium-workbench#1150, W1). A
+    path moves only when the server says, by capability membership, that the new
+    spelling is served; otherwise it is returned unchanged -- the legacy spelling,
+    which viva-api keeps answering until every caller has shipped a release like
+    this one (D14). Paths with no successor (``/api/v1/*``, ``/core/v1/*``,
+    ``/version``) pass through untouched.
+    """
+    if logical.startswith(_COMPOSE_PREFIX + "/") and CAPABILITY_VIVA_V1_SURFACE in capabilities:
+        return "/viva/v1/compose" + logical[len(_COMPOSE_PREFIX):]
+    if logical.startswith(_ENV_WORKER_PREFIX + "/") and CAPABILITY_VIVA_V1_WORKERS in capabilities:
+        moved = _workers_path(logical[len(_ENV_WORKER_PREFIX):])
+        if moved is not None:
+            return moved
+    return logical
+
+
+def _has_successor(logical: str) -> bool:
+    """Whether ``logical`` could move at all -- so a path that cannot never costs a capability probe."""
+    return logical.startswith((_COMPOSE_PREFIX + "/", _ENV_WORKER_PREFIX + "/"))
+
+
 class SmsApiClient:
     def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 30.0,
                  max_retries: int = _GET_RETRIES, *, force_link: bool = False) -> None:
@@ -171,6 +237,10 @@ class SmsApiClient:
         # the breaker currently holds open. Normal calls leave it False so a
         # known-down tunnel fails in microseconds instead of the full timeout.
         self.force_link = force_link
+        # The server's capability advertisement, fetched on the first call whose
+        # path could move (see ``_path``) and kept for ``_CAPABILITY_TTL``.
+        self._caps: "frozenset[str] | None" = None
+        self._caps_at = 0.0
 
     @classmethod
     def for_(cls, kind: str, base_url: str | None = None, *, force_link: bool = False) -> "SmsApiClient":
@@ -210,6 +280,50 @@ class SmsApiClient:
         except Exception:  # noqa: BLE001 - see _mark_link_up
             pass
 
+    def _server_capabilities(self) -> "frozenset[str]":
+        """This deployment's capability names, fetched once per client (cached for
+        ``_CAPABILITY_TTL``) through ``server_capabilities.fetch_capabilities``.
+
+        Never raises. A server that predates the endpoint (404) advertises nothing,
+        and that answer is cached. Any other failure -- unreachable, 5xx, a
+        malformed body -- is NOT cached and reads as "nothing advertised" for this
+        one call: every path then keeps its legacy spelling, which still answers,
+        and the real request that follows surfaces the real error. Capability
+        detection must never be the thing that fails a call.
+        """
+        now = time.monotonic()
+        if self._caps is not None and now - self._caps_at < _CAPABILITY_TTL:
+            return self._caps
+        # lazy: server_capabilities imports this module
+        from vivarium_workbench.lib.server_capabilities import fetch_capabilities
+
+        # A probe-class budget: one attempt, short timeout, so a wedged tunnel
+        # costs one fast failure here rather than a retried one.
+        probe = SmsApiClient(self.base_url, timeout=min(self.timeout, 5.0),
+                             max_retries=1, force_link=self.force_link)
+        # The probe's own connection failure must not trip the RemoteLink
+        # breaker: the real request that follows gets its full attempt (and its
+        # own retries), and is what reports -- and records -- an outage.
+        probe._mark_link_down = lambda error: None  # type: ignore[method-assign]
+        try:
+            caps = frozenset(fetch_capabilities(probe).capabilities)
+        except Exception:  # noqa: BLE001 - see docstring: fall back, never fail the call
+            return frozenset()
+        self._caps, self._caps_at = caps, now
+        return caps
+
+    def _path(self, logical: str) -> str:
+        """The path to request for ``logical`` (its legacy spelling) on THIS server.
+
+        Every request this client makes goes through here -- ``_get``, ``_post``,
+        ``_delete`` and the streaming helpers -- so a spelling change is one table
+        (:func:`resolve_path`), never a per-method edit. A path with no successor
+        is returned without asking the server anything.
+        """
+        if not _has_successor(logical):
+            return logical
+        return resolve_path(logical, self._server_capabilities())
+
     def _headers(self, accept: str = "application/json") -> dict[str, str]:
         """Request headers, carrying the caller's identity when there is one.
 
@@ -244,7 +358,7 @@ class SmsApiClient:
         # Fail fast when the tunnel is known-down (raises CircuitOpen, itself an
         # SmsApiError). force_link bypasses it for the probe / explicit refresh.
         self._link().check(force=self.force_link)
-        url = self.base_url + path
+        url = self.base_url + self._path(path)
         if params:
             url = f"{url}?{urlencode(params, doseq=True)}"
         req = Request(url, method="GET", headers=self._headers())
@@ -364,9 +478,6 @@ class SmsApiClient:
     def get_env_worker_task(self, task_id: int) -> dict:
         return self._get(f"/env-worker/v1/tasks/{task_id}")
 
-    def cancel_env_worker_task(self, task_id: int) -> dict:
-        return self._delete(f"/env-worker/v1/tasks/{task_id}")
-
     def simulator_status(self, simulator_id: int) -> dict:
         return self._get("/core/v1/simulator/status", {"simulator_id": simulator_id})
 
@@ -437,7 +548,7 @@ class SmsApiClient:
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
         out_path = dest_dir / "workspace.tar.gz"
-        url = f"{self.base_url}/api/v1/simulations/workspace?simulator_id={simulator_id}"
+        url = f"{self.base_url}{self._path('/api/v1/simulations/workspace')}?simulator_id={simulator_id}"
         req = Request(url, method="GET", headers=self._headers("application/gzip"))
         to = timeout if timeout is not None else DOWNLOAD_TIMEOUT
         try:
@@ -471,7 +582,7 @@ class SmsApiClient:
         cancels/terminates whichever job is actually non-terminal per seed —
         not just a single job id. Idempotent: already-terminal rows short-
         circuit server-side and return their existing status. Same ``_delete``
-        pattern as :meth:`cancel_env_worker_task`."""
+        pattern as :meth:`stop_env_worker`."""
         return self._delete(f"/api/v1/simulations/{simulation_id}/cancel")
 
     def simulator_commit(self, simulator_id: int) -> str | None:
@@ -499,14 +610,8 @@ class SmsApiClient:
         aggregate — callers should use ``simulation_status`` for those)."""
         return self._get(f"/api/v1/simulations/{simulation_id}/chain-progress")
 
-    def observables(self, simulation_id: int, names: list[str], seed: int = 0) -> dict:
-        params = {"seed": seed}
-        if names:
-            params["names"] = ",".join(names)
-        return self._get(f"/api/v1/simulations/{simulation_id}/observables", params)
-
     def _delete(self, path: str) -> dict:
-        url = self.base_url + path
+        url = self.base_url + self._path(path)
         req = Request(url, method="DELETE", headers=self._headers())
         try:
             with urlopen(req, timeout=self.timeout) as r:  # noqa: S310 — fixed scheme, internal tunnel
@@ -521,7 +626,7 @@ class SmsApiClient:
         # doseq=True so list-valued params become repeated keys (?observables=a&observables=b)
         # Fail fast when the tunnel is known-down (CircuitOpen, an SmsApiError).
         self._link().check(force=self.force_link)
-        url = self.base_url + path
+        url = self.base_url + self._path(path)
         if params:
             url = f"{url}?{urlencode(params, doseq=True)}"
         data = json.dumps(json_body).encode() if json_body is not None else None
@@ -603,11 +708,11 @@ class SmsApiClient:
         )
 
     def analysis_status(self, analysis_id: int) -> dict:
-        """GET /analyses/{id}/status — poll a triggered analysis's real status.
+        """GET /api/v1/analyses/{id}/status — poll a triggered analysis's real status.
         Only meaningful when run_analysis() returned a database_id (Ray-backend
         simulators); resolved server-side via S3-exists probe, since there is
         no persistent job-status API for the backing K8s Job."""
-        return self._get(f"/analyses/{analysis_id}/status")
+        return self._get(f"/api/v1/analyses/{analysis_id}/status")
 
     def list_analyses(self, simulation_id: int) -> list:
         """GET /api/v1/simulations/{id}/analyses — the analyses attached to a
@@ -624,14 +729,6 @@ class SmsApiClient:
     # ------------------------------------------------------------------
     # Compose endpoints (generic .pbg runner, Phase C)
     # ------------------------------------------------------------------
-
-    def compose_check(self, pbg_bytes: bytes) -> dict:
-        """GET /compose/v1/simulation/check — verify compose endpoint reachability.
-
-        Raises :exc:`SmsApiError` if the server is unreachable or returns a
-        non-200 status.
-        """
-        return self._get("/compose/v1/simulation/check")
 
     def compose_submit(
         self,
@@ -700,7 +797,7 @@ class SmsApiClient:
         if extra_pip_deps:
             params["extra_pip_deps"] = extra_pip_deps  # list → repeated key via doseq
 
-        url = self.base_url + "/compose/v1/simulation/run"
+        url = self.base_url + self._path("/compose/v1/simulation/run")
         if params:
             url = f"{url}?{urlencode(params, doseq=True)}"
 
@@ -759,7 +856,7 @@ class SmsApiClient:
         dest = Path(dest)
         dest.mkdir(parents=True, exist_ok=True)
         out_path = dest / "results.tar.gz"
-        url = f"{self.base_url}/compose/v1/simulation/{sim_id}/results"
+        url = self.base_url + self._path(f"/compose/v1/simulation/{sim_id}/results")
         req = Request(url, method="GET", headers=self._headers("application/gzip"))
         to = timeout if timeout is not None else DOWNLOAD_TIMEOUT
         try:
@@ -778,7 +875,7 @@ class SmsApiClient:
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
         out_path = dest_dir / f"sim_{simulation_id}.tar.gz"
-        url = f"{self.base_url}/api/v1/simulations/{simulation_id}/data"
+        url = self.base_url + self._path(f"/api/v1/simulations/{simulation_id}/data")
         req = Request(url, data=b"", method="POST", headers=self._headers("application/gzip"))
         to = timeout if timeout is not None else DOWNLOAD_TIMEOUT
         try:

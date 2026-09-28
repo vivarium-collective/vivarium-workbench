@@ -26,7 +26,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench.lib.sms_api_client import (
+    CAPABILITY_VIVA_V1_SURFACE as CAPABILITY_VIVA_V1_SURFACE,
+    CAPABILITY_VIVA_V1_WORKERS as CAPABILITY_VIVA_V1_WORKERS,
+    SmsApiClient,
+    SmsApiError,
+)
 
 # Capability names the workbench branches on. Mirrored from viva-api's
 # CAPABILITY_REGISTRY — the strings themselves are the public, stable API
@@ -36,6 +41,9 @@ CAPABILITY_CONTAINER_JOBS = "container-jobs"
 CAPABILITY_DUAL_ENGINE_COMPARISON = "dual-engine-comparison"
 CAPABILITY_CHAIN_DISPATCH = "chain-dispatch"
 CAPABILITY_CHAIN_PROGRESS = "chain-progress"
+# The /viva/v1 path switches (CAPABILITY_VIVA_V1_SURFACE, CAPABILITY_VIVA_V1_WORKERS)
+# are defined beside the resolver that reads them, in sms_api_client, and
+# re-exported above so every name the workbench branches on is importable here.
 
 # The version string reported for a deployment that predates the endpoint —
 # for error messages and logs only (never branched on, like any version).

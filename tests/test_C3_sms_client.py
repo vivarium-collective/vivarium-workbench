@@ -1,7 +1,6 @@
 """C3: Tests for SmsApiClient compose methods.
 
 Tests:
-- compose_check(pbg_bytes) - validate server connectivity
 - compose_submit(pbg_bytes, extra_pip_deps=None) - POST multipart to /compose/v1/simulation/run
 - compose_status(task_id) - GET /compose/v1/simulation/{id}/status
 - download_compose_results(sim_id, dest) - GET /compose/v1/simulation/{id}/results
@@ -73,29 +72,6 @@ def _patch_urlopen(monkeypatch, capture: dict, payload, status: int = 200):
 
     monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
     yield
-
-
-# ---------------------------------------------------------------------------
-# compose_check
-# ---------------------------------------------------------------------------
-
-def test_compose_check_sends_get_to_health_or_check_endpoint(monkeypatch):
-    """compose_check makes a GET request to verify server reachability."""
-    cap = {}
-    with _patch_urlopen(monkeypatch, cap, {"status": "ok"}):
-        c = SmsApiClient("http://h:8080")
-        result = c.compose_check(b"fake-pbg-bytes")
-    assert cap["method"] in ("GET", "POST")
-    assert "/compose/" in cap["url"]
-
-
-def test_compose_check_raises_sms_api_error_on_failure(monkeypatch):
-    """compose_check raises SmsApiError on non-200."""
-    cap = {}
-    with _patch_urlopen(monkeypatch, cap, {}, status=503):
-        c = SmsApiClient("http://h:8080")
-        with pytest.raises(SmsApiError):
-            c.compose_check(b"fake-pbg-bytes")
 
 
 # ---------------------------------------------------------------------------
