@@ -139,6 +139,40 @@ SessionEntry {
   (protocol §17 "lazy spawn"). So a restart costs a client only a one-time
   re-warm, never a lost session.
 
+> **Status — the durable tier is implemented** (`lib/session_registry.py`, item 3
+> Phase 1): one small JSON file, `session-bindings.json`, under `build_cache_root()`
+> (the directory that already holds each session's clone; PVC-backed in the deployed
+> workbench — where the build cache falls back to a temp dir, because HOME is not writable,
+> the bindings are no more durable than that dir), loaded lazily on first use and rewritten atomically by every bind/drop
+> before it returns. Each entry also carries `last_seen`, advanced at most every 5
+> minutes **in memory** by the lookup (§10: lookups are cheap) and written by a
+> short-lived background thread, so the durable record lags by about one interval
+> while the volume is writable.
+> **A store that cannot be read or understood is never overwritten** (I/O error,
+> invalid JSON, wrong shape, another `version`): the registry falls back to
+> memory-only — the pre-Phase-1 behaviour — logs one error and retries the read;
+> entries it cannot parse are written back verbatim. A binding whose folder no longer
+> exists is served as *unbound* (the default workspace) and the binding is kept.
+> **A failed persist degrades to memory-only:** if a write fails (or the store cannot be read),
+> the binding still holds for the running process and is retried; `rebind` does not raise and
+> `/api/source/switch` does not report it. The signal is a logged error, and the binding is lost
+> if the process restarts before a write succeeds. Locks: `_LOCK` guards memory and is never held
+> across store I/O; `_IO_LOCK` serialises file readers/writers and is always taken first.
+> **Expiry is deliberately not implemented:** reaping a session's clone before
+> `WorkspaceStore.persist()` exists destroys unpushed work (#944; the resulting
+> accumulation is #1142), so no binding is dropped on idle either.
+> **The ephemeral tier is not rebuilt yet.** Only the binding is durable: `session_env` state
+> is in memory, so after a restart `GET /api/source/materialization` reports `ready` for a
+> returning session (no state reads as "nothing to prepare") whether or not its environment
+> still exists, and nothing re-materializes a clone that is gone — that is `WorkspaceStore`
+> (plan Phase 2).
+> **What this buys — and what it does not:** durability across restarts, not
+> concurrent multi-user access. It assumes one backend process per build cache (§12);
+> two processes sharing one lose each other's updates (last writer wins). The session
+> key is per-tab (`sessionStorage`, [session-binding.md](session-binding.md) §3), so a
+> binding survives a restart for the *same tab*; resumption across tabs or browsers
+> needs a stable identity (`Principal`, plan Phase 4).
+
 This layering lines up the three lifetimes cleanly:
 
 | state | owner | lifetime | reclaimed by |

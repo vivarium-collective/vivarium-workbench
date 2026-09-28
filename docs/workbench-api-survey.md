@@ -71,7 +71,6 @@ before refactoring.
 |---|---|
 | investigation run jobs | `run_jobs.manager` — a `RunJobManager()` module singleton; dict + one daemon thread per job |
 | warm env workers | `env_worker_pool` `_pool` singleton, keyed `(workspace, env_key, launcher_kind)`, LRU cap + idle TTL |
-| session → workspace bindings | `session_registry` (in-memory; its own docstring calls durable persistence "a later slice") |
 | process default workspace | `_root._WS_ROOT` |
 
 A pod roll loses every running job's tracking. Hosted pods roll on every deploy.
@@ -104,9 +103,12 @@ established way to extend it.
 
 `workspaces.json` (the switcher's catalog), `servers/<name>.json` (live-server
 join for the switcher), `build-cache/` (materialized builds, and
-`build-cache/sessions/<session>/<simN-commit>` for per-session clones).
+`build-cache/sessions/<session>/<simN-commit>` for per-session clones), and
+`build-cache/session-bindings.json` — the session → workspace bindings, **durable**
+since item 3 Phase 1 (`lib/session_registry.py`, `docs/session-registry.md` §6).
 
-Owned by `viva_superpowers.workspace_catalog`, not by this repo. Note the
+The catalog and server files are owned by `viva_superpowers.workspace_catalog`, not by
+this repo; `build-cache/` and the bindings file are this repo's. Note the
 resolution order is `VIVA_HOME or PBG_HOME or ~/.pbg` — a default set on one
 variable and an override on the *other* does not compose, which is what made the
 test-isolation fix in #955 non-obvious.

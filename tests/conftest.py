@@ -69,6 +69,44 @@ def _isolate_viva_home(tmp_path_factory):
             os.environ["VIVA_HOME"] = previous
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_build_cache(tmp_path_factory):
+    """Point the build cache — and the durable session-bindings store under it — at a
+    temp dir for the whole run.
+
+    ``session_registry`` persists ``session_key → source`` to
+    ``build_cache_root() / "session-bindings.json"`` (default ``~/.pbg/build-cache``),
+    so without this every test that binds a session, and every ``dashboard_client``
+    server that handles a switch, would write into the developer's REAL ``~/.pbg`` —
+    the same leak :func:`_isolate_viva_home` closed for the workspace catalog.
+
+    Set in ``os.environ`` (not via monkeypatch) for the same reason as
+    :func:`_isolate_viva_home`: ``dashboard_client`` hands ``os.environ.copy()`` to the
+    server subprocess, which is the process that actually writes. Tests that need a
+    cache of their own still ``monkeypatch.setenv`` it (function scope wins).
+
+    **Override it by the CANONICAL name only.** ``env_compat.get_env`` reads
+    ``VIVARIUM_WORKBENCH_BUILD_CACHE`` before the deprecated
+    ``VIVARIUM_DASHBOARD_BUILD_CACHE``, so a per-test override through the alias is
+    silently shadowed by this default (every test then shares one cache dir — five
+    ``test_remote_build_source`` tests failed exactly that way until their fixture moved
+    to the canonical name). The same trap is why ``_isolate_viva_home`` avoids
+    ``PBG_HOME``.
+    """
+    from vivarium_workbench.lib.env_compat import BUILD_CACHE_ENV
+
+    cache = tmp_path_factory.mktemp("build_cache")
+    previous = os.environ.get(BUILD_CACHE_ENV)
+    os.environ[BUILD_CACHE_ENV] = str(cache)
+    try:
+        yield cache
+    finally:
+        if previous is None:
+            os.environ.pop(BUILD_CACHE_ENV, None)
+        else:
+            os.environ[BUILD_CACHE_ENV] = previous
+
+
 # ---------------------------------------------------------------------------
 # Live-deployment isolation
 # ---------------------------------------------------------------------------

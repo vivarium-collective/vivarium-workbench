@@ -15,10 +15,14 @@ behavior.
 """
 from __future__ import annotations
 
+import functools
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from vivarium_workbench.lib import active_workspace, session_registry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -43,12 +47,33 @@ def _default_ws_root() -> Path:
     return Path(get_env("WORKSPACE", ".")).resolve()
 
 
+@functools.lru_cache(maxsize=256)
+def _warn_stale_binding(key_prefix: str, path: str) -> None:
+    """Warn once per (session, path): this runs on the request path, where a stale binding
+    would otherwise repeat on every request. Only a key prefix is logged — the full key is
+    a routing token."""
+    logger.warning(
+        "session %s… is bound to %s, which no longer exists; serving the default workspace "
+        "instead (the binding is kept — nothing is deleted)", key_prefix, path)
+
+
 def resolve(session_key: str | None) -> WorkspaceContext:
     """Resolve a request's ``WorkspaceContext`` from its session key.
 
     Bound session → its bound path; unbound/unknown → the process default
-    (§ session-registry §5 UNBOUND).
+    (§ session-registry §5 UNBOUND). A binding is durable (it outlives a restart), so its
+    folder can be gone by the time a session returns — a clone reaped by hand, a removed
+    catalog path. That session is then served as *unbound*, exactly as it was before
+    bindings survived restarts (re-materializing the source is the ``WorkspaceStore``'s
+    job, plan Phase 2); the binding itself is kept.
     """
     entry = session_registry.get(session_key)
-    ws_root = entry.source_path if entry is not None else _default_ws_root()
-    return WorkspaceContext(ws_root=ws_root, session_key=session_key)
+    if entry is not None:
+        try:
+            usable = entry.source_path.is_dir()
+        except OSError:  # e.g. EACCES on a parent: unusable either way, never a 500
+            usable = False
+        if usable:
+            return WorkspaceContext(ws_root=entry.source_path, session_key=session_key)
+        _warn_stale_binding((session_key or "")[:8], str(entry.source_path))
+    return WorkspaceContext(ws_root=_default_ws_root(), session_key=session_key)

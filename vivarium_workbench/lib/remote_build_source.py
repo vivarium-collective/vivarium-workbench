@@ -185,15 +185,19 @@ def materialize_session_build(
     its own existing clone, same as ``materialize_build``'s reuse-by-commit).
 
     KNOWN FOLLOW-UP (not this function's job): nothing ever deletes a session's
-    clone once ``session_registry`` forgets that session (drop / in-memory-only
-    state lost on restart) — every switch is a net-new directory under
-    ``sessions/<key>/`` that outlives the binding that created it. On the old
-    ephemeral cache this was harmless (a pod restart wiped it anyway, a crude
-    accidental GC); once ``build_cache_root()`` is durable (see its docstring)
-    that accidental GC is gone, so orphaned per-session clones now accumulate
-    for real. Not fixed here — a real eviction policy (age? last-access? tied to
-    ``session_registry.drop``?) is its own scoped decision, not an improvised
-    TTL bolted on as a side effect of the storage-location fix. Worth watching
+    clone — every switch is a net-new directory under ``sessions/<key>/`` that
+    outlives the binding that created it. Once ``build_cache_root()`` is durable
+    (see its docstring) the old "a pod restart wipes it" cleanup is gone — it was only
+    ever a crude accidental GC on the old ephemeral cache — so orphaned per-session
+    clones accumulate for real (#1142). ``session_registry`` now persists its
+    ``session_key → source`` map as well, so a binding outlives a restart along with
+    the clone it points at.
+    Not fixed here — and any eviction policy is GATED on
+    ``WorkspaceStore.persist()`` (#944): a clone can hold a session's only copy of
+    unpushed study/investigation YAML, so reaping it without ``persist`` destroys
+    real work. When that policy is written, derive "orphaned" from
+    ``session_registry``'s persisted ``last_seen``, never from process state
+    (``replicas: 1`` + ``Recreate`` resets it on every rollout). Worth watching
     against the PVC's 20Gi request if usage grows.
     """
     session_key = _safe_session_key(session_key)

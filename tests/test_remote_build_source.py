@@ -119,7 +119,12 @@ class _FakeClient:
 
 @pytest.fixture
 def _cache(tmp_path, monkeypatch):
-    monkeypatch.setenv("VIVARIUM_DASHBOARD_BUILD_CACHE", str(tmp_path / "bc"))
+    # The canonical name, on purpose: conftest's session-wide isolation default
+    # (`_isolate_build_cache`) sets it, and it outranks the deprecated alias in
+    # env_compat.get_env — so an alias override here would be silently shadowed and
+    # every test would share one cache dir. The alias itself is covered explicitly by
+    # test_build_cache_root_still_honors_the_deprecated_alias.
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BUILD_CACHE", str(tmp_path / "bc"))
     return tmp_path
 
 
@@ -330,14 +335,29 @@ def test_materialize_session_build_symlinked_content_stays_isolated(_cache, tmp_
 def test_build_cache_root_honors_new_prefix_env_var(tmp_path, monkeypatch):
     """The actual production knob (`VIVARIUM_WORKBENCH_BUILD_CACHE` — the
     kustomize env var the deployment-side fix sets) resolves correctly and
-    without the deprecated-alias warning. Every other test in this file only
-    ever exercises the OLD `VIVARIUM_DASHBOARD_BUILD_CACHE` alias via the
-    `_cache` fixture; this closes that gap directly."""
+    without the deprecated-alias warning. (Until the `_cache` fixture moved to
+    this name, every other test in this file only ever exercised the OLD
+    `VIVARIUM_DASHBOARD_BUILD_CACHE` alias; that alias is covered separately
+    below.)"""
     target = tmp_path / "durable-build-cache"
     monkeypatch.setenv("VIVARIUM_WORKBENCH_BUILD_CACHE", str(target))
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
         assert rbs.build_cache_root() == target  # raises if the deprecated path fires
+
+
+def test_build_cache_root_still_honors_the_deprecated_alias(tmp_path, monkeypatch):
+    """The deprecated ``VIVARIUM_DASHBOARD_BUILD_CACHE`` keeps working — with a
+    DeprecationWarning — when the canonical name is unset. Every test in this file
+    used to exercise it implicitly through the old `_cache` fixture."""
+    from vivarium_workbench.lib import env_compat
+
+    target = tmp_path / "legacy-build-cache"
+    monkeypatch.delenv("VIVARIUM_WORKBENCH_BUILD_CACHE", raising=False)
+    monkeypatch.setenv("VIVARIUM_DASHBOARD_BUILD_CACHE", str(target))
+    monkeypatch.setattr(env_compat, "_warned", set())  # the warning fires once per process
+    with pytest.warns(DeprecationWarning, match="VIVARIUM_DASHBOARD_BUILD_CACHE"):
+        assert rbs.build_cache_root() == target
 
 
 def test_materialize_build_survives_simulated_pod_restart(tmp_path, monkeypatch):
