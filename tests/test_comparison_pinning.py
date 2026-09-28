@@ -22,7 +22,7 @@ class FakeClient:
         self._statuses = statuses or {}
         self.status_calls: list[int] = []
 
-    def list_simulators(self):
+    def list_simulators(self, branch_lookup=False):
         return {"versions": self._versions}
 
     def simulator_status(self, simulator_id):

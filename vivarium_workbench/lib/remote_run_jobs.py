@@ -149,7 +149,9 @@ def _poll(get_status: Callable[[], dict], terminal: set[str], interval: float, t
         time.sleep(interval)
 
 
-_TERMINAL_OK = {"completed", "done", "succeeded"}
+# "ready" is an environment's terminal-OK status (/viva/v1/environments, W2):
+# without it a build poll against a W2 server never ends.
+_TERMINAL_OK = {"completed", "done", "succeeded", "ready"}
 _TERMINAL_BAD = {"failed", "cancelled", "error"}
 
 

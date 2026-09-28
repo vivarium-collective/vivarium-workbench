@@ -220,6 +220,114 @@ def _has_successor(logical: str) -> bool:
     return logical.startswith((_COMPOSE_PREFIX + "/", _ENV_WORKER_PREFIX + "/"))
 
 
+#: ``viva-v1-environments``: ``GET /viva/v1/environments[/{id}]`` answers (W2).
+CAPABILITY_VIVA_V1_ENVIRONMENTS = "viva-v1-environments"
+#: ``viva-v1-environments-build``: ``POST /viva/v1/environments`` can select or build (W2).
+#: Its own name: a deployment may serve the reads without a build path.
+CAPABILITY_VIVA_V1_ENVIRONMENTS_BUILD = "viva-v1-environments-build"
+
+#: Environment statuses (``/viva/v1/environments``). A build is ready only when
+#: EVERY variant row of it is (a vEcoli build has three: ``arm64``, ``amd64``,
+#: ``amd64-submit``).
+_ENV_READY = "ready"
+_ENV_FAILED = "failed"
+_ENV_BUILDING = "building"
+_ENV_PENDING = "pending"
+
+#: One page of ``GET /viva/v1/environments`` (the server's maximum), and how many
+#: pages a full listing may take before it stops (a runaway guard, not a limit
+#: anyone should reach: dev held 286 rows on 2026-09-27).
+_ENV_PAGE = 200
+_ENV_MAX_PAGES = 25
+
+#: Environment ids a POST on THIS process returned, by (base_url, simulator id), so
+#: a status poll asks for exactly those rows (``GET /viva/v1/environments/{id}``).
+#: Bounded; a miss just means the status poll finds the rows by listing instead.
+_ENV_IDS: "dict[tuple[str, int], list[str]]" = {}
+_ENV_IDS_MAX = 512
+
+
+def _remember_environment_ids(base_url: str, simulator_id: int, ids: "list[str]") -> None:
+    if not ids:
+        return
+    if len(_ENV_IDS) >= _ENV_IDS_MAX:
+        _ENV_IDS.pop(next(iter(_ENV_IDS)))
+    _ENV_IDS[(base_url, simulator_id)] = list(ids)
+
+
+def environments_as_simulators(rows: "list[dict]") -> "list[dict]":
+    """``/viva/v1/environments`` rows in the ``/core/v1/simulator/versions`` shape.
+
+    The one conversion W2 rests on (vivarium-workbench#1150, the W2 brief):
+    everything downstream -- ``_build_id``, ``_scope_build_ids``,
+    ``simulator_commit``, the build dropdown -- reads ``database_id``, and an
+    environment record has none. Left unconverted, ``_build_id`` would return
+    the record's own ``id``: the ENVIRONMENT id, which passed to
+    ``run_simulation`` names the wrong simulator. So each row becomes the
+    legacy record it belongs to:
+
+    ``database_id = legacy_simulator_id``, ``git_repo_url = repo_url``,
+    ``git_commit_hash = commit``, ``created_at``, ``temporary``, ``label``.
+
+    A row with a null ``legacy_simulator_id`` is skipped (nothing in the
+    workbench can address it). Rows are grouped by simulator -- one entry per
+    build, in first-seen order (the listing is newest first) -- and each entry
+    carries its rows' ``environment_ids``. There is NO ``git_branch``: an
+    environment stores none, which is why branch lookups do not use this.
+    """
+    out: "dict[int, dict]" = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lid = row.get("legacy_simulator_id")
+        if lid is None:
+            continue
+        lid = int(lid)
+        entry = out.get(lid)
+        if entry is None:
+            entry = out[lid] = {
+                "database_id": lid,
+                "git_repo_url": row.get("repo_url"),
+                "git_commit_hash": row.get("commit"),
+                "created_at": row.get("created_at"),
+                "temporary": bool(row.get("temporary")),
+                "label": row.get("label"),
+                "environment_ids": [],
+            }
+        if row.get("id") is not None:
+            entry["environment_ids"].append(str(row["id"]))
+    return list(out.values())
+
+
+def environment_build_status(rows: "list[dict]") -> str:
+    """One build's status from its variant rows: ``failed`` if any failed,
+    ``ready`` only if all are ready, ``building`` if any is, else ``pending``."""
+    statuses = {str(r.get("status") or "").lower() for r in rows if isinstance(r, dict)}
+    if _ENV_FAILED in statuses:
+        return _ENV_FAILED
+    if statuses and statuses == {_ENV_READY}:
+        return _ENV_READY
+    if _ENV_BUILDING in statuses or _ENV_READY in statuses:
+        return _ENV_BUILDING
+    return _ENV_PENDING
+
+
+class BranchHeadUnresolved(SmsApiError):
+    """The server could not say which commit a branch's head is."""
+
+
+def register_branch_head_legacy(client: "Any", repo_url: str, branch: str) -> dict:
+    """The pre-W2 head register: ``latest_simulator`` for the head's commit, then
+    ``register_simulator``. Module-level so a stand-in client can reuse it."""
+    latest = client.latest_simulator(repo_url, branch)
+    commit = latest.get("git_commit_hash") or ""
+    if not commit:
+        raise BranchHeadUnresolved("could not resolve branch HEAD via sms-api")
+    reg = dict(client.register_simulator(repo_url, branch, commit) or {})
+    reg["git_commit_hash"] = commit
+    return reg
+
+
 class SmsApiClient:
     def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 30.0,
                  max_retries: int = _GET_RETRIES, *, force_link: bool = False) -> None:
@@ -385,13 +493,58 @@ class SmsApiClient:
                 raise SmsApiError(f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
 
     def latest_simulator(self, repo_url: str, branch: str) -> dict:
+        """GET /core/v1/simulator/latest -- legacy only; see :meth:`register_branch_head`."""
         return self._get("/core/v1/simulator/latest", {"git_branch": branch, "git_repo_url": repo_url})
 
     def register_simulator(self, repo_url: str, branch: str, commit: str) -> dict:
-        """POST /core/v1/simulator/upload — register a repo@commit build (async image build)."""
-        return self._post("/core/v1/simulator/upload", json_body={
+        """Register a repo@commit build (async image build). See :meth:`upload_simulator`."""
+        return self.upload_simulator({
             "git_repo_url": repo_url, "git_branch": branch, "git_commit_hash": commit,
         })
+
+    def register_branch_head(self, repo_url: str, branch: str) -> dict:
+        """Register the build at ``branch``'s current head; returns the legacy shape
+        (``database_id``, ``git_commit_hash`` = the commit the head resolved to).
+
+        With ``viva-v1-environments-build`` this is ONE call --
+        ``POST /viva/v1/environments {repo_url, branch}`` with no ``commit``: the
+        server resolves the head and says which commit it used. Without it, the
+        legacy pair: ``GET /core/v1/simulator/latest`` for the head, then the
+        upload. Raises :class:`SmsApiError` when the head does not resolve.
+        """
+        if CAPABILITY_VIVA_V1_ENVIRONMENTS_BUILD in self._server_capabilities():
+            created = self._create_environment(repo_url=repo_url, branch=branch, commit=None, force=False)
+            if created is not None:
+                return created
+        return register_branch_head_legacy(self, repo_url, branch)
+
+    def _create_environment(self, *, repo_url: str, branch: "str | None", commit: "str | None",
+                            force: bool) -> "dict | None":
+        """``POST /viva/v1/environments`` (select-or-build), answered in the legacy
+        ``SimulatorVersion`` shape the callers read. ``None`` when the answer names
+        no simulator (``legacy_simulator_id`` null -- e.g. ready rows selected that
+        were never linked to one): the caller then takes the legacy route, which
+        the server serves through the same builder (viva-api P5-8)."""
+        body: dict = {"repo_url": repo_url, "force": bool(force)}
+        if commit:
+            body["commit"] = commit
+        if branch:
+            body["branch"] = branch
+        resp = self._post("/viva/v1/environments", json_body=body)
+        lid = resp.get("legacy_simulator_id")
+        if lid is None:
+            return None
+        rows = [r for r in (resp.get("environments") or []) if isinstance(r, dict)]
+        env_ids = [str(r["id"]) for r in rows if r.get("id") is not None]
+        _remember_environment_ids(self.base_url, int(lid), env_ids)
+        return {
+            "database_id": int(lid),
+            "git_repo_url": repo_url,
+            "git_commit_hash": resp.get("commit") or commit,
+            "git_branch": branch,
+            "selected": bool(resp.get("selected")),
+            "environment_ids": env_ids,
+        }
 
     # -- env workers (REFACTOR-PLAN §2A.8, #942) ----------------------------
     # The workbench cannot create Jobs (§2B.2 gives it no cluster access), so it
@@ -479,21 +632,95 @@ class SmsApiClient:
         return self._get(f"/env-worker/v1/tasks/{task_id}")
 
     def simulator_status(self, simulator_id: int) -> dict:
-        return self._get("/core/v1/simulator/status", {"simulator_id": simulator_id})
+        """A simulator build's status, in the legacy ``HpcRun``-ish shape
+        (``status``, ``error_message``).
 
-    def list_simulators(self) -> dict:
-        """GET /core/v1/simulator/versions — all registered simulator builds."""
-        return self._get("/core/v1/simulator/versions")
+        With ``viva-v1-environments``: the build's environment rows -- by the ids
+        this process's own POST returned (``GET /viva/v1/environments/{id}``), else
+        by listing ``?legacy_simulator_id=`` -- aggregated across every variant
+        (:func:`environment_build_status`: ``ready`` only when all are). The
+        listing is re-checked client-side: a server that predates that filter
+        ignores it and answers the unfiltered list, so only rows that really
+        carry this id count. No rows (a SLURM build has none; an old server's
+        unfiltered page may miss an old build) -> the legacy call. An environment
+        carries no error text, so a ``failed`` build asks the legacy status for
+        its ``error_message``, best effort, while that route lasts.
+        """
+        sid = int(simulator_id)
+        if CAPABILITY_VIVA_V1_ENVIRONMENTS in self._server_capabilities():
+            rows = self._environment_rows_for(sid)
+            if rows:
+                status = environment_build_status(rows)
+                out: dict = {"status": status, "error_message": None, "database_id": sid,
+                             "environments": rows}
+                if status == _ENV_FAILED:
+                    try:
+                        legacy = self._get("/core/v1/simulator/status", {"simulator_id": sid})
+                        out["error_message"] = legacy.get("error_message")
+                    except SmsApiError:
+                        pass
+                return out
+        return self._get("/core/v1/simulator/status", {"simulator_id": sid})
+
+    def _environment_rows_for(self, simulator_id: int) -> "list[dict]":
+        known = _ENV_IDS.get((self.base_url, simulator_id))
+        if known:
+            return [self._get(f"/viva/v1/environments/{eid}") for eid in known]
+        page = self._get("/viva/v1/environments", {
+            "legacy_simulator_id": simulator_id, "temporary": "any", "limit": _ENV_PAGE,
+        })
+        rows = [r for r in (page.get("environments") or [])
+                if isinstance(r, dict) and r.get("legacy_simulator_id") == simulator_id]
+        return rows
+
+    def list_simulators(self, *, branch_lookup: bool = False) -> dict:
+        """All registered simulator builds, as ``{"versions": [SimulatorVersion-shaped]}``.
+
+        With ``viva-v1-environments`` (and ``branch_lookup`` false): every page of
+        ``GET /viva/v1/environments?temporary=any`` (temporaries included, as the
+        legacy listing includes them; each entry carries ``temporary``/``label``),
+        converted by :func:`environments_as_simulators`. Otherwise
+        ``GET /core/v1/simulator/versions``.
+
+        ``branch_lookup=True`` always takes the legacy route, because it is the
+        only listing that carries ``git_branch``: an environment stores no branch,
+        and the server's ``?repo_url=&branch=`` filter (viva-api#901, 0.9.166) is
+        silently ignored by an older server -- with no capability to tell the
+        two apart, a filtered answer cannot be trusted. Callers that match on a
+        branch (``resolve_pinned_build``, ``comparison_pinning`` for a branch ref,
+        the build dropdown's branch column) pass it.
+        """
+        if branch_lookup or CAPABILITY_VIVA_V1_ENVIRONMENTS not in self._server_capabilities():
+            return self._get("/core/v1/simulator/versions")
+        rows: "list[dict]" = []
+        offset: "int | None" = 0
+        for _ in range(_ENV_MAX_PAGES):
+            if offset is None:
+                break
+            page = self._get("/viva/v1/environments", {
+                "temporary": "any", "limit": _ENV_PAGE, "offset": offset,
+            })
+            rows.extend(r for r in (page.get("environments") or []) if isinstance(r, dict))
+            nxt = page.get("next_offset")
+            offset = int(nxt) if nxt is not None else None
+        return {"versions": environments_as_simulators(rows)}
 
     def capabilities(self) -> dict:
-        """GET /core/v1/capabilities — ``{version, capabilities: [str, ...]}``.
+        """The deployment's capability advertisement: ``{version, capabilities: [str, ...]}``.
 
-        The deployment's capability advertisement (viva-api #262, dual-engine
-        W4/Q5). Clients branch on MEMBERSHIP in ``capabilities``, never on
-        ``version`` (which is for humans/logs). A deployment predating the
-        endpoint 404s — callers use ``lib.server_capabilities.fetch_capabilities``,
-        which maps that to "advertises nothing" per the endpoint's own contract.
+        ``GET /viva/v1/capabilities`` first, then ``GET /core/v1/capabilities``
+        when that 404s (a server that predates core's route) -- both answer the
+        same list, and ``/core/v1/*`` is dated (M3, which waits on this release).
+        Clients branch on MEMBERSHIP in ``capabilities``, never on ``version``
+        (for humans/logs). A deployment predating both 404s -- callers use
+        ``lib.server_capabilities.fetch_capabilities``, which maps that to
+        "advertises nothing" per the endpoint's own contract.
         """
+        try:
+            return self._get("/viva/v1/capabilities")
+        except SmsApiError as e:
+            if e.status != 404:
+                raise
         return self._get("/core/v1/capabilities")
 
     def ping(self, timeout: float | None = None) -> str:
@@ -587,8 +814,8 @@ class SmsApiClient:
 
     def simulator_commit(self, simulator_id: int) -> str | None:
         """Resolve ``simulator_id`` -> the git commit sms-api actually built
-        and ran, from sms-api's OWN simulator registry (``GET
-        /core/v1/simulator/versions``) — never the landing laptop's local
+        and ran, from sms-api's OWN simulator registry (:meth:`list_simulators`:
+        ``/viva/v1/environments`` or ``/core/v1/simulator/versions``) — never the landing laptop's local
         checkout (that mismatch was the P1-11 "partly wrong" finding, audit
         §3.9). ``None`` (not raised) when the id can't be resolved — e.g. an
         old/pruned registry — since this is best-effort provenance and must
@@ -647,6 +874,28 @@ class SmsApiClient:
             raise SmsApiError(f"POST {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
 
     def upload_simulator(self, simulator: dict, force: bool = False) -> dict:
+        """Register (select-or-build) ``simulator`` = ``{git_repo_url, git_branch,
+        git_commit_hash}``; returns the legacy ``SimulatorVersion`` shape, whose
+        ``database_id`` is the simulator id every later call takes.
+
+        With ``viva-v1-environments-build``: ``POST /viva/v1/environments
+        {repo_url, commit, branch, force}`` -- 200 selected (already ready, nothing
+        built) or 202 sent to the builder; ``force`` against a built or building
+        one is a 409 (write-once, D11). Otherwise, or when that answer names no
+        simulator: ``POST /core/v1/simulator/upload``.
+        """
+        if CAPABILITY_VIVA_V1_ENVIRONMENTS_BUILD in self._server_capabilities():
+            created = self._create_environment(
+                repo_url=str(simulator.get("git_repo_url") or ""),
+                branch=simulator.get("git_branch") or None,
+                commit=simulator.get("git_commit_hash") or None,
+                force=force,
+            )
+            if created is not None:
+                return created
+        return self._legacy_upload(simulator, force=force)
+
+    def _legacy_upload(self, simulator: dict, force: bool = False) -> dict:
         params = {"force": "true"} if force else None
         return self._post("/core/v1/simulator/upload", params=params, json_body=simulator)
 

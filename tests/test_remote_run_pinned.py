@@ -54,7 +54,7 @@ class _FakeClient:
     def __init__(self, versions=None) -> None:
         self._versions = versions if versions is not None else _VERSIONS
 
-    def list_simulators(self):
+    def list_simulators(self, branch_lookup=False):
         return self._versions
 
 
@@ -360,7 +360,7 @@ def test_resolve_pinned_simulator_id_none_when_sms_api_unreachable(tmp_path, mon
     from vivarium_workbench.lib.sms_api_client import SmsApiError
 
     class _BoomClient:
-        def list_simulators(self):
+        def list_simulators(self, branch_lookup=False):
             raise SmsApiError("GET ... failed: connection refused")
 
     monkeypatch.setattr(

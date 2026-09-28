@@ -4384,6 +4384,10 @@ class TestSourceBuildRemoteRoute:
             def __init__(self, base=None):
                 pass
 
+            def register_branch_head(self, repo, branch):
+                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                return register_branch_head_legacy(self, repo, branch)
+
             def latest_simulator(self, repo, branch):
                 return {"git_commit_hash": ""}
 
@@ -4400,6 +4404,10 @@ class TestSourceBuildRemoteRoute:
             def __init__(self, base=None):
                 pass
 
+            def register_branch_head(self, repo, branch):
+                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                return register_branch_head_legacy(self, repo, branch)
+
             def latest_simulator(self, repo, branch):
                 raise SmsApiError("boom")
 
@@ -4414,6 +4422,10 @@ class TestSourceBuildRemoteRoute:
         class _Client:
             def __init__(self, base=None):
                 pass
+
+            def register_branch_head(self, repo, branch):
+                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                return register_branch_head_legacy(self, repo, branch)
 
             def latest_simulator(self, repo, branch):
                 return {"git_commit_hash": "c0ffee"}

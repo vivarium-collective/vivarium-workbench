@@ -110,7 +110,7 @@ class _FakeClient:
         shutil.copy(self._src, dest)
         return dest
 
-    def list_simulators(self):
+    def list_simulators(self, branch_lookup=False):
         return {"versions": [
             {"database_id": 45, "git_repo_url": "https://github.com/org/v2ecoli",
              "git_commit_hash": "32b901", "git_branch": "main", "created_at": "2026-06-18T00:00:00"},
@@ -396,7 +396,7 @@ def test_list_build_sources_maps_and_labels():
 
 def test_list_build_sources_degrades_on_error():
     class _Boom:
-        def list_simulators(self):
+        def list_simulators(self, branch_lookup=False):
             from vivarium_workbench.lib.sms_api_client import SmsApiError
             raise SmsApiError("tunnel down")
     out = rbs.list_build_sources(_Boom())
@@ -581,7 +581,7 @@ def test_list_build_sources_marks_cached(tmp_path, monkeypatch):
     (tmp_path / "sim210-9102846").mkdir()
 
     class _Client:
-        def list_simulators(self):
+        def list_simulators(self, branch_lookup=False):
             return {"versions": [
                 {"database_id": 210, "git_commit_hash": "9102846", "git_repo_url": "https://github.com/x/sms-ecoli.git", "git_branch": "main"},
                 {"database_id": 211, "git_commit_hash": "33ecd77", "git_repo_url": "https://github.com/x/sms-ecoli.git", "git_branch": "main"},

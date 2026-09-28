@@ -934,8 +934,16 @@ def test_the_terminal_sets_match_sms_apis_real_status_vocabulary():
     TERMINAL status would read as permanently running until it is added here.
     So this set has to be updated together with sms-api's, not after it.
     """
-    assert rrv._TERMINAL_OK == {"completed", "done", "succeeded"}
+    # "ready" is an environment's terminal-OK status (/viva/v1/environments,
+    # W2, vivarium-workbench#1150); an environment's "failed" is already here.
+    assert rrv._TERMINAL_OK == {"completed", "done", "succeeded", "ready"}
     assert rrv._TERMINAL_BAD == {"failed", "cancelled", "error"}
+
+
+def test_status_build_ready_environment_maps_to_built(monkeypatch):
+    _bind_status_client(monkeypatch, build_status={"status": "ready"})
+    body, status = rrv.remote_run_status({"simulator_id": 66})
+    assert status == 200 and body["phase"] == "built"
 
 
 def test_status_run_queued_maps_to_queued(monkeypatch):

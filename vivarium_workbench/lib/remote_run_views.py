@@ -50,7 +50,9 @@ from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 # never arrive, and a set that lists states the API cannot produce invites the
 # reader to believe it can. If a partial-run status ever genuinely lands, add
 # it back together with the sms-api change that produces it.
-_TERMINAL_OK = {"completed", "done", "succeeded"}
+# "ready" is an environment's terminal-OK status (/viva/v1/environments, W2):
+# without it a build poll against a W2 server never ends.
+_TERMINAL_OK = {"completed", "done", "succeeded", "ready"}
 _TERMINAL_BAD = {"failed", "cancelled", "error"}
 
 # Real completion signal now exists (GET /api/v1/analyses/{id}/status, S3-exists

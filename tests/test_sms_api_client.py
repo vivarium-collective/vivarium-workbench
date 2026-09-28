@@ -438,7 +438,9 @@ def test_post_is_never_retried_on_5xx(monkeypatch):
     calls = {"n": 0}
 
     def fake_urlopen(req, timeout=None):
-        calls["n"] += 1
+        # the capability probe (a GET, which may be retried) is not the submit
+        if req.get_method() == "POST":
+            calls["n"] += 1
         raise HTTPError(req.full_url, 503, "Service Unavailable", {}, io.BytesIO(b""))
 
     monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)

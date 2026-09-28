@@ -34,7 +34,7 @@ from vivarium_workbench.lib.remote_build_source import (
     materialize_build,
     materialize_session_build,
 )
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench.lib.sms_api_client import BranchHeadUnresolved, SmsApiClient, SmsApiError
 from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 
@@ -71,13 +71,16 @@ def build_remote(body: dict) -> tuple[dict, int]:
     repo = _normalize_repo_url(repo)
     client = SmsApiClient(_sms_api_base())
     try:
-        latest = client.latest_simulator(repo, branch)
-        commit = latest.get("git_commit_hash") or ""
-        if not commit:
-            return {"error": "could not resolve branch HEAD via sms-api"}, 502
-        reg = client.register_simulator(repo, branch, commit)
+        # One call on a server advertising viva-v1-environments-build (it resolves
+        # the head itself); the latest + register pair otherwise (W2).
+        reg = client.register_branch_head(repo, branch)
+    except BranchHeadUnresolved:
+        return {"error": "could not resolve branch HEAD via sms-api"}, 502
     except SmsApiError as e:
         return {"error": f"sms-api: {e}"}, 502
+    commit = reg.get("git_commit_hash") or ""
+    if not commit:
+        return {"error": "could not resolve branch HEAD via sms-api"}, 502
     return (
         {"ok": True, "simulator_id": reg.get("database_id"),
          "repo": repo, "branch": branch, "commit": commit},

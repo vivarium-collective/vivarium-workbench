@@ -26,7 +26,8 @@ from vivarium_workbench.lib.sms_api_client import (
 )
 
 BOTH = frozenset({CAPABILITY_VIVA_V1_SURFACE, CAPABILITY_VIVA_V1_WORKERS})
-CAPS_PATH = "/core/v1/capabilities"
+#: Both capability routes: /viva/v1 first, /core/v1 when that 404s (W2).
+CAPS_PATHS = ("/viva/v1/capabilities", "/core/v1/capabilities")
 
 
 class _Resp(io.BytesIO):
@@ -54,13 +55,14 @@ class FakeServer:
 
     def __call__(self, req, timeout=None):
         path = urlsplit(req.full_url).path
-        if path == CAPS_PATH:
+        if path in CAPS_PATHS:
             self.probes += 1
-            if self.caps == 404:
+            if self.caps == 404 or (self.caps == "core-only" and path == CAPS_PATHS[0]):
                 raise HTTPError(req.full_url, 404, "nf", {}, io.BytesIO(b'{"detail":"Not Found"}'))
             if self.caps == "down":
                 raise URLError("connection refused")
-            return _Resp({"version": "test", "capabilities": list(self.caps)})
+            names = [CAPABILITY_VIVA_V1_SURFACE] if self.caps == "core-only" else list(self.caps)
+            return _Resp({"version": "test", "capabilities": names})
         self.requests.append((req.get_method(), path))
         if path.endswith("/results"):
             return _Resp(b"\x1f\x8bfake")
@@ -123,7 +125,7 @@ def test_capability_absent_keeps_the_legacy_path(monkeypatch, tmp_path, name, ca
 
 @pytest.mark.parametrize("name,call,method,legacy,new,cap", OPS, ids=IDS)
 def test_endpoint_missing_404_keeps_the_legacy_path(monkeypatch, tmp_path, name, call, method, legacy, new, cap):
-    """A deployment that predates GET /core/v1/capabilities advertises nothing."""
+    """A deployment that predates both capability routes advertises nothing."""
     server = FakeServer(monkeypatch, caps=404)
     call(SmsApiClient("http://h:8080"), tmp_path)
     assert server.requests == [(method, legacy)]
@@ -188,7 +190,7 @@ def test_advertisement_refreshed_after_ttl(monkeypatch):
 
 @pytest.mark.parametrize("call,path", [
     (lambda c: c.simulation_status(5), "/api/v1/simulations/5/status"),
-    (lambda c: c.list_simulators(), "/core/v1/simulator/versions"),
+    (lambda c: c.list_build_simulations(3), "/api/v1/simulations"),
     (lambda c: c.analysis_status(7), "/api/v1/analyses/7/status"),
     (lambda c: c._get("/api/v1/simulations/discovery"), "/api/v1/simulations/discovery"),
 ])
@@ -226,3 +228,12 @@ def test_surface_alone_does_not_move_env_worker_ops():
 def test_removed_dead_ops_are_gone():
     for name in ("observables", "compose_check", "cancel_env_worker_task"):
         assert not hasattr(SmsApiClient, name), name
+
+
+def test_capabilities_read_from_core_v1_when_viva_v1_route_is_missing(monkeypatch):
+    """A server with /core/v1/capabilities but no /viva/v1/capabilities (before
+    viva-api 0.9.157) is still read -- by the second route."""
+    server = FakeServer(monkeypatch, caps="core-only")
+    SmsApiClient("http://h:8080").compose_status(1)
+    assert server.requests == [("GET", "/viva/v1/compose/simulation/1/status")]
+    assert server.probes == 2  # /viva/v1 (404), then /core/v1

@@ -314,7 +314,9 @@ def list_build_sources(client: Any) -> dict:
     unreachable so the dropdown degrades to Local-only.
     """
     try:
-        data = client.list_simulators()
+        # branch_lookup: the dropdown shows each build's branch, which only the
+        # legacy listing carries (W2 -- an environment stores no branch).
+        data = client.list_simulators(branch_lookup=True)
     except SmsApiError as e:
         return {"builds": [], "error": str(e)}
     builds = []

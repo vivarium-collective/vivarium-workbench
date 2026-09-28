@@ -207,7 +207,9 @@ def resolve_pinned_build(client: SmsApiClient, repo_url: str, branch: str) -> di
     keeping this to one GET is what makes Phase 1 instant.)
     """
     want_repo = _normalize_repo(repo_url)
-    versions = (client.list_simulators() or {}).get("versions") or []
+    # branch_lookup: the only listing that carries git_branch (W2 -- an
+    # environment stores no branch; see SmsApiClient.list_simulators).
+    versions = (client.list_simulators(branch_lookup=True) or {}).get("versions") or []
     matches = [
         v
         for v in versions

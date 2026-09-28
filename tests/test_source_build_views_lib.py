@@ -12,6 +12,7 @@ import json
 import pytest
 
 from vivarium_workbench.lib import _root
+from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
 from vivarium_workbench.lib import active_workspace
 from vivarium_workbench.lib import source_build_views
 from vivarium_workbench.lib.sms_api_client import SmsApiError
@@ -45,6 +46,10 @@ class _FakeClient:
     def register_simulator(self, repo, branch, commit):
         self.register_args = (repo, branch, commit)
         return self._reg
+
+    def register_branch_head(self, repo, branch):
+        # the legacy (no viva-v1-environments-build) composition, over the canned calls above
+        return register_branch_head_legacy(self, repo, branch)
 
 
 def test_build_remote_missing_repo_or_branch_400():
