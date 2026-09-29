@@ -28,9 +28,12 @@ async def ai_save_credentials(body: AiCredentialsRequest, mode: StorageMode,
     ai_auth.require_chat()
     api_key, base_url = ai_auth.validate_request(
         body.provider, body.api_key, body.base_url, mode=mode)
-    # A key-less save (bedrock, or a key-less openai-compatible endpoint) checks
-    # whatever the environment/store would supply, so the check still means
-    # "this exact configuration answers".
+    # Re-saving an openai-compatible endpoint without retyping the key keeps the
+    # saved key (the form never shows it) instead of silently dropping it.
+    if body.provider == "openai-compatible" and api_key is None:
+        existing = ai_auth.get_credential(body.provider, mode=mode, session=session)
+        if existing and existing.source in ("keyring", "memory"):
+            api_key = existing.api_key
     cred = ai_auth.Credential(api_key, base_url, "memory")
     if body.provider == "bedrock":
         got = ai_auth.get_credential("bedrock", mode=mode, session=session)

@@ -19,12 +19,16 @@ See ``docs/ai-chat.md``.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI
-from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, ToolDenied
+# pydantic-ai prints a banner (with an ad) on import; keep server logs clean.
+os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
+
+from fastapi import FastAPI  # noqa: E402
+from pydantic_ai import Agent, capture_run_messages, DeferredToolRequests, DeferredToolResults, ToolDenied
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
@@ -86,24 +90,41 @@ class Turn:
     secrets: tuple[str, ...] = ()
 
     async def frames(self) -> AsyncIterator[dict[str, Any]]:
+        executed_tool = False
+        failed = False
         try:
-            manifest = await _manifest(self.deps)
-            instructions = f"{SYSTEM_PROMPT}\n{manifest}"
-            async with self.agent.run_stream_events(
-                self.prompt,
-                message_history=self.history or None,
-                deferred_tool_results=self.deferred,
-                instructions=instructions,
-                deps=self.deps,
-                usage_limits=USAGE_LIMITS,
-            ) as stream:
-                async for ev in stream:
-                    for frame in _frame_for(ev):
-                        yield frame
-        except APIError as e:
-            yield {"type": "error", "error": ai_auth.mask_key(e.message, self.secrets)}
-        except Exception as e:  # noqa: BLE001 — surface, masked; never leak a key
-            yield {"type": "error", "error": ai_auth.mask_key(f"{type(e).__name__}: {e}", self.secrets)}
+            # capture_run_messages() lets a failed turn still hand the browser the
+            # transcript up to the failure (see the checkpoint below).
+            with capture_run_messages() as captured:
+                try:
+                    manifest = await _manifest(self.deps)
+                    instructions = f"{SYSTEM_PROMPT}\n{manifest}"
+                    async with self.agent.run_stream_events(
+                        self.prompt,
+                        message_history=self.history or None,
+                        deferred_tool_results=self.deferred,
+                        instructions=instructions,
+                        deps=self.deps,
+                        usage_limits=USAGE_LIMITS,
+                    ) as stream:
+                        async for ev in stream:
+                            if isinstance(ev, FunctionToolResultEvent):
+                                executed_tool = True
+                            for frame in _frame_for(ev):
+                                yield frame
+                except APIError as e:
+                    failed = True
+                    yield {"type": "error", "error": ai_auth.mask_key(e.message, self.secrets)}
+                except Exception as e:  # noqa: BLE001 — surface, masked; never leak a key
+                    failed = True
+                    yield {"type": "error",
+                           "error": ai_auth.mask_key(f"{type(e).__name__}: {e}", self.secrets)}
+                if failed and executed_tool:
+                    # A tool (possibly an approved mutation) ran before the failure. The
+                    # browser's transcript would otherwise end on a dangling tool call —
+                    # the next prompt is rejected — so checkpoint what really happened.
+                    yield {"type": "done", "pending_approval": False, "incomplete": True,
+                           "messages": ModelMessagesTypeAdapter.dump_python(list(captured), mode="json")}
         finally:
             await self.deps.client.aclose()
 

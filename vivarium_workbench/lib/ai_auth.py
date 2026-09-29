@@ -56,6 +56,9 @@ ENV_KEYS = {
 
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
+# NAT64 prefixes embed an arbitrary IPv4 (incl. 169.254.169.254) in an IPv6 address.
+_NAT64 = (ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("64:ff9b:1::/48"))
+
 # Shapes of provider secrets, plus any bearer token. Exact stored values are
 # scrubbed as well (see mask_key's ``secrets`` argument).
 _SECRET_RE = re.compile(
@@ -100,9 +103,22 @@ def mask_key(text: str, secrets: tuple[str, ...] = ()) -> str:
 # ---------------------------------------------------------------------------
 
 
-def storage_mode(bind_host: str | None) -> StorageMode:
-    """``keyring`` for a loopback bind, ``memory`` for anything else."""
-    return "keyring" if (bind_host or "127.0.0.1") in LOCAL_HOSTS else "memory"
+def storage_mode(bind_host: str | None, *, proxied: bool = False) -> StorageMode:
+    """``keyring`` only for a loopback bind that is NOT behind a proxy/base path.
+
+    Fail closed: an unknown bind (``None`` — e.g. the app imported by another
+    ASGI runner) and any proxied deployment (``--trust-proxy``, ``--allowed-origin``,
+    ``--base-path`` — a loopback bind behind a local reverse proxy serves many
+    users) get per-session memory, never the machine keyring.
+    """
+    return "keyring" if (bind_host in LOCAL_HOSTS and not proxied) else "memory"
+
+
+def server_credentials_allowed() -> bool:
+    """Operator opt-in (``VIVARIUM_WORKBENCH_CHAT_ALLOW_SERVER_CREDENTIALS=1``) to let
+    a *hosted* server's own env/AWS credentials serve every visitor's chat."""
+    from vivarium_workbench.lib.env_compat import get_env
+    return (get_env("CHAT_ALLOW_SERVER_CREDENTIALS", "") or "").strip().lower() in ("1", "true", "yes")
 
 
 _LOCK = Lock()
@@ -182,9 +198,12 @@ def _aws_credentials_present() -> bool:
 
 
 def get_credential(provider: str, *, mode: StorageMode, session: str | None) -> Credential | None:
-    """The credential a chat turn should use: saved first, then the environment."""
+    """The credential a chat turn should use: saved first, then (loopback servers,
+    or hosted ones whose operator opted in) the server's environment / AWS role.
+    A hosted server never lends its own credentials to anonymous sessions by default."""
+    ambient = mode == "keyring" or server_credentials_allowed()
     if provider == "bedrock":
-        return Credential(source="aws") if _aws_credentials_present() else None
+        return Credential(source="aws") if (ambient and _aws_credentials_present()) else None
     if mode == "keyring":
         cred = _keyring_get(provider)
         if cred:
@@ -194,7 +213,7 @@ def get_credential(provider: str, *, mode: StorageMode, session: str | None) -> 
     if cred:
         return cred
     env = ENV_KEYS.get(provider)
-    if env and os.environ.get(env):
+    if ambient and env and os.environ.get(env):
         return Credential(api_key=os.environ[env], source="environment")
     return None
 
@@ -206,16 +225,20 @@ def _check_base_url(url: str, mode: StorageMode) -> str:
     parts = urlsplit(url.strip())
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise APIError(422, "base_url must be an http(s) URL")
+    try:
+        port = parts.port
+    except ValueError:
+        raise APIError(422, "base_url has an invalid port") from None
     if mode == "memory":
         if parts.scheme != "https":
             raise APIError(422, "base_url must be https on a hosted server")
         try:
-            infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+            infos = socket.getaddrinfo(parts.hostname, port or 443, proto=socket.IPPROTO_TCP)
         except OSError as e:
             raise APIError(422, f"base_url host does not resolve: {e}") from e
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
-            if not ip.is_global:
+            if not ip.is_global or any(ip in n for n in _NAT64):
                 raise APIError(422, "base_url must resolve to a public address on a hosted server")
     return url.strip().rstrip("/")
 

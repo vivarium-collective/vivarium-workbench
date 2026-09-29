@@ -123,3 +123,4 @@ The design above shipped as described except:
 - `chat.js` resolves URLs through `DataSource.apiUrl` (hosted base path); the `asset_version` stamp in `lib/report.py` now covers the chat assets.
 - CI test/type jobs and the Docker image install `--extra chat` so the chat tests run rather than skip.
 See [../ai-chat.md](../ai-chat.md) for the shipped design.
+- After the adversarial review: the audit is intent-first and approvals are single-use; the session key is hashed in the audit file; hosted servers don't lend their env/AWS credentials without an operator opt-in; keyring mode requires a loopback `Host` and any proxy flag/base path/unknown bind falls back to memory; the exclusion list also covers workspace listing, PR creation, host installs and binary reads; a failed turn after an approved mutation checkpoints the transcript (`done` with `incomplete: true`).

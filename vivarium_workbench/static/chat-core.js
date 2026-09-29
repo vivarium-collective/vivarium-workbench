@@ -153,6 +153,12 @@
     return { messages: state.transcript, prompt: prompt };
   }
 
+  // Only a fresh-prompt request may be retried. A resume body carries the user's
+  // approvals: re-sending it would re-execute an approved change.
+  function canRetry(body) {
+    return !!body && typeof body.prompt === 'string' && body.deferred_results === undefined;
+  }
+
   function buildResumeRequest(state) {
     var body = { messages: state.transcript, deferred_results: { approvals: state.decisions } };
     state.decisions = {};
@@ -177,6 +183,17 @@
     };
   }
 
+  function validMessage(m) {
+    if (!m || typeof m !== 'object') return false;
+    if (m.role === 'user') return typeof m.text === 'string';
+    if (m.role !== 'assistant' || !Array.isArray(m.parts)) return false;
+    return m.parts.every(function (p) {
+      return p && typeof p === 'object' &&
+        ((p.kind === 'text' || p.kind === 'error' || p.kind === 'notice') ? typeof p.text === 'string'
+          : p.kind === 'tool' ? typeof p.id === 'string' && typeof p.status === 'string' : false);
+    });
+  }
+
   // What is safe/worth keeping in sessionStorage.
   function snapshot(state) {
     return { ui: state.ui, transcript: state.transcript, pending: state.pending, decisions: state.decisions };
@@ -184,7 +201,8 @@
   function restore(saved) {
     var s = newState();
     if (!saved || typeof saved !== 'object') return s;
-    if (Array.isArray(saved.ui)) s.ui = saved.ui;
+    // sessionStorage is user-controllable and unversioned: keep only well-formed messages.
+    if (Array.isArray(saved.ui)) s.ui = saved.ui.filter(validMessage);
     if (Array.isArray(saved.transcript)) s.transcript = saved.transcript;
     if (Array.isArray(saved.pending)) s.pending = saved.pending;
     if (saved.decisions && typeof saved.decisions === 'object') s.decisions = saved.decisions;
@@ -242,7 +260,7 @@
   var api = {
     esc: esc, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
     startResume: startResume, applyFrame: applyFrame, decide: decide,
-    buildPromptRequest: buildPromptRequest, buildResumeRequest: buildResumeRequest,
+    buildPromptRequest: buildPromptRequest, buildResumeRequest: buildResumeRequest, canRetry: canRetry,
     statusLabel: statusLabel, describeApproval: describeApproval, snapshot: snapshot,
     restore: restore, renderMarkdown: renderMarkdown,
   };

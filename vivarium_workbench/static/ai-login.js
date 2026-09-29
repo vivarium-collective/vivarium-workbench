@@ -63,7 +63,7 @@
     var sel = status.selected;
     if (sel && sel.provider === p && !el.model.value) el.model.value = sel.model;
     el.storage.textContent = status.storage_mode === 'keyring'
-      ? 'Keys are stored in your operating-system keyring.'
+      ? 'Keys go to your operating-system keyring (kept in this server\'s memory only if no keyring is available).'
       : 'Hosted server: keys are kept in server memory for this browser session only and are never written to disk.';
     el.save.textContent = configured && !el.key.value && p !== 'bedrock' ? 'Test & save' : 'Save & test';
   }

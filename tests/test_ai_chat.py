@@ -149,7 +149,9 @@ def test_mutation_pauses_then_approve_executes_and_audits(env):
     assert next(f for f in f2 if f["type"] == "tool-result")["content"]["status"] == 200
     assert f2[-1]["pending_approval"] is False
     assert (ws / "studies" / "chat-made" / "study.yaml").is_file()
-    rec = json.loads(ai_tools.audit_path(ws).read_text())
+    lines = [json.loads(x) for x in ai_tools.audit_path(ws).read_text().splitlines()]
+    assert [r["phase"] for r in lines] == ["intent", "result"]
+    rec = lines[-1]
     assert (rec["provider"], rec["model"], rec["method"], rec["path"], rec["status"], rec["approved"]) == (
         "anthropic", "fm", "POST", "/api/study-create", 200, True)
 
@@ -247,6 +249,7 @@ from pathlib import Path  # noqa: E402
 
 _NODE = shutil.which("node")
 _CONTRACT = Path(__file__).parent / "js" / "contract_chat_core.js"
+_CONTRACT_RESUME = Path(__file__).parent / "js" / "contract_chat_resume.js"
 
 
 def _reduce(tmp_path, ndjson, chunk, prior=None):
@@ -272,11 +275,22 @@ def test_client_reducer_consumes_real_frames_through_approve(env, tmp_path, chun
     assert (tool["kind"], tool["status"]) == ("tool", "awaiting")
     assert tool["approval"]["method"] == "POST" and tool["approval"]["body"] == {"name": "chat-made"}
     assert s1["pending"] == [tool["id"]] and s1["transcript"]
-    # the transcript the JS kept is exactly what the server accepts back
-    s1["ui"][1]["parts"][0]["status"] = "running"
-    body = {"messages": s1["transcript"], "deferred_results": {"approvals": {tool["id"]: True}}}
+    # the browser answers the card with the client's OWN decide()/buildResumeRequest();
+    # the body it builds is exactly what the server accepts back
+    st = tmp_path / "state.json"
+    st.write_text(json.dumps(s1))
+    out = subprocess.run([_NODE, str(_CONTRACT_RESUME), str(st), "approve"], capture_output=True,
+                         text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    built = json.loads(out.stdout)
+    assert built["pendingLeft"] == 0
+    body = built["body"]
+    assert body["deferred_results"] == {"approvals": {tool["id"]: True}}
     r2 = client.post("/api/chat/turn", json=body, headers=H)
-    s2 = _reduce(tmp_path, r2.text, chunk, prior={**s1, "pending": []})
+    prior = json.loads(st.read_text())
+    prior["pending"] = []
+    prior["ui"][1]["parts"][0]["status"] = "running"      # what decide() set locally
+    s2 = _reduce(tmp_path, r2.text, chunk, prior=prior)
     parts = s2["ui"][1]["parts"]
     assert parts[0]["status"] == "done" and parts[0]["result"]["status"] == 200
     assert parts[-1] == {"kind": "text", "text": "Done."}

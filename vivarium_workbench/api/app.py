@@ -427,9 +427,25 @@ def get_workspace(request: Request = None) -> Path:
 
 
 def _ai_scope(request: Request) -> "tuple[_ai_auth.StorageMode, str | None]":
-    """Where this request's LLM credentials live (``keyring`` on a loopback bind,
-    ``memory`` otherwise) and the session key that scopes them in memory mode."""
-    mode = _ai_auth.storage_mode(getattr(request.app.state, "bind_host", None))
+    """Where this request's LLM credentials live and the session key that scopes them.
+
+    ``keyring`` only for a loopback bind that is not proxied / under a base path;
+    otherwise per-session ``memory`` (fail closed — see ``ai_auth.storage_mode``).
+    In keyring mode the request's ``Host`` must itself be loopback: the CSRF guard
+    only compares Origin to Host, so a DNS-rebound page (Host == Origin ==
+    attacker's name) would otherwise reach the machine keyring and the LLM spend.
+    """
+    proxied = bool(
+        _csrf.is_trust_proxy_via_env(os.environ)
+        or _csrf.allowed_origins_via_env(os.environ)
+        or getattr(request.app.state, "base_path", "")
+    )
+    mode = _ai_auth.storage_mode(getattr(request.app.state, "bind_host", None), proxied=proxied)
+    if mode == "keyring":
+        from urllib.parse import urlsplit
+        host = urlsplit("//" + (request.headers.get("host") or "")).hostname
+        if host not in _ai_auth.LOCAL_HOSTS:
+            raise APIError(403, "the AI routes are only available from a loopback host (localhost / 127.0.0.1)")
     return mode, _session_key_of(request)
 
 

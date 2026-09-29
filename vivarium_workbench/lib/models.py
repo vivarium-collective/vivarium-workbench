@@ -3527,6 +3527,6 @@ class ChatTurnRequest(BaseModel):
     paused on). The response is an NDJSON stream (see ``lib.ai_chat``).
     """
 
-    messages: list[dict[str, Any]] = Field(default_factory=list)
-    prompt: Optional[str] = None
+    messages: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
+    prompt: Optional[str] = Field(default=None, max_length=20_000)
     deferred_results: Optional[dict[str, Any]] = None

@@ -105,7 +105,8 @@ def stub_llm():
 def _client(bind_host="127.0.0.1"):
     app = appmod.create_app()
     app.state.bind_host = bind_host
-    return TestClient(app)
+    # keyring mode only answers to a loopback Host (DNS-rebinding guard)
+    return TestClient(app, base_url="http://127.0.0.1:8000")
 
 
 def _save(c, base_url, key, **kw):

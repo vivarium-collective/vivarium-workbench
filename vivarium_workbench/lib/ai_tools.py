@@ -18,8 +18,10 @@ See ``docs/ai-chat.md``.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,20 +34,36 @@ from pydantic_ai import ApprovalRequired, RunContext
 
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
-# Operations the model must never see or call. Auth: it would be acting on the
-# user's GitHub identity. AI: it would be editing its own credentials. Downloads:
-# binary/HTML bodies. The path rules cover: workspace/source switching and
-# process start/stop (change what the server is bound to), pushing to remotes,
-# the chat route itself (recursion), and the SSE streams (never terminate).
-EXCLUDED_TAGS = frozenset({"Auth", "AI", "Downloads"})
+# Operations the model must never see or call.
+#   * Auth: it would act on the user's GitHub identity. AI: it would edit its own
+#     credentials.
+#   * Downloads (tag, GET only): binary/HTML bodies. Binary reads tagged elsewhere
+#     are excluded by path below. (Downloads-tagged POSTs, e.g. figures-build, stay.)
+#   * Anything that changes what the server is bound to (workspace/source
+#     switching, other servers' start/stop), writes to a remote or under the
+#     user's remote identity (push, PR creation), or installs/uninstalls software
+#     on the host (arbitrary code execution) — approval on a card is not enough
+#     for those.
+#   * The chat routes themselves (recursion) and the SSE streams (never terminate).
+# Deliberately NOT excluded: local git commits and run launches — approval-gated.
+# NOTE the approval rule is a *verb* test (non-GET), not a side-effect test: a GET
+# handler that writes (e.g. audit-report?rerun=1) runs unapproved. See docs/ai-chat.md.
+EXCLUDED_TAGS = frozenset({"Auth", "AI"})
+EXCLUDED_GET_TAGS = frozenset({"Downloads"})
 EXCLUDED_PATH_PREFIXES = (
     "/api/source/",
-    "/api/workspaces/",
-    "/api/chat",
-    "/api/ai",
+    "/api/workspaces",
+    "/api/chat/",
+    "/api/ai/",
     "/api/events",
 )
-EXCLUDED_PATHS = frozenset({"/api/branch/push", "/api/work-push"})
+EXCLUDED_PATHS = frozenset({
+    "/api/branch/push", "/api/work-push", "/api/work-create-pr",
+    "/api/catalog-install", "/api/catalog-uninstall", "/api/import-install",
+    "/api/system-deps-install",
+    "/api/simulation-run-download", "/api/study-analysis-zip",
+    "/api/composite-run/{run_id}/download",
+})
 
 MAX_RESPONSE_CHARS = 20_000
 MAX_LIST_RESULTS = 40
@@ -73,11 +91,12 @@ def make_client(app: FastAPI) -> httpx.AsyncClient:
     )
 
 
-def is_excluded(path: str, tags: list[str] | tuple[str, ...]) -> bool:
+def is_excluded(path: str, tags: list[str] | tuple[str, ...], method: str = "get") -> bool:
     return (
         path in EXCLUDED_PATHS
         or path.startswith(EXCLUDED_PATH_PREFIXES)
         or bool(EXCLUDED_TAGS.intersection(tags))
+        or (method.lower() == "get" and bool(EXCLUDED_GET_TAGS.intersection(tags)))
     )
 
 
@@ -96,7 +115,7 @@ def build_index(app: FastAPI) -> dict[str, dict[str, Any]]:
             if not op:
                 continue
             tags = op.get("tags") or []
-            if is_excluded(path, tags):
+            if is_excluded(path, tags, method):
                 continue
             oid = op["operationId"]
             index[oid] = {
@@ -142,10 +161,24 @@ def _brief(entry: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Audit
 # ---------------------------------------------------------------------------
+#
+# ``.pbg/ai-actions.jsonl`` is INTENT-FIRST: an ``intent`` line is written (and
+# fsync'd) *before* a mutation is dispatched, a ``result`` line after. So a
+# mutation that runs but whose caller is cancelled (Stop, tab close) is still on
+# record, an unwritable log refuses the change instead of letting it run
+# unaudited, and the intent line doubles as the single-use claim on an approval.
+# The session key is a routing id that scopes hosted credentials, and this file
+# is served by the workspace catch-all — so only a short hash of it is recorded.
+
+_AUDIT_LOCK = threading.Lock()
 
 
 def audit_path(ws_root: Path) -> Path:
     return WorkspacePaths.load(ws_root).pbg / "ai-actions.jsonl"
+
+
+def session_tag(session: str | None) -> str:
+    return hashlib.sha256((session or "").encode()).hexdigest()[:12]
 
 
 def append_audit(ws_root: Path, record: dict[str, Any]) -> None:
@@ -157,6 +190,26 @@ def append_audit(ws_root: Path, record: dict[str, Any]) -> None:
         f.write(json.dumps(record, separators=(",", ":")) + "\n")
         f.flush()
         os.fsync(f.fileno())
+
+
+def _already_executed(ws_root: Path, tool_call_id: str, digest: str) -> bool:
+    path = audit_path(ws_root)
+    if not path.exists():
+        return False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("phase") == "intent" and r.get("tool_call_id") == tool_call_id and r.get("digest") == digest:
+            return True
+    return False
+
+
+def _call_digest(operation_id: str, path: str, query: Any, body: Any) -> str:
+    blob = json.dumps({"op": operation_id, "path": path, "query": query or {}, "body": body},
+                      sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------------
@@ -251,17 +304,45 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
             "summary": e["summary"], "query": query or {}, "body": body,
         })
     headers = {"X-VW-Session": deps.session_key} if deps.session_key else {}
-    resp = await deps.client.request(
-        e["method"], path, params=query or None,
-        json=body if body is not None else None, headers=headers)
+    base = {"session": session_tag(deps.session_key), "provider": deps.provider, "model": deps.model,
+            "tool_call_id": ctx.tool_call_id or "", "operation_id": operation_id,
+            "method": e["method"], "path": path, "approved": True,
+            "digest": _call_digest(operation_id, path, query, body)}
     if e["mutating"]:
-        append_audit(deps.ws_root, {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "session": deps.session_key, "provider": deps.provider, "model": deps.model,
-            "operation_id": operation_id, "method": e["method"], "path": path,
-            "status": resp.status_code, "approved": True,
-        })
-    return _shape(resp)
+        # Claim the approval (single use) and record intent BEFORE dispatching.
+        with _AUDIT_LOCK:
+            if _already_executed(deps.ws_root, base["tool_call_id"], base["digest"]):
+                return {"error": "this approved call was already executed "
+                                 f"(tool_call_id {base['tool_call_id']}); not running it again"}
+            try:
+                append_audit(deps.ws_root, {**base, "phase": "intent",
+                                            "ts": datetime.now(timezone.utc).isoformat()})
+            except OSError as exc:
+                return {"error": f"audit log unavailable ({exc}); refusing to run an unaudited change"}
+    warning = None
+
+    def record_result(status: int | None, outcome: str) -> None:
+        nonlocal warning
+        try:
+            append_audit(deps.ws_root, {**base, "phase": "result", "status": status, "outcome": outcome,
+                                        "ts": datetime.now(timezone.utc).isoformat()})
+        except OSError as exc:
+            warning = f"could not record the result in the audit log: {exc}"
+
+    try:
+        resp = await deps.client.request(
+            e["method"], path, params=query or None,
+            json=body if body is not None else None, headers=headers)
+    except BaseException:                    # incl. CancelledError: the handler may still complete
+        if e["mutating"]:
+            record_result(None, "interrupted")
+        raise
+    if e["mutating"]:
+        record_result(resp.status_code, "completed")
+    out = _shape(resp)
+    if warning:
+        out["audit_warning"] = warning
+    return out
 
 
 TOOLS = [list_operations, describe_operation, call_operation]

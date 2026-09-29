@@ -126,4 +126,23 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(md(''), '');
 }
 
+// ── Retry: a fresh prompt may be retried; a resume (carries approvals) never ──
+{
+  assert.strictEqual(C.canRetry({ messages: [], prompt: 'x' }), true);
+  assert.strictEqual(C.canRetry({ messages: [], deferred_results: { approvals: { a: true } } }), false);
+  assert.strictEqual(C.canRetry(null), false);
+}
+
+// ── corrupted sessionStorage: malformed messages are dropped, never thrown on ──
+{
+  const bad = { ui: [null, 3, { role: 'assistant' }, { role: 'assistant', parts: 'x' },
+    { role: 'assistant', parts: [{ kind: 'tool' }] }, { role: 'user' },
+    { role: 'user', text: 'kept' }, { role: 'assistant', parts: [{ kind: 'text', text: 'ok' }] }],
+    transcript: 'nope', pending: 7, decisions: [] };
+  const s = C.restore(bad);
+  assert.deepStrictEqual(s.ui.map(m => m.role), ['user', 'assistant']);
+  assert.deepStrictEqual(s.transcript, []); assert.deepStrictEqual(s.pending, []);
+  assert.doesNotThrow(() => JSON.stringify(C.snapshot(s)));
+}
+
 console.log('test_chat_core: all passed');

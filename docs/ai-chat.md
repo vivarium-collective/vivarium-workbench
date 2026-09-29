@@ -66,10 +66,33 @@ The in-process client sends no `Origin`, so the CSRF guard's existing rule
 other `POST`.
 
 **Approval.** Every non-GET raises pydantic-ai's `ApprovalRequired` unless the
-call was approved (`ctx.tool_call_approved`). Approved mutations append one line
-to `<workspace>/.pbg/ai-actions.jsonl` — `ts, session, provider, model,
-operation_id, method, path, status, approved` — fsync'd like `lib/event_log`
-(`events.jsonl` can't be used: its schema admits four event types).
+call was approved (`ctx.tool_call_approved`). Approval is **single-use** and the
+audit is **intent-first**: before an approved mutation is dispatched, an `intent`
+line is written to `<workspace>/.pbg/ai-actions.jsonl` (fsync'd, like
+`lib/event_log`; `events.jsonl` can't be used — its schema admits four event
+types) and a `result` line follows (`status`, `outcome: completed | interrupted`).
+Consequences:
+
+- replaying the same approval (same `tool_call_id` + same call) is refused with
+  "already executed" — a duplicated tab or a stale approval card can't re-run it;
+- a mutation whose caller is cancelled (Stop, tab close) is still on record
+  (`outcome: interrupted`) — the sync route handler finishes in its thread;
+- if the log can't be written the change is **refused**, not run unaudited; if
+  only the result line fails the tool result carries an `audit_warning`;
+- each line has `ts, session, provider, model, tool_call_id, digest, operation_id,
+  method, path, approved`. `session` is a 12-hex-char **hash** of the session key:
+  the raw key scopes hosted credentials and this file is served by the workspace
+  catch-all (and swept up by `git add -A` commits), so it must never be written.
+
+If a provider call fails *after* an approved change ran, the stream emits an
+`error` frame followed by a `done` frame with `incomplete: true` carrying the
+transcript so far, so the browser's history has no dangling tool call. Retry is
+offered only for a fresh prompt, never for a resume (which carries approvals).
+
+> **Approval is a verb test, not a side-effect test.** Reads (`GET`) run without
+> approval; a `GET` handler that writes (e.g. `GET /api/audit-report?rerun=1`)
+> therefore runs unapproved. The exclusion list below removes the worst
+> offenders; the rest is inherent to trusting HTTP semantics.
 
 ### Exclusion list (`lib/ai_tools.py`)
 
@@ -77,21 +100,35 @@ Applied once, when the index is built; listing and calling both resolve ids only
 through that index, so a forged `operation_id` in a tampered transcript cannot
 reach an excluded route:
 
-- tags `Auth` (GitHub identity), `AI` (its own credentials), `Downloads` (binary/HTML bodies);
-- path prefixes `/api/source/` (switch, remote build, materialize), `/api/workspaces/`
-  (add/forget/cleanup, **start/stop** of other servers), `/api/chat*`, `/api/ai*`, `/api/events*` (SSE never terminates);
-- `/api/branch/push`, `/api/work-push` (writes to remotes).
+- tags `Auth` (GitHub identity) and `AI` (its own credentials); tag `Downloads`
+  for **reads** only (binary/HTML bodies — Downloads-tagged POSTs such as
+  `figures-build` stay available, with approval);
+- path prefixes `/api/source/` (switch, remote build, materialize), `/api/workspaces`
+  (the switcher catalog, add/forget/cleanup, **start/stop** of other servers),
+  `/api/chat/`, `/api/ai/`, `/api/events` (SSE never terminates);
+- remote writes / remote identity: `/api/branch/push`, `/api/work-push`, `/api/work-create-pr`;
+- software installs on the host (arbitrary code execution):
+  `/api/catalog-install`, `/api/catalog-uninstall`, `/api/import-install`, `/api/system-deps-install`;
+- binary reads tagged elsewhere: `/api/simulation-run-download`, `/api/study-analysis-zip`,
+  `/api/composite-run/{run_id}/download`.
 
-Large responses are truncated (20k chars) and non-JSON responses are summarised.
+Deliberately still available (approval-gated): local git commits
+(`/api/dirty-commit-all` — its card shows an empty body, so read the audit log to
+see what was swept) and run launches. Large responses are truncated (20k chars);
+non-JSON responses are summarised.
 
 ## Credentials (`lib/ai_auth.py`)
 
 Where a key lives depends on how the server is bound:
 
-| bind | storage | notes |
+| server | storage | notes |
 |---|---|---|
-| loopback (`127.0.0.1`, `localhost`, `::1`) | OS keyring, service `vivarium-workbench-llm` (process memory if no usable backend) | provider/model choice in `~/.config/vivarium-workbench/ai.yaml` (never `workspace.yaml`, which is git-tracked scientific record) |
-| anything else (hosted pod, `0.0.0.0`) | **process memory only**, per `X-VW-Session`, never disk or keyring | selection is per-session memory too; `openai-compatible` `base_url` must be public `https` (SSRF guard) |
+| loopback bind (`127.0.0.1`, `localhost`, `::1`), no proxy flags, no base path | OS keyring, service `vivarium-workbench-llm` (process memory if no usable backend) | provider/model choice in `~/.config/vivarium-workbench/ai.yaml` (never `workspace.yaml`, which is git-tracked scientific record). The request's `Host` must itself be loopback — a DNS-rebound page (Host == Origin == the attacker's name) gets 403 on `/api/ai/*` and `/api/chat/*` |
+| anything else — hosted pod, `0.0.0.0`, **any** `--trust-proxy` / `--allowed-origin` / `--base-path`, or an unknown bind | **process memory only**, per `X-VW-Session`, never disk or keyring | selection is per-session memory too; `openai-compatible` `base_url` must be public `https` (SSRF guard, incl. NAT64/IPv4-mapped/scoped addresses); **the server's own env keys (`ANTHROPIC_API_KEY`, …) and AWS role are NOT lent to sessions** unless the operator sets `VIVARIUM_WORKBENCH_CHAT_ALLOW_SERVER_CREDENTIALS=1` |
+
+On a loopback server the ambient environment keys and AWS credentials are picked
+up as a convenience ("from the server environment"). Re-saving an
+`openai-compatible` endpoint without retyping the key keeps the saved key.
 
 Keys are never returned by any route; `mask_key` scrubs key-shaped strings and the
 exact stored value from every error string that could carry one.
@@ -104,10 +141,17 @@ exact stored value from every error string that could carry one.
 - **Tampered client transcript**: the user could already call the API directly,
   so approving a tampered call grants nothing new; the exclusion list is still
   enforced server-side.
-- **Residual**: the hosted `base_url` check resolves DNS once (a rebinding race
-  is theoretically possible); approved operations that are themselves powerful
-  (e.g. starting runs, which read-only servers keep) remain reachable with
-  approval, consistent with the existing surface.
+- **Session keys are routing ids, not auth.** Anyone holding a hosted session's
+  key can use the credentials saved under it, so the key is kept out of the
+  publicly served audit file (hashed) and must be treated as a secret by operators.
+- **Hosted servers are anonymous**: without the operator opt-in above, visitors
+  can only use keys they bring themselves; with it, every visitor can spend the
+  server's credentials (and choose the model) — enable only behind your own auth.
+- **Residual**: the hosted `base_url` check resolves DNS once (a rebinding race is
+  theoretically possible; redirects are not followed by the SDK); approved
+  operations that are themselves powerful (starting runs — read-only servers keep
+  those) remain reachable with approval; there is no cumulative per-session token
+  cap (each turn is limited to 30 model requests / 40 tool calls, prompt ≤ 20k chars).
 
 ## Files
 

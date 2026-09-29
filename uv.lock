@@ -3464,7 +3464,7 @@ requires-dist = [
     { name = "process-bigraph", specifier = ">=1.8.4" },
     { name = "pyarrow", marker = "extra == 'test'" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "openai", "google", "bedrock"], marker = "extra == 'chat'", specifier = ">=2.51.0" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "openai", "google", "bedrock"], marker = "extra == 'chat'", specifier = ">=2.51.0,<3" },
     { name = "pypdf", specifier = ">=4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4" },
     { name = "pytest-json-report", marker = "extra == 'dev'", specifier = ">=1.5" },

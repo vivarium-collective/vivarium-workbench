@@ -122,13 +122,16 @@ def test_approved_post_executes_and_is_audited(tmp_path):
     out = _run(go())
     assert out == {"status": 200, "body": {"ok": True, "name": "chat-made"}}
     assert (ws / "studies" / "chat-made" / "study.yaml").is_file()
-    lines = ai_tools.audit_path(ws).read_text().splitlines()
-    assert len(lines) == 1
-    rec = json.loads(lines[0])
-    assert {k: rec[k] for k in ("session", "provider", "model", "operation_id", "method",
-                                "path", "status", "approved")} == {
-        "session": "tab-1", "provider": "test", "model": "m", "operation_id": oid,
-        "method": "POST", "path": "/api/study-create", "status": 200, "approved": True}
+    recs = [json.loads(x) for x in ai_tools.audit_path(ws).read_text().splitlines()]
+    assert [r["phase"] for r in recs] == ["intent", "result"]      # intent BEFORE dispatch, then the result
+    intent, rec = recs
+    assert intent["approved"] is True and "status" not in intent
+    assert {k: rec[k] for k in ("provider", "model", "operation_id", "method", "path",
+                                "status", "approved", "outcome")} == {
+        "provider": "test", "model": "m", "operation_id": oid,
+        "method": "POST", "path": "/api/study-create", "status": 200, "approved": True,
+        "outcome": "completed"}
+    assert rec["session"] == ai_tools.session_tag("tab-1") and "tab-1" not in json.dumps(rec)
     assert rec["ts"].endswith("+00:00")
 
 
@@ -143,7 +146,8 @@ def test_failed_mutation_is_still_audited_with_its_status(tmp_path):
 
     out = _run(go())
     assert out["status"] == 400
-    assert json.loads(ai_tools.audit_path(ws).read_text())["status"] == 400
+    last = json.loads(ai_tools.audit_path(ws).read_text().splitlines()[-1])
+    assert last["phase"] == "result" and last["status"] == 400
 
 
 @pytest.mark.parametrize("method,path", MUST_EXCLUDE)

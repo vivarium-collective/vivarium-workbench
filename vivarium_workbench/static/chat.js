@@ -176,12 +176,14 @@
   }
 
   function streamTurn(body) {
-    lastBody = body;
+    lastBody = C.canRetry(body) ? body : null;   // never retry a resume (it carries approvals)
     controller = new AbortController();
     var splitter = C.createSplitter();
     var mutated = false;
     function handle(f) {
       C.applyFrame(state, f);
+      // A checkpoint after a failure advanced the transcript: the old body is stale.
+      if (f.type === 'done' && f.incomplete) lastBody = null;
       if (f.type === 'tool-result') {
         var tool = null;
         state.ui.forEach(function (m) { (m.parts || []).forEach(function (p) { if (p.kind === 'tool' && p.id === f.tool_call_id) tool = p; }); });
@@ -213,7 +215,6 @@
         if (m && m.parts) m.parts.push({ kind: 'notice', text: 'Stopped.' });
         state.busy = false;
       } else {
-        lastBody = body;
         C.applyFrame(state, { type: 'error', error: (err && err.message) || 'request failed' });
       }
     }).then(function () {
@@ -350,7 +351,12 @@
   }
 
   build();
-  renderAll();
+  try {
+    renderAll();
+  } catch (e) {
+    // A corrupted sessionStorage transcript must not take the tab down.
+    state = C.newState(); lastBody = null; save(); renderAll();
+  }
   // Called by walkthrough.js _switchPage('chat') and after the AI card changes.
   window._loadChat = function () { refreshStatus().then(function () { el.input.focus(); }); };
   window.addEventListener('viv:ai-changed', refreshStatus);
