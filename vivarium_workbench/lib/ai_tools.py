@@ -193,18 +193,36 @@ def append_audit(ws_root: Path, record: dict[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
-def _already_executed(ws_root: Path, tool_call_id: str, digest: str) -> bool:
+def _find_claim(ws_root: Path, tool_call_id: str, digest: str) -> tuple[bool, dict[str, Any] | None]:
+    """``(claimed, result_record)`` for an approved call: was its intent already recorded,
+    and if so what did the recorded result say?"""
     path = audit_path(ws_root)
     if not path.exists():
-        return False
+        return False, None
+    claimed, result = False, None
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             r = json.loads(line)
         except ValueError:
             continue
-        if r.get("phase") == "intent" and r.get("tool_call_id") == tool_call_id and r.get("digest") == digest:
-            return True
-    return False
+        if r.get("tool_call_id") == tool_call_id and r.get("digest") == digest:
+            if r.get("phase") == "intent":
+                claimed = True
+            elif r.get("phase") == "result":
+                result = r
+    return claimed, result
+
+
+def _refusal(tool_call_id: str, result: dict[str, Any] | None) -> dict[str, Any]:
+    """Tell the model what actually happened to the earlier execution — it may be retrying
+    because it never saw the outcome."""
+    if result is None:
+        what = "no result was recorded (it may have been interrupted) — check with a read before assuming it did or didn't apply"
+    elif result.get("status") is None:
+        what = f"it was {result.get('outcome', 'interrupted')} and its outcome is unknown — check with a read"
+    else:
+        what = f"it finished with status {result['status']}"
+    return {"error": f"this approved call was already executed (tool_call_id {tool_call_id}); {what}; not running it again"}
 
 
 def _call_epoch(ctx: RunContext[ChatDeps]) -> str:
@@ -325,9 +343,9 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
     if e["mutating"]:
         # Claim the approval (single use) and record intent BEFORE dispatching.
         with _AUDIT_LOCK:
-            if _already_executed(deps.ws_root, base["tool_call_id"], base["digest"]):
-                return {"error": "this approved call was already executed "
-                                 f"(tool_call_id {base['tool_call_id']}); not running it again"}
+            claimed, prior = _find_claim(deps.ws_root, base["tool_call_id"], base["digest"])
+            if claimed:
+                return _refusal(base["tool_call_id"], prior)
             try:
                 append_audit(deps.ws_root, {**base, "phase": "intent",
                                             "ts": datetime.now(timezone.utc).isoformat()})

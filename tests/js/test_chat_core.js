@@ -126,34 +126,45 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(md(''), '');
 }
 
-// ── Retry: prompt AND resume bodies are retryable (approvals are single-use server-side) ──
+// ── Retry is a COMPACT, persisted record: {prompt} or {deferred_results}; messages come from the transcript ──
 {
-  assert.strictEqual(C.canRetry({ messages: [], prompt: 'x' }), true);
-  assert.strictEqual(C.canRetry({ messages: [], deferred_results: { approvals: { a: true } } }), true);
-  assert.strictEqual(C.canRetry({ messages: [], prompt: 'x', deferred_results: {} }), false, 'exactly one of the two');
-  assert.strictEqual(C.canRetry({ prompt: 'x' }), false, 'needs messages');
+  assert.strictEqual(C.canRetry({ prompt: 'x' }), true);
+  assert.strictEqual(C.canRetry({ deferred_results: { approvals: { a: true } } }), true);
+  assert.strictEqual(C.canRetry({ prompt: 'x', deferred_results: {} }), false, 'exactly one of the two');
+  assert.strictEqual(C.canRetry({}), false);
   assert.strictEqual(C.canRetry(null), false);
+  const st = C.newState(); st.transcript = [{ m: 1 }]; st.retry = { prompt: 'x' };
+  assert.deepStrictEqual(C.retryBody(st), { messages: [{ m: 1 }], prompt: 'x' });
 }
 
-// ── a reload mid-turn: the persisted retry body re-offers the turn instead of wedging the chat ──
+// ── H1: the retry record is set by the SAME calls chat.js makes before its save(),
+//    so a reload at any point after the turn starts can recover. Drive the real order. ──
 {
-  const st = C.newState(); C.startUserTurn(st, 'x');
-  st.retry = { messages: [], prompt: 'x' };
-  C.applyFrame(st, { type: 'tool-call', tool_call_id: 't', tool_name: 'call_operation', args: {} });
-  const back = C.restore(JSON.parse(JSON.stringify(C.snapshot(st))));
-  assert.deepStrictEqual(back.retry, { messages: [], prompt: 'x' });
-  const last = back.ui[1].parts[back.ui[1].parts.length - 1];
-  assert.strictEqual(last.kind, 'error');
-  assert(/interrupted/.test(last.text));
-  // a turn that finished (retry cleared) restores without any interruption notice
-  const done = C.newState(); C.startUserTurn(done, 'y'); done.retry = { messages: [], prompt: 'y' };
-  C.applyFrame(done, { type: 'text-delta', text: 'ok' });
-  C.applyFrame(done, { type: 'done', messages: [] });
-  assert.strictEqual(done.retry, null);
-  const clean = C.restore(JSON.parse(JSON.stringify(C.snapshot(done))));
-  assert.strictEqual(clean.ui[1].parts.length, 1);
-  // a tampered retry is dropped
-  assert.strictEqual(C.restore({ ui: [], retry: { prompt: 5 } }).retry, null);
+  const persist = (st) => JSON.parse(JSON.stringify(C.snapshot(st)));   // == save() -> sessionStorage
+  // send(): buildPromptRequest -> startUserTurn -> save()
+  const st = C.newState(); st.transcript = [{ m: 1 }];
+  C.buildPromptRequest(st, 'hello'); C.startUserTurn(st, 'hello');
+  let back = C.restore(persist(st));                                    // reload right after send()
+  assert.deepStrictEqual(back.retry, { prompt: 'hello' }, 'send() persists the retry record');
+  assert(back.ui[1].parts.some(p => p.kind === 'error' && /interrupted/.test(p.text)));
+
+  // resume(): decide -> buildResumeRequest -> startResume -> save()
+  const r = C.newState(); C.startUserTurn(r, 'create'); r.retry = null;
+  C.applyFrame(r, { type: 'tool-call', tool_call_id: 'p', tool_name: 'call_operation', args: {} });
+  C.applyFrame(r, { type: 'approval-required', tool_call_id: 'p', tool_name: 'call_operation', args: {}, metadata: {} });
+  C.applyFrame(r, { type: 'done', pending_approval: true, messages: [{ m: 2 }] });
+  C.decide(r, 'p', true);
+  const body = C.buildResumeRequest(r); C.startResume(r);
+  assert.deepStrictEqual(body.deferred_results, { approvals: { p: true } });
+  back = C.restore(persist(r));                                          // reload mid-resume
+  assert.deepStrictEqual(back.retry, { deferred_results: { approvals: { p: true } } });
+  assert.deepStrictEqual(C.retryBody(back).messages, [{ m: 2 }], 'the transcript is not duplicated in storage');
+  assert.strictEqual(JSON.stringify(persist(r).retry).includes('"m":2'), false);
+  assert(back.ui[1].parts.some(p => p.kind === 'error' && /interrupted/.test(p.text)), 'Retry is re-offered');
+
+  // a finished turn clears it
+  C.applyFrame(r, { type: 'done', pending_approval: false, messages: [{ m: 3 }] });
+  assert.strictEqual(C.restore(persist(r)).retry, null);
 }
 
 // ── corrupted sessionStorage: malformed messages are dropped, never thrown on ──

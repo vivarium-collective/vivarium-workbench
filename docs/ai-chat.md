@@ -89,9 +89,18 @@ Consequences:
 If a provider call fails *after* an approved change ran, the stream emits an
 `error` frame followed by a `done` frame with `incomplete: true` carrying the
 transcript so far, so the browser's history has no dangling tool call. The browser
-persists the request body of the turn in flight, so **Retry** (also offered after a
-Stop mid-resume, or a reload) re-sends it: for a resume that is safe precisely
-because approvals are single-use — it can never run a change twice.
+persists a compact record of the turn in flight (`{prompt}` or `{deferred_results}`; the
+messages come from the stored transcript, so nothing is stored twice), set by the same
+state transition that starts the turn — so a reload at any point recovers. **Retry**
+(also offered after a Stop mid-resume or a reload) re-sends it: for a resume that is safe
+precisely because approvals are single-use. A retry of a change that already ran is
+refused *with the recorded outcome* (`status N`, or "no result recorded / interrupted —
+check with a read"), so the model learns what happened.
+
+If a transcript still ends on an unresolved tool call (lost record, hostile or stale
+state), a new prompt no longer wedges the chat: the server closes each dangling call
+with a synthetic "outcome unknown — check with a read" result. The action is **not**
+executed.
 
 `ai-actions.jsonl` is workspace state like any other file: if a workspace commits it,
 a branch switch reverts it (and with it the single-use claims). Add it to the

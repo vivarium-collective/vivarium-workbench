@@ -35,11 +35,14 @@ from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
     ModelMessagesTypeAdapter,
+    ModelRequest,
     PartDeltaEvent,
     PartStartEvent,
     RetryPromptPart,
     TextPart,
     TextPartDelta,
+    ToolCallPart,
+    ToolReturnPart,
 )
 from pydantic_ai.run import AgentRunResultEvent
 from pydantic_ai.usage import UsageLimits
@@ -212,6 +215,32 @@ def _deferred_results(raw: dict[str, Any]) -> DeferredToolResults:
     return res
 
 
+INTERRUPTED = ("This action did not finish (the turn was interrupted or the approval was lost). "
+               "Its outcome is unknown: check with a read before assuming it did or didn't apply.")
+
+
+def _repair_dangling(history: list[Any]) -> list[Any]:
+    """Close tool calls that have no return with a synthetic 'outcome unknown' result.
+
+    A transcript can end on an unresolved tool call — a resume that was stopped, a reload,
+    a lost approval. pydantic-ai rejects a new prompt on top of one, which would wedge the
+    chat for good. The action is NOT executed; the model is simply told what we know.
+    """
+    calls: dict[str, str] = {}
+    answered: set[str] = set()
+    for m in history:
+        for p in getattr(m, "parts", []):
+            if isinstance(p, ToolCallPart):
+                calls[p.tool_call_id] = p.tool_name
+            elif isinstance(p, (ToolReturnPart, RetryPromptPart)) and getattr(p, "tool_call_id", None):
+                answered.add(p.tool_call_id)
+    missing = [(i, n) for i, n in calls.items() if i not in answered]
+    if not missing:
+        return history
+    return [*history, ModelRequest(parts=[
+        ToolReturnPart(tool_name=n, content=INTERRUPTED, tool_call_id=i) for i, n in missing])]
+
+
 def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: StorageMode,
                  session: str | None) -> Turn:
     """Validate everything a turn needs; raises ``APIError`` (409/422/503) up front."""
@@ -231,6 +260,8 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
         history = ModelMessagesTypeAdapter.validate_python(body.messages)
     except ValueError as e:
         raise APIError(422, f"invalid transcript: {ai_auth.mask_key(str(e))[:300]}") from None
+    if body.prompt is not None:
+        history = _repair_dangling(list(history))
     deferred = _deferred_results(body.deferred_results) if body.deferred_results is not None else None
     agent: Agent[ai_tools.ChatDeps, str | DeferredToolRequests] = Agent(
         ai_auth.build_model(provider, model, cred),

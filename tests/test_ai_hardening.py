@@ -567,3 +567,49 @@ def test_no_operation_shares_the_ai_or_chat_prefix_unexcluded(tmp_path):
     app, _ = _make_app(tmp_path)
     served = {e["path"] for e in ai_tools.build_index(app).values()}
     assert not any(p.startswith(("/api/ai", "/api/chat")) for p in served)
+
+
+# =============================================================================
+# Turn 3 findings (H1–H4)
+# =============================================================================
+
+
+def test_new_prompt_over_a_dangling_transcript_is_repaired_not_wedged(chat):
+    """H2: a transcript ending on an unresolved tool call (a resume that was stopped/lost)
+    used to make every later prompt fail with 'unprocessed tool calls'."""
+    client, ws, _ = chat
+    _cid, msgs = _pause(client)                    # ends on an approval-pending tool call
+    frames = _turn(client, messages=msgs, prompt="list the studies")
+    types = [f["type"] for f in frames]
+    assert "error" not in types and types[-1] == "done"
+    assert not (ws / "studies" / "made").exists()   # the interrupted action was NOT executed
+    # the model was told the action's outcome is unknown, not silently dropped
+    dumped = json.dumps(frames[-1]["messages"])
+    assert "outcome is unknown" in dumped
+
+
+def test_already_executed_refusal_carries_the_recorded_outcome(chat):
+    """H3: the retry should tell the model what happened, not just that it happened."""
+    client, ws, _ = chat
+    cid, msgs = _pause(client)
+    body = {"messages": msgs, "deferred_results": {"approvals": {cid: True}}}
+    _turn(client, **body)
+    replay = _turn(client, **body)
+    err = next(f for f in replay if f["type"] == "tool-result")["content"]["error"]
+    assert "already executed" in err and "status 200" in err
+
+
+def test_already_executed_without_a_result_line_says_so(tmp_path):
+    app, ws = _make_app(tmp_path)
+    oid = _oid(app, "post", "/api/study-create")
+    body = {"name": "x"}
+    path = "/api/study-create"
+    ai_tools.append_audit(ws, {"phase": "intent", "tool_call_id": "c1", "operation_id": oid,
+                               "digest": ai_tools._call_digest(oid, path, None, body, "")})
+
+    async def go():
+        async with _deps(app, ws) as d:
+            return await ai_tools.call_operation(_ctx(d, approved=True, call_id="c1"), oid, body=body)
+
+    out = asyncio.run(go())
+    assert "already executed" in out["error"] and "no result" in out["error"]

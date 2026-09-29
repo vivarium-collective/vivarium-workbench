@@ -89,6 +89,9 @@
     state.ui.push({ role: 'user', text: prompt });
     state.ui.push({ role: 'assistant', parts: [] });
     state.pending = []; state.decisions = {}; state.busy = true;
+    // The retry record is set HERE (not later, in the network code) so the save() that
+    // follows persists it: a reload at any point after the turn starts can recover.
+    state.retry = { prompt: prompt };
     return state;
   }
 
@@ -158,18 +161,29 @@
     return { messages: state.transcript, prompt: prompt };
   }
 
-  // A prompt body may be retried. So may a resume body: the server claims each approved
-  // call once (tool_call_id + digest), so re-sending it can never run a change twice —
-  // and it is the only way out of a resume that failed/was stopped/reloaded mid-way.
-  function canRetry(body) {
-    if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) return false;
-    var prompt = typeof body.prompt === 'string';
-    var resume = !!body.deferred_results && typeof body.deferred_results === 'object';
+  // Retry is a COMPACT record — {prompt} or {deferred_results} — persisted with the
+  // snapshot; the messages come from state.transcript (which only advances on `done`,
+  // and `done` clears the record), so the transcript is never stored twice. A resume is
+  // safe to re-send: the server claims each approved call once (tool_call_id + digest).
+  function canRetry(r) {
+    if (!r || typeof r !== 'object') return false;
+    var prompt = typeof r.prompt === 'string';
+    var resume = !!r.deferred_results && typeof r.deferred_results === 'object';
     return prompt !== resume;
   }
 
+  function retryBody(state) {
+    return Object.assign({ messages: state.transcript }, state.retry);
+  }
+
+  function buildPromptRequest(state, prompt) {
+    return { messages: state.transcript, prompt: prompt };
+  }
+
   function buildResumeRequest(state) {
-    var body = { messages: state.transcript, deferred_results: { approvals: state.decisions } };
+    var approvals = state.decisions;
+    state.retry = { deferred_results: { approvals: approvals } };   // persisted by the save() that follows
+    var body = { messages: state.transcript, deferred_results: { approvals: approvals } };
     state.decisions = {};
     return body;
   }
@@ -281,6 +295,7 @@
     esc: esc, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
     startResume: startResume, applyFrame: applyFrame, decide: decide,
     buildPromptRequest: buildPromptRequest, buildResumeRequest: buildResumeRequest, canRetry: canRetry,
+    retryBody: retryBody,
     statusLabel: statusLabel, describeApproval: describeApproval, snapshot: snapshot,
     restore: restore, renderMarkdown: renderMarkdown,
   };

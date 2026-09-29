@@ -175,7 +175,6 @@
   }
 
   function streamTurn(body) {
-    state.retry = C.canRetry(body) ? body : null;   // persisted; safe to re-send (approvals are single-use)
     controller = new AbortController();
     var splitter = C.createSplitter();
     var mutated = false;
@@ -328,7 +327,7 @@
     var m = state.ui[state.ui.length - 1];
     if (m && m.parts) m.parts = m.parts.filter(function (p) { return p.kind !== 'error'; });
     state.busy = true; save(); renderAll();
-    streamTurn(state.retry);
+    streamTurn(C.retryBody(state));
   }
 
   function copyMessage(btn) {
