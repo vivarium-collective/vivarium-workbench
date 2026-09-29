@@ -73,8 +73,10 @@ line is written to `<workspace>/.pbg/ai-actions.jsonl` (fsync'd, like
 types) and a `result` line follows (`status`, `outcome: completed | interrupted`).
 Consequences:
 
-- replaying the same approval (same `tool_call_id` + same call) is refused with
-  "already executed" — a duplicated tab or a stale approval card can't re-run it;
+- replaying the same approval (same `tool_call_id`, same call, same issuing model
+  response) is refused with "already executed" — a duplicated tab or a stale approval
+  card can't re-run it; a provider that *reuses* ids across turns is fine because the
+  issuing response's timestamp is part of the claim;
 - a mutation whose caller is cancelled (Stop, tab close) is still on record
   (`outcome: interrupted`) — the sync route handler finishes in its thread;
 - if the log can't be written the change is **refused**, not run unaudited; if
@@ -86,8 +88,14 @@ Consequences:
 
 If a provider call fails *after* an approved change ran, the stream emits an
 `error` frame followed by a `done` frame with `incomplete: true` carrying the
-transcript so far, so the browser's history has no dangling tool call. Retry is
-offered only for a fresh prompt, never for a resume (which carries approvals).
+transcript so far, so the browser's history has no dangling tool call. The browser
+persists the request body of the turn in flight, so **Retry** (also offered after a
+Stop mid-resume, or a reload) re-sends it: for a resume that is safe precisely
+because approvals are single-use — it can never run a change twice.
+
+`ai-actions.jsonl` is workspace state like any other file: if a workspace commits it,
+a branch switch reverts it (and with it the single-use claims). Add it to the
+workspace's `.gitignore` if that matters to you.
 
 > **Approval is a verb test, not a side-effect test.** Reads (`GET`) run without
 > approval; a `GET` handler that writes (e.g. `GET /api/audit-report?rerun=1`)

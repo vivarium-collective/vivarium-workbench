@@ -19,6 +19,8 @@ See ``docs/ai-chat.md``.
 from __future__ import annotations
 
 import json
+import asyncio
+import contextlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,6 +92,27 @@ class Turn:
     secrets: tuple[str, ...] = ()
 
     async def frames(self) -> AsyncIterator[dict[str, Any]]:
+        """Yield the turn's NDJSON frames. The agent runs in its OWN task and hands
+        frames over through a queue: ``capture_run_messages()`` (a ContextVar) is then
+        entered and exited in one context, so a client disconnect — which finalises
+        this generator in a different context — just cancels the task instead of
+        tripping "Token was created in a different Context"."""
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        task = asyncio.create_task(self._run(queue.put_nowait))
+        try:
+            while True:
+                frame = await queue.get()
+                if frame is None:
+                    return
+                yield frame
+        finally:
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            await self.deps.client.aclose()
+
+    async def _run(self, emit: Any) -> None:
         executed_tool = False
         failed = False
         try:
@@ -111,22 +134,22 @@ class Turn:
                             if isinstance(ev, FunctionToolResultEvent):
                                 executed_tool = True
                             for frame in _frame_for(ev):
-                                yield frame
+                                emit(frame)
                 except APIError as e:
                     failed = True
-                    yield {"type": "error", "error": ai_auth.mask_key(e.message, self.secrets)}
+                    emit({"type": "error", "error": ai_auth.mask_key(e.message, self.secrets)})
                 except Exception as e:  # noqa: BLE001 — surface, masked; never leak a key
                     failed = True
-                    yield {"type": "error",
-                           "error": ai_auth.mask_key(f"{type(e).__name__}: {e}", self.secrets)}
+                    emit({"type": "error",
+                          "error": ai_auth.mask_key(f"{type(e).__name__}: {e}", self.secrets)})
                 if failed and executed_tool:
                     # A tool (possibly an approved mutation) ran before the failure. The
                     # browser's transcript would otherwise end on a dangling tool call —
                     # the next prompt is rejected — so checkpoint what really happened.
-                    yield {"type": "done", "pending_approval": False, "incomplete": True,
-                           "messages": ModelMessagesTypeAdapter.dump_python(list(captured), mode="json")}
+                    emit({"type": "done", "pending_approval": False, "incomplete": True,
+                          "messages": ModelMessagesTypeAdapter.dump_python(list(captured), mode="json")})
         finally:
-            await self.deps.client.aclose()
+            emit(None)
 
 
 async def _manifest(deps: ai_tools.ChatDeps) -> str:

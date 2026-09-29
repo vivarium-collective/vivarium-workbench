@@ -17,7 +17,6 @@
   var state = load();
   var status = null;            // GET /api/ai/status
   var controller = null;        // AbortController of the in-flight stream
-  var lastBody = null;          // for Retry
   var el = {};
 
   function api(p) {
@@ -82,7 +81,7 @@
       if (p.kind === 'tool') return renderTool(p);
       if (p.kind === 'error') {
         return '<div class="vc-error"><span>' + C.esc(p.text) + '</span>' +
-          (isLast && i === m.parts.length - 1 && lastBody ? '<button class="vc-btn" data-act="retry">Retry</button>' : '') + '</div>';
+          (isLast && i === m.parts.length - 1 && state.retry ? '<button class="vc-btn" data-act="retry">Retry</button>' : '') + '</div>';
       }
       if (p.kind === 'notice') return '<div class="vc-notice">' + C.esc(p.text) + '</div>';
       return '';
@@ -156,7 +155,7 @@
     el.send.disabled = !state.busy && (!ready || state.pending.length > 0);
     el.setup.hidden = ready || !status;
     if (!ready && status) {
-      el.setup.innerHTML = !status.available
+      el.setup.innerHTML = status.error ? C.esc(status.error) : !status.available
         ? 'Chat needs the optional extra: <code>pip install \'vivarium-workbench[chat]\'</code>'
         : 'No AI provider is set up yet. <a data-act="setup">Add one under Account → AI provider</a>.';
     }
@@ -176,14 +175,12 @@
   }
 
   function streamTurn(body) {
-    lastBody = C.canRetry(body) ? body : null;   // never retry a resume (it carries approvals)
+    state.retry = C.canRetry(body) ? body : null;   // persisted; safe to re-send (approvals are single-use)
     controller = new AbortController();
     var splitter = C.createSplitter();
     var mutated = false;
     function handle(f) {
       C.applyFrame(state, f);
-      // A checkpoint after a failure advanced the transcript: the old body is stale.
-      if (f.type === 'done' && f.incomplete) lastBody = null;
       if (f.type === 'tool-result') {
         var tool = null;
         state.ui.forEach(function (m) { (m.parts || []).forEach(function (p) { if (p.kind === 'tool' && p.id === f.tool_call_id) tool = p; }); });
@@ -212,7 +209,13 @@
     }).catch(function (err) {
       if (err && err.name === 'AbortError') {
         var m = state.ui[state.ui.length - 1];
-        if (m && m.parts) m.parts.push({ kind: 'notice', text: 'Stopped.' });
+        if (body.deferred_results) {
+          // Stopped mid-resume: the transcript is dangling until the turn is re-sent.
+          if (m && m.parts) m.parts.push({ kind: 'error', text: 'Stopped before the approved action finished.' });
+        } else {
+          if (m && m.parts) m.parts.push({ kind: 'notice', text: 'Stopped.' });
+          state.retry = null;
+        }
         state.busy = false;
       } else {
         C.applyFrame(state, { type: 'error', error: (err && err.message) || 'request failed' });
@@ -250,7 +253,7 @@
 
   function newChat() {
     if (controller) controller.abort();
-    state = C.newState(); lastBody = null; save(); renderAll();
+    state = C.newState(); save(); renderAll();
     el.input.focus();
   }
 
@@ -321,11 +324,11 @@
   }
 
   function retry() {
-    if (!lastBody || state.busy) return;
+    if (!state.retry || state.busy) return;
     var m = state.ui[state.ui.length - 1];
     if (m && m.parts) m.parts = m.parts.filter(function (p) { return p.kind !== 'error'; });
     state.busy = true; save(); renderAll();
-    streamTurn(lastBody);
+    streamTurn(state.retry);
   }
 
   function copyMessage(btn) {
@@ -345,8 +348,14 @@
   }
 
   function refreshStatus() {
-    return fetch(api('/api/ai/status')).then(function (r) { return r.json(); })
-      .then(function (s) { status = s; }, function () { status = { available: false, providers: [] }; })
+    return fetch(api('/api/ai/status'))
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (!r.ok) return { available: false, providers: [], error: j.error || ('HTTP ' + r.status) };
+          return j;
+        });
+      })
+      .then(function (s) { status = s; }, function () { status = { available: false, providers: [], error: 'Could not reach the server.' }; })
       .then(function () { renderAll(); });
   }
 
@@ -355,7 +364,7 @@
     renderAll();
   } catch (e) {
     // A corrupted sessionStorage transcript must not take the tab down.
-    state = C.newState(); lastBody = null; save(); renderAll();
+    state = C.newState(); save(); renderAll();
   }
   // Called by walkthrough.js _switchPage('chat') and after the AI card changes.
   window._loadChat = function () { refreshStatus().then(function () { el.input.focus(); }); };

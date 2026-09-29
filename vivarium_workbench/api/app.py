@@ -443,7 +443,8 @@ def _ai_scope(request: Request) -> "tuple[_ai_auth.StorageMode, str | None]":
     mode = _ai_auth.storage_mode(getattr(request.app.state, "bind_host", None), proxied=proxied)
     if mode == "keyring":
         from urllib.parse import urlsplit
-        host = urlsplit("//" + (request.headers.get("host") or "")).hostname
+        raw_host = request.headers.get("host") or ""
+        host = None if "@" in raw_host else urlsplit("//" + raw_host).hostname
         if host not in _ai_auth.LOCAL_HOSTS:
             raise APIError(403, "the AI routes are only available from a loopback host (localhost / 127.0.0.1)")
     return mode, _session_key_of(request)

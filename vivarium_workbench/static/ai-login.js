@@ -71,12 +71,17 @@
   function refresh() {
     // A published snapshot has no live server behind /api/ai — the card is hidden there.
     if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return Promise.resolve();
-    return fetch(api('/api/ai/status')).then(function (r) { return r.json(); })
+    return fetch(api('/api/ai/status')).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+          return j;
+        });
+      })
       .then(function (s) {
         status = s;
         if (s.selected && !card.dataset.touched) el.provider.value = s.selected.provider;
         render();
-      }, function () { el.status.textContent = 'Could not reach /api/ai/status'; });
+      }, function (e) { el.status.textContent = (e && e.message) || 'Could not reach /api/ai/status'; });
   }
   function changed() { window.dispatchEvent(new CustomEvent('viv:ai-changed')); }
 

@@ -49,8 +49,10 @@
   // transcript: the pydantic-ai messages (JSON) the server returned in `done`
   // pending:    tool_call_ids awaiting the user's Approve/Deny
   // decisions:  tool_call_id -> true | {denied: reason}   (sent as deferred_results)
+  // retry:      the request body of the turn in flight (persisted): re-sending it after a
+  //             failure/stop/reload is safe — approvals are single-use server-side
   function newState() {
-    return { ui: [], transcript: [], pending: [], decisions: {}, busy: false };
+    return { ui: [], transcript: [], pending: [], decisions: {}, busy: false, retry: null };
   }
 
   function lastAssistant(state) {
@@ -127,8 +129,11 @@
         break;
       }
       case 'done':
+        // The turn ended (normally, paused for approval, or checkpointed after a
+        // failure): the transcript advanced and there is nothing left to retry.
         state.transcript = f.messages || [];
         state.busy = false;
+        state.retry = null;
         break;
       case 'error':
         m.parts.push({ kind: 'error', text: f.error || 'error' });
@@ -153,10 +158,14 @@
     return { messages: state.transcript, prompt: prompt };
   }
 
-  // Only a fresh-prompt request may be retried. A resume body carries the user's
-  // approvals: re-sending it would re-execute an approved change.
+  // A prompt body may be retried. So may a resume body: the server claims each approved
+  // call once (tool_call_id + digest), so re-sending it can never run a change twice —
+  // and it is the only way out of a resume that failed/was stopped/reloaded mid-way.
   function canRetry(body) {
-    return !!body && typeof body.prompt === 'string' && body.deferred_results === undefined;
+    if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) return false;
+    var prompt = typeof body.prompt === 'string';
+    var resume = !!body.deferred_results && typeof body.deferred_results === 'object';
+    return prompt !== resume;
   }
 
   function buildResumeRequest(state) {
@@ -196,7 +205,8 @@
 
   // What is safe/worth keeping in sessionStorage.
   function snapshot(state) {
-    return { ui: state.ui, transcript: state.transcript, pending: state.pending, decisions: state.decisions };
+    return { ui: state.ui, transcript: state.transcript, pending: state.pending,
+             decisions: state.decisions, retry: state.retry };
   }
   function restore(saved) {
     var s = newState();
@@ -206,6 +216,7 @@
     if (Array.isArray(saved.transcript)) s.transcript = saved.transcript;
     if (Array.isArray(saved.pending)) s.pending = saved.pending;
     if (saved.decisions && typeof saved.decisions === 'object') s.decisions = saved.decisions;
+    if (canRetry(saved.retry)) s.retry = saved.retry;
     // A reload mid-stream leaves 'running' tools that will never report back;
     // anything not awaiting approval is settled as failed.
     s.ui.forEach(function (m) {
@@ -213,6 +224,15 @@
         if (p.kind === 'tool' && p.status === 'running' && s.pending.indexOf(p.id) < 0) p.status = 'error';
       });
     });
+    // A reload mid-turn left a turn that will never finish: say so, and (retry was
+    // persisted) let the user re-send it instead of stranding the chat.
+    var lastMsg = s.ui[s.ui.length - 1];
+    if (s.retry && lastMsg && lastMsg.role === 'assistant' && s.pending.length === 0) {
+      var tail = lastMsg.parts[lastMsg.parts.length - 1];
+      if (!tail || tail.kind !== 'error') {
+        lastMsg.parts.push({ kind: 'error', text: 'This turn was interrupted before it finished.' });
+      }
+    }
     return s;
   }
 

@@ -30,9 +30,11 @@ async def ai_save_credentials(body: AiCredentialsRequest, mode: StorageMode,
         body.provider, body.api_key, body.base_url, mode=mode)
     # Re-saving an openai-compatible endpoint without retyping the key keeps the
     # saved key (the form never shows it) instead of silently dropping it.
+    # ONLY for the same endpoint: sending the saved key to a different base_url
+    # would hand it to whoever runs that host.
     if body.provider == "openai-compatible" and api_key is None:
         existing = ai_auth.get_credential(body.provider, mode=mode, session=session)
-        if existing and existing.source in ("keyring", "memory"):
+        if existing and existing.source in ("keyring", "memory") and existing.base_url == base_url:
             api_key = existing.api_key
     cred = ai_auth.Credential(api_key, base_url, "memory")
     if body.provider == "bedrock":

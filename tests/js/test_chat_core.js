@@ -126,11 +126,34 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(md(''), '');
 }
 
-// ── Retry: a fresh prompt may be retried; a resume (carries approvals) never ──
+// ── Retry: prompt AND resume bodies are retryable (approvals are single-use server-side) ──
 {
   assert.strictEqual(C.canRetry({ messages: [], prompt: 'x' }), true);
-  assert.strictEqual(C.canRetry({ messages: [], deferred_results: { approvals: { a: true } } }), false);
+  assert.strictEqual(C.canRetry({ messages: [], deferred_results: { approvals: { a: true } } }), true);
+  assert.strictEqual(C.canRetry({ messages: [], prompt: 'x', deferred_results: {} }), false, 'exactly one of the two');
+  assert.strictEqual(C.canRetry({ prompt: 'x' }), false, 'needs messages');
   assert.strictEqual(C.canRetry(null), false);
+}
+
+// ── a reload mid-turn: the persisted retry body re-offers the turn instead of wedging the chat ──
+{
+  const st = C.newState(); C.startUserTurn(st, 'x');
+  st.retry = { messages: [], prompt: 'x' };
+  C.applyFrame(st, { type: 'tool-call', tool_call_id: 't', tool_name: 'call_operation', args: {} });
+  const back = C.restore(JSON.parse(JSON.stringify(C.snapshot(st))));
+  assert.deepStrictEqual(back.retry, { messages: [], prompt: 'x' });
+  const last = back.ui[1].parts[back.ui[1].parts.length - 1];
+  assert.strictEqual(last.kind, 'error');
+  assert(/interrupted/.test(last.text));
+  // a turn that finished (retry cleared) restores without any interruption notice
+  const done = C.newState(); C.startUserTurn(done, 'y'); done.retry = { messages: [], prompt: 'y' };
+  C.applyFrame(done, { type: 'text-delta', text: 'ok' });
+  C.applyFrame(done, { type: 'done', messages: [] });
+  assert.strictEqual(done.retry, null);
+  const clean = C.restore(JSON.parse(JSON.stringify(C.snapshot(done))));
+  assert.strictEqual(clean.ui[1].parts.length, 1);
+  // a tampered retry is dropped
+  assert.strictEqual(C.restore({ ui: [], retry: { prompt: 5 } }).retry, null);
 }
 
 // ── corrupted sessionStorage: malformed messages are dropped, never thrown on ──

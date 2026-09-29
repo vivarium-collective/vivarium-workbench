@@ -31,6 +31,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import FastAPI
 from pydantic_ai import ApprovalRequired, RunContext
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
@@ -206,9 +207,22 @@ def _already_executed(ws_root: Path, tool_call_id: str, digest: str) -> bool:
     return False
 
 
-def _call_digest(operation_id: str, path: str, query: Any, body: Any) -> str:
-    blob = json.dumps({"op": operation_id, "path": path, "query": query or {}, "body": body},
-                      sort_keys=True, default=str)
+def _call_epoch(ctx: RunContext[ChatDeps]) -> str:
+    """Timestamp of the model response that issued this tool call. Folded into the
+    claim digest so a provider that REUSES tool_call_ids (some local servers emit
+    ``call_0`` every turn) can't have a later, legitimately approved identical call
+    refused as a replay — while replaying the same transcript (same response, same
+    timestamp) is still refused."""
+    for m in reversed(ctx.messages or []):
+        if isinstance(m, ModelResponse) and any(
+                isinstance(p, ToolCallPart) and p.tool_call_id == ctx.tool_call_id for p in m.parts):
+            return m.timestamp.isoformat()
+    return ""
+
+
+def _call_digest(operation_id: str, path: str, query: Any, body: Any, epoch: str = "") -> str:
+    blob = json.dumps({"op": operation_id, "path": path, "query": query or {}, "body": body,
+                       "epoch": epoch}, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
@@ -307,7 +321,7 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
     base = {"session": session_tag(deps.session_key), "provider": deps.provider, "model": deps.model,
             "tool_call_id": ctx.tool_call_id or "", "operation_id": operation_id,
             "method": e["method"], "path": path, "approved": True,
-            "digest": _call_digest(operation_id, path, query, body)}
+            "digest": _call_digest(operation_id, path, query, body, _call_epoch(ctx))}
     if e["mutating"]:
         # Claim the approval (single use) and record intent BEFORE dispatching.
         with _AUDIT_LOCK:

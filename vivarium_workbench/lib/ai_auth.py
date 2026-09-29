@@ -34,7 +34,11 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from vivarium_workbench.lib.atomic_io import atomic_write_text
+# pydantic-ai prints a banner (with an ad) on first import; check_key/build_model
+# import it lazily from request handlers, so silence it here, before any of them.
+os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
+
+from vivarium_workbench.lib.atomic_io import atomic_write_text  # noqa: E402
 from vivarium_workbench.lib.errors import APIError
 
 log = logging.getLogger(__name__)

@@ -412,3 +412,158 @@ def test_httpx_is_used_for_in_process_calls_only():
     """Guard the SSRF surface: the tool client must be ASGI-only (no real network)."""
     c = ai_tools.make_client(FastAPI())
     assert isinstance(c._transport, httpx.ASGITransport)
+
+
+# =============================================================================
+# Turn 2 findings (G1–G6)
+# =============================================================================
+
+import threading  # noqa: E402
+from http.server import BaseHTTPRequestHandler, HTTPServer  # noqa: E402
+
+keyring = pytest.importorskip("keyring")
+from keyring.backends import fail as _keyring_fail  # noqa: E402
+
+
+class _Recorder:
+    """A local OpenAI-compatible endpoint that records every Authorization header."""
+
+    def __init__(self, good_key=None):
+        self.auth = []
+        rec = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a, **k):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                rec.auth.append(self.headers.get("Authorization", ""))
+                ok = good_key is None or self.headers.get("Authorization") == f"Bearer {good_key}"
+                body = ({"id": "c", "object": "chat.completion", "created": 0, "model": "m",
+                         "choices": [{"index": 0, "finish_reason": "length",
+                                      "message": {"role": "assistant", "content": "p"}}],
+                         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+                        if ok else {"error": {"message": "bad key"}})
+                raw = json.dumps(body).encode()
+                self.send_response(200 if ok else 401)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        self.srv = HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.srv.server_port}/v1"
+
+    def close(self):
+        self.srv.shutdown()
+
+
+# --- G1: a saved key must never be sent to a *different* endpoint -------------
+
+
+def test_stored_key_is_not_sent_to_a_changed_base_url(tmp_path):
+    KEY = "sk-or-VICTIMKEY-0123456789abcdefghijkl"
+    prev = keyring.get_keyring()
+    keyring.set_keyring(_keyring_fail.Keyring())          # key lands in memory scope
+    a, b = _Recorder(good_key=KEY), _Recorder()
+    try:
+        app, _ = _make_app(tmp_path, bind_host="127.0.0.1")
+        c = TestClient(app, base_url="http://127.0.0.1:8000")
+        body = {"provider": "openai-compatible", "model": "m"}
+        assert c.post("/api/ai/credentials", json={**body, "base_url": a.url, "api_key": KEY}).status_code == 200
+        # same endpoint, no key retyped -> the saved key is reused (and is sent to A only)
+        assert c.post("/api/ai/credentials", json={**body, "base_url": a.url}).status_code == 200
+        # a DIFFERENT endpoint, no key retyped -> must NOT ship the saved key there
+        c.post("/api/ai/credentials", json={**body, "base_url": b.url})
+        assert KEY not in "".join(b.auth), f"saved key leaked to another endpoint: {b.auth}"
+    finally:
+        keyring.set_keyring(prev)
+        a.close(); b.close()
+
+
+# --- G2: a provider that reuses tool_call_ids must not be blocked forever ------
+
+
+def test_reused_tool_call_id_in_a_later_response_is_not_treated_as_a_replay(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    app, ws = _make_app(tmp_path)
+    oid = _oid(app, "post", "/api/investigation-create") if "/api/investigation-create" in app.openapi()["paths"] \
+        else _oid(app, "post", "/api/study-create")
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def ctx_at(when, name):
+        msgs = [ModelResponse(parts=[ToolCallPart("call_operation", {"operation_id": oid, "body": {"name": name}},
+                                                  tool_call_id="call_0")], timestamp=when)]
+        return RunContext(deps=None, model=TestModel(), usage=RunUsage(), tool_call_approved=True,
+                          tool_call_id="call_0", messages=msgs)
+
+    async def go():
+        out = []
+        async with _deps(app, ws) as d:
+            for when, name in ((t0, "same"), (t0, "same"), (t0 + timedelta(days=7), "same")):
+                c = ctx_at(when, name)
+                c.deps = d
+                out.append(await ai_tools.call_operation(c, oid, body={"name": name}))
+        return out
+
+    first, replay, later = asyncio.run(go())
+    assert first["status"] == 200
+    assert "already executed" in replay["error"]          # same response => a real replay
+    assert "already executed" not in json.dumps(later)    # a later response reusing the id is a new call
+
+
+# --- G3/G4: interrupted turns -------------------------------------------------
+
+
+def test_abandoning_a_turn_between_frames_is_quiet(tmp_path, monkeypatch):
+    """A client disconnect finalises the generator in another context; nothing may
+    log 'Token was created in a different Context'."""
+    from vivarium_workbench.lib import ai_chat
+    from vivarium_workbench.lib.models import ChatTurnRequest
+    app, ws = _make_app(tmp_path)
+    ai_auth.save_credential("anthropic", "sk-ant-abcdefghijklmnopqrstuvwx", None, mode="memory", session="t")
+    ai_auth.set_selection("anthropic", "fm", mode="memory", session="t")
+    monkeypatch.setattr(ai_auth, "build_model", lambda *a, **k: _fake_llm(app, {"on": False}))
+    errors = []
+
+    async def go():
+        asyncio.get_running_loop().set_exception_handler(lambda loop, ctx: errors.append(ctx))
+        turn = ai_chat.prepare_turn(app, ChatTurnRequest(prompt="list the studies"), ws, "memory", "t")
+        gen = turn.frames()
+        await gen.__anext__()                              # one frame, then the client vanishes
+        await asyncio.create_task(gen.aclose())            # finalised from a different task/context
+        await asyncio.sleep(0.2)
+
+    asyncio.run(go())
+    assert errors == []
+
+
+# --- G5: the banner is silenced before pydantic-ai is first imported anywhere --
+
+
+def test_banner_is_silenced_by_ai_auth_too():
+    import importlib
+    os.environ.pop("PYDANTIC_AI_NO_BANNER", None)
+    importlib.reload(ai_auth)
+    assert os.environ.get("PYDANTIC_AI_NO_BANNER") == "1"
+
+
+# --- G6: Host gate details ------------------------------------------------------
+
+
+@pytest.mark.parametrize("host", ["evil.com@localhost", "localhost@evil.com", "@localhost"])
+def test_host_with_userinfo_is_rejected(tmp_path, host):
+    app, _ = _make_app(tmp_path, bind_host="127.0.0.1")
+    r = TestClient(app, base_url="http://127.0.0.1:8000").get("/api/ai/status", headers={"Host": host})
+    assert r.status_code == 403
+
+
+def test_no_operation_shares_the_ai_or_chat_prefix_unexcluded(tmp_path):
+    """The exclusion prefixes are `/api/ai/` and `/api/chat/`; a future route named
+    `/api/ai-…` would slip past them. If this fails, decide whether it belongs to the model."""
+    app, _ = _make_app(tmp_path)
+    served = {e["path"] for e in ai_tools.build_index(app).values()}
+    assert not any(p.startswith(("/api/ai", "/api/chat")) for p in served)
