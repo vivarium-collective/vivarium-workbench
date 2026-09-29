@@ -105,6 +105,18 @@ export function postCollapseCard() {
   if (target) target.postMessage({ type: 'explore:collapse-card' } as ExploreCollapseCardMsg, '*');
 }
 
+export type ExploreOpenSourceMsg = { type: 'explore:open-source'; address: string };
+
+/** Ask the embedding dashboard to open a process/step's SOURCE in its right-rail
+ *  Code panel — the same panel the Processes tab opens (window.ProcessCode.open).
+ *  `address` is the process's registry address, e.g. `local:MichaelisMentenStep`.
+ *  A no-op when loom is not embedded (standalone page): the source panel lives in
+ *  the parent SPA, so there is nothing to open. */
+export function postOpenSource(address: string) {
+  const target = _embeddingTarget();
+  if (target) target.postMessage({ type: 'explore:open-source', address } as ExploreOpenSourceMsg, '*');
+}
+
 // --- Cloud-run dispatch protocol -----------------------------------------
 // A composite-card Cloud Run dispatches a build's pre-built image via sms-api
 // run_simulation. That POST is inherently slow (~15-25s registering the run over

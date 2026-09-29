@@ -8,6 +8,7 @@ import { toLatex, MathText } from "../mathText";
 import InnerCompositePreview from "./InnerCompositePreview";
 import { configParams } from "../configView";
 import { displayName } from "../labels";
+import { postOpenSource } from "../api";
 
 // Canvas text metrics — used to reserve exactly the room the widest port label
 // needs (see the adaptive port-column width below). A shared module-level context
@@ -508,6 +509,21 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
                 strokeLinejoin="round" />
         </svg>
       </button>
+      {/* Open source: hover-revealed </> button that asks the embedding dashboard
+          to open THIS process's source in its right-rail Code panel — the same
+          panel the Processes tab opens. Only shown when the node has a registry
+          address to resolve (composite-process inner maps and unaddressed nodes
+          have no single source file). A no-op on the standalone loom page. */}
+      {(data as any).address && (
+        <button
+          type="button"
+          className="process-node-source-btn nodrag nopan"
+          title={`Open source in the Code panel — ${(data as any).address}`}
+          onClick={(e) => { e.stopPropagation(); postOpenSource(String((data as any).address)); }}
+        >
+          <span aria-hidden="true">&lt;/&gt;</span>
+        </button>
+      )}
       {/* Place-graph handles: a process nested inside a store (e.g. a Composite
           Process under a `simulations` store) is a place-graph child, so it needs
           the same top/bottom place anchors a store has — otherwise the parent's

@@ -437,6 +437,30 @@ body {
 .process-node:hover .process-node-fit-btn { opacity: 0.85; }
 .process-node-fit-btn:hover { opacity: 1; background: #eef2ff; border-color: #6366f1; }
 
+/* Open-source button — sits just left of the fit button, same hover-reveal.
+   The </> glyph mirrors the Processes tab's "Code" affordance. */
+.process-node-source-btn {
+  position: absolute;
+  top: 5px;
+  right: 30px;
+  height: 20px;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid #c7d2fe;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #6366f1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 6;
+}
+.process-node:hover .process-node-source-btn { opacity: 0.85; }
+.process-node-source-btn:hover { opacity: 1; background: #eef2ff; border-color: #6366f1; }
+
 /* Step kind colors — distinguish emitters and visualizations from regular processes.
  * Classification is driven by ProcessNode._classifyStep based on the node's address. */
 .process-node-emitter {
