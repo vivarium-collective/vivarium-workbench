@@ -3528,5 +3528,20 @@ class ChatTurnRequest(BaseModel):
     """
 
     messages: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
-    prompt: Optional[str] = Field(default=None, max_length=20_000)
+    prompt: Optional[str] = Field(default=None, max_length=300_000)   # attached text files are inlined
     deferred_results: Optional[dict[str, Any]] = None
+    # marimo's footer modes: manual = pure chat (no tools), ask = read-only tools,
+    # agent = read + write tools (every write still pauses for approval).
+    mode: Literal["manual", "ask", "agent"] = "agent"
+    # Inject a live workspace summary into the instructions (costs tokens).
+    include_manifest: bool = True
+
+
+class AiCapabilitiesPayload(BaseModel):
+    """``GET /api/ai/capabilities`` — what the assistant can reach, counted from the live
+    OpenAPI (feeds the chat's Capabilities popover). ``excluded`` lists the deliberately
+    withheld routes/tags."""
+
+    reads: int
+    writes: int
+    excluded: list[str]

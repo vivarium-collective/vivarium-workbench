@@ -948,17 +948,21 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Analysis</span>
       </a>
-      <!-- Chat: built-in AI assistant (docs/ai-chat.md). Live-only — hidden in the
-           read-only snapshot (snapshot-readonly.css). -->
-      <a href="#chat"              class="viv-rail-link menu-link" data-page="chat">
+      <!-- AI: toggles the docked chat panel on the right (docs/ai-chat.md). Not a page,
+           and deliberately NOT a .menu-link (so page switches don't clear its state).
+           Live-only — hidden in the read-only snapshot (snapshot-readonly.css). -->
+      <a href="#" id="viv-ai-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="AI">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <path d="M4 5.5 A1.5 1.5 0 0 1 5.5 4 H18.5 A1.5 1.5 0 0 1 20 5.5 V14.5 A1.5 1.5 0 0 1 18.5 16 H10 L6 20 V16 H5.5 A1.5 1.5 0 0 1 4 14.5 Z"/>
-            <path d="M8.5 8.5 H15.5"/>
-            <path d="M8.5 11.5 H12.5"/>
+            <rect x="5" y="8" width="14" height="10" rx="2.5"/>
+            <path d="M12 4.5 V8"/>
+            <circle cx="12" cy="3.6" r="0.9"/>
+            <circle cx="9.5" cy="13" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="14.5" cy="13" r="1" fill="currentColor" stroke="none"/>
+            <path d="M3 12 V15 M21 12 V15"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Chat</span>
+        <span class="viv-rail-link-label">AI</span>
       </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
@@ -1691,67 +1695,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
 
-    <!-- ── AI provider — credentials + model for the built-in Chat tab.
-         Live-only (hidden in the snapshot). static/ai-login.js drives it; the
-         key is verified server-side before it is stored and is never echoed. ── -->
-    <div class="gh-section" id="viv-ai-card">
-      <h3 class="gh-section-title">AI provider</h3>
-
-      <div class="gh-row">
-        <div class="gh-label">Provider</div>
-        <div class="gh-value">
-          <select id="viv-ai-provider" class="gh-input">
-            <option value="anthropic">Anthropic</option>
-            <option value="openai">OpenAI</option>
-            <option value="google">Google</option>
-            <option value="openai-compatible">OpenAI-compatible (Ollama, vLLM, OpenRouter…)</option>
-            <option value="bedrock">AWS Bedrock</option>
-          </select>
-          <div class="gh-value-hint" id="viv-ai-status">checking…</div>
-        </div>
-      </div>
-
-      <div class="gh-row" id="viv-ai-key-row">
-        <div class="gh-label">API key</div>
-        <div class="gh-value">
-          <input id="viv-ai-key" class="gh-input" type="password" placeholder="paste to save or replace"
-                 autocomplete="off" spellcheck="false">
-          <div class="gh-value-hint" id="viv-ai-storage"></div>
-        </div>
-      </div>
-
-      <div class="gh-row" id="viv-ai-url-row" hidden>
-        <div class="gh-label">Base URL</div>
-        <div class="gh-value">
-          <input id="viv-ai-url" class="gh-input" type="text" placeholder="http://localhost:11434/v1"
-                 autocomplete="off" spellcheck="false">
-        </div>
-      </div>
-
-      <div class="gh-row">
-        <div class="gh-label">Model</div>
-        <div class="gh-value">
-          <input id="viv-ai-model" class="gh-input" type="text" list="viv-ai-models" placeholder="model name"
-                 autocomplete="off" spellcheck="false">
-          <datalist id="viv-ai-models">
-            <option value="claude-sonnet-5-5"></option>
-            <option value="claude-opus-5-5"></option>
-            <option value="claude-haiku-4-5-20251001"></option>
-          </datalist>
-        </div>
-      </div>
-
-      <div class="gh-row">
-        <div class="gh-label"></div>
-        <div class="gh-value gh-action-row">
-          <button id="viv-ai-save" class="action-btn" type="button">Save &amp; test</button>
-          <button id="viv-ai-use" class="btn-mini" type="button" hidden>Use this model</button>
-          <button id="viv-ai-remove" class="btn-mini" type="button" hidden>Remove key</button>
-          <span id="viv-ai-msg" style="font-size:0.85em"></span>
-        </div>
-      </div>
-    </div>
-
     <!-- ── Branch & sync — the workspace's git state. Repo/branch are CHOSEN in
          the Source card above (local/remote); this card is about committing,
          pushing, and PRs, so it shows git STATE, not the repo/branch selectors
@@ -1792,11 +1735,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
   </div>
-</section>
-
-<!-- Chat: the DOM is built by static/chat.js into #viv-chat (chat-core.js holds the logic). -->
-<section id="page-chat" class="page" data-page="chat">
-  <div id="viv-chat" style="display:flex;flex-direction:column;flex:1 1 auto;min-height:0"></div>
 </section>
 
 <section id="page-studies" class="page" data-page="studies">
@@ -2117,7 +2055,61 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
   </div> <!-- /.viv-main -->
 
-  <!-- RIGHT RAIL: process code — collapsible editable Python source for the
+  <!-- AI panel: the built-in chat, docked on the RIGHT (docs/ai-chat.md). static/chat.js builds the
+     chat into #viv-ai; the settings sheet below is what the gear opens (static/ai-login.js).
+     Live-only — hidden in the read-only snapshot. -->
+<aside id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="AI">
+  <div class="vp-resize" id="viv-ai-resize" title="Drag to resize"></div>
+  <div class="vp-root" id="viv-ai"></div>
+  <div id="viv-ai-card" class="vp-settings" hidden>
+    <div class="vp-settings-head">
+      <button class="vp-icon" id="viv-ai-back" type="button" title="Back to chat" aria-label="Back to chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <strong>AI Settings</strong>
+    </div>
+    <div class="vp-form">
+      <label class="vp-field"><span>Provider</span>
+        <select id="viv-ai-provider" class="vp-input">
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+          <option value="google">Google</option>
+          <option value="openai-compatible">OpenAI-compatible (Ollama, vLLM, OpenRouter…)</option>
+          <option value="bedrock">AWS Bedrock</option>
+        </select>
+      </label>
+      <div class="vp-hint" id="viv-ai-status">checking…</div>
+      <div id="viv-ai-key-row">
+        <label class="vp-field"><span>API key</span>
+          <input id="viv-ai-key" class="vp-input" type="password" placeholder="paste to save or replace"
+                 autocomplete="off" spellcheck="false">
+        </label>
+        <div class="vp-hint" id="viv-ai-storage"></div>
+      </div>
+      <label class="vp-field" id="viv-ai-url-row" hidden><span>Base URL</span>
+        <input id="viv-ai-url" class="vp-input" type="text" placeholder="http://localhost:11434/v1"
+               autocomplete="off" spellcheck="false">
+      </label>
+      <label class="vp-field"><span>Model</span>
+        <input id="viv-ai-model" class="vp-input" type="text" list="viv-ai-models" placeholder="model name"
+               autocomplete="off" spellcheck="false">
+        <datalist id="viv-ai-models">
+          <option value="claude-sonnet-5-5"></option>
+          <option value="claude-opus-5-5"></option>
+          <option value="claude-haiku-4-5-20251001"></option>
+        </datalist>
+      </label>
+      <div class="vp-actions">
+        <button id="viv-ai-save" class="vp-btn vp-primary" type="button">Save &amp; test</button>
+        <button id="viv-ai-use" class="vp-btn" type="button" hidden>Use this model</button>
+        <button id="viv-ai-remove" class="vp-btn" type="button" hidden>Remove key</button>
+      </div>
+      <div class="vp-msg" id="viv-ai-msg"></div>
+    </div>
+  </div>
+</aside>
+
+<!-- RIGHT RAIL: process code — collapsible editable Python source for the
        selected registry process/step. Global across tabs; collapsed by default
        to a thin edge tab (see .viv-code-collapsed CSS + process-code.js). -->
   <aside id="viv-code-rail" class="viv-code-rail viv-code-collapsed" aria-label="Process code">

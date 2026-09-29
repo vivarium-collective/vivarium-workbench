@@ -1,28 +1,51 @@
 # Built-in AI chat
 
-An in-dashboard **Chat** tab plus an **AI provider** card on the Account page.
-You bring your own provider and model; the assistant can do anything you can do
-by hand through the dashboard's own HTTP API, and **every change asks for your
-approval first**.
+An **AI panel docked on the right** of the dashboard (toggle it with **AI** in the left rail;
+there is no chat page). You bring your own provider and model; the assistant can do anything
+you can do by hand through the dashboard's own HTTP API, and **every change asks for your
+approval first**. Its layout and controls follow marimo's "AI" panel.
 
-This is optional: `pip install 'vivarium-workbench[chat]'`. Without the extra the
-rest of the tool is unchanged, `GET /api/ai/status` reports `available: false`,
-and every other chat route answers `503 chat extra not installed`. The
-`viva-superpowers` Claude Code skills remain the way to drive the workbench from
-Claude Code; this is the path for users without it.
+This is optional: `pip install 'vivarium-workbench[chat]'`. Without the extra the rest of the
+tool is unchanged, `GET /api/ai/status` reports `available: false`, and every other chat route
+answers `503 chat extra not installed`. The `viva-superpowers` Claude Code skills remain the way
+to drive the workbench from Claude Code; this is the path for users without it.
 
 ## Using it
 
-1. **Account → AI provider**: pick a provider, paste a key (or, for
-   `openai-compatible`, a base URL — Ollama, vLLM, OpenRouter), type a model name,
-   **Save & test**. The server proves the key with one real 1-token request
-   before storing it. Keys already in the server's environment
-   (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) are detected and shown
-   as "from the server environment"; Bedrock uses the server's ambient AWS
-   credentials.
-2. **Chat**: ask. Reads (`GET`) run immediately and show as compact tool rows.
-   Anything else pauses on an **Approval required** card showing the method, path
-   and request body; **Approve** runs it, **Deny** tells the model you declined.
+The panel, top to bottom:
+
+- **Header** — "AI" and a close ×. **Toolbar** — `+` new chat · provider status plug (red until a
+  provider + model are usable) · **gear = AI Settings** · clock = previous chats.
+- **Gear → AI Settings**: pick a provider, paste a key (or, for `openai-compatible`, a base URL —
+  Ollama, vLLM, OpenRouter), type a model, **Save & test**. The server proves the key with one
+  real 1-token request before storing it. Keys already in the server's environment
+  (`ANTHROPIC_API_KEY`, …) are detected on a loopback server; Bedrock uses ambient AWS
+  credentials. The settings live in the panel, not on the Account page.
+- **Composer footer** — **mode** · **model** · capabilities · `@` context · attach · send:
+  - **Mode** (marimo's four, mapped to what the workbench can do; default **Manual**):
+    *Manual* = pure chat, the model gets **no tools**; *Ask* = read-only tools (write operations
+    are hidden from the model and refused); *Agent* = read and write tools, **every change still
+    pauses for your approval**; *Code Mode (beta)* is listed but disabled (there is no kernel).
+  - **Model** dropdown: switch among the models you have used (per configured provider), or
+    "Add or edit models…" (opens Settings).
+  - **Capabilities** (sliders): a switch for the live *workspace summary* injected into every
+    message (costs tokens), plus live counts of what the assistant can reach.
+  - **`@`** (button, or type `@`): mention a study or composite — inserted as
+    `@study/<name>` / `@composite/<name>`, which the model is told how to resolve.
+  - **Attach**: text files (≤ 100 KB each, ≤ 5, ≤ 200 KB total) are inlined into your message.
+- **Messages** — your message is a bordered monospace box (click it to **edit and resend** from
+  that point); replies are borderless markdown with a hover **Copy**; reasoning shows as a
+  *Thinking* / *View reasoning (N chars)* accordion; reads show as compact tool rows, and every
+  change is an amber **Approval required** card (method, path, body; **Deny** / **Approve**).
+  Errors are a red banner with a separate **Retry**. Messages sent while a turn is running are
+  **queued** (dashed, spinner) and sent when it finishes. A **Stop** strip appears while streaming.
+- **Previous chats** — searchable, grouped by date (Today / Yesterday / Previous 7 days / Older);
+  stored in this tab's `sessionStorage` only (they contain workspace data, so nothing persists
+  beyond the tab).
+- **Connect your own agent** — the new-thread callout explains the Claude Code alternative.
+
+Deliberately not offered: web search (the workbench has no such tool), image attachments, and an
+auto-approve ("Agent runs changes on its own") mode — every non-GET needs your approval.
 
 ## How it works
 
@@ -45,8 +68,10 @@ browser (chat.js, chat-core.js)          server
   `Content-Encoding: identity` so `GZipMiddleware` doesn't buffer the stream.
 - **Preflight errors** (no extra 503, no provider/credentials 409, bad request
   422) are ordinary JSON envelopes sent before streaming starts.
-- **Manifest.** Each turn injects a live `GET /api/workspace-manifest` snapshot as
-  instructions (the orientation call `ai-onboarding.md` §3 prescribes).
+- **Manifest.** Unless switched off in Capabilities, each turn injects a live
+  `GET /api/workspace-manifest` snapshot as instructions (the orientation call
+  `ai-onboarding.md` §3 prescribes). The request also carries the chosen `mode`
+  (`manual` | `ask` | `agent`) and `include_manifest`; reasoning streams as `reasoning-delta` frames.
 
 ### Action surface = the app's own live OpenAPI
 
@@ -173,8 +198,8 @@ exact stored value from every error string that could carry one.
 ## Files
 
 `lib/ai_auth.py`, `lib/ai_views.py`, `lib/ai_tools.py`, `lib/ai_chat.py`,
-`static/chat-core.js` (DOM-free logic, unit-tested under node), `static/chat.js`,
-`static/chat.css`, `static/ai-login.js`. Tests: `tests/test_ai_auth.py`,
+`static/chat-core.js` (DOM-free logic, unit-tested under node), `static/chat.js` (the panel),
+`static/chat.css`, `static/ai-login.js` (the settings sheet). Tests: `tests/test_ai_auth.py`,
 `test_ai_tools.py`, `test_ai_chat.py` (includes a contract test feeding real
 server frames through the real client reducer), `tests/js/test_chat_core.js`.
-The chat UI and the AI card are hidden in the published read-only snapshot.
+The AI panel and its rail toggle are hidden in the published read-only snapshot.

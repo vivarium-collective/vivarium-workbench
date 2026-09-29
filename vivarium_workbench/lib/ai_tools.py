@@ -81,6 +81,7 @@ class ChatDeps:
     session_key: str | None
     provider: str
     model: str
+    mode: str = "agent"          # manual (no tools are registered) | ask (reads only) | agent
 
 
 def make_client(app: FastAPI) -> httpx.AsyncClient:
@@ -260,6 +261,8 @@ async def list_operations(ctx: RunContext[ChatDeps], tag: str | None = None,
     for e in get_index(ctx.deps.app).values():
         if tag and e["tag"] != tag:
             continue
+        if e["mutating"] and ctx.deps.mode != "agent":
+            continue                      # Ask mode: the model never even sees the write operations
         hay = f'{e["operation_id"]} {e["path"]} {e["summary"]}'.lower()
         if all(w in hay for w in words):
             hits.append(_brief(e))
@@ -330,6 +333,9 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
     path = _resolve_path(e["path"], path_params)
     if isinstance(path, dict):
         return path
+    if e["mutating"] and deps.mode != "agent":
+        return {"error": "read-only mode (Ask): changes are disabled — ask the user to switch the "
+                         "mode to Agent if they want you to change the workspace"}
     if e["mutating"] and not ctx.tool_call_approved:
         raise ApprovalRequired(metadata={
             "operation_id": operation_id, "method": e["method"], "path": path,
@@ -375,6 +381,18 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
     if warning:
         out["audit_warning"] = warning
     return out
+
+
+def capabilities(app: FastAPI) -> dict[str, Any]:
+    """Counts of what the model can reach, from the live index (for the Capabilities popover)."""
+    idx = get_index(app)
+    return {
+        "reads": sum(1 for e in idx.values() if not e["mutating"]),
+        "writes": sum(1 for e in idx.values() if e["mutating"]),
+        "excluded": [*(f"tag: {t}" for t in sorted(EXCLUDED_TAGS)),
+                     *(f"tag: {t} (reads)" for t in sorted(EXCLUDED_GET_TAGS)),
+                     *sorted(EXCLUDED_PATH_PREFIXES), *sorted(EXCLUDED_PATHS)],
+    }
 
 
 TOOLS = [list_operations, describe_operation, call_operation]

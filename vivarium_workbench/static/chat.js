@@ -1,188 +1,474 @@
-// chat.js — the built-in Chat tab (docs/ai-chat.md). DOM only; the transcript
-// state machine, NDJSON splitting and markdown live in chat-core.js.
+// chat.js — the built-in AI panel, docked on the right (docs/ai-chat.md). DOM only: the
+// transcript state machine, history store, NDJSON splitting, modes, mentions, attachments
+// and markdown live in chat-core.js (unit-tested under node).
 //
-// Streams POST /api/chat/turn with fetch + ReadableStream (EventSource can't
-// POST). fetch goes through session.js's override, so X-VW-Session rides along.
-// The browser owns the transcript (sessionStorage); the server keeps none.
+// Layout and controls follow marimo's AI panel: "AI" header + close; toolbar (new chat,
+// provider status plug, settings gear, previous-chats clock); message column; Stop strip;
+// composer with mode pill, model pill, capabilities (sliders), @ context, attach, send.
+// Streams POST /api/chat/turn with fetch + ReadableStream (EventSource can't POST); fetch
+// goes through session.js's override, so X-VW-Session rides along. The browser owns the
+// transcripts (sessionStorage); the server keeps none.
 (function () {
   'use strict';
-  var C = window.VivChatCore;
-  var root = document.getElementById('viv-chat');
-  if (!C || !root) return;
+  const C = window.VivChatCore;
+  const panel = document.getElementById('viv-ai-panel');
+  const root = document.getElementById('viv-ai');
+  if (!C || !panel || !root) return;
+  if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return;   // published bundle: no live server
 
-  var STORE_KEY = 'viv.chat.v1';
-  var SUGGESTIONS = ['List the studies in this workspace', 'What composites are available?',
-                     'Summarize the latest runs', 'What needs attention?'];
+  const STORE_KEY = 'viv.chat.v2';
+  const DOCS = 'https://github.com/vivarium-collective/vivarium-workbench/blob/main/docs/';
+  const REFRESH_AFTER_MUTATION = ['_loadInvestigations', '_loadInvestigationSets', '_refreshGitStatus'];
+  const PLACEHOLDER_NEW = 'Ask anything, @ to include context about studies or composites';
+  const PLACEHOLDER = 'Type your message...';
 
-  var state = load();
-  var status = null;            // GET /api/ai/status
-  var controller = null;        // AbortController of the in-flight stream
-  var el = {};
+  // ── State ─────────────────────────────────────────────────────────────────
+  let store = loadStore();
+  let state = C.restore(store.chats[store.active].snap);
+  let status = null;              // GET /api/ai/status
+  let controller = null;          // AbortController of the in-flight stream
+  let editing = -1;               // ui index of the user message being edited
+  let queued = [];                // messages sent while a turn was running
+  let attached = [];              // [{name,size,content}] pending attachments
+  let ctxItems = null;            // @ picker items (from the workspace manifest)
+  let pop = null;                 // the open popover
+  const prefs = {
+    mode: lsGet('viv.ai.mode', 'manual'),
+    manifest: lsGet('viv.ai.manifest', '1') !== '0',
+  };
+  if (!C.validMode(prefs.mode)) prefs.mode = 'manual';
+  const el = {};
 
-  function api(p) {
-    return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p;
-  }
-  function load() {
-    try { return C.restore(JSON.parse(sessionStorage.getItem(STORE_KEY))); } catch (e) { return C.newState(); }
+  function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (x) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (x) { /* private mode */ } }
+  function api(p) { return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p; }
+  function loadStore() {
+    try { return C.storeRestore(JSON.parse(sessionStorage.getItem(STORE_KEY))); } catch (x) { return C.newStore(); }
   }
   function save() {
-    try { sessionStorage.setItem(STORE_KEY, JSON.stringify(C.snapshot(state))); } catch (e) { /* private mode / quota */ }
-  }
-
-  // ── Icons (inline, currentColor) ──────────────────────────────────────────
-  var ICON = {
-    spin: '<svg class="vc-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"/></svg>',
-    done: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/></svg>',
-    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
-    denied: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>',
-    shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9.6 9.6a2.4 2.4 0 1 1 3.4 2.2c-.6.3-1 .8-1 1.4M12 16.3v.1"/></svg>',
-    chev: '<svg class="vc-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
-  };
-  function statusIcon(s) {
-    return s === 'done' ? ICON.done : s === 'error' ? ICON.error : s === 'denied' ? ICON.denied : ICON.spin;
-  }
-
-  // ── Rendering ─────────────────────────────────────────────────────────────
-  function pretty(v) {
-    if (v === undefined || v === null || v === '') return '';
-    if (typeof v === 'string') return v;
-    try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
-  }
-
-  function toolName(p) {
-    return (p.args && p.args.operation_id) || (p.approval && p.approval.operation_id) || p.name;
-  }
-
-  function renderTool(p) {
-    var e = C.esc;
-    if (p.status === 'awaiting') {
-      var a = C.describeApproval(p);
-      return '<div class="vc-approve" data-id="' + e(p.id) + '">' +
-        '<div class="vc-approve-h">' + ICON.shield + '<span>Approval required: <code>' + e(a.title) + '</code></span></div>' +
-        '<div class="vc-req"><span class="vc-method">' + e(a.method) + '</span><code>' + e(a.path) + '</code>' +
-          (a.summary ? '<span class="vc-sum">' + e(a.summary) + '</span>' : '') + '</div>' +
-        (a.query ? '<div><div class="vc-k">Query</div><pre>' + e(a.query) + '</pre></div>' : '') +
-        (a.body ? '<div><div class="vc-k">Request body</div><pre>' + e(a.body) + '</pre></div>' : '') +
-        '<div class="vc-actions"><button class="vc-btn" data-act="deny">Deny</button>' +
-        '<button class="vc-btn vc-primary" data-act="approve">Approve</button></div></div>';
+    C.storeUpsert(store, state);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { sessionStorage.setItem(STORE_KEY, JSON.stringify(store)); return; }
+      catch (x) { C.storePrune(store); if (attempt === 0) dropOldest(); }   // quota: shed history, retry once
     }
-    var body = '';
-    if (p.args && Object.keys(p.args).length) body += '<div><div class="vc-k">Arguments</div><pre>' + e(pretty(p.args)) + '</pre></div>';
-    if (p.status === 'denied') body += '<div class="vc-note">You declined this action, so it was not run.</div>';
-    else if (p.result !== undefined) body += '<div><div class="vc-k">Result</div><pre>' + e(pretty(p.result)) + '</pre></div>';
-    return '<details class="vc-tool vc-s-' + e(p.status) + '" data-id="' + e(p.id) + '"' + (p.open ? ' open' : '') + '>' +
-      '<summary><span class="vc-ic">' + statusIcon(p.status) + '</span><span class="vc-lbl">' + e(C.statusLabel(p.status)) +
-      '</span><code>' + e(toolName(p)) + '</code>' + ICON.chev + '</summary><div class="vc-tool-body">' + body + '</div></details>';
   }
-
-  function renderAssistant(m, isLast) {
-    var html = m.parts.map(function (p, i) {
-      if (p.kind === 'text') return '<div class="vc-md">' + C.renderMarkdown(p.text) + '</div>';
-      if (p.kind === 'tool') return renderTool(p);
-      if (p.kind === 'error') {
-        return '<div class="vc-error"><span>' + C.esc(p.text) + '</span>' +
-          (isLast && i === m.parts.length - 1 && state.retry ? '<button class="vc-btn" data-act="retry">Retry</button>' : '') + '</div>';
-      }
-      if (p.kind === 'notice') return '<div class="vc-notice">' + C.esc(p.text) + '</div>';
-      return '';
-    }).join('');
-    if (isLast && state.busy) html += '<span class="vc-typing"></span>';
-    return '<div class="vc-body">' + html + '</div>' +
-      '<button class="vc-btn vc-copy" data-act="copy" title="Copy">Copy</button>';
+  function dropOldest() {
+    const ids = Object.keys(store.chats).filter(function (id) { return id !== store.active; })
+      .sort(function (a, b) { return store.chats[a].updatedAt - store.chats[b].updatedAt; });
+    ids.slice(0, Math.max(1, Math.ceil(ids.length / 2))).forEach(function (id) { delete store.chats[id]; });
   }
-
-  function messageNode(m, isLast) {
-    var d = document.createElement('div');
-    if (m.role === 'user') {
-      d.className = 'vc-msg vc-user';
-      d.innerHTML = '<div class="vc-bubble">' + C.esc(m.text) + '</div>';
-    } else {
-      d.className = 'vc-msg vc-asst';
-      d.innerHTML = renderAssistant(m, isLast);
-    }
-    return d;
-  }
-
-  function nearBottom() {
-    var l = el.list;
-    return l.scrollHeight - l.scrollTop - l.clientHeight < 80;
-  }
-  function scrollDown(force) {
-    if (force || el.pinned) el.list.scrollTop = el.list.scrollHeight;
-  }
-
-  function renderAll() {
-    el.col.innerHTML = '';
-    if (!state.ui.length) {
-      var ready = canChat();
-      var empty = document.createElement('div');
-      empty.className = 'vc-empty';
-      empty.innerHTML = '<h3>Ask about this workspace</h3><div>The assistant can do anything you can do by hand — ' +
-        'every change asks for your approval first.</div>' +
-        (ready ? '<div class="vc-suggest">' + SUGGESTIONS.map(function (s) {
-          return '<button class="vc-chip" data-suggest="' + C.esc(s) + '">' + C.esc(s) + '</button>'; }).join('') + '</div>' : '');
-      el.col.appendChild(empty);
-    }
-    state.ui.forEach(function (m, i) { el.col.appendChild(messageNode(m, i === state.ui.length - 1)); });
-    renderChrome();
-    scrollDown(true);
-  }
-
-  // Re-render only the assistant message being streamed (cheap; keeps the rest stable).
-  function renderLast() {
-    var i = state.ui.length - 1, m = state.ui[i];
-    var kids = el.col.children, node = kids[kids.length - 1];
-    if (!m || m.role !== 'assistant' || !node || !node.classList.contains('vc-asst')) return renderAll();
-    var fresh = messageNode(m, true);
-    el.col.replaceChild(fresh, node);
-    renderChrome();
-    scrollDown(false);
-  }
-
   function canChat() {
     return !!(status && status.available && status.selected &&
       (status.providers || []).some(function (p) { return p.id === status.selected.provider && p.configured; }));
   }
 
-  function renderChrome() {
-    var ready = canChat();
-    var chip = ready ? status.selected.provider + ' · ' + status.selected.model : 'No model selected';
-    el.model.textContent = chip; el.model2.textContent = chip;
-    el.input.disabled = !ready || state.busy || state.pending.length > 0;
-    el.input.placeholder = state.pending.length ? 'Approve or deny the pending action to continue…'
-      : 'Ask about this workspace…  (Enter to send · Shift+Enter for a new line)';
-    el.send.textContent = state.busy ? 'Stop' : 'Send';
-    el.send.disabled = !state.busy && (!ready || state.pending.length > 0);
-    el.setup.hidden = ready || !status;
-    if (!ready && status) {
-      el.setup.innerHTML = status.error ? C.esc(status.error) : !status.available
-        ? 'Chat needs the optional extra: <code>pip install \'vivarium-workbench[chat]\'</code>'
-        : 'No AI provider is set up yet. <a data-act="setup">Add one under Account → AI provider</a>.';
+  // ── Icons (inline, currentColor; lucide-style) ────────────────────────────
+  const S = (d, extra) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"' + (extra || '') + '>' + d + '</svg>';
+  const ICON = {
+    plus: S('<path d="M12 5v14M5 12h14"/>'),
+    x: S('<path d="M6 6l12 12M18 6L6 18"/>'),
+    plug: S('<path d="M9 2v6M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>'),
+    gear: S('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+    clock: S('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    send: S('<path d="M3 11l18-8-8 18-2-8z"/><path d="M11 13L21 3"/>'),
+    stop: S('<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor"/>'),
+    bot: S('<path d="M12 6V2H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>'),
+    sliders: S('<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'),
+    at: S('<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>'),
+    clip: S('<path d="M21 12.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/>'),
+    file: S('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
+    chev: S('<path d="M6 9l6 6 6-6"/>', ' class="vp-chev"'),
+    chevs: S('<path d="M6 9l6 6 6-6"/>'),
+    copy: S('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
+    message: S('<path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12z"/>'),
+    book: S('<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v18H6.5A2.5 2.5 0 0 0 4 22z"/><path d="M8 7h8M8 11h8"/>'),
+    hat: S('<path d="M3 12h18M6 12l1.5-6a2 2 0 0 1 2-1.5h5a2 2 0 0 1 2 1.5L18 12"/><circle cx="8" cy="16" r="3"/><circle cx="16" cy="16" r="3"/>'),
+    code: S('<path d="M8 8l-5 4 5 4M16 8l5 4-5 4M14 4l-4 16"/>'),
+    sparkles: S('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>'),
+    shield: S('<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9.6 9.6a2.4 2.4 0 1 1 3.4 2.2c-.6.3-1 .8-1 1.4M12 16.3v.1"/>'),
+    spin: S('<path d="M12 3a9 9 0 1 0 9 9"/>', ' class="vp-spin"'),
+    done: S('<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>'),
+    error: S('<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>'),
+    denied: S('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
+    down: S('<path d="M12 5v14M6 13l6 6 6-6"/>'),
+  };
+  const statusIcon = (s) => s === 'done' ? ICON.done : s === 'error' ? ICON.error : s === 'denied' ? ICON.denied : ICON.spin;
+  const e = C.esc;
+
+  // ── Rendering: messages ───────────────────────────────────────────────────
+  function pretty(v) {
+    if (v === undefined || v === null || v === '') return '';
+    if (typeof v === 'string') return v;
+    try { return JSON.stringify(v, null, 2); } catch (x) { return String(v); }
+  }
+  const toolName = (p) => (p.args && p.args.operation_id) || (p.approval && p.approval.operation_id) || p.name;
+
+  function renderTool(p) {
+    if (p.status === 'awaiting') {
+      const a = C.describeApproval(p);
+      return '<div class="vp-approve" data-id="' + e(p.id) + '">' +
+        '<div class="vp-approve-h">' + ICON.shield + '<span>Approval required: <code>' + e(a.title) + '</code></span></div>' +
+        '<div class="vp-req"><span class="vp-method">' + e(a.method) + '</span><code>' + e(a.path) + '</code>' +
+          (a.summary ? '<span class="vp-sum">' + e(a.summary) + '</span>' : '') + '</div>' +
+        (a.query ? '<div><div class="vp-k">Query</div><pre>' + e(a.query) + '</pre></div>' : '') +
+        (a.body ? '<div><div class="vp-k">Request body</div><pre>' + e(a.body) + '</pre></div>' : '') +
+        '<div class="vp-actions"><button class="vp-btn" data-act="deny">Deny</button>' +
+        '<button class="vp-btn vp-primary" data-act="approve">Approve</button></div></div>';
     }
+    let body = '';
+    if (p.args && Object.keys(p.args).length) body += '<div><div class="vp-k">Arguments</div><pre>' + e(pretty(p.args)) + '</pre></div>';
+    if (p.status === 'denied') body += '<div class="vp-note">You declined this action, so it was not run.</div>';
+    else if (p.result !== undefined) body += '<div><div class="vp-k">Result</div><pre>' + e(pretty(p.result)) + '</pre></div>';
+    return '<details class="vp-tool vp-s-' + e(p.status) + '" data-id="' + e(p.id) + '"' + (p.open ? ' open' : '') + '>' +
+      '<summary><span class="vp-ic">' + statusIcon(p.status) + '</span><span class="vp-lbl">' + e(C.statusLabel(p.status)) +
+      '</span><code>' + e(toolName(p)) + '</code>' + ICON.chev + '</summary><div class="vp-tool-body">' + body + '</div></details>';
+  }
+
+  // "Thinking" (open) while streaming; "View reasoning (N chars)" once done.
+  function renderReasoning(p, streaming) {
+    const label = streaming ? 'Thinking' : 'View reasoning' + (p.text ? ' (' + p.text.length + ' chars)' : '');
+    return '<details class="vp-reason"' + (streaming || p.open ? ' open' : '') + '><summary>' + ICON.bot +
+      '<span>' + e(label) + '</span>' + ICON.chev + '</summary>' +
+      '<div class="vp-reason-body vp-md">' + C.renderMarkdown(p.text) + '</div></details>';
+  }
+
+  function renderAssistant(m, isLast) {
+    const busy = isLast && state.busy;
+    const html = m.parts.map(function (p, i) {
+      if (p.kind === 'text') return '<div class="vp-md">' + C.renderMarkdown(p.text) + '</div>';
+      if (p.kind === 'reasoning') return renderReasoning(p, busy && i === m.parts.length - 1);
+      if (p.kind === 'tool') return renderTool(p);
+      if (p.kind === 'error') {
+        return '<div class="vp-error"><div class="vp-error-msg">' + e(p.text) + '</div>' +
+          (isLast && i === m.parts.length - 1 && state.retry ? '<button class="vp-btn" data-act="retry">Retry</button>' : '') + '</div>';
+      }
+      if (p.kind === 'notice') return '<div class="vp-notice">' + e(p.text) + '</div>';
+      return '';
+    }).join('');
+    return '<div class="vp-body">' + html + (busy ? '<span class="vp-typing"></span>' : '') + '</div>' +
+      '<button class="vp-icon vp-copy" data-act="copy" title="Copy">' + ICON.copy + '</button>';
+  }
+
+  // A user message is a bordered monospace box; click to edit and resend from that point.
+  function userBox(m, idx) {
+    if (idx === editing) {
+      return '<div class="vp-userbox"><textarea data-edit-input rows="1">' + e(m.text) + '</textarea>' +
+        '<div class="vp-editbar"><button class="vp-btn" data-act="edit-cancel">Cancel</button>' +
+        '<button class="vp-btn vp-primary" data-act="edit-send">Resend</button></div></div>';
+    }
+    const files = (m.files && m.files.length)
+      ? '<div class="vp-files">' + m.files.map(function (n) { return '<span class="vp-file">' + ICON.file + '<span>' + e(n) + '</span></span>'; }).join('') + '</div>' : '';
+    return '<div class="vp-userbox" data-act="edit" data-idx="' + idx + '" title="Click to edit and resend">' + e(m.text) + files + '</div>';
+  }
+
+  function messageNode(m, idx, isLast) {
+    const d = document.createElement('div');
+    if (m.role === 'user') { d.className = 'vp-msg-row vp-user'; d.innerHTML = userBox(m, idx); }
+    else { d.className = 'vp-msg-row vp-asst'; d.innerHTML = renderAssistant(m, isLast); }
+    return d;
+  }
+
+  function queuedNode(q) {
+    const d = document.createElement('div');
+    d.className = 'vp-msg-row vp-user vp-queued';
+    d.innerHTML = '<div class="vp-userbox">' + ICON.spin + '<span>' + e(q.text) + '</span></div>';
+    return d;
+  }
+
+  const nearBottom = () => el.list.scrollHeight - el.list.scrollTop - el.list.clientHeight < 80;
+  function scrollDown(force) { if (force || el.pinned) el.list.scrollTop = el.list.scrollHeight; }
+
+  function renderAll() {
+    const fresh = state.ui.length === 0;
+    el.new.hidden = !fresh; el.list.hidden = fresh; el.foot.hidden = fresh;
+    el.list.innerHTML = '';
+    state.ui.forEach(function (m, i) { el.list.appendChild(messageNode(m, i, i === state.ui.length - 1)); });
+    queued.forEach(function (q) { el.list.appendChild(queuedNode(q)); });
+    renderChrome();
+    const ta = el.list.querySelector('[data-edit-input]');
+    if (ta) { autosize(ta); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    scrollDown(true);
+  }
+
+  // Re-render only the assistant message being streamed.
+  function renderLast() {
+    const i = state.ui.length - 1, m = state.ui[i];
+    const kids = el.list.querySelectorAll('.vp-msg-row:not(.vp-queued)');
+    const node = kids[kids.length - 1];
+    if (!m || m.role !== 'assistant' || !node || !node.classList.contains('vp-asst')) return renderAll();
+    el.list.replaceChild(messageNode(m, i, true), node);
+    renderChrome();
+    scrollDown(false);
+  }
+
+  // ── Rendering: chrome (toolbar, composer, new-thread state) ───────────────
+  function renderChrome() {
+    const ready = canChat();
+    const fresh = state.ui.length === 0;
+    // plug: the provider connection (red until a provider + model are usable)
+    el.plug.className = 'vp-icon ' + (status ? (ready ? 'vp-ok' : 'vp-red') : '');
+    el.plug.title = ready ? 'Connected: ' + status.selected.provider + ' · ' + status.selected.model
+      : 'Not connected — open AI settings';
+    // composer placement (only move it when the layout changes: moving steals focus)
+    const target = fresh ? el.newHost : el.foot;
+    if (el.composer.parentNode !== target) target.appendChild(el.composer);
+    el.newCopy.innerHTML = status && !ready
+      ? '<h3>Chat with AI</h3><p>' + e(status.error || (status.available ? 'No AI provider configured or Chat model not selected' :
+          "The chat needs the optional extra: pip install 'vivarium-workbench[chat]'")) + '</p>' +
+        (status.available ? '<button class="vp-callout" data-act="settings">Edit AI settings</button>' : '')
+      : '<h3>Chat with AI</h3>';
+    el.composer.hidden = !!(fresh && status && !ready);
+    el.callout.hidden = !fresh;
+    // composer controls
+    const mode = C.MODES.filter(function (m) { return m.id === prefs.mode; })[0];
+    el.mode.innerHTML = ICON[mode.icon] + '<span>' + e(mode.label) + '</span>' + ICON.chevs;
+    el.model.innerHTML = ICON.bot + '<span>' + e(ready ? status.selected.model : 'Model') + '</span>' + ICON.chevs;
+    el.input.placeholder = fresh ? PLACEHOLDER_NEW : PLACEHOLDER;
+    el.send.innerHTML = state.busy ? ICON.stop : ICON.send;
+    el.send.title = state.busy ? 'Stop' : 'Submit';
+    el.send.className = 'vp-icon' + (state.busy ? ' vp-red' : '');
+    el.stop.hidden = !state.busy;
+    renderPills();
+  }
+
+  function renderPills() {
+    el.pills.innerHTML = attached.map(function (f, i) {
+      return '<span class="vp-file">' + ICON.file + '<span>' + e(f.name) + '</span>' +
+        '<button data-act="unattach" data-idx="' + i + '" title="Remove">' + ICON.x.replace('<svg', '<svg width="12" height="12"') + '</button></span>';
+    }).join('');
+  }
+
+  function autosize(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 400) + 'px'; }
+
+  // ── Popovers ──────────────────────────────────────────────────────────────
+  function closePop() {
+    if (!pop) return;
+    pop.node.remove();
+    document.removeEventListener('mousedown', pop.off, true);
+    pop = null;
+  }
+  // Anchored inside the panel (position:relative). opts.up === false opens below the anchor.
+  function openPop(anchor, node, opts) {
+    opts = opts || {};
+    closePop();
+    node.classList.add('vp-pop');
+    panel.appendChild(node);
+    const pr = panel.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
+    node.style.width = Math.min(opts.width || 260, pr.width - 16) + 'px';
+    const left = Math.max(8, Math.min(ar.left - pr.left, pr.width - node.offsetWidth - 8));
+    node.style.left = left + 'px';
+    // open above the anchor unless there is no room for it (then flip below)
+    const below = opts.up === false || (ar.top - pr.top) < node.offsetHeight + 12;
+    if (below) node.style.top = (ar.bottom - pr.top + 4) + 'px';
+    else node.style.bottom = (pr.bottom - ar.top + 4) + 'px';
+    const off = function (ev) { if (!node.contains(ev.target) && !anchor.contains(ev.target)) closePop(); };
+    document.addEventListener('mousedown', off, true);
+    pop = { node: node, off: off, anchor: anchor };
+    return node;
+  }
+  const div = (html) => { const d = document.createElement('div'); d.innerHTML = html; return d; };
+
+  function openModeMenu(anchor) {
+    const n = div(C.MODES.map(function (m) {
+      return '<button class="vp-pop-item' + (m.id === prefs.mode ? ' on' : '') + '" data-mode="' + m.id + '"' + (m.disabled ? ' disabled' : '') + '>' +
+        ICON[m.icon] + '<span><strong>' + e(m.label) + '</strong><span class="vp-sub">' + e(m.desc) + '</span></span></button>';
+    }).join(''));
+    openPop(anchor, n, { width: 300 });
+    n.addEventListener('click', function (ev) {
+      const b = ev.target.closest('[data-mode]');
+      if (!b || b.disabled) return;
+      prefs.mode = b.getAttribute('data-mode'); lsSet('viv.ai.mode', prefs.mode);
+      closePop(); renderChrome();
+    });
+  }
+
+  function recentModels() {
+    let r = {};
+    try { r = JSON.parse(lsGet('viv.ai.models', '{}')) || {}; } catch (x) { r = {}; }
+    return r;
+  }
+  function rememberModel(provider, model) {
+    const r = recentModels();
+    r[provider] = [model].concat((r[provider] || []).filter(function (m) { return m !== model; })).slice(0, 6);
+    lsSet('viv.ai.models', JSON.stringify(r));
+  }
+  function openModelMenu(anchor) {
+    const r = recentModels(), cur = status && status.selected;
+    const configured = ((status && status.providers) || []).filter(function (p) { return p.configured; });
+    let rows = '';
+    configured.forEach(function (p) {
+      const models = (r[p.id] || []).slice();
+      if (cur && cur.provider === p.id && models.indexOf(cur.model) < 0) models.unshift(cur.model);
+      models.forEach(function (m) {
+        const on = cur && cur.provider === p.id && cur.model === m;
+        rows += '<button class="vp-pop-item' + (on ? ' on' : '') + '" data-provider="' + e(p.id) + '" data-model="' + e(m) + '">' +
+          ICON.bot + '<span><strong>' + e(m) + '</strong><span class="vp-sub">' + e(p.id) + '</span></span></button>';
+      });
+    });
+    const n = div('<div class="vp-pop-h">Model</div>' + (rows || '<div class="vp-pop-empty">No models yet</div>') +
+      '<div class="vp-pop-foot"><button class="vp-pop-item" data-open-settings="1"><span>Add or edit models…</span></button></div>');
+    openPop(anchor, n, { width: 280 });
+    n.addEventListener('click', function (ev) {
+      const b = ev.target.closest('[data-model]');
+      if (b) { closePop(); selectModel(b.getAttribute('data-provider'), b.getAttribute('data-model')); return; }
+      if (ev.target.closest('[data-open-settings]')) { closePop(); openSettings(); }
+    });
+  }
+  function selectModel(provider, model) {
+    fetch(api('/api/ai/select'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: provider, model: model }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || r.status); }); })
+      .then(refreshStatus, function (err) { flash(err.message); });
+  }
+
+  function openCapabilities(anchor) {
+    const n = div('<label class="vp-switch"><span><strong>Workspace summary</strong><small>Include a live summary of the workspace in every message ' +
+      '(uses more tokens). <a href="' + DOCS + 'ai-chat.md" target="_blank" rel="noopener noreferrer">Learn more</a></small></span>' +
+      '<input type="checkbox" id="vp-cap-manifest"' + (prefs.manifest ? ' checked' : '') + '></label>' +
+      '<hr><div class="vp-caps" id="vp-caps">Loading…</div>');
+    openPop(anchor, n, { width: 300 });
+    n.querySelector('#vp-cap-manifest').addEventListener('change', function (ev) {
+      prefs.manifest = ev.target.checked; lsSet('viv.ai.manifest', prefs.manifest ? '1' : '0');
+    });
+    fetch(api('/api/ai/capabilities')).then(function (r) { return r.ok ? r.json() : null; }).then(function (c) {
+      const box = n.querySelector('#vp-caps');
+      if (!box) return;
+      box.innerHTML = c ? 'Reachable: <strong>' + c.reads + '</strong> read operations · <strong>' + c.writes +
+        '</strong> write operations (each needs your approval).<br>Withheld: GitHub auth, workspace/source switching, remote pushes, ' +
+        'package installs, downloads and streams.' : 'Capabilities are unavailable.';
+    }, function () { const box = n.querySelector('#vp-caps'); if (box) box.textContent = 'Capabilities are unavailable.'; });
+  }
+
+  function openConnect(anchor) {
+    const n = div('<div class="vp-pop-h">Connect your own agent</div><div class="vp-caps">Drive this workspace from Claude Code instead: ' +
+      'install the <code>viva-superpowers</code> plugin, run <code>/viva-init</code> once, then <code>/viva-workbench start</code>. ' +
+      '<a href="' + DOCS + 'ai-onboarding.md" target="_blank" rel="noopener noreferrer">Setup guide</a></div>');
+    openPop(anchor, n, { width: 300, up: false });
+  }
+
+  function fetchContext() {
+    if (ctxItems) return Promise.resolve(ctxItems);
+    return fetch(api('/api/workspace-manifest')).then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (m) { ctxItems = C.contextItems(m); return ctxItems; }, function () { return []; });
+  }
+  function ctxMenuHtml(items) {
+    if (!items.length) return '<div class="vp-pop-empty">No studies or composites found</div>';
+    let out = '', last = '';
+    items.slice(0, 60).forEach(function (i) {
+      if (i.group !== last) { out += '<div class="vp-pop-h">' + e(i.group) + '</div>'; last = i.group; }
+      out += '<button class="vp-pop-item" data-mention="' + e(i.value) + '"><span>' + e(i.label) + '</span></button>';
+    });
+    return out;
+  }
+  // From the @ button (with a search box) or from typing "@" in the input (filters as you type).
+  function openContext(anchor, trigger) {
+    fetchContext().then(function (all) {
+      const n = div(trigger ? '<div class="vp-pop-scroll" id="vp-ctx-list"></div>'
+        : '<input class="vp-pop-input" id="vp-ctx-q" placeholder="Search studies and composites…"><div class="vp-pop-scroll" id="vp-ctx-list"></div>');
+      openPop(anchor, n, { width: 300 });
+      const paint = function (q) {
+        n.querySelector('#vp-ctx-list').innerHTML = ctxMenuHtml(C.filterItems(all, q));
+        const first = n.querySelector('[data-mention]'); if (first) first.classList.add('hi');
+      };
+      paint(trigger ? trigger.query : '');
+      const qbox = n.querySelector('#vp-ctx-q');
+      if (qbox) { qbox.addEventListener('input', function () { paint(qbox.value); }); qbox.focus(); }
+      pop.paint = paint;
+      n.addEventListener('click', function (ev) {
+        const b = ev.target.closest('[data-mention]'); if (b) insertMention(b.getAttribute('data-mention'));
+      });
+    });
+  }
+  function insertMention(value) {
+    const ta = el.input, caret = ta.selectionStart || ta.value.length;
+    const t = C.mentionQuery(ta.value, caret);
+    let out;
+    if (t) out = C.insertMention(ta.value, t.start, caret, value);
+    else {
+      const pre = ta.value.slice(0, caret), sp = pre && !/\s$/.test(pre) ? ' ' : '';
+      out = { text: pre + sp + value + ' ' + ta.value.slice(caret), caret: pre.length + sp.length + value.length + 1 };
+    }
+    ta.value = out.text; ta.setSelectionRange(out.caret, out.caret); autosize(ta); closePop(); ta.focus();
+  }
+
+  // "Previous chats": search, newest first, grouped by date with dividers, time-ago per row.
+  function openHistory(anchor) {
+    const n = div('<input class="vp-pop-input" id="vp-h-q" placeholder="Search chat history..."><div class="vp-pop-scroll" id="vp-h-list"></div>');
+    openPop(anchor, n, { width: 480, up: false });
+    n.style.right = '8px'; n.style.left = 'auto';
+    const q = n.querySelector('#vp-h-q');
+    const paint = function () {
+      C.storeUpsert(store, state);
+      const res = C.storeList(store, q.value);
+      const list = n.querySelector('#vp-h-list');
+      if (!res.total) {
+        list.innerHTML = q.value
+          ? '<div class="vp-pop-empty"><strong>No chats found</strong>No chats match "' + e(q.value) + '"</div>'
+          : '<div class="vp-pop-empty"><strong>No chats yet</strong>Start a new chat to get started</div>';
+        return;
+      }
+      list.innerHTML = res.groups.map(function (g, gi) {
+        return (gi ? '<hr>' : '') + '<div class="vp-pop-h">' + e(g.group) + '</div>' + g.items.map(function (c) {
+          return '<button class="vp-pop-item' + (c.active ? ' on' : '') + '" data-chat="' + e(c.id) + '"><span class="vp-hist-row" style="width:100%">' +
+            '<span class="t">' + e(c.title) + '</span><span class="a">' + e(C.timeAgo(c.updatedAt)) + '</span></span></button>';
+        }).join('');
+      }).join('');
+    };
+    paint();
+    q.addEventListener('input', paint);
+    q.focus();
+    n.addEventListener('click', function (ev) {
+      const b = ev.target.closest('[data-chat]'); if (!b) return;
+      closePop(); switchChat(b.getAttribute('data-chat'));
+    });
+  }
+
+  // brief inline message in the composer (attachment errors, select failures)
+  function flash(msg) {
+    const n = div('<span class="vp-note">' + e(msg) + '</span>');
+    el.flash.appendChild(n);                       // own element: renderPills() must not wipe it
+    setTimeout(function () { n.remove(); }, 4000);
+  }
+
+  // ── Chats: new / switch ───────────────────────────────────────────────────
+  function abortStream() { if (controller) controller.abort(); }
+  function resetTransient() { queued = []; attached = []; editing = -1; }
+  function newChat() {
+    abortStream(); closePop();
+    store = C.storeNew(store, state);
+    state = C.restore(store.chats[store.active].snap);
+    resetTransient(); save(); renderAll();
+    el.input.focus();
+  }
+  function switchChat(id) {
+    abortStream();
+    const next = C.storeSwitch(store, id, state);
+    if (!next) return;
+    state = next; resetTransient(); save(); renderAll();
   }
 
   // ── Turn streaming ────────────────────────────────────────────────────────
-  // Same loaders the UI's own create/edit flows call (walkthrough.js _submitBrowseCreate).
-  var REFRESH_AFTER_MUTATION = ['_loadInvestigations', '_loadInvestigationSets', '_refreshGitStatus'];
   function refreshWorkspaceViews() {
     // Other tabs memoise their first load; clear those flags so the next visit
     // (and the rail) reflect what the assistant just changed.
     window._registryLoaded = false;
     window._investigationsLoaded = false;
     REFRESH_AFTER_MUTATION.forEach(function (fn) {
-      try { if (typeof window[fn] === 'function') window[fn](); } catch (e) { /* best effort */ }
+      try { if (typeof window[fn] === 'function') window[fn](); } catch (x) { /* best effort */ }
     });
   }
+  const withPrefs = (body) => Object.assign({}, body, { mode: prefs.mode, include_manifest: prefs.manifest });
 
-  function streamTurn(body) {
+  function streamTurn(rawBody) {
+    const body = withPrefs(rawBody);
     controller = new AbortController();
-    var splitter = C.createSplitter();
-    var mutated = false;
+    const splitter = C.createSplitter();
+    let mutated = false;
     function handle(f) {
       C.applyFrame(state, f);
       if (f.type === 'tool-result') {
-        var tool = null;
-        state.ui.forEach(function (m) { (m.parts || []).forEach(function (p) { if (p.kind === 'tool' && p.id === f.tool_call_id) tool = p; }); });
+        const last = state.ui[state.ui.length - 1];
+        const tool = last && (last.parts || []).filter(function (p) { return p.kind === 'tool' && p.id === f.tool_call_id; })[0];
         if (tool && tool.approval && tool.status === 'done') mutated = true;
       }
       renderLast();
@@ -192,22 +478,20 @@
       body: JSON.stringify(body), signal: controller.signal,
     }).then(function (resp) {
       if (!resp.ok) {
-        return resp.json().catch(function () { return {}; }).then(function (j) {
-          throw new Error(j.error || ('HTTP ' + resp.status));
-        });
+        return resp.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.error || ('HTTP ' + resp.status)); });
       }
-      var reader = resp.body.getReader(), dec = new TextDecoder();
-      function pump() {
+      const reader = resp.body.getReader(), dec = new TextDecoder();
+      const pump = function () {
         return reader.read().then(function (r) {
           if (r.done) { splitter.flush().forEach(handle); return; }
           splitter.push(dec.decode(r.value, { stream: true })).forEach(handle);
           return pump();
         });
-      }
+      };
       return pump();
     }).catch(function (err) {
+      const m = state.ui[state.ui.length - 1];
       if (err && err.name === 'AbortError') {
-        var m = state.ui[state.ui.length - 1];
         if (body.deferred_results) {
           // Stopped mid-resume: the transcript is dangling until the turn is re-sent.
           if (m && m.parts) m.parts.push({ kind: 'error', text: 'Stopped before the approved action finished.' });
@@ -224,126 +508,100 @@
       state.busy = false;
       if (mutated) refreshWorkspaceViews();
       save(); renderAll();
+      drainQueue();
     });
   }
 
-  function send(prompt) {
-    prompt = (prompt || '').trim();
-    if (!prompt || state.busy || !canChat()) return;
-    var body = C.buildPromptRequest(state, prompt);
-    C.startUserTurn(state, prompt);
+  function drainQueue() {
+    if (!queued.length || state.busy || state.pending.length || !canChat()) return;
+    const next = queued.shift();
+    sendPrompt(next.text, next.files);
+  }
+
+  function sendPrompt(text, files) {
+    text = (text || '').trim();
+    if (!text && !(files && files.length)) return;
+    if (!canChat()) { openSettings(); return; }
+    const composed = C.composePrompt(text, files);
+    const body = C.buildPromptRequest(state, composed);
+    C.startUserTurn(state, composed);
+    // the box shows what the user typed (+ file pills); the model gets the composed prompt
+    const u = state.ui[state.ui.length - 2];
+    u.text = text; u.files = (files || []).map(function (f) { return f.name; });
     el.pinned = true;
     save(); renderAll();
     streamTurn(body);
   }
 
+  function submit() {
+    const text = el.input.value.trim();
+    if (!text && !attached.length) return;
+    const files = attached.slice();
+    el.input.value = ''; attached = []; autosize(el.input); closePop();
+    // Sent while a turn runs (or approvals are pending)? Queue it (dashed, spinner).
+    if (state.busy || state.pending.length) { queued.push({ text: text, files: files }); renderAll(); return; }
+    sendPrompt(text, files);
+  }
+
   function resume() {
-    var body = C.buildResumeRequest(state);
+    const body = C.buildResumeRequest(state);
     C.startResume(state);
     save(); renderAll();
     streamTurn(body);
   }
-
   function decide(id, approved) {
-    var allAnswered = C.decide(state, id, approved);
+    const all = C.decide(state, id, approved);
     save();
-    if (allAnswered) resume(); else renderAll();
+    if (all) resume(); else renderAll();
   }
-
-  function newChat() {
-    if (controller) controller.abort();
-    state = C.newState(); save(); renderAll();
-    el.input.focus();
-  }
-
-  // ── DOM + events ──────────────────────────────────────────────────────────
-  function build() {
-    root.innerHTML =
-      '<div class="viv-chat">' +
-        '<div class="vc-header"><span class="vc-title">Chat</span><button class="vc-chip" id="vc-model" data-act="setup" title="Change provider / model"></button>' +
-        '<span class="vc-spacer"></span><button class="vc-btn" id="vc-new">New chat</button></div>' +
-        '<div class="vc-setup" id="vc-setup" hidden></div>' +
-        '<div class="vc-list" id="vc-list"><div class="vc-col" id="vc-col"></div></div>' +
-        '<button class="vc-scroll" id="vc-scroll" title="Scroll to bottom" hidden>↓</button>' +
-        '<div class="vc-foot"><div class="vc-box">' +
-          '<textarea class="vc-input" id="vc-input" rows="1" spellcheck="true"></textarea>' +
-          '<div class="vc-boxbar"><button class="vc-chip" id="vc-model2" data-act="setup" title="Change provider / model"></button>' +
-          '<span class="vc-hint">Changes need your approval</span><span class="vc-spacer"></span>' +
-          '<button class="vc-btn vc-primary" id="vc-send">Send</button></div>' +
-        '</div></div></div>';
-    el.list = root.querySelector('#vc-list'); el.col = root.querySelector('#vc-col');
-    el.input = root.querySelector('#vc-input'); el.send = root.querySelector('#vc-send');
-    el.setup = root.querySelector('#vc-setup'); el.scroll = root.querySelector('#vc-scroll');
-    el.model = root.querySelector('#vc-model'); el.model2 = root.querySelector('#vc-model2');
-    el.pinned = true;
-
-    root.querySelector('#vc-new').addEventListener('click', newChat);
-    function submit() {
-      var text = el.input.value;
-      el.input.value = ''; grow();
-      send(text);
-    }
-    el.send.addEventListener('click', function () {
-      if (state.busy && controller) controller.abort(); else submit();
-    });
-    el.input.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); submit(); }
-    });
-    el.input.addEventListener('input', grow);
-    el.list.addEventListener('scroll', function () {
-      el.pinned = nearBottom(); el.scroll.hidden = el.pinned;
-    });
-    el.scroll.addEventListener('click', function () { el.pinned = true; scrollDown(true); el.scroll.hidden = true; });
-
-    root.addEventListener('click', function (ev) {
-      var s = ev.target.closest('[data-suggest]');
-      if (s) return send(s.getAttribute('data-suggest'));
-      var b = ev.target.closest('[data-act]');
-      if (!b) return;
-      var act = b.getAttribute('data-act');
-      var host = b.closest('[data-id]');
-      if (act === 'approve' && host) decide(host.getAttribute('data-id'), true);
-      else if (act === 'deny' && host) decide(host.getAttribute('data-id'), false);
-      else if (act === 'retry') retry();
-      else if (act === 'setup') openSetup();
-      else if (act === 'copy') copyMessage(b);
-    });
-    // Remember which tool rows the user expanded across re-renders.
-    root.addEventListener('toggle', function (ev) {
-      var d = ev.target;
-      if (!d.matches || !d.matches('details.vc-tool')) return;
-      var id = d.getAttribute('data-id');
-      state.ui.forEach(function (m) { (m.parts || []).forEach(function (p) { if (p.kind === 'tool' && p.id === id) p.open = d.open; }); });
-    }, true);
-  }
-
-  function grow() {
-    el.input.style.height = 'auto';
-    el.input.style.height = Math.min(el.input.scrollHeight, 400) + 'px';
-  }
-
   function retry() {
     if (!state.retry || state.busy) return;
-    var m = state.ui[state.ui.length - 1];
+    const m = state.ui[state.ui.length - 1];
     if (m && m.parts) m.parts = m.parts.filter(function (p) { return p.kind !== 'error'; });
     state.busy = true; save(); renderAll();
     streamTurn(C.retryBody(state));
   }
-
-  function copyMessage(btn) {
-    var node = btn.closest('.vc-asst');
-    var text = node ? node.querySelector('.vc-body').innerText : '';
-    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function () {});
-    btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1200);
+  function resendEdited(idx, text) {
+    text = text.trim();
+    if (!text || state.busy) return;
+    if (!C.truncateAt(state, idx)) return;
+    editing = -1;
+    sendPrompt(text, []);
   }
 
-  function openSetup() {
-    if (typeof window._switchPage === 'function') window._switchPage('github');
-    if (window.location.hash !== '#github') window.location.hash = 'github';
-    setTimeout(function () {
-      var card = document.getElementById('viv-ai-card');
-      if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 60);
+  // ── Panel: open/close, resize, settings sheet ─────────────────────────────
+  function setOpen(open) {
+    panel.hidden = !open;
+    document.body.classList.toggle('viv-ai-open', open);
+    el.toggle.classList.toggle('viv-ai-on', open);
+    el.toggle.setAttribute('aria-pressed', open ? 'true' : 'false');
+    lsSet('viv.ai.open', open ? '1' : '0');
+    if (open) {
+      refreshStatus().then(function () { if (el.card.hidden) { el.input.focus(); scrollDown(true); } });
+    } else closePop();
+  }
+  function openSettings() {
+    closePop();
+    el.card.hidden = false;
+    if (typeof window._loadAiLogin === 'function') window._loadAiLogin();
+  }
+  function closeSettings() { el.card.hidden = true; refreshStatus(); }
+
+  function initResize() {
+    const w = parseInt(lsGet('viv.ai.w', ''), 10);
+    if (w >= 340 && w <= 720) panel.style.setProperty('--viv-ai-w', w + 'px');
+    const h = document.getElementById('viv-ai-resize');
+    h.addEventListener('mousedown', function (ev) {
+      ev.preventDefault(); h.classList.add('dragging');
+      const right = panel.getBoundingClientRect().right;
+      const move = function (m) { panel.style.setProperty('--viv-ai-w', Math.max(340, Math.min(720, right - m.clientX)) + 'px'); };
+      const up = function () {
+        h.classList.remove('dragging');
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        lsSet('viv.ai.w', String(Math.round(panel.getBoundingClientRect().width)));
+      };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    });
   }
 
   function refreshStatus() {
@@ -355,17 +613,160 @@
         });
       })
       .then(function (s) { status = s; }, function () { status = { available: false, providers: [], error: 'Could not reach the server.' }; })
-      .then(function () { renderAll(); });
+      .then(function () {
+        if (status.selected) rememberModel(status.selected.provider, status.selected.model);
+        renderAll();
+        drainQueue();
+      });
+  }
+
+  // ── DOM ───────────────────────────────────────────────────────────────────
+  function build() {
+    root.innerHTML =
+      '<div class="vp-head"><span>AI</span><button class="vp-icon" data-act="close" title="Close" aria-label="Close">' + ICON.x + '</button></div>' +
+      '<div class="vp-toolbar">' +
+        '<button class="vp-icon" data-act="new" title="New chat" aria-label="New chat">' + ICON.plus + '</button><span class="vp-spacer"></span>' +
+        '<button class="vp-icon" id="vp-plug" data-act="settings" aria-label="Provider status">' + ICON.plug + '</button>' +
+        '<button class="vp-icon" data-act="settings" title="AI Settings" aria-label="AI Settings">' + ICON.gear + '</button>' +
+        '<button class="vp-icon" id="vp-hist" data-act="history" title="Previous chats" aria-label="Previous chats">' + ICON.clock + '</button>' +
+      '</div>' +
+      '<div class="vp-main">' +
+        '<div class="vp-new" id="vp-new"><div id="vp-new-copy"></div><div id="vp-new-host"></div>' +
+          '<button class="vp-callout" id="vp-callout" data-act="connect">' + ICON.sparkles + '<span>Connect your own agent to this workspace</span></button></div>' +
+        '<div class="vp-list" id="vp-list" hidden></div>' +
+        '<button class="vp-scroll" id="vp-scroll" title="Scroll to bottom" hidden>' + ICON.down + '</button>' +
+      '</div>' +
+      '<div class="vp-stop" id="vp-stop" hidden><button data-act="stop">Stop</button></div>' +
+      '<div class="vp-foot" id="vp-foot" hidden></div>';
+
+    const composer = document.createElement('div');
+    composer.className = 'vp-composer'; composer.id = 'vp-composer';
+    composer.innerHTML =
+      '<div class="vp-flash" id="vp-flash"></div>' +
+      '<div class="vp-pills" id="vp-pills"></div>' +
+      '<textarea class="vp-input-area" id="vp-input" rows="1" spellcheck="true"></textarea>' +
+      '<div class="vp-composer-bar">' +
+        '<button class="vp-pill" id="vp-mode" data-act="mode" title="Mode"></button>' +
+        '<button class="vp-pill" id="vp-model" data-act="model" title="Model"></button>' +
+        '<button class="vp-icon" data-act="caps" title="Capabilities" aria-label="Capabilities">' + ICON.sliders + '</button>' +
+        '<span class="vp-spacer"></span>' +
+        '<button class="vp-icon" data-act="ctx" title="Add context" aria-label="Add context">' + ICON.at + '</button>' +
+        '<button class="vp-icon" data-act="attach" title="Attach a file" aria-label="Attach a file">' + ICON.clip + '</button>' +
+        '<button class="vp-icon" id="vp-send" data-act="send" title="Submit" aria-label="Submit">' + ICON.send + '</button>' +
+        '<input type="file" id="vp-file" multiple hidden accept="' + C.ATTACH.exts.map(function (x) { return '.' + x; }).join(',') + '">' +
+      '</div>';
+    el.composer = composer;
+    el.new = root.querySelector('#vp-new'); el.newCopy = root.querySelector('#vp-new-copy'); el.newHost = root.querySelector('#vp-new-host');
+    el.callout = root.querySelector('#vp-callout'); el.list = root.querySelector('#vp-list'); el.foot = root.querySelector('#vp-foot');
+    el.scroll = root.querySelector('#vp-scroll'); el.stop = root.querySelector('#vp-stop'); el.plug = root.querySelector('#vp-plug');
+    el.input = composer.querySelector('#vp-input'); el.pills = composer.querySelector('#vp-pills'); el.flash = composer.querySelector('#vp-flash');
+    el.mode = composer.querySelector('#vp-mode'); el.model = composer.querySelector('#vp-model');
+    el.send = composer.querySelector('#vp-send'); el.file = composer.querySelector('#vp-file');
+    el.card = document.getElementById('viv-ai-card'); el.toggle = document.getElementById('viv-ai-toggle');
+    el.pinned = true;
+
+    el.list.addEventListener('scroll', function () { el.pinned = nearBottom(); el.scroll.hidden = el.pinned; });
+    el.scroll.addEventListener('click', function () { el.pinned = true; scrollDown(true); el.scroll.hidden = true; });
+    el.input.addEventListener('input', function () {
+      autosize(el.input);
+      const t = C.mentionQuery(el.input.value, el.input.selectionStart);
+      if (t) { if (pop && pop.paint) pop.paint(t.query); else openContext(el.input, t); } else if (pop && pop.paint) closePop();
+    });
+    el.input.addEventListener('keydown', function (ev) {
+      const list = pop && pop.paint ? pop.node.querySelectorAll('[data-mention]') : null;
+      if (list && list.length && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+        ev.preventDefault();
+        const items = Array.prototype.slice.call(list);
+        let i = items.findIndex(function (x) { return x.classList.contains('hi'); });
+        items.forEach(function (x) { x.classList.remove('hi'); });
+        i = (i + (ev.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items[i].classList.add('hi'); items[i].scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (list && list.length && (ev.key === 'Enter' || ev.key === 'Tab')) {
+        ev.preventDefault();
+        insertMention((pop.node.querySelector('[data-mention].hi') || list[0]).getAttribute('data-mention'));
+        return;
+      }
+      if (ev.key === 'Escape') { if (pop) closePop(); else el.input.blur(); return; }
+      if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); submit(); }
+    });
+    el.file.addEventListener('change', function () {
+      Array.prototype.slice.call(el.file.files).forEach(function (f) {
+        const err = C.attachError(attached, { name: f.name, size: f.size });
+        if (err) return flash(err);
+        const rd = new FileReader();
+        rd.onload = function () { attached.push({ name: f.name, size: f.size, content: String(rd.result) }); renderPills(); };
+        rd.readAsText(f);
+      });
+      el.file.value = '';
+    });
+
+    panel.addEventListener('keydown', function (ev) {
+      if (ev.target && ev.target.matches && ev.target.matches('[data-edit-input]')) {
+        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); resendEdited(editing, ev.target.value); }
+        else if (ev.key === 'Escape') { editing = -1; renderAll(); }
+      }
+    });
+    panel.addEventListener('input', function (ev) { if (ev.target.matches && ev.target.matches('[data-edit-input]')) autosize(ev.target); });
+    panel.addEventListener('click', function (ev) {
+      const b = ev.target.closest('[data-act]'); if (!b) return;
+      const act = b.getAttribute('data-act');
+      const host = b.closest('[data-id]');
+      switch (act) {
+        case 'close': setOpen(false); break;
+        case 'new': newChat(); break;
+        case 'settings': openSettings(); break;
+        case 'history': openHistory(b); break;
+        case 'mode': openModeMenu(b); break;
+        case 'model': openModelMenu(b); break;
+        case 'caps': openCapabilities(b); break;
+        case 'ctx': openContext(b, null); break;
+        case 'connect': openConnect(b); break;
+        case 'attach': el.file.click(); break;
+        case 'unattach': attached.splice(+b.getAttribute('data-idx'), 1); renderPills(); break;
+        case 'send': if (state.busy) abortStream(); else submit(); break;
+        case 'stop': abortStream(); break;
+        case 'approve': if (host) decide(host.getAttribute('data-id'), true); break;
+        case 'deny': if (host) decide(host.getAttribute('data-id'), false); break;
+        case 'retry': retry(); break;
+        case 'edit': if (!state.busy && !window.getSelection().toString()) { editing = +b.getAttribute('data-idx'); renderAll(); } break;
+        case 'edit-cancel': editing = -1; renderAll(); break;
+        case 'edit-send': { const ta = el.list.querySelector('[data-edit-input]'); if (ta) resendEdited(editing, ta.value); break; }
+        case 'copy': {
+          const row = b.closest('.vp-asst');
+          const text = row ? row.querySelector('.vp-body').innerText : '';
+          if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function () {});
+          break;
+        }
+      }
+    });
+    // Remember which tool rows / reasoning blocks the user expanded across re-renders.
+    panel.addEventListener('toggle', function (ev) {
+      const d = ev.target;
+      if (!d.matches) return;
+      const last = state.ui[state.ui.length - 1];
+      if (d.matches('details.vp-tool')) {
+        const id = d.getAttribute('data-id');
+        state.ui.forEach(function (m) { (m.parts || []).forEach(function (p) { if (p.kind === 'tool' && p.id === id) p.open = d.open; }); });
+      } else if (d.matches('details.vp-reason') && last && last.parts && !state.busy) {
+        const all = Array.prototype.slice.call(d.closest('.vp-body').querySelectorAll('details.vp-reason'));
+        const p = last.parts.filter(function (x) { return x.kind === 'reasoning'; })[all.indexOf(d)];
+        if (p) p.open = d.open;
+      }
+    }, true);
+
+    el.toggle.addEventListener('click', function (ev) { ev.preventDefault(); setOpen(panel.hidden); });
+    document.getElementById('viv-ai-back').addEventListener('click', closeSettings);
+    window.addEventListener('viv:ai-changed', function () { refreshStatus(); });
+    initResize();
   }
 
   build();
-  try {
-    renderAll();
-  } catch (e) {
-    // A corrupted sessionStorage transcript must not take the tab down.
-    state = C.newState(); save(); renderAll();
+  try { renderAll(); } catch (x) {
+    // A corrupted sessionStorage transcript must not take the panel down.
+    store = C.newStore(); state = C.restore(store.chats[store.active].snap); save(); renderAll();
   }
-  // Called by walkthrough.js _switchPage('chat') and after the AI card changes.
-  window._loadChat = function () { refreshStatus().then(function () { el.input.focus(); }); };
-  window.addEventListener('viv:ai-changed', refreshStatus);
+  window._openAiPanel = function () { setOpen(true); };
+  if (lsGet('viv.ai.open', '0') === '1') setOpen(true);
 })();

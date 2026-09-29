@@ -66,3 +66,10 @@ def ai_select(body: AiSelectRequest, mode: StorageMode, session: str | None) -> 
         raise APIError(409, f"{body.provider} has no credentials yet — save them first")
     ai_auth.set_selection(body.provider, body.model, mode=mode, session=session)
     return {"ok": True, "provider": body.provider, "model": body.model}
+
+
+def ai_capabilities(app: Any) -> dict[str, Any]:
+    """``GET /api/ai/capabilities`` — what the assistant can reach (Capabilities popover)."""
+    from vivarium_workbench.lib import ai_tools
+    ai_auth.require_chat()
+    return ai_tools.capabilities(app)

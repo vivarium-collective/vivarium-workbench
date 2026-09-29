@@ -367,7 +367,7 @@ def test_bad_ports_and_nat64_are_422_not_500_or_accepted(url):
 
 def test_oversized_prompt_and_transcript_are_rejected(chat):
     client, _, _ = chat
-    r = client.post("/api/chat/turn", json={"messages": [], "prompt": "x" * 30_000}, headers=H)
+    r = client.post("/api/chat/turn", json={"messages": [], "prompt": "x" * 400_000}, headers=H)
     assert r.status_code == 422
     r = client.post("/api/chat/turn", json={"messages": [{}] * 2000, "prompt": "hi"}, headers=H)
     assert r.status_code == 422

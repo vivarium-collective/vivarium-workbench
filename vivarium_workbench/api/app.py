@@ -308,6 +308,7 @@ from vivarium_workbench.lib.models import (
     RemoteRunStartResponse,
     # C-state-3e: GitHub device-flow auth (pass-through payload)
     AuthPayload,
+    AiCapabilitiesPayload,
     AiCredentialsRequest,
     AiOkPayload,
     AiSelectRequest,
@@ -7431,6 +7432,16 @@ def create_app() -> FastAPI:
     def ai_status(request: Request) -> dict:
         mode, session = _ai_scope(request)
         return _ai_views.ai_status(mode, session)
+
+    @app.get(
+        "/api/ai/capabilities",
+        response_model=AiCapabilitiesPayload,
+        tags=["AI"],
+        summary="What the assistant can reach: read/write operation counts + the exclusion list",
+    )
+    def ai_capabilities(request: Request) -> dict:
+        _ai_scope(request)
+        return _ai_views.ai_capabilities(request.app)
 
     @app.post(
         "/api/ai/credentials",

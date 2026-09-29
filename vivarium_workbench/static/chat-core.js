@@ -112,6 +112,12 @@
         else m.parts.push({ kind: 'text', text: f.text });
         break;
       }
+      case 'reasoning-delta': {
+        var lp = m.parts[m.parts.length - 1];
+        if (lp && lp.kind === 'reasoning') lp.text += f.text;
+        else m.parts.push({ kind: 'reasoning', text: f.text });
+        break;
+      }
       case 'tool-call': {
         var t = ensureTool(state, f.tool_call_id, f.tool_name);
         t.args = f.args || {};
@@ -212,7 +218,7 @@
     if (m.role !== 'assistant' || !Array.isArray(m.parts)) return false;
     return m.parts.every(function (p) {
       return p && typeof p === 'object' &&
-        ((p.kind === 'text' || p.kind === 'error' || p.kind === 'notice') ? typeof p.text === 'string'
+        ((p.kind === 'text' || p.kind === 'error' || p.kind === 'notice' || p.kind === 'reasoning') ? typeof p.text === 'string'
           : p.kind === 'tool' ? typeof p.id === 'string' && typeof p.status === 'string' : false);
     });
   }
@@ -291,6 +297,174 @@
     return out.join('');
   }
 
+
+  // ── Modes (marimo's footer dropdown, mapped onto what the workbench can do) ──────────
+  // manual = pure chat, no tools · ask = read-only tools · agent = read+write tools (every
+  // write still pauses for approval — a standing decision) · code = n/a (no kernel).
+  var MODES = [
+    { id: 'manual', label: 'Manual', desc: 'Pure chat, no tool usage', icon: 'message' },
+    { id: 'ask', label: 'Ask', desc: 'AI with access to read-only workspace tools', icon: 'book' },
+    { id: 'agent', label: 'Agent', desc: 'AI with access to read and write tools — every change still asks for your approval', icon: 'hat' },
+    { id: 'code', label: 'Code Mode (beta)', desc: 'Not available in the workbench: there is no kernel to run code in', icon: 'code', disabled: true },
+  ];
+  function validMode(id) {
+    return MODES.some(function (m) { return m.id === id && !m.disabled; });
+  }
+
+  // ── Edit a previous user message and resend from there ───────────────────────────────
+  function isUserRequest(m) {
+    return !!m && m.kind === 'request' && Array.isArray(m.parts) &&
+      m.parts.some(function (p) { return p && p.part_kind === 'user-prompt'; });
+  }
+  // Rewind to just before the user message at ui[index]: drops it and everything after,
+  // in BOTH the UI and the model transcript. Returns false if index isn't a user message.
+  function truncateAt(state, index) {
+    var target = state.ui[index];
+    if (!target || target.role !== 'user') return false;
+    var k = state.ui.slice(0, index).filter(function (m) { return m.role === 'user'; }).length;
+    var seen = 0, cut = -1;
+    for (var i = 0; i < state.transcript.length; i++) {
+      if (isUserRequest(state.transcript[i])) {
+        if (seen === k) { cut = i; break; }
+        seen++;
+      }
+    }
+    if (cut >= 0) state.transcript = state.transcript.slice(0, cut);
+    state.ui = state.ui.slice(0, index);
+    state.pending = []; state.decisions = {}; state.busy = false; state.retry = null;
+    return true;
+  }
+
+  // ── Chat history (marimo's "Previous chats" popover) ─────────────────────────────────
+  function timeAgo(ts, now) {
+    var s = Math.max(0, Math.floor(((now || Date.now()) - ts) / 1000));
+    if (s < 60) return 'just now';
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + (m === 1 ? ' minute ago' : ' minutes ago');
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + (h === 1 ? ' hour ago' : ' hours ago');
+    var d = Math.floor(h / 24);
+    return d + (d === 1 ? ' day ago' : ' days ago');
+  }
+  function dateGroup(ts, now) {
+    var a = new Date(now || Date.now()); a.setHours(0, 0, 0, 0);
+    var t = new Date(ts); t.setHours(0, 0, 0, 0);
+    var d = Math.round((a - t) / 86400000);
+    return d <= 0 ? 'Today' : d === 1 ? 'Yesterday' : d < 7 ? 'Previous 7 days' : 'Older';
+  }
+  var MAX_CHATS = 30;
+  function newId() { return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function titleOf(state) {
+    var u = state.ui.filter(function (m) { return m.role === 'user'; })[0];
+    return u ? String(u.text).replace(/\s+/g, ' ').trim().slice(0, 60) || 'New chat' : 'New chat';
+  }
+  function newStore(now) {
+    var id = newId(), s = { active: id, chats: {} };
+    s.chats[id] = { id: id, title: 'New chat', updatedAt: now || Date.now(), snap: snapshot(newState()) };
+    return s;
+  }
+  function storeUpsert(store, state, now) {
+    var c = store.chats[store.active];
+    c.snap = snapshot(state); c.title = titleOf(state);
+    if (state.ui.length) c.updatedAt = now || Date.now();
+    return store;
+  }
+  function storePrune(store) {
+    var ids = Object.keys(store.chats).filter(function (id) { return id !== store.active; });
+    ids.forEach(function (id) { if (!store.chats[id].snap.ui.length) delete store.chats[id]; });
+    ids = Object.keys(store.chats).filter(function (id) { return id !== store.active; });
+    ids.sort(function (a, b) { return store.chats[b].updatedAt - store.chats[a].updatedAt; });
+    ids.slice(MAX_CHATS - 1).forEach(function (id) { delete store.chats[id]; });
+    return store;
+  }
+  // Start a new chat (the current one is kept in history if it has any messages).
+  function storeNew(store, state, now) {
+    storeUpsert(store, state, now);
+    var id = newId();
+    store.chats[id] = { id: id, title: 'New chat', updatedAt: now || Date.now(), snap: snapshot(newState()) };
+    store.active = id;
+    return storePrune(store);
+  }
+  // Switch to a stored chat; returns its restored state (or null).
+  function storeSwitch(store, id, state, now) {
+    if (!store.chats[id]) return null;
+    storeUpsert(store, state, now);
+    store.active = id;
+    return restore(store.chats[id].snap);
+  }
+  function storeRestore(saved, now) {
+    if (!saved || typeof saved !== 'object' || typeof saved.active !== 'string' ||
+        !saved.chats || typeof saved.chats !== 'object' || !saved.chats[saved.active]) return newStore(now);
+    var out = { active: saved.active, chats: {} };
+    Object.keys(saved.chats).forEach(function (id) {
+      var c = saved.chats[id];
+      if (c && typeof c === 'object' && c.snap && typeof c.snap === 'object') {
+        out.chats[id] = { id: id, title: String(c.title || 'New chat'), updatedAt: +c.updatedAt || 0,
+                          snap: snapshot(restore(c.snap)) };
+      }
+    });
+    return out.chats[out.active] ? out : newStore(now);
+  }
+  // History rows: newest first, filtered by title, grouped by date (empty chats hidden).
+  function storeList(store, query, now) {
+    var q = String(query || '').toLowerCase();
+    var rows = Object.keys(store.chats).map(function (id) { return store.chats[id]; })
+      .filter(function (c) { return c.snap.ui.length > 0 && c.title.toLowerCase().indexOf(q) >= 0; })
+      .sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+    var groups = [];
+    rows.forEach(function (c) {
+      var g = dateGroup(c.updatedAt, now);
+      var last = groups[groups.length - 1];
+      if (!last || last.group !== g) { last = { group: g, items: [] }; groups.push(last); }
+      last.items.push({ id: c.id, title: c.title, updatedAt: c.updatedAt, active: c.id === store.active });
+    });
+    return { groups: groups, total: rows.length };
+  }
+
+  // ── "@" context mentions (marimo's context trigger) ──────────────────────────────────
+  function mentionQuery(text, caret) {
+    var m = /(^|\s)@([\w\/.\-]*)$/.exec(String(text).slice(0, caret));
+    return m ? { start: caret - m[2].length - 1, query: m[2] } : null;
+  }
+  function insertMention(text, start, caret, mention) {
+    return { text: text.slice(0, start) + mention + ' ' + text.slice(caret), caret: start + mention.length + 1 };
+  }
+  // Items for the picker, from GET /api/workspace-manifest.
+  function contextItems(manifest) {
+    var out = [];
+    function names(list) {
+      return (Array.isArray(list) ? list : []).map(function (x) {
+        return typeof x === 'string' ? x : (x && (x.name || x.slug || x.id)) || '';
+      }).filter(Boolean);
+    }
+    names(manifest && manifest.studies).forEach(function (n) { out.push({ group: 'Studies', value: '@study/' + n, label: n }); });
+    names(manifest && manifest.composites).forEach(function (n) { out.push({ group: 'Composites', value: '@composite/' + n, label: n }); });
+    return out;
+  }
+  function filterItems(items, query) {
+    var q = String(query || '').toLowerCase().replace(/^(study|composite)\//, '');
+    return items.filter(function (i) { return i.label.toLowerCase().indexOf(q) >= 0; });
+  }
+
+  // ── File attachments: text files are inlined into the prompt ─────────────────────────
+  var ATTACH = { maxFiles: 5, maxBytes: 100000, maxTotal: 200000,
+    exts: ['txt', 'md', 'json', 'yaml', 'yml', 'csv', 'tsv', 'py', 'log', 'toml', 'xml', 'html', 'ini', 'cfg'] };
+  function attachError(files, next) {
+    var ext = String(next.name).split('.').pop().toLowerCase();
+    if (ATTACH.exts.indexOf(ext) < 0) return next.name + ': only text files can be attached (' + ATTACH.exts.join(', ') + ')';
+    if (next.size > ATTACH.maxBytes) return next.name + ' is larger than ' + (ATTACH.maxBytes / 1000) + ' KB';
+    if (files.length >= ATTACH.maxFiles) return 'At most ' + ATTACH.maxFiles + ' files per message';
+    var total = files.reduce(function (n, f) { return n + f.size; }, next.size);
+    return total > ATTACH.maxTotal ? 'Attachments are limited to ' + (ATTACH.maxTotal / 1000) + ' KB in total' : null;
+  }
+  function composePrompt(text, files) {
+    var out = String(text || '');
+    (files || []).forEach(function (f) {
+      out += '\n\nAttached file `' + f.name + '`:\n```\n' + f.content.replace(/```/g, '``​`') + '\n```';
+    });
+    return out;
+  }
+
   var api = {
     esc: esc, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
     startResume: startResume, applyFrame: applyFrame, decide: decide,
@@ -298,6 +472,11 @@
     retryBody: retryBody,
     statusLabel: statusLabel, describeApproval: describeApproval, snapshot: snapshot,
     restore: restore, renderMarkdown: renderMarkdown,
+    MODES: MODES, validMode: validMode, truncateAt: truncateAt, timeAgo: timeAgo, dateGroup: dateGroup,
+    newStore: newStore, storeUpsert: storeUpsert, storeNew: storeNew, storeSwitch: storeSwitch,
+    storeRestore: storeRestore, storeList: storeList, storePrune: storePrune, titleOf: titleOf,
+    mentionQuery: mentionQuery, insertMention: insertMention, contextItems: contextItems,
+    filterItems: filterItems, ATTACH: ATTACH, attachError: attachError, composePrompt: composePrompt,
   };
   global.VivChatCore = api;
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; }

@@ -972,7 +972,7 @@ def test_build_bundle_exports_investigation_notebooks(tmp_workspace, tmp_path):
 # Built-in chat is live-server only: the published (snapshot) bundle must hide it
 # ---------------------------------------------------------------------------
 
-def test_snapshot_bundle_hides_chat_and_ai_card(tmp_workspace, tmp_path):
+def test_snapshot_bundle_hides_the_ai_panel_and_its_toggle(tmp_workspace, tmp_path):
     from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
@@ -980,24 +980,23 @@ def test_snapshot_bundle_hides_chat_and_ai_card(tmp_workspace, tmp_path):
     html = (out / "index.html").read_text()
     css = (out / "assets" / "snapshot-readonly.css").read_text()
 
-    # The elements the hide rules target really exist in the shell (so the rules
-    # aren't vacuous) and the chat assets ship with the bundle.
-    for needle in ('data-page="chat"', 'id="page-chat"', 'id="viv-ai-card"'):
+    # The elements the hide rules target really exist in the shell (so the rules aren't
+    # vacuous), the chat is no longer a page, and the chat assets ship with the bundle.
+    for needle in ('id="viv-ai-panel"', 'id="viv-ai-toggle"', 'id="viv-ai-card"'):
         assert needle in html, f"shell lost {needle}"
+    assert 'id="page-chat"' not in html and 'data-page="chat"' not in html
     for asset in ("chat.css", "chat-core.js", "chat.js", "ai-login.js"):
         assert (out / "assets" / asset).is_file(), f"bundle missing assets/{asset}"
-    for sel in ('body.snapshot a.menu-link[data-page="chat"]', "body.snapshot #page-chat",
-                "body.snapshot #viv-ai-card"):
+    for sel in ("body.snapshot #viv-ai-toggle", "body.snapshot #viv-ai-panel"):
         assert sel in css, f"snapshot-readonly.css missing {sel!r}"
     # chat.css must load BEFORE snapshot-readonly.css so the hide rules win.
     assert html.index("chat.css") < html.index("snapshot-readonly.css")
 
 
-def test_chat_page_is_live_only_in_walkthrough_routing():
+def test_chat_is_not_a_routable_page_in_walkthrough():
     js = (STATIC_DIR / "walkthrough.js").read_text()
     pairs = re.findall(r"\?\s*\[([^\]]*)\]\s*:\s*\[([^\]]*)\];", js)
     assert len(pairs) == 2, "focus-mode + hash-route validPages arrays changed shape"
     for snapshot_pages, live_pages in pairs:
-        assert "'chat'" not in snapshot_pages and "'chat'" in live_pages
-    # and a snapshot navigation to #chat is redirected rather than shown empty
-    assert "pageId === 'chat'" in js
+        assert "'chat'" not in snapshot_pages and "'chat'" not in live_pages
+    assert "_loadChat" not in js

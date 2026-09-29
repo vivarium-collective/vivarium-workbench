@@ -179,4 +179,108 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.doesNotThrow(() => JSON.stringify(C.snapshot(s)));
 }
 
+// ── reasoning (marimo's "View reasoning" accordion): its own part kind, merged deltas ──
+{
+  const st = C.newState(); C.startUserTurn(st, 'q');
+  C.applyFrame(st, { type: 'reasoning-delta', text: 'pond' });
+  C.applyFrame(st, { type: 'reasoning-delta', text: 'ering' });
+  C.applyFrame(st, { type: 'text-delta', text: 'answer' });
+  assert.deepStrictEqual(st.ui[1].parts, [{ kind: 'reasoning', text: 'pondering' }, { kind: 'text', text: 'answer' }]);
+  C.applyFrame(st, { type: 'done', messages: [] });
+  assert.strictEqual(C.restore(JSON.parse(JSON.stringify(C.snapshot(st)))).ui[1].parts.length, 2, 'reasoning survives restore');
+}
+
+// ── modes: Manual / Ask / Agent are selectable; Code Mode is listed but disabled ──
+{
+  assert.deepStrictEqual(C.MODES.map(m => m.id), ['manual', 'ask', 'agent', 'code']);
+  assert.strictEqual(C.MODES[0].desc, 'Pure chat, no tool usage');
+  assert(C.validMode('manual') && C.validMode('ask') && C.validMode('agent'));
+  assert(!C.validMode('code') && !C.validMode('yolo') && !C.validMode(undefined));
+}
+
+// ── edit + resend: rewind BOTH the UI and the model transcript to before a user message ──
+{
+  const req = (kind) => ({ kind: 'request', parts: [{ part_kind: kind }] });
+  const res = { kind: 'response', parts: [{ part_kind: 'text' }] };
+  const st = C.newState();
+  st.transcript = [req('user-prompt'), res, req('tool-return'), res, req('user-prompt'), res];   // 2 user turns
+  st.ui = [{ role: 'user', text: 'one' }, { role: 'assistant', parts: [] }, { role: 'user', text: 'two' }, { role: 'assistant', parts: [] }];
+  st.retry = { prompt: 'two' }; st.pending = ['x'];
+  assert.strictEqual(C.truncateAt(st, 1), false, 'only user messages can be edited');
+  assert.strictEqual(C.truncateAt(st, 2), true);
+  assert.strictEqual(st.transcript.length, 4, 'the 2nd user turn is cut from the transcript');
+  assert.deepStrictEqual(st.ui.map(m => m.text), ['one', undefined]);
+  assert.strictEqual(st.retry, null); assert.deepStrictEqual(st.pending, []);
+  assert.strictEqual(C.truncateAt(st, 0), true);
+  assert.deepStrictEqual(st.transcript, []); assert.strictEqual(st.ui.length, 0);
+}
+
+// ── history: timeAgo / date groups / store lifecycle ──
+{
+  const NOW = new Date('2026-09-29T12:00:00').getTime(), H = 3600e3, D = 24 * H;
+  assert.strictEqual(C.timeAgo(NOW - 5e3, NOW), 'just now');
+  assert.strictEqual(C.timeAgo(NOW - 61e3, NOW), '1 minute ago');
+  assert.strictEqual(C.timeAgo(NOW - 2 * H, NOW), '2 hours ago');
+  assert.strictEqual(C.timeAgo(NOW - 3 * D, NOW), '3 days ago');
+  assert.deepStrictEqual([0, H, D, 2 * D, 8 * D].map(x => C.dateGroup(NOW - x, NOW)),
+    ['Today', 'Today', 'Yesterday', 'Previous 7 days', 'Older']);
+
+  let store = C.newStore(NOW - 9 * D);
+  const st = C.newState(); C.startUserTurn(st, 'first question about   studies');
+  store = C.storeNew(store, st, NOW - 9 * D);                            // "New chat": keep the old one in history
+  assert.strictEqual(C.storeList(store, '', NOW).total, 1);
+  assert.strictEqual(C.storeList(store, '', NOW).groups[0].group, 'Older');
+  assert.strictEqual(C.storeList(store, '', NOW).groups[0].items[0].title, 'first question about studies');
+  const second = C.newState(); C.startUserTurn(second, 'recent one');
+  store = C.storeNew(store, second, NOW - H);
+  const list = C.storeList(store, '', NOW);
+  assert.deepStrictEqual(list.groups.map(g => g.group), ['Today', 'Older'], 'newest group first, dividers between groups');
+  assert.strictEqual(C.storeList(store, 'RECENT', NOW).total, 1, 'case-insensitive title search');
+  assert.strictEqual(C.storeList(store, 'zzz', NOW).total, 0);
+  // switching restores the other chat and keeps the current one
+  const cur = C.newState(); C.startUserTurn(cur, 'typing now');
+  const oldId = list.groups[1].items[0].id;
+  const back = C.storeSwitch(store, oldId, cur, NOW);
+  assert.strictEqual(back.ui[0].text, 'first question about   studies');
+  assert.strictEqual(store.active, oldId);
+  assert.strictEqual(C.storeList(store, 'typing', NOW).total, 1, 'the chat we left is now in history');
+  assert.strictEqual(C.storeSwitch(store, 'nope', cur, NOW), null);
+  // hostile/garbled storage never throws and yields a usable store
+  for (const junk of [null, 'x', {}, { active: 'a' }, { active: 'a', chats: { a: 5 } }]) {
+    const s2 = C.storeRestore(junk, NOW); assert(s2.chats[s2.active]);
+  }
+  // bounded
+  let big = C.newStore(NOW);
+  for (let i = 0; i < 50; i++) { const s = C.newState(); C.startUserTurn(s, 'q' + i); big = C.storeNew(big, s, NOW + i); }
+  assert(Object.keys(big.chats).length <= 31);
+  assert(!Object.values(big.chats).some(c => c.id !== big.active && c.snap.ui.length === 0), 'empty chats are pruned');
+}
+
+// ── "@" context: trigger detection, insertion, picker items ──
+{
+  assert.deepStrictEqual(C.mentionQuery('look at @stu', 12), { start: 8, query: 'stu' });
+  assert.deepStrictEqual(C.mentionQuery('@', 1), { start: 0, query: '' });
+  assert.strictEqual(C.mentionQuery('mail a@b.com', 12), null, 'an @ inside a word is not a trigger');
+  assert.strictEqual(C.mentionQuery('done @x now', 11), null, 'caret past the token');
+  assert.deepStrictEqual(C.insertMention('look at @stu please', 8, 12, '@study/demo'),
+    { text: 'look at @study/demo  please', caret: 20 });
+  const items = C.contextItems({ studies: ['s1', { name: 's2' }], composites: [{ slug: 'c1' }, null] });
+  assert.deepStrictEqual(items.map(i => i.value), ['@study/s1', '@study/s2', '@composite/c1']);
+  assert.deepStrictEqual(C.filterItems(items, 'study/s2').map(i => i.label), ['s2']);
+  assert.strictEqual(C.filterItems(items, '').length, 3);
+}
+
+// ── attachments: text only, size/count limits, inlined into the prompt ──
+{
+  assert.strictEqual(C.attachError([], { name: 'a.md', size: 10 }), null);
+  assert(/only text files/.test(C.attachError([], { name: 'a.exe', size: 10 })));
+  assert(/larger than/.test(C.attachError([], { name: 'a.txt', size: 200000 })));
+  assert(/At most 5/.test(C.attachError(new Array(5).fill({ name: 'x.txt', size: 1 }), { name: 'a.txt', size: 1 })));
+  assert(/in total/.test(C.attachError([{ name: 'x.txt', size: 99000 }, { name: 'y.txt', size: 99000 }], { name: 'z.txt', size: 99000 })));
+  const p = C.composePrompt('hi', [{ name: 'a.py', content: 'x = 1\n```\nboom' }]);
+  assert(p.startsWith('hi\n\nAttached file `a.py`:\n```\nx = 1'));
+  assert.strictEqual((p.match(/```/g) || []).length, 2, 'a fence inside the file cannot break out of the block');
+  assert.strictEqual(C.composePrompt('plain', []), 'plain');
+}
+
 console.log('test_chat_core: all passed');
