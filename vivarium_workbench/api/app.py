@@ -312,6 +312,7 @@ from vivarium_workbench.lib.models import (
     AiOkPayload,
     AiSelectRequest,
     AiStatusPayload,
+    ChatTurnRequest,
     # C-state-3f: git-subprocess commit/push routes
     BranchPushRequest,
     BranchPushResponse,
@@ -7443,6 +7444,35 @@ def create_app() -> FastAPI:
     def ai_select(body: AiSelectRequest, request: Request) -> dict:
         mode, session = _ai_scope(request)
         return _ai_views.ai_select(body, mode, session)
+
+    @app.post(
+        "/api/chat/turn",
+        tags=["AI"],
+        summary="One stateless chat turn, streamed as NDJSON (see lib/ai_chat.py)",
+        response_class=StreamingResponse,
+    )
+    def chat_turn(body: ChatTurnRequest, request: Request,
+                  ws: Path = Depends(get_workspace)) -> StreamingResponse:
+        """Continue (``prompt``) or resume (``deferred_results``) a chat. The
+        browser holds the transcript; every non-GET the model attempts pauses as
+        an ``approval-required`` frame until the user answers. Preflight errors
+        (503 no extra, 409 no provider/credentials, 422 bad request) are plain
+        JSON envelopes, sent before any streaming starts."""
+        _ai_auth.require_chat()
+        from vivarium_workbench.lib import ai_chat   # needs the [chat] extra
+        mode, session = _ai_scope(request)
+        turn = ai_chat.prepare_turn(request.app, body, ws, mode, session)
+
+        async def frames():
+            async for frame in turn.frames():
+                yield json.dumps(frame, separators=(",", ":"), default=str) + "\n"
+
+        # `Content-Encoding: identity` opts out of GZipMiddleware, which would
+        # otherwise buffer small NDJSON chunks and stall the live token stream.
+        return StreamingResponse(
+            frames(), media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "Content-Encoding": "identity",
+                     "X-Accel-Buffering": "no"})
 
     # -----------------------------------------------------------------------
     # Git — subprocess commit/push WRITE routes (2 POSTs)

@@ -3516,3 +3516,17 @@ class AiOkPayload(BaseModel):
 
     ok: bool
     provider: str
+
+
+class ChatTurnRequest(BaseModel):
+    """``POST /api/chat/turn`` body. ``messages`` is the transcript the browser
+    got back in the previous turn's ``done`` frame (pydantic-ai messages as
+    JSON; the server stores none). Send exactly one of ``prompt`` (a new user
+    message) or ``deferred_results`` (``{"approvals": {tool_call_id: true |
+    {"denied": reason}}}`` — the user's decision on the calls the previous turn
+    paused on). The response is an NDJSON stream (see ``lib.ai_chat``).
+    """
+
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    prompt: Optional[str] = None
+    deferred_results: Optional[dict[str, Any]] = None
