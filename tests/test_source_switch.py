@@ -1,7 +1,5 @@
-from pathlib import Path
 import pytest
 import yaml
-import vivarium_workbench
 from vivarium_workbench.lib import _root
 from vivarium_workbench.lib import active_workspace
 from vivarium_workbench.lib import registry as _registry
@@ -11,8 +9,6 @@ from vivarium_workbench.lib import composite_state_views as _cs_views
 from vivarium_workbench.lib import source_switch_views as _switch_views
 from vivarium_workbench.lib.data_sources import _DATA_SOURCES_CACHE
 
-_PKG_DIR = Path(vivarium_workbench.__file__).parent
-
 
 @pytest.fixture(autouse=True)
 def _restore_workspace():
@@ -20,10 +16,6 @@ def _restore_workspace():
     yield
     if saved_root is not None:
         _root.set_workspace_root(saved_root)
-
-
-def _static(name):
-    return (_PKG_DIR / "static" / name).read_text(encoding="utf-8")
 
 
 def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
@@ -92,20 +84,6 @@ def test_source_switch_accepts_registered_path(tmp_path, monkeypatch):
     assert _root.get_workspace_root() == ws.resolve()
 
 
-def test_source_switch_js_present_and_wired():
-    js = _static("source-switch.js")
-    assert "/api/workspaces" in js          # lists the catalog
-    assert "/api/source/switch" in js       # POSTs the switch
-    assert "window.location.reload" in js   # reload after switch
-    assert "viv-source-switch" in js        # the control id
-
-
-# NOTE: the rail source-switch dropdown was superseded by the Branch-tab Source
-# panel (branch-source.js); its template-presence test was removed. The
-# /api/source/switch endpoint it relied on is still exercised below and by
-# branch-source.js. source-switch.js remains on disk as (now unloaded) dead code.
-
-
 def _make_ws(d, name):
     d.mkdir(parents=True, exist_ok=True)
     (d / "workspace.yaml").write_text(yaml.safe_dump({"name": name}))
@@ -128,11 +106,6 @@ def test_one_server_switches_between_two_workspaces(tmp_path):
 
     active_workspace.switch_workspace(a)
     assert active_name() == "alpha"                             # and back
-
-
-def test_source_switch_warns_about_composites():
-    js = _static("source-switch.js")
-    assert "Composite" in js   # the honest until-SP2b note
 
 
 def test_composite_state_cache_is_workspace_keyed():

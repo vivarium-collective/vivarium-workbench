@@ -41,7 +41,7 @@ function run() {
     '`window.__BASE_PATH__ || ""`:\n  ' + offenders.join('\n  '));
 
   // And the fix is actually present where the bug was.
-  for (const f of ['source-switch.js', 'workspace-picker.js']) {
+  for (const f of ['workspace-picker.js']) {
     const src = fs.readFileSync(path.join(STATIC_DIR, f), 'utf8');
     assert.ok(src.includes('__BASE_PATH__'),
       `${f} navigates by URL and must consult window.__BASE_PATH__`);
