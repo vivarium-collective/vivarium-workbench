@@ -237,3 +237,47 @@ def test_chat_routes_are_not_offered_to_the_model(env):
     _, _, app = env
     paths = {e["path"] for e in ai_tools.build_index(app).values()}
     assert "/api/chat/turn" not in paths and not any(p.startswith("/api/ai") for p in paths)
+
+
+# --- contract: REAL server frames -> REAL client reducer (chat-core.js) ------
+
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+_NODE = shutil.which("node")
+_CONTRACT = Path(__file__).parent / "js" / "contract_chat_core.js"
+
+
+def _reduce(tmp_path, ndjson, chunk, prior=None):
+    f = tmp_path / "frames.ndjson"
+    f.write_text(ndjson)
+    args = [_NODE, str(_CONTRACT), str(f), str(chunk)]
+    if prior is not None:
+        p = tmp_path / "prior.json"
+        p.write_text(json.dumps(prior))
+        args.append(str(p))
+    out = subprocess.run(args, capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not installed")
+@pytest.mark.parametrize("chunk", [7, 64, 100000])
+def test_client_reducer_consumes_real_frames_through_approve(env, tmp_path, chunk):
+    client, ws, _ = env
+    r1 = client.post("/api/chat/turn", json={"messages": [], "prompt": "create a study"}, headers=H)
+    s1 = _reduce(tmp_path, r1.text, chunk)
+    tool = s1["ui"][1]["parts"][0]
+    assert (tool["kind"], tool["status"]) == ("tool", "awaiting")
+    assert tool["approval"]["method"] == "POST" and tool["approval"]["body"] == {"name": "chat-made"}
+    assert s1["pending"] == [tool["id"]] and s1["transcript"]
+    # the transcript the JS kept is exactly what the server accepts back
+    s1["ui"][1]["parts"][0]["status"] = "running"
+    body = {"messages": s1["transcript"], "deferred_results": {"approvals": {tool["id"]: True}}}
+    r2 = client.post("/api/chat/turn", json=body, headers=H)
+    s2 = _reduce(tmp_path, r2.text, chunk, prior={**s1, "pending": []})
+    parts = s2["ui"][1]["parts"]
+    assert parts[0]["status"] == "done" and parts[0]["result"]["status"] == 200
+    assert parts[-1] == {"kind": "text", "text": "Done."}
+    assert (ws / "studies" / "chat-made" / "study.yaml").is_file()

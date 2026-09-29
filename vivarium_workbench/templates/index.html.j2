@@ -2,6 +2,7 @@
 <html lang="en"><head>
 <meta charset="UTF-8"><title>{% if dashboard_name %}{{ dashboard_name }} dashboard{% else %}{{ workspace_name }}{% endif %}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
+<link rel="stylesheet" href="assets/chat.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <link rel="stylesheet" href="assets/snapshot-readonly.css">
 <!-- Apply the saved light/dark theme before first paint (no flash of light). -->
 <script>(function(){try{var t=localStorage.getItem('viv.theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
@@ -947,6 +948,18 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Analysis</span>
       </a>
+      <!-- Chat: built-in AI assistant (docs/ai-chat.md). Live-only — hidden in the
+           read-only snapshot (snapshot-readonly.css). -->
+      <a href="#chat"              class="viv-rail-link menu-link" data-page="chat">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <path d="M4 5.5 A1.5 1.5 0 0 1 5.5 4 H18.5 A1.5 1.5 0 0 1 20 5.5 V14.5 A1.5 1.5 0 0 1 18.5 16 H10 L6 20 V16 H5.5 A1.5 1.5 0 0 1 4 14.5 Z"/>
+            <path d="M8.5 8.5 H15.5"/>
+            <path d="M8.5 11.5 H12.5"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Chat</span>
+      </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
            #viv-workspace-switcher). Hash route #github kept for back-compat. -->
@@ -1678,6 +1691,67 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
 
+    <!-- ── AI provider — credentials + model for the built-in Chat tab.
+         Live-only (hidden in the snapshot). static/ai-login.js drives it; the
+         key is verified server-side before it is stored and is never echoed. ── -->
+    <div class="gh-section" id="viv-ai-card">
+      <h3 class="gh-section-title">AI provider</h3>
+
+      <div class="gh-row">
+        <div class="gh-label">Provider</div>
+        <div class="gh-value">
+          <select id="viv-ai-provider" class="gh-input">
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+            <option value="google">Google</option>
+            <option value="openai-compatible">OpenAI-compatible (Ollama, vLLM, OpenRouter…)</option>
+            <option value="bedrock">AWS Bedrock</option>
+          </select>
+          <div class="gh-value-hint" id="viv-ai-status">checking…</div>
+        </div>
+      </div>
+
+      <div class="gh-row" id="viv-ai-key-row">
+        <div class="gh-label">API key</div>
+        <div class="gh-value">
+          <input id="viv-ai-key" class="gh-input" type="password" placeholder="paste to save or replace"
+                 autocomplete="off" spellcheck="false">
+          <div class="gh-value-hint" id="viv-ai-storage"></div>
+        </div>
+      </div>
+
+      <div class="gh-row" id="viv-ai-url-row" hidden>
+        <div class="gh-label">Base URL</div>
+        <div class="gh-value">
+          <input id="viv-ai-url" class="gh-input" type="text" placeholder="http://localhost:11434/v1"
+                 autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="gh-row">
+        <div class="gh-label">Model</div>
+        <div class="gh-value">
+          <input id="viv-ai-model" class="gh-input" type="text" list="viv-ai-models" placeholder="model name"
+                 autocomplete="off" spellcheck="false">
+          <datalist id="viv-ai-models">
+            <option value="claude-sonnet-5-5"></option>
+            <option value="claude-opus-5-5"></option>
+            <option value="claude-haiku-4-5-20251001"></option>
+          </datalist>
+        </div>
+      </div>
+
+      <div class="gh-row">
+        <div class="gh-label"></div>
+        <div class="gh-value gh-action-row">
+          <button id="viv-ai-save" class="action-btn" type="button">Save &amp; test</button>
+          <button id="viv-ai-use" class="btn-mini" type="button" hidden>Use this model</button>
+          <button id="viv-ai-remove" class="btn-mini" type="button" hidden>Remove key</button>
+          <span id="viv-ai-msg" style="font-size:0.85em"></span>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Branch & sync — the workspace's git state. Repo/branch are CHOSEN in
          the Source card above (local/remote); this card is about committing,
          pushing, and PRs, so it shows git STATE, not the repo/branch selectors
@@ -1718,6 +1792,11 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
   </div>
+</section>
+
+<!-- Chat: the DOM is built by static/chat.js into #viv-chat (chat-core.js holds the logic). -->
+<section id="page-chat" class="page" data-page="chat">
+  <div id="viv-chat" style="display:flex;flex-direction:column;flex:1 1 auto;min-height:0"></div>
 </section>
 
 <section id="page-studies" class="page" data-page="studies">
@@ -2453,6 +2532,9 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
+<script src="assets/chat-core.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
+<script src="assets/chat.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
+<script src="assets/ai-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* ai-login unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher
      (investigation-switcher.js). The /api/workspaces endpoints remain available

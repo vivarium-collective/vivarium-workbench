@@ -69,6 +69,13 @@ body.snapshot a.menu-link[data-page="github"] {
   display: none !important;
 }
 
+/* ── Chat + AI provider: live-server only (they call /api/chat and /api/ai) ── */
+body.snapshot a.menu-link[data-page="chat"],
+body.snapshot #page-chat,
+body.snapshot #viv-ai-card {
+  display: none !important;
+}
+
 /* ── GitHub identity / "Connect GitHub" rail footer (git auth — not in a read-only viewer) ── */
 body.snapshot .viv-rail-footer {
   display: none !important;

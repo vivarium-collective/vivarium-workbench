@@ -764,9 +764,9 @@
     // unavailable in a static bundle → redirect to simulation-setup (composites list).
     if (document.body.classList.contains('snapshot')) {
       // 'github' (Source page) IS available in snapshot now — it's the published
-      // workspace switcher (repo navigator + Sync-to-local). Only 'studies'
-      // (the legacy flat list) redirects to the investigations view.
-      if (pageId === 'studies') {
+      // workspace switcher (repo navigator + Sync-to-local). 'studies' (the legacy
+      // flat list) and 'chat' (needs the live server) redirect to the investigations view.
+      if (pageId === 'studies' || pageId === 'chat') {
         pageId = 'investigations';
       }
     }
@@ -841,6 +841,14 @@
     if (pageId === 'audit' && typeof window._loadAudit === 'function') {
       _loadAudit();
     }
+    // Chat (live-only): refresh provider status + focus the input.
+    if (pageId === 'chat' && typeof window._loadChat === 'function') {
+      window._loadChat();
+    }
+    // Account page: refresh the AI provider card (status never includes a key).
+    if (pageId === 'github' && typeof window._loadAiLogin === 'function') {
+      window._loadAiLogin();
+    }
   }
 
   function _initMenuNav() {
@@ -852,7 +860,7 @@
       var _snapshot = document.body.classList.contains('snapshot');
       var validPages = _snapshot
         ? ['workspace-inputs', 'simulation-setup', 'modules', 'market', 'investigations', 'simulations', 'visualizations', 'audit', 'composite-explore', 'github', 'about']
-        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'modules', 'market', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
+        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'modules', 'market', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about', 'chat'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -884,7 +892,7 @@
         var _snap = document.body.classList.contains('snapshot');
         var validPages = _snap
           ? ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'audit', 'composite-explore', 'github', 'about']
-          : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
+          : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about', 'chat'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
       window.addEventListener('hashchange', fromHash);
