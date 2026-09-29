@@ -33,15 +33,6 @@ from vivarium_workbench.lib.study_spec import SLUG_RE as _SLUG_RE
 # ---------------------------------------------------------------------------
 
 
-def _investigation_yaml_path(ws_root: Path, inv: str) -> "Path | None":
-    """Resolve investigations/<inv>/investigation.yaml, or None if missing."""
-    for d in _invstatus.iter_iset_dirs(ws_root):
-        if d.name == inv:
-            p = d / "investigation.yaml"
-            return p if p.is_file() else None
-    return None
-
-
 def _sync_parent_investigation(ws_root: Any, study_dir: Any) -> None:
     """Best-effort SP1 hook: re-write the parent investigation's computed
     acceptance so the verdict on disk tracks the member study's new outcome.
@@ -97,7 +88,7 @@ def decide_proposed_input(ws_root: Path, body: dict) -> "tuple[dict, int]":
     if decision not in ("accept", "decline"):
         return {"error": "decision must be 'accept' or 'decline'"}, 400
 
-    target = _investigation_yaml_path(ws_root, inv)
+    target = _invstatus.investigation_yaml_path(ws_root, inv)
     if target is None:
         return {"error": f"no investigation.yaml for {inv!r}"}, 404
 

@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import platform
 import subprocess
-import sys
 import json
 from pathlib import Path
 
@@ -42,16 +41,7 @@ from vivarium_workbench.lib import single_study_report
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
-def _ws_add_to_sys_path(ws_root: Path) -> None:
-    """Make the workspace's own Python package(s) importable.
-
-    Inline replica of ``server._ws_add_to_sys_path`` (which used the ``WORKSPACE``
-    global): insert ``ws_root`` at the front of ``sys.path`` so a top-level
-    workspace package (e.g. ``pbg_chromosome_rep1``) resolves.
-    """
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
+from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
 
 
 def suggest(ws_root: Path, body: dict) -> tuple[dict, int]:

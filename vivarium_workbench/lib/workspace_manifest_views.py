@@ -30,16 +30,7 @@ from vivarium_workbench.lib import registry as _registry
 # Pure helpers (moved verbatim from server.py — no other lib copy existed)
 # ---------------------------------------------------------------------------
 
-def _add_ws_to_sys_path(ws_root: Path) -> None:
-    """Make the workspace's own Python package(s) importable.
-
-    Inline replica of server.py's ``_ws_add_to_sys_path`` (the workspace's own
-    package — e.g. ``pbg_chromosome_rep1`` — lives at the workspace root, so we
-    add it to ``sys.path`` so it resolves as a top-level package).
-    """
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
+from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _add_ws_to_sys_path
 
 
 def _composite_top_pkg(rec: dict) -> str:

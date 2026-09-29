@@ -32,11 +32,7 @@ from typing import Optional
 # sys.path helper (mirrors visualization_classes.py / composite_resolve.py)
 # ---------------------------------------------------------------------------
 
-def _ws_add_to_sys_path(ws_root: Path) -> None:
-    """Ensure the workspace root is on ``sys.path`` so its package is importable."""
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
+from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
 
 
 # ---------------------------------------------------------------------------

@@ -3036,24 +3036,6 @@ class StudyReproduceRequest(BaseModel):
     run_id: str = ""
 
 
-class ReproduceResult(BaseModel):
-    """Result of ``POST /api/study-reproduce`` — the new run's launch result
-    plus reproduction provenance (``origin``, and on success the replayed
-    ``reran`` run_id this new run reproduces).
-
-    ``extra="allow"``: the wrapped launcher (``study_runs.launch_into_study``)
-    contributes a variable result shape (``simulation_id``, ``status``, ...);
-    only the fields this route controls are typed.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    run_id: Optional[str] = None
-    origin: Optional[str] = None
-    status: Optional[str] = None
-    error: Optional[str] = None
-
-
 class InvestigationRerunRequest(BaseModel):
     """POST /api/investigation-rerun request body — ``{"investigation"}``.
 

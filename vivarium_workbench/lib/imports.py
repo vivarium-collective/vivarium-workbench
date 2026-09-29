@@ -12,12 +12,6 @@ from .workspace_yaml import load_workspace, save_workspace, WorkspaceValidationE
 ImportMode = Literal["reference", "fork-source", "in-place"]
 
 
-def get_import(ws_root: Path, name: str) -> dict | None:
-    """Return the catalog entry for `name`, or None."""
-    ws = load_workspace(ws_root / "workspace.yaml")
-    return (ws.get("imports") or {}).get(name)
-
-
 def register_import(
     ws_root: Path, *,
     name: str, source: str, ref: str, mode: ImportMode,

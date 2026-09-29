@@ -155,6 +155,15 @@ def iter_iset_dirs(ws_root: Path) -> Iterator[Path]:
             yield d
 
 
+def investigation_yaml_path(ws_root: Path, inv: str) -> "Path | None":
+    """Resolve investigations/<inv>/investigation.yaml, or None if missing."""
+    for d in iter_iset_dirs(ws_root):
+        if d.name == inv:
+            p = d / "investigation.yaml"
+            return p if p.is_file() else None
+    return None
+
+
 def iset_lifecycle(ws_root: Path, slug: str) -> str:
     """Git lifecycle of an investigation: 'merged' if its dir exists in the
     merge-base with main (already on main), else 'wip'. Any git error -> 'wip'."""

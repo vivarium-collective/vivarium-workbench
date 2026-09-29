@@ -66,17 +66,7 @@ def _generator_entry(ref: str):
     return entry
 
 
-def _ws_add_to_sys_path(ws_root: Path) -> None:
-    """Make the workspace's own Python package(s) importable.
-
-    Replicates ``server._ws_add_to_sys_path`` (which uses the ``WORKSPACE``
-    global) with the root threaded explicitly: insert ``ws_root`` on ``sys.path``
-    so the workspace package (e.g. ``pbg_chromosome_rep1``) resolves as a
-    top-level package.
-    """
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
+from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
 
 
 def investigation_run_one(ws_root: Path, body: dict) -> tuple[dict, int]:

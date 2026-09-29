@@ -37,7 +37,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from vivarium_workbench.lib import active_workspace as _active_workspace
@@ -102,16 +101,7 @@ def _install_timeout(default: int = _INSTALL_TIMEOUT_DEFAULT) -> int:
     return default
 
 
-def _ws_add_to_sys_path(ws_root: Path) -> None:
-    """Make the workspace's own Python package(s) importable.
-
-    Replicates ``server._ws_add_to_sys_path`` (which uses the ``WORKSPACE``
-    global) with the root threaded explicitly: insert ``ws_root`` on
-    ``sys.path`` so the workspace package resolves as a top-level package.
-    """
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
+from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
 
 
 def _install_locked_deps_with_uv(

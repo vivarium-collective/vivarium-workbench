@@ -369,26 +369,6 @@ def _emit_paths_from_document(document: dict) -> list[str]:
     return out
 
 
-def _has_emitter_node(document: dict) -> bool:
-    found = [False]
-
-    def _walk(node: Any) -> None:
-        if found[0]:
-            return
-        if isinstance(node, dict):
-            if str(node.get("address", "")).split(":")[-1].endswith("Emitter"):
-                found[0] = True
-                return
-            for v in node.values():
-                _walk(v)
-        elif isinstance(node, list):
-            for v in node:
-                _walk(v)
-
-    _walk(document.get("state", document) if isinstance(document, dict) else {})
-    return found[0]
-
-
 def _resolve_store_path(state: dict, path: str) -> "tuple[bool, bool]":
     """Resolve ``path`` (``a/b/c``) against ``state``.
 

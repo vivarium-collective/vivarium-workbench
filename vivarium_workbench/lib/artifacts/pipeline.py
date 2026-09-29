@@ -27,7 +27,10 @@ import yaml
 from vivarium_workbench.lib.artifacts.hashing import artifact_id
 from vivarium_workbench.lib.artifacts.store import ArtifactStore
 from vivarium_workbench.lib.composite_runs import collect_emit_paths_from_spec
-from vivarium_workbench.lib.investigation_members import investigation_member_slugs
+from vivarium_workbench.lib.investigation_members import (
+    investigation_member_slugs,
+    member_slug,
+)
 from vivarium_workbench.lib.study_spec import study_interface
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
@@ -456,23 +459,6 @@ def resolve_investigation(
         result["error"] = f"cannot load investigation {inv_slug!r}: {exc}"
         return result
 
-    def _member_slug(item):
-        """Normalize a member-list entry to its slug string.
-
-        `investigation_member_slugs` deliberately does not normalize item
-        shape (see its docstring): real/migrated ``investigation.yaml``
-        files may list members as bare slug strings OR dicts (``{study|
-        slug|name: ...}``). Every consumer must normalize — mirrors the
-        pattern in ``lib/rerun.py`` (~line 123) and ``lib/workspace_paths.py``
-        (~line 228). Returns ``None`` for anything that doesn't normalize to
-        a usable slug (skipped by the caller).
-        """
-        if isinstance(item, str):
-            return item
-        if isinstance(item, dict):
-            return item.get("study") or item.get("slug") or item.get("name")
-        return None
-
     # Discover every node (members + any producer they transitively pull
     # in, even if that producer isn't itself a declared member) and its own
     # `inputs[].from`, building the sorter as we go. The whole discovery
@@ -484,7 +470,7 @@ def resolve_investigation(
     seen: set[str] = set()
     try:
         member_slugs = investigation_member_slugs(inv_spec)
-        queue = [s for s in (_member_slug(m) for m in member_slugs) if s]
+        queue = [s for s in (member_slug(m) for m in member_slugs) if s]
         while queue:
             slug = queue.pop()
             if slug in seen:

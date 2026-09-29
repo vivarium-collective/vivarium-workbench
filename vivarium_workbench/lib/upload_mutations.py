@@ -25,7 +25,6 @@ import base64
 import hashlib
 import re
 import shutil
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -46,11 +45,7 @@ from vivarium_workbench.lib.workspace_yaml import (
 # ---------------------------------------------------------------------------
 
 
-def _ws_add_to_sys_path(ws_root: Path) -> None:
-    """Ensure the workspace root is on ``sys.path`` so its package is importable."""
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
+from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
 
 
 def _safe_slug(s: str) -> str:
@@ -133,15 +128,6 @@ def persist_composite_config(ws_root: Path, body: dict[str, Any]) -> "tuple[dict
     }, 200
 
 
-def _investigation_yaml_path(ws_root: Path, inv: str) -> "Path | None":
-    """Resolve investigations/<inv>/investigation.yaml, or None if missing."""
-    for d in _invstatus.iter_iset_dirs(ws_root):
-        if d.name == inv:
-            p = d / "investigation.yaml"
-            return p if p.is_file() else None
-    return None
-
-
 def _append_investigation_input(ws_root: Path, inv: str, category: str, entry: Any) -> bool:
     """Append ``entry`` to investigation.yaml's ``inputs.<category>`` list.
 
@@ -150,7 +136,7 @@ def _append_investigation_input(ws_root: Path, inv: str, category: str, entry: A
     (references). Prefers ruamel for round-trip preservation, falling back to
     safe_dump. Returns True on success.
     """
-    target = _investigation_yaml_path(ws_root, inv)
+    target = _invstatus.investigation_yaml_path(ws_root, inv)
     if target is None:
         return False
 

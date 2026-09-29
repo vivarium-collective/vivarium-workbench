@@ -39,7 +39,10 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_workbench.lib.investigation_members import investigation_member_slugs
+from vivarium_workbench.lib.investigation_members import (
+    investigation_member_slugs,
+    member_slug,
+)
 from vivarium_workbench.lib.study_spec import study_interface, study_dir
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
@@ -73,15 +76,6 @@ def artifacts_root(ws_root: Path | str) -> str:
     misses.
     """
     return str(WorkspacePaths.load(Path(ws_root)).pbg / "artifacts")
-
-
-def _member_slug(item):
-    """Normalize a member-list entry (bare slug str, or ``{study|slug|name}``)."""
-    if isinstance(item, str):
-        return item
-    if isinstance(item, dict):
-        return item.get("study") or item.get("slug") or item.get("name")
-    return None
 
 
 def _load_study_spec(ws_root: Path, slug: str) -> dict | None:
@@ -163,7 +157,7 @@ def build_investigation_document(ws_root: Path | str, inv_slug: str) -> dict:
     # BFS discovery: members + transitive producers, loading each study's spec
     # once. Mirrors ``resolve_investigation``'s node discovery.
     specs: dict[str, dict] = {}
-    queue = [s for s in (_member_slug(m) for m in investigation_member_slugs(inv_spec)) if s]
+    queue = [s for s in (member_slug(m) for m in investigation_member_slugs(inv_spec)) if s]
     seen: set[str] = set()
     while queue:
         slug = queue.pop()

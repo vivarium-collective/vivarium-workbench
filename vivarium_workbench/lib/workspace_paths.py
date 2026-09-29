@@ -24,6 +24,7 @@ of raising. Call sites that relied on the old raise-when-absent semantics pass
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -47,7 +48,15 @@ __all__ = [
     "find_workspace_root",
     "study_dir",
     "package_slug",
+    "add_ws_to_sys_path",
 ]
+
+
+def add_ws_to_sys_path(ws_root: Path) -> None:
+    """Ensure the workspace root is on ``sys.path`` so its package is importable."""
+    ws = str(ws_root)
+    if ws not in sys.path:
+        sys.path.insert(0, ws)
 
 
 class WorkspacePaths(_BaseWorkspacePaths):

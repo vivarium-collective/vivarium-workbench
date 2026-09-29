@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,11 +29,7 @@ import yaml
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
-def _ws_add_to_sys_path(ws_root: Path) -> None:
-    """Ensure the workspace root is on ``sys.path`` so its package is importable."""
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
+from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
 
 
 # ---------------------------------------------------------------------------

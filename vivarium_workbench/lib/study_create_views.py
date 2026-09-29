@@ -43,7 +43,6 @@ The ``action`` closure is moved verbatim from the handler (``WORKSPACE`` →
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 import yaml
@@ -51,16 +50,7 @@ import yaml
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
-def _ws_add_to_sys_path(ws_root: Path) -> None:
-    """Make the workspace's own Python package(s) importable.
-
-    Replicates ``server._ws_add_to_sys_path`` (which uses the ``WORKSPACE``
-    global) with the root threaded explicitly: insert ``ws_root`` on
-    ``sys.path`` so the workspace package resolves as a top-level package.
-    """
-    ws = str(ws_root)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
+from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
 
 
 def _append_investigation_member(ws_root: Path, investigation: str, study_name: str) -> None:
