@@ -3454,3 +3454,65 @@ class CatalogUninstallRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str = ""
+
+
+class AiProviderStatus(BaseModel):
+    """One provider row of ``GET /api/ai/status``. Never carries a key.
+
+    ``source`` is where the credential comes from (``keyring`` / ``memory`` /
+    ``environment`` / ``aws``), ``None`` when the provider is not configured.
+    """
+
+    id: str
+    configured: bool
+    source: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+class AiSelection(BaseModel):
+    """The chosen provider + model (non-secret)."""
+
+    provider: str
+    model: str
+
+
+class AiStatusPayload(BaseModel):
+    """``GET /api/ai/status``. ``available`` is False when the ``[chat]`` extra
+    is not installed; ``storage_mode`` is ``keyring`` (loopback bind) or
+    ``memory`` (hosted — keys live only in this process, per session).
+
+    Source: ``lib.ai_views.ai_status``.
+    """
+
+    available: bool
+    providers: list[AiProviderStatus]
+    selected: Optional[AiSelection] = None
+    storage_mode: Literal["keyring", "memory"]
+
+
+class AiCredentialsRequest(BaseModel):
+    """``POST /api/ai/credentials`` body. ``api_key`` (or ``base_url`` for
+    ``openai-compatible``) is checked with one real 1-token request to ``model``
+    before anything is stored."""
+
+    provider: str
+    model: str
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+class AiSelectRequest(BaseModel):
+    """``POST /api/ai/select`` body — switch provider/model."""
+
+    provider: str
+    model: str
+
+
+class AiOkPayload(BaseModel):
+    """``{ok: true, provider, model?, source?}`` acknowledgement for the
+    ``/api/ai/*`` writes."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    provider: str

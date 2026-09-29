@@ -57,6 +57,8 @@ from vivarium_workbench.lib import remote_run_jobs as _remote_run_jobs
 from vivarium_workbench.lib import remote_run_views as _remote_run_views
 from vivarium_workbench.lib import remote_analysis_figures as _remote_analysis_figures
 from vivarium_workbench.lib import auth_views as _auth_views
+from vivarium_workbench.lib import ai_auth as _ai_auth
+from vivarium_workbench.lib import ai_views as _ai_views
 from vivarium_workbench.lib import composite_run_views as _cr_views
 from vivarium_workbench.lib import composite_test_run_views as _composite_test_run_views
 from vivarium_workbench.lib import loom_savepoints as _loom_savepoints
@@ -306,6 +308,10 @@ from vivarium_workbench.lib.models import (
     RemoteRunStartResponse,
     # C-state-3e: GitHub device-flow auth (pass-through payload)
     AuthPayload,
+    AiCredentialsRequest,
+    AiOkPayload,
+    AiSelectRequest,
+    AiStatusPayload,
     # C-state-3f: git-subprocess commit/push routes
     BranchPushRequest,
     BranchPushResponse,
@@ -419,6 +425,13 @@ def get_workspace(request: Request = None) -> Path:
     return get_workspace_context(request).ws_root
 
 
+def _ai_scope(request: Request) -> "tuple[_ai_auth.StorageMode, str | None]":
+    """Where this request's LLM credentials live (``keyring`` on a loopback bind,
+    ``memory`` otherwise) and the session key that scopes them in memory mode."""
+    mode = _ai_auth.storage_mode(getattr(request.app.state, "bind_host", None))
+    return mode, _session_key_of(request)
+
+
 _OPENAPI_TAGS = [
     {
         "name": "Investigations",
@@ -469,6 +482,10 @@ _OPENAPI_TAGS = [
         "description": "GitHub OAuth device-flow authentication.",
     },
     {
+        "name": "AI",
+        "description": "Built-in chat: LLM-provider credentials/model choice and the streaming chat turn (needs the `[chat]` extra).",
+    },
+    {
         "name": "System",
         "description": "Service health, client configuration, workspace info, and the event stream.",
     },
@@ -504,6 +521,10 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/source/switch", "/api/source/build-remote", "/api/source/switch-build",
     # GitHub auth (needed to reach the remote / private content)
     "/api/auth/github/start", "/api/auth/github/logout",
+    # built-in chat: provider login + the chat turn (its own mutating calls are
+    # still limited to the routes this filter leaves registered)
+    "/api/ai/credentials", "/api/ai/credentials/{provider}", "/api/ai/select",
+    "/api/chat/turn",
     # benign UI telemetry
     "/api/click",
     # item 86: non-mutating config computation, same class of usefulness as
@@ -7376,6 +7397,52 @@ def create_app() -> FastAPI:
         """
         resp, code = _auth_views.auth_orgs()
         return JSONResponse(content=resp, status_code=code)
+
+    # -----------------------------------------------------------------------
+    # AI — provider credentials + model choice for the built-in chat
+    # (docs/ai-chat.md). Logic in lib.ai_views / lib.ai_auth; no route ever
+    # returns a key. Everything but /status answers 503 without the [chat] extra.
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/ai/status",
+        response_model=AiStatusPayload,
+        tags=["AI"],
+        summary="Chat availability, configured providers, selected model (never a key)",
+    )
+    def ai_status(request: Request) -> dict:
+        mode, session = _ai_scope(request)
+        return _ai_views.ai_status(mode, session)
+
+    @app.post(
+        "/api/ai/credentials",
+        response_model=AiOkPayload,
+        tags=["AI"],
+        summary="Verify (one real 1-token request) then store a provider key; select it",
+    )
+    async def ai_save_credentials(body: AiCredentialsRequest, request: Request) -> dict:
+        mode, session = _ai_scope(request)
+        return await _ai_views.ai_save_credentials(body, mode, session)
+
+    @app.delete(
+        "/api/ai/credentials/{provider}",
+        response_model=AiOkPayload,
+        tags=["AI"],
+        summary="Forget a saved provider key",
+    )
+    def ai_delete_credentials(provider: str, request: Request) -> dict:
+        mode, session = _ai_scope(request)
+        return _ai_views.ai_delete_credentials(provider, mode, session)
+
+    @app.post(
+        "/api/ai/select",
+        response_model=AiOkPayload,
+        tags=["AI"],
+        summary="Switch the chat's provider/model",
+    )
+    def ai_select(body: AiSelectRequest, request: Request) -> dict:
+        mode, session = _ai_scope(request)
+        return _ai_views.ai_select(body, mode, session)
 
     # -----------------------------------------------------------------------
     # Git — subprocess commit/push WRITE routes (2 POSTs)

@@ -369,6 +369,8 @@ files = [
     "vivarium_workbench/lib/install_views.py",
     "vivarium_workbench/lib/catalog_install_views.py",
     "vivarium_workbench/lib/catalog_uninstall_views.py",
+    "vivarium_workbench/lib/ai_auth.py",
+    "vivarium_workbench/lib/ai_views.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
