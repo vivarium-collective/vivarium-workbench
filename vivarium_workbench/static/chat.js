@@ -163,7 +163,8 @@
   }
 
   // ── Turn streaming ────────────────────────────────────────────────────────
-  var REFRESH_AFTER_MUTATION = ['_loadInvestigationSets', '_refreshGitStatus'];
+  // Same loaders the UI's own create/edit flows call (walkthrough.js _submitBrowseCreate).
+  var REFRESH_AFTER_MUTATION = ['_loadInvestigations', '_loadInvestigationSets', '_refreshGitStatus'];
   function refreshWorkspaceViews() {
     // Other tabs memoise their first load; clear those flags so the next visit
     // (and the rail) reflect what the assistant just changed.

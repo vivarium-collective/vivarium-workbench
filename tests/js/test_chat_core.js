@@ -74,6 +74,21 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(st.ui.length, 2, 'a resume continues the same assistant message');
 }
 
+// ── a reused tool_call_id in a later turn must not rewrite an earlier turn's row ──
+{
+  const st = C.newState();
+  C.startUserTurn(st, 'first');
+  C.applyFrame(st, { type: 'tool-call', tool_call_id: 'same', tool_name: 'call_operation', args: { operation_id: 'a' } });
+  C.applyFrame(st, { type: 'tool-result', tool_call_id: 'same', tool_name: 'call_operation', ok: true, content: { status: 200 } });
+  C.applyFrame(st, { type: 'done', pending_approval: false, messages: [] });
+  C.startUserTurn(st, 'second');
+  C.applyFrame(st, { type: 'tool-call', tool_call_id: 'same', tool_name: 'call_operation', args: { operation_id: 'b' } });
+  C.applyFrame(st, { type: 'approval-required', tool_call_id: 'same', tool_name: 'call_operation', args: {}, metadata: {} });
+  assert.strictEqual(st.ui[1].parts[0].status, 'done', 'earlier turn untouched');
+  assert.strictEqual(st.ui[1].parts[0].args.operation_id, 'a');
+  assert.strictEqual(st.ui[3].parts[0].status, 'awaiting', 'the new call lands in the new message');
+}
+
 // ── error frame ──
 {
   const st = C.newState(); C.startUserTurn(st, 'x');

@@ -62,13 +62,14 @@
     return m;
   }
 
+  // Tool calls are only ever updated within the assistant message being built (a
+  // resumed turn continues that same message). Never search earlier messages: a
+  // reused id must not rewrite a previous turn's row.
   function findTool(state, id) {
-    for (var i = state.ui.length - 1; i >= 0; i--) {
-      var m = state.ui[i];
-      if (m.role !== 'assistant') continue;
-      for (var j = 0; j < m.parts.length; j++) {
-        if (m.parts[j].kind === 'tool' && m.parts[j].id === id) return m.parts[j];
-      }
+    var m = state.ui[state.ui.length - 1];
+    if (!m || m.role !== 'assistant') return null;
+    for (var j = 0; j < m.parts.length; j++) {
+      if (m.parts[j].kind === 'tool' && m.parts[j].id === id) return m.parts[j];
     }
     return null;
   }
