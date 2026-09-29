@@ -5210,6 +5210,22 @@ body.col-resizing .registry-table.reg-table-fill th, body.col-resizing .registry
 /* Focus mode hides the left rail; hide the code rail too. */
 body.focus-mode .viv-code-rail{ display:none !important; }
 
+/* Fill-the-pane (maximized card) + Code panel open: the maximized card is
+   position:fixed spanning to the right edge (z-index 900), which would paint over
+   the in-flow code rail — so the source panel is invisible in fill-pane mode.
+   Fix: leave room on the right for the rail, and pin the rail fixed ABOVE the
+   card so its source shows beside the maximized graph (as it does un-maximized).
+   Scoped to `.viv-code-open` so a collapsed rail never steals width. --viv-code-w
+   is mirrored onto <body> by process-code.js so a resized rail stays in sync. */
+body.pcard-maximized.viv-code-open .registry-entry-full.pcard-maximized{
+  right: var(--viv-code-w, 460px) !important;
+}
+body.pcard-maximized.viv-code-open .viv-code-rail{
+  position:fixed; top:0; right:0; bottom:0;
+  width:var(--viv-code-w, 460px);
+  z-index:901;
+}
+
 :root[data-theme="dark"] .viv-code-badge-edit{ background:#14351f; color:#86efac; }
 :root[data-theme="dark"] .viv-code-badge-ro{ background:#3a2d0c; color:#fcd34d; }
 :root[data-theme="dark"] .viv-code-status-ok{ color:#86efac; }
