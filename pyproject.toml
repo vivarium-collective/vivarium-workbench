@@ -105,6 +105,13 @@ viz = ["matplotlib", "imageio", "numpy"]
 # each study's composite loom as a PNG. After installing, fetch the browser once:
 #   python -m playwright install chromium
 loom-render = ["playwright>=1.40"]
+# Built-in AI chat (docs/ai-chat.md): provider-agnostic tool loop + approvals via
+# pydantic-ai, in-process ASGI calls via httpx, key storage via the OS keyring.
+# Optional so the tool stays installable without any LLM SDKs; every chat route
+# answers 503 "chat extra not installed" when pydantic-ai isn't importable.
+# 2.51.0 is the release the approval/streaming flow was verified against
+# (ApprovalRequired + ctx.tool_call_approved, DeferredToolResults, run_stream_events).
+chat = ["pydantic-ai-slim[anthropic,openai,google,bedrock]>=2.51.0", "httpx>=0.27", "keyring>=24"]
 dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "pytest-xdist>=3.5", "pytest-split>=0.9", "mypy>=1.8", "httpx>=0.27", "import-linter>=2.0"]
 # Optional readers used only by parts of the test suite (parquet/zarr run
 # stores). Without them those tests skip (via pytest.importorskip) rather than

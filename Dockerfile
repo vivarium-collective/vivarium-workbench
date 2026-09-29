@@ -98,7 +98,7 @@ COPY . .
 # dependency resolves from a git source declared in [tool.uv.sources], so no
 # private registry is involved.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra chat
 
 ENV PATH="/app/vivarium-workbench/.venv/bin:${PATH}"
 

@@ -49,7 +49,7 @@ jobs:
         # `test` (polars/pyarrow/zarr) is REQUIRED here, unlike in types.yml:
         # without it 11 tests fail rather than skip, because the parquet/zarr
         # readers are missing entirely.
-        run: uv sync --frozen --extra dev --extra test
+        run: uv sync --frozen --extra dev --extra test --extra chat
       - name: pytest (shard ${{ matrix.group }}/4, quarantine deselected)
         # Serial single-job was ~14 min, xdist-only ~6 min. Sharding divides the
         # remaining test time by 4; the ~45s of checkout+sync is paid per shard
@@ -95,6 +95,6 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --frozen --extra dev --extra test
+        run: uv sync --frozen --extra dev --extra test --extra chat
       - name: pytest (quarantined only)
         run: uv run --frozen bash scripts/pytest_gate.sh --only-known
