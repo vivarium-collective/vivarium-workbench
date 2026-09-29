@@ -7,6 +7,7 @@ lives, the run/render lifecycles, and which companion repo owns which
 transformation — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). For how the
 dashboard is deployed with a workspace (it's a pip dependency of the workspace,
 run from the workspace venv) see [docs/USAGE.md](docs/USAGE.md).
+The optional built-in AI chat (`[chat]` extra: `lib/ai_{auth,views,tools,chat}.py`, `static/chat*.js`) is documented in [docs/ai-chat.md](docs/ai-chat.md).
 
 ## What this is
 

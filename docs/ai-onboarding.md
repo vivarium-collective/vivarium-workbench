@@ -2,9 +2,9 @@
 
 **Audience:** an AI agent setting up a **new** Vivarium Workbench workspace repo and driving it.
 **What the Workbench is:** a local web UI + HTTP API over a *process-bigraph workspace* (a folder with a `workspace.yaml` holding composites, studies, investigations, and runs). It **reads and writes** the workspace's files and commits each change to git, so every action has an audit trail.
-**Two layers, keep them separate:**
-- **The Workbench** = server/UI/data. It has **no AI dependencies** — pure Python + static assets.
-- **The LLM layer** = the `viva-superpowers` Claude Code plugin (skills that *drive* the Workbench's HTTP API). All AI lives here, never in the Workbench. (See §4.)
+**Two layers:**
+- **The Workbench** = server/UI/data. Its core has **no AI dependencies** — pure Python + static assets. It also ships an *optional* built-in chat (`pip install 'vivarium-workbench[chat]'`, see [ai-chat.md](ai-chat.md)).
+- **The LLM layer for Claude Code** = the `viva-superpowers` plugin (skills that *drive* the Workbench's HTTP API). (See §4.)
 
 ---
 
@@ -64,7 +64,7 @@ Useful endpoints:
 ## 4. The LLM layer — how an AI works with the Workbench
 
 ### 4.1 The principle
-The **Workbench is AI-free**. All AI capability is packaged as the **`viva-superpowers`** Claude Code plugin (v0.16.0): a set of `viva-*` **skills** that call the Workbench's HTTP API to author and run models. This keeps the tool auditable and the AI swappable.
+The Workbench **core is AI-free**; AI is either (a) the **`viva-superpowers`** Claude Code plugin — a set of `viva-*` **skills** that call the Workbench's HTTP API to author and run models — or (b) the Workbench's own **optional built-in chat** (the `[chat]` extra): a provider-agnostic assistant tab where you bring your own provider/model and **every non-GET action needs your approval** (see [ai-chat.md](ai-chat.md)). Both drive the same public HTTP API — neither has a private back door — so the tool stays auditable and the AI swappable. The skills remain the Claude Code path; the built-in chat is for users without it.
 
 ### 4.2 One-time agent setup
 ```
@@ -80,7 +80,7 @@ The **Workbench is AI-free**. All AI capability is packaged as the **`viva-super
 - **Read the contract, not the prose:** `GET /openapi.json` is authoritative for shapes.
 - **Orient in one call:** `GET /api/workspace-manifest` (state) + `GET /api/linkage-index` (graph) before you start editing.
 - **Runs are asynchronous:** a run returns a `run_id`; poll its status endpoint until done; the durable artifact is `studies/<slug>/runs.db`. Check the run's *result field*, not just the HTTP status (a failed run can still return 200).
-- **Every write commits to git** in the workspace — your changes are a reviewable history.
+- **Writes land in the workspace files; not every write commits to git.** Some routes commit on the active branch, but many FastAPI write paths defer the commit (e.g. `POST /api/study-create` scaffolds the study and leaves it uncommitted) — check `git status` and commit through the Branch tab / `/api/branch/push`. Built-in-chat mutations are additionally recorded in `.pbg/ai-actions.jsonl`.
 
 ### 4.4 The skills (what each is for)
 | Skill | Purpose |

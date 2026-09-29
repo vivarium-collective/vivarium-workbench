@@ -43,6 +43,9 @@ The mental model is three layers:
                      (scaffolded from viva-template)
 ```
 
+> The dashboard also ships an optional **built-in chat** (`[chat]` extra) that
+> drives the same HTTP API with per-action approval — see [ai-chat.md](ai-chat.md).
+
 The dashboard's job is to **author** the workspace's YAML specs through a UI,
 **orchestrate** simulation runs, **persist** results, **render** specs+results
 into status verdicts and charts, and **commit** every change to git so there is
