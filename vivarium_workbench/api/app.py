@@ -3638,6 +3638,59 @@ def create_app() -> FastAPI:
         }
         return Response(content=blob, headers=headers)
 
+    @app.post(
+        "/api/investigation/{slug}/figures-build",
+        tags=["Downloads"],
+        summary="Run the investigation's declared (incremental) figure build",
+    )
+    def investigation_figures_build_route(
+        slug: str,
+        payload: dict = Body(default={}),
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Run the investigation's DECLARED figure build so the download reflects
+        the current saved views. The command comes from ``investigation.yaml``'s
+        ``figures_build:`` (the investigation-level analog of a study's
+        ``canonical_runs``) — the workbench stays generic. Incremental by default;
+        pass ``{"all": true}`` to force a full rebuild. Runs detached in the
+        workspace (the build self-discovers this dashboard + the loom); returns
+        immediately with the pid. 404 when the investigation declares no builder.
+        """
+        import shlex
+        import subprocess
+        import sys as _sys
+        from vivarium_workbench.lib import investigation_figures as _figs
+
+        inv = _figs._load_investigation(ws, slug) or {}
+        fb = inv.get("figures_build")
+        if not fb:
+            return JSONResponse(status_code=404, content={
+                "error": f"investigation {slug!r} declares no figures_build",
+                "hint": "add `figures_build: python scripts/build_all_figures.py` to investigation.yaml",
+            })
+        if isinstance(fb, dict):
+            cmd = fb.get("command") or f"python {fb.get('script', 'scripts/build_all_figures.py')}"
+        else:
+            cmd = str(fb)
+        parts = shlex.split(cmd)
+        # Resolve `python` to the workspace's interpreter (a worktree shares the
+        # base checkout's .venv, e.g. spatio-flux--figures-step -> spatio-flux).
+        if parts and parts[0] == "python":
+            base = ws.name.split("--")[0]
+            for c in (ws / ".venv" / "bin" / "python", ws.parent / base / ".venv" / "bin" / "python"):
+                if c.exists():
+                    parts[0] = str(c)
+                    break
+            else:
+                parts[0] = _sys.executable
+        if payload.get("all"):
+            parts.append("--all")
+        try:
+            proc = subprocess.Popen(parts, cwd=str(ws))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(status_code=500, content={"error": str(e), "command": " ".join(parts)})
+        return {"ok": True, "started": True, "pid": proc.pid, "command": " ".join(parts)}
+
     @app.get(
         "/api/study/{slug}/figures.zip",
         tags=["Downloads"],
