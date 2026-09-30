@@ -20,6 +20,7 @@ from pathlib import Path
 import yaml
 
 from vivarium_workbench.lib import study_spec as _study_spec_lib
+from vivarium_workbench.lib.path_safety import plain_name
 
 
 # ---------------------------------------------------------------------------
@@ -32,10 +33,12 @@ def _study_name_from_body(body: dict) -> str:
     Accepts name/study/investigation keys interchangeably (matches the
     server._study_name_from_body contract).
     """
-    return (
+    name = (
         (body.get("name") or body.get("study") or body.get("investigation") or "")
         .strip()
     )
+    # Always joined onto the studies/investigations directory, so it must be a plain name.
+    return plain_name(name, "name") if name else name
 
 
 def _v4_baseline_not_yet_materialized(spec: dict) -> bool:

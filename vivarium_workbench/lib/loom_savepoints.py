@@ -32,7 +32,7 @@ def _root(ws_root: Path) -> Path:
 def _safe(composite_id: str) -> str:
     """Slugify a composite id into a filesystem-safe directory name."""
     s = re.sub(r"[^A-Za-z0-9._-]", "_", (composite_id or "").strip())
-    return s or "_unknown"
+    return "_unknown" if not s.strip(".") else s  # "", ".", ".." would name this directory or its parent
 
 
 def _dir(ws_root: Path, composite_id: str) -> Path:

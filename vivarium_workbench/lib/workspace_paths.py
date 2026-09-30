@@ -38,6 +38,7 @@ from viva_workspace import paths as _vw_paths
 from viva_workspace.paths import LAYOUT_KEYS
 
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
+from vivarium_workbench.lib.path_safety import plain_name
 from vivarium_workbench.lib.yaml_io import load_yaml
 
 __all__ = [
@@ -66,6 +67,10 @@ class WorkspacePaths(_BaseWorkspacePaths):
     the inherited ``load``/``from_config`` classmethods (which construct via
     ``cls(...)``) return instances of THIS subclass, keeping the override live.
     """
+
+    def study_dir(self, slug: str, must_exist: bool = False) -> Path:
+        """The shared resolver, but ``slug`` must be a plain name (see :func:`plain_name`)."""
+        return super().study_dir(plain_name(slug, "study name"), must_exist=must_exist)
 
     def study_owner(self, slug: str) -> Optional[str]:
         """Owning investigation slug for a study: nested layout, else the

@@ -39,6 +39,7 @@ import yaml
 # import it lazily from request handlers, so silence it here, before any of them.
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
+from vivarium_workbench.lib import csrf as _csrf  # noqa: E402
 from vivarium_workbench.lib.atomic_io import atomic_write_text  # noqa: E402
 from vivarium_workbench.lib.errors import APIError
 
@@ -72,7 +73,7 @@ ENV_KEYS = {
     "google": "GOOGLE_API_KEY",
 }
 
-LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+LOCAL_HOSTS = _csrf.LOOPBACK_HOSTS
 
 # NAT64 prefixes embed an arbitrary IPv4 (incl. 169.254.169.254) in an IPv6 address.
 _NAT64 = (ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("64:ff9b:1::/48"))

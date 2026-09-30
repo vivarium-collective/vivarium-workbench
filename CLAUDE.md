@@ -142,7 +142,13 @@ behavior, consider both the live and snapshot data sources.
 - **CSRF/origin guard**: every mutating (`POST`/`DELETE`) endpoint calls
   `_csrf_ok()`. Requests with no `Origin` (curl, local CLI) are allowed; a present
   `Origin` must match `Host`. Bypass for tests/tools with
-  `VIVARIUM_WORKBENCH_DISABLE_CSRF=1`.
+  `VIVARIUM_WORKBENCH_DISABLE_CSRF=1`. A loopback-bound, un-proxied server also
+  refuses any `Host` other than `localhost`/`127.0.0.1`/`[::1]` (DNS-rebinding guard,
+  `lib/csrf.is_host_allowed`; extend with `--allowed-host` / `VIVARIUM_WORKBENCH_ALLOWED_HOSTS`).
+- **Request values that become paths**: route them through `lib/path_safety.py`
+  (`plain_name` for study/run/upload names, `resolve_inside` for file references);
+  `tests/test_traversal_sweep.py` walks the OpenAPI schema and fails when a
+  path-like parameter can escape the workspace.
 - **Atomic writes**: use `lib/atomic_io.py` for file writes that must not be seen
   half-written.
 - **JSON serialization**: the server's `_json_default` handles numpy/dataclasses;
