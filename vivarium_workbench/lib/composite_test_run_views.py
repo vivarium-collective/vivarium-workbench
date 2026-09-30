@@ -389,7 +389,17 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     run_id = plan.run_id
     run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    log_rel = str((run_dir / "run.log").relative_to(ws_root))
+    try:
+        log_rel = str((run_dir / "run.log").relative_to(ws_root))
+    except ValueError:
+        # WorkspacePaths.pbg may resolve outside ws_root when VIVARIUM_PBG_DIR
+        # is set (viva-workspace#1 — redirects .pbg off a network-mounted
+        # workspace root onto local/ephemeral storage). Store the absolute
+        # path instead: the one consumer that reads this back
+        # (composite_run_views.py's ``ws_root / log_rel``) resolves correctly
+        # either way, since pathlib discards the left operand of ``/`` when
+        # the right operand is already absolute.
+        log_rel = str(run_dir / "run.log")
     request_path = run_dir / "request.json"
     request_path.write_text(json.dumps({
         "run_id": run_id,
