@@ -8,7 +8,9 @@
  * capabilities (sliders), @ context, attach and send. Colours are --c-* tokens scoped to
  * .viv-ai-panel: light is self-contained, dark maps onto the workbench's dark tokens. */
 
-.viv-ai-panel, .vp-pop{
+/* .viv-code-rail is included so the process-code panel can reuse the same .vp-head /
+   .vp-icon chrome and read as one system with the chat panel. */
+.viv-ai-panel, .vp-pop, .viv-code-rail{
   --c-bg:#ffffff; --c-panel:#ffffff; --c-border:#e2e6eb; --c-text:#1f2937; --c-muted:#6b7280;
   --c-chip:#eef1f5; --c-chip-hover:#e3e8ef; --c-code:#f3f4f6; --c-input:#f8fafc;
   --c-accent:#4f46e5; --c-accent-fg:#fff;
@@ -23,7 +25,7 @@
   border-left:1px solid var(--c-border);
 }
 .viv-ai-panel[hidden]{ display:none; }
-:root[data-theme="dark"] .viv-ai-panel, :root[data-theme="dark"] .vp-pop{
+:root[data-theme="dark"] .viv-ai-panel, :root[data-theme="dark"] .vp-pop, :root[data-theme="dark"] .viv-code-rail{
   --c-bg:var(--rail, #0f1728); --c-panel:var(--surface, #18233c); --c-border:var(--border, #26324c);
   --c-text:var(--text, #d3ddeb); --c-muted:var(--text-muted, #93a3b6); --c-chip:var(--surface-3, #1c2946);
   --c-chip-hover:var(--active, #20304f); --c-code:var(--surface-2, #12203a); --c-input:var(--field, #0d1526);

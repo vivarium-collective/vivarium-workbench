@@ -16,6 +16,30 @@
   function lsGet(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
 
+  function svg(inner) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+  }
+  // Dock glyphs (a framed window with the panel edge highlighted) — the same marks the
+  // chat's own dock menu uses, so both dock menus read identically.
+  var DOCK_GLYPH = {
+    left:   svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),
+    right:  svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
+    bottom: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14h18"/>'),
+  };
+
+  // A single shared dock dropdown (only one open at a time). Uses the chat's .vp-pop /
+  // .vp-pop-item chrome so it matches the rest of the panel UI.
+  var openMenu = null;
+  function closeMenu() {
+    if (!openMenu) return;
+    openMenu.remove(); openMenu = null;
+    document.removeEventListener('mousedown', _onDoc, true);
+    document.removeEventListener('keydown', _onKey, true);
+  }
+  function _onDoc(ev) { if (openMenu && !openMenu.contains(ev.target)) closeMenu(); }
+  function _onKey(ev) { if (ev.key === 'Escape') closeMenu(); }
+
   // opts: {
   //   panel, layout, mainEl,            required DOM nodes (.viv-layout + .viv-main)
   //   key,                              'ai' | 'code' — namespaces storage + CSS vars
@@ -87,6 +111,33 @@
       if (persist) lsSet(K.dock, zone);
       if (isOpen()) { place(zone); syncVars(); }
       if (opts.onDock) opts.onDock(zone);
+    }
+    // Dropdown of Dock left / right / bottom, anchored under the header's dock button.
+    function openDockMenu(anchor) {
+      closeMenu();
+      var menu = document.createElement('div');
+      menu.className = 'vp-pop vp-dock-menu';
+      menu.setAttribute('role', 'menu');
+      menu.innerHTML = C.DOCKS.map(function (z) {
+        return '<button type="button" role="menuitemradio" aria-checked="' + (dock === z) + '" ' +
+          'class="vp-pop-item' + (dock === z ? ' on' : '') + '" data-zone="' + z + '">' +
+          DOCK_GLYPH[z] + '<span>Dock ' + z + '</span></button>';
+      }).join('');
+      document.body.appendChild(menu);
+      var r = anchor.getBoundingClientRect();
+      menu.style.top = Math.round(r.bottom + 4) + 'px';
+      menu.style.left = Math.round(Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + 'px';
+      menu.addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-zone]'); if (!b) return;
+        dockTo(b.getAttribute('data-zone'), true);
+        if (!isOpen()) setOpen(true);
+        closeMenu();
+      });
+      openMenu = menu;
+      setTimeout(function () {
+        document.addEventListener('mousedown', _onDoc, true);
+        document.addEventListener('keydown', _onKey, true);
+      }, 0);
     }
 
     // ── drag-to-dock (ghost chip + edge drop zones), like PyCharm tool windows ──
@@ -168,6 +219,7 @@
       toggle: function () { setOpen(!isOpen()); },
       isOpen: isOpen,
       dockTo: dockTo,
+      openDockMenu: openDockMenu,
       getDock: function () { return dock; },
       didDrag: function () { return justDragged; },
       syncVars: syncVars,

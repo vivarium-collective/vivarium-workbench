@@ -143,3 +143,28 @@ def test_popout_body_renders_only_that_panel_full_window():
     block = css[css.index("body.viv-popout-chat #viv-ai-panel,"):]
     block = block[:block.index("}")]
     assert "position:fixed" in block and "inset:0" in block     # fills the popped window
+
+
+# ── Unified chat/code chrome ──
+
+def test_code_head_reuses_the_chat_panel_chrome():
+    html = TEMPLATE.read_text()
+    assert 'class="viv-code-head vp-head"' in html               # same header bar as the chat
+    head = html[html.index('class="viv-code-head vp-head"'):][:2000]
+    # three .vp-icon controls: pop-out, dock, close — same as the chat header
+    assert head.count('class="vp-icon"') >= 3
+    assert "ProcessCode.popout()" in head and "ProcessCode.dockMenu(this)" in head and "ProcessCode.toggle()" in head
+    # the pop-out icon is the SAME external-link glyph the chat uses
+    assert 'd="M14 3h7v7"' in head
+    # the code rail carries the chat's --c-* design tokens so .vp-* renders identically
+    assert ".viv-code-rail" in (STATIC / "chat.css").read_text().split("--c-bg")[0]
+
+
+def test_both_panels_share_one_dock_menu():
+    js = (STATIC / "panel-dock.js").read_text()
+    assert "function openDockMenu" in js
+    assert "vp-pop vp-dock-menu" in js and "vp-pop-item" in js    # chat's popover chrome
+    assert "C.DOCKS.map" in js                                    # left / right / bottom
+    code_js = (STATIC / "process-code.js").read_text()
+    assert "function dockMenu" in code_js and "dockMenu: dockMenu" in code_js
+    assert "openDockMenu: openDockMenu" in js                     # exposed on the controller

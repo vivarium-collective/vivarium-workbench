@@ -79,6 +79,7 @@
   function open() { if (dockCtl) dockCtl.open(); }
   function collapse() { if (dockCtl) dockCtl.close(); }
   function toggle() { if (dockCtl) dockCtl.toggle(); }
+  function dockMenu(anchor) { if (dockCtl) dockCtl.openDockMenu(anchor); }
   // Open the current source in a separate window, then close the in-page rail.
   function popout() {
     if (!window.VivPanelDock) return;
@@ -484,6 +485,7 @@
     toggle: toggle,
     collapse: collapse,
     popout: popout,
+    dockMenu: dockMenu,
     save: save,
     revert: revert,
     init: init,

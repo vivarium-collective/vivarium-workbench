@@ -5158,24 +5158,18 @@ body.vp-dragging .viv-code-head{ cursor:grabbing; }
   left:0; right:0; top:0; bottom:auto; width:auto; height:6px; cursor:row-resize;
 }
 
+/* Header chrome matches the chat panel's .vp-head (it carries both classes): a
+   centered flex bar with the title on the left and .vp-icon controls on the right. */
 .viv-code-head{
-  display:flex; align-items:flex-start; justify-content:space-between; gap:8px;
-  padding:12px 14px 8px; border-bottom:1px solid var(--border, #e2e6eb);
+  display:flex; align-items:center; gap:8px;
+  padding:8px 8px 8px 14px; border-bottom:1px solid var(--c-border, #e2e6eb);
 }
 .viv-code-title{ min-width:0; }
-.viv-code-title strong{ display:block; font-size:0.95rem; }
+.viv-code-title strong{ display:block; font-size:0.9rem; }
 .viv-code-addr{
-  display:block; font-size:0.72rem; color:var(--text-muted, #64748b);
-  word-break:break-all; margin-top:2px;
+  display:block; font-size:0.72rem; font-weight:400; color:var(--c-muted, #64748b);
+  word-break:break-all; margin-top:1px;
 }
-.viv-code-head-actions{ display:flex; align-items:center; gap:2px; flex:0 0 auto; }
-.viv-code-close, .viv-code-popout{
-  border:0; background:transparent; line-height:1; cursor:pointer;
-  color:var(--text-muted, #64748b); padding:0 4px;
-}
-.viv-code-close{ font-size:1.3rem; }
-.viv-code-popout{ font-size:1rem; }
-.viv-code-close:hover, .viv-code-popout:hover{ color:var(--text, #1f2937); }
 
 /* ── Pop-out window (?popout=<kind>): show only the popped panel, full-window ──
    panel-dock.js adds body.viv-popout + .viv-popout-<kind> and opens that panel.
@@ -5192,8 +5186,13 @@ body.viv-popout-code  #viv-code-rail{
 body.viv-popout [data-act="dock"],
 body.viv-popout [data-act="popout"],
 body.viv-popout .vp-resize,
-body.viv-popout .viv-code-resize-handle,
-body.viv-popout .viv-code-popout{ display:none !important; }
+body.viv-popout .viv-code-resize-handle{ display:none !important; }
+
+/* Shared dock dropdown (panel-dock.js) — reuses the chat's .vp-pop / .vp-pop-item
+   chrome so the chat and code dock menus are visually identical. */
+.vp-dock-menu{ padding:4px; min-width:150px; }
+.vp-dock-menu .vp-pop-item{ align-items:center; }
+.vp-dock-menu .vp-pop-item svg{ margin-top:0; }
 
 .viv-code-meta{ padding:8px 14px; display:flex; flex-direction:column; gap:4px; }
 .viv-code-badge{

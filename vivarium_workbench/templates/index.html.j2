@@ -2163,20 +2163,27 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <div class="viv-code-resize-handle" id="viv-code-resize-handle"
            role="separator" aria-orientation="vertical" aria-label="Resize code panel"
            title="Drag to resize"></div>
-      <!-- Header doubles as the drag handle: drag it to an edge to re-dock (panel-dock.js). -->
-      <div class="viv-code-head" title="Drag to dock left / right / bottom">
+      <!-- Header doubles as the drag handle; the icon controls mirror the chat panel's
+           header (same .vp-head / .vp-icon chrome + identical pop-out / dock / close icons)
+           so the two tool panels read as one system. -->
+      <div class="viv-code-head vp-head" title="Drag to dock left / right / bottom">
         <div class="viv-code-title">
           <strong id="viv-code-name">Code</strong>
           <code id="viv-code-addr" class="viv-code-addr"></code>
         </div>
-        <div class="viv-code-head-actions">
-          <button class="viv-code-popout" type="button" title="Open in a separate window"
-                  aria-label="Pop out code panel"
-                  onclick="window.ProcessCode&&ProcessCode.popout()">⧉</button>
-          <button class="viv-code-close" type="button" title="Close"
-                  aria-label="Close code panel"
-                  onclick="window.ProcessCode&&ProcessCode.toggle()">&times;</button>
-        </div>
+        <span class="vp-spacer"></span>
+        <button class="vp-icon" type="button" data-act="popout" title="Open in a separate window" aria-label="Pop out"
+                onclick="window.ProcessCode&&ProcessCode.popout()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+        </button>
+        <button class="vp-icon" type="button" data-act="dock" title="Move panel" aria-label="Move panel"
+                onclick="window.ProcessCode&&ProcessCode.dockMenu(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+        </button>
+        <button class="vp-icon" type="button" title="Close" aria-label="Close code panel"
+                onclick="window.ProcessCode&&ProcessCode.toggle()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
       </div>
       <!-- New-file bar: shown only while authoring a new artifact. -->
       <div class="viv-code-newbar" id="viv-code-newbar" hidden>
