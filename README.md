@@ -41,11 +41,17 @@ pip install vivarium-workbench         # or: uv pip install vivarium-workbench
 > (they emit a `DeprecationWarning`) and are removed in a future major release.
 > The published static bundle is still the "read-only dashboard".
 
-Not on PyPI yet during beta — install editable from a clone instead:
+Install from PyPI into your workspace's venv:
 
 ```bash
-git clone https://github.com/vivarium-collective/vivarium-workbench.git ~/code/vivarium-dashboard
-./.venv/bin/pip install -e ~/code/vivarium-dashboard   # into your workspace's venv
+./.venv/bin/pip install vivarium-workbench
+```
+
+Or install editable from a clone for development:
+
+```bash
+git clone https://github.com/vivarium-collective/vivarium-workbench.git ~/code/vivarium-workbench
+./.venv/bin/pip install -e ~/code/vivarium-workbench   # into your workspace's venv
 ```
 
 ### 2. Get a workspace
@@ -105,7 +111,9 @@ is *configuration* (env vars), not code — one image, three "planes."
 ### Local — authoring (default)
 
 What [Getting Started](#getting-started) sets up: serve a workspace, run studies
-on the local engine, commit every action to a git branch.
+on the local engine, and commit authoring actions to a git branch. (Note: under
+the current FastAPI server some actions — catalog install/uninstall and study
+runs — defer or skip the commit; see [docs/ARCHITECTURE-DEEP-DIVE.md](docs/ARCHITECTURE-DEEP-DIVE.md).)
 
 ```bash
 vivarium-workbench serve --workspace .

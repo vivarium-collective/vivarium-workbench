@@ -16,8 +16,10 @@ workspaces. You point it at a workspace directory (one containing `workspace.yam
 scaffolded from [viva-template](https://github.com/vivarium-collective/viva-template))
 and it serves an interactive dashboard over that workspace's registry, composites,
 studies, investigations, and reports. The dashboard reads and **writes** the
-workspace's files — every action commits to a git branch in the workspace, giving
-a full audit trail.
+workspace's files, committing authoring actions to a git branch in the workspace
+for a git audit trail. (Commit semantics are not yet uniform: catalog
+install/uninstall and study runs currently defer or skip the commit under the
+FastAPI seam — see [docs/ARCHITECTURE-DEEP-DIVE.md](docs/ARCHITECTURE-DEEP-DIVE.md).)
 
 Crucial distinction: this repo is the *server/tooling*; the *data* it operates on
 lives in a separate workspace directory passed via `--workspace`. The workspace is

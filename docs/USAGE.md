@@ -61,7 +61,8 @@ dependencies = [
 allow-direct-references = true     # permits the git source below
 ```
 
-Because the dashboard is **not on PyPI during beta**, `viva-template`'s
+The dashboard is on PyPI (`pip install vivarium-workbench`), but to track `main`
+ahead of tagged releases during active development `viva-template`'s
 `template-init.sh` appends a `[tool.uv.sources]` pin to a git URL at scaffold
 time (it always uses the git source — never a committed local path — so CI,
 Docker, and collaborators all resolve identically):
