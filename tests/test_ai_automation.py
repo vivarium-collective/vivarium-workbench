@@ -84,10 +84,30 @@ def test_registry_installs_are_now_reachable_but_pushing_and_rebinding_are_not(t
                  "/api/system-deps-install"):
         assert ("POST", path) in served, f"{path} should be reachable (approval-gated)"
     for path in ("/api/branch/push", "/api/work-push", "/api/work-create-pr",     # the one exception: pushing
+                 "/api/work-link-branch", "/api/remote-run-start", "/api/remote-run-build",   # ...also push
                  "/api/source/switch", "/api/workspaces/start", "/api/auth/github/start",
                  "/api/ai/credentials", "/api/chat/turn", "/api/events"):
         assert not any(p == path for _, p in served), f"{path} must stay unreachable"
     assert ("POST", "/api/dirty-commit-all") in served          # a LOCAL commit is fine
+
+
+def test_every_module_that_can_push_is_accounted_for():
+    """Tripwire, not proof: the exclusion list is per-route, so a NEW code path that runs
+    ``git push`` would silently become reachable. This fails when a lib module gains (or loses) a
+    push site, forcing whoever added it to decide whether its route must join EXCLUDED_PATHS.
+    Reviewed 2026-09: branch_push/work_push/work_create_pr/work_link_branch/remote-run-start/
+    remote-run-build are excluded; ``remote_push_and_sha`` callers listed here are covered by that."""
+    import re
+    pat = re.compile(r"""["']push["']\s*[,\]]|remote_push_and_sha|remote_commit_and_push|\bgit\b[^\n]*\bpush\b""")
+    skip = {"models.py", "generate_ts.py", "ai_chat.py", "ai_tools.py"}      # prose mentions only
+    found = {f.name for f in (REPO / "vivarium_workbench" / "lib").glob("*.py")
+             if f.name not in skip and pat.search(f.read_text())}
+    expected = {"git_status.py", "git_commit_views.py", "work_mutations.py", "work_pr_views.py",
+                "remote_run_views.py", "remote_run_jobs.py", "github_auth.py", "study_spec.py",
+                "work_state.py", "remote_link.py", "remote_run.py", "remote_pinned.py",
+                "remote_build_source.py", "source_build_views.py", "iset_close_views.py",
+                "env_worker_provision.py", "composite_test_run_views.py", "run_runner.py"}
+    assert found <= expected, f"new push-capable module(s): {sorted(found - expected)} — decide whether their routes must be excluded"
 
 
 # --- select: page/slice big responses instead of a blind cut ------------------------------
@@ -127,6 +147,24 @@ def test_oversized_json_returns_a_shape_and_select_pages_it(tmp_path):
     assert "select" in big["hint"] and len(json.dumps(big)) < 6000        # a summary, not a blind 20k cut
     assert page["status"] == 200 and isinstance(page["body"], list) and len(page["body"]) == 2
     assert "error" in bad and "keys:" in bad["error"]
+
+
+def test_select_does_not_hide_an_error_response(tmp_path):
+    app, ws = _make_app(tmp_path, fixture=False)
+    oid = _oid(app, "get", "/api/study/{slug}")
+
+    async def go():
+        async with _session(app, ws) as (d, ctx, call):
+            return await call(oid, path_params={"slug": "no-such-study"}, select="processes[0:25]")
+
+    r = asyncio.run(go())
+    assert r["status"] >= 400 and "select failed" not in json.dumps(r), r      # the real error survives
+
+
+def test_select_rejects_malformed_paths_instead_of_guessing():
+    for bad in ("a]]", "x[abc]", "[1:2:3]", "a..b", "a[0"):
+        with pytest.raises(ValueError):
+            ai_tools.select_path({"a": [1, 2, 3], "x": [1]}, bad)
 
 
 # --- wait_seconds: a bounded sleep so polling isn't a hot loop -----------------------------

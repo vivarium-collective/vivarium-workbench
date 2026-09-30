@@ -64,6 +64,9 @@ EXCLUDED_PATH_PREFIXES = (
 )
 EXCLUDED_PATHS = frozenset({
     "/api/branch/push", "/api/work-push", "/api/work-create-pr",
+    # These also `git push` (work-link-branch defaults push=true; the remote-run build/start
+    # pipelines push the branch to origin before building) — same rule: never.
+    "/api/work-link-branch", "/api/remote-run-start", "/api/remote-run-build",
     "/api/simulation-run-download", "/api/study-analysis-zip",
     "/api/composite-run/{run_id}/download",
 })
@@ -309,7 +312,16 @@ def select_path(obj: Any, path: str | None) -> Any:
     segments for lists (``a.b[1].c``, ``processes[0:25]``, ``rows.2``). ``ValueError`` names
     the keys/length that were available, so a model can correct itself."""
     cur = obj
-    for m in _TOKEN.finditer((path or "").strip()):
+    text, pos = (path or "").strip(), 0
+    while pos < len(text):
+        m = _TOKEN.match(text, pos)
+        if m is None:
+            raise ValueError(f"cannot parse select at position {pos}: {text[pos:pos + 12]!r}")
+        pos = m.end()
+        if pos < len(text) and text[pos] == ".":
+            pos += 1
+            if pos == len(text):
+                raise ValueError("select ends with '.'")
         a, colon, b, key = m.groups()
         if key is not None:
             if isinstance(cur, dict):
@@ -359,7 +371,7 @@ def _shape(resp: httpx.Response, select: str | None = None) -> dict[str, Any]:
         except ValueError:
             data = None
         else:
-            if select:
+            if select and resp.is_success:      # an error body is the message the model needs — never hide it
                 try:
                     data = select_path(data, select)
                 except ValueError as e:
