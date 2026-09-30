@@ -520,3 +520,65 @@ class TestCompositeConfigPersistRoute:
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/composite-config-persist" in paths
         assert "post" in paths["/api/composite-config-persist"]
+
+
+# ---------------------------------------------------------------------------
+# Investigation-scoped uploads honour the workspace `layout:` map
+# (regression: dest was hardcoded to top-level `investigations/`)
+# ---------------------------------------------------------------------------
+
+_WS_YAML_LAYOUT = """\
+schema_version: 3
+name: testws
+created: "2026-01-01"
+plugin_version: "0.14.0"
+package_path: pbg_testws
+layout:
+  investigations: workspace/investigations
+  studies: workspace/studies
+datasets: []
+expert_docs: []
+imports: {}
+"""
+
+
+def _make_ws_layout(tmp_path: Path) -> Path:
+    w = tmp_path / "wsL"
+    w.mkdir()
+    (w / "workspace.yaml").write_text(_WS_YAML_LAYOUT, encoding="utf-8")
+    schemas = w / ".pbg" / "schemas"
+    schemas.mkdir(parents=True)
+    (schemas / "workspace.schema.json").write_text(
+        _SCHEMA_SRC.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    inv = w / "workspace" / "investigations" / _INV_SLUG   # relocated per layout:
+    (inv / "studies").mkdir(parents=True)
+    (inv / "investigation.yaml").write_text(
+        f"name: {_INV_SLUG}\ntitle: {_INV_SLUG}\nstudies: []\n", encoding="utf-8"
+    )
+    return w
+
+
+class TestInvestigationUploadsHonourLayout:
+    def test_dataset_lands_under_layout_dir_not_top_level(self, tmp_path: Path) -> None:
+        w = _make_ws_layout(tmp_path)
+        resp, code = um.register_dataset(w, {
+            "name": "counts", "file_b64": _b64(b"a,b\n1,2\n"), "filename": "c.csv",
+            "investigation": _INV_SLUG,
+        })
+        assert code == 200, resp
+        assert (w / "workspace" / "investigations" / _INV_SLUG / "inputs"
+                / "datasets" / "counts" / "c.csv").is_file()
+        # the bug wrote a SECOND, top-level investigations/ tree:
+        assert not (w / "investigations").exists()
+
+    def test_expert_doc_lands_under_layout_dir_not_top_level(self, tmp_path: Path) -> None:
+        w = _make_ws_layout(tmp_path)
+        resp, code = um.register_expert_doc(w, {
+            "name": "paper", "file_b64": _b64(b"%PDF-1.4"), "filename": "p.pdf",
+            "investigation": _INV_SLUG, "claims": "",
+        })
+        assert code == 200, resp
+        assert (w / "workspace" / "investigations" / _INV_SLUG / "inputs"
+                / "expert" / "paper.pdf").is_file()
+        assert not (w / "investigations").exists()
