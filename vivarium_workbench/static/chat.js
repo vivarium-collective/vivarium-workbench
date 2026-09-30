@@ -1123,7 +1123,7 @@
     }, true);
 
     el.toggle.addEventListener('click', function (ev) { ev.preventDefault(); if (justDragged) return; setOpen(panel.hidden); });
-    el.toggle.title = 'VivaChat — click to toggle, drag to dock left, right or bottom';
+    el.toggle.title = 'Chat — click to toggle, drag to dock left, right or bottom';
     document.getElementById('viv-ai-back').addEventListener('click', closeSettings);
     window.addEventListener('viv:ai-changed', function () { refreshStatus(); });
     initResize();
