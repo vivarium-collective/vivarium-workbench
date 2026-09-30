@@ -3545,3 +3545,11 @@ class AiCapabilitiesPayload(BaseModel):
     reads: int
     writes: int
     excluded: list[str]
+
+
+class AiModelsPayload(BaseModel):
+    """``GET /api/ai/models`` — models discovered from an endpoint (Ollama ``/api/tags``,
+    OpenCode Go / OpenAI-compatible ``/models``); ``source`` is the URL asked."""
+
+    models: list[str]
+    source: str

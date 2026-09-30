@@ -2071,11 +2071,13 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <div class="vp-form">
       <label class="vp-field"><span>Provider</span>
         <select id="viv-ai-provider" class="vp-input">
-          <option value="anthropic">Anthropic</option>
           <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
           <option value="google">Google</option>
-          <option value="openai-compatible">OpenAI-compatible (Ollama, vLLM, OpenRouter…)</option>
+          <option value="ollama">Ollama (local models)</option>
+          <option value="opencode">OpenCode Go</option>
           <option value="bedrock">AWS Bedrock</option>
+          <option value="openai-compatible">OpenAI-compatible (vLLM, OpenRouter…)</option>
         </select>
       </label>
       <div class="vp-hint" id="viv-ai-status">checking…</div>
@@ -2093,12 +2095,15 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <label class="vp-field"><span>Model</span>
         <input id="viv-ai-model" class="vp-input" type="text" list="viv-ai-models" placeholder="model name"
                autocomplete="off" spellcheck="false">
-        <datalist id="viv-ai-models">
-          <option value="claude-sonnet-5-5"></option>
-          <option value="claude-opus-5-5"></option>
-          <option value="claude-haiku-4-5-20251001"></option>
-        </datalist>
+        <datalist id="viv-ai-models"></datalist>
       </label>
+      <div class="vp-field" id="viv-ai-models-row"><span>Models</span>
+        <div class="vp-chips" id="viv-ai-chips"></div>
+        <div class="vp-actions">
+          <button id="viv-ai-addmodel" class="vp-btn" type="button" title="Add the model above to this provider's list">Add model</button>
+          <button id="viv-ai-discover" class="vp-btn" type="button" hidden title="List the models this endpoint serves">Discover models</button>
+        </div>
+      </div>
       <div class="vp-actions">
         <button id="viv-ai-save" class="vp-btn vp-primary" type="button">Save &amp; test</button>
         <button id="viv-ai-use" class="vp-btn" type="button" hidden>Use this model</button>

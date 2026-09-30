@@ -283,4 +283,52 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(C.composePrompt('plain', []), 'plain');
 }
 
+// ── providers + model dropdown helpers (marimo groups models by provider with icon + count) ──
+{
+  assert.deepStrictEqual(C.PROVIDERS.map(p => p.id),
+    ['openai', 'anthropic', 'google', 'ollama', 'opencode', 'bedrock', 'openai-compatible']);
+  assert.strictEqual(C.providerMeta('opencode').label, 'OpenCode Go');
+  assert.strictEqual(C.providerMeta('ollama').label, 'Ollama');
+  assert.strictEqual(C.providerMeta('mystery').label, 'mystery', 'unknown providers degrade gracefully');
+  assert.deepStrictEqual(C.mergeModels(['b', 'a'], ['a', 'c'], [' ', null, 'b', 'd']), ['b', 'a', 'c', 'd'],
+    'order kept, de-duplicated, junk dropped');
+  assert.strictEqual(C.mergeModels(new Array(300).fill(0).map((_, i) => 'm' + i)).length, 100, 'bounded');
+
+  const status = { providers: [{ id: 'ollama', configured: true }, { id: 'anthropic', configured: false },
+                               { id: 'opencode', configured: true }], selected: { provider: 'ollama', model: 'llama3.1:8b' } };
+  const known = { ollama: ['qwen2.5-coder:7b'], opencode: ['minimax-m3', 'kimi-k2'], anthropic: ['claude-opus-5-5'] };
+  const groups = C.groupModels(status, known, status.selected);
+  assert.deepStrictEqual(groups.map(g => g.id), ['ollama', 'opencode'], 'only configured providers, in marimo order');
+  assert.deepStrictEqual(groups[0].models.map(m => m.id), ['llama3.1:8b', 'qwen2.5-coder:7b'], 'the selected model is always listed');
+  assert.deepStrictEqual(groups[0].models.map(m => m.on), [true, false]);
+  assert.strictEqual(groups[0].count, 2); assert.strictEqual(groups[1].count, 2);
+  assert(groups.every(g => g.mark && g.color));
+  assert.deepStrictEqual(C.groupModels({ providers: [] }, {}, null), []);
+  const noisy = { providers: [{ id: 'bedrock', configured: true }, { id: 'ollama', configured: true }] };
+  assert.deepStrictEqual(C.groupModels(noisy, { ollama: ['m'] }, null).map(g => g.id), ['ollama'], 'empty groups are hidden');
+
+  // keyboard navigation wraps and supports Home/End
+  assert.strictEqual(C.nextIndex(0, 3, 'ArrowDown'), 1);
+  assert.strictEqual(C.nextIndex(2, 3, 'ArrowDown'), 0);
+  assert.strictEqual(C.nextIndex(0, 3, 'ArrowUp'), 2);
+  assert.strictEqual(C.nextIndex(1, 3, 'Home'), 0);
+  assert.strictEqual(C.nextIndex(1, 3, 'End'), 2);
+  assert.strictEqual(C.nextIndex(-1, 3, 'ArrowDown'), 0, 'nothing highlighted yet');
+  assert.strictEqual(C.nextIndex(0, 0, 'ArrowDown'), -1, 'empty list');
+}
+
+// ── known-models storage: newest first, per provider, removable, survives junk ──
+{
+  const mem = {}; globalThis.localStorage = { getItem: k => (k in mem ? mem[k] : null), setItem: (k, v) => { mem[k] = String(v); } };
+  assert.deepStrictEqual(C.loadKnown(), {});
+  assert.deepStrictEqual(C.addKnown('ollama', ['a', 'b']), ['a', 'b']);
+  assert.deepStrictEqual(C.addKnown('ollama', ['c', 'a']), ['c', 'a', 'b'], 'newest first, de-duplicated');
+  assert.deepStrictEqual(C.addKnown('opencode', ['x']), ['x']);
+  assert.deepStrictEqual(C.removeKnown('ollama', 'a'), ['c', 'b']);
+  assert.deepStrictEqual(Object.keys(C.loadKnown()).sort(), ['ollama', 'opencode']);
+  mem['viv.ai.models'] = '[1,2]'; assert.deepStrictEqual(C.loadKnown(), {}, 'an array is not a valid store');
+  mem['viv.ai.models'] = 'not json'; assert.deepStrictEqual(C.loadKnown(), {});
+  delete globalThis.localStorage;
+}
+
 console.log('test_chat_core: all passed');

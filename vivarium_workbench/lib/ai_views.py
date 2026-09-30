@@ -26,8 +26,14 @@ async def ai_save_credentials(body: AiCredentialsRequest, mode: StorageMode,
     1-token request, store it, and select the provider/model. The key is only
     stored after the provider accepted it."""
     ai_auth.require_chat()
+    raw_key = body.api_key
+    if body.provider == "opencode" and not (raw_key or "").strip():
+        # fixed base URL => re-saving without retyping the key can't send it anywhere new
+        prior = ai_auth.get_credential("opencode", mode=mode, session=session)
+        if prior and prior.source in ("keyring", "memory"):
+            raw_key = prior.api_key
     api_key, base_url = ai_auth.validate_request(
-        body.provider, body.api_key, body.base_url, mode=mode)
+        body.provider, raw_key, body.base_url, mode=mode)
     # Re-saving an openai-compatible endpoint without retyping the key keeps the
     # saved key (the form never shows it) instead of silently dropping it.
     # ONLY for the same endpoint: sending the saved key to a different base_url
@@ -73,3 +79,9 @@ def ai_capabilities(app: Any) -> dict[str, Any]:
     from vivarium_workbench.lib import ai_tools
     ai_auth.require_chat()
     return ai_tools.capabilities(app)
+
+
+async def ai_models(provider: str, base_url: str | None, mode: StorageMode,
+                    session: str | None) -> dict[str, Any]:
+    """``GET /api/ai/models`` — models an endpoint serves (feeds the model dropdown)."""
+    return await ai_auth.discover_models(provider, base_url=base_url, mode=mode, session=session)

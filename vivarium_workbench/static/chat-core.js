@@ -465,6 +465,76 @@
     return out;
   }
 
+
+  // ── Providers (marimo's AI Providers order) + the model dropdown ─────────────────────
+  var PROVIDERS = [
+    { id: 'openai', label: 'OpenAI', color: '#10a37f', mark: 'O' },
+    { id: 'anthropic', label: 'Anthropic', color: '#d97757', mark: 'A' },
+    { id: 'google', label: 'Google', color: '#4285f4', mark: 'G' },
+    { id: 'ollama', label: 'Ollama', color: '#4b5563', mark: 'Ol' },
+    { id: 'opencode', label: 'OpenCode Go', color: '#2563eb', mark: 'OC' },
+    { id: 'bedrock', label: 'AWS Bedrock', color: '#f59e0b', mark: 'AWS' },
+    { id: 'openai-compatible', label: 'OpenAI-compatible', color: '#6366f1', mark: '⇄' },
+  ];
+  function providerMeta(id) {
+    var m = PROVIDERS.filter(function (p) { return p.id === id; })[0];
+    return m || { id: id, label: String(id), color: '#6b7280', mark: String(id).slice(0, 2).toUpperCase() };
+  }
+  // Merge model-id lists: order kept, de-duplicated, blanks/non-strings dropped, bounded.
+  function mergeModels() {
+    var seen = {}, out = [];
+    for (var i = 0; i < arguments.length; i++) {
+      (arguments[i] || []).forEach(function (m) {
+        if (typeof m !== 'string') return;
+        m = m.trim();
+        if (m && !seen[m]) { seen[m] = true; out.push(m); }
+      });
+    }
+    return out.slice(0, 100);
+  }
+  // Dropdown groups: one per CONFIGURED provider (marimo order), each with its known models
+  // (the selected model is always present) and a count for the "n models" caption.
+  function groupModels(status, known, selected) {
+    var configured = {};
+    ((status && status.providers) || []).forEach(function (p) { if (p.configured) configured[p.id] = true; });
+    return PROVIDERS.filter(function (p) { return configured[p.id]; }).map(function (p) {
+      var ids = (known && known[p.id]) || [];
+      if (selected && selected.provider === p.id) ids = mergeModels([selected.model], ids);
+      else ids = mergeModels(ids);
+      var models = ids.map(function (id) { return { id: id, on: !!(selected && selected.provider === p.id && selected.model === id) }; });
+      return { id: p.id, label: p.label, color: p.color, mark: p.mark, models: models, count: models.length };
+    }).filter(function (g) { return g.count > 0; });     // an empty group is just noise (e.g. ambient AWS creds)
+  }
+  // Keyboard index for a listbox (wraps; Home/End; -1 = nothing highlighted yet).
+  function nextIndex(i, n, key) {
+    if (n <= 0) return -1;
+    if (key === 'Home') return 0;
+    if (key === 'End') return n - 1;
+    if (key === 'ArrowDown') return i < 0 ? 0 : (i + 1) % n;
+    if (key === 'ArrowUp') return i < 0 ? n - 1 : (i - 1 + n) % n;
+    return i;
+  }
+
+  // Known models per provider (marimo's "Add model" list): browser-local, non-secret.
+  var KNOWN_KEY = 'viv.ai.models';
+  function loadKnown() {
+    try { var k = JSON.parse(localStorage.getItem(KNOWN_KEY)); return k && typeof k === 'object' && !Array.isArray(k) ? k : {}; }
+    catch (e) { return {}; }
+  }
+  function saveKnown(k) { try { localStorage.setItem(KNOWN_KEY, JSON.stringify(k)); } catch (e) { /* private mode */ } }
+  function addKnown(provider, ids) {
+    var k = loadKnown();
+    k[provider] = mergeModels(ids, k[provider]);          // newest first
+    saveKnown(k);
+    return k[provider];
+  }
+  function removeKnown(provider, id) {
+    var k = loadKnown();
+    k[provider] = (k[provider] || []).filter(function (m) { return m !== id; });
+    saveKnown(k);
+    return k[provider];
+  }
+
   var api = {
     esc: esc, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
     startResume: startResume, applyFrame: applyFrame, decide: decide,
@@ -476,6 +546,8 @@
     newStore: newStore, storeUpsert: storeUpsert, storeNew: storeNew, storeSwitch: storeSwitch,
     storeRestore: storeRestore, storeList: storeList, storePrune: storePrune, titleOf: titleOf,
     mentionQuery: mentionQuery, insertMention: insertMention, contextItems: contextItems,
+    PROVIDERS: PROVIDERS, providerMeta: providerMeta, mergeModels: mergeModels, groupModels: groupModels,
+    nextIndex: nextIndex, loadKnown: loadKnown, addKnown: addKnown, removeKnown: removeKnown,
     filterItems: filterItems, ATTACH: ATTACH, attachError: attachError, composePrompt: composePrompt,
   };
   global.VivChatCore = api;

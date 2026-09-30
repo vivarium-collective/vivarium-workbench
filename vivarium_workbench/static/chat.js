@@ -91,6 +91,7 @@
     error: S('<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>'),
     denied: S('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
     down: S('<path d="M12 5v14M6 13l6 6 6-6"/>'),
+    check: S('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   };
   const statusIcon = (s) => s === 'done' ? ICON.done : s === 'error' ? ICON.error : s === 'denied' ? ICON.denied : ICON.spin;
   const e = C.esc;
@@ -247,20 +248,30 @@
     document.removeEventListener('mousedown', pop.off, true);
     pop = null;
   }
-  // Anchored inside the panel (position:relative). opts.up === false opens below the anchor.
+  // Popovers live on <body> with position:fixed, so a short (bottom-docked) panel or an
+  // overflow:hidden ancestor can never clip them. opts.up === false forces below; opts.align
+  // 'right' aligns the popover's right edge to the anchor's.
+  function place(node, anchor, opts) {
+    const ar = anchor.getBoundingClientRect();
+    const width = Math.min(opts.width || 260, innerWidth - 16);
+    node.style.width = width + 'px';
+    let left = opts.align === 'right' ? ar.right - width : ar.left;
+    left = Math.max(8, Math.min(left, innerWidth - width - 8));
+    node.style.left = left + 'px';
+    node.style.maxHeight = '';
+    const h = Math.min(node.offsetHeight, opts.maxHeight || 340);
+    const roomBelow = innerHeight - ar.bottom - 8, roomAbove = ar.top - 8;
+    const below = opts.up === false || (opts.up !== true && roomBelow >= h) || roomBelow >= roomAbove && roomAbove < h;
+    node.style.maxHeight = Math.max(120, Math.min(opts.maxHeight || 340, below ? roomBelow : roomAbove)) + 'px';
+    if (below) { node.style.top = (ar.bottom + 4) + 'px'; node.style.bottom = 'auto'; }
+    else { node.style.bottom = (innerHeight - ar.top + 4) + 'px'; node.style.top = 'auto'; }
+  }
   function openPop(anchor, node, opts) {
     opts = opts || {};
     closePop();
     node.classList.add('vp-pop');
-    panel.appendChild(node);
-    const pr = panel.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
-    node.style.width = Math.min(opts.width || 260, pr.width - 16) + 'px';
-    const left = Math.max(8, Math.min(ar.left - pr.left, pr.width - node.offsetWidth - 8));
-    node.style.left = left + 'px';
-    // open above the anchor unless there is no room for it (then flip below)
-    const below = opts.up === false || (ar.top - pr.top) < node.offsetHeight + 12;
-    if (below) node.style.top = (ar.bottom - pr.top + 4) + 'px';
-    else node.style.bottom = (pr.bottom - ar.top + 4) + 'px';
+    document.body.appendChild(node);
+    place(node, anchor, opts);
     const off = function (ev) { if (!node.contains(ev.target) && !anchor.contains(ev.target)) closePop(); };
     document.addEventListener('mousedown', off, true);
     pop = { node: node, off: off, anchor: anchor };
@@ -268,51 +279,93 @@
   }
   const div = (html) => { const d = document.createElement('div'); d.innerHTML = html; return d; };
 
+  // A real dropdown (like marimo's Radix Select): the trigger is a bordered select-like button,
+  // the menu is a listbox flush under it. spec: {groups:[{id,label,color,mark,count,models:[{id,on}]}]
+  // | items:[{id,label,desc,icon,on,disabled}], onPick(id, groupId), footer:{label,onClick}, empty}.
+  function dropdown(trigger, spec) {
+    closePop();
+    const menu = document.createElement('div');
+    menu.className = 'vp-dd'; menu.setAttribute('role', 'listbox');
+    let html = '', n = 0;
+    (spec.groups || []).forEach(function (g) {
+      html += '<div class="vp-dd-group"><span class="vp-badge" style="background:' + e(g.color) + '">' + e(g.mark) + '</span>' +
+        '<span class="vp-dd-glabel">' + e(g.label) + '</span><span class="vp-dd-count">' + g.count + (g.count === 1 ? ' model' : ' models') + '</span></div>';
+      g.models.forEach(function (m) {
+        html += '<div role="option" class="vp-dd-item' + (m.on ? ' on' : '') + '" data-i="' + (n++) + '" data-group="' + e(g.id) + '" data-id="' + e(m.id) + '" aria-selected="' + !!m.on + '">' +
+          '<span class="vp-dd-check">' + (m.on ? ICON.check : '') + '</span><span class="vp-dd-label">' + e(m.id) + '</span></div>';
+      });
+    });
+    (spec.items || []).forEach(function (it) {
+      html += '<div role="option" class="vp-dd-item' + (it.on ? ' on' : '') + (it.disabled ? ' disabled' : '') + '" data-i="' + (n++) + '" data-id="' + e(it.id) + '" aria-selected="' + !!it.on +
+        '" aria-disabled="' + !!it.disabled + '"><span class="vp-dd-check">' + (it.on ? ICON.check : '') + '</span>' +
+        (it.icon ? '<span class="vp-dd-icon">' + it.icon + '</span>' : '') +
+        '<span class="vp-dd-label">' + e(it.label) + (it.desc ? '<small>' + e(it.desc) + '</small>' : '') + '</span></div>';
+    });
+    if (!n) html += '<div class="vp-dd-empty">' + e(spec.empty || 'Nothing to choose from yet') + '</div>';
+    if (spec.footer) html += '<div class="vp-dd-foot" role="button" tabindex="0" data-footer="1">' + e(spec.footer.label) + '</div>';
+    menu.innerHTML = html;
+    openPop(trigger, menu, { width: Math.max(trigger.getBoundingClientRect().width, spec.width || 230), up: spec.up, maxHeight: 340 });
+    menu.classList.add('vp-dd-menu');
+    const rows = function () { return Array.prototype.slice.call(menu.querySelectorAll('.vp-dd-item:not(.disabled)')); };
+    let hi = Math.max(0, rows().findIndex(function (r) { return r.classList.contains('on'); }));
+    const mark = function () {
+      rows().forEach(function (r, i) { r.classList.toggle('hi', i === hi); });
+      const cur = rows()[hi]; if (cur) cur.scrollIntoView({ block: 'nearest' });
+    };
+    mark();
+    const pick = function (r) { if (!r || r.classList.contains('disabled')) return; closePop(); spec.onPick(r.getAttribute('data-id'), r.getAttribute('data-group')); };
+    menu.addEventListener('mousemove', function (ev) {
+      const r = ev.target.closest('.vp-dd-item:not(.disabled)');
+      if (r) { hi = rows().indexOf(r); mark(); }
+    });
+    menu.addEventListener('click', function (ev) {
+      if (ev.target.closest('[data-footer]')) { closePop(); spec.footer.onClick(); return; }
+      pick(ev.target.closest('.vp-dd-item'));
+    });
+    const onKey = function (ev) {
+      if (!pop || pop.node !== menu) { document.removeEventListener('keydown', onKey, true); return; }
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closePop(); trigger.focus(); }
+      else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(ev.key) >= 0) { ev.preventDefault(); hi = C.nextIndex(hi, rows().length, ev.key); mark(); }
+      else if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(rows()[hi]); }
+      else if (ev.key === 'Tab') closePop();
+    };
+    document.addEventListener('keydown', onKey, true);
+    pop.dd = true;
+    return menu;
+  }
+
   function openModeMenu(anchor) {
-    const n = div(C.MODES.map(function (m) {
-      return '<button class="vp-pop-item' + (m.id === prefs.mode ? ' on' : '') + '" data-mode="' + m.id + '"' + (m.disabled ? ' disabled' : '') + '>' +
-        ICON[m.icon] + '<span><strong>' + e(m.label) + '</strong><span class="vp-sub">' + e(m.desc) + '</span></span></button>';
-    }).join(''));
-    openPop(anchor, n, { width: 300 });
-    n.addEventListener('click', function (ev) {
-      const b = ev.target.closest('[data-mode]');
-      if (!b || b.disabled) return;
-      prefs.mode = b.getAttribute('data-mode'); lsSet('viv.ai.mode', prefs.mode);
-      closePop(); renderChrome();
+    dropdown(anchor, {
+      items: C.MODES.map(function (m) { return { id: m.id, label: m.label, desc: m.desc, icon: ICON[m.icon], on: m.id === prefs.mode, disabled: !!m.disabled }; }),
+      width: 300,
+      onPick: function (id) { prefs.mode = id; lsSet('viv.ai.mode', id); renderChrome(); },
     });
   }
 
-  function recentModels() {
-    let r = {};
-    try { r = JSON.parse(lsGet('viv.ai.models', '{}')) || {}; } catch (x) { r = {}; }
-    return r;
-  }
-  function rememberModel(provider, model) {
-    const r = recentModels();
-    r[provider] = [model].concat((r[provider] || []).filter(function (m) { return m !== model; })).slice(0, 6);
-    lsSet('viv.ai.models', JSON.stringify(r));
+  // Provider endpoints that list their models (Ollama tags, OpenCode Go /models) are asked once
+  // per page load when the menu opens, so the dropdown fills itself without a trip to Settings.
+  const asked = {};
+  function autoDiscover(repaint) {
+    ((status && status.providers) || []).forEach(function (p) {
+      if (!p.configured || asked[p.id] || ['ollama', 'opencode'].indexOf(p.id) < 0) return;
+      asked[p.id] = true;
+      fetch(api('/api/ai/models?provider=' + encodeURIComponent(p.id)))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) { if (j && j.models && j.models.length) { C.addKnown(p.id, j.models); repaint(); } }, function () {});
+    });
   }
   function openModelMenu(anchor) {
-    const r = recentModels(), cur = status && status.selected;
-    const configured = ((status && status.providers) || []).filter(function (p) { return p.configured; });
-    let rows = '';
-    configured.forEach(function (p) {
-      const models = (r[p.id] || []).slice();
-      if (cur && cur.provider === p.id && models.indexOf(cur.model) < 0) models.unshift(cur.model);
-      models.forEach(function (m) {
-        const on = cur && cur.provider === p.id && cur.model === m;
-        rows += '<button class="vp-pop-item' + (on ? ' on' : '') + '" data-provider="' + e(p.id) + '" data-model="' + e(m) + '">' +
-          ICON.bot + '<span><strong>' + e(m) + '</strong><span class="vp-sub">' + e(p.id) + '</span></span></button>';
+    const paint = function () {
+      dropdown(anchor, {
+        groups: C.groupModels(status, C.loadKnown(), status && status.selected),
+        empty: 'No models yet — open AI Settings to add or discover some',
+        width: 280,
+        footer: { label: 'Add or edit models…', onClick: openSettings },
+        onPick: function (id, group) { selectModel(group, id); },
       });
-    });
-    const n = div('<div class="vp-pop-h">Model</div>' + (rows || '<div class="vp-pop-empty">No models yet</div>') +
-      '<div class="vp-pop-foot"><button class="vp-pop-item" data-open-settings="1"><span>Add or edit models…</span></button></div>');
-    openPop(anchor, n, { width: 280 });
-    n.addEventListener('click', function (ev) {
-      const b = ev.target.closest('[data-model]');
-      if (b) { closePop(); selectModel(b.getAttribute('data-provider'), b.getAttribute('data-model')); return; }
-      if (ev.target.closest('[data-open-settings]')) { closePop(); openSettings(); }
-    });
+    };
+    paint();
+    autoDiscover(function () { if (pop && pop.anchor === anchor && pop.dd) paint(); });
   }
   function selectModel(provider, model) {
     fetch(api('/api/ai/select'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -394,8 +447,7 @@
   // "Previous chats": search, newest first, grouped by date with dividers, time-ago per row.
   function openHistory(anchor) {
     const n = div('<input class="vp-pop-input" id="vp-h-q" placeholder="Search chat history..."><div class="vp-pop-scroll" id="vp-h-list"></div>');
-    openPop(anchor, n, { width: 480, up: false });
-    n.style.right = '8px'; n.style.left = 'auto';
+    openPop(anchor, n, { width: 480, up: false, align: 'right' });
     const q = n.querySelector('#vp-h-q');
     const paint = function () {
       C.storeUpsert(store, state);
@@ -614,7 +666,7 @@
       })
       .then(function (s) { status = s; }, function () { status = { available: false, providers: [], error: 'Could not reach the server.' }; })
       .then(function () {
-        if (status.selected) rememberModel(status.selected.provider, status.selected.model);
+        if (status.selected) C.addKnown(status.selected.provider, [status.selected.model]);
         renderAll();
         drainQueue();
       });

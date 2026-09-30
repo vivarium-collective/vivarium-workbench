@@ -309,6 +309,7 @@ from vivarium_workbench.lib.models import (
     # C-state-3e: GitHub device-flow auth (pass-through payload)
     AuthPayload,
     AiCapabilitiesPayload,
+    AiModelsPayload,
     AiCredentialsRequest,
     AiOkPayload,
     AiSelectRequest,
@@ -7442,6 +7443,16 @@ def create_app() -> FastAPI:
     def ai_capabilities(request: Request) -> dict:
         _ai_scope(request)
         return _ai_views.ai_capabilities(request.app)
+
+    @app.get(
+        "/api/ai/models",
+        response_model=AiModelsPayload,
+        tags=["AI"],
+        summary="Discover the models an endpoint serves (Ollama tags, OpenCode Go / OpenAI-compatible /models)",
+    )
+    async def ai_models(request: Request, provider: str, base_url: str | None = None) -> dict:
+        mode, session = _ai_scope(request)
+        return await _ai_views.ai_models(provider, base_url, mode, session)
 
     @app.post(
         "/api/ai/credentials",

@@ -46,8 +46,16 @@ log = logging.getLogger(__name__)
 KEYRING_SERVICE = "vivarium-workbench-llm"
 INSTALL_HINT = "chat extra not installed: pip install 'vivarium-workbench[chat]'"
 
-PROVIDERS = ("anthropic", "openai", "google", "openai-compatible", "bedrock")
-Provider = Literal["anthropic", "openai", "google", "openai-compatible", "bedrock"]
+# Order follows marimo's AI Providers tab (OpenAI, Anthropic, Google, Ollama, OpenCode Go,
+# Bedrock, then the generic OpenAI-compatible entry).
+PROVIDERS = ("openai", "anthropic", "google", "ollama", "opencode", "bedrock", "openai-compatible")
+Provider = Literal["openai", "anthropic", "google", "ollama", "opencode", "bedrock", "openai-compatible"]
+
+# Ollama: marimo's placeholder base URL; no API key.
+OLLAMA_DEFAULT = "http://localhost:11434/v1"
+# OpenCode Go: an OpenAI-compatible gateway (marimo lists it as "OpenCode Go"); key required,
+# base URL fixed. Its /models list is public, which powers the model dropdown.
+OPENCODE_BASE = "https://opencode.ai/zen/go/v1"
 StorageMode = Literal["keyring", "memory"]
 Source = Literal["keyring", "memory", "environment", "aws"]
 
@@ -262,6 +270,16 @@ def validate_request(provider: str, api_key: str | None, base_url: str | None,
         if not base_url:
             raise APIError(422, "openai-compatible requires base_url")
         return api_key, _check_base_url(base_url, mode)
+    if provider == "ollama":
+        # Local model server: no key, default base URL (loopback http is fine on a local
+        # bind; a hosted server may only reach a public https endpoint).
+        return None, _check_base_url(base_url or OLLAMA_DEFAULT, mode)
+    if provider == "opencode":
+        if base_url:
+            raise APIError(422, "opencode uses a fixed base URL; base_url is not accepted")
+        if not api_key:
+            raise APIError(422, "opencode requires api_key")
+        return api_key, None
     if base_url:
         raise APIError(422, f"base_url is only accepted for openai-compatible, not {provider}")
     if not api_key:
@@ -369,6 +387,14 @@ def build_model(provider: str, model: str, cred: Credential):
         # SDK refuses an empty one — a placeholder is the documented convention.
         key = cred.api_key or ("unused" if provider == "openai-compatible" else None)
         return OpenAIChatModel(model, provider=OpenAIProvider(base_url=cred.base_url, api_key=key))
+    if provider == "ollama":
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.ollama import OllamaProvider
+        return OpenAIChatModel(model, provider=OllamaProvider(base_url=cred.base_url or OLLAMA_DEFAULT))
+    if provider == "opencode":
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+        return OpenAIChatModel(model, provider=OpenAIProvider(base_url=OPENCODE_BASE, api_key=cred.api_key))
     if provider == "google":
         from pydantic_ai.models.google import GoogleModel
         from pydantic_ai.providers.google import GoogleProvider
@@ -404,4 +430,64 @@ async def check_key(provider: str, model: str, cred: Credential) -> None:
     except APIError:
         raise
     except Exception as e:  # noqa: BLE001 — network/SDK errors: surface, masked
-        raise APIError(502, f"{provider} check failed: {mask_key(str(e), secrets)}") from None
+        msg = mask_key(str(e), secrets)
+        if provider in ("ollama", "openai-compatible") and "onnect" in msg:
+            where = cred.base_url or "the configured endpoint"
+            hint = "is Ollama running? start it with `ollama serve`" if provider == "ollama" else "is the server running?"
+            msg = f"could not connect to {where} — {hint} ({msg})"
+        raise APIError(502, f"{provider} check failed: {msg}") from None
+
+
+# ---------------------------------------------------------------------------
+# Model discovery (populates the model dropdown)
+# ---------------------------------------------------------------------------
+
+_DISCOVERABLE = ("ollama", "opencode", "openai-compatible")
+MAX_DISCOVERED = 500
+
+
+async def discover_models(provider: str, *, base_url: str | None, mode: StorageMode,
+                          session: str | None) -> dict[str, Any]:
+    """List the models an endpoint serves: Ollama ``/api/tags``, OpenCode Go and other
+    OpenAI-compatible ``/models``. Uses the same SSRF rules as a save (loopback http only on
+    a local bind, public https on a hosted one). A saved key is sent ONLY to the endpoint it
+    was saved for — never to a different ``base_url`` the caller supplies."""
+    require_chat()
+    import httpx
+
+    if provider not in PROVIDERS:
+        raise APIError(422, f"unknown provider '{provider}'", providers=list(PROVIDERS))
+    if provider not in _DISCOVERABLE:
+        raise APIError(404, f"model discovery is not available for {provider}")
+    saved = get_credential(provider, mode=mode, session=session)
+    headers: dict[str, str] = {}
+    if provider == "opencode":
+        url = OPENCODE_BASE + "/models"
+    elif provider == "ollama":
+        base = _check_base_url(base_url or (saved.base_url if saved else None) or OLLAMA_DEFAULT, mode)
+        root = base[:-3] if base.endswith("/v1") else base
+        url = root.rstrip("/") + "/api/tags"
+    else:  # openai-compatible
+        raw = base_url or (saved.base_url if saved else None)
+        if not raw:
+            raise APIError(422, "openai-compatible needs a base_url to list models")
+        base = _check_base_url(raw, mode)
+        url = base + "/models"
+        if saved and saved.api_key and saved.base_url == base:
+            headers["Authorization"] = f"Bearer {saved.api_key}"
+    secrets = (saved.api_key or "",) if saved else ()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=False) as c:
+            resp = await c.get(url, headers=headers)
+    except httpx.HTTPError as e:
+        raise APIError(502, mask_key(f"could not reach {url}: {e}", secrets)) from None
+    if resp.status_code != 200:
+        raise APIError(502, f"{url} answered {resp.status_code}")
+    try:
+        data = resp.json()
+        names = ([m.get("name") for m in data.get("models", [])] if provider == "ollama"
+                 else [m.get("id") for m in data.get("data", [])])
+    except (ValueError, AttributeError):
+        raise APIError(502, f"{url} did not return a model list") from None
+    models = sorted({n for n in names if isinstance(n, str) and n})[:MAX_DISCOVERED]
+    return {"models": models, "source": url}
