@@ -117,7 +117,9 @@ def _isolate_viva_api_base():
     scope wins over this); tests that want the *unconfigured* default must
     delete **both** names, which is what "unconfigured" has always meant.
     """
-    previous = {k: os.environ.get(k) for k in ("VIVA_API_BASE", "SMS_API_BASE")}
+    from vivarium_workbench.lib.sms_api_client import BACKEND_BASE_ENV_VARS
+
+    previous = {k: os.environ.get(k) for k in BACKEND_BASE_ENV_VARS}
     for k in previous:
         os.environ[k] = UNREACHABLE_VIVA_API_BASE
     try:

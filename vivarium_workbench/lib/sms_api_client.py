@@ -19,15 +19,51 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
-def sms_api_base() -> str:
-    """Base URL of the viva-api (nee sms-api; the SSM tunnel by default).
+#: Env vars naming the backend, highest precedence first. ``serve --backend-base-url``
+#: sets the first; the other two are the pre-existing names, kept as aliases.
+BACKEND_BASE_ENV_VARS = ("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "VIVA_API_BASE", "SMS_API_BASE")
+DEFAULT_BACKEND_BASE = "http://localhost:8080"
 
-    ``VIVA_API_BASE`` is the canonical name; ``SMS_API_BASE`` is kept as a
-    fallback alias since the backend repo was renamed sms-api -> viva-api. The
-    single source of truth for this lookup — ``workspace_deps_views`` and
-    ``remote_simulations`` re-export it under their old ``_sms_api_base`` name.
+
+def normalize_backend_base_url(url: str) -> str:
+    """Validate a backend base URL: http(s), a host, no credentials, no trailing slash.
+
+    Credentials are refused because the value is forwarded on a child process's
+    argv (``serve --detach``) where any local user can read it.
     """
-    return os.environ.get("VIVA_API_BASE") or os.environ.get("SMS_API_BASE", "http://localhost:8080")
+    from urllib.parse import urlsplit
+
+    raw = (url or "").strip()
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(f"backend base URL must be http(s)://host[:port][/prefix], got {raw!r}")
+    if parts.username or parts.password:
+        raise ValueError("backend base URL must not embed credentials")
+    if parts.query or parts.fragment:
+        raise ValueError("backend base URL must not carry a query or fragment")
+    return raw.rstrip("/")
+
+
+def backend_configured() -> bool:
+    """Whether the operator named a backend at all (flag or any env alias)."""
+    return any(os.environ.get(v) for v in BACKEND_BASE_ENV_VARS)
+
+
+def sms_api_base() -> str:
+    """Base URL of the backend (viva-api / viva-core; nee sms-api).
+
+    Precedence: ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` (what ``serve
+    --backend-base-url`` sets) > ``VIVA_API_BASE`` > ``SMS_API_BASE`` (the
+    legacy alias, since the backend repo was renamed sms-api -> viva-api) >
+    ``http://localhost:8080`` (the SSM tunnel). The single source of truth for
+    this lookup — ``workspace_deps_views`` and ``remote_simulations`` re-export
+    it under their old ``_sms_api_base`` name.
+    """
+    for name in BACKEND_BASE_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return DEFAULT_BACKEND_BASE
 
 
 class SmsApiError(Exception):

@@ -85,7 +85,9 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # Only probe when VIVA_API_BASE/SMS_API_BASE is explicitly set — a local-only
     # user hasn't opted into remote and shouldn't pay a probe delay. Best-effort:
     # never blocks/raises.
-    if os.environ.get("VIVA_API_BASE") or os.environ.get("SMS_API_BASE"):
+    from vivarium_workbench.lib.sms_api_client import backend_configured
+
+    if backend_configured():
         try:
             from vivarium_workbench.lib.workspace_deps_views import remote_health
             _h = remote_health()
