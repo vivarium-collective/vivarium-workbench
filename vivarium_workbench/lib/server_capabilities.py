@@ -27,6 +27,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from vivarium_workbench.lib.sms_api_client import (
+    CAPABILITY_VIVA_V1_COMPOSITES as CAPABILITY_VIVA_V1_COMPOSITES,
+    CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS as CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS,
+    CAPABILITY_VIVA_V1_ENVIRONMENTS,
     CAPABILITY_VIVA_V1_SURFACE as CAPABILITY_VIVA_V1_SURFACE,
     CAPABILITY_VIVA_V1_WORKERS as CAPABILITY_VIVA_V1_WORKERS,
     SmsApiClient,
@@ -123,3 +126,55 @@ def require_capabilities(client: SmsApiClient, *names: str) -> ServerCapabilitie
     if missing:
         raise CapabilityUnsupportedError(missing, caps.version)
     return caps
+
+
+# ---------------------------------------------------------------------------
+# Which dispatch surface does this backend give the workbench?
+# ---------------------------------------------------------------------------
+
+#: ``dispatch`` values of :func:`backend_profile`.
+DISPATCH_LEGACY = "legacy"            # /api/v1/simulations (simulator-id keyed)
+DISPATCH_COMPOSITE = "viva-v1-composite"  # POST /viva/v1/composites {environment.id, composite}
+DISPATCH_DOCUMENT = "viva-v1-document"    # POST /viva/v1/composites {environment, document}
+
+
+def backend_profile(client: SmsApiClient) -> dict:
+    """What the configured backend can do for a workspace, read live (never cached here).
+
+    ``GET /viva/v1/capabilities`` (membership, never version) plus, when the
+    run surface is present, ``GET /viva/v1/health`` (``services``: which stores
+    the deployment actually wired). ``dispatch`` is the route a workspace
+    composite takes:
+
+    * ``viva-v1-composite``: the deployment has an environment store, so a run
+      is ``{environment: {id}, composite: {id, params}}`` (the environment built
+      from the workspace's repo@commit provides the composite);
+    * ``viva-v1-document``: no environment store (a standalone viva-core), so the
+      workspace's composite is resolved locally to a process-bigraph document and
+      run in a site-named environment;
+    * ``legacy``: no ``viva-v1-composites`` -- ``/api/v1/simulations`` as before.
+
+    Never raises: ``reachable: false`` + ``error`` when the backend cannot be
+    asked, which reads as ``legacy`` so an older/unreachable backend keeps the
+    path it always had (and the real call then reports the real error).
+    """
+    out: dict = {"reachable": True, "version": None, "capabilities": [], "services": {},
+                 "dispatch": DISPATCH_LEGACY, "error": None}
+    try:
+        caps = fetch_capabilities(client)
+    except SmsApiError as e:
+        out.update(reachable=False, error=str(e))
+        return out
+    out["version"] = caps.version
+    out["capabilities"] = sorted(caps.capabilities)
+    if not caps.supports(CAPABILITY_VIVA_V1_COMPOSITES):
+        return out
+    try:
+        out["services"] = dict(client.health_v1().get("services") or {})
+    except SmsApiError:
+        out["services"] = {}
+    if caps.supports(CAPABILITY_VIVA_V1_ENVIRONMENTS):
+        out["dispatch"] = DISPATCH_COMPOSITE
+    elif caps.supports(CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS):
+        out["dispatch"] = DISPATCH_DOCUMENT
+    return out

@@ -268,6 +268,21 @@ CAPABILITY_VIVA_V1_ENVIRONMENTS_BUILD = "viva-v1-environments-build"
 #: so a branch lookup may trust the filter only when this is advertised.
 CAPABILITY_VIVA_V1_ENVIRONMENTS_FILTERS = "viva-v1-environments-filters"
 
+#: ``viva-v1-composites``: ``POST/GET/DELETE /viva/v1/composites[/{id}[/status|progress|jobs|...]]``
+#: answer -- the generic run surface (an environment + a composite id with params, or
+#: a document), not one simulator's.
+CAPABILITY_VIVA_V1_COMPOSITES = "viva-v1-composites"
+#: ``viva-v1-composites-documents``: that surface also runs a process-bigraph ``document``.
+CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS = "viva-v1-composites-documents"
+
+_COMPOSITES = "/viva/v1/composites"
+
+
+def _run_path(run_id: "str | int", leaf: str = "") -> str:
+    """``/viva/v1/composites/{id}[/leaf]`` -- the id is opaque, so it is quoted whole."""
+    return f"{_COMPOSITES}/{quote(str(run_id), safe='')}" + (f"/{leaf}" if leaf else "")
+
+
 #: Environment statuses (``/viva/v1/environments``). A build is ready only when
 #: EVERY variant row of it is (a vEcoli build has three: ``arm64``, ``amd64``,
 #: ``amd64-submit``).
@@ -954,6 +969,93 @@ class SmsApiClient:
         format as :meth:`simulation_trace`). ``run_id`` is the composite run id,
         which for a ``/compose/v1`` submission is its ``correlation_id``."""
         return self._get_bytes(f"/viva/v1/composites/{quote(str(run_id), safe='')}/trace")
+
+    # -- /viva/v1/composites: the generic run surface -----------------------
+    # Contract: docs/backend-viva-v1.md (verified against the deployment's own
+    # /viva/v1/openapi.json). A run ``id`` is opaque -- pass it back as given.
+
+    def create_composite_run(
+        self, *, environment: dict, composite: "dict | None" = None,
+        document: "dict | None" = None, execution: "dict | None" = None,
+        label: "str | None" = None,
+    ) -> dict:
+        """``POST /viva/v1/composites`` -> the run record (HTTP 202).
+
+        ``environment`` is ``{"id": ...}`` or ``{"name": ...}``; exactly one of
+        ``composite`` (``{"id", "params"}``, a composite the environment provides)
+        or ``document`` (a process-bigraph document) names what runs. Never
+        retried (``_post``): a retried submit could double-spend a real run.
+        """
+        if (composite is None) == (document is None):
+            raise ValueError("exactly one of composite / document is required")
+        body: dict = {"environment": environment}
+        if composite is not None:
+            body["composite"] = composite
+        else:
+            body["document"] = document
+        if execution:
+            body["execution"] = execution
+        if label:
+            body["label"] = label
+        return self._post(_COMPOSITES, json_body=body)
+
+    def list_composite_runs(self, **filters: Any) -> dict:
+        """``GET /viva/v1/composites`` (``status`` repeatable, ``composite_id``,
+        ``environment_id``, ``created_by``, ``limit``, ``offset``) -> a page."""
+        return self._get(_COMPOSITES, {k: v for k, v in filters.items() if v is not None})
+
+    def composite_run(self, run_id: "str | int") -> dict:
+        return self._get(_run_path(run_id))
+
+    def composite_run_status(self, run_id: "str | int") -> dict:
+        """``{id, status, message}``; ``status`` is a JobStatus (lower-case)."""
+        return self._get(_run_path(run_id, "status"))
+
+    def composite_run_progress(self, run_id: "str | int") -> dict:
+        """``{id, status, total, by_kind: {kind: {status: n}}}``."""
+        return self._get(_run_path(run_id, "progress"))
+
+    def composite_run_jobs(self, run_id: "str | int") -> dict:
+        return self._get(_run_path(run_id, "jobs"))
+
+    def composite_run_datasets(self, run_id: "str | int", *, limit: "int | None" = None,
+                               offset: "int | None" = None) -> dict:
+        """The run's datasets; 503 (:class:`SmsApiError`) on a deployment with no dataset store."""
+        params = {k: v for k, v in (("limit", limit), ("offset", offset)) if v is not None}
+        return self._get(_run_path(run_id, "datasets"), params or None)
+
+    def composite_run_log(self, run_id: "str | int", *, full: bool = False) -> str:
+        """The run's log as text (``text/plain``)."""
+        path = _run_path(run_id, "log") + ("?full=true" if full else "")
+        return self._get_bytes(path, accept="text/plain").decode("utf-8", errors="replace")
+
+    def cancel_composite_run(self, run_id: "str | int") -> dict:
+        """``DELETE /viva/v1/composites/{id}`` -> ``{run, pending}``. The record is kept;
+        ``pending`` names what is still being stopped (HTTP 202)."""
+        return self._delete(_run_path(run_id))
+
+    def environment_for_commit(self, repo_url: str, commit: str) -> "dict | None":
+        """The environment a run of ``repo_url``@``commit`` should use: the primary
+        (variant ``""``) ready row, else any ready row; ``None`` when none is ready.
+        Needs ``viva-v1-environments``. The ``repo_url`` match is exact server-side,
+        so every registered spelling of the repo is tried."""
+        want = repo_key(repo_url)
+        spellings: "list[str]" = []
+        for row in self._environment_pages({"commit": commit}):
+            url = row.get("repo_url")
+            if isinstance(url, str) and url not in spellings and repo_key(url) == want:
+                spellings.append(url)
+        ready: "list[dict]" = []
+        for url in spellings:
+            ready += [r for r in self._environment_pages({"repo_url": url, "commit": commit})
+                      if str(r.get("status") or "").lower() == _ENV_READY]
+        primary = [r for r in ready if r.get("variant") == ""]
+        pick = (primary or ready or [None])[0]
+        return pick
+
+    def health_v1(self) -> dict:
+        """``GET /viva/v1/health`` -> ``{status, version, services: {name: bool}}``."""
+        return self._get("/viva/v1/health")
 
     def _get_bytes(self, path: str, accept: str = "application/json") -> bytes:
         """GET ``path`` and return the body undecoded. One attempt: a trace is
