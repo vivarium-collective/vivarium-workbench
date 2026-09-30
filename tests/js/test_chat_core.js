@@ -294,18 +294,29 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
     'order kept, de-duplicated, junk dropped');
   assert.strictEqual(C.mergeModels(new Array(300).fill(0).map((_, i) => 'm' + i)).length, 100, 'bounded');
 
-  const status = { providers: [{ id: 'ollama', configured: true }, { id: 'anthropic', configured: false },
-                               { id: 'opencode', configured: true }], selected: { provider: 'ollama', model: 'llama3.1:8b' } };
-  const known = { ollama: ['qwen2.5-coder:7b'], opencode: ['minimax-m3', 'kimi-k2'], anthropic: ['claude-opus-5-5'] };
-  const groups = C.groupModels(status, known, status.selected);
-  assert.deepStrictEqual(groups.map(g => g.id), ['ollama', 'opencode'], 'only configured providers, in marimo order');
-  assert.deepStrictEqual(groups[0].models.map(m => m.id), ['llama3.1:8b', 'qwen2.5-coder:7b'], 'the selected model is always listed');
-  assert.deepStrictEqual(groups[0].models.map(m => m.on), [true, false]);
-  assert.strictEqual(groups[0].count, 2); assert.strictEqual(groups[1].count, 2);
-  assert(groups.every(g => g.mark && g.color));
-  assert.deepStrictEqual(C.groupModels({ providers: [] }, {}, null), []);
-  const noisy = { providers: [{ id: 'bedrock', configured: true }, { id: 'ollama', configured: true }] };
-  assert.deepStrictEqual(C.groupModels(noisy, { ollama: ['m'] }, null).map(g => g.id), ['ollama'], 'empty groups are hidden');
+  // marimo's dropdown tree: registry models + custom ones, per provider, empty providers omitted
+  const registry = {
+    ollama: { description: 'local', url: 'https://ollama.ai/', models: [{ name: 'GLM 5.3', model: 'glm-5.3', thinking: true }] },
+    anthropic: { models: [{ name: 'Claude Opus 5.5', model: 'claude-opus-5-5' }] },
+  };
+  const sel = { provider: 'ollama', model: 'qwen3.6:27b' };
+  const tree = C.modelTree(registry, { ollama: ['my-tune'], 'openai-compatible': ['gpt-x'] }, sel);
+  assert.deepStrictEqual(tree.map(g => g.id), ['anthropic', 'ollama', 'openai-compatible'], 'marimo order; empty providers omitted');
+  const oll = tree.find(g => g.id === 'ollama');
+  assert.deepStrictEqual(oll.models.map(m => m.model), ['qwen3.6:27b', 'my-tune', 'glm-5.3'], 'custom first (selected, then newest), then the registry');
+  assert(oll.models.some(m => m.model === 'qwen3.6:27b' && m.custom && m.on), 'the selected model is listed and marked, even if custom');
+  assert(oll.models.some(m => m.model === 'glm-5.3' && !m.custom && m.thinking), 'registry models keep the reasoning flag');
+  assert.strictEqual(oll.description, 'local');
+  assert(tree.every(g => g.mark && g.color));
+  assert.deepStrictEqual(C.modelTree({}, {}, null), [], 'nothing to list');
+  assert.deepStrictEqual(C.modelTree(null, null, null), []);
+
+  // "Enter a custom model": provider/model like marimo; anything else belongs to the fallback provider
+  assert.deepStrictEqual(C.parseQualified('ollama/qwen3.6:27b', 'openai'), { provider: 'ollama', model: 'qwen3.6:27b' });
+  assert.deepStrictEqual(C.parseQualified('qwen3.6:27b', 'ollama'), { provider: 'ollama', model: 'qwen3.6:27b' });
+  assert.deepStrictEqual(C.parseQualified('deepseek-ai/DeepSeek-V4', 'openai-compatible'), { provider: 'openai-compatible', model: 'deepseek-ai/DeepSeek-V4' });
+  assert.deepStrictEqual(C.parseQualified('ollama/', 'x'), { provider: 'x', model: 'ollama/' }, 'no model after the slash');
+  assert.strictEqual(C.parseQualified('  ', 'x'), null);
 
   // keyboard navigation wraps and supports Home/End
   assert.strictEqual(C.nextIndex(0, 3, 'ArrowDown'), 1);
@@ -328,6 +339,12 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.deepStrictEqual(Object.keys(C.loadKnown()).sort(), ['ollama', 'opencode']);
   mem['viv.ai.models'] = '[1,2]'; assert.deepStrictEqual(C.loadKnown(), {}, 'an array is not a valid store');
   mem['viv.ai.models'] = 'not json'; assert.deepStrictEqual(C.loadKnown(), {});
+  // a hostile/garbled store must never break the panel: non-list values are dropped
+  mem['viv.ai.models'] = JSON.stringify({ ollama: 'abc', opencode: { a: 1 }, google: 5, bedrock: ['ok', 3, ' '] });
+  assert.deepStrictEqual(C.loadKnown(), { bedrock: ['ok'] });
+  assert.doesNotThrow(() => C.addKnown('ollama', ['x']));
+  assert.doesNotThrow(() => C.mergeModels('abc', { a: 1 }, 5, ['fine']));
+  assert.deepStrictEqual(C.mergeModels('abc', ['fine']), ['fine']);
   delete globalThis.localStorage;
 }
 
@@ -364,9 +381,65 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(C.clampDock('left', 100, 1400, 900), 340);
   assert.strictEqual(C.clampDock('right', 5000, 1400, 900), 720);
   assert.strictEqual(C.clampDock('left', 600, 800, 900), 480, 'never more than 60% of a narrow window');
+  assert.strictEqual(C.clampDock('left', 440, 400, 800), 240, 'a phone-width window still leaves room for the content');
+  assert.strictEqual(C.clampDock('left', 100, 1400, 900), 340);
   assert.strictEqual(C.clampDock('bottom', 50, 1400, 900), 160);
   assert.strictEqual(C.clampDock('bottom', 9999, 1400, 900), 630, 'at most 70% of the height');
   assert.strictEqual(C.clampDock('bottom', 'junk', 1400, 900), 160);
 }
 
 console.log('test_chat_core: all passed');
+
+// ── durable, cross-tab history: open per tab, merge other tabs' saves, tombstoned deletes ──
+{
+  const chatWith = (id, text, at) => {
+    const st = C.newState(); st.ui.push({ role: 'user', text: text, parts: [] });
+    return { id: id, title: text, updatedAt: at, snap: C.snapshot(st) };
+  };
+  const disk = { active: 'a', chats: { a: chatWith('a', 'first question', 100), b: chatWith('b', 'second question', 200) } };
+
+  // a fresh tab (no active id) starts on a NEW empty chat but keeps the whole history
+  const t1 = C.storeOpen(disk, null, 300);
+  assert.notStrictEqual(t1.active, 'a'); assert.notStrictEqual(t1.active, 'b');
+  assert.deepStrictEqual(C.storeList(t1, '', 300).groups.flatMap(g => g.items.map(i => i.id)).sort(), ['a', 'b']);
+  // a reload keeps the chat this tab was on
+  assert.strictEqual(C.storeOpen(disk, 'b', 300).active, 'b');
+  // a stale active id falls back to a new chat instead of crashing
+  assert.doesNotThrow(() => C.storeOpen(disk, 'gone', 300));
+  assert.doesNotThrow(() => C.storeOpen(null, 'x')); assert.doesNotThrow(() => C.storeOpen('junk', 'x'));
+
+  // another tab saved chat c meanwhile: our save keeps it, and our newer edit of `a` wins
+  const mine = C.storeOpen(disk, 'a', 300);
+  mine.chats.a = chatWith('a', 'first question, edited', 400);
+  const theirs = { active: 'c', chats: { a: chatWith('a', 'first question', 100), b: chatWith('b', 'second question', 200), c: chatWith('c', 'from tab two', 350) } };
+  const merged = C.storeMerge(mine, theirs);
+  assert.deepStrictEqual(Object.keys(merged.chats).sort(), ['a', 'b', 'c']);
+  assert.strictEqual(merged.chats.a.title, 'first question, edited'); assert.strictEqual(merged.active, 'a');
+
+  // delete: gone for good, even if a tab that still caches it saves later
+  C.storeDelete(mine, 'b');
+  assert(!mine.chats.b && mine.deleted.indexOf('b') >= 0);
+  const afterDelete = C.storeMerge(mine, theirs);
+  assert(!afterDelete.chats.b, 'a deleted chat is not resurrected from disk or from another tab');
+  const other = C.storeOpen(theirs, 'c', 500);          // the other tab still caches b
+  assert(!C.storeMerge(other, { active: 'a', chats: afterDelete.chats, deleted: afterDelete.deleted }).chats.b);
+  // deleting the chat being viewed empties it in place
+  const viewing = C.storeOpen(disk, 'a', 300); C.storeDelete(viewing, 'a');
+  assert.strictEqual(viewing.active, 'a'); assert.strictEqual(viewing.chats.a.snap.ui.length, 0);
+  assert.strictEqual(C.storeDelete(viewing, 'nope'), null);
+  // garbage from disk never throws
+  assert.doesNotThrow(() => C.storeMerge(mine, { chats: { z: 5, y: { snap: 'x' } }, deleted: 'nope' }));
+  assert.doesNotThrow(() => C.storeMerge(mine, null));
+}
+
+
+// ── "Approve all" lists exactly what it will approve ──
+{
+  const st = C.newState();
+  st.ui.push({ role: 'assistant', parts: [
+    { kind: 'tool', id: 't1', name: 'call_operation', args: {}, approval: { method: 'POST', path: '/api/catalog-install', operation_id: 'catalog-install' } },
+    { kind: 'tool', id: 't2', name: 'call_operation', args: {}, approval: { method: 'POST', path: '/api/study-create' } }] });
+  st.pending = ['t1', 't2', 'gone'];
+  const rows = st.pending.map(id => { const t = C.findTool(st, id); return t ? C.describeApproval(t) : null; });
+  assert.deepStrictEqual(rows.map(r => r && (r.method + ' ' + r.path)), ['POST /api/catalog-install', 'POST /api/study-create', null]);
+}

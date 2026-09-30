@@ -985,7 +985,7 @@ def test_snapshot_bundle_hides_the_ai_panel_and_its_toggle(tmp_workspace, tmp_pa
     for needle in ('id="viv-ai-panel"', 'id="viv-ai-toggle"', 'id="viv-ai-card"'):
         assert needle in html, f"shell lost {needle}"
     assert 'id="page-chat"' not in html and 'data-page="chat"' not in html
-    for asset in ("chat.css", "chat-core.js", "chat.js", "ai-login.js"):
+    for asset in ("chat.css", "chat-core.js", "ai-models.js", "chat.js", "ai-login.js"):
         assert (out / "assets" / asset).is_file(), f"bundle missing assets/{asset}"
     for sel in ("body.snapshot #viv-ai-toggle", "body.snapshot #viv-ai-panel"):
         assert sel in css, f"snapshot-readonly.css missing {sel!r}"

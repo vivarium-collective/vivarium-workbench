@@ -2092,17 +2092,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <input id="viv-ai-url" class="vp-input" type="text" placeholder="http://localhost:11434/v1"
                autocomplete="off" spellcheck="false">
       </label>
-      <label class="vp-field"><span>Model</span>
-        <input id="viv-ai-model" class="vp-input" type="text" list="viv-ai-models" placeholder="model name"
-               autocomplete="off" spellcheck="false">
-        <datalist id="viv-ai-models"></datalist>
-      </label>
-      <div class="vp-field" id="viv-ai-models-row"><span>Models</span>
-        <div class="vp-chips" id="viv-ai-chips"></div>
-        <div class="vp-actions">
-          <button id="viv-ai-addmodel" class="vp-btn" type="button" title="Add the model above to this provider's list">Add model</button>
-          <button id="viv-ai-discover" class="vp-btn" type="button" hidden title="List the models this endpoint serves">Discover models</button>
-        </div>
+      <div class="vp-field"><span>Model</span>
+        <button id="viv-ai-model" class="vp-pill vp-select" type="button" aria-haspopup="menu" title="Choose a model"></button>
       </div>
       <div class="vp-actions">
         <button id="viv-ai-save" class="vp-btn vp-primary" type="button">Save &amp; test</button>
@@ -2530,6 +2521,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
 <script src="assets/chat-core.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
+<script src="assets/ai-models.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
 <script src="assets/chat.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
 <script src="assets/ai-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* ai-login unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown

@@ -75,9 +75,13 @@ def _iso(tmp_path, monkeypatch):
                                                 "VIVARIUM_WORKBENCH_ALLOWED_ORIGINS"]:
         monkeypatch.delenv(e, raising=False)
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
     yield
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
 
 

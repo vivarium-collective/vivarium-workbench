@@ -411,6 +411,51 @@
     });
     return out.chats[out.active] ? out : newStore(now);
   }
+  // Open the shared history for THIS tab: the saved chats, with `activeId` (this tab's own
+  // conversation, kept in sessionStorage) active if it still exists — otherwise a fresh chat, so a
+  // new tab starts empty while the history stays reachable.
+  function storeOpen(saved, activeId, now) {
+    var probe = saved && typeof saved === 'object' && saved.chats && typeof saved.chats === 'object' ? saved.chats : null;
+    if (!probe) return newStore(now);
+    var ids = Object.keys(probe);
+    var keep = ids.filter(function (id) { return id === activeId; })[0] || ids[0];
+    if (!keep) return newStore(now);
+    var out = storeRestore({ active: keep, chats: probe }, now);
+    if (Array.isArray(saved.deleted)) out.deleted = saved.deleted.filter(function (x) { return typeof x === 'string'; }).slice(-200);
+    if (out.active !== activeId) storeNew(out, restore(out.chats[out.active].snap), now);
+    return out;
+  }
+  // Fold in what other tabs saved since we last looked: their chats are kept, ours wins where it is
+  // newer (and always for the chat this tab is editing). A deleted chat is remembered by id
+  // (`deleted`, in both copies) so a tab that still caches it cannot bring it back.
+  function storeMerge(mine, theirs) {
+    var dead = {};
+    [mine.deleted, theirs && theirs.deleted].forEach(function (l) {
+      (Array.isArray(l) ? l : []).forEach(function (id) { if (typeof id === 'string') dead[id] = true; });
+    });
+    var disk = theirs && typeof theirs === 'object' && theirs.chats && typeof theirs.chats === 'object' ? theirs.chats : {};
+    var chats = {};
+    Object.keys(disk).forEach(function (id) {
+      if (dead[id] || !disk[id] || typeof disk[id] !== 'object' || !disk[id].snap) return;
+      var one = {}; one[id] = disk[id];
+      var r = storeRestore({ active: id, chats: one }, 0).chats[id];
+      if (r && r.snap.ui.length) chats[id] = r;
+    });
+    Object.keys(mine.chats).forEach(function (id) {
+      var m = mine.chats[id];
+      if (dead[id] || !m) return;
+      if (id === mine.active || (m.snap.ui.length && (!chats[id] || m.updatedAt >= chats[id].updatedAt))) chats[id] = m;
+    });
+    return { active: mine.active, chats: chats, deleted: Object.keys(dead).slice(-200) };
+  }
+  // Delete a chat from history; deleting the one being viewed leaves an empty chat in its place.
+  function storeDelete(store, id) {
+    if (!store.chats[id]) return null;
+    if (id === store.active) { store.chats[id] = { id: id, title: 'New chat', updatedAt: Date.now(), snap: snapshot(newState()) }; return store; }
+    delete store.chats[id];
+    store.deleted = (store.deleted || []).concat(id).slice(-200);
+    return store;
+  }
   // History rows: newest first, filtered by title, grouped by date (empty chats hidden).
   function storeList(store, query, now) {
     var q = String(query || '').toLowerCase();
@@ -490,7 +535,8 @@
   function mergeModels() {
     var seen = {}, out = [];
     for (var i = 0; i < arguments.length; i++) {
-      (arguments[i] || []).forEach(function (m) {
+      if (!Array.isArray(arguments[i])) continue;       // localStorage is untrusted: a non-list is ignored
+      arguments[i].forEach(function (m) {
         if (typeof m !== 'string') return;
         m = m.trim();
         if (m && !seen[m]) { seen[m] = true; out.push(m); }
@@ -498,18 +544,38 @@
     }
     return out.slice(0, 100);
   }
-  // Dropdown groups: one per CONFIGURED provider (marimo order), each with its known models
-  // (the selected model is always present) and a count for the "n models" caption.
-  function groupModels(status, known, selected) {
-    var configured = {};
-    ((status && status.providers) || []).forEach(function (p) { if (p.configured) configured[p.id] = true; });
-    return PROVIDERS.filter(function (p) { return configured[p.id]; }).map(function (p) {
-      var ids = (known && known[p.id]) || [];
-      if (selected && selected.provider === p.id) ids = mergeModels([selected.model], ids);
-      else ids = mergeModels(ids);
-      var models = ids.map(function (id) { return { id: id, on: !!(selected && selected.provider === p.id && selected.model === id) }; });
-      return { id: p.id, label: p.label, color: p.color, mark: p.mark, models: models, count: models.length };
-    }).filter(function (g) { return g.count > 0; });     // an empty group is just noise (e.g. ambient AWS creds)
+  // marimo's model dropdown tree: one entry per provider, each with its registry models
+  // (static/ai-models.js, generated from marimo's llm-info) plus the user's custom models
+  // (`known`, browser-local) and the selected model when it is neither. Providers with nothing
+  // to list are omitted, as in marimo.
+  function modelTree(registry, known, selected) {
+    registry = registry || {};
+    return PROVIDERS.map(function (p) {
+      var reg = registry[p.id] || {};
+      var models = (reg.models || []).map(function (m) {
+        return { model: m.model, name: m.name || m.model, description: m.description || '', thinking: !!m.thinking, custom: false };
+      });
+      var have = {};
+      models.forEach(function (m) { have[m.model] = true; });
+      var extra = mergeModels(selected && selected.provider === p.id ? [selected.model] : [], known && known[p.id]);
+      var customs = extra.filter(function (id) { return !have[id]; }).map(function (id) {
+        return { model: id, name: id, description: '', thinking: false, custom: true };
+      });
+      models = customs.concat(models);
+      models.forEach(function (m) { m.on = !!(selected && selected.provider === p.id && selected.model === m.model); });
+      return { id: p.id, label: p.label, color: p.color, mark: p.mark, description: reg.description || '',
+               url: reg.url || '', models: models };
+    }).filter(function (g) { return g.models.length > 0; });
+  }
+  // marimo qualifies custom models as "provider/model" (e.g. ollama/qwen3.6:27b). A first segment
+  // that is not a known provider id means the whole text is the model, for `fallback`.
+  function parseQualified(text, fallback) {
+    var t = String(text || '').trim();
+    var i = t.indexOf('/');
+    if (i > 0 && PROVIDERS.some(function (p) { return p.id === t.slice(0, i); }) && t.slice(i + 1).trim()) {
+      return { provider: t.slice(0, i), model: t.slice(i + 1).trim() };
+    }
+    return t ? { provider: fallback || null, model: t } : null;
   }
   // Keyboard index for a listbox (wraps; Home/End; -1 = nothing highlighted yet).
   function nextIndex(i, n, key) {
@@ -524,8 +590,12 @@
   // Known models per provider (marimo's "Add model" list): browser-local, non-secret.
   var KNOWN_KEY = 'viv.ai.models';
   function loadKnown() {
-    try { var k = JSON.parse(localStorage.getItem(KNOWN_KEY)); return k && typeof k === 'object' && !Array.isArray(k) ? k : {}; }
-    catch (e) { return {}; }
+    try {
+      var k = JSON.parse(localStorage.getItem(KNOWN_KEY)), out = {};
+      if (!k || typeof k !== 'object' || Array.isArray(k)) return {};
+      Object.keys(k).forEach(function (p) { if (Array.isArray(k[p])) out[p] = mergeModels(k[p]); });
+      return out;
+    } catch (e) { return {}; }
   }
   function saveKnown(k) { try { localStorage.setItem(KNOWN_KEY, JSON.stringify(k)); } catch (e) { /* private mode */ } }
   function addKnown(provider, ids) {
@@ -557,7 +627,8 @@
   function clampDock(dock, size, vw, vh) {
     var n = Math.round(+size) || 0;
     if (dock === 'bottom') return Math.max(160, Math.min(n, Math.max(160, Math.floor(vh * 0.7))));
-    return Math.max(340, Math.min(n, Math.min(720, Math.max(340, Math.floor(vw * 0.6)))));
+    var cap = Math.floor(vw * 0.6);                              // never more than 60% of the window...
+    return Math.max(Math.min(340, cap), Math.min(n, Math.min(720, cap)));   // ...even below 340px on a phone-width window
   }
 
   var api = {
@@ -569,9 +640,9 @@
     restore: restore, renderMarkdown: renderMarkdown,
     MODES: MODES, validMode: validMode, truncateAt: truncateAt, timeAgo: timeAgo, dateGroup: dateGroup,
     newStore: newStore, storeUpsert: storeUpsert, storeNew: storeNew, storeSwitch: storeSwitch,
-    storeRestore: storeRestore, storeList: storeList, storePrune: storePrune, titleOf: titleOf,
+    findTool: findTool, storeRestore: storeRestore, storeOpen: storeOpen, storeMerge: storeMerge, storeDelete: storeDelete, storeList: storeList, storePrune: storePrune, titleOf: titleOf,
     mentionQuery: mentionQuery, insertMention: insertMention, contextItems: contextItems,
-    PROVIDERS: PROVIDERS, providerMeta: providerMeta, mergeModels: mergeModels, groupModels: groupModels,
+    PROVIDERS: PROVIDERS, providerMeta: providerMeta, mergeModels: mergeModels, modelTree: modelTree, parseQualified: parseQualified,
     DOCKS: DOCKS, validDock: validDock, dropZone: dropZone, clampDock: clampDock,
     nextIndex: nextIndex, loadKnown: loadKnown, addKnown: addKnown, removeKnown: removeKnown,
     filterItems: filterItems, ATTACH: ATTACH, attachError: attachError, composePrompt: composePrompt,

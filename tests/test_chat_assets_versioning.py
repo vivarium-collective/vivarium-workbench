@@ -12,7 +12,7 @@ from pathlib import Path
 from vivarium_workbench.lib import report
 
 _FIXTURE = Path(__file__).parent / "_fixtures" / "ws_increase_demo"
-_CHAT_ASSETS = ("chat.css", "chat-core.js", "chat.js", "ai-login.js")
+_CHAT_ASSETS = ("chat.css", "chat-core.js", "chat.js", "ai-login.js", "ai-models.js")
 
 
 def _render(ws):

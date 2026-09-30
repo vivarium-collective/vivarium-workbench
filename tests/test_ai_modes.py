@@ -38,6 +38,8 @@ def env(tmp_path, monkeypatch):
     app.state.bind_host = "0.0.0.0"
     app.dependency_overrides[appmod.get_workspace] = lambda: ws
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
     SEEN["tools"].clear()
     SEEN["instructions"].clear()
@@ -86,6 +88,8 @@ def env(tmp_path, monkeypatch):
                         lambda *a, **k: FunctionModel(function, stream_function=stream, model_name="fm"))
     yield TestClient(app), ws, app
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
 
 

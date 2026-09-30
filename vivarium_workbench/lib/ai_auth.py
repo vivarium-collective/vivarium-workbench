@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import socket
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -57,7 +58,12 @@ OLLAMA_DEFAULT = "http://localhost:11434/v1"
 # base URL fixed. Its /models list is public, which powers the model dropdown.
 OPENCODE_BASE = "https://opencode.ai/zen/go/v1"
 StorageMode = Literal["keyring", "memory"]
-Source = Literal["keyring", "memory", "environment", "aws"]
+Source = Literal["keyring", "memory", "environment", "aws", "config"]
+
+# Providers with no secret to store: only an endpoint. It goes in ai.yaml, never the keychain —
+# a URL is not a secret, and a keychain read is what makes macOS ask "python wants to use
+# confidential information".
+KEYLESS_ENDPOINT_PROVIDERS = ("ollama",)
 
 # Providers whose key is picked up from the ambient environment when none was saved.
 ENV_KEYS = {
@@ -154,7 +160,20 @@ def _keyring():
         return None
 
 
+# One keychain read per provider per process (until it is saved/removed), and a failed or
+# refused read is not retried for a minute: the UI asks for status several times per page load,
+# and on macOS each read of an item created by another program prompts the user.
+_KR_CACHE: dict[str, Credential | None] = {}
+_KR_FAILED: dict[str, float] = {}
+KR_RETRY_S = 60.0
+
+
 def _keyring_get(provider: str) -> Credential | None:
+    with _LOCK:
+        if provider in _KR_CACHE:
+            return _KR_CACHE[provider]
+        if time.monotonic() - _KR_FAILED.get(provider, -KR_RETRY_S) < KR_RETRY_S:
+            return None
     kr = _keyring()
     if kr is None:
         return None
@@ -162,14 +181,25 @@ def _keyring_get(provider: str) -> Credential | None:
         raw = kr.get_password(KEYRING_SERVICE, provider)
     except Exception as e:  # noqa: BLE001
         log.warning("keyring read failed for %s: %s", provider, mask_key(str(e)))
+        with _LOCK:
+            _KR_FAILED[provider] = time.monotonic()
         return None
-    if not raw:
-        return None
-    try:
-        d = json.loads(raw)
-        return Credential(d.get("api_key"), d.get("base_url"), "keyring")
-    except (ValueError, AttributeError):
-        return None
+    cred: Credential | None = None
+    if raw:
+        try:
+            d = json.loads(raw)
+            cred = Credential(d.get("api_key"), d.get("base_url"), "keyring")
+        except (ValueError, AttributeError):
+            cred = None
+    with _LOCK:
+        _KR_CACHE[provider] = cred
+    return cred
+
+
+def _keyring_forget(provider: str) -> None:
+    with _LOCK:
+        _KR_CACHE.pop(provider, None)
+        _KR_FAILED.pop(provider, None)
 
 
 def _keyring_set(provider: str, cred: Credential) -> bool:
@@ -179,6 +209,7 @@ def _keyring_set(provider: str, cred: Credential) -> bool:
     try:
         kr.set_password(KEYRING_SERVICE, provider,
                         json.dumps({"api_key": cred.api_key, "base_url": cred.base_url}))
+        _keyring_forget(provider)
         return True
     except Exception as e:  # noqa: BLE001
         log.warning("keyring write failed for %s: %s", provider,
@@ -194,6 +225,7 @@ def _keyring_delete(provider: str) -> None:
         kr.delete_password(KEYRING_SERVICE, provider)
     except Exception:  # noqa: BLE001 — absent entries are not an error
         pass
+    _keyring_forget(provider)
 
 
 # ---------------------------------------------------------------------------
@@ -217,9 +249,16 @@ def get_credential(provider: str, *, mode: StorageMode, session: str | None) -> 
     if provider == "bedrock":
         return Credential(source="aws") if (ambient and _aws_credentials_present()) else None
     if mode == "keyring":
-        cred = _keyring_get(provider)
-        if cred:
-            return cred
+        cfg = _read_cfg()
+        # Only providers this app itself saved to the keychain are looked up there: probing every
+        # provider on every status call would touch the keychain (and, on macOS, prompt) for nothing.
+        if provider in (cfg.get("keyring") or []):
+            cred = _keyring_get(provider)
+            if cred:
+                return cred
+        url = (cfg.get("endpoints") or {}).get(provider)
+        if url and provider in KEYLESS_ENDPOINT_PROVIDERS:
+            return Credential(None, str(url), "config")
     with _LOCK:
         cred = _MEMORY.get((_scope(mode, session), provider))
     if cred:
@@ -291,7 +330,11 @@ def save_credential(provider: str, api_key: str | None, base_url: str | None,
                     *, mode: StorageMode, session: str | None) -> Source:
     """Store an already-validated credential; returns where it actually landed."""
     cred = Credential(api_key, base_url, "memory")
+    if mode == "keyring" and api_key is None and provider in KEYLESS_ENDPOINT_PROVIDERS:
+        _update_cfg(lambda c: c.setdefault("endpoints", {}).__setitem__(provider, base_url))
+        return "config"
     if mode == "keyring" and _keyring_set(provider, Credential(api_key, base_url, "keyring")):
+        _update_cfg(lambda c: c.__setitem__("keyring", sorted({*(c.get("keyring") or []), provider})))
         return "keyring"
     with _LOCK:
         _MEMORY[(_scope(mode, session), provider)] = cred
@@ -300,7 +343,14 @@ def save_credential(provider: str, api_key: str | None, base_url: str | None,
 
 def delete_credential(provider: str, *, mode: StorageMode, session: str | None) -> None:
     if mode == "keyring":
-        _keyring_delete(provider)
+        cfg = _read_cfg()
+        if provider in (cfg.get("keyring") or []):
+            _keyring_delete(provider)
+        if provider in (cfg.get("keyring") or []) or provider in (cfg.get("endpoints") or {}):
+            def _drop(c: dict) -> None:
+                c["keyring"] = [x for x in (c.get("keyring") or []) if x != provider]
+                (c.get("endpoints") or {}).pop(provider, None)
+            _update_cfg(_drop)
     with _LOCK:
         _MEMORY.pop((_scope(mode, session), provider), None)
 
@@ -315,16 +365,35 @@ def selection_path() -> Path:
     return Path(base) / "vivarium-workbench" / "ai.yaml"
 
 
+_CFG_LOCK = Lock()
+
+
+def _read_cfg() -> dict[str, Any]:
+    try:
+        data = yaml.safe_load(selection_path().read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _update_cfg(mutate) -> None:
+    """Read-modify-write ``ai.yaml`` (non-secret: selection, keyless endpoints, which providers
+    have a keychain entry) so unrelated keys survive."""
+    with _CFG_LOCK:
+        cfg = _read_cfg()
+        mutate(cfg)
+        path = selection_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(path, yaml.safe_dump(cfg, sort_keys=True))
+
+
 def get_selection(*, mode: StorageMode, session: str | None) -> dict[str, str] | None:
     if mode == "memory":
         with _LOCK:
             sel = _SELECTION.get(session or "")
         return dict(sel) if sel else None
-    try:
-        data = yaml.safe_load(selection_path().read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return None
-    if isinstance(data, dict) and data.get("provider") and data.get("model"):
+    data = _read_cfg()
+    if data.get("provider") and data.get("model"):
         return {"provider": str(data["provider"]), "model": str(data["model"])}
     return None
 
@@ -339,9 +408,7 @@ def set_selection(provider: str, model: str, *, mode: StorageMode, session: str 
         with _LOCK:
             _SELECTION[session or ""] = sel
         return
-    path = selection_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, yaml.safe_dump(sel, sort_keys=True))
+    _update_cfg(lambda c: c.update(sel))
 
 
 # ---------------------------------------------------------------------------
@@ -436,58 +503,3 @@ async def check_key(provider: str, model: str, cred: Credential) -> None:
             hint = "is Ollama running? start it with `ollama serve`" if provider == "ollama" else "is the server running?"
             msg = f"could not connect to {where} — {hint} ({msg})"
         raise APIError(502, f"{provider} check failed: {msg}") from None
-
-
-# ---------------------------------------------------------------------------
-# Model discovery (populates the model dropdown)
-# ---------------------------------------------------------------------------
-
-_DISCOVERABLE = ("ollama", "opencode", "openai-compatible")
-MAX_DISCOVERED = 500
-
-
-async def discover_models(provider: str, *, base_url: str | None, mode: StorageMode,
-                          session: str | None) -> dict[str, Any]:
-    """List the models an endpoint serves: Ollama ``/api/tags``, OpenCode Go and other
-    OpenAI-compatible ``/models``. Uses the same SSRF rules as a save (loopback http only on
-    a local bind, public https on a hosted one). A saved key is sent ONLY to the endpoint it
-    was saved for — never to a different ``base_url`` the caller supplies."""
-    require_chat()
-    import httpx
-
-    if provider not in PROVIDERS:
-        raise APIError(422, f"unknown provider '{provider}'", providers=list(PROVIDERS))
-    if provider not in _DISCOVERABLE:
-        raise APIError(404, f"model discovery is not available for {provider}")
-    saved = get_credential(provider, mode=mode, session=session)
-    headers: dict[str, str] = {}
-    if provider == "opencode":
-        url = OPENCODE_BASE + "/models"
-    elif provider == "ollama":
-        base = _check_base_url(base_url or (saved.base_url if saved else None) or OLLAMA_DEFAULT, mode)
-        root = base[:-3] if base.endswith("/v1") else base
-        url = root.rstrip("/") + "/api/tags"
-    else:  # openai-compatible
-        raw = base_url or (saved.base_url if saved else None)
-        if not raw:
-            raise APIError(422, "openai-compatible needs a base_url to list models")
-        base = _check_base_url(raw, mode)
-        url = base + "/models"
-        if saved and saved.api_key and saved.base_url == base:
-            headers["Authorization"] = f"Bearer {saved.api_key}"
-    secrets = (saved.api_key or "",) if saved else ()
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=False) as c:
-            resp = await c.get(url, headers=headers)
-    except httpx.HTTPError as e:
-        raise APIError(502, mask_key(f"could not reach {url}: {e}", secrets)) from None
-    if resp.status_code != 200:
-        raise APIError(502, f"{url} answered {resp.status_code}")
-    try:
-        data = resp.json()
-        names = ([m.get("name") for m in data.get("models", [])] if provider == "ollama"
-                 else [m.get("id") for m in data.get("data", [])])
-    except (ValueError, AttributeError):
-        raise APIError(502, f"{url} did not return a model list") from None
-    models = sorted({n for n in names if isinstance(n, str) and n})[:MAX_DISCOVERED]
-    return {"models": models, "source": url}

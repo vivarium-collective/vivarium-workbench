@@ -285,6 +285,8 @@ body.focus-mode .viv-ai-panel, body.focus-mode #viv-ai-toggle{ display:none !imp
 
 /* Drag chip + drop zones (drag the AI item or the header to an edge to re-dock) */
 body.vp-dragging{ user-select:none; cursor:grabbing; }
+/* pointer events over an iframe never reach this document: without this a drag or resize that crosses the embedded study/composite pages freezes and loses its mouseup */
+body.vp-dragging iframe{ pointer-events:none; }
 .vp-ghost{ position:fixed; z-index:3001; pointer-events:none; display:flex; align-items:center; gap:6px; padding:4px 12px 4px 8px;
   border-radius:999px; background:#4f46e5; color:#fff; font:600 12px/1.4 -apple-system,"Segoe UI",sans-serif;
   box-shadow:0 4px 14px rgba(0,0,0,.3); }
@@ -298,3 +300,47 @@ body.vp-dragging{ user-select:none; cursor:grabbing; }
 .vp-zone-right{ right:0; top:0; bottom:28%; width:33%; }
 .vp-zone-bottom{ left:0; right:0; bottom:0; height:28%; }
 :root[data-theme="dark"] .vp-zone{ color:#a5b4fc; border-color:#818cf8; }
+
+/* ── marimo-style model picker: providers → submenu of models → info card ── */
+.vp-mm{ padding:4px; }
+.vp-mm-cur{ display:flex; align-items:center; gap:8px; padding:6px 8px; }
+.vp-mm-cur b{ display:block; font-weight:500; }
+.vp-mm-cur small, .vp-mm-info code{ display:block; color:var(--c-muted); font-size:11.5px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.vp-mm-prov, .vp-mm-model{ display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:4px; cursor:pointer; outline:none; }
+.vp-mm-prov > span:nth-child(2), .vp-mm-name{ flex:1 1 auto; min-width:0; }
+.vp-mm-prov:hover, .vp-mm-prov.hi, .vp-mm-prov:focus, .vp-mm-model:hover, .vp-mm-model:focus{ background:var(--c-chip); }
+.vp-mm-chev{ width:14px; height:14px; color:var(--c-muted); flex:0 0 14px; }
+.vp-mm-h{ display:flex; align-items:center; gap:4px; margin:0; padding:6px 8px 2px; color:var(--c-muted); font-size:12px; }
+.vp-mm-i svg{ width:12px; height:12px; }
+.vp-mm-input{ display:block; box-sizing:border-box; width:calc(100% - 16px); margin:2px 8px 6px; padding:5px 8px; font:inherit; font-size:12.5px;
+  color:var(--c-text); background:var(--c-bg, transparent); border:1px solid var(--c-border); border-radius:6px; }
+.vp-mm-input:focus{ outline:2px solid var(--c-accent); outline-offset:0; }
+.vp-mm-input.bad{ border-color:#b91c1c; }
+.vp-mm-desc{ margin:0; padding:6px 8px; max-width:280px; color:var(--c-muted); font-size:12.5px; }
+.vp-mm-desc a{ color:inherit; text-decoration:underline; }
+.vp-mm-sub{ padding:4px; }
+.vp-mm-brain, .vp-mm-bot{ display:inline-flex; color:var(--c-muted); }
+.vp-mm-brain{ padding:3px; border-radius:6px; color:#7c3aed; background:color-mix(in srgb, #7c3aed 14%, transparent); }
+.vp-mm-brain svg, .vp-mm-bot svg{ width:14px; height:14px; }
+.vp-mm-rm{ display:inline-flex; padding:2px; border:0; background:transparent; color:var(--c-muted); cursor:pointer; border-radius:4px; }
+.vp-mm-rm:hover{ color:#b91c1c; background:var(--c-chip); }
+.vp-mm-rm svg{ width:12px; height:12px; }
+.vp-mm-info{ padding:14px; }
+.vp-mm-info h4{ margin:0 0 2px; font-size:14px; }
+.vp-mm-info p{ margin:8px 0 0; color:var(--c-muted); font-size:12.5px; }
+.vp-mm-think{ display:flex; align-items:center; gap:6px; font-size:12px; }
+.vp-mm-think i{ width:8px; height:8px; border-radius:50%; background:#8b5cf6; }
+.vp-mm-by{ display:flex; align-items:center; gap:6px; margin-top:12px; padding-top:8px; border-top:1px solid var(--c-border); color:var(--c-muted); font-size:12px; }
+/* the Settings sheet's Model field: a select-like trigger for the same picker */
+.vp-select{ width:100%; height:32px; justify-content:space-between; }
+.vp-select > span{ display:flex; align-items:center; gap:8px; min-width:0; }
+.vp-select .vp-placeholder{ color:var(--c-muted); }
+
+.vp-hist-del{ display:none; flex:0 0 auto; padding:2px; border:0; background:transparent; color:var(--c-muted); cursor:pointer; border-radius:4px; }
+.vp-pop-item:hover .vp-hist-del, .vp-pop-item:focus-within .vp-hist-del{ display:inline-flex; }
+.vp-hist-del:hover{ color:#b91c1c; background:var(--c-chip); }
+.vp-hist-del svg{ width:12px; height:12px; }
+div.vp-pop-item{ cursor:pointer; }
+
+.vp-bulk-list{ margin:4px 0 0; padding:0 0 0 16px; max-height:96px; overflow:auto; font-size:11.5px; color:var(--c-muted); }
+.vp-bulk-list code{ font-size:11px; }

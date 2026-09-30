@@ -80,8 +80,3 @@ def ai_capabilities(app: Any) -> dict[str, Any]:
     ai_auth.require_chat()
     return ai_tools.capabilities(app)
 
-
-async def ai_models(provider: str, base_url: str | None, mode: StorageMode,
-                    session: str | None) -> dict[str, Any]:
-    """``GET /api/ai/models`` — models an endpoint serves (feeds the model dropdown)."""
-    return await ai_auth.discover_models(provider, base_url=base_url, mode=mode, session=session)

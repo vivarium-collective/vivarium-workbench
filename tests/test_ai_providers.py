@@ -1,9 +1,8 @@
 """Providers marimo offers that the workbench now has too: Ollama (local, no key, default
-base URL, model discovery) and OpenCode Go (OpenAI-compatible, fixed base URL, key).
+base URL) and OpenCode Go (OpenAI-compatible, fixed base URL, key).
 
-Real: the app + middleware, pydantic-ai + the OpenAI SDK, httpx discovery, keyring API.
-Stubbed: only the remote LLM/model-list servers (local HTTP servers). One test also probes
-the REAL opencode.ai /models endpoint (skipped when offline).
+Real: the app + middleware, pydantic-ai + the OpenAI SDK, keyring API.
+Stubbed: only the remote LLM (a local HTTP server).
 """
 import json
 import threading
@@ -29,8 +28,10 @@ class _MemKeyring(KeyringBackend):
     def __init__(self):
         super().__init__()
         self.store = {}
+        self.reads = []
 
     def get_password(self, s, u):
+        self.reads.append(u)
         return self.store.get((s, u))
 
     def set_password(self, s, u, p):
@@ -41,8 +42,8 @@ class _MemKeyring(KeyringBackend):
 
 
 class _Server:
-    """A local server speaking just enough of Ollama + OpenAI-compatible to be discovered
-    and to answer a 1-token completion. Records (method, path, Authorization)."""
+    """A local server speaking just enough OpenAI-compatible to answer a 1-token completion.
+    Records (method, path, Authorization)."""
 
     def __init__(self, require_key=None):
         self.seen = []
@@ -59,14 +60,6 @@ class _Server:
                 self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
                 self.wfile.write(raw)
-
-            def do_GET(self):
-                srv.seen.append(("GET", self.path, self.headers.get("Authorization", "")))
-                if self.path == "/api/tags":
-                    return self._send(200, {"models": [{"name": "qwen2.5-coder:7b"}, {"name": "llama3.1:8b"}]})
-                if self.path == "/v1/models":
-                    return self._send(200, {"object": "list", "data": [{"id": "zeta"}, {"id": "alpha"}]})
-                self._send(404, {"error": "nope"})
 
             def do_POST(self):
                 self.rfile.read(int(self.headers.get("Content-Length", 0)))
@@ -94,6 +87,8 @@ def _iso(tmp_path, monkeypatch):
     for env in ai_auth.ENV_KEYS.values():
         monkeypatch.delenv(env, raising=False)
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
     prev = keyring.get_keyring()
     backend = _MemKeyring()
@@ -101,6 +96,8 @@ def _iso(tmp_path, monkeypatch):
     yield backend
     keyring.set_keyring(prev)
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
 
 
@@ -177,55 +174,6 @@ def test_ollama_that_is_not_running_is_a_readable_502(_iso):
     assert r.status_code == 502 and "ollama serve" in r.json()["error"]
 
 
-def test_ollama_discovery_lists_tags_sorted(srv):
-    r = _client().get("/api/ai/models", params={"provider": "ollama", "base_url": srv.v1})
-    assert r.status_code == 200, r.text
-    assert r.json() == {"models": ["llama3.1:8b", "qwen2.5-coder:7b"], "source": srv.root + "/api/tags"}
-
-
-def test_discovery_uses_the_saved_base_url_when_none_is_given(srv):
-    c = _client()
-    ai_auth.save_credential("ollama", None, srv.v1, mode="keyring", session=None)
-    assert c.get("/api/ai/models", params={"provider": "ollama"}).json()["models"][0] == "llama3.1:8b"
-
-
-def test_openai_compatible_discovery_sends_the_saved_key_to_its_own_endpoint_only():
-    s = _Server()
-    try:
-        ai_auth.save_credential("openai-compatible", "sk-k-SAVEDKEY-0123456789abcdefgh", s.v1, mode="keyring", session=None)
-        c = _client()
-        r = c.get("/api/ai/models", params={"provider": "openai-compatible"})
-        assert r.json()["models"] == ["alpha", "zeta"]
-        assert ("GET", "/v1/models", "Bearer sk-k-SAVEDKEY-0123456789abcdefgh") in s.seen
-        # a DIFFERENT url passed by the caller must not receive the saved key
-        other = _Server()
-        try:
-            c.get("/api/ai/models", params={"provider": "openai-compatible", "base_url": other.v1})
-            assert all(a == "" for _, _, a in other.seen)
-        finally:
-            other.close()
-    finally:
-        s.close()
-
-
-def test_opencode_discovery_needs_no_key(srv, monkeypatch):
-    monkeypatch.setattr(ai_auth, "OPENCODE_BASE", srv.v1)
-    r = _client().get("/api/ai/models", params={"provider": "opencode"})
-    assert r.status_code == 200 and r.json()["models"] == ["alpha", "zeta"]
-    assert all(a == "" for _, _, a in srv.seen)
-
-
-def test_discovery_errors_are_typed_and_ssrf_guarded():
-    c = _client()
-    assert c.get("/api/ai/models", params={"provider": "anthropic"}).status_code == 404
-    assert c.get("/api/ai/models", params={"provider": "nope"}).status_code == 422
-    assert c.get("/api/ai/models", params={"provider": "ollama", "base_url": "http://127.0.0.1:9/v1"}).status_code == 502
-    hosted = _client("0.0.0.0")
-    for url in ("http://127.0.0.1:11434/v1", "https://169.254.169.254/v1"):
-        r = hosted.get("/api/ai/models", params={"provider": "ollama", "base_url": url})
-        assert r.status_code == 422, (url, r.text)
-
-
 # --- opencode: save/re-save with the fixed base URL -----------------------------
 
 
@@ -245,12 +193,60 @@ def test_opencode_saves_with_a_bearer_key_and_resaves_without_retyping_it(monkey
         s.close()
 
 
-def test_the_real_opencode_go_models_endpoint_is_reachable_and_public():
-    import httpx
+# --- keychain hygiene: no secret, no keychain access (macOS prompts on every foreign read) ------
+
+
+def test_ollama_endpoint_lives_in_ai_yaml_never_the_keychain(srv, _iso):
+    c = _client()
+    r = c.post("/api/ai/credentials", json={"provider": "ollama", "model": "m", "base_url": srv.v1})
+    assert r.status_code == 200 and r.json()["source"] == "config"
+    assert _iso.store == {} and _iso.reads == []                       # the keychain was never touched
+    assert srv.v1 in ai_auth.selection_path().read_text()               # a URL is not a secret
+    row = next(p for p in c.get("/api/ai/status").json()["providers"] if p["id"] == "ollama")
+    assert row["configured"] is True and row["source"] == "config" and row["base_url"] == srv.v1
+    assert c.get("/api/ai/status").json()["selected"] == {"provider": "ollama", "model": "m"}, "selection kept alongside the endpoint"
+    assert c.delete("/api/ai/credentials/ollama").status_code == 200
+    assert next(p for p in c.get("/api/ai/status").json()["providers"] if p["id"] == "ollama")["configured"] is False
+    assert _iso.store == {} and _iso.reads == []
+
+
+def test_status_reads_only_the_keychain_entries_this_app_saved(srv, _iso, monkeypatch):
+    c = _client()
+    c.get("/api/ai/status")
+    assert _iso.reads == [], "a fresh install must not touch the keychain at all"
+    s = _Server(require_key=OC_KEY)
+    monkeypatch.setattr(ai_auth, "OPENCODE_BASE", s.v1)
     try:
-        r = httpx.get(ai_auth.OPENCODE_BASE + "/models", timeout=8)
-    except httpx.HTTPError:
-        pytest.skip("offline")
-    assert r.status_code == 200
-    ids = [m["id"] for m in r.json()["data"]]
-    assert ids and all(isinstance(i, str) for i in ids)
+        assert c.post("/api/ai/credentials", json={"provider": "opencode", "model": "m", "api_key": OC_KEY}).status_code == 200
+    finally:
+        s.close()
+    assert ("vivarium-workbench-llm", "opencode") in _iso.store
+    _iso.reads.clear()
+    st = c.get("/api/ai/status").json()
+    assert set(_iso.reads) == {"opencode"}, _iso.reads                     # only the provider it saved
+    assert next(p for p in st["providers"] if p["id"] == "opencode")["source"] == "keyring"
+    assert c.delete("/api/ai/credentials/opencode").status_code == 200
+    assert _iso.store == {} and "opencode" not in (ai_auth._read_cfg().get("keyring") or [])
+
+
+def test_a_keychain_entry_is_read_once_per_process_and_a_refusal_is_not_retried(_iso, monkeypatch):
+    ai_auth.save_credential("openai-compatible", "sk-k-SAVEDKEY-0123456789abcdefgh", "https://example.com/v1",
+                            mode="keyring", session=None)
+    ai_auth._KR_CACHE.clear()
+    _iso.reads.clear()
+    for _ in range(5):                                            # the UI asks for status several times per page load
+        assert ai_auth.get_credential("openai-compatible", mode="keyring", session=None).source == "keyring"
+    assert _iso.reads == ["openai-compatible"], "one keychain read, not one per status call"
+
+    # the user refuses the macOS prompt -> the read raises; do not re-prompt on every poll
+    ai_auth._KR_CACHE.clear()
+    _iso.reads.clear()
+
+    def refused(s, u):
+        _iso.reads.append(u)
+        raise PermissionError("user denied")
+    monkeypatch.setattr(_iso, "get_password", refused)
+    for _ in range(5):
+        assert ai_auth.get_credential("openai-compatible", mode="keyring", session=None) is None
+    assert _iso.reads == ["openai-compatible"], "a refusal is remembered for KR_RETRY_S"
+

@@ -55,6 +55,8 @@ def _isolate(tmp_path, monkeypatch):
     for env in ai_auth.ENV_KEYS.values():
         monkeypatch.delenv(env, raising=False)
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
     prev = keyring.get_keyring()
     backend = _MemKeyring()
@@ -62,6 +64,8 @@ def _isolate(tmp_path, monkeypatch):
     yield backend
     keyring.set_keyring(prev)
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
 
 

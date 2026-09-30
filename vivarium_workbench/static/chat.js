@@ -23,6 +23,15 @@
   const PLACEHOLDER = 'Type your message...';
 
   // ── State ─────────────────────────────────────────────────────────────────
+  // History survives reloads, closed tabs and restarts on a loopback server (this browser, this
+  // machine). On any other host it stays in the tab (sessionStorage) because transcripts hold
+  // workspace data. Which chat a TAB is looking at is always per-tab (sessionStorage).
+  const LOCAL = ['localhost', '127.0.0.1', '[::1]', '::1'].indexOf(location.hostname) >= 0;
+  const durable = function () { try { return LOCAL ? localStorage : sessionStorage; } catch (x) { return null; } };
+  const ACTIVE_KEY = 'viv.chat.active';
+  const readDurable = function () {
+    try { const d = durable(); return JSON.parse((d && d.getItem(STORE_KEY)) || 'null'); } catch (x) { return null; }
+  };
   let store = loadStore();
   let state = C.restore(store.chats[store.active].snap);
   let status = null;              // GET /api/ai/status
@@ -48,13 +57,22 @@
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (x) { /* private mode */ } }
   function api(p) { return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p; }
   function loadStore() {
-    try { return C.storeRestore(JSON.parse(sessionStorage.getItem(STORE_KEY))); } catch (x) { return C.newStore(); }
+    try {
+      let saved = readDurable();
+      if (!saved && LOCAL) saved = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null');    // adopt this tab's pre-history store
+      return C.storeOpen(saved, sessionStorage.getItem(ACTIVE_KEY));
+    } catch (x) { return C.newStore(); }
   }
-  function save() {
+  function save(asIs) {
     C.storeUpsert(store, state);
     for (let attempt = 0; attempt < 2; attempt++) {
-      try { sessionStorage.setItem(STORE_KEY, JSON.stringify(store)); return; }
-      catch (x) { C.storePrune(store); if (attempt === 0) dropOldest(); }   // quota: shed history, retry once
+      try {
+        if (!asIs) store = C.storeMerge(store, readDurable());     // keep what other tabs saved
+        const d = durable();
+        if (d) d.setItem(STORE_KEY, JSON.stringify(store));
+        sessionStorage.setItem(ACTIVE_KEY, store.active);
+        return;
+      } catch (x) { C.storePrune(store); if (attempt === 0) dropOldest(); }   // quota: shed history, retry once
     }
   }
   function dropOldest() {
@@ -83,6 +101,9 @@
     clip: S('<path d="M21 12.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/>'),
     file: S('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
     chev: S('<path d="M6 9l6 6 6-6"/>', ' class="vp-chev"'),
+    chevr: S('<path d="M9 6l6 6-6 6"/>', ' class="vp-mm-chev"'),
+    brain: S('<path d="M12 5a3 3 0 1 0-5.9.8A3.5 3.5 0 0 0 5 12.5 3.5 3.5 0 0 0 8.5 19H12z"/><path d="M12 5a3 3 0 1 1 5.9.8A3.5 3.5 0 0 1 19 12.5 3.5 3.5 0 0 1 15.5 19H12z"/><path d="M12 5v14"/>'),
+    info: S('<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>'),
     chevs: S('<path d="M6 9l6 6 6-6"/>'),
     copy: S('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
     message: S('<path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12z"/>'),
@@ -153,8 +174,13 @@
       return '';
     }).join('');
     const waiting = isLast ? state.pending.length : 0;
+    const listed = waiting >= 2 ? state.pending.map(function (id) {
+      const t = C.findTool(state, id);
+      const a = t ? C.describeApproval(t) : null;
+      return '<li><code>' + e(a ? (a.method + ' ' + (a.path || a.title)).trim() : id) + '</code></li>';
+    }).join('') : '';
     const bulk = waiting >= 2
-      ? '<div class="vp-bulk"><span>' + waiting + ' actions are waiting for your approval</span>' +
+      ? '<div class="vp-bulk"><span>' + waiting + ' actions are waiting for your approval</span><ul class="vp-bulk-list">' + listed + '</ul>' +
         '<button class="vp-btn" data-act="deny-all">Deny all</button>' +
         '<button class="vp-btn vp-primary" data-act="approve-all">Approve all</button></div>' : '';
     return '<div class="vp-body">' + html + bulk + (busy ? '<span class="vp-typing"></span>' : '') + '</div>' +
@@ -256,6 +282,7 @@
   function closePop() {
     if (!pop) return;
     pop.node.remove();
+    (pop.subs || []).forEach(function (n) { n.remove(); });
     document.removeEventListener('mousedown', pop.off, true);
     pop = null;
   }
@@ -283,9 +310,12 @@
     node.classList.add('vp-pop');
     document.body.appendChild(node);
     place(node, anchor, opts);
-    const off = function (ev) { if (!node.contains(ev.target) && !anchor.contains(ev.target)) closePop(); };
+    const off = function (ev) {
+      const inSub = pop && (pop.subs || []).some(function (n) { return n.contains(ev.target); });
+      if (!node.contains(ev.target) && !anchor.contains(ev.target) && !inSub) closePop();
+    };
     document.addEventListener('mousedown', off, true);
-    pop = { node: node, off: off, anchor: anchor };
+    pop = { node: node, off: off, anchor: anchor, subs: [] };
     return node;
   }
   const div = (html) => { const d = document.createElement('div'); d.innerHTML = html; return d; };
@@ -294,6 +324,7 @@
   // the menu is a listbox flush under it. spec: {groups:[{id,label,color,mark,count,models:[{id,on}]}]
   // | items:[{id,label,desc,icon,on,disabled}], onPick(id, groupId), footer:{label,onClick}, empty}.
   function dropdown(trigger, spec) {
+    if (pop && pop.anchor === trigger) { closePop(); return null; }       // clicking the trigger again closes it
     closePop();
     const menu = document.createElement('div');
     menu.className = 'vp-dd'; menu.setAttribute('role', 'listbox');
@@ -353,30 +384,141 @@
     });
   }
 
-  // Provider endpoints that list their models (Ollama tags, OpenCode Go /models) are asked once
-  // per page load when the menu opens, so the dropdown fills itself without a trip to Settings.
-  const asked = {};
-  function autoDiscover(repaint) {
-    ((status && status.providers) || []).forEach(function (p) {
-      if (!p.configured || asked[p.id] || ['ollama', 'opencode'].indexOf(p.id) < 0) return;
-      asked[p.id] = true;
-      fetch(api('/api/ai/models?provider=' + encodeURIComponent(p.id)))
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (j) { if (j && j.models && j.models.length) { C.addKnown(p.id, j.models); repaint(); } }, function () {});
-    });
-  }
-  function openModelMenu(anchor) {
-    const paint = function () {
-      dropdown(anchor, {
-        groups: C.groupModels(status, C.loadKnown(), status && status.selected),
-        empty: 'No models yet — open AI Settings to add or discover some',
-        width: 280,
-        footer: { label: 'Add or edit models…', onClick: openSettings },
-        onPick: function (id, group) { selectModel(group, id); },
+  // marimo's model picker (its AIModelDropdown): the menu lists providers; a provider opens a
+  // submenu of its models (name, a brain for reasoning models, a bot for custom ones) with an
+  // info card on hover; "Enter a custom model" at the bottom takes `provider/model`.
+  // opts: {selected:{provider,model}|null, fallback: provider for a bare custom name, onPick(provider, model)}
+  function modelMenu(anchor, opts) {
+    if (pop && pop.anchor === anchor) { closePop(); return null; }
+    const badge = function (g) { return '<span class="vp-badge" style="background:' + e(g.color) + '">' + e(g.mark) + '</span>'; };
+    const tree = C.modelTree(window.VivAiModels, C.loadKnown(), opts.selected);
+    const sel = opts.selected && tree.reduce(function (f, g) {
+      return f || (g.id === opts.selected.provider ? g.models.filter(function (m) { return m.on; }).map(function (m) { return { g: g, m: m }; })[0] : null);
+    }, null);
+    const menu = document.createElement('div');
+    menu.className = 'vp-mm'; menu.setAttribute('role', 'menu');
+    menu.innerHTML =
+      (sel ? '<div class="vp-mm-cur">' + badge(sel.g) + '<span><b>' + e(sel.m.name) + '</b><small>' + e(sel.g.id + '/' + sel.m.model) + '</small></span></div><hr>' : '') +
+      tree.map(function (g) {
+        return '<div class="vp-mm-prov" role="menuitem" tabindex="-1" data-p="' + e(g.id) + '">' + badge(g) +
+          '<span>' + e(g.label) + '</span>' + ICON.chevr + '</div>';
+      }).join('') +
+      '<hr><p class="vp-mm-h">Enter a custom model <span class="vp-mm-i" title="Models should include the provider prefix, e.g. \'ollama/qwen3.6:27b\'">' + ICON.info + '</span></p>' +
+      '<input class="vp-mm-input" type="text" placeholder="provider/model, e.g. ollama/qwen3.6:27b" autocomplete="off" spellcheck="false" aria-label="Custom model">';
+    openPop(anchor, menu, { width: 300, maxHeight: 460 });
+    menu.classList.add('vp-dd-menu');
+    const done = function (provider, model) { closePop(); opts.onPick(provider, model); };
+    let subNode = null, infoNode = null, openFor = null;
+    const dropSubs = function () {
+      [subNode, infoNode].forEach(function (n) { if (n) n.remove(); });
+      if (pop) pop.subs = []; subNode = infoNode = openFor = null;
+      menu.querySelectorAll('.vp-mm-prov.hi').forEach(function (r) { r.classList.remove('hi'); });
+    };
+    const side = function (node, ref, w) {          // to the right of `ref`, or to its left when there is no room
+      const r = ref.getBoundingClientRect();
+      node.style.width = w + 'px';
+      let left = r.right + 4; if (left + w > innerWidth - 8) left = r.left - w - 4;
+      node.style.left = Math.max(8, left) + 'px';
+      return r;
+    };
+    const showInfo = function (row, g, m) {
+      if (infoNode) infoNode.remove();
+      infoNode = document.createElement('div'); infoNode.className = 'vp-pop vp-mm-info';
+      infoNode.innerHTML = '<h4>' + e(m.name) + '</h4><code>' + e(m.model) + '</code>' +
+        (m.description ? '<p>' + e(m.description) + '</p>' : '') +
+        (m.thinking ? '<p class="vp-mm-think"><i></i>Supports thinking mode</p>' : '') +
+        '<div class="vp-mm-by">' + badge(g) + '<span>' + e(g.label) + '</span></div>';
+      document.body.appendChild(infoNode); pop.subs.push(infoNode);
+      const r = side(infoNode, subNode, 300);
+      infoNode.style.top = Math.max(8, Math.min(row.getBoundingClientRect().top - 4, innerHeight - infoNode.offsetHeight - 8)) + 'px';
+      void r;
+    };
+    const openSub = function (row) {
+      const g = tree.filter(function (t) { return t.id === row.getAttribute('data-p'); })[0];
+      if (!g || openFor === g.id) return;
+      dropSubs(); openFor = g.id; row.classList.add('hi');
+      subNode = document.createElement('div'); subNode.className = 'vp-pop vp-dd-menu vp-mm-sub'; subNode.setAttribute('role', 'menu');
+      subNode.innerHTML =
+        (g.description ? '<p class="vp-mm-desc">' + e(g.description) + (g.url ? '<br><br>For more information, see the <a href="' + e(g.url) +
+          '" target="_blank" rel="noopener noreferrer">provider details</a>.' : '') + '</p><hr>' : '') +
+        g.models.map(function (m) {
+          return '<div class="vp-mm-model' + (m.on ? ' on' : '') + '" role="menuitem" tabindex="-1" data-m="' + e(m.model) + '">' +
+            '<span class="vp-dd-check">' + (m.on ? ICON.check : '') + '</span>' + badge(g) + '<span class="vp-mm-name">' + e(m.name) + '</span>' +
+            (m.thinking ? '<span class="vp-mm-brain" title="Reasoning model">' + ICON.brain + '</span>' : '') +
+            (m.custom ? '<span class="vp-mm-bot" title="Custom model">' + ICON.bot + '</span>' +
+              '<button type="button" class="vp-mm-rm" data-rm="' + e(m.model) + '" title="Remove custom model" aria-label="Remove custom model">' + ICON.x + '</button>' : '') + '</div>';
+        }).join('');
+      document.body.appendChild(subNode); pop.subs.push(subNode);
+      const r = side(subNode, menu, 280);
+      subNode.style.maxHeight = Math.round(innerHeight * 0.4) + 'px';
+      subNode.style.top = Math.max(8, Math.min(row.getBoundingClientRect().top - 4, innerHeight - subNode.offsetHeight - 8)) + 'px';
+      void r;
+      subNode.addEventListener('mouseover', function (ev) {
+        const mr = ev.target.closest('.vp-mm-model');
+        if (!mr) return;
+        const m = g.models.filter(function (x) { return x.model === mr.getAttribute('data-m'); })[0];
+        if (m) showInfo(mr, g, m);
+      });
+      subNode.addEventListener('click', function (ev) {
+        const rm = ev.target.closest('[data-rm]');
+        if (rm) { ev.stopPropagation(); C.removeKnown(g.id, rm.getAttribute('data-rm')); closePop(); modelMenu(anchor, opts); return; }
+        const mr = ev.target.closest('.vp-mm-model');
+        if (mr) done(g.id, mr.getAttribute('data-m'));
       });
     };
-    paint();
-    autoDiscover(function () { if (pop && pop.anchor === anchor && pop.dd) paint(); });
+    menu.addEventListener('mouseover', function (ev) { const r = ev.target.closest('.vp-mm-prov'); if (r) openSub(r); });
+    menu.addEventListener('click', function (ev) { const r = ev.target.closest('.vp-mm-prov'); if (r) openSub(r); });
+    const input = menu.querySelector('.vp-mm-input');
+    input.addEventListener('focus', dropSubs);
+    input.addEventListener('keydown', function (ev) {
+      ev.stopPropagation();
+      if (ev.key === 'Escape') { closePop(); anchor.focus(); return; }
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      const q = C.parseQualified(input.value, opts.fallback);
+      if (!q || !q.provider) { input.classList.add('bad'); input.title = 'Use provider/model, e.g. ollama/qwen3.6:27b'; return; }
+      C.addKnown(q.provider, [q.model]);
+      done(q.provider, q.model);
+    });
+    input.addEventListener('input', function () { input.classList.remove('bad'); });
+    const provs = function () { return Array.prototype.slice.call(menu.querySelectorAll('.vp-mm-prov')); };
+    const models = function () { return subNode ? Array.prototype.slice.call(subNode.querySelectorAll('.vp-mm-model')) : []; };
+    const onKey = function (ev) {
+      if (!pop || pop.node !== menu) { document.removeEventListener('keydown', onKey, true); return; }
+      if (ev.target === input) return;
+      const inSub = models().indexOf(document.activeElement) >= 0;
+      const list = inSub ? models() : provs();
+      const cur = list.indexOf(document.activeElement);
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closePop(); anchor.focus(); }
+      else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(ev.key) >= 0) {
+        ev.preventDefault();
+        const i = C.nextIndex(cur, list.length, ev.key);
+        if (list[i]) { list[i].focus(); if (!inSub) openSub(list[i]); }
+      } else if (ev.key === 'ArrowRight' && !inSub && cur >= 0) { ev.preventDefault(); openSub(list[cur]); const f = models()[0]; if (f) f.focus(); }
+      else if (ev.key === 'ArrowLeft' && inSub) { ev.preventDefault(); const p = menu.querySelector('.vp-mm-prov.hi'); if (p) p.focus(); }
+      else if ((ev.key === 'Enter' || ev.key === ' ') && cur >= 0) {
+        ev.preventDefault();
+        if (inSub) done(openFor, list[cur].getAttribute('data-m'));
+        else { openSub(list[cur]); const f = models()[0]; if (f) f.focus(); }
+      } else if (ev.key === 'Tab') closePop();
+    };
+    document.addEventListener('keydown', onKey, true);
+    const first = provs()[0]; if (first) first.focus();
+    return menu;
+  }
+  window.VivAiModelMenu = modelMenu;
+  function openModelMenu(anchor) {
+    const cur = status && status.selected;
+    modelMenu(anchor, {
+      selected: cur, fallback: cur && cur.provider,
+      onPick: function (provider, model) {
+        const row = ((status && status.providers) || []).filter(function (x) { return x.id === provider; })[0];
+        if (row && row.configured) return selectModel(provider, model);
+        // marimo lets you pick any provider's model; here the provider still needs its key/endpoint
+        window.dispatchEvent(new CustomEvent('viv:ai-prefill', { detail: { provider: provider, model: model } }));
+        openSettings();
+      },
+    });
   }
   function selectModel(provider, model) {
     fetch(api('/api/ai/select'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -398,8 +540,8 @@
       const box = n.querySelector('#vp-caps');
       if (!box) return;
       box.innerHTML = c ? 'Reachable: <strong>' + c.reads + '</strong> read operations · <strong>' + c.writes +
-        '</strong> write operations (each needs your approval).<br>Withheld: GitHub auth, workspace/source switching, remote pushes, ' +
-        'package installs, downloads and streams.' : 'Capabilities are unavailable.';
+        '</strong> write operations (each needs your approval).<br>Withheld: pushing to a remote, GitHub auth, workspace/source switching, ' +
+        'downloads and streams.' : 'Capabilities are unavailable.';
     }, function () { const box = n.querySelector('#vp-caps'); if (box) box.textContent = 'Capabilities are unavailable.'; });
   }
 
@@ -472,8 +614,9 @@
       }
       list.innerHTML = res.groups.map(function (g, gi) {
         return (gi ? '<hr>' : '') + '<div class="vp-pop-h">' + e(g.group) + '</div>' + g.items.map(function (c) {
-          return '<button class="vp-pop-item' + (c.active ? ' on' : '') + '" data-chat="' + e(c.id) + '"><span class="vp-hist-row" style="width:100%">' +
-            '<span class="t">' + e(c.title) + '</span><span class="a">' + e(C.timeAgo(c.updatedAt)) + '</span></span></button>';
+          return '<div role="button" tabindex="0" class="vp-pop-item' + (c.active ? ' on' : '') + '" data-chat="' + e(c.id) + '"><span class="vp-hist-row" style="width:100%">' +
+            '<span class="t">' + e(c.title) + '</span><span class="a">' + e(C.timeAgo(c.updatedAt)) + '</span></span>' +
+            '<button type="button" class="vp-hist-del" data-del="' + e(c.id) + '" title="Delete this chat" aria-label="Delete this chat">' + ICON.x + '</button></div>';
         }).join('');
       }).join('');
     };
@@ -481,8 +624,23 @@
     q.addEventListener('input', paint);
     q.focus();
     n.addEventListener('click', function (ev) {
+      const del = ev.target.closest('[data-del]');
+      if (del) {
+        ev.stopPropagation();
+        const id = del.getAttribute('data-del');
+        if (id === store.active) { abortStream(); resetTransient(); }
+        if (C.storeDelete(store, id)) {
+          if (id === store.active) state = C.restore(store.chats[store.active].snap);
+          save(true); renderAll(); paint();
+        }
+        return;
+      }
       const b = ev.target.closest('[data-chat]'); if (!b) return;
       closePop(); switchChat(b.getAttribute('data-chat'));
+    });
+    n.addEventListener('keydown', function (ev) {
+      const b = ev.target.closest && ev.target.closest('[data-chat]');
+      if (b && ev.target === b && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); closePop(); switchChat(b.getAttribute('data-chat')); }
     });
   }
 
@@ -661,7 +819,7 @@
   const sizeKey = (d) => d === 'bottom' ? 'viv.ai.h' : 'viv.ai.w';
   function applySize() {
     const n = parseInt(lsGet(sizeKey(dock), ''), 10);
-    const size = n ? C.clampDock(dock, n, innerWidth, innerHeight) : (dock === 'bottom' ? 320 : 440);
+    const size = C.clampDock(dock, n || (dock === 'bottom' ? 320 : 440), innerWidth, innerHeight);
     panel.style.setProperty(dock === 'bottom' ? '--viv-ai-h' : '--viv-ai-w', size + 'px');
   }
   // Published on <html> so fixed-position/viewport-height layouts elsewhere leave room for the panel.
@@ -694,7 +852,7 @@
   function initResize() {
     const h = document.getElementById('viv-ai-resize');
     h.addEventListener('mousedown', function (ev) {
-      ev.preventDefault(); h.classList.add('dragging');
+      ev.preventDefault(); h.classList.add('dragging'); document.body.classList.add('vp-dragging');
       const r0 = panel.getBoundingClientRect();
       const move = function (m) {
         const raw = dock === 'left' ? m.clientX - r0.left : dock === 'right' ? r0.right - m.clientX : r0.bottom - m.clientY;
@@ -702,7 +860,7 @@
         panel.style.setProperty(dock === 'bottom' ? '--viv-ai-h' : '--viv-ai-w', size + 'px');
       };
       const up = function () {
-        h.classList.remove('dragging');
+        h.classList.remove('dragging'); document.body.classList.remove('vp-dragging');
         document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
         const r = panel.getBoundingClientRect();
         lsSet(sizeKey(dock), String(Math.round(dock === 'bottom' ? r.height : r.width)));
@@ -791,7 +949,6 @@
       })
       .then(function (s) { status = s; }, function () { status = { available: false, providers: [], error: 'Could not reach the server.' }; })
       .then(function () {
-        if (status.selected) C.addKnown(status.selected.provider, [status.selected.model]);
         renderAll();
         drainQueue();
       });
@@ -944,13 +1101,13 @@
     window.addEventListener('viv:ai-changed', function () { refreshStatus(); });
     initResize();
     initChipDrag();
-    if (window.ResizeObserver) new ResizeObserver(syncDockVars).observe(panel);
+    if (window.ResizeObserver) { const ro = new ResizeObserver(syncDockVars); ro.observe(panel); if (codeRail) ro.observe(codeRail); }
     window.addEventListener('resize', function () { applySize(); syncDockVars(); });
   }
 
   build();
   try { renderAll(); } catch (x) {
-    // A corrupted sessionStorage transcript must not take the panel down.
+    // A corrupted stored transcript must not take the panel down.
     store = C.newStore(); state = C.restore(store.chats[store.active].snap); save(); renderAll();
   }
   dockTo(dock, false);

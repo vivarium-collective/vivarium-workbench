@@ -88,6 +88,8 @@ def env(tmp_path, monkeypatch):
     app.state.bind_host = "0.0.0.0"            # hosted mode: memory-only, no keyring/disk
     app.dependency_overrides[appmod.get_workspace] = lambda: ws
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
     SEEN["instructions"].clear()
     ai_auth.save_credential("anthropic", KEY, None, mode="memory", session="tab-1")
@@ -95,6 +97,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(ai_auth, "build_model", lambda provider, model, cred: _fake_llm(app))
     yield TestClient(app), ws, app
     ai_auth._MEMORY.clear()
+    ai_auth._KR_CACHE.clear()
+    ai_auth._KR_FAILED.clear()
     ai_auth._SELECTION.clear()
 
 
