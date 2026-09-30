@@ -893,6 +893,10 @@ body.viv-rail-resizing-active{ cursor:col-resize !important; user-select:none; }
   width:18px; height:18px;
   display:block;
 }
+/* Multicolour rail glyphs (Fluent Emoji Flat): they carry their own colours, so no currentColor tint. */
+.viv-rail-link-svg.viv-rail-color{ width:20px; height:20px; flex:0 0 20px; }
+.viv-rail-link:not(.active) .viv-rail-color{ filter:saturate(.92); }
+
 .viv-rail-link-label{
   flex:1 1 auto; min-width:0;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
