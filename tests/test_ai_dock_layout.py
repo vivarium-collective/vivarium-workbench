@@ -34,23 +34,30 @@ def test_embeds_refit_and_focus_mode_hides_the_panel():
     assert "body.focus-mode .viv-ai-panel" in chat_css                       # a pop-out window has no room for it
 
 
-def test_the_panel_publishes_its_footprint_and_defaults_to_left():
+def test_the_panel_publishes_its_footprint_and_defaults_to_right():
     js = (STATIC / "chat.js").read_text()
     for var in ("--viv-ai-left", "--viv-ai-right", "--viv-ai-bottom", "--viv-ai-rw"):
         assert var in js
-    assert "lsGet('viv.ai.dock', 'left')" in js
+    assert "lsGet('viv.ai.dock', 'right')" in js                            # chat + code both default to the right dock
     assert "draggable', 'false'" in js and "pointercancel" in js            # the native link drag must never strand the ghost
 
 
-def test_the_panel_and_its_rail_tab_are_called_viva():
+def test_both_panels_default_to_the_right_dock():
+    assert "lsGet('viv.ai.dock', 'right')" in (STATIC / "chat.js").read_text()
+    assert "defaultDock: 'right'" in (STATIC / "process-code.js").read_text()
+
+
+def test_the_rail_tab_is_called_chat_and_the_panel_keeps_the_viva_name():
     html = (STATIC.parent / "templates" / "index.html.j2").read_text()
     rail = html[html.index('id="viv-ai-toggle"'):][:900]
-    assert 'title="VivaChat"' in rail and '<span class="viv-rail-link-label">VivaChat</span>' in rail
-    assert 'id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="VivaChat"' in html
+    # the LEFT-RAIL TAB is just "Chat" (pairs with the "Code" tab)
+    assert 'title="Chat"' in rail and '<span class="viv-rail-link-label">Chat</span>' in rail
     chat_js = (STATIC / "chat.js").read_text()
+    assert "el.toggle.title = 'Chat — click to toggle" in chat_js             # the tab's runtime tooltip
+    # the panel itself keeps the VivaChat name (product identity, not the tab)
+    assert 'id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="VivaChat"' in html
     assert '<span>VivaChat</span><span class="vp-spacer">' in chat_js         # panel header
     assert "<span>VivaChat</span>'" in chat_js                                 # drag ghost
-    assert "el.toggle.title = 'VivaChat — click to toggle" in chat_js          # the rail tab's tooltip (set at runtime)
 
 
 # ── The process-code panel is a dockable panel too, built on the same shared engine ──
