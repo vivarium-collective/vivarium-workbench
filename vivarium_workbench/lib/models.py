@@ -3490,6 +3490,14 @@ class AiStatusPayload(BaseModel):
     storage_mode: Literal["keyring", "memory"]
 
 
+class AiOllamaModelsPayload(BaseModel):
+    """``GET /api/ai/ollama-models`` — the models installed in an Ollama server (its
+    ``/api/tags``); ``source`` is the URL asked."""
+
+    models: list[str]
+    source: str
+
+
 class AiCredentialsRequest(BaseModel):
     """``POST /api/ai/credentials`` body. ``api_key`` (or ``base_url`` for
     ``openai-compatible``) is checked with one real 1-token request to ``model``

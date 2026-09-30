@@ -187,7 +187,7 @@ def _turn(client, **body):
     body.setdefault("messages", [])
     r = client.post("/api/chat/turn", json=body, headers=H)
     assert r.status_code == 200, r.text
-    return [json.loads(x) for x in r.text.splitlines()]
+    return [f for f in (json.loads(x) for x in r.text.splitlines()) if f.get("type") != "ping"]   # keep-alive, not content
 
 
 def _pause(client):

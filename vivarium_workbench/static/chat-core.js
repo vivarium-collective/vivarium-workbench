@@ -548,13 +548,18 @@
   // (static/ai-models.js, generated from marimo's llm-info) plus the user's custom models
   // (`known`, browser-local) and the selected model when it is neither. Providers with nothing
   // to list are omitted, as in marimo.
-  function modelTree(registry, known, selected) {
+  function modelTree(registry, known, selected, installed) {
     registry = registry || {};
+    installed = installed || {};
     return PROVIDERS.map(function (p) {
       var reg = registry[p.id] || {};
-      var models = (reg.models || []).map(function (m) {
-        return { model: m.model, name: m.name || m.model, description: m.description || '', thinking: !!m.thinking, custom: false };
-      });
+      var here = installed[p.id];          // {models:[names], note} — what THIS machine actually has (Ollama)
+      var models = here && Array.isArray(here.models)
+        ? here.models.filter(function (n) { return typeof n === 'string' && n; })
+            .map(function (n) { return { model: n, name: n, description: '', thinking: false, custom: false }; })
+        : (reg.models || []).map(function (m) {
+            return { model: m.model, name: m.name || m.model, description: m.description || '', thinking: !!m.thinking, custom: false };
+          });
       var have = {};
       models.forEach(function (m) { have[m.model] = true; });
       var extra = mergeModels(selected && selected.provider === p.id ? [selected.model] : [], known && known[p.id]);
@@ -563,10 +568,11 @@
       });
       models = customs.concat(models);
       models.forEach(function (m) { m.on = !!(selected && selected.provider === p.id && selected.model === m.model); });
-      return { id: p.id, label: p.label, color: p.color, mark: p.mark, description: reg.description || '',
-               url: reg.url || '', models: models };
-    }).filter(function (g) { return g.models.length > 0; });
+      return { id: p.id, label: p.label, color: p.color, mark: p.mark, description: here ? '' : (reg.description || ''),
+               url: reg.url || '', note: (here && here.note) || '', models: models, live: !!here };
+    }).filter(function (g) { return g.models.length > 0 || g.live; });   // a provider we asked about stays, with its note
   }
+
   // marimo qualifies custom models as "provider/model" (e.g. ollama/qwen3.6:27b). A first segment
   // that is not a known provider id means the whole text is the model, for `fallback`.
   function parseQualified(text, fallback) {

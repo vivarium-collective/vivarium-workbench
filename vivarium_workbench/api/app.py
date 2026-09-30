@@ -311,6 +311,7 @@ from vivarium_workbench.lib.models import (
     AiCapabilitiesPayload,
     AiCredentialsRequest,
     AiOkPayload,
+    AiOllamaModelsPayload,
     AiSelectRequest,
     AiStatusPayload,
     ChatTurnRequest,
@@ -7442,6 +7443,16 @@ def create_app() -> FastAPI:
     def ai_capabilities(request: Request) -> dict:
         _ai_scope(request)
         return _ai_views.ai_capabilities(request.app)
+
+    @app.get(
+        "/api/ai/ollama-models",
+        response_model=AiOllamaModelsPayload,
+        tags=["AI"],
+        summary="The models installed in the user's Ollama server (its /api/tags)",
+    )
+    async def ai_ollama_models(request: Request, base_url: str | None = None) -> dict:
+        mode, session = _ai_scope(request)
+        return await _ai_views.ai_ollama_models(base_url, mode, session)
 
     @app.post(
         "/api/ai/credentials",

@@ -503,3 +503,46 @@ async def check_key(provider: str, model: str, cred: Credential) -> None:
             hint = "is Ollama running? start it with `ollama serve`" if provider == "ollama" else "is the server running?"
             msg = f"could not connect to {where} — {hint} ({msg})"
         raise APIError(502, f"{provider} check failed: {msg}") from None
+
+
+# ---------------------------------------------------------------------------
+# Installed Ollama models (the model dropdown shows what the user actually has)
+# ---------------------------------------------------------------------------
+
+MAX_OLLAMA_MODELS = 200
+_MAX_TAGS_BYTES = 1_000_000
+
+
+async def list_ollama_models(*, base_url: str | None, mode: StorageMode, session: str | None) -> dict[str, Any]:
+    """The models installed in an Ollama server (its ``/api/tags``). Same SSRF rules as a save
+    (loopback ``http`` only on a local bind, public ``https`` on a hosted one), no redirects, no key
+    sent, response size capped. Ollama has no model catalogue to consult otherwise: marimo's static
+    list names models a given machine may never have pulled."""
+    require_chat()
+    import asyncio
+
+    import httpx
+
+    saved = await asyncio.to_thread(get_credential, "ollama", mode=mode, session=session)
+    raw = base_url or (saved.base_url if saved else None) or OLLAMA_DEFAULT
+    base = await asyncio.to_thread(_check_base_url, raw, mode)      # DNS + blocking: off the event loop
+    root = base[:-3] if base.endswith("/v1") else base
+    url = root.rstrip("/") + "/api/tags"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=False) as c:
+            async with c.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    raise APIError(502, f"{url} answered {resp.status_code}")
+                body = b""
+                async for chunk in resp.aiter_bytes():
+                    body += chunk
+                    if len(body) > _MAX_TAGS_BYTES:
+                        raise APIError(502, f"{url} answered with too much data")
+    except httpx.HTTPError as e:
+        raise APIError(502, f"could not reach Ollama at {root} — is it running? (`ollama serve`) ({e})") from None
+    try:
+        names = [m.get("name") for m in json.loads(body).get("models", [])]
+    except (ValueError, AttributeError):
+        raise APIError(502, f"{url} did not return a model list") from None
+    models = sorted({n[:200] for n in names if isinstance(n, str) and n})[:MAX_OLLAMA_MODELS]
+    return {"models": models, "source": url}

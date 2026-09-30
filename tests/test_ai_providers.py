@@ -61,6 +61,14 @@ class _Server:
                 self.end_headers()
                 self.wfile.write(raw)
 
+            def do_GET(self):
+                srv.seen.append(("GET", self.path, self.headers.get("Authorization", "")))
+                if self.path == "/api/tags":
+                    return self._send(200, {"models": [{"name": "qwen2.5-coder:7b"}, {"name": "llama3.1:8b"}, {"name": 5}]})
+                if self.path == "/big/api/tags":
+                    return self._send(200, {"models": [{"name": "x" * 2_000_000}]})
+                self._send(404, {"error": "nope"})
+
             def do_POST(self):
                 self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 auth = self.headers.get("Authorization", "")
@@ -282,3 +290,36 @@ def test_a_slow_keychain_does_not_freeze_the_event_loop(monkeypatch):
         await t
         return max(gaps)
     assert asyncio.run(go()) < 0.2, "the event loop was blocked by the keychain lookup"
+
+
+# --- installed Ollama models: what the dropdown lists for Ollama --------------------------------
+
+
+def test_ollama_models_are_the_installed_ones_sorted_and_no_key_is_sent(srv):
+    r = _client().get("/api/ai/ollama-models", params={"base_url": srv.v1})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"models": ["llama3.1:8b", "qwen2.5-coder:7b"], "source": srv.root + "/api/tags"}
+    assert srv.seen == [("GET", "/api/tags", "")]                       # junk entries dropped, no Authorization
+
+
+def test_ollama_models_use_the_saved_endpoint_when_none_is_given(srv):
+    ai_auth.save_credential("ollama", None, srv.v1, mode="keyring", session=None)
+    assert _client().get("/api/ai/ollama-models").json()["models"][0] == "llama3.1:8b"
+
+
+def test_ollama_not_running_is_a_readable_502():
+    r = _client().get("/api/ai/ollama-models", params={"base_url": "http://127.0.0.1:9/v1"})
+    assert r.status_code == 502 and "ollama serve" in r.json()["error"]
+
+
+def test_ollama_models_reject_an_oversized_reply(srv):
+    r = _client().get("/api/ai/ollama-models", params={"base_url": srv.v1.replace("/v1", "/big/v1")})
+    assert r.status_code == 502 and "too much data" in r.json()["error"]
+
+
+def test_ollama_models_on_a_hosted_server_are_ssrf_guarded():
+    hosted = _client("0.0.0.0")
+    for url in ("http://127.0.0.1:11434/v1", "https://169.254.169.254/v1", "https://[::1]/v1"):
+        r = hosted.get("/api/ai/ollama-models", params={"base_url": url})
+        assert r.status_code == 422, (url, r.text)
+

@@ -391,7 +391,7 @@
   function modelMenu(anchor, opts) {
     if (pop && pop.anchor === anchor) { closePop(); return null; }
     const badge = function (g) { return '<span class="vp-badge" style="background:' + e(g.color) + '">' + e(g.mark) + '</span>'; };
-    const tree = C.modelTree(window.VivAiModels, C.loadKnown(), opts.selected);
+    const tree = C.modelTree(window.VivAiModels, C.loadKnown(), opts.selected, opts.installed);
     const sel = opts.selected && tree.reduce(function (f, g) {
       return f || (g.id === opts.selected.provider ? g.models.filter(function (m) { return m.on; }).map(function (m) { return { g: g, m: m }; })[0] : null);
     }, null);
@@ -439,6 +439,7 @@
       dropSubs(); openFor = g.id; row.classList.add('hi');
       subNode = document.createElement('div'); subNode.className = 'vp-pop vp-dd-menu vp-mm-sub'; subNode.setAttribute('role', 'menu');
       subNode.innerHTML =
+        (g.note ? '<p class="vp-mm-desc">' + e(g.note) + '</p><hr>' : '') +
         (g.description ? '<p class="vp-mm-desc">' + e(g.description) + (g.url ? '<br><br>For more information, see the <a href="' + e(g.url) +
           '" target="_blank" rel="noopener noreferrer">provider details</a>.' : '') + '</p><hr>' : '') +
         g.models.map(function (m) {
@@ -506,10 +507,33 @@
     const first = provs()[0]; if (first) first.focus();
     return menu;
   }
-  window.VivAiModelMenu = modelMenu;
+  // What the user's Ollama actually has installed (server asks its /api/tags). Ollama has no model
+  // catalogue, so a static list would name models this machine never pulled. Any failure is shown
+  // as a note in that provider's submenu rather than blocking the picker.
+  function ollamaInstalled(baseUrl) {
+    const ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 4000);
+    const q = baseUrl ? '?base_url=' + encodeURIComponent(baseUrl) : '';
+    return fetch(api('/api/ai/ollama-models' + q), { signal: ctl.signal })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return j; }); })
+      .then(function (j) { return { ollama: { models: j.models || [], note: (j.models || []).length ? '' : 'No models installed yet — run `ollama pull <model>`.' } }; },
+            function (err) { return { ollama: { models: [], note: (err && err.name === 'AbortError') ? 'Ollama did not answer — is it running? (`ollama serve`)' : String((err && err.message) || 'Ollama is not reachable') } }; })
+      .then(function (v) { clearTimeout(timer); return v; });
+  }
+  let opening = false;        // a second click while the installed-models lookup is in flight must not stack menus
+  function pickModel(anchor, ollamaUrl, build) {
+    if (pop && pop.anchor === anchor) return closePop();
+    if (opening) return;
+    opening = true;
+    const go = function (installed) { opening = false; build(installed); };
+    ollamaInstalled(ollamaUrl).then(go, function () { go({}); });
+  }
+  window.VivAiModelMenu = function (anchor, opts) {
+    pickModel(anchor, opts.ollamaUrl, function (installed) { modelMenu(anchor, Object.assign({}, opts, { installed: installed })); });
+  };
   function openModelMenu(anchor) {
     const cur = status && status.selected;
-    modelMenu(anchor, {
+    pickModel(anchor, '', function (installed) { modelMenu(anchor, {
+      installed: installed,
       selected: cur, fallback: cur && cur.provider,
       onPick: function (provider, model) {
         const row = ((status && status.providers) || []).filter(function (x) { return x.id === provider; })[0];
@@ -518,7 +542,7 @@
         window.dispatchEvent(new CustomEvent('viv:ai-prefill', { detail: { provider: provider, model: model } }));
         openSettings();
       },
-    });
+    }); });
   }
   function selectModel(provider, model) {
     fetch(api('/api/ai/select'), { method: 'POST', headers: { 'Content-Type': 'application/json' },

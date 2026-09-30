@@ -129,6 +129,7 @@
     var open = window.VivAiModelMenu;
     if (!open) return say('The model picker is unavailable (chat assets did not load).');
     open(el.model, {
+      ollamaUrl: el.provider.value === 'ollama' ? el.url.value.trim() : '',     // the endpoint being edited, not only the saved one
       selected: model ? { provider: el.provider.value, model: model } : null,
       fallback: el.provider.value,
       onPick: function (p, m) {

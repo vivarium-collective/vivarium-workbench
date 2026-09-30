@@ -443,3 +443,22 @@ console.log('test_chat_core: all passed');
   const rows = st.pending.map(id => { const t = C.findTool(st, id); return t ? C.describeApproval(t) : null; });
   assert.deepStrictEqual(rows.map(r => r && (r.method + ' ' + r.path)), ['POST /api/catalog-install', 'POST /api/study-create', null]);
 }
+
+// ── Ollama lists what is INSTALLED, not marimo's catalogue ──
+{
+  const registry = { ollama: { description: 'catalogue', models: [{ name: 'GLM 5.3', model: 'glm-5.3' }] }, anthropic: { models: [{ name: 'Opus', model: 'claude-opus-5-5' }] } };
+  const inst = { ollama: { models: ['qwen3.6:27b', 'nemotron-mini:latest', 7, ''], note: '' } };
+  const tree = C.modelTree(registry, { ollama: ['glm-5.3'] }, { provider: 'ollama', model: 'qwen3.6:27b' }, inst);
+  const oll = tree.find(g => g.id === 'ollama');
+  assert.deepStrictEqual(oll.models.map(m => m.model), ['glm-5.3', 'qwen3.6:27b', 'nemotron-mini:latest'],
+    'installed models replace the catalogue; a custom entry stays; junk is dropped');
+  assert(!oll.models.some(m => m.model === 'glm-5.3' && !m.custom), 'a catalogue model you do not have is not offered as installed');
+  assert(oll.models.find(m => m.model === 'qwen3.6:27b').on && !oll.models.find(m => m.model === 'qwen3.6:27b').custom);
+  assert.strictEqual(oll.description, '', 'the catalogue blurb is not shown for a live list');
+  assert(tree.find(g => g.id === 'anthropic').models.length === 1, 'other providers keep marimo\'s registry');
+  // Ollama down / empty: the provider stays, with the reason, instead of vanishing
+  const down = C.modelTree(registry, {}, null, { ollama: { models: [], note: 'Ollama did not answer' } }).find(g => g.id === 'ollama');
+  assert(down && down.models.length === 0 && down.note === 'Ollama did not answer' && down.live);
+  // no lookup at all -> the registry, as before
+  assert.strictEqual(C.modelTree(registry, {}, null).find(g => g.id === 'ollama').models[0].model, 'glm-5.3');
+}

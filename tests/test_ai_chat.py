@@ -106,7 +106,8 @@ def _turn(client, **body):
     body.setdefault("messages", [])
     r = client.post("/api/chat/turn", json=body, headers=H)
     assert r.status_code == 200, r.text
-    return [json.loads(line) for line in r.text.splitlines()]
+    # `ping` is a transport keep-alive (sent after 15 s of silence, e.g. a starved CI worker), not content
+    return [f for f in (json.loads(line) for line in r.text.splitlines()) if f.get("type") != "ping"]
 
 
 def _types(frames):
