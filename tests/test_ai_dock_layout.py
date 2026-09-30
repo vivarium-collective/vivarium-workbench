@@ -45,9 +45,9 @@ def test_the_panel_publishes_its_footprint_and_defaults_to_left():
 def test_the_panel_and_its_rail_tab_are_called_viva():
     html = (STATIC.parent / "templates" / "index.html.j2").read_text()
     rail = html[html.index('id="viv-ai-toggle"'):][:900]
-    assert 'title="Viva"' in rail and '<span class="viv-rail-link-label">Viva</span>' in rail
-    assert 'id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="Viva"' in html
+    assert 'title="VivaChat"' in rail and '<span class="viv-rail-link-label">VivaChat</span>' in rail
+    assert 'id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="VivaChat"' in html
     chat_js = (STATIC / "chat.js").read_text()
-    assert '<span>Viva</span><span class="vp-spacer">' in chat_js         # panel header
-    assert "<span>Viva</span>'" in chat_js                                 # drag ghost
-    assert "el.toggle.title = 'Viva — click to toggle" in chat_js          # the rail tab's tooltip (set at runtime)
+    assert '<span>VivaChat</span><span class="vp-spacer">' in chat_js         # panel header
+    assert "<span>VivaChat</span>'" in chat_js                                 # drag ghost
+    assert "el.toggle.title = 'VivaChat — click to toggle" in chat_js          # the rail tab's tooltip (set at runtime)

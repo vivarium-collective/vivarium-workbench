@@ -1,10 +1,10 @@
 # Built-in AI chat
 
-An **AI panel docked on the left** of the dashboard by default (toggle it with **Viva** in the
+An **AI panel docked on the left** of the dashboard by default (toggle it with **VivaChat** in the
 left rail; there is no chat page). You bring your own provider and model; the assistant can do
 anything you can do by hand through the dashboard's own HTTP API **except push commits**, and
 **every change asks for your approval first**. Its layout and controls follow marimo's "AI"
-panel. Drag the panel's **Viva** chip (rail or header) onto the left, right or bottom edge to
+panel. Drag the panel's **VivaChat** chip (rail or header) onto the left, right or bottom edge to
 re-dock it, or use the header's **Move panel** menu; the choice and size are remembered per browser.
 
 This is optional: `pip install 'vivarium-workbench[chat]'`. Without the extra the rest of the
@@ -16,7 +16,7 @@ to drive the workbench from Claude Code; this is the path for users without it.
 
 The panel, top to bottom:
 
-- **Header** — "Viva" and a close ×. **Toolbar** — `+` new chat · provider status plug (red until a
+- **Header** — "VivaChat" and a close ×. **Toolbar** — `+` new chat · provider status plug (red until a
   provider + model are usable) · **gear = AI Settings** · clock = previous chats.
 - **Gear → AI Settings**: pick a provider, then the fields it needs, type or pick a model,
   **Save & test**. The server proves the endpoint/key with one real 1-token request before
