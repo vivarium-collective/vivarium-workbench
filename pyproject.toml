@@ -373,6 +373,7 @@ files = [
     "vivarium_workbench/lib/ai_views.py",
     "vivarium_workbench/lib/ai_tools.py",
     "vivarium_workbench/lib/ai_chat.py",
+    "vivarium_workbench/lib/ai_skills.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
