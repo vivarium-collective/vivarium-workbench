@@ -301,7 +301,7 @@ def test_dispatch_remote_pinned_blocks_when_generations_or_seeds_unset():
     # Blocks BEFORE the confirm()/POST — never asks the user to confirm a
     # dispatch that's going to be rejected anyway.
     i_guard = block.index("missing.length")
-    i_confirm = block.index("confirm(msg)")
+    i_confirm = block.index("_confirmModal(msg)")
     i_post = block.index("/api/remote-run-submit")
     assert i_guard < i_confirm < i_post
     assert "Cannot dispatch:" in block
@@ -311,7 +311,7 @@ def test_dispatch_remote_pinned_blocks_when_generations_or_seeds_unset():
 def test_dispatch_remote_pinned_confirm_shows_resolved_generations_and_seeds():
     block = _dispatch_remote_pinned_block(_js_text())
     i_msg = block.index("var msg =")
-    i_confirm = block.index("confirm(msg)")
+    i_confirm = block.index("_confirmModal(msg)")
     msg_block = block[i_msg:i_confirm]
     assert "generations:" in msg_block
     assert "seeds:" in msg_block
