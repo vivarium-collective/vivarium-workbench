@@ -6967,21 +6967,36 @@
     var railLeft = rail.getBoundingClientRect().left;
     var lastW = _vivRailSavedWidth();
 
+    // mousemove fires far faster than the display refreshes; writing --rail-w on
+    // every event forces a synchronous reflow of the whole rail each time, which on
+    // a workspace with a large study list (e.g. sms-ecoli) makes the drag stutter.
+    // Coalesce to at most ONE style write per animation frame: mousemove only records
+    // the target state (cheap), and rAF applies it. lastW is tracked synchronously so
+    // the saved width on mouse-up is always the latest pointer position.
+    var _raf = 0, _pending = null;
+    function _flush() {
+      _raf = 0;
+      if (!_pending) return;
+      if (_pending.collapsed) { rail.classList.add('viv-rail-collapsed'); }
+      else { rail.classList.remove('viv-rail-collapsed'); _vivRailApplyWidth(rail, _pending.w); }
+    }
     function _move(e) {
       var raw = e.clientX - railLeft;         // desired width: left edge → pointer
       if (raw < _RAIL_COLLAPSE_AT) {          // snap into the collapsed bar look
-        rail.classList.add('viv-rail-collapsed');
-        return;
+        _pending = { collapsed: true };
+      } else {
+        var w = Math.min(_RAIL_MAX, Math.max(_RAIL_MIN, raw));
+        if (Math.abs(w - _RAIL_NORMAL) <= _RAIL_SNAP) w = _RAIL_NORMAL;  // snap to normal
+        lastW = w;
+        _pending = { collapsed: false, w: w };
       }
-      rail.classList.remove('viv-rail-collapsed');
-      var w = Math.min(_RAIL_MAX, Math.max(_RAIL_MIN, raw));
-      if (Math.abs(w - _RAIL_NORMAL) <= _RAIL_SNAP) w = _RAIL_NORMAL;  // snap to normal
-      lastW = w;
-      _vivRailApplyWidth(rail, w);
+      if (!_raf) _raf = requestAnimationFrame(_flush);
     }
     function _up() {
       document.removeEventListener('mousemove', _move);
       document.removeEventListener('mouseup', _up);
+      if (_raf) { cancelAnimationFrame(_raf); _raf = 0; }
+      _flush();                               // apply the final pointer position now
       rail.classList.remove('viv-rail-resizing');
       document.body.classList.remove('viv-rail-resizing-active');
       var collapsed = rail.classList.contains('viv-rail-collapsed');
