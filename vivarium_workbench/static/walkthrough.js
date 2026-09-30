@@ -400,6 +400,7 @@
     if (!frame._fitBound) {
       window.addEventListener('resize', fit);
       window.addEventListener('viv:ai-layout', fit);      // the AI panel docked/undocked/resized
+      window.addEventListener('viv:panel-layout', fit);   // any dockable panel (chat OR code) changed
       frame._fitBound = true;
     }
   }

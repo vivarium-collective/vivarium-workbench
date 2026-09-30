@@ -5132,32 +5132,31 @@ body.col-resizing .registry-table.reg-table-fill th, body.col-resizing .registry
   position:relative; overflow:hidden;
   transition:flex-basis .18s ease, width .18s ease;
 }
-/* Collapsed → a thin edge with a vertical "Code" tab. */
-.viv-code-rail.viv-code-collapsed{
-  --viv-code-w:34px; flex-basis:34px; width:34px;
-}
 .viv-code-rail .viv-code-panel{ display:flex; flex-direction:column; height:100%; min-width:0; flex:1; }
-.viv-code-rail.viv-code-collapsed .viv-code-panel{ display:none; }
+/* Closed → out of the flex flow (launched from the left rail's Code tab, like the chat). */
+.viv-code-rail[hidden]{ display:none !important; }
 
-/* Edge tab — only visible when collapsed. */
-.viv-code-edge{
-  display:none; position:absolute; inset:0; width:34px;
-  border:0; background:transparent; cursor:pointer; padding:0;
-  color:var(--text-muted, #64748b);
+/* Dockable left / right / bottom via panel-dock.js (mirrors the chat panel's data-dock
+   rules). Default is right (border on the left, grip on the left edge). */
+.viv-code-rail[data-dock="left"]{ border-left:none; border-right:1px solid var(--border, #e2e6eb); }
+.viv-code-rail[data-dock="bottom"]{
+  flex:0 0 var(--viv-code-h, 320px); width:auto; height:var(--viv-code-h, 320px); min-height:0;
+  border-left:none; border-top:1px solid var(--border, #e2e6eb);
 }
-.viv-code-rail.viv-code-collapsed .viv-code-edge{ display:flex; align-items:center; justify-content:center; }
-.viv-code-edge:hover{ background:var(--hover, #f1f5f9); color:#2563eb; }
-.viv-code-edge-label{
-  writing-mode:vertical-rl; transform:rotate(180deg);
-  font-size:0.78rem; font-weight:600; letter-spacing:.06em; white-space:nowrap;
-  font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
-}
+/* The header is the drag handle. */
+.viv-code-head{ cursor:grab; }
+body.vp-dragging .viv-code-head{ cursor:grabbing; }
 
 .viv-code-resize-handle{
   position:absolute; top:0; left:0; bottom:0; width:6px;
   cursor:col-resize; z-index:6; background:transparent; transition:background .12s ease;
 }
 .viv-code-resize-handle:hover{ background:#c7d2fe; }
+/* Left dock → grip on the right edge; bottom dock → grip on the top edge. */
+.viv-code-rail[data-dock="left"] .viv-code-resize-handle{ left:auto; right:0; }
+.viv-code-rail[data-dock="bottom"] .viv-code-resize-handle{
+  left:0; right:0; top:0; bottom:auto; width:auto; height:6px; cursor:row-resize;
+}
 
 .viv-code-head{
   display:flex; align-items:flex-start; justify-content:space-between; gap:8px;
@@ -5216,13 +5215,15 @@ body.focus-mode .viv-code-rail{ display:none !important; }
    the in-flow code rail — so the source panel is invisible in fill-pane mode.
    Fix: leave room on the right for the rail, and pin the rail fixed ABOVE the
    card so its source shows beside the maximized graph (as it does un-maximized).
-   Scoped to `.viv-code-open` so a collapsed rail never steals width. --viv-code-w
-   is mirrored onto <body> by process-code.js so a resized rail stays in sync. */
+   Scoped to a RIGHT-docked open rail (`[data-dock="right"]`) — the only dock where the
+   fixed maximized card would paint over it. Left/bottom-docked rails stay in the flex
+   flow and need no pin. --viv-code-w is mirrored onto <body> by process-code.js so a
+   resized rail stays in sync. */
 body.pcard-maximized.viv-code-open .registry-entry-full.pcard-maximized{
   /* the code rail is pinned fixed beside the panel (--viv-ai-rw = its width when docked right) */
-  right: calc(var(--viv-code-w, 460px) + var(--viv-ai-rw, 0px)) !important;
+  right: calc(var(--viv-code-rw, 0px) + var(--viv-ai-rw, 0px)) !important;
 }
-body.pcard-maximized.viv-code-open .viv-code-rail{
+body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
   position:fixed; top:0; right:var(--viv-ai-rw, 0px); bottom:0;
   width:var(--viv-code-w, 460px);
   z-index:901;

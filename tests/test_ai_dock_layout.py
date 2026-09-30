@@ -51,3 +51,57 @@ def test_the_panel_and_its_rail_tab_are_called_viva():
     assert '<span>VivaChat</span><span class="vp-spacer">' in chat_js         # panel header
     assert "<span>VivaChat</span>'" in chat_js                                 # drag ghost
     assert "el.toggle.title = 'VivaChat — click to toggle" in chat_js          # the rail tab's tooltip (set at runtime)
+
+
+# ── The process-code panel is a dockable panel too, built on the same shared engine ──
+
+def test_shared_panel_dock_engine_exists_and_reuses_the_dock_math():
+    js = (STATIC / "panel-dock.js").read_text()
+    assert "VivPanelDock" in js and "function make" in js
+    assert "'--viv-' + key + '-' + suffix" in js                # per-key footprint vars on <html>
+    for call in ("V('left')", "V('right')", "V('rw')", "V('bottom')"):
+        assert call in js
+    assert "C.dropZone" in js and "C.clampDock" in js           # reuses chat-core's dock math
+    assert "draggable', 'false'" in js and "pointercancel" in js   # same anti-strand guards as the chat
+
+
+def test_process_code_panel_is_dockable_via_the_shared_engine():
+    js = (STATIC / "process-code.js").read_text()
+    assert "VivPanelDock.make" in js
+    assert "key: 'code'" in js
+    assert "resizeHandle: 'viv-code-resize-handle'" in js
+    assert "dragHandles: ['.viv-code-head']" in js
+
+
+def test_code_rail_has_a_left_rail_launcher_and_no_right_edge_tab():
+    html = TEMPLATE.read_text()
+    assert 'id="viv-code-toggle"' in html                       # launcher lives on the left nav rail
+    assert 'id="viv-code-edge"' not in html                     # the right-edge tab is gone
+    assert "viv-code-collapsed" not in html
+    assert 'id="viv-code-rail" class="viv-code-rail" aria-label="Process code" hidden' in html
+
+
+def test_code_rail_docks_in_css_and_layout_clears_a_bottom_code_dock():
+    css = (STATIC / "style.css").read_text()
+    assert ".viv-code-rail[hidden]" in css
+    assert '.viv-code-rail[data-dock="left"]' in css
+    assert '.viv-code-rail[data-dock="bottom"]' in css
+    # only a RIGHT-docked rail is pinned fixed beneath a maximized card
+    assert 'body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]' in css
+    # every viewport-height iframe leaves room for a bottom-docked code panel too
+    # (full expression, incl. nested var() parens, up to the style-attr delimiter)
+    html = TEMPLATE.read_text()
+    calcs = re.findall(r"calc\(100vh[^;\"']*", html)
+    missing = [c for c in calcs if "--viv-code-bottom" not in c]
+    assert not missing, f"100vh sites that ignore a bottom code dock: {missing}"
+    # embeds refit when ANY dockable panel (chat OR code) changes
+    assert "viv:panel-layout" in (STATIC / "walkthrough.js").read_text()
+    assert "--viv-code-bottom" in (STATIC / "composite-card.js").read_text()
+
+
+def test_dock_core_loads_before_the_panels_that_build_on_it():
+    html = TEMPLATE.read_text()
+    i_core = html.index("assets/chat-core.js")
+    i_dock = html.index("assets/panel-dock.js")
+    i_code = html.index("assets/process-code.js")
+    assert i_core < i_dock < i_code, "chat-core + panel-dock must load before process-code.js"

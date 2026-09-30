@@ -989,6 +989,18 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">VivaChat</span>
       </a>
+      <!-- Code: toggles the process-code panel (dockable left/right/bottom like the chat,
+           via panel-dock.js). Like VivaChat, NOT a .menu-link (page switches leave its
+           state alone) and live-only (hidden in the read-only snapshot). -->
+      <a href="#" id="viv-code-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Process code">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <polyline points="16 18 22 12 16 6"/>
+            <polyline points="8 6 2 12 8 18"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Code</span>
+      </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
            #viv-workspace-switcher). Hash route #github kept for back-compat. -->
@@ -1563,7 +1575,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
            .study-tabs (inside the iframe) actually sticks to the iframe top
            as the user scrolls through Overview → Build → … → Decide. -->
       <iframe id="investigation-study-embed-frame" src="" title="Study detail"
-              style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px)); min-height:600px;
+              style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px) - var(--viv-code-bottom, 0px)); min-height:600px;
                      border:0; display:block"></iframe>
     </div>
   </div>
@@ -1810,7 +1822,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
     <iframe id="study-detail-frame" src="" title="Study detail"
-            style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px)); min-height:560px; border:0; display:block"></iframe>
+            style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px) - var(--viv-code-bottom, 0px)); min-height:560px; border:0; display:block"></iframe>
   </div>
 </section>
 
@@ -2070,7 +2082,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <iframe id="composite-explore-frame"
               src="/bigraph-loom/index.html"
               title="Composite Explorer"
-              style="width:100%;height:calc(100vh - 84px - var(--viv-ai-bottom, 0px));min-height:520px;border:1px solid #ddd;background:#fff"></iframe>
+              style="width:100%;height:calc(100vh - 84px - var(--viv-ai-bottom, 0px) - var(--viv-code-bottom, 0px));min-height:520px;border:1px solid #ddd;background:#fff"></iframe>
     </div>
 
   </div>
@@ -2130,26 +2142,23 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   </div>
 </aside>
 
-<!-- RIGHT RAIL: process code — collapsible editable Python source for the
-       selected registry process/step. Global across tabs; collapsed by default
-       to a thin edge tab (see .viv-code-collapsed CSS + process-code.js). -->
-  <aside id="viv-code-rail" class="viv-code-rail viv-code-collapsed" aria-label="Process code">
-    <button class="viv-code-edge" id="viv-code-edge" type="button"
-            title="Show process code" aria-label="Show process code"
-            onclick="window.ProcessCode&&ProcessCode.toggle()">
-      <span class="viv-code-edge-label">&lt;/&gt; Code</span>
-    </button>
+<!-- PROCESS CODE PANEL: editable Python source for the selected registry
+       process/step. Global across tabs; a dockable panel (left/right/bottom, like
+       the chat) built on panel-dock.js, launched from the left rail's "Code" tab,
+       and hidden until opened. -->
+  <aside id="viv-code-rail" class="viv-code-rail" aria-label="Process code" hidden>
     <div class="viv-code-panel">
       <div class="viv-code-resize-handle" id="viv-code-resize-handle"
            role="separator" aria-orientation="vertical" aria-label="Resize code panel"
            title="Drag to resize"></div>
-      <div class="viv-code-head">
+      <!-- Header doubles as the drag handle: drag it to an edge to re-dock (panel-dock.js). -->
+      <div class="viv-code-head" title="Drag to dock left / right / bottom">
         <div class="viv-code-title">
           <strong id="viv-code-name">Code</strong>
           <code id="viv-code-addr" class="viv-code-addr"></code>
         </div>
-        <button class="viv-code-close" type="button" title="Collapse"
-                aria-label="Collapse code panel"
+        <button class="viv-code-close" type="button" title="Close"
+                aria-label="Close code panel"
                 onclick="window.ProcessCode&&ProcessCode.toggle()">&times;</button>
       </div>
       <!-- New-file bar: shown only while authoring a new artifact. -->
@@ -2529,6 +2538,11 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/aig-graph.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* aig-graph unavailable */"></script>
 <script src="assets/audit.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* audit view unavailable */"></script>
 <script src="assets/col-resize.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<!-- chat-core.js provides the shared dock math (VivChatCore); panel-dock.js the shared
+     dockable-panel engine (VivPanelDock). Both must load BEFORE process-code.js and
+     chat.js, which build their panels on them. -->
+<script src="assets/chat-core.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat/dock core unavailable */"></script>
+<script src="assets/panel-dock.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* dockable panels unavailable */"></script>
 <script src="assets/process-code.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* process-code panel unavailable */"></script>
 <script src="assets/perfetto-open.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* trace action unavailable */"></script>
 <script src="assets/sim-table.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
@@ -2546,7 +2560,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
-<script src="assets/chat-core.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
+<!-- chat-core.js already loaded above (shared by panel-dock.js + process-code.js). -->
 <script src="assets/ai-models.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
 <script src="assets/chat.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
 <script src="assets/ai-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* ai-login unavailable */"></script>

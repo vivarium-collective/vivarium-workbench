@@ -569,10 +569,13 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # would resolve to the same URL across workspaces, and a cached image from
     # a previous workspace could survive a switch back.
     _logo_rel = (dashboard_logo or "").removeprefix("assets/")
-    # The chat assets (docs/ai-chat.md) ride on the same stamp: their URLs must
-    # change when any of them does, or an edit to chat.js alone would be served
-    # stale from the browser cache.
-    _chat_stamp = max(int(_mtime(f)) for f in ("chat.js", "chat-core.js", "chat.css", "ai-login.js", "ai-models.js"))
+    # The chat + dockable-panel assets (docs/ai-chat.md) ride on the same stamp:
+    # their URLs must change when any of them does, or an edit to chat.js /
+    # panel-dock.js / process-code.js alone would be served stale from the cache.
+    _chat_stamp = max(int(_mtime(f)) for f in (
+        "chat.js", "chat-core.js", "chat.css", "ai-login.js", "ai-models.js",
+        "panel-dock.js", "process-code.js",
+    ))
     asset_version = (
         _mtime("walkthrough.js") + "_" + _mtime("style.css") + "_" + str(_chat_stamp)
         + ("_" + _mtime(_logo_rel) if _logo_rel else "")
