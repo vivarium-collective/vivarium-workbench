@@ -905,7 +905,7 @@
       let ghost = null, zones = null, zone = null, active = false;
       const mk = function () {
         ghost = document.createElement('div');
-        ghost.className = 'vp-ghost'; ghost.innerHTML = ICON.bot + '<span>AI</span>';
+        ghost.className = 'vp-ghost'; ghost.innerHTML = ICON.bot + '<span>Viva</span>';
         zones = document.createElement('div');
         zones.className = 'vp-zones';
         zones.innerHTML = ['left', 'right', 'bottom'].map(function (z) { return '<div class="vp-zone vp-zone-' + z + '" data-zone="' + z + '"><span>Dock ' + z + '</span></div>'; }).join('');
@@ -981,7 +981,7 @@
   // ── DOM ───────────────────────────────────────────────────────────────────
   function build() {
     root.innerHTML =
-      '<div class="vp-head" title="Drag to dock left, right or bottom"><span>AI</span><span class="vp-spacer"></span>' +
+      '<div class="vp-head" title="Drag to dock left, right or bottom"><span>Viva</span><span class="vp-spacer"></span>' +
         '<button class="vp-icon" data-act="dock" title="Move panel" aria-label="Move panel">' + ICON.dock + '</button>' +
         '<button class="vp-icon" data-act="close" title="Close" aria-label="Close">' + ICON.x + '</button></div>' +
       '<div class="vp-toolbar">' +
@@ -1120,7 +1120,7 @@
     }, true);
 
     el.toggle.addEventListener('click', function (ev) { ev.preventDefault(); if (justDragged) return; setOpen(panel.hidden); });
-    el.toggle.title = 'AI — click to toggle, drag to dock left, right or bottom';
+    el.toggle.title = 'Viva — click to toggle, drag to dock left, right or bottom';
     document.getElementById('viv-ai-back').addEventListener('click', closeSettings);
     window.addEventListener('viv:ai-changed', function () { refreshStatus(); });
     initResize();

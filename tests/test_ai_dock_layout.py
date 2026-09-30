@@ -40,3 +40,14 @@ def test_the_panel_publishes_its_footprint_and_defaults_to_left():
         assert var in js
     assert "lsGet('viv.ai.dock', 'left')" in js
     assert "draggable', 'false'" in js and "pointercancel" in js            # the native link drag must never strand the ghost
+
+
+def test_the_panel_and_its_rail_tab_are_called_viva():
+    html = (STATIC.parent / "templates" / "index.html.j2").read_text()
+    rail = html[html.index('id="viv-ai-toggle"'):][:900]
+    assert 'title="Viva"' in rail and '<span class="viv-rail-link-label">Viva</span>' in rail
+    assert 'id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="Viva"' in html
+    chat_js = (STATIC / "chat.js").read_text()
+    assert '<span>Viva</span><span class="vp-spacer">' in chat_js         # panel header
+    assert "<span>Viva</span>'" in chat_js                                 # drag ghost
+    assert "el.toggle.title = 'Viva — click to toggle" in chat_js          # the rail tab's tooltip (set at runtime)
