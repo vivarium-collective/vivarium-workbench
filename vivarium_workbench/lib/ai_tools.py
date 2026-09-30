@@ -24,7 +24,7 @@ import json
 import os
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -35,6 +35,7 @@ from fastapi import FastAPI
 from pydantic_ai import ApprovalRequired, RunContext
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 
+from vivarium_workbench.lib import ai_skills
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 # Operations the model must never see or call.
@@ -87,6 +88,7 @@ class ChatDeps:
     provider: str
     model: str
     mode: str = "agent"          # manual (no tools are registered) | ask (reads only) | agent
+    skills: dict[str, ai_skills.Skill] = field(default_factory=dict)   # discovered SKILL.md folders, this turn
 
 
 def make_client(app: FastAPI) -> httpx.AsyncClient:
@@ -482,4 +484,25 @@ def capabilities(app: FastAPI) -> dict[str, Any]:
     }
 
 
+async def list_skills(ctx: RunContext[ChatDeps]) -> dict[str, Any]:
+    """List the skills you can load: reusable step-by-step instructions (name, what it is for, and
+    what it needs beyond the workbench API)."""
+    return {"skills": ai_skills.summary(ctx.deps.skills)}
+
+
+async def load_skill(ctx: RunContext[ChatDeps], name: str) -> dict[str, Any]:
+    """Load one skill's full instructions by name (see list_skills), then follow them with your
+    tools. Load a skill before acting on a request it covers."""
+    skill = ctx.deps.skills.get(name)
+    if skill is None:
+        return {"error": f"unknown skill '{name}'", "available": sorted(ctx.deps.skills)}
+    try:
+        text = ai_skills.read_skill(skill)
+    except (OSError, UnicodeDecodeError) as e:
+        return {"error": f"could not read skill '{name}': {e.__class__.__name__}"}
+    return {"skill": skill.name, "needs": ai_skills.needs_label(skill),
+            "how_to_follow": ai_skills.HOW_TO_FOLLOW, "instructions": text}
+
+
 TOOLS = [list_operations, describe_operation, call_operation, wait_seconds]
+SKILL_TOOLS = [list_skills, load_skill]      # registered only when the workspace/user has skills

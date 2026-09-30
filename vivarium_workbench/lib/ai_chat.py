@@ -51,7 +51,7 @@ from pydantic_ai.run import AgentRunResultEvent
 from pydantic_ai.usage import UsageLimits
 from pydantic_core import to_jsonable_python
 
-from vivarium_workbench.lib import ai_auth, ai_tools
+from vivarium_workbench.lib import ai_auth, ai_skills, ai_tools
 from vivarium_workbench.lib.ai_auth import StorageMode
 from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.models import ChatTurnRequest
@@ -128,11 +128,31 @@ or Agent (read and write, with approval).
 """
 
 
-def build_instructions(mode: str) -> str:
+MAX_ORIENT_CHARS = 6_000
+
+
+def skills_prompt(skills: dict[str, ai_skills.Skill]) -> str:
+    """The skills the model may load, plus any ``*-orient`` gateway skill inlined (a plugin's
+    session-start orientation, the way Claude Code's start-up hook injects it)."""
+    if not skills:
+        return ""
+    lines = "\n".join(f"- {s.name}: {s.description or '(no description)'}" for s in sorted(skills.values(), key=lambda s: s.name))
+    out = ("\nSkills — reusable step-by-step instructions you can load with load_skill(name) (list_skills shows what "
+           "each needs beyond the workbench API). If a request matches a skill, load it first and follow it; "
+           "steps that need a shell or files, which you do not have, you hand back to the user:\n" + lines + "\n")
+    for s in skills.values():
+        if s.name.endswith("-orient"):
+            body = ai_skills.read_skill(s)[:MAX_ORIENT_CHARS]
+            out += f"\nOrientation ({s.name}):\n{body}\n"
+    return out
+
+
+def build_instructions(mode: str, skills: dict[str, ai_skills.Skill] | None = None) -> str:
     if mode == "manual":
         return f"{_BASE_PROMPT}\n{_MANUAL_PROMPT}"
     playbook = _WRITE_PLAYBOOK if mode == "agent" else _READ_PLAYBOOK
-    return f"{_BASE_PROMPT}\n{_TOOLS_PROMPT.format(write_rules=_WRITE_RULES[mode], playbook=playbook)}"
+    return (f"{_BASE_PROMPT}\n{_TOOLS_PROMPT.format(write_rules=_WRITE_RULES[mode], playbook=playbook)}"
+            + skills_prompt(skills or {}))
 
 
 @dataclass
@@ -183,7 +203,7 @@ class Turn:
             # transcript up to the failure (see the checkpoint below).
             with capture_run_messages() as captured:
                 try:
-                    instructions = build_instructions(self.mode)
+                    instructions = build_instructions(self.mode, self.deps.skills)
                     if self.include_manifest:
                         manifest = await _manifest(self.deps)
                         instructions += ("\nThe live workspace manifest follows (an orientation snapshot"
@@ -331,14 +351,16 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
     if body.prompt is not None:
         history = _repair_dangling(list(history))
     deferred = _deferred_results(body.deferred_results) if body.deferred_results is not None else None
+    # Skills: instructions the model can load. A hosted server never reads its own home directory for them.
+    skills = {} if body.mode == "manual" else ai_skills.discover(ws_root, local=(mode == "keyring"))
     agent: Agent[ai_tools.ChatDeps, str | DeferredToolRequests] = Agent(
         ai_auth.build_model(provider, model, cred),
         output_type=[str, DeferredToolRequests],
-        tools=[] if body.mode == "manual" else ai_tools.TOOLS,     # Manual = pure chat, no tools
+        tools=[] if body.mode == "manual" else ai_tools.TOOLS + (ai_tools.SKILL_TOOLS if skills else []),   # Manual = no tools
         deps_type=ai_tools.ChatDeps,
     )
     deps = ai_tools.ChatDeps(app=app, client=ai_tools.make_client(app), ws_root=ws_root,
-                             session_key=session, provider=provider, model=model, mode=body.mode)
+                             session_key=session, provider=provider, model=model, mode=body.mode, skills=skills)
     return Turn(agent=agent, deps=deps, history=list(history), prompt=body.prompt,
                 deferred=deferred, secrets=(cred.api_key or "",), mode=body.mode,
                 include_manifest=body.include_manifest)
