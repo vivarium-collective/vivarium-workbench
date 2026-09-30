@@ -6,6 +6,7 @@ Nothing returned from this module ever contains an API key.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from vivarium_workbench.lib import ai_auth
@@ -26,34 +27,37 @@ async def ai_save_credentials(body: AiCredentialsRequest, mode: StorageMode,
     1-token request, store it, and select the provider/model. The key is only
     stored after the provider accepted it."""
     ai_auth.require_chat()
+    # Everything that can block — keychain reads (macOS may show a prompt and wait for the user),
+    # DNS resolution for the hosted SSRF check, file writes — runs off the event loop, so a slow
+    # answer can't freeze every other request this server is handling.
+    off = asyncio.to_thread
     raw_key = body.api_key
     if body.provider == "opencode" and not (raw_key or "").strip():
         # fixed base URL => re-saving without retyping the key can't send it anywhere new
-        prior = ai_auth.get_credential("opencode", mode=mode, session=session)
+        prior = await off(ai_auth.get_credential, "opencode", mode=mode, session=session)
         if prior and prior.source in ("keyring", "memory"):
             raw_key = prior.api_key
-    api_key, base_url = ai_auth.validate_request(
-        body.provider, raw_key, body.base_url, mode=mode)
+    api_key, base_url = await off(
+        ai_auth.validate_request, body.provider, raw_key, body.base_url, mode=mode)
     # Re-saving an openai-compatible endpoint without retyping the key keeps the
     # saved key (the form never shows it) instead of silently dropping it.
     # ONLY for the same endpoint: sending the saved key to a different base_url
     # would hand it to whoever runs that host.
     if body.provider == "openai-compatible" and api_key is None:
-        existing = ai_auth.get_credential(body.provider, mode=mode, session=session)
+        existing = await off(ai_auth.get_credential, body.provider, mode=mode, session=session)
         if existing and existing.source in ("keyring", "memory") and existing.base_url == base_url:
             api_key = existing.api_key
     cred = ai_auth.Credential(api_key, base_url, "memory")
     if body.provider == "bedrock":
-        got = ai_auth.get_credential("bedrock", mode=mode, session=session)
+        got = await off(ai_auth.get_credential, "bedrock", mode=mode, session=session)
         if got is None:
             raise APIError(422, "no ambient AWS credentials found on the server")
         cred = got
     await ai_auth.check_key(body.provider, body.model, cred)
     source: str = "aws"
     if body.provider != "bedrock":
-        source = ai_auth.save_credential(
-            body.provider, api_key, base_url, mode=mode, session=session)
-    ai_auth.set_selection(body.provider, body.model, mode=mode, session=session)
+        source = await off(ai_auth.save_credential, body.provider, api_key, base_url, mode=mode, session=session)
+    await off(ai_auth.set_selection, body.provider, body.model, mode=mode, session=session)
     return {"ok": True, "provider": body.provider, "model": body.model, "source": source}
 
 

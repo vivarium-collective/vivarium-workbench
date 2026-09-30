@@ -250,3 +250,35 @@ def test_a_keychain_entry_is_read_once_per_process_and_a_refusal_is_not_retried(
         assert ai_auth.get_credential("openai-compatible", mode="keyring", session=None) is None
     assert _iso.reads == ["openai-compatible"], "a refusal is remembered for KR_RETRY_S"
 
+
+
+def test_a_slow_keychain_does_not_freeze_the_event_loop(monkeypatch):
+    """macOS shows a prompt and WAITS on a foreign keychain read; that must not stall every other request."""
+    import asyncio
+    import time
+
+    from vivarium_workbench.lib import ai_views
+    from vivarium_workbench.lib.models import AiCredentialsRequest
+
+    def slow(*a, **k):
+        time.sleep(0.4)
+        return None
+    monkeypatch.setattr(ai_auth, "get_credential", slow)
+
+    async def go():
+        gaps, stop = [], False
+
+        async def ticker():
+            last = time.monotonic()
+            while not stop:
+                await asyncio.sleep(0.02)
+                now = time.monotonic()
+                gaps.append(now - last)
+                last = now
+        t = asyncio.create_task(ticker())
+        with pytest.raises(APIError):          # opencode without a key: 422, after the (slow) keychain lookup
+            await ai_views.ai_save_credentials(AiCredentialsRequest(provider="opencode", model="m"), "keyring", None)
+        stop = True
+        await t
+        return max(gaps)
+    assert asyncio.run(go()) < 0.2, "the event loop was blocked by the keychain lookup"
