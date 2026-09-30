@@ -74,14 +74,14 @@ dependencies = [
     # [tool.uv.sources] git pin below stays for main-branch unification with the
     # sibling process-packages (see that section).
     "viva-superpowers>=0.23.0",
-    # viva-superpowers requires pbg-basic-processes, which is not yet on
+    # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
     # branch URL becomes part of this package's published metadata, and uv
-    # refuses to unify it with the bare `pbg-basic-processes` requirement coming
+    # refuses to unify it with the bare `viva-basic-processes` requirement coming
     # from viva-superpowers → "conflicting URLs" failures in any project that
     # depends on vivarium-dashboard transitively.
-    "pbg-basic-processes",
+    "viva-basic-processes",
     "investigation-contracts",
     # The ecosystem ledger. Distribution renamed viva-marketplace → viva-catalog
     # (it still ships the viva_marketplace import package as a shim).
@@ -89,7 +89,7 @@ dependencies = [
     # topic-discovered modules.json when installed (single source of truth for the
     # Registry/Marketplace tab); without it the dashboard falls back to
     # pbg-superpowers' stale bundled copy. Not on PyPI → bare here,
-    # git URL via [tool.uv.sources] below (same pattern as pbg-basic-processes).
+    # git URL via [tool.uv.sources] below (same pattern as viva-basic-processes).
     "viva-catalog",
     # Shared workspace-layout source of truth (WorkspacePaths, find_workspace_root,
     # study_dir, canonical-run outcomes, package naming). vivarium-workbench's
@@ -134,7 +134,7 @@ vivarium-dashboard = "vivarium_workbench.cli:main"
 vdash = "vivarium_workbench.cli:main"
 vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 
-# Git source for the bare pbg-basic-processes dependency (not on PyPI). uv reads
+# Git source for the bare viva-basic-processes dependency (not on PyPI). uv reads
 # this when vivarium-dashboard is the root project; consumers that depend on it
 # transitively supply the same URL via their own [tool.uv.sources]. This keeps
 # the URL OUT of the published metadata so it never conflicts with the bare
@@ -154,7 +154,7 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # to the same rev, not just this one. Drop the source + pin a PyPI floor once
 # viva-superpowers ships a release that requires viva-emitters.
 viva-superpowers = { git = "https://github.com/vivarium-collective/viva-superpowers.git", branch = "main" }
-pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git", branch = "main" }
+viva-basic-processes = { git = "https://github.com/vivarium-collective/viva-basic-processes.git", branch = "main" }
 viva-catalog = { git = "https://github.com/vivarium-collective/viva-marketplace.git", branch = "main" }
 viva-workspace = { git = "https://github.com/vivarium-collective/viva-workspace.git", branch = "main" }
 # investigation-contracts is declared bare in [project.dependencies] (kept out

@@ -3187,7 +3187,7 @@ class TestStudyDetailPageRoute:
             "variants": [
                 {
                     "name": "dnaa-baseline",
-                    "source": "pbg_basic_processes.composites.test.dummy",
+                    "source": "viva_basic_processes.composites.test.dummy",
                     "document": "./composites/dnaa-baseline.yaml",
                 },
             ],

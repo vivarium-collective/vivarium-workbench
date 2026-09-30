@@ -35,7 +35,7 @@ def ws(tmp_path: Path) -> Path:
         "variants": [
             {
                 "name": "dnaa-binding-baseline",
-                "source": "pbg_basic_processes.composites.test.dummy",
+                "source": "viva_basic_processes.composites.test.dummy",
                 "document": "./composites/dnaa-binding-baseline.yaml",
             },
         ],
