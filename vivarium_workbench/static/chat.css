@@ -268,3 +268,7 @@ body.snapshot #viv-ai-panel{ display:none !important; }
 .vp-dd-empty{ padding:10px 8px; color:var(--c-muted); }
 .vp-dd-foot{ margin-top:4px; padding:7px 8px 5px; border-top:1px solid var(--c-border); color:var(--c-accent); cursor:pointer; border-radius:0 0 4px 4px; }
 .vp-dd-foot:hover, .vp-dd-foot:focus-visible{ background:var(--c-chip); outline:none; }
+
+/* Approve all / Deny all (when a turn pauses on several actions) */
+.vp-bulk{ display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--c-muted); }
+.vp-bulk span{ margin-right:auto; }

@@ -18,9 +18,11 @@ See ``docs/ai-chat.md``.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
+import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -41,10 +43,12 @@ from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 #   * Downloads (tag, GET only): binary/HTML bodies. Binary reads tagged elsewhere
 #     are excluded by path below. (Downloads-tagged POSTs, e.g. figures-build, stay.)
 #   * Anything that changes what the server is bound to (workspace/source
-#     switching, other servers' start/stop), writes to a remote or under the
-#     user's remote identity (push, PR creation), or installs/uninstalls software
-#     on the host (arbitrary code execution) — approval on a card is not enough
-#     for those.
+#     switching, other servers' start/stop — the turn's workspace and audit
+#     invariants assume ONE workspace, and the reads there list other workspaces'
+#     paths) and anything that writes to a remote or under the user's remote
+#     identity (push, PR creation): the one thing the assistant may never do.
+#   * Registry/package installs (catalog-install, import-install, system-deps-install)
+#     are ordinary user actions and ARE reachable — behind the approval card.
 #   * The chat routes themselves (recursion) and the SSE streams (never terminate).
 # Deliberately NOT excluded: local git commits and run launches — approval-gated.
 # NOTE the approval rule is a *verb* test (non-GET), not a side-effect test: a GET
@@ -60,8 +64,6 @@ EXCLUDED_PATH_PREFIXES = (
 )
 EXCLUDED_PATHS = frozenset({
     "/api/branch/push", "/api/work-push", "/api/work-create-pr",
-    "/api/catalog-install", "/api/catalog-uninstall", "/api/import-install",
-    "/api/system-deps-install",
     "/api/simulation-run-download", "/api/study-analysis-zip",
     "/api/composite-run/{run_id}/download",
 })
@@ -299,19 +301,79 @@ def _resolve_path(template: str, path_params: dict[str, Any] | None) -> str | di
     return out
 
 
-def _shape(resp: httpx.Response) -> dict[str, Any]:
+_TOKEN = re.compile(r"\[(-?\d*)(:)?(-?\d*)\]|([^.\[\]]+)")
+
+
+def select_path(obj: Any, path: str | None) -> Any:
+    """A tiny path into a JSON value: dotted keys, ``[i]`` index, ``[a:b]`` slice, bare integer
+    segments for lists (``a.b[1].c``, ``processes[0:25]``, ``rows.2``). ``ValueError`` names
+    the keys/length that were available, so a model can correct itself."""
+    cur = obj
+    for m in _TOKEN.finditer((path or "").strip()):
+        a, colon, b, key = m.groups()
+        if key is not None:
+            if isinstance(cur, dict):
+                if key not in cur:
+                    raise ValueError(f"no key '{key}' (keys: {', '.join(list(cur)[:40])})")
+                cur = cur[key]
+            elif isinstance(cur, list):
+                try:
+                    cur = cur[int(key)]
+                except (ValueError, IndexError):
+                    raise ValueError(f"'{key}' is not a valid list index (length {len(cur)})") from None
+            else:
+                raise ValueError(f"'{key}': the value here is not an object or list")
+        elif not isinstance(cur, list):
+            raise ValueError("[...] needs a list, but the value here is not a list")
+        elif colon:
+            cur = cur[int(a) if a else None: int(b) if b else None]
+        else:
+            try:
+                cur = cur[int(a)]
+            except (ValueError, IndexError):
+                raise ValueError(f"list index {a or '?'} out of range (length {len(cur)})") from None
+    return cur
+
+
+def _describe(v: Any) -> str:
+    if isinstance(v, list):
+        return f"list[{len(v)}]"
+    if isinstance(v, dict):
+        return f"object[{len(v)} keys]"
+    return "null" if v is None else "boolean" if isinstance(v, bool) else \
+        "number" if isinstance(v, (int, float)) else "string"
+
+
+def _shape_of(body: Any) -> dict[str, str]:
+    if isinstance(body, dict):
+        return {k: _describe(v) for k, v in list(body.items())[:60]}
+    return {"(root)": _describe(body)}
+
+
+def _shape(resp: httpx.Response, select: str | None = None) -> dict[str, Any]:
     ctype = resp.headers.get("content-type", "")
+    out: dict[str, Any] = {"status": resp.status_code}
     if "json" in ctype:
         try:
-            text = json.dumps(resp.json(), separators=(",", ":"), default=str)
+            data = resp.json()
         except ValueError:
-            text = resp.text
-        out: dict[str, Any] = {"status": resp.status_code}
-        if len(text) > MAX_RESPONSE_CHARS:
-            return {**out, "truncated": True, "chars": len(text),
-                    "body_preview": text[:MAX_RESPONSE_CHARS]}
-        return {**out, "body": json.loads(text) if text[:1] in "{[" else text}
-    out = {"status": resp.status_code, "content_type": ctype, "bytes": len(resp.content)}
+            data = None
+        else:
+            if select:
+                try:
+                    data = select_path(data, select)
+                except ValueError as e:
+                    return {**out, "error": f"select failed: {e}"}
+            text = json.dumps(data, separators=(",", ":"), default=str)
+            if len(text) <= MAX_RESPONSE_CHARS:
+                return {**out, "body": data}
+            # Too big to show: give a map of it and how to read a part, not a blind cut.
+            return {**out, "truncated": True, "chars": len(text), "shape": _shape_of(data),
+                    "body_preview": text[:2000],
+                    "hint": f"{len(text)} chars is too large to return. Re-call with select='<key>[0:20]' "
+                            "(dotted keys, [i] index, [a:b] slice; keys are in `shape`) to read one part."}
+        return {**out, "body": resp.text[:MAX_RESPONSE_CHARS]}
+    out.update(content_type=ctype, bytes=len(resp.content))
     if ctype.startswith("text/"):
         out["text_preview"] = resp.text[:2000]
     return out
@@ -320,12 +382,14 @@ def _shape(resp: httpx.Response) -> dict[str, Any]:
 async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
                          path_params: dict[str, Any] | None = None,
                          query: dict[str, Any] | None = None,
-                         body: Any = None) -> dict[str, Any]:
+                         body: Any = None, select: str | None = None) -> dict[str, Any]:
     """Call one workbench API operation. GET runs immediately; every other
     method pauses until the user approves it (you'll be told if they decline).
     Pass ``path_params``, ``query`` and a JSON ``body`` exactly as
     ``describe_operation`` specifies. Check the returned ``status`` — a failed
-    operation can still come back as a normal result."""
+    operation can still come back as a normal result. A response over ~20k chars comes
+    back as a ``shape`` (its keys and sizes) instead of the data: re-call with ``select``
+    (a path like ``processes[0:25]`` or ``types.0``) to read just that part."""
     deps = ctx.deps
     e = get_index(deps.app).get(operation_id)
     if e is None:
@@ -377,10 +441,21 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
         raise
     if e["mutating"]:
         record_result(resp.status_code, "completed")
-    out = _shape(resp)
+    out = _shape(resp, select)
     if warning:
         out["audit_warning"] = warning
     return out
+
+
+MAX_WAIT_S = 30
+
+
+async def wait_seconds(ctx: RunContext[ChatDeps], seconds: float) -> dict[str, Any]:
+    """Pause for ``seconds`` (at most 30). Use it between polls of a running job instead of
+    calling the status endpoint back-to-back."""
+    s = max(0.0, min(float(seconds), MAX_WAIT_S))
+    await asyncio.sleep(s)
+    return {"waited": s}
 
 
 def capabilities(app: FastAPI) -> dict[str, Any]:
@@ -395,4 +470,4 @@ def capabilities(app: FastAPI) -> dict[str, Any]:
     }
 
 
-TOOLS = [list_operations, describe_operation, call_operation]
+TOOLS = [list_operations, describe_operation, call_operation, wait_seconds]

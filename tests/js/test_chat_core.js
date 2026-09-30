@@ -331,4 +331,23 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   delete globalThis.localStorage;
 }
 
+// ── Approve all / Deny all: one click answers every pending call, then the turn resumes ──
+{
+  const st = C.newState(); C.startUserTurn(st, 'do three things');
+  ['a', 'b', 'c'].forEach(id => {
+    C.applyFrame(st, { type: 'tool-call', tool_call_id: id, tool_name: 'call_operation', args: {} });
+    C.applyFrame(st, { type: 'approval-required', tool_call_id: id, tool_name: 'call_operation', args: {}, metadata: {} });
+  });
+  C.applyFrame(st, { type: 'done', pending_approval: true, messages: [{ m: 1 }] });
+  assert.strictEqual(st.pending.length, 3);
+  assert.strictEqual(C.decideAll(st, true), true);
+  assert.deepStrictEqual(st.decisions, { a: true, b: true, c: true });
+  assert.deepStrictEqual(st.ui[1].parts.map(p => p.status), ['running', 'running', 'running']);
+  const deny = C.newState(); C.startUserTurn(deny, 'x');
+  ['p', 'q'].forEach(id => { C.applyFrame(deny, { type: 'approval-required', tool_call_id: id, tool_name: 't', args: {}, metadata: {} }); });
+  C.decideAll(deny, false, 'no thanks');
+  assert.deepStrictEqual(deny.decisions, { p: { denied: 'no thanks' }, q: { denied: 'no thanks' } });
+  assert.strictEqual(C.decideAll(C.newState(), true), true, 'nothing pending is a no-op');
+}
+
 console.log('test_chat_core: all passed');

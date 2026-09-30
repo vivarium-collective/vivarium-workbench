@@ -218,7 +218,8 @@ def test_list_and_describe_operations(tmp_path):
 def test_response_shaping_truncates_and_summarises_non_json():
     big = httpx.Response(200, json={"a": "x" * (ai_tools.MAX_RESPONSE_CHARS + 10)})
     out = ai_tools._shape(big)
-    assert out["truncated"] is True and len(out["body_preview"]) == ai_tools.MAX_RESPONSE_CHARS
+    assert out["truncated"] is True and out["shape"] == {"a": "string"} and len(out["body_preview"]) == 2000
+    assert "select" in out["hint"]
     html = ai_tools._shape(httpx.Response(200, text="<p>hi</p>", headers={"content-type": "text/html"}))
     assert html == {"status": 200, "content_type": "text/html", "bytes": 9, "text_preview": "<p>hi</p>"}
     blob = ai_tools._shape(httpx.Response(200, content=b"\x00\x01", headers={"content-type": "application/zip"}))

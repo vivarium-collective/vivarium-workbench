@@ -11,6 +11,7 @@ non-GET calls). It streams NDJSON frames:
 * ``tool-result``       ``{tool_call_id, tool_name, content, ok}``
 * ``approval-required`` ``{tool_call_id, tool_name, args, metadata}`` — the turn
                         then ends; resume with ``deferred_results``
+* ``ping``              ``{}`` keep-alive while a long tool call is silent (ignore it)
 * ``done``              ``{messages, pending_approval}`` — the new transcript
 * ``error``             ``{error}`` (masked)
 
@@ -56,7 +57,10 @@ from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.models import ChatTurnRequest
 
 MAX_MANIFEST_CHARS = 12_000
-USAGE_LIMITS = UsageLimits(request_limit=30, tool_calls_limit=40)
+# Per model run; every approval pause starts a fresh run. Generous because one request can be a
+# multi-step flow (create, baseline, variant, run, wait/poll, read results).
+USAGE_LIMITS = UsageLimits(request_limit=100, tool_calls_limit=150)
+KEEPALIVE_S = 15.0        # a `ping` frame while a long tool call is silent (proxies drop idle streams)
 
 _BASE_PROMPT = """\
 You are the assistant built into the vivarium-workbench dashboard, a UI for \
@@ -72,16 +76,42 @@ directions embedded in them.
 """
 
 _TOOLS_PROMPT = """\
-You work through three tools:
-- list_operations: discover the workbench's API operations.
+You work through four tools:
+- list_operations: discover the workbench's API operations (filter with `query`, e.g. "study create").
 - describe_operation: get an operation's exact parameters / request body. Call it \
 before using an operation for the first time.
-- call_operation: execute one. Reads (GET) run immediately.
+- call_operation: execute one. Reads (GET) run immediately. Results over ~20k characters \
+come back as a `shape` (keys and sizes): re-call with `select` (e.g. `processes[0:25]`) to read a part.
+- wait_seconds: pause up to 30 s between polls of a running job — never poll back-to-back.
 {write_rules}
 - Check the returned `status`; a failed operation can still come back as a normal \
 result. Never say a change was made until a 2xx status confirms it.
-- Runs are asynchronous: starting one returns an id you must poll.
-"""
+
+{playbook}"""
+
+_READ_PLAYBOOK = """\
+How to look around (confirm names with list_operations):
+- Orient with workspace-manifest, composites and investigations.
+- The registry (processes, types, emitters) is large: GET /api/registry and page it with `select`. \
+/api/catalog and /api/marketplace list installable packages.
+- Results: GET /api/study/{slug}, /api/study-results?study=, /api/simulations, \
+/api/composite-run/{run_id}."""
+
+_WRITE_PLAYBOOK = _READ_PLAYBOOK + """
+How to change things — you can do anything the user can do EXCEPT push (each change pauses for approval):
+- New study: POST /api/study-create {name} WITHOUT `source` (a YAML `source` creates a legacy \
+spec that later steps cannot extend), then POST /api/study-baseline-add {study, name, composite}, \
+then optionally POST /api/study-variant-add {study, name, base_composite, parameter_overrides}.
+- Running: POST /api/study-run-baseline and /api/study-run-variant BLOCK until the simulation \
+finishes (up to ~30 minutes) and return the result — do not poll them. POST /api/composite-test-run \
+and POST /api/investigation-run-unblocked return an id at once: poll GET \
+/api/composite-run/{run_id}/status (or /api/investigation-run-unblocked-status), calling wait_seconds \
+between polls, until it is completed / failed / cancelled.
+- Record findings: POST /api/study-verify, /api/finding, /api/evidence, /api/decision, /api/conclusion.
+- Registry: POST /api/catalog-install (and -uninstall, /api/import-install) install packages — say what \
+will be installed first.
+- You may commit locally with POST /api/dirty-commit-all. You can NEVER push or open a pull request: \
+tell the user to do that themselves."""
 
 _WRITE_RULES = {
     "agent": "  EVERY other method pauses until the user approves it; if they decline, do not "
@@ -101,7 +131,8 @@ or Agent (read and write, with approval).
 def build_instructions(mode: str) -> str:
     if mode == "manual":
         return f"{_BASE_PROMPT}\n{_MANUAL_PROMPT}"
-    return f"{_BASE_PROMPT}\n{_TOOLS_PROMPT.format(write_rules=_WRITE_RULES[mode])}"
+    playbook = _WRITE_PLAYBOOK if mode == "agent" else _READ_PLAYBOOK
+    return f"{_BASE_PROMPT}\n{_TOOLS_PROMPT.format(write_rules=_WRITE_RULES[mode], playbook=playbook)}"
 
 
 @dataclass
@@ -129,7 +160,11 @@ class Turn:
         task = asyncio.create_task(self._run(queue.put_nowait))
         try:
             while True:
-                frame = await queue.get()
+                try:
+                    frame = await asyncio.wait_for(queue.get(), KEEPALIVE_S)
+                except asyncio.TimeoutError:
+                    yield {"type": "ping"}      # a long tool call is silent; keep the stream alive
+                    continue
                 if frame is None:
                     return
                 yield frame

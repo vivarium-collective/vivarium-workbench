@@ -300,9 +300,10 @@ def test_failure_to_record_the_result_is_a_warning_not_an_exception(tmp_path, mo
 
 
 @pytest.mark.parametrize("method,path", [
-    ("get", "/api/workspaces"), ("post", "/api/work-create-pr"), ("post", "/api/catalog-install"),
-    ("post", "/api/catalog-uninstall"), ("post", "/api/import-install"),
-    ("post", "/api/system-deps-install"), ("get", "/api/simulation-run-download"),
+    # NOTE registry installs (catalog-install/uninstall, import-install, system-deps-install) used to be
+    # here; they are ordinary user actions and are now reachable behind approval
+    # (tests/test_ai_automation.py::test_registry_installs_are_now_reachable...).
+    ("get", "/api/workspaces"), ("post", "/api/work-create-pr"), ("get", "/api/simulation-run-download"),
     ("get", "/api/study-analysis-zip"), ("get", "/api/composite-run/{run_id}/download"),
     ("get", "/api/study-export"),
 ])

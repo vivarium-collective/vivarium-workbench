@@ -108,7 +108,7 @@ def test_manual_mode_is_pure_chat_with_no_tools(env):
 def test_ask_mode_offers_only_read_operations_and_refuses_changes(env):
     client, ws, app = env
     frames = _turn(client, prompt="create a study", mode="ask")
-    assert set(SEEN["tools"][0]) == {"list_operations", "describe_operation", "call_operation"}
+    assert set(SEEN["tools"][0]) == {"list_operations", "describe_operation", "call_operation", "wait_seconds"}
     res = next(f for f in frames if f["type"] == "tool-result")["content"]
     assert "read-only" in res["error"].lower()
     assert "approval-required" not in [f["type"] for f in frames]     # refused outright, not asked

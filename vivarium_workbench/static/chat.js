@@ -146,7 +146,12 @@
       if (p.kind === 'notice') return '<div class="vp-notice">' + e(p.text) + '</div>';
       return '';
     }).join('');
-    return '<div class="vp-body">' + html + (busy ? '<span class="vp-typing"></span>' : '') + '</div>' +
+    const waiting = isLast ? state.pending.length : 0;
+    const bulk = waiting >= 2
+      ? '<div class="vp-bulk"><span>' + waiting + ' actions are waiting for your approval</span>' +
+        '<button class="vp-btn" data-act="deny-all">Deny all</button>' +
+        '<button class="vp-btn vp-primary" data-act="approve-all">Approve all</button></div>' : '';
+    return '<div class="vp-body">' + html + bulk + (busy ? '<span class="vp-typing"></span>' : '') + '</div>' +
       '<button class="vp-icon vp-copy" data-act="copy" title="Copy">' + ICON.copy + '</button>';
   }
 
@@ -517,6 +522,7 @@
     const splitter = C.createSplitter();
     let mutated = false;
     function handle(f) {
+      if (f.type === 'ping') return;          // keep-alive while a long tool call runs
       C.applyFrame(state, f);
       if (f.type === 'tool-result') {
         const last = state.ui[state.ui.length - 1];
@@ -603,6 +609,11 @@
   }
   function decide(id, approved) {
     const all = C.decide(state, id, approved);
+    save();
+    if (all) resume(); else renderAll();
+  }
+  function decideEvery(approved) {
+    const all = C.decideAll(state, approved);
     save();
     if (all) resume(); else renderAll();
   }
@@ -781,6 +792,8 @@
         case 'stop': abortStream(); break;
         case 'approve': if (host) decide(host.getAttribute('data-id'), true); break;
         case 'deny': if (host) decide(host.getAttribute('data-id'), false); break;
+        case 'approve-all': decideEvery(true); break;
+        case 'deny-all': decideEvery(false); break;
         case 'retry': retry(); break;
         case 'edit': if (!state.busy && !window.getSelection().toString()) { editing = +b.getAttribute('data-idx'); renderAll(); } break;
         case 'edit-cancel': editing = -1; renderAll(); break;

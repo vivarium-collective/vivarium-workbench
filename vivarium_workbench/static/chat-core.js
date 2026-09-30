@@ -163,6 +163,12 @@
     return state.pending.length === 0;
   }
 
+  // Answer EVERY pending approval the same way (the "Approve all / Deny all" click).
+  function decideAll(state, approved, reason) {
+    state.pending.slice().forEach(function (id) { decide(state, id, approved, reason); });
+    return state.pending.length === 0;
+  }
+
   function buildPromptRequest(state, prompt) {
     return { messages: state.transcript, prompt: prompt };
   }
@@ -537,7 +543,7 @@
 
   var api = {
     esc: esc, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
-    startResume: startResume, applyFrame: applyFrame, decide: decide,
+    startResume: startResume, applyFrame: applyFrame, decide: decide, decideAll: decideAll,
     buildPromptRequest: buildPromptRequest, buildResumeRequest: buildResumeRequest, canRetry: canRetry,
     retryBody: retryBody,
     statusLabel: statusLabel, describeApproval: describeApproval, snapshot: snapshot,
