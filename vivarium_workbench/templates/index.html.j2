@@ -1538,7 +1538,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
            .study-tabs (inside the iframe) actually sticks to the iframe top
            as the user scrolls through Overview → Build → … → Decide. -->
       <iframe id="investigation-study-embed-frame" src="" title="Study detail"
-              style="width:100%; height:calc(100vh - 220px); min-height:600px;
+              style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px)); min-height:600px;
                      border:0; display:block"></iframe>
     </div>
   </div>
@@ -1785,7 +1785,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
     <iframe id="study-detail-frame" src="" title="Study detail"
-            style="width:100%; height:calc(100vh - 220px); min-height:560px; border:0; display:block"></iframe>
+            style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px)); min-height:560px; border:0; display:block"></iframe>
   </div>
 </section>
 
@@ -2045,7 +2045,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <iframe id="composite-explore-frame"
               src="/bigraph-loom/index.html"
               title="Composite Explorer"
-              style="width:100%;height:calc(100vh - 84px);min-height:520px;border:1px solid #ddd;background:#fff"></iframe>
+              style="width:100%;height:calc(100vh - 84px - var(--viv-ai-bottom, 0px));min-height:520px;border:1px solid #ddd;background:#fff"></iframe>
     </div>
 
   </div>

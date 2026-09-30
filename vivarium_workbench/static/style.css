@@ -1917,8 +1917,9 @@ textarea.loom-in-field{
 body.pcard-maximized{ overflow:hidden; }
 .registry-entry-full.pcard-maximized{
   position:fixed !important;
-  top:0 !important; right:0 !important; bottom:0 !important;
-  left:var(--vw-rail-right, 240px) !important;
+  /* --viv-ai-left/right/bottom: room for the docked AI panel (0 when closed / docked elsewhere) */
+  top:0 !important; right:var(--viv-ai-right, 0px) !important; bottom:var(--viv-ai-bottom, 0px) !important;
+  left:calc(var(--vw-rail-right, 240px) + var(--viv-ai-left, 0px)) !important;
   width:auto !important; height:auto !important;
   max-width:none !important; z-index:900;
   margin:0 !important; border-radius:0;
@@ -5218,10 +5219,11 @@ body.focus-mode .viv-code-rail{ display:none !important; }
    Scoped to `.viv-code-open` so a collapsed rail never steals width. --viv-code-w
    is mirrored onto <body> by process-code.js so a resized rail stays in sync. */
 body.pcard-maximized.viv-code-open .registry-entry-full.pcard-maximized{
-  right: var(--viv-code-w, 460px) !important;
+  /* the code rail is pinned fixed beside the panel (--viv-ai-rw = its width when docked right) */
+  right: calc(var(--viv-code-w, 460px) + var(--viv-ai-rw, 0px)) !important;
 }
 body.pcard-maximized.viv-code-open .viv-code-rail{
-  position:fixed; top:0; right:0; bottom:0;
+  position:fixed; top:0; right:var(--viv-ai-rw, 0px); bottom:0;
   width:var(--viv-code-w, 460px);
   z-index:901;
 }

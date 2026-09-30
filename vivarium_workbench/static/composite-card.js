@@ -145,7 +145,8 @@
     var frame = card.querySelector('.ccard-loom-frame');
     if (frame) {
       var fr = frame.getBoundingClientRect();
-      frame.style.height = Math.max(360, window.innerHeight - fr.top - 16) + 'px';
+      var aiBottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--viv-ai-bottom')) || 0;
+      frame.style.height = Math.max(360, window.innerHeight - fr.top - 16 - aiBottom) + 'px';
       frame.style.maxHeight = 'none';
     }
   }

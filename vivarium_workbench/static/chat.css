@@ -272,3 +272,29 @@ body.snapshot #viv-ai-panel{ display:none !important; }
 /* Approve all / Deny all (when a turn pauses on several actions) */
 .vp-bulk{ display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--c-muted); }
 .vp-bulk span{ margin-right:auto; }
+
+/* ── Docks: the panel is a flex sibling left of / right of / below the content ── */
+.viv-ai-panel[data-dock="left"]{ border-left:none; border-right:1px solid var(--c-border); }
+.viv-ai-panel[data-dock="left"] .vp-resize{ left:auto; right:-3px; }
+.viv-ai-panel[data-dock="bottom"]{ flex:0 0 var(--viv-ai-h, 320px); width:auto; height:var(--viv-ai-h, 320px); min-height:0;
+  border-left:none; border-top:1px solid var(--c-border); }
+.viv-ai-panel[data-dock="bottom"] .vp-resize{ left:0; right:0; top:-3px; bottom:auto; width:auto; height:6px; cursor:row-resize; }
+body.focus-mode .viv-ai-panel, body.focus-mode #viv-ai-toggle{ display:none !important; }
+.vp-head{ cursor:grab; user-select:none; }
+.vp-head .vp-icon{ cursor:pointer; }
+
+/* Drag chip + drop zones (drag the AI item or the header to an edge to re-dock) */
+body.vp-dragging{ user-select:none; cursor:grabbing; }
+.vp-ghost{ position:fixed; z-index:3001; pointer-events:none; display:flex; align-items:center; gap:6px; padding:4px 12px 4px 8px;
+  border-radius:999px; background:#4f46e5; color:#fff; font:600 12px/1.4 -apple-system,"Segoe UI",sans-serif;
+  box-shadow:0 4px 14px rgba(0,0,0,.3); }
+.vp-ghost svg{ width:14px; height:14px; }
+.vp-zones{ position:fixed; inset:0; z-index:3000; pointer-events:none; }
+.vp-zone{ position:absolute; display:flex; align-items:center; justify-content:center; box-sizing:border-box;
+  border:2px dashed #6366f1; border-radius:8px; background:rgba(99,102,241,.06); color:#4f46e5;
+  font:600 13px/1.4 -apple-system,"Segoe UI",sans-serif; opacity:.75; transition:background .1s, opacity .1s; }
+.vp-zone.on{ background:rgba(99,102,241,.22); opacity:1; }
+.vp-zone-left{ left:0; top:0; bottom:28%; width:33%; }
+.vp-zone-right{ right:0; top:0; bottom:28%; width:33%; }
+.vp-zone-bottom{ left:0; right:0; bottom:0; height:28%; }
+:root[data-theme="dark"] .vp-zone{ color:#a5b4fc; border-color:#818cf8; }

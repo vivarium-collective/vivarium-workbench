@@ -541,6 +541,25 @@
     return k[provider];
   }
 
+  // ── Docking (PyCharm-style: the AI chip can dock left, right or bottom) ──────────────
+  var DOCKS = ['left', 'right', 'bottom'];
+  function validDock(d) { return DOCKS.indexOf(d) >= 0; }
+  // Which drop zone is the pointer over? Bottom band first, then the left/right thirds; the
+  // middle is "cancel". (Zones are shown as edge overlays while dragging.)
+  function dropZone(x, y, w, h) {
+    if (!(w > 0 && h > 0) || x < 0 || y < 0 || x > w || y > h) return null;
+    if (y > h * 0.72) return 'bottom';
+    if (x < w * 0.33) return 'left';
+    if (x > w * 0.67) return 'right';
+    return null;
+  }
+  // Panel thickness (width for left/right, height for bottom), kept usable at any window size.
+  function clampDock(dock, size, vw, vh) {
+    var n = Math.round(+size) || 0;
+    if (dock === 'bottom') return Math.max(160, Math.min(n, Math.max(160, Math.floor(vh * 0.7))));
+    return Math.max(340, Math.min(n, Math.min(720, Math.max(340, Math.floor(vw * 0.6)))));
+  }
+
   var api = {
     esc: esc, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
     startResume: startResume, applyFrame: applyFrame, decide: decide, decideAll: decideAll,
@@ -553,6 +572,7 @@
     storeRestore: storeRestore, storeList: storeList, storePrune: storePrune, titleOf: titleOf,
     mentionQuery: mentionQuery, insertMention: insertMention, contextItems: contextItems,
     PROVIDERS: PROVIDERS, providerMeta: providerMeta, mergeModels: mergeModels, groupModels: groupModels,
+    DOCKS: DOCKS, validDock: validDock, dropZone: dropZone, clampDock: clampDock,
     nextIndex: nextIndex, loadKnown: loadKnown, addKnown: addKnown, removeKnown: removeKnown,
     filterItems: filterItems, ATTACH: ATTACH, attachError: attachError, composePrompt: composePrompt,
   };

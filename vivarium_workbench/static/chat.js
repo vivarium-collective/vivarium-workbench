@@ -38,6 +38,11 @@
   };
   if (!C.validMode(prefs.mode)) prefs.mode = 'manual';
   const el = {};
+  // Docking: the panel is a flex sibling that can live left of, right of, or below the content.
+  const layout = document.querySelector('.viv-layout');
+  const mainEl = layout && layout.querySelector('.viv-main');
+  const codeRail = document.getElementById('viv-code-rail');
+  let dock = C.validDock(lsGet('viv.ai.dock', 'left')) ? lsGet('viv.ai.dock', 'left') : 'left';
 
   function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (x) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (x) { /* private mode */ } }
@@ -92,6 +97,7 @@
     denied: S('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
     down: S('<path d="M12 5v14M6 13l6 6 6-6"/>'),
     check: S('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+    dock: S('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),
   };
   const statusIcon = (s) => s === 'done' ? ICON.done : s === 'error' ? ICON.error : s === 'denied' ? ICON.denied : ICON.spin;
   const e = C.esc;
@@ -639,6 +645,7 @@
     el.toggle.classList.toggle('viv-ai-on', open);
     el.toggle.setAttribute('aria-pressed', open ? 'true' : 'false');
     lsSet('viv.ai.open', open ? '1' : '0');
+    syncDockVars();
     if (open) {
       refreshStatus().then(function () { if (el.card.hidden) { el.input.focus(); scrollDown(true); } });
     } else closePop();
@@ -650,20 +657,127 @@
   }
   function closeSettings() { el.card.hidden = true; refreshStatus(); }
 
+  // ── Docking ───────────────────────────────────────────────────────────────
+  const sizeKey = (d) => d === 'bottom' ? 'viv.ai.h' : 'viv.ai.w';
+  function applySize() {
+    const n = parseInt(lsGet(sizeKey(dock), ''), 10);
+    const size = n ? C.clampDock(dock, n, innerWidth, innerHeight) : (dock === 'bottom' ? 320 : 440);
+    panel.style.setProperty(dock === 'bottom' ? '--viv-ai-h' : '--viv-ai-w', size + 'px');
+  }
+  // Published on <html> so fixed-position/viewport-height layouts elsewhere leave room for the panel.
+  function syncDockVars() {
+    const r = panel.getBoundingClientRect(), on = !panel.hidden;
+    const root = document.documentElement.style;
+    root.setProperty('--viv-ai-left', on && dock === 'left' ? Math.round(r.width) + 'px' : '0px');
+    // distance from the viewport's right edge to the panel's left edge: includes whatever sits to its
+    // right (the code rail — collapsed edge tab or open panel), which fixed overlays must also clear
+    root.setProperty('--viv-ai-right', on && dock === 'right' ? Math.round(innerWidth - r.left) + 'px' : '0px');
+    // the panel's own width when docked right (the maximized-card + open-code-rail case pins the rail beside it)
+    root.setProperty('--viv-ai-rw', on && dock === 'right' ? Math.round(r.width) + 'px' : '0px');
+    root.setProperty('--viv-ai-bottom', on && dock === 'bottom' ? Math.round(r.height) + 'px' : '0px');
+    window.dispatchEvent(new CustomEvent('viv:ai-layout'));
+  }
+  function dockTo(zone, persist) {
+    if (!C.validDock(zone) || !layout || !mainEl) return;
+    closePop();
+    dock = zone;
+    panel.dataset.dock = zone;
+    if (zone === 'left') layout.insertBefore(panel, mainEl);
+    else if (zone === 'right') layout.insertBefore(panel, codeRail || null);
+    else mainEl.appendChild(panel);                       // below <main>, inside the flex column
+    applySize();
+    if (persist) lsSet('viv.ai.dock', zone);
+    syncDockVars();
+    if (!panel.hidden) scrollDown(true);
+  }
+
   function initResize() {
-    const w = parseInt(lsGet('viv.ai.w', ''), 10);
-    if (w >= 340 && w <= 720) panel.style.setProperty('--viv-ai-w', w + 'px');
     const h = document.getElementById('viv-ai-resize');
     h.addEventListener('mousedown', function (ev) {
       ev.preventDefault(); h.classList.add('dragging');
-      const right = panel.getBoundingClientRect().right;
-      const move = function (m) { panel.style.setProperty('--viv-ai-w', Math.max(340, Math.min(720, right - m.clientX)) + 'px'); };
+      const r0 = panel.getBoundingClientRect();
+      const move = function (m) {
+        const raw = dock === 'left' ? m.clientX - r0.left : dock === 'right' ? r0.right - m.clientX : r0.bottom - m.clientY;
+        const size = C.clampDock(dock, raw, innerWidth, innerHeight);
+        panel.style.setProperty(dock === 'bottom' ? '--viv-ai-h' : '--viv-ai-w', size + 'px');
+      };
       const up = function () {
         h.classList.remove('dragging');
         document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
-        lsSet('viv.ai.w', String(Math.round(panel.getBoundingClientRect().width)));
+        const r = panel.getBoundingClientRect();
+        lsSet(sizeKey(dock), String(Math.round(dock === 'bottom' ? r.height : r.width)));
       };
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    });
+  }
+
+  // Drag the AI chip (rail item or panel header) to an edge to re-dock it, like PyCharm's tool
+  // windows. A small movement threshold keeps a plain click a click. Esc cancels.
+  let justDragged = false;
+  function initChipDrag() {
+    const THRESH = 6;
+    function begin(ev, source) {
+      if (ev.button !== undefined && ev.button !== 0) return;
+      if (ev.target.closest && ev.target.closest('button')) return;      // header buttons keep their own clicks
+      const x0 = ev.clientX, y0 = ev.clientY;
+      let ghost = null, zones = null, zone = null, active = false;
+      const mk = function () {
+        ghost = document.createElement('div');
+        ghost.className = 'vp-ghost'; ghost.innerHTML = ICON.bot + '<span>AI</span>';
+        zones = document.createElement('div');
+        zones.className = 'vp-zones';
+        zones.innerHTML = ['left', 'right', 'bottom'].map(function (z) { return '<div class="vp-zone vp-zone-' + z + '" data-zone="' + z + '"><span>Dock ' + z + '</span></div>'; }).join('');
+        document.body.appendChild(zones); document.body.appendChild(ghost);
+      };
+      const move = function (m) {
+        if (!active) {
+          if (Math.hypot(m.clientX - x0, m.clientY - y0) < THRESH) return;
+          active = true; mk(); document.body.classList.add('vp-dragging');
+        }
+        ghost.style.left = (m.clientX + 10) + 'px'; ghost.style.top = (m.clientY + 10) + 'px';
+        zone = C.dropZone(m.clientX, m.clientY, innerWidth, innerHeight);
+        Array.prototype.forEach.call(zones.children, function (z) { z.classList.toggle('on', z.getAttribute('data-zone') === zone); });
+      };
+      const end = function (commit) {
+        document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up, true);
+        document.removeEventListener('pointercancel', cancel, true); window.removeEventListener('blur', cancel);
+        document.removeEventListener('keydown', key, true);
+        if (!active) return;
+        document.body.classList.remove('vp-dragging');
+        ghost.remove(); zones.remove();
+        justDragged = true; setTimeout(function () { justDragged = false; }, 0);   // swallow the click that follows a drag
+        if (commit && zone) { dockTo(zone, true); if (panel.hidden) setOpen(true); }
+      };
+      // The release position is authoritative (a fast flick may end far from the last pointermove).
+      const up = function (u) {
+        if (active && u && u.clientX !== undefined) zone = C.dropZone(u.clientX, u.clientY, innerWidth, innerHeight);
+        end(true);
+      };
+      const cancel = function () { end(false); };            // the browser took the gesture away: never stay stuck
+      const key = function (k) { if (k.key === 'Escape') { k.preventDefault(); end(false); } };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up, true);
+      document.addEventListener('pointercancel', cancel, true);
+      window.addEventListener('blur', cancel);
+      document.addEventListener('keydown', key, true);
+    }
+    // The rail item is an <a>: without this the browser starts a native link drag, which cancels
+    // the pointer events and would strand the ghost chip and drop zones on screen.
+    el.toggle.setAttribute('draggable', 'false');
+    el.toggle.addEventListener('dragstart', function (ev) { ev.preventDefault(); });
+    el.toggle.addEventListener('pointerdown', function (ev) { begin(ev, 'rail'); });
+    panel.querySelector('.vp-head').addEventListener('pointerdown', function (ev) { begin(ev, 'header'); });
+  }
+
+  function openDockMenu(anchor) {
+    const glyph = (d) => S('<rect x="3" y="4" width="18" height="16" rx="2"/>' +
+      (d === 'left' ? '<path d="M9 4v16"/>' : d === 'right' ? '<path d="M15 4v16"/>' : '<path d="M3 14h18"/>'));
+    dropdown(anchor, {
+      items: [['left', 'Dock left'], ['right', 'Dock right'], ['bottom', 'Dock bottom']].map(function (d) {
+        return { id: d[0], label: d[1], icon: glyph(d[0]), on: dock === d[0] };
+      }),
+      width: 180,
+      onPick: function (id) { dockTo(id, true); },
     });
   }
 
@@ -686,7 +800,9 @@
   // ── DOM ───────────────────────────────────────────────────────────────────
   function build() {
     root.innerHTML =
-      '<div class="vp-head"><span>AI</span><button class="vp-icon" data-act="close" title="Close" aria-label="Close">' + ICON.x + '</button></div>' +
+      '<div class="vp-head" title="Drag to dock left, right or bottom"><span>AI</span><span class="vp-spacer"></span>' +
+        '<button class="vp-icon" data-act="dock" title="Move panel" aria-label="Move panel">' + ICON.dock + '</button>' +
+        '<button class="vp-icon" data-act="close" title="Close" aria-label="Close">' + ICON.x + '</button></div>' +
       '<div class="vp-toolbar">' +
         '<button class="vp-icon" data-act="new" title="New chat" aria-label="New chat">' + ICON.plus + '</button><span class="vp-spacer"></span>' +
         '<button class="vp-icon" id="vp-plug" data-act="settings" aria-label="Provider status">' + ICON.plug + '</button>' +
@@ -778,6 +894,7 @@
       const host = b.closest('[data-id]');
       switch (act) {
         case 'close': setOpen(false); break;
+        case 'dock': openDockMenu(b); break;
         case 'new': newChat(); break;
         case 'settings': openSettings(); break;
         case 'history': openHistory(b); break;
@@ -821,10 +938,14 @@
       }
     }, true);
 
-    el.toggle.addEventListener('click', function (ev) { ev.preventDefault(); setOpen(panel.hidden); });
+    el.toggle.addEventListener('click', function (ev) { ev.preventDefault(); if (justDragged) return; setOpen(panel.hidden); });
+    el.toggle.title = 'AI — click to toggle, drag to dock left, right or bottom';
     document.getElementById('viv-ai-back').addEventListener('click', closeSettings);
     window.addEventListener('viv:ai-changed', function () { refreshStatus(); });
     initResize();
+    initChipDrag();
+    if (window.ResizeObserver) new ResizeObserver(syncDockVars).observe(panel);
+    window.addEventListener('resize', function () { applySize(); syncDockVars(); });
   }
 
   build();
@@ -832,6 +953,7 @@
     // A corrupted sessionStorage transcript must not take the panel down.
     store = C.newStore(); state = C.restore(store.chats[store.active].snap); save(); renderAll();
   }
+  dockTo(dock, false);
   window._openAiPanel = function () { setOpen(true); };
   if (lsGet('viv.ai.open', '0') === '1') setOpen(true);
 })();
