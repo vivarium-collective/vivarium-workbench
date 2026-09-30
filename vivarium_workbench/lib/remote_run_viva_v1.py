@@ -9,6 +9,7 @@ backend's opaque run ids (strings), carried as ``run_id``.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 import warnings
@@ -71,12 +72,13 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
         for err in errors:
             warnings.warn(f"remote_run_submit: {study!r} analysis config: {err.get('error')}")
 
-    with tempfile.TemporaryDirectory() as td:
-        pbg = Path(td) / "composite.pbg"
-        export_composite_pbg(ws_root, composite_id, pbg, overrides=params)
-        import json
-
-        document = json.loads(pbg.read_text(encoding="utf-8"))
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            pbg = Path(td) / "composite.pbg"
+            export_composite_pbg(ws_root, composite_id, pbg, overrides=params)
+            document = json.loads(pbg.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001 - the export's own reason (an unregistered process, a missing dep) IS the answer
+        return {"error": f"could not export composite {composite_id!r} as a document: {e}"}, 422
     try:
         run = _client().create_composite_run(
             environment=environment,

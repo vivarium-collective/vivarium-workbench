@@ -317,3 +317,14 @@ def test_run_remote_with_a_supplied_client_never_uses_the_run_surface(ws, stub, 
                         lambda *a, **k: type("R", (), {"summary": lambda self: "ok"})())
     remote_run.run_remote(ws, COMPOSITE, client=Legacy("http://127.0.0.1:1"), dest=tmp_path / "o", poll_interval=0.01)
     assert used and stub.calls_to("viva-create-composite-run") == []
+
+
+def test_a_composite_that_cannot_be_exported_is_a_422_with_the_reason_and_nothing_is_sent(
+        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+    (ws / "studies" / "demo" / "study.yaml").write_text(yaml.safe_dump({
+        "name": "demo", "schema_version": 3,
+        "baseline": [{"name": "core", "composite": "pbg_ws_increase_demo.composites.no-such", "params": {}}]}))
+    _name_backend(monkeypatch, stub.url)
+    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
+    assert res.status_code == 422 and "could not export composite" in res.json()["error"]
+    assert stub.calls_to("viva-create-composite-run") == []
