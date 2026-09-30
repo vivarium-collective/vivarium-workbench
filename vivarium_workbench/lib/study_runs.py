@@ -722,6 +722,16 @@ def run_study_baseline(ws_root, body):
     }
     dry_run = bool(body.get("dry_run"))
 
+    # A backend the operator NAMED (serve --backend-base-url) that runs documents via
+    # POST /viva/v1/composites: ANY baseline composite runs there, keyed by the workspace's
+    # composite (no simulator id exists to pin, and none is needed).
+    if not dry_run and remote_pinned.uses_viva_v1_dispatch(ws_root):
+        from vivarium_workbench.lib.remote_run_views import remote_run_submit
+        return remote_run_submit(ws_root, {
+            "study": name, "composite": spec_id,
+            "params": generator_overrides, "n_steps": params_n_steps,
+        })
+
     # item 83: on a deployment target, delegate to the ONE proven, real
     # remote-dispatch mechanism (remote_run_submit -> real POST
     # /api/v1/simulations, the same path "Run current spec" already uses when
@@ -1001,6 +1011,12 @@ def run_study_variant(ws_root, body):
             return {"error": str(e)}, 409
         # Remote-build guard — same as the baseline path above (SP-D2/G1, item 18).
         if plan.target == "deployment":
+            if remote_pinned.uses_viva_v1_dispatch(ws_root):
+                from vivarium_workbench.lib.remote_run_views import remote_run_submit
+                return remote_run_submit(ws_root, {
+                    "study": name, "composite": spec_id,
+                    "params": generator_overrides, "n_steps": params_n_steps,
+                })
             return {"error": "Study variant runs on a remote build are not available "
                              "on this path yet (SP-D/G1)."}, 409
         run_id = plan.run_id

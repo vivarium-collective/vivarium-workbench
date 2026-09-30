@@ -117,11 +117,14 @@ def _isolate_viva_api_base():
     scope wins over this); tests that want the *unconfigured* default must
     delete **both** names, which is what "unconfigured" has always meant.
     """
-    from vivarium_workbench.lib.sms_api_client import BACKEND_BASE_ENV_VARS
-
-    previous = {k: os.environ.get(k) for k in BACKEND_BASE_ENV_VARS}
+    previous = {k: os.environ.get(k) for k in ("VIVA_API_BASE", "SMS_API_BASE")}
     for k in previous:
         os.environ[k] = UNREACHABLE_VIVA_API_BASE
+    # The explicit name (``serve --backend-base-url``) outranks both aliases and opts a
+    # process into running on that backend: a developer's exported value must never leak
+    # into a test run, and tests that want it set it themselves (monkeypatch).
+    previous["VIVARIUM_WORKBENCH_BACKEND_BASE_URL"] = os.environ.pop(
+        "VIVARIUM_WORKBENCH_BACKEND_BASE_URL", None)
     try:
         yield UNREACHABLE_VIVA_API_BASE
     finally:

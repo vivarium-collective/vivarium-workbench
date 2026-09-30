@@ -125,10 +125,17 @@ def test_opaque_run_id_is_quoted_not_parsed(stub, client):
 
 # -- capability negotiation ------------------------------------------------
 
-def test_profile_composite_when_environments_and_composites_advertised(stub, client):
-    _advertise(stub, ["viva-v1-composites", "viva-v1-environments"], {"composites": True})
+def test_profile_document_when_composites_and_documents_advertised(stub, client):
+    _advertise(stub, ["viva-v1-composites", "viva-v1-composites-documents", "viva-v1-environments"],
+               {"composites": True})
     p = sc.backend_profile(client)
-    assert p["dispatch"] == sc.DISPATCH_COMPOSITE and p["services"] == {"composites": True}
+    assert p["dispatch"] == sc.DISPATCH_DOCUMENT and p["services"] == {"composites": True}
+
+
+def test_profile_legacy_when_composites_are_served_by_id_only(stub, client):
+    """A run surface without documents cannot run an arbitrary workspace composite."""
+    _advertise(stub, ["viva-v1-composites", "viva-v1-environments"])
+    assert sc.backend_profile(client)["dispatch"] == sc.DISPATCH_LEGACY
 
 
 def test_profile_document_on_a_standalone_core(stub, client):
@@ -166,16 +173,3 @@ def test_profile_reports_unreachable_without_raising():
     c = SmsApiClient("http://127.0.0.1:1", timeout=1, max_retries=1)
     p = sc.backend_profile(c)
     assert p["reachable"] is False and p["dispatch"] == sc.DISPATCH_LEGACY and p["error"]
-
-
-def test_environment_for_commit_prefers_the_primary_ready_row(stub, client):
-    row = lambda i, variant, status: {  # noqa: E731
-        "id": i, "spec_hash": "h", "kind": "explicit", "recipe": "r", "repo_url": "https://github.com/o/r",
-        "commit": "abc", "key": "abc", "variant": variant, "status": status, "temporary": False,
-        "created_at": "2026-01-01T00:00:00Z", "created_by": "t"}
-    stub.respond("GET", "/viva/v1/environments", 200, {
-        "environments": [row("e-amd", "amd64", "ready"), row("e-primary", "", "ready"), row("e-bad", "", "failed")],
-        "limit": 200, "offset": 0})
-    assert client.environment_for_commit("https://github.com/o/r.git", "abc")["id"] == "e-primary"
-    stub.respond("GET", "/viva/v1/environments", 200, {"environments": [row("e1", "", "building")], "limit": 200, "offset": 0})
-    assert client.environment_for_commit("https://github.com/o/r", "abc") is None

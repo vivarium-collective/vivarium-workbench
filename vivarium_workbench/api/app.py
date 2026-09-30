@@ -6798,6 +6798,14 @@ def create_app() -> FastAPI:
         if target != "deployment":
             return JSONResponse(content={"target": target, "ok": True, "reason": "local",
                                          "message": "This workspace runs locally — no push needed."})
+        from vivarium_workbench.lib import remote_pinned as _rp
+        if _rp.uses_viva_v1_dispatch(ws):
+            # The named backend runs the workspace's composites as documents: there is no
+            # cloud image to resolve, but a named-environment run ships the workspace from git.
+            pf = _remote_run.remote_dispatch_preflight(ws)
+            pf["target"] = "deployment"
+            pf["dispatch"] = "viva-v1-document"
+            return JSONResponse(content=pf)
         cloud = _ctr.resolve_cloud_target(ws, {})
         if isinstance(cloud, _ctr.CloudTarget):
             return JSONResponse(content={
@@ -7232,8 +7240,11 @@ def create_app() -> FastAPI:
         simulator_id: int = 0,
         simulation_id: int = 0,
         analysis_id: int = 0,
+        run_id: Union[str, None] = None,
     ) -> JSONResponse:
         params: dict = {}
+        if run_id:
+            params["run_id"] = run_id
         if simulation_id:
             params["simulation_id"] = simulation_id
         if simulator_id:
@@ -7245,13 +7256,19 @@ def create_app() -> FastAPI:
 
     @app.get("/api/remote-run-chain-progress", tags=["Runs"],
              summary="Real per-seed aggregate progress for a chain-dispatch campaign")
-    def remote_run_chain_progress(simulation_id: int = 0) -> JSONResponse:
+    def remote_run_chain_progress(
+        simulation_id: int = 0, run_id: Union[str, None] = None,
+    ) -> JSONResponse:
         """Backlog item 6: proxies viva-api's ``GET /simulations/{id}/chain-
         progress`` (real seed succeeded/failed/in-progress counts, PR #257) the
         same way ``/api/remote-run-poll`` proxies plain status. The JS panel
         polls this on a session-status.js-style interval — see
         ``lib.remote_run_views.remote_run_chain_progress`` for the full
-        rationale (polling, not SSE)."""
+        rationale (polling, not SSE). ``run_id`` is a /viva/v1 run's opaque id
+        (``--backend-base-url`` backends); ``simulation_id`` stays the legacy integer."""
+        if run_id:
+            body, status = _remote_run_views.remote_run_chain_progress({"run_id": run_id})
+            return JSONResponse(status_code=status, content=body)
         if not simulation_id:
             return JSONResponse(status_code=400, content={"error": "simulation_id required"})
         body, status = _remote_run_views.remote_run_chain_progress({"simulation_id": simulation_id})

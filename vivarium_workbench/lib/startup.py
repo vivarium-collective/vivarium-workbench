@@ -102,6 +102,20 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
         except Exception as e:  # noqa: BLE001
             print(f"warning: remote sms-api health check failed: {e}", file=sys.stderr)
 
+        # A backend named with --backend-base-url: say which dispatch route its
+        # capabilities give this workspace (best-effort; never blocks or raises).
+        try:
+            from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
+            _p = explicit_backend_profile()
+            if _p is not None and _p["reachable"]:
+                print(f"backend dispatch: {_p['dispatch']} (server v{_p['version']}; "
+                      f"capabilities: {', '.join(_p['capabilities']) or 'none advertised'})")
+            elif _p is not None:
+                print(f"backend dispatch: legacy (capabilities unavailable: {_p['error']})",
+                      file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: backend capability check failed: {e}", file=sys.stderr)
+
         # Start the RemoteLink circuit-breaker probe so a wedged tunnel is
         # detected in the background (~3s probe every 30s) and every sms-api call
         # site fails fast instead of burning its 91.5s timeout budget. Opt-in:

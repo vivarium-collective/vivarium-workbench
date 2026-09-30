@@ -49,6 +49,16 @@ def backend_configured() -> bool:
     return any(os.environ.get(v) for v in BACKEND_BASE_ENV_VARS)
 
 
+def explicit_backend_base_url() -> "str | None":
+    """The backend the operator NAMED for this process (flag / new env), else ``None``.
+
+    Distinct from :func:`sms_api_base`, which also honours the legacy aliases and a
+    localhost default: only an explicit name opts a process into running studies on
+    the backend through ``/viva/v1/composites``.
+    """
+    return os.environ.get(BACKEND_BASE_ENV_VARS[0]) or None
+
+
 def sms_api_base() -> str:
     """Base URL of the backend (viva-api / viva-core; nee sms-api).
 
@@ -1033,25 +1043,6 @@ class SmsApiClient:
         """``DELETE /viva/v1/composites/{id}`` -> ``{run, pending}``. The record is kept;
         ``pending`` names what is still being stopped (HTTP 202)."""
         return self._delete(_run_path(run_id))
-
-    def environment_for_commit(self, repo_url: str, commit: str) -> "dict | None":
-        """The environment a run of ``repo_url``@``commit`` should use: the primary
-        (variant ``""``) ready row, else any ready row; ``None`` when none is ready.
-        Needs ``viva-v1-environments``. The ``repo_url`` match is exact server-side,
-        so every registered spelling of the repo is tried."""
-        want = repo_key(repo_url)
-        spellings: "list[str]" = []
-        for row in self._environment_pages({"commit": commit}):
-            url = row.get("repo_url")
-            if isinstance(url, str) and url not in spellings and repo_key(url) == want:
-                spellings.append(url)
-        ready: "list[dict]" = []
-        for url in spellings:
-            ready += [r for r in self._environment_pages({"repo_url": url, "commit": commit})
-                      if str(r.get("status") or "").lower() == _ENV_READY]
-        primary = [r for r in ready if r.get("variant") == ""]
-        pick = (primary or ready or [None])[0]
-        return pick
 
     def health_v1(self) -> dict:
         """``GET /viva/v1/health`` -> ``{status, version, services: {name: bool}}``."""

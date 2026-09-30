@@ -29,7 +29,6 @@ from dataclasses import dataclass, field
 from vivarium_workbench.lib.sms_api_client import (
     CAPABILITY_VIVA_V1_COMPOSITES as CAPABILITY_VIVA_V1_COMPOSITES,
     CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS as CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS,
-    CAPABILITY_VIVA_V1_ENVIRONMENTS,
     CAPABILITY_VIVA_V1_SURFACE as CAPABILITY_VIVA_V1_SURFACE,
     CAPABILITY_VIVA_V1_WORKERS as CAPABILITY_VIVA_V1_WORKERS,
     SmsApiClient,
@@ -133,8 +132,7 @@ def require_capabilities(client: SmsApiClient, *names: str) -> ServerCapabilitie
 # ---------------------------------------------------------------------------
 
 #: ``dispatch`` values of :func:`backend_profile`.
-DISPATCH_LEGACY = "legacy"            # /api/v1/simulations (simulator-id keyed)
-DISPATCH_COMPOSITE = "viva-v1-composite"  # POST /viva/v1/composites {environment.id, composite}
+DISPATCH_LEGACY = "legacy"            # /compose/v1 + /api/v1/simulations, as before
 DISPATCH_DOCUMENT = "viva-v1-document"    # POST /viva/v1/composites {environment, document}
 
 
@@ -146,13 +144,13 @@ def backend_profile(client: SmsApiClient) -> dict:
     the deployment actually wired). ``dispatch`` is the route a workspace
     composite takes:
 
-    * ``viva-v1-composite``: the deployment has an environment store, so a run
-      is ``{environment: {id}, composite: {id, params}}`` (the environment built
-      from the workspace's repo@commit provides the composite);
-    * ``viva-v1-document``: no environment store (a standalone viva-core), so the
-      workspace's composite is resolved locally to a process-bigraph document and
-      run in a site-named environment;
-    * ``legacy``: no ``viva-v1-composites`` -- ``/api/v1/simulations`` as before.
+    * ``viva-v1-document``: the backend advertises ``viva-v1-composites`` AND
+      ``viva-v1-composites-documents`` -- a workspace composite is exported to a
+      process-bigraph document and run by ``POST /viva/v1/composites``. This is
+      the general route: a backend serving composites only BY ID (today: the one
+      ``ecoli-simulation`` on SMS) cannot run an arbitrary workspace composite;
+    * ``legacy``: anything else (no capabilities route, older deployment, run
+      surface without documents) -- the existing path, unchanged.
 
     Never raises: ``reachable: false`` + ``error`` when the backend cannot be
     asked, which reads as ``legacy`` so an older/unreachable backend keeps the
@@ -173,8 +171,44 @@ def backend_profile(client: SmsApiClient) -> dict:
         out["services"] = dict(client.health_v1().get("services") or {})
     except SmsApiError:
         out["services"] = {}
-    if caps.supports(CAPABILITY_VIVA_V1_ENVIRONMENTS):
-        out["dispatch"] = DISPATCH_COMPOSITE
-    elif caps.supports(CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS):
+    if caps.supports(CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS):
         out["dispatch"] = DISPATCH_DOCUMENT
     return out
+
+
+#: How long a dispatch decision is trusted. Run entrypoints resolve the target
+#: several times per request; one probe per half-minute keeps that off the wire.
+_PROFILE_TTL = 30.0
+_PROFILE_CACHE: "dict[str, tuple[float, dict]]" = {}
+
+
+def explicit_backend_profile() -> "dict | None":
+    """The profile of the backend the operator NAMED (``--backend-base-url`` /
+    ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL``), cached briefly; ``None`` when they
+    named none.
+
+    The aliases (``VIVA_API_BASE`` / ``SMS_API_BASE``) deliberately do not count:
+    they have always meant "a remote exists", not "run there", and every existing
+    deployment of them must keep its behaviour byte for byte.
+    """
+    import time
+
+    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+
+    base = explicit_backend_base_url()
+    if base is None:
+        return None
+    hit = _PROFILE_CACHE.get(base)
+    now = time.monotonic()
+    if hit and now - hit[0] < _PROFILE_TTL:
+        return hit[1]
+    profile = backend_profile(SmsApiClient.for_("probe", base))
+    _PROFILE_CACHE[base] = (now, profile)
+    return profile
+
+
+def viva_v1_dispatch_active() -> bool:
+    """True only when a backend was named explicitly AND it runs documents through
+    ``POST /viva/v1/composites``. False (no network call at all) otherwise."""
+    profile = explicit_backend_profile()
+    return bool(profile and profile["dispatch"] == DISPATCH_DOCUMENT)

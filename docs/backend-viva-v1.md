@@ -67,9 +67,54 @@ Answers: `202` run; `409` environment not ready; `422` unknown composite/protoco
 A study's `baseline[0]` is `{composite: "<dotted id>", params: {...}}`
 (e.g. `viva_biomodels.composites.batch_compare_biomodels.batch-compare-biomodels`).
 
-* **`viva-v1-composite` mode** (backend advertises `viva-v1-environments`): `composite.id` = that id, `composite.params` = the study's baseline params (+ per-dispatch overrides), `environment.id` = the ready primary-variant environment for the workspace's `origin` URL @ `HEAD` commit (`GET /viva/v1/environments?repo_url=&commit=`; none ready -> the dispatch is refused with a message to build it first, never guessed).
-* **`viva-v1-document` mode** (no environment store, `viva-v1-composites-documents`): the composite is resolved locally (`composite_resolve.resolve_composite`) to a process-bigraph document; `environment.name` = `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT` or the deployment default; `execution.options` carries e.g. `interval_time`. **Unverified:** whether the site environment's image contains the workspace's own processes (a document's processes are `local:<name>` addresses resolved inside the job). That is only knowable by a real run.
-* **`legacy` mode**: no `viva-v1-composites` -> unchanged `/api/v1/simulations` path.
+**Finding that shapes the design.** A composite *by id* (`composite: {id, params}`) is served today
+only for the one composite SMS registers (`ecoli-simulation`, params = `POST /api/v1/simulations`'s
+own), and a standalone core refuses it by name (docs/architecture-core.md, "`/viva/v1/composites`").
+So an arbitrary workspace composite cannot be dispatched by id. The general route is the **document**:
+
+* `viva-v1-document` (backend advertises `viva-v1-composites` AND `viva-v1-composites-documents`):
+  the workspace composite is exported with `pbg_export.export_composite_pbg(ws, composite_id, overrides=params)`
+  (a process-bigraph document, process addresses rewritten to `local:!module.qualname`) and sent as
+  `document`, with `environment` and `execution.options`:
+  * `environment`: `{"name": "runtime"}` (default; the **only** name `NAMED_ENVIRONMENTS` accepts in
+    viva-core — `deployment-default` is merely the label a legacy compose submission is *recorded*
+    under), or `{"id": "<env id>"}` via `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=id:<env id>`.
+  * `execution.options` (closed set, `extra=forbid`): `interval_time` (= steps, 0..100000);
+    for a named environment `extra_pip_deps` = `git+<origin>.git@<HEAD>` (+ the workspace's pinned
+    framework versions) so the workspace code is installed in the container — the same contract as
+    legacy `/compose/v1`, including the server's `compose_allow_list`; a named environment **refuses**
+    `num_nodes` / `analysis_options`; for an environment id `analysis_options` is sent and no pip deps.
+  * A named-environment dispatch requires a clean, pushed workspace (`remote_dispatch_preflight`).
+* `legacy`: anything else (no capabilities route, or a run surface without documents) — unchanged
+  `/compose/v1` + `/api/v1/simulations`.
+
+**Unverified (needs a real run, the owner's call):** that the `runtime` image plus `extra_pip_deps`
+resolves a given workspace's processes, and that the repo is on the backend's allow-list.
+
+## Where the workbench uses it
+
+Everything is gated on an operator-**named** backend (`--backend-base-url` /
+`VIVARIUM_WORKBENCH_BACKEND_BASE_URL`; the `VIVA_API_BASE` / `SMS_API_BASE` aliases do **not** opt in,
+so existing deployments are byte-for-byte unchanged) AND that backend advertising
+`viva-v1-composites` + `viva-v1-composites-documents` (`server_capabilities.viva_v1_dispatch_active`,
+cached 30 s). A session build (`.viv-build.json`) or the pinned-build config keeps the simulator-keyed path.
+
+| Workbench operation | Route taken |
+|---|---|
+| `serve` start-up | probe `/version`, `GET /viva/v1/capabilities` + `/health`; prints `backend dispatch: <mode>` |
+| `GET /api/remote-run-config` | unchanged payload + `backend: {dispatch, version, capabilities, services, reachable, error}` (key absent when no backend is named) |
+| Run target (`remote_pinned.resolve_run_target`) | `deployment` when the above holds |
+| Study baseline / variant run, `POST /api/remote-run-submit` (no `simulator_id`) | `POST /viva/v1/composites` (document); answer `{run_id, phase, backend}` |
+| Composites-tab / detached run (`run_remote`) | `POST /viva/v1/composites`, poll `/composites/{id}/status`, results `GET /viva/v1/compose/simulation/{n}/results` |
+| `GET /api/remote-run-poll?run_id=` | `/composites/{id}/status` |
+| `GET /api/remote-run-chain-progress?run_id=` | `/composites/{id}/progress` (`simulation` jobs = seeds) |
+| `POST /api/remote-run-cancel {simulation_id: <run id>}` | `DELETE /composites/{id}` |
+| `GET /api/remote-dispatch-preflight` | clean+pushed check; `dispatch: viva-v1-document` |
+
+Not yet wired to `/viva/v1` (still legacy, or unsupported against a viva-core-only backend):
+landing a finished **study** run into the study (`/api/remote-run-land`, still simulator/`/api/v1`
+shaped), analyses (`/api/v1/analyses*`), build/branch pickers, `/composites/{id}/{jobs,datasets,log,events}`
+(client methods exist, no UI consumer yet), and the ecoli pinned flow (`simulator_id`).
 
 ## Fetching results
 

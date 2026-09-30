@@ -28,6 +28,7 @@ from pathlib import Path
 from vivarium_workbench.lib import git_status
 from vivarium_workbench.lib import github_auth
 from vivarium_workbench.lib import remote_pinned
+from vivarium_workbench.lib import remote_run_viva_v1
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
 from vivarium_workbench.lib.remote_run_jobs import (
@@ -314,6 +315,22 @@ def remote_run_config(ws_root: Path) -> tuple[dict, int]:
     Mirrors :func:`remote_run_pinned_build_start`'s priority: this session's own
     switched build (``ws_root``'s ``.viv-build.json``) wins over the deployment's
     static repo@branch pin, so the label always matches what will actually run."""
+    body, status = _remote_run_config(ws_root)
+    backend = _backend_info()
+    if backend is not None:
+        body["backend"] = backend
+    return body, status
+
+
+def _backend_info() -> "dict | None":
+    """The explicitly named backend's negotiated profile for the UI; ``None`` (no key at all,
+    no network call) when the operator named none, so the payload is byte-identical to before."""
+    from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
+
+    return explicit_backend_profile()
+
+
+def _remote_run_config(ws_root: Path) -> tuple[dict, int]:
     deployment = remote_pinned.remote_deployment_name()
     session_build = remote_pinned.resolved_from_session_build(ws_root)
     if session_build is not None:
@@ -371,6 +388,10 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     :meth:`SmsApiClient.run_simulation`; unset when absent/blank, matching
     every other optional field here."""
     body = body or {}
+    if not body.get("simulator_id") and remote_pinned.uses_viva_v1_dispatch(ws_root):
+        # The operator named a backend that runs documents (serve --backend-base-url):
+        # the declaration authorizes the dispatch, and no simulator id exists to ask for.
+        return remote_run_viva_v1.submit(ws_root, body)
     if not _run_auth_ok():
         return {"error": "not authenticated"}, 401
     study = (body.get("study") or "").strip()
@@ -684,6 +705,8 @@ def remote_run_status(params: dict) -> tuple[dict, int]:
     (build phase) or ``analysis_id`` (analysis phase). Maps the raw sms-api
     status into a UI ``phase``."""
     params = params or {}
+    if params.get("run_id"):
+        return remote_run_viva_v1.status(str(params["run_id"]))
     sim_id = params.get("simulation_id")
     sm_id = params.get("simulator_id")
     an_id = params.get("analysis_id")
@@ -772,6 +795,8 @@ def remote_run_chain_progress(params: dict) -> tuple[dict, int]:
     distinct, meaningful phases rather than collapsing into one generic error,
     so the frontend can tell "not a campaign" apart from "genuinely broken"."""
     params = params or {}
+    if params.get("run_id"):
+        return remote_run_viva_v1.progress(str(params["run_id"]))
     sim_id = params.get("simulation_id")
     if not sim_id:
         return {"error": "simulation_id required"}, 400
@@ -831,6 +856,10 @@ def remote_run_cancel(body: dict) -> tuple[dict, int]:
     convention of not collapsing every viva-api error into one generic
     message."""
     body = body or {}
+    run_id = body.get("run_id") or (
+        body.get("simulation_id") if remote_run_viva_v1.is_run_id(body.get("simulation_id")) else None)
+    if run_id:
+        return remote_run_viva_v1.cancel(str(run_id))
     sim_id = body.get("simulation_id")
     if not sim_id:
         return {"error": "simulation_id required"}, 400
