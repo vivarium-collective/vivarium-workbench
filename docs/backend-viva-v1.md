@@ -9,7 +9,7 @@ The UI and VivaChat stay local; only dispatch, status and results cross the wire
 
 | Claim | Source |
 |---|---|
-| Schemas, routes, status codes below | `GET /viva/v1/openapi.json` of a live deployment (viva-core **0.1.9**, 96 paths), fetched 2026-09-30 with GETs only; snapshot committed at `tests/_contracts/viva_core_openapi_0.1.9.json` |
+| Schemas, routes, status codes below | `GET /viva/v1/openapi.json` of a live deployment (viva-core **0.1.9**, 96 paths; the host's other routes are sms-api 0.9.174, see below), fetched 2026-09-30 with GETs only; snapshot committed at `tests/_contracts/viva_core_openapi_0.1.9.json` |
 | Capability names, dual-period semantics, which deployments run which mode | viva-api `origin/main` `docs/architecture-core.md` ("`/viva/v1/composites`"), `app/smoke.py` (`check_composites_*`), `app/contract.py` |
 | Live capability/health values | `GET /viva/v1/capabilities`, `GET /viva/v1/health` on the same deployment |
 
@@ -19,15 +19,21 @@ deployment's `/viva/v1/openapi.json` again; a failing contract test then names t
 
 ## What the live target is (important)
 
-`sms.cam.uchc.edu` is a **standalone viva-core**, not a full viva-api:
+`sms.cam.uchc.edu` is **two services behind one gateway** (read with GETs, 2026-09-30):
 
-* `GET /viva/v1/capabilities` -> `viva-v1-composites, viva-v1-composites-documents, viva-v1-jobs, viva-v1-surface, viva-v1-workers`.
-  No `viva-v1-environments`, no `viva-v1-datasets`.
-* `GET /viva/v1/health` -> `services`: `composites: true`, `jobs: true`, `environment_records: false`, `datasets: false`.
-* There is **no `/api/v1/*` at all** (`GET /api/v1/version` -> 404; the OpenAPI document has zero non-`/viva/v1` paths). The workbench's current remote path cannot work against it.
-* `GET /viva/v1/environments` -> 503 "this deployment provides no environment store"; docs: a standalone core "refuses an environment id and a composite by id, each by name". It runs **documents** in a **site-named environment** (existing runs show `environment: {"id": null, "name": "deployment-default"}`).
+* `/viva/v1/*` -> a **standalone viva-core 0.1.9** (`/viva/v1/openapi.json`, title `viva-core`, 96 paths, all `/viva/v1`).
+  `GET /viva/v1/capabilities` -> `viva-v1-composites, viva-v1-composites-documents, viva-v1-jobs, viva-v1-surface, viva-v1-workers`;
+  no `viva-v1-environments`, no `viva-v1-datasets`. `GET /viva/v1/health` -> `services`: `composites: true`, `jobs: true`,
+  `environment_records: false`, `datasets: false`. `GET /viva/v1/environments` -> 503 "this deployment provides no environment
+  store"; per viva-api's docs a standalone core "refuses an environment id and a composite by id, each by name". It runs
+  **documents** in the site-named environment `runtime`; existing runs report the label `deployment-default`, and their
+  jobs are `backend: slurm`.
+* everything else (`/api/v1/*`, `/core/v1/*`, `/version`) -> **sms-api 0.9.174** (`/openapi.json`, title `sms-api`): the legacy
+  simulator-keyed API the workbench's pinned ecoli flow uses. (`/compose/v1/*` is not served there; the workbench already maps
+  it to `/viva/v1/compose/*` when `viva-v1-surface` is advertised.)
 
-The SMS (Stanford/full) deployments instead advertise `viva-v1-environments` (+ `-build`, `-filters`), run composites **by id** (`ecoli-simulation`) in an environment **id**, and still serve `/api/v1`.
+The SMS (Stanford/full) deployments instead serve both groups from one application and advertise `viva-v1-environments`
+(+ `-build`, `-filters`).
 
 ## Dispatch: `POST /viva/v1/composites` -> `202 CompositeRunModel`
 
