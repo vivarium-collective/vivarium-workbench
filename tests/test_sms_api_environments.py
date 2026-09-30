@@ -5,8 +5,10 @@ by capability, with every caller still seeing the legacy SimulatorVersion shape.
   register, one call) via ``POST /viva/v1/environments``
 * ``viva-v1-environments`` -> ``simulator_status`` (all variant rows) and
   ``list_simulators`` via ``GET /viva/v1/environments``
-* branch lookups stay on ``/core/v1/simulator/versions`` (no capability says the
-  server's ``branch`` filter is honoured; an older server ignores it silently)
+* ``viva-v1-environments-filters`` -> branch lookups (``resolve_pinned_build``,
+  ``comparison_pinning`` for a branch ref) via ``?repo_url=&branch=``; without it
+  they stay on ``/core/v1/simulator/versions`` (an older server ignores the
+  filter silently). The build dropdown's branch column stays legacy either way.
 * capability absent / old server -> the legacy calls, unchanged
 """
 from __future__ import annotations
@@ -21,6 +23,7 @@ import pytest
 from vivarium_workbench.lib import sms_api_client as mod
 from vivarium_workbench.lib.sms_api_client import (
     CAPABILITY_VIVA_V1_ENVIRONMENTS as READS,
+    CAPABILITY_VIVA_V1_ENVIRONMENTS_FILTERS as FILTERS,
     CAPABILITY_VIVA_V1_ENVIRONMENTS_BUILD as BUILD,
     SmsApiClient,
     environment_build_status,
@@ -30,10 +33,13 @@ from vivarium_workbench.lib.sms_api_client import (
 REPO = "https://github.com/CovertLabEcoli/vEcoli-private"
 
 
-def _env(eid, lid, status="ready", variant="", commit="abc1234", temporary=False, label=None):
-    return {"id": str(eid), "legacy_simulator_id": lid, "repo_url": REPO, "commit": commit,
-            "variant": variant, "status": status, "created_at": f"2026-09-27T00:00:{eid:02d}",
-            "temporary": temporary, "label": label, "key": commit}
+def _env(eid, lid, status="ready", variant="", commit="abc1234", temporary=False, label=None,
+         branch=None, repo_url=REPO):
+    # ``_branch`` is what the SERVER knows (the linked simulator's git_branch);
+    # the fake uses it to filter and never returns it (stripped in __call__).
+    return {"id": str(eid), "legacy_simulator_id": lid, "repo_url": repo_url, "commit": commit,
+            "variant": variant, "status": status, "created_at": f"2026-09-27T00:{eid // 60:02d}:{eid % 60:02d}",
+            "temporary": temporary, "label": label, "key": commit, "_branch": branch}
 
 
 class _Resp(io.BytesIO):
@@ -72,13 +78,30 @@ class FakeServer:
             rows = list(self.envs)
             if "legacy_simulator_id" in q and not self.ignore_filters:
                 rows = [r for r in rows if r["legacy_simulator_id"] == int(q["legacy_simulator_id"])]
+            if not self.ignore_filters:
+                # viva-api >= 0.9.166 (viva-v1-environments-filters): exact repo_url,
+                # branch through the linked simulator (a row with none never
+                # matches), temporaries out unless asked for.
+                if "branch" in q and "repo_url" not in q:
+                    raise HTTPError(req.full_url, 422, "branch needs repo_url", {}, io.BytesIO(b"{}"))
+                if "repo_url" in q:
+                    rows = [r for r in rows if r["repo_url"] == q["repo_url"]]
+                if "branch" in q:
+                    rows = [r for r in rows if r["legacy_simulator_id"] is not None
+                            and r.get("_branch") == q["branch"]]
+                if "status" in q:
+                    rows = [r for r in rows if r["status"] == q["status"]]
+                temp = q.get("temporary", "any" if "legacy_simulator_id" in q else "false")
+                if temp != "any":
+                    rows = [r for r in rows if bool(r["temporary"]) == (temp == "true")]
             off, lim = int(q.get("offset", 0)), int(q.get("limit", 100))
-            page = rows[off:off + lim]
+            page = [{k: v for k, v in r.items() if k != "_branch"} for r in rows[off:off + lim]]
             return _Resp({"environments": page, "limit": lim, "offset": off, "total": len(rows),
                           "next_offset": off + lim if len(page) == lim else None})
         if u.path.startswith("/viva/v1/environments/"):
             eid = u.path.rsplit("/", 1)[1]
-            return _Resp(next(r for r in self.envs if r["id"] == eid))
+            return _Resp({k: v for k, v in next(r for r in self.envs if r["id"] == eid).items()
+                          if k != "_branch"})
         if u.path == "/core/v1/simulator/status":
             return _Resp({"status": "completed", "error_message": "legacy says boom"})
         if u.path == "/core/v1/simulator/versions":
@@ -246,14 +269,18 @@ def test_list_without_capability_is_legacy(monkeypatch):
 class _RecordingClient:
     def __init__(self, versions):
         self.versions = versions
-        self.branch_lookups: list[bool] = []
+        self.calls: list[tuple] = []
 
     def list_simulators(self, branch_lookup=False):
-        self.branch_lookups.append(branch_lookup)
+        self.calls.append(("list", branch_lookup))
+        return {"versions": self.versions}
+
+    def list_branch_builds(self, repo_url, branch):
+        self.calls.append(("branch", repo_url, branch))
         return {"versions": self.versions}
 
 
-def test_branch_callers_ask_for_the_branch_listing():
+def test_branch_callers_ask_for_the_branch_builds():
     from vivarium_workbench.lib import comparison_pinning, remote_build_source, remote_pinned
 
     v = [{"database_id": 5, "git_repo_url": REPO, "git_branch": "master",
@@ -261,8 +288,105 @@ def test_branch_callers_ask_for_the_branch_listing():
     c = _RecordingClient(v)
     remote_pinned.resolve_pinned_build(c, REPO, "master")
     comparison_pinning.resolve_environment_build(c, {"repo": REPO, "ref": "master"})
+    assert c.calls == [("branch", REPO, "master"), ("branch", REPO, "master")]
+    # the dropdown shows EVERY build's branch: still the legacy branch listing
     remote_build_source.list_build_sources(c)
-    assert c.branch_lookups == [True, True, True]
-    # a SHA ref needs no branch: it may use the environments listing
+    assert c.calls[-1] == ("list", True)
+    # a SHA ref needs no branch: the whole listing (environments where served)
     comparison_pinning.resolve_environment_build(c, {"repo": REPO, "ref": "abc1234"})
-    assert c.branch_lookups[-1] is False
+    assert c.calls[-1] == ("list", False)
+
+
+# -- branch lookups on viva-v1-environments-filters ---------------------------
+
+def _branch_rows():
+    return [
+        # newest first, as the server lists them
+        _env(40, 12, variant="arm64", commit="ccc3333", branch="master"),
+        _env(39, 12, variant="amd64", commit="ccc3333", branch="master", status="building"),
+        _env(30, 11, commit="bbb2222", branch="master"),
+        _env(20, 10, commit="aaa1111", branch="master"),
+        _env(35, 13, commit="ddd4444", branch="feature"),        # other branch
+        _env(45, 14, commit="eee5555", branch="master", temporary=True, label="smoke"),
+        _env(46, None, commit="fff6666", branch="master"),       # no linked simulator
+    ]
+
+
+def test_branch_builds_use_the_pair_filter(monkeypatch):
+    server = FakeServer(monkeypatch, [READS, BUILD, FILTERS], envs=_branch_rows())
+    out = SmsApiClient("http://h").list_branch_builds(REPO, "master")
+    gets = [(p, q) for m, p, q, _ in server.requests if m == "GET"]
+    assert all(p == "/viva/v1/environments" for p, _ in gets)
+    # the spelling discovery (no filter), then the pair -- no status, no temporary
+    assert "branch" not in gets[0][1] and "repo_url" not in gets[0][1]
+    pair = gets[-1][1]
+    assert pair["repo_url"] == REPO and pair["branch"] == "master"
+    assert "status" not in pair and "temporary" not in pair
+    assert [v["database_id"] for v in out["versions"]] == [12, 11, 10]
+    assert all(v["git_branch"] == "master" and v["git_repo_url"] == REPO for v in out["versions"])
+    assert out["versions"][0]["environment_ids"] == ["40", "39"]
+
+
+def test_branch_builds_exclude_temporaries_by_default(monkeypatch):
+    FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
+    ids = [v["database_id"] for v in SmsApiClient("http://h").list_branch_builds(REPO, "master")["versions"]]
+    assert 14 not in ids  # the marked-temporary build (D11), though it is the newest
+
+
+def test_pinned_build_is_the_newest_registered_on_the_branch(monkeypatch):
+    """Newest REGISTERED build (12, one variant still building), not the newest
+    ready one (11) and not the branch head: today's semantics, unchanged."""
+    from vivarium_workbench.lib import remote_pinned
+    FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
+    got = remote_pinned.resolve_pinned_build(SmsApiClient("http://h"), REPO, "master")
+    assert got == {"simulator_id": 12, "commit": "ccc3333", "branch": "master", "repo_url": REPO}
+
+
+def test_comparison_branch_ref_uses_the_pair_filter(monkeypatch):
+    from vivarium_workbench.lib import comparison_pinning
+    server = FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
+    got = comparison_pinning.resolve_environment_build(
+        SmsApiClient("http://h"), {"repo": "CovertLabEcoli/vEcoli-private", "ref": "feature"})
+    assert got["simulator_id"] == 13 and got["commit"] == "ddd4444"
+    assert any(q.get("branch") == "feature" and q.get("repo_url") == REPO
+               for _, _, q, _ in server.requests)
+
+
+@pytest.mark.parametrize("asked", [
+    REPO, REPO + ".git", REPO + "/", REPO.lower(), "CovertLabEcoli/vEcoli-private",
+    "git@github.com:CovertLabEcoli/vEcoli-private.git",
+])
+def test_branch_builds_ask_with_the_spelling_the_server_registered(monkeypatch, asked):
+    """The server's repo_url match is exact; the workbench's is not. The client
+    finds the registered spelling(s) and asks with each."""
+    server = FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
+    out = SmsApiClient("http://h").list_branch_builds(asked, "master")
+    assert [v["database_id"] for v in out["versions"]] == [12, 11, 10]
+    assert {q["repo_url"] for _, _, q, _ in server.requests if "branch" in q} == {REPO}
+
+
+def test_branch_builds_ask_every_registered_spelling(monkeypatch):
+    rows = _branch_rows() + [_env(50, 20, commit="999aaaa", branch="master", repo_url=REPO + ".git")]
+    server = FakeServer(monkeypatch, [READS, FILTERS], envs=rows)
+    out = SmsApiClient("http://h").list_branch_builds(REPO, "master")
+    assert {q["repo_url"] for _, _, q, _ in server.requests if "branch" in q} == {REPO, REPO + ".git"}
+    assert sorted(v["database_id"] for v in out["versions"]) == [10, 11, 12, 20]
+    from vivarium_workbench.lib import remote_pinned
+    # the caller's own rule (.git-insensitive) still picks the newest across both
+    assert remote_pinned.resolve_pinned_build(SmsApiClient("http://h"), REPO, "master")["simulator_id"] == 20
+
+
+def test_branch_builds_for_an_unknown_repo_ask_no_pair(monkeypatch):
+    server = FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
+    assert SmsApiClient("http://h").list_branch_builds("https://github.com/x/y", "master") == {"versions": []}
+    assert not any("branch" in q for _, _, q, _ in server.requests)
+
+
+@pytest.mark.parametrize("caps", [[READS, BUILD], [FILTERS], [], 404])
+def test_branch_builds_without_the_filters_capability_are_legacy(monkeypatch, caps):
+    """No filters capability (an older server silently ignores ?branch=), or no
+    reads: the legacy listing, unchanged, for the caller to filter."""
+    server = FakeServer(monkeypatch, caps, envs=_branch_rows(), ignore_filters=True)
+    out = SmsApiClient("http://h").list_branch_builds(REPO, "master")
+    assert server.paths() == [("GET", "/core/v1/simulator/versions")]
+    assert out == {"versions": [{"database_id": 5, "git_branch": "master"}]}

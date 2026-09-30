@@ -316,6 +316,12 @@
       } else if (d.type === 'explore:remote-dispatch-failed') {
         var cf = _cardFromMsg(ev);
         if (cf) _renderCloudChip(cf, { phase: 'dispatch-failed', error: d.error });
+      } else if (d.type === 'explore:open-source') {
+        // A loom process node's </> button — open that process's source in the
+        // right-rail Code panel, exactly like the Processes tab does.
+        if (d.address && window.ProcessCode && typeof window.ProcessCode.open === 'function') {
+          window.ProcessCode.open(String(d.address));
+        }
       }
     });
   }

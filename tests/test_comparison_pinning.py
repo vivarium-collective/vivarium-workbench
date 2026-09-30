@@ -25,6 +25,9 @@ class FakeClient:
     def list_simulators(self, branch_lookup=False):
         return {"versions": self._versions}
 
+    def list_branch_builds(self, repo_url, branch):
+        return {"versions": self._versions}
+
     def simulator_status(self, simulator_id):
         self.status_calls.append(int(simulator_id))
         return {"status": self._statuses.get(int(simulator_id), "completed")}

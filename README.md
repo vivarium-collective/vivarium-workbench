@@ -138,6 +138,15 @@ name is fine.)
   a `repo@commit` build (viva-api builds it on demand), then submit runs — they execute remotely
   (Ray → AWS Batch → zarr/parquet on S3) and land back as study runs you can
   browse, with status polled in the UI.
+- **Trace timeline:** a remote run's **⌄ Actions → ⏱ Trace** opens its trace
+  (Chrome Trace Event JSON from viva-api, shown only when the deployment
+  advertises `viva-v1-trace`) in [Perfetto](https://perfetto.dev). The trace is
+  parsed in your browser and never uploaded. The Docker image bundles a pinned,
+  hash-verified Perfetto UI served at `<base-path>/perfetto/`, so no outside
+  network is needed; elsewhere run `python -m vivarium_workbench.lib.perfetto_ui`
+  once to install it, or the workbench falls back to `https://ui.perfetto.dev`.
+  `VIVARIUM_WORKBENCH_PERFETTO_UI=auto|bundled|off|<url>` picks the viewer
+  (`off` downloads the JSON instead).
 
 ### Public read-only — published snapshot
 

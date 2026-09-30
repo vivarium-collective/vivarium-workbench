@@ -94,11 +94,13 @@ def resolve_environment_build(client: SmsApiClient, environment: dict) -> dict:
         raise ValueError(f"environment requires repo and ref, got {environment!r}")
 
     want_repo = _repo_key(repo)
-    # A branch ref needs git_branch, which only the legacy listing carries (W2);
-    # a SHA ref matches on repo + commit, which the environments listing has.
-    versions = (
-        client.list_simulators(branch_lookup=not _looks_like_sha(ref)) or {}
-    ).get("versions") or []
+    # A branch ref asks for that branch's builds (list_branch_builds: the
+    # server's ?repo_url=&branch= filter where advertised); a SHA ref matches on
+    # repo + commit prefix over the whole listing, which the environments carry.
+    listing = (
+        client.list_simulators() if _looks_like_sha(ref) else client.list_branch_builds(repo, ref)
+    )
+    versions = (listing or {}).get("versions") or []
     in_repo = [
         v for v in versions
         if _repo_key(v.get("git_repo_url", "")) == want_repo

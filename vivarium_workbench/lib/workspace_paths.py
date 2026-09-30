@@ -28,8 +28,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 from viva_workspace import (
     LAYOUT_DEFAULTS,
     find_workspace_root,
@@ -40,6 +38,7 @@ from viva_workspace import paths as _vw_paths
 from viva_workspace.paths import LAYOUT_KEYS
 
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
+from vivarium_workbench.lib.yaml_io import load_yaml
 
 __all__ = [
     "WorkspacePaths",
@@ -89,7 +88,7 @@ class WorkspacePaths(_BaseWorkspacePaths):
             pass
         sy = d / "study.yaml"
         if sy.is_file():
-            data = yaml.safe_load(sy.read_text(encoding="utf-8")) or {}
+            data = load_yaml(sy) or {}
             owner = data.get("investigation")
             if owner:
                 return owner
@@ -107,7 +106,7 @@ class WorkspacePaths(_BaseWorkspacePaths):
             if not iy.is_file():
                 continue
             try:
-                data = yaml.safe_load(iy.read_text(encoding="utf-8")) or {}
+                data = load_yaml(iy) or {}
             except Exception:  # noqa: BLE001
                 continue
             for st in investigation_member_slugs(data):

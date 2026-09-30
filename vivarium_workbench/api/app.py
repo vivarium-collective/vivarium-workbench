@@ -38,7 +38,7 @@ _error_logger = logging.getLogger("vivarium_workbench.errors")
 from fastapi import Body, Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import ValidationError
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -57,6 +57,8 @@ from vivarium_workbench.lib import remote_run_jobs as _remote_run_jobs
 from vivarium_workbench.lib import remote_run_views as _remote_run_views
 from vivarium_workbench.lib import remote_analysis_figures as _remote_analysis_figures
 from vivarium_workbench.lib import auth_views as _auth_views
+from vivarium_workbench.lib import ai_auth as _ai_auth
+from vivarium_workbench.lib import ai_views as _ai_views
 from vivarium_workbench.lib import composite_run_views as _cr_views
 from vivarium_workbench.lib import composite_test_run_views as _composite_test_run_views
 from vivarium_workbench.lib import loom_savepoints as _loom_savepoints
@@ -306,6 +308,13 @@ from vivarium_workbench.lib.models import (
     RemoteRunStartResponse,
     # C-state-3e: GitHub device-flow auth (pass-through payload)
     AuthPayload,
+    AiCapabilitiesPayload,
+    AiCredentialsRequest,
+    AiOkPayload,
+    AiOllamaModelsPayload,
+    AiSelectRequest,
+    AiStatusPayload,
+    ChatTurnRequest,
     # C-state-3f: git-subprocess commit/push routes
     BranchPushRequest,
     BranchPushResponse,
@@ -419,6 +428,30 @@ def get_workspace(request: Request = None) -> Path:
     return get_workspace_context(request).ws_root
 
 
+def _ai_scope(request: Request) -> "tuple[_ai_auth.StorageMode, str | None]":
+    """Where this request's LLM credentials live and the session key that scopes them.
+
+    ``keyring`` only for a loopback bind that is not proxied / under a base path;
+    otherwise per-session ``memory`` (fail closed — see ``ai_auth.storage_mode``).
+    In keyring mode the request's ``Host`` must itself be loopback: the CSRF guard
+    only compares Origin to Host, so a DNS-rebound page (Host == Origin ==
+    attacker's name) would otherwise reach the machine keyring and the LLM spend.
+    """
+    proxied = bool(
+        _csrf.is_trust_proxy_via_env(os.environ)
+        or _csrf.allowed_origins_via_env(os.environ)
+        or getattr(request.app.state, "base_path", "")
+    )
+    mode = _ai_auth.storage_mode(getattr(request.app.state, "bind_host", None), proxied=proxied)
+    if mode == "keyring":
+        from urllib.parse import urlsplit
+        raw_host = request.headers.get("host") or ""
+        host = None if "@" in raw_host else urlsplit("//" + raw_host).hostname
+        if host not in _ai_auth.LOCAL_HOSTS:
+            raise APIError(403, "the AI routes are only available from a loopback host (localhost / 127.0.0.1)")
+    return mode, _session_key_of(request)
+
+
 _OPENAPI_TAGS = [
     {
         "name": "Investigations",
@@ -469,6 +502,10 @@ _OPENAPI_TAGS = [
         "description": "GitHub OAuth device-flow authentication.",
     },
     {
+        "name": "AI",
+        "description": "Built-in chat: LLM-provider credentials/model choice and the streaming chat turn (needs the `[chat]` extra).",
+    },
+    {
         "name": "System",
         "description": "Service health, client configuration, workspace info, and the event stream.",
     },
@@ -504,6 +541,10 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/source/switch", "/api/source/build-remote", "/api/source/switch-build",
     # GitHub auth (needed to reach the remote / private content)
     "/api/auth/github/start", "/api/auth/github/logout",
+    # built-in chat: provider login + the chat turn (its own mutating calls are
+    # still limited to the routes this filter leaves registered)
+    "/api/ai/credentials", "/api/ai/credentials/{provider}", "/api/ai/select",
+    "/api/chat/turn",
     # benign UI telemetry
     "/api/click",
     # item 86: non-mutating config computation, same class of usefulness as
@@ -4004,6 +4045,49 @@ def create_app() -> FastAPI:
         return _serve_static_file(target, name)
 
     @app.get(
+        "/perfetto/{rel:path}",
+        tags=["Static & shell"],
+        summary="The bundled Perfetto trace-viewer UI (404 when not installed)",
+        response_class=Response,
+        include_in_schema=False,
+    )
+    def perfetto_ui_asset(rel: str = "") -> Response:
+        """Serve the pinned Perfetto UI bundle (``lib.perfetto_ui``).
+
+        404 when no bundle is installed (``viewer.mode`` is then not ``bundled``
+        and the frontend never links here), 403 on a ``..`` segment. The bundle is
+        versioned and immutable, so it is cacheable -- unlike the workbench's own
+        assets -- except ``index.html``, which names no version. ``.wasm`` is
+        served as ``application/wasm`` (streaming compilation requires it)."""
+        from vivarium_workbench.lib import perfetto_ui as _perfetto_ui
+        try:
+            target = _perfetto_ui.resolve_asset(rel)
+        except _perfetto_ui.AssetTraversal:
+            return Response(status_code=403)
+        if target is None or not target.is_file():
+            return Response(status_code=404)
+        name = rel or "index.html"
+        cache = "no-store" if name.endswith(".html") else "public, max-age=86400"
+        # frontend.css is served with its out-of-bundle font URLs corrected
+        # (``perfetto_ui.fix_stylesheet``); every other file verbatim.
+        body = _perfetto_ui.served_bytes(name, target)
+        if body is not None:
+            return Response(content=body, media_type=_perfetto_ui.mime_for(name),
+                            headers={"Cache-Control": cache})
+        return FileResponse(target, media_type=_perfetto_ui.mime_for(name),
+                            headers={"Cache-Control": cache})
+
+    @app.get(
+        "/perfetto",
+        include_in_schema=False,
+    )
+    def perfetto_ui_root(request: Request) -> Response:
+        """``/perfetto`` → ``/perfetto/``: the bundle loads its files relative to
+        the directory, so the trailing slash matters."""
+        base_path = request.scope.get("root_path") or ""
+        return RedirectResponse(url=f"{base_path}/perfetto/", status_code=307)
+
+    @app.get(
         "/parsimony-viewer/{rel:path}",
         tags=["Static & shell"],
         summary="pbg_parsimony 3D viewer bundle asset (404 when not installed)",
@@ -7087,7 +7171,53 @@ def create_app() -> FastAPI:
         body, status = _remote_run_views.remote_run_cancel(req or {})
         return JSONResponse(status_code=status, content=body)
 
-    @app.post("/api/remote-run-pinned-build", tags=["Runs"], status_code=202,
+    @app.get("/api/remote-run-trace-support", tags=["Runs"],
+             summary="Whether viva-api serves run traces (viva-v1-trace), and which Perfetto UI to open")
+    def remote_run_trace_support() -> JSONResponse:
+        """``{supported, reason, capability, server_version?, viewer: {mode, url, version}}``.
+
+        The frontend calls this once and shows the "⏱ Trace" action only when
+        ``supported`` (viva-api advertises ``viva-v1-trace``). ``viewer.mode`` is
+        ``bundled`` (Perfetto served by this server at ``viewer.url`` under the
+        base path), ``external`` (an absolute Perfetto URL) or ``off`` (the action
+        downloads the JSON). See ``lib.remote_trace`` and ``lib.perfetto_ui``."""
+        from vivarium_workbench.lib import remote_trace as _remote_trace
+        body, status = _remote_trace.trace_support(_remote_trace.make_client())
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get("/api/remote-run-trace", tags=["Runs"], response_class=Response,
+             summary="Proxy a remote run's Chrome Trace Event JSON from viva-api (for Perfetto)")
+    def remote_run_trace(simulation_id: Union[str, None] = None,
+                         composite_run_id: Union[str, None] = None,
+                         compose_id: Union[str, None] = None) -> Response:
+        """The trace of exactly one of ``simulation_id`` (viva-api
+        ``/api/v1/simulations/{id}/trace``), ``composite_run_id``
+        (``/viva/v1/composites/{id}/trace``) or ``compose_id`` (a ``/compose/v1``
+        submission, resolved to its composite run by ``correlation_id``).
+
+        200 with the bytes verbatim (``application/json``); 400 bad id; 409 when
+        viva-api does not advertise ``viva-v1-trace``; 404 passed through (no such
+        run / no trace yet); 502 viva-api unreachable.
+
+        A 200 carries ``X-Trace-Events: <n>``, the number of non-metadata events,
+        whenever it is known (``remote_trace.count_trace_events``): ``0`` means the
+        run recorded nothing, and the frontend says so instead of opening an empty
+        Perfetto."""
+        from vivarium_workbench.lib import remote_trace as _remote_trace
+        body, status, filename = _remote_trace.fetch_trace(
+            _remote_trace.make_client(), simulation_id=simulation_id,
+            composite_run_id=composite_run_id, compose_id=compose_id)
+        if isinstance(body, bytes):
+            headers = {"Content-Disposition": f'inline; filename="{filename}"',
+                       "Cache-Control": "no-store"}
+            n_events = _remote_trace.count_trace_events(body)
+            if n_events is not None:
+                headers[_remote_trace.TRACE_EVENTS_HEADER] = str(n_events)
+            return Response(content=body, status_code=status, media_type="application/json",
+                            headers=headers)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post("/api/remote-run-pinned-build",tags=["Runs"], status_code=202,
               summary="Pinned phase 1: resolve the latest built simulator (no push/login)")
     def remote_run_pinned_build(
         req: Union[dict, None] = Body(default=None),
@@ -7234,6 +7364,101 @@ def create_app() -> FastAPI:
         """
         resp, code = _auth_views.auth_orgs()
         return JSONResponse(content=resp, status_code=code)
+
+    # -----------------------------------------------------------------------
+    # AI — provider credentials + model choice for the built-in chat
+    # (docs/ai-chat.md). Logic in lib.ai_views / lib.ai_auth; no route ever
+    # returns a key. Everything but /status answers 503 without the [chat] extra.
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/ai/status",
+        response_model=AiStatusPayload,
+        tags=["AI"],
+        summary="Chat availability, configured providers, selected model (never a key)",
+    )
+    def ai_status(request: Request) -> dict:
+        mode, session = _ai_scope(request)
+        return _ai_views.ai_status(mode, session)
+
+    @app.get(
+        "/api/ai/capabilities",
+        response_model=AiCapabilitiesPayload,
+        tags=["AI"],
+        summary="What the assistant can reach: read/write operation counts + the exclusion list",
+    )
+    def ai_capabilities(request: Request) -> dict:
+        _ai_scope(request)
+        return _ai_views.ai_capabilities(request.app)
+
+    @app.get(
+        "/api/ai/ollama-models",
+        response_model=AiOllamaModelsPayload,
+        tags=["AI"],
+        summary="The models installed in the user's Ollama server (its /api/tags)",
+    )
+    async def ai_ollama_models(request: Request, base_url: str | None = None) -> dict:
+        mode, session = _ai_scope(request)
+        return await _ai_views.ai_ollama_models(base_url, mode, session)
+
+    @app.post(
+        "/api/ai/credentials",
+        response_model=AiOkPayload,
+        tags=["AI"],
+        summary="Verify (one real 1-token request) then store a provider key; select it",
+    )
+    async def ai_save_credentials(body: AiCredentialsRequest, request: Request) -> dict:
+        mode, session = _ai_scope(request)
+        return await _ai_views.ai_save_credentials(body, mode, session)
+
+    @app.delete(
+        "/api/ai/credentials/{provider}",
+        response_model=AiOkPayload,
+        tags=["AI"],
+        summary="Forget a saved provider key",
+    )
+    def ai_delete_credentials(provider: str, request: Request) -> dict:
+        mode, session = _ai_scope(request)
+        return _ai_views.ai_delete_credentials(provider, mode, session)
+
+    @app.post(
+        "/api/ai/select",
+        response_model=AiOkPayload,
+        tags=["AI"],
+        summary="Switch the chat's provider/model",
+    )
+    def ai_select(body: AiSelectRequest, request: Request) -> dict:
+        mode, session = _ai_scope(request)
+        return _ai_views.ai_select(body, mode, session)
+
+    @app.post(
+        "/api/chat/turn",
+        tags=["AI"],
+        summary="One stateless chat turn, streamed as NDJSON (see lib/ai_chat.py)",
+        response_class=StreamingResponse,
+    )
+    def chat_turn(body: ChatTurnRequest, request: Request,
+                  ws: Path = Depends(get_workspace)) -> StreamingResponse:
+        """Continue (``prompt``) or resume (``deferred_results``) a chat. The
+        browser holds the transcript; every non-GET the model attempts pauses as
+        an ``approval-required`` frame until the user answers. Preflight errors
+        (503 no extra, 409 no provider/credentials, 422 bad request) are plain
+        JSON envelopes, sent before any streaming starts."""
+        _ai_auth.require_chat()
+        from vivarium_workbench.lib import ai_chat   # needs the [chat] extra
+        mode, session = _ai_scope(request)
+        turn = ai_chat.prepare_turn(request.app, body, ws, mode, session)
+
+        async def frames():
+            async for frame in turn.frames():
+                yield json.dumps(frame, separators=(",", ":"), default=str) + "\n"
+
+        # `Content-Encoding: identity` opts out of GZipMiddleware, which would
+        # otherwise buffer small NDJSON chunks and stall the live token stream.
+        return StreamingResponse(
+            frames(), media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "Content-Encoding": "identity",
+                     "X-Accel-Buffering": "no"})
 
     # -----------------------------------------------------------------------
     # Git — subprocess commit/push WRITE routes (2 POSTs)

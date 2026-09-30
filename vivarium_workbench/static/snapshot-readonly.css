@@ -69,6 +69,12 @@ body.snapshot a.menu-link[data-page="github"] {
   display: none !important;
 }
 
+/* ── AI panel + its rail toggle: live-server only (they call /api/chat and /api/ai) ── */
+body.snapshot #viv-ai-toggle,
+body.snapshot #viv-ai-panel {
+  display: none !important;
+}
+
 /* ── GitHub identity / "Connect GitHub" rail footer (git auth — not in a read-only viewer) ── */
 body.snapshot .viv-rail-footer {
   display: none !important;

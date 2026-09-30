@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow, Background, Controls, ReactFlowProvider,
+  ReactFlow, Background, Controls, ReactFlowProvider, SelectionMode,
   useNodesState, useEdgesState, getNodesBounds, getViewportForBounds,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -624,31 +624,47 @@ export default function App() {
   // some embeds/browsers (e.g. Safari in the read-only workbench iframe: the
   // wheel zoomed over a node but not over the empty pane between nodes). A
   // single non-passive listener on the canvas WRAPPER catches the wheel wherever
-  // it lands — pane, edge, or node — via bubbling, so zoom is uniform and
-  // standard. Zooms about the cursor (keep the point under the pointer fixed),
-  // normalizes deltaMode across mouse/trackpad, and skips ctrl-wheel so pinch
-  // still goes to React Flow's `zoomOnPinch`. The inner-composite mini-map stops
-  // propagation + carries `nowheel`, so its own zoom is untouched.
+  // it lands — pane, edge, or node — via bubbling, so the gesture is uniform.
+  // Standard canvas mapping (Figma/tldraw): a plain wheel / two-finger trackpad
+  // scroll PANS the field; ⌘/Ctrl+wheel or a trackpad PINCH zooms about the
+  // cursor. This makes two-finger-drag pan the graph (the native Mac expectation)
+  // instead of zooming it. The inner-composite mini-map stops propagation +
+  // carries `nowheel`, so its own zoom/scroll is untouched.
   useEffect(() => {
     const el = canvasWrapRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) return;                                   // pinch → React Flow
       if (!(e.target as Element)?.closest?.('.react-flow')) return; // toolbar/hint: ignore
       const inst = rfRef.current;
       if (!inst?.getViewport || !inst.setViewport) return;
+      // ⌘/Ctrl + wheel, or a trackpad pinch (which the browser reports as
+      // ctrlKey+wheel) → ZOOM about the cursor (keep the point under the pointer
+      // fixed). Everything else (plain wheel, two-finger scroll) → PAN.
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        let dy = e.deltaY;
+        if (e.deltaMode === 1) dy *= 16;                        // lines → px
+        else if (e.deltaMode === 2) dy *= el.clientHeight;      // pages → px
+        const { x, y, zoom } = inst.getViewport();
+        const next = Math.min(12, Math.max(0.02, zoom * Math.exp(-dy * 0.0015)));
+        if (next === zoom) return;
+        const rect = el.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const k = next / zoom;                                  // zoom about the cursor
+        inst.setViewport({ x: px - (px - x) * k, y: py - (py - y) * k, zoom: next });
+        userMovedRef.current = true;
+        return;
+      }
+      // Pan: translate the viewport by the scroll delta (units normalized across
+      // mouse/trackpad). Position is in screen px, so it is zoom-independent.
       e.preventDefault();
-      let dy = e.deltaY;
-      if (e.deltaMode === 1) dy *= 16;                         // lines → px
-      else if (e.deltaMode === 2) dy *= el.clientHeight;       // pages → px
+      let dx = e.deltaX, dy = e.deltaY;
+      if (e.deltaMode === 1) { dx *= 16; dy *= 16; }            // lines → px
+      else if (e.deltaMode === 2) { dx *= el.clientWidth; dy *= el.clientHeight; }
+      if (dx === 0 && dy === 0) return;
       const { x, y, zoom } = inst.getViewport();
-      const next = Math.min(12, Math.max(0.02, zoom * Math.exp(-dy * 0.0015)));
-      if (next === zoom) return;
-      const rect = el.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      const k = next / zoom;                                   // zoom about the cursor
-      inst.setViewport({ x: px - (px - x) * k, y: py - (py - y) * k, zoom: next });
+      inst.setViewport({ x: x - dx, y: y - dy, zoom });
       userMovedRef.current = true;
     };
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -656,6 +672,41 @@ export default function App() {
     // Re-attach once the canvas is actually mounted (the wrapper renders after
     // state loads; a mount-only effect would bind to a null ref and never zoom).
   }, [haveNodes, compositeId]);
+
+  // Double-click empty canvas → fit the whole graph in view (a quick "reset
+  // view"). We disable React Flow's own zoomOnDoubleClick and handle the PANE
+  // dblclick here; a dblclick on a card is left to onNodeDoubleClick (expand).
+  useEffect(() => {
+    const el = canvasWrapRef.current;
+    if (!el) return;
+    const onDblClick = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (!t?.closest?.('.react-flow')) return;               // outside the canvas
+      // Only the empty pane / background — not a node, edge, handle, or control.
+      if (t.closest?.('.react-flow__node, .react-flow__edge, .react-flow__controls, .react-flow__handle')) return;
+      const inst = rfRef.current;
+      if (!inst?.fitView) return;
+      e.preventDefault();
+      inst.fitView({ padding: 0.2, duration: 300 });
+      userMovedRef.current = true;
+    };
+    el.addEventListener('dblclick', onDblClick);
+    return () => el.removeEventListener('dblclick', onDblClick);
+  }, [haveNodes, compositeId]);
+
+  // Esc → clear the current selection (deselect every node/edge). React Flow has
+  // no built-in Escape-to-clear; wire it once so the key does the expected thing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const inst = rfRef.current;
+      if (!inst?.setNodes) return;
+      inst.setNodes((ns: any[]) => ns.map((n) => (n.selected ? { ...n, selected: false } : n)));
+      inst.setEdges?.((es: any[]) => es.map((ed: any) => (ed.selected ? { ...ed, selected: false } : ed)));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
   // Mirror `nodes` for the edge-visibility seam below (same reason hiddenRef
   // exists): dragging a node rewrites `nodes` on every animation frame, and a
@@ -2593,7 +2644,7 @@ export default function App() {
                         position: 'absolute', top: '100%', right: 0, marginTop: 4,
                         background: '#fff', border: '1px solid #d1d5db', borderRadius: 6,
                         boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: '10px 12px',
-                        width: 250, zIndex: 20, fontSize: 12, color: '#374151',
+                        width: 288, zIndex: 20, fontSize: 12, color: '#374151',
                         lineHeight: 1.5, textAlign: 'left', cursor: 'default',
                       }}>
                         <div style={{ fontWeight: 600, marginBottom: 6, color: '#111827' }}>
@@ -2601,11 +2652,16 @@ export default function App() {
                         </div>
                         <table style={{ borderCollapse: 'collapse' }}><tbody>
                           {([
+                            ['Drag', 'pan the field'],
+                            ['Scroll / two-finger', 'pan the field'],
+                            ['⌘/Ctrl-scroll · pinch', 'zoom in and out'],
+                            ['Shift-drag', 'box-select'],
                             ['Click', 'select a process / store'],
                             ['Drag a card', 'move it'],
-                            ['Right-drag', 'pan the view'],
-                            ['Scroll / pinch', 'zoom in and out'],
-                            ['Double-click', 'expand a card'],
+                            ['Space + drag', 'pan (anywhere)'],
+                            ['Double-click empty', 'fit the whole graph'],
+                            ['Double-click a card', 'expand it'],
+                            ['Esc', 'clear selection'],
                           ] as [string, string][]).map(([k, v]) => (
                             <tr key={k}>
                               <td style={{ padding: '2px 8px 2px 0', whiteSpace: 'nowrap',
@@ -2701,15 +2757,21 @@ export default function App() {
                   edgesReconnectable={false}
                   connectOnClick={false}
                   deleteKeyCode={null}
-                  /* Standard navigation: LEFT-click selects (and left-drag on empty
-                     canvas box-selects); RIGHT- or MIDDLE-drag pans the view. The
-                     browser's iframe context menu is suppressed on the canvas (see
-                     onContextMenu below) so right-drag-to-pan doesn't pop it. */
-                  selectionOnDrag
+                  /* Standard canvas navigation (Figma/Miro/tldraw convention):
+                     LEFT-drag pans the field; hold SHIFT and drag to box-select;
+                     hold SPACE and drag also pans (accelerator); MIDDLE-drag pans.
+                     LEFT-click selects a process/store. Right-click is left free
+                     (the canvas context menu stays suppressed via onContextMenu).
+                     Double-click on empty canvas fits the whole graph (see the
+                     pane dblclick handler); double-click a card expands it. */
+                  selectionOnDrag={false}
                   selectNodesOnDrag={false}
-                  panOnDrag={[1, 2]}
+                  panOnDrag={[0, 1]}
+                  panActivationKeyCode="Space"
+                  selectionKeyCode="Shift"
+                  selectionMode={SelectionMode.Partial}
                   multiSelectionKeyCode={['Meta', 'Control']}
-                  selectionKeyCode={null}
+                  zoomOnDoubleClick={false}
                 >
                   <Background />
                   <Controls />

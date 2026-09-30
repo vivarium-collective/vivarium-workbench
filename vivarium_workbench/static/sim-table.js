@@ -284,10 +284,18 @@
     // Actions are grouped VIEW / DOWNLOAD / RE-RUN with a short inline description
     // so the overflow menu reads without hovering. Each entry: {group, html, desc}.
     var out = [];
-    function add(group, html, desc) { if (html) out.push({ group: group, html: html, desc: desc }); }
+    function add(group, html, desc, cls) { if (html) out.push({ group: group, html: html, desc: desc, cls: cls }); }
 
     // --- VIEW ---
     add("VIEW", viz, "Open the run's figures");
+    // ⏱ Trace — the run's trace timeline in Perfetto (perfetto-open.js). Any
+    // status: a failed or stuck run's trace is the one you most want to see.
+    // `viva-trace-action` keeps it hidden until the deployment advertises
+    // viva-v1-trace; the delegated handler reads the id from the <tr>.
+    add("VIEW", (remoteSimId != null && !isSnapshot)
+      ? '<button type="button" class="action-btn js-authoring trace-remote-btn viva-trace-action" ' +
+        'title="Open this run\'s trace timeline in Perfetto">⏱ Trace</button>' : "",
+      "Trace timeline in Perfetto", "viva-trace-action");
     add("VIEW", (completed && hasRun) ? _art("report", "📋 Report", "Open this run's report card", false) : "",
       "Open the report card");
 
@@ -358,7 +366,8 @@
         '<div class="sim-action-menu-header" style="font-size:10px;text-transform:uppercase;' +
         'letter-spacing:.05em;color:#94a3b8;padding:6px 8px 2px;">' + g[1] + '</div>' +
         items.map(function (a) {
-          return '<div class="sim-action-menu-item" style="display:flex;align-items:center;gap:6px;">' +
+          return '<div class="sim-action-menu-item' + (a.cls ? ' ' + esc(a.cls) : '') +
+            '" style="display:flex;align-items:center;gap:6px;">' +
             a.html +
             (a.desc ? '<span class="sim-action-desc" style="color:#94a3b8;font-size:11px;">' +
               esc(a.desc) + '</span>' : '') +

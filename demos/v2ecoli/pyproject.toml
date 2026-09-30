@@ -1,0 +1,58 @@
+# The local e-coli workbench environment: vivarium-workbench + v2ecoli +
+# the pbg-ptools Omics-Viewer plugin, all EDITABLE from sibling checkouts.
+#
+# This replaces the root project's old `demo` extra. It lives in its own
+# project (own uv.lock) so the ROOT project never needs a sibling checkout to
+# install: a bare clone of vivarium-workbench runs `uv sync && uv run vwb smoke`
+# with nothing next to it (CI's `standalone` job enforces that).
+#
+# Layout it expects — the same one the old extra assumed:
+#
+#   <dir>/vivarium-workbench/   (this repo; the checkout MUST have this name, see pbg-ptools below)
+#   <dir>/v2ecoli/
+#   <dir>/pbg-ptools/
+#
+# Use:
+#   cd demos/v2ecoli && uv sync
+#   uv run vwb serve --workspace ../../../v2ecoli
+#
+# NOT the image. The published workbench image installs the root project only
+# (`uv sync --frozen --no-dev`) plus pbg-ptools from git (`--no-deps`); it has
+# never installed this environment or the old `demo` extra. See ../../Dockerfile.
+#
+# No lock is committed here (demos/v2ecoli/uv.lock is gitignored): it would only
+# record the sibling checkouts' HEADs at lock time and go stale as they move.
+# Path sources move with your checkouts, so plain `uv sync` locks locally (and
+# re-locks when a sibling's metadata changed); don't use `--frozen`.
+
+[project]
+name = "vivarium-workbench-v2ecoli-demo"
+version = "0.0.0"
+description = "Local dev environment: vivarium-workbench + v2ecoli + pbg-ptools (sibling checkouts)"
+# v2ecoli pins its interpreter exactly (requires-python == 3.12.12); so does
+# this environment. The root project is not bound by it (>=3.11).
+requires-python = "==3.12.12"
+dependencies = [
+    "vivarium-workbench",
+    "v2ecoli",
+    "pbg-ptools",
+]
+
+[tool.uv]
+# A virtual project: nothing here to build or install, only an environment.
+package = false
+
+[tool.uv.sources]
+vivarium-workbench = { path = "../..", editable = true }
+# v2ecoli: a PATH source, not a pinned git rev. The point of this environment is
+# to work against YOUR v2ecoli checkout (editable, the old extra's behaviour);
+# a git pin would install a second, frozen copy you are not editing, and would
+# clone a ~2 GB repository to get it.
+v2ecoli = { path = "../../../v2ecoli", editable = true }
+# pbg-ptools depends back on vivarium-workbench and sources it from its own
+# `../vivarium-workbench`. That resolves to the SAME directory as the
+# `../..` above only when this checkout is named `vivarium-workbench` beside
+# pbg-ptools — then uv unifies the two and there is no "conflicting URLs".
+# (A git source for pbg-ptools would collide with the path source above, which
+# is why the image installs it with `--no-deps` instead.)
+pbg-ptools = { path = "../../../pbg-ptools", editable = true }

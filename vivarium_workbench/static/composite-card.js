@@ -145,7 +145,8 @@
     var frame = card.querySelector('.ccard-loom-frame');
     if (frame) {
       var fr = frame.getBoundingClientRect();
-      frame.style.height = Math.max(360, window.innerHeight - fr.top - 16) + 'px';
+      var aiBottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--viv-ai-bottom')) || 0;
+      frame.style.height = Math.max(360, window.innerHeight - fr.top - 16 - aiBottom) + 'px';
       frame.style.maxHeight = 'none';
     }
   }
@@ -556,7 +557,7 @@
       '<div class="pcard-out-ctl-row pcard-out-obs-row">' +
         '<span class="pcard-out-ctl-lbl">Observables</span>' +
         '<div class="pcard-out-obs" data-role="out-observables">' +
-          '<span class="muted pcard-out-obs-hint">Loading declared observables…</span>' +
+          (window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading declared observables…') : '<span class="muted pcard-out-obs-hint">Loading declared observables…</span>') +
         '</div>' +
       '</div>' +
     '</div>';

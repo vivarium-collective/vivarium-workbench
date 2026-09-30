@@ -12,6 +12,7 @@ sorted list. ``delete_simulation`` performs the full-delete pass.
 """
 from __future__ import annotations
 
+import contextvars
 import datetime as _dt
 import json
 import shutil
@@ -32,6 +33,7 @@ from vivarium_workbench.lib import run_capabilities
 from vivarium_workbench.lib import _root
 from vivarium_workbench.lib import run_log
 from vivarium_workbench.lib import run_store
+from vivarium_workbench.lib import yaml_io
 from vivarium_workbench.lib.models import SimRow
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
@@ -695,7 +697,7 @@ def _read_study_yaml_runs(workspace: Path) -> list[dict]:
         if not yml.is_file():
             continue
         try:
-            data = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
+            data = yaml_io.load_yaml(yml) or {}
         except yaml.YAMLError:
             warnings.warn(f"simulations_index: malformed yaml at {yml}")
             continue
@@ -765,7 +767,7 @@ def _build_run_to_studies_map(workspace: Path) -> dict[str, list[str]]:
         if not yml.is_file():
             continue
         try:
-            data = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
+            data = yaml_io.load_yaml(yml) or {}
         except yaml.YAMLError:
             continue
         has_store = _study_has_run_store(sdir)
@@ -861,7 +863,7 @@ def _parquet_sim_name_from_yaml(yaml_path: Path, experiment_id: str) -> str | No
     if not yaml_path.is_file():
         return None
     try:
-        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        data = yaml_io.load_yaml(yaml_path) or {}
     except (yaml.YAMLError, OSError):
         return None
     for entry in data.get("runs") or []:
@@ -1118,6 +1120,10 @@ def _discover_ce_store_path(workspace: Path, run_id: str) -> str | None:
 def list_simulations(workspace: Path) -> list[dict]:
     """Return every persisted simulation in ``workspace``, newest first.
 
+    Runs under a :func:`yaml_io.parse_scope`, so each study.yaml /
+    investigation.yaml is parsed once per call (or once per enclosing
+    ``build_simulations_data`` request) rather than once per run per reader.
+
     Each dict contains: run_id, spec_id, sim_name, label, status, n_steps,
     progress_step, started_at, completed_at, db_path (workspace-relative),
     studies (list of study names that reference this run_id).
@@ -1131,6 +1137,12 @@ def list_simulations(workspace: Path) -> list[dict]:
     float started_at values and trips ``new Date(string * 1000)``,
     halting the table render.
     """
+    with yaml_io.parse_scope():
+        return _list_simulations(workspace)
+
+
+def _list_simulations(workspace: Path) -> list[dict]:
+    """:func:`list_simulations` body (called inside a YAML parse scope)."""
     def _to_float_ts(v):
         if v is None:
             return None
@@ -1903,29 +1915,86 @@ def _attach_matched_tools(rows: list[dict], ws_root: Path) -> None:
 # every load/filter/auto-refresh; caching keeps repeat interactions instant. A
 # short TTL bounds staleness (a new local run appears within it); the Runs-tab
 # refresh button passes ?refresh=true, which clears this via clear_build_cache().
+#
+# Single-flight: concurrent identical requests (same workspace + params) that
+# miss the cache share ONE build instead of each redoing it. The build is
+# CPU-bound Python, so N overlapping builds in threadpool workers contend for the
+# GIL and each takes ~N times as long (measured on dev: 28 s alone, 183-207 s per
+# request with several overlapping). ``_BUILD_GENERATION`` is bumped by
+# clear_build_cache(); a build that started before a clear does not repopulate
+# the cache (it may predate whatever the refresh was meant to pick up), though
+# callers already waiting on it still get its result.
 _BUILD_CACHE: dict = {}
 _BUILD_CACHE_TTL = 15.0
+_BUILD_LOCK = threading.Lock()
+_BUILD_INFLIGHT: dict = {}
+_BUILD_GENERATION = 0
+
+
+class _BuildFlight:
+    """One in-progress build that concurrent identical callers wait on."""
+    __slots__ = ("done", "result", "error")
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.result: dict | None = None
+        self.error: BaseException | None = None
 
 
 def clear_build_cache() -> None:
-    _BUILD_CACHE.clear()
+    global _BUILD_GENERATION
+    with _BUILD_LOCK:
+        _BUILD_CACHE.clear()
+        _BUILD_GENERATION += 1
 
 
 def build_simulations_data_cached(ws_root: Path, include_remote: bool = True,
                                   ttl: float = _BUILD_CACHE_TTL,
                                   fresh: bool = False) -> dict:
-    """TTL-cached :func:`build_simulations_data` for the live-serving path.
+    """TTL-cached, single-flight :func:`build_simulations_data` for the
+    live-serving path.
 
     ``fresh=True`` (the ``?refresh=true`` path, which already clears this cache)
-    forces the blocking-but-bounded remote fetch instead of the SWR cache."""
+    forces the blocking-but-bounded remote fetch instead of the SWR cache; it
+    never joins a non-fresh build already in flight (that one may predate the
+    change the user is refreshing for), but a non-fresh caller may join a fresh
+    build. A failed build is not cached; its waiters re-raise its exception."""
     key = (str(ws_root), bool(include_remote))
-    now = time.time()
-    hit = _BUILD_CACHE.get(key)
-    if hit and hit[0] > now:
-        return hit[1]
-    data = build_simulations_data(ws_root, include_remote=include_remote, fresh=fresh)
-    _BUILD_CACHE[key] = (now + ttl, data)
-    return data
+    fkey = key + (bool(fresh),)
+    with _BUILD_LOCK:
+        if not fresh:
+            hit = _BUILD_CACHE.get(key)
+            if hit and hit[0] > time.time():
+                return hit[1]
+        flight = _BUILD_INFLIGHT.get(key + (True,))
+        if flight is None and not fresh:
+            flight = _BUILD_INFLIGHT.get(key + (False,))
+        if flight is not None:
+            leader = False
+        else:
+            leader = True
+            flight = _BuildFlight()
+            _BUILD_INFLIGHT[fkey] = flight
+            generation = _BUILD_GENERATION
+    if not leader:
+        flight.done.wait()
+        if flight.error is not None:
+            raise flight.error
+        return flight.result  # type: ignore[return-value]
+    try:
+        data = build_simulations_data(ws_root, include_remote=include_remote, fresh=fresh)
+        flight.result = data
+        return data
+    except BaseException as e:
+        flight.error = e
+        raise
+    finally:
+        with _BUILD_LOCK:
+            if _BUILD_INFLIGHT.get(fkey) is flight:
+                del _BUILD_INFLIGHT[fkey]
+            if flight.error is None and generation == _BUILD_GENERATION:
+                _BUILD_CACHE[key] = (time.time() + ttl, flight.result)
+        flight.done.set()
 
 
 # Run statuses that mean "not finished" — a run in one of these is something the
@@ -1954,6 +2023,15 @@ def _sim_recency_key(r: dict) -> tuple:
     return (active, ts, simid)
 
 
+# Workspaces already backfilled in the current (outermost) build_simulations_data
+# call. The build nests itself once per request (``_attach_matched_tools`` ->
+# ``analysis_tools.build_analysis_tools`` -> ``_run_candidates`` ->
+# ``build_simulations_data``), and the inner call's backfill repeated the outer
+# one's full ``list_simulations`` scan to append nothing. None outside a build.
+_backfilled_in_build: contextvars.ContextVar[set | None] = contextvars.ContextVar(
+    "simulations_index_backfilled_in_build", default=None)
+
+
 def build_simulations_data(ws_root: Path, include_remote: bool = True,
                            fresh: bool = False) -> dict:
     """Data builder for GET /api/simulations — the ``list_simulations`` rows
@@ -1967,7 +2045,25 @@ def build_simulations_data(ws_root: Path, include_remote: bool = True,
     ``include_remote=False`` skips the (slow, ~tens-of-seconds) sms-api fetch of
     remote runs so the local index returns fast — the Runs tab loads local runs
     first, then fetches remote in a second call to merge them in.
+
+    The whole build (nested calls included) shares one
+    :func:`yaml_io.parse_scope`, and a nested call skips the backfill scan the
+    outer call already made for the same workspace.
     """
+    outer = _backfilled_in_build.get() is None
+    token = _backfilled_in_build.set(set()) if outer else None
+    try:
+        with yaml_io.parse_scope():
+            return _build_simulations_data(ws_root, include_remote=include_remote,
+                                           fresh=fresh)
+    finally:
+        if token is not None:
+            _backfilled_in_build.reset(token)
+
+
+def _build_simulations_data(ws_root: Path, include_remote: bool = True,
+                            fresh: bool = False) -> dict:
+    """:func:`build_simulations_data` body."""
     ws = str(ws_root)
     import sys as _sys
     if ws not in _sys.path:
@@ -1986,10 +2082,15 @@ def build_simulations_data(ws_root: Path, include_remote: bool = True,
     # append-only JSONL run log (idempotent), then build every row from the log
     # fold alone. The append-only log is the single source of truth; each row
     # carries its data-store location so retrieval works across all emitters.
-    try:
-        backfill_index_into_jsonl(Path(ws_root))
-    except Exception:
-        pass
+    done = _backfilled_in_build.get()
+    ws_key = str(Path(ws_root).resolve())
+    if done is None or ws_key not in done:
+        if done is not None:
+            done.add(ws_key)
+        try:
+            backfill_index_into_jsonl(Path(ws_root))
+        except Exception:
+            pass
     try:
         folded = run_log.fold_runs_jsonl(Path(ws_root))
     except Exception:

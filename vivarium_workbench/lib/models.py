@@ -3436,3 +3436,103 @@ class CatalogUninstallRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str = ""
+
+
+class AiProviderStatus(BaseModel):
+    """One provider row of ``GET /api/ai/status``. Never carries a key.
+
+    ``source`` is where the credential comes from (``keyring`` / ``memory`` /
+    ``environment`` / ``aws``), ``None`` when the provider is not configured.
+    """
+
+    id: str
+    configured: bool
+    source: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+class AiSelection(BaseModel):
+    """The chosen provider + model (non-secret)."""
+
+    provider: str
+    model: str
+
+
+class AiStatusPayload(BaseModel):
+    """``GET /api/ai/status``. ``available`` is False when the ``[chat]`` extra
+    is not installed; ``storage_mode`` is ``keyring`` (loopback bind) or
+    ``memory`` (hosted — keys live only in this process, per session).
+
+    Source: ``lib.ai_views.ai_status``.
+    """
+
+    available: bool
+    providers: list[AiProviderStatus]
+    selected: Optional[AiSelection] = None
+    storage_mode: Literal["keyring", "memory"]
+
+
+class AiOllamaModelsPayload(BaseModel):
+    """``GET /api/ai/ollama-models`` — the models installed in an Ollama server (its
+    ``/api/tags``); ``source`` is the URL asked."""
+
+    models: list[str]
+    source: str
+
+
+class AiCredentialsRequest(BaseModel):
+    """``POST /api/ai/credentials`` body. ``api_key`` (or ``base_url`` for
+    ``openai-compatible``) is checked with one real 1-token request to ``model``
+    before anything is stored."""
+
+    provider: str
+    model: str
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+class AiSelectRequest(BaseModel):
+    """``POST /api/ai/select`` body — switch provider/model."""
+
+    provider: str
+    model: str
+
+
+class AiOkPayload(BaseModel):
+    """``{ok: true, provider, model?, source?}`` acknowledgement for the
+    ``/api/ai/*`` writes."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    provider: str
+
+
+class ChatTurnRequest(BaseModel):
+    """``POST /api/chat/turn`` body. ``messages`` is the transcript the browser
+    got back in the previous turn's ``done`` frame (pydantic-ai messages as
+    JSON; the server stores none). Send exactly one of ``prompt`` (a new user
+    message) or ``deferred_results`` (``{"approvals": {tool_call_id: true |
+    {"denied": reason}}}`` — the user's decision on the calls the previous turn
+    paused on). The response is an NDJSON stream (see ``lib.ai_chat``).
+    """
+
+    messages: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
+    prompt: Optional[str] = Field(default=None, max_length=300_000)   # attached text files are inlined
+    deferred_results: Optional[dict[str, Any]] = None
+    # marimo's footer modes: manual = pure chat (no tools), ask = read-only tools,
+    # agent = read + write tools (every write still pauses for approval).
+    mode: Literal["manual", "ask", "agent"] = "agent"
+    # Inject a live workspace summary into the instructions (costs tokens).
+    include_manifest: bool = True
+
+
+class AiCapabilitiesPayload(BaseModel):
+    """``GET /api/ai/capabilities`` — what the assistant can reach, counted from the live
+    OpenAPI (feeds the chat's Capabilities popover). ``excluded`` lists the deliberately
+    withheld routes/tags."""
+
+    reads: int
+    writes: int
+    excluded: list[str]
+

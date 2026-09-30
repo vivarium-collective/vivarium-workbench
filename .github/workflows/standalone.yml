@@ -1,0 +1,37 @@
+name: standalone
+
+# The root project must install from a BARE checkout — no sibling repos
+# (v2ecoli, pbg-ptools, ...) — and pass `vwb smoke` there.
+#
+# Why this exists: until the demo environment moved to demos/v2ecoli/, the root
+# pyproject sourced v2ecoli and pbg-ptools from `../v2ecoli` / `../pbg-ptools`.
+# Every other workflow installs with `uv sync --frozen`, which never reads
+# [tool.uv.sources], so CI stayed green while a plain `uv sync` in a fresh
+# clone failed:
+#   error: Distribution not found at: file:///…/v2ecoli
+# This job runs the non-frozen install, so a sibling path source (or a lock
+# that has drifted from pyproject.toml) fails here.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  standalone:
+    name: bare clone -> uv sync -> vwb smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Only this repository is checked out; the runner has no siblings.
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Assert no sibling checkouts
+        run: |
+          if ls -d ../v2ecoli ../pbg-ptools 2>/dev/null; then
+            echo "::error::sibling checkout present; this job must run without one"; exit 1
+          fi
+      - name: uv sync (locked, NOT frozen) + vwb smoke
+        run: bash scripts/standalone_smoke.sh --in-place

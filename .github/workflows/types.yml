@@ -12,10 +12,9 @@ on:
 jobs:
   types:
     runs-on: ubuntu-latest
-    # Pin the interpreter to 3.12.12: the demo track adds
-    # `[tool.uv] environments = "python_full_version == '3.12.12'"` (the demo
-    # extra pulls v2ecoli, which is pinned ==3.12.12), so the lock resolves for
-    # that one environment. uv fetches this managed CPython automatically.
+    # Interpreter pinned to 3.12.12 to match the image's Python 3.12. The lock
+    # itself is no longer 3.12.12-only (the v2ecoli demo environment that forced
+    # that moved to demos/v2ecoli/); it resolves for >=3.11.
     env:
       UV_PYTHON: "3.12.12"
     steps:
@@ -24,10 +23,9 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        # --frozen: install straight from uv.lock without re-resolving, so the
-        # `demo` extra's editable path sources (../v2ecoli, ../pbg-ptools) — not
-        # checked out in CI — are never touched. This gate only needs `dev`.
-        run: uv sync --frozen --extra dev
+        # --frozen: install straight from uv.lock without re-resolving. The
+        # non-frozen install is the `standalone` workflow's job. Needs only `dev`.
+        run: uv sync --frozen --extra dev --extra chat
       - name: ruff (F + E722 correctness gate, shipped packages)
         # Behaviour-only lint (pyflakes + bare-except): undefined names, unused
         # imports/vars, duplicate defs. Config in [tool.ruff.lint]. Scoped to the

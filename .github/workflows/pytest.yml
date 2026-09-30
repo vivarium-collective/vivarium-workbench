@@ -34,8 +34,7 @@ jobs:
       matrix:
         group: [1, 2, 3, 4]
     timeout-minutes: 20
-    # Same interpreter pin as types.yml: the demo extra pulls v2ecoli, which is
-    # pinned ==3.12.12, so the lock resolves for that one environment.
+    # Same interpreter pin as types.yml (matches the image's Python 3.12).
     env:
       UV_PYTHON: "3.12.12"
     steps:
@@ -44,14 +43,13 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        # --frozen: install straight from uv.lock without re-resolving, so the
-        # `demo` extra's editable path sources (../v2ecoli, ../pbg-ptools) — not
-        # checked out in CI — are never touched.
+        # --frozen: install straight from uv.lock without re-resolving (the
+        # non-frozen install is the `standalone` workflow's job).
         #
         # `test` (polars/pyarrow/zarr) is REQUIRED here, unlike in types.yml:
         # without it 11 tests fail rather than skip, because the parquet/zarr
         # readers are missing entirely.
-        run: uv sync --frozen --extra dev --extra test
+        run: uv sync --frozen --extra dev --extra test --extra chat
       - name: pytest (shard ${{ matrix.group }}/4, quarantine deselected)
         # Serial single-job was ~14 min, xdist-only ~6 min. Sharding divides the
         # remaining test time by 4; the ~45s of checkout+sync is paid per shard
@@ -97,6 +95,6 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --frozen --extra dev --extra test
+        run: uv sync --frozen --extra dev --extra test --extra chat
       - name: pytest (quarantined only)
         run: uv run --frozen bash scripts/pytest_gate.sh --only-known

@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
@@ -225,6 +225,12 @@ CAPABILITY_VIVA_V1_ENVIRONMENTS = "viva-v1-environments"
 #: ``viva-v1-environments-build``: ``POST /viva/v1/environments`` can select or build (W2).
 #: Its own name: a deployment may serve the reads without a build path.
 CAPABILITY_VIVA_V1_ENVIRONMENTS_BUILD = "viva-v1-environments-build"
+#: ``viva-v1-environments-filters``: ``GET /viva/v1/environments`` HONOURS
+#: ``?repo_url=&branch=`` (the pair; exact match on the linked simulator's
+#: ``git_branch``) and ``?legacy_simulator_id=``. Its own name because a server
+#: without it silently ignores those parameters and answers the UNFILTERED list,
+#: so a branch lookup may trust the filter only when this is advertised.
+CAPABILITY_VIVA_V1_ENVIRONMENTS_FILTERS = "viva-v1-environments-filters"
 
 #: Environment statuses (``/viva/v1/environments``). A build is ready only when
 #: EVERY variant row of it is (a vEcoli build has three: ``arm64``, ``amd64``,
@@ -310,6 +316,25 @@ def environment_build_status(rows: "list[dict]") -> str:
     if _ENV_BUILDING in statuses or _ENV_READY in statuses:
         return _ENV_BUILDING
     return _ENV_PENDING
+
+
+def repo_key(url: str) -> str:
+    """A lenient repository key, ``org/repo`` lower-cased: no scheme, host,
+    ``.git`` or trailing slash; ``git@host:org/repo`` and the ``org/repo``
+    shorthand give the same key. Used to find the EXACT spellings the server
+    registered (its ``repo_url`` filter is an exact match) -- the callers then
+    apply their own matching rule to what comes back, exactly as before."""
+    u = (url or "").strip().rstrip("/")
+    if u.lower().endswith(".git"):
+        u = u[: -len(".git")]
+    u = u.lower()
+    if "://" in u:
+        u = u.split("://", 1)[1]
+        u = u.split("/", 1)[1] if "/" in u else ""
+    elif "@" in u and ":" in u:
+        u = u.split(":", 1)[1]
+    parts = [p for p in u.split("/") if p]
+    return "/".join(parts[-2:])
 
 
 class BranchHeadUnresolved(SmsApiError):
@@ -673,6 +698,60 @@ class SmsApiClient:
                 if isinstance(r, dict) and r.get("legacy_simulator_id") == simulator_id]
         return rows
 
+    def _environment_pages(self, params: dict) -> "list[dict]":
+        """Every row of ``GET /viva/v1/environments`` for ``params``, page by page."""
+        rows: "list[dict]" = []
+        offset: "int | None" = 0
+        for _ in range(_ENV_MAX_PAGES):
+            if offset is None:
+                break
+            page = self._get("/viva/v1/environments", {**params, "limit": _ENV_PAGE, "offset": offset})
+            rows.extend(r for r in (page.get("environments") or []) if isinstance(r, dict))
+            nxt = page.get("next_offset")
+            offset = int(nxt) if nxt is not None else None
+        return rows
+
+    def list_branch_builds(self, repo_url: str, branch: str) -> dict:
+        """The builds registered for ``repo_url``@``branch``, as
+        ``{"versions": [SimulatorVersion-shaped]}`` -- what a branch lookup
+        (``resolve_pinned_build``, ``comparison_pinning`` for a branch ref)
+        filters and picks the newest of.
+
+        With ``viva-v1-environments-filters``: ``GET /viva/v1/environments
+        ?repo_url=&branch=`` (the pair), converted by
+        :func:`environments_as_simulators`, each entry given ``git_branch =
+        branch`` (the response carries no branch; the server matched it exactly).
+        The server's ``repo_url`` match is exact where the workbench's is not
+        (case, ``.git``, the ``org/repo`` shorthand), so the spellings actually
+        registered are found first -- every distinct ``repo_url`` in the listing
+        whose :func:`repo_key` equals this one's -- and each is asked for; the
+        caller's own repo match then runs on the answer as before.
+
+        No ``status`` filter: today's lookup is "the newest REGISTERED build on
+        the branch" (a newer build still building, or failed, is resolved and
+        then refused by the submit / ``verify_build_ready``), not the newest
+        ready one. Temporaries are left out (the server's default): a
+        marked-temporary build is never picked by default (D11).
+
+        Without the capability: ``GET /core/v1/simulator/versions``, unchanged
+        (the caller filters by repo and branch).
+        """
+        caps = self._server_capabilities()
+        if CAPABILITY_VIVA_V1_ENVIRONMENTS_FILTERS not in caps or CAPABILITY_VIVA_V1_ENVIRONMENTS not in caps:
+            return self._get("/core/v1/simulator/versions")
+        want = repo_key(repo_url)
+        spellings: "list[str]" = []
+        for row in self._environment_pages({}):
+            url = row.get("repo_url")
+            if isinstance(url, str) and url not in spellings and repo_key(url) == want:
+                spellings.append(url)
+        versions: "list[dict]" = []
+        for url in spellings:
+            for v in environments_as_simulators(self._environment_pages({"repo_url": url, "branch": branch})):
+                v["git_branch"] = branch
+                versions.append(v)
+        return {"versions": versions}
+
     def list_simulators(self, *, branch_lookup: bool = False) -> dict:
         """All registered simulator builds, as ``{"versions": [SimulatorVersion-shaped]}``.
 
@@ -683,27 +762,17 @@ class SmsApiClient:
         ``GET /core/v1/simulator/versions``.
 
         ``branch_lookup=True`` always takes the legacy route, because it is the
-        only listing that carries ``git_branch``: an environment stores no branch,
-        and the server's ``?repo_url=&branch=`` filter (viva-api#901, 0.9.166) is
-        silently ignored by an older server -- with no capability to tell the
-        two apart, a filtered answer cannot be trusted. Callers that match on a
-        branch (``resolve_pinned_build``, ``comparison_pinning`` for a branch ref,
-        the build dropdown's branch column) pass it.
+        only listing that carries every build's ``git_branch``: an environment
+        stores no branch, and the ``?repo_url=&branch=`` filter
+        (``viva-v1-environments-filters``) answers "which builds are on THIS
+        branch", not "which branch is each build on". A lookup of one known
+        branch uses :meth:`list_branch_builds`; the one caller left here is the
+        build dropdown's branch column (``list_build_sources``, which
+        ``switch_build`` also reads), which shows every build's branch.
         """
         if branch_lookup or CAPABILITY_VIVA_V1_ENVIRONMENTS not in self._server_capabilities():
             return self._get("/core/v1/simulator/versions")
-        rows: "list[dict]" = []
-        offset: "int | None" = 0
-        for _ in range(_ENV_MAX_PAGES):
-            if offset is None:
-                break
-            page = self._get("/viva/v1/environments", {
-                "temporary": "any", "limit": _ENV_PAGE, "offset": offset,
-            })
-            rows.extend(r for r in (page.get("environments") or []) if isinstance(r, dict))
-            nxt = page.get("next_offset")
-            offset = int(nxt) if nxt is not None else None
-        return {"versions": environments_as_simulators(rows)}
+        return {"versions": environments_as_simulators(self._environment_pages({"temporary": "any"}))}
 
     def capabilities(self) -> dict:
         """The deployment's capability advertisement: ``{version, capabilities: [str, ...]}``.
@@ -836,6 +905,36 @@ class SmsApiClient:
         simulation exists but isn't a chain-dispatch campaign (nothing to
         aggregate — callers should use ``simulation_status`` for those)."""
         return self._get(f"/api/v1/simulations/{simulation_id}/chain-progress")
+
+    def simulation_trace(self, simulation_id: int) -> bytes:
+        """GET /api/v1/simulations/{id}/trace -- the run's trace as a Chrome Trace
+        Event JSON document, returned as the raw bytes (never parsed: it goes
+        straight to the browser's Perfetto). Gated by ``viva-v1-trace``; callers
+        check the capability (``lib.remote_trace``)."""
+        return self._get_bytes(f"/api/v1/simulations/{simulation_id}/trace")
+
+    def composite_run_trace(self, run_id: str) -> bytes:
+        """GET /viva/v1/composites/{id}/trace -- a composite run's trace (same
+        format as :meth:`simulation_trace`). ``run_id`` is the composite run id,
+        which for a ``/compose/v1`` submission is its ``correlation_id``."""
+        return self._get_bytes(f"/viva/v1/composites/{quote(str(run_id), safe='')}/trace")
+
+    def _get_bytes(self, path: str, accept: str = "application/json") -> bytes:
+        """GET ``path`` and return the body undecoded. One attempt: a trace is
+        assembled on demand server-side and the caller is a person clicking."""
+        self._link().check(force=self.force_link)
+        url = self.base_url + self._path(path)
+        req = Request(url, method="GET", headers=self._headers(accept))
+        try:
+            with urlopen(req, timeout=self.timeout) as r:  # noqa: S310 — fixed scheme, internal tunnel
+                body = bytes(r.read())
+        except HTTPError as e:
+            raise SmsApiError(f"GET {url} -> {e.code}{_http_error_detail(e)}", status=e.code) from e
+        except (URLError, OSError) as e:
+            self._mark_link_down(str(e))
+            raise SmsApiError(f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
+        self._mark_link_up()
+        return body
 
     def _delete(self, path: str) -> dict:
         url = self.base_url + self._path(path)

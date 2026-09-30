@@ -70,7 +70,12 @@
 
   async function refreshChip() {
     chip.dataset.state = 'loading';
-    chip.textContent = 'Loading…';
+    if (window.ProgressTrack) {
+      window.ProgressTrack.loading(chip, 'Loading…');
+      chip.firstElementChild.classList.add('viv-loading-compact');
+    } else {
+      chip.textContent = 'Loading…';
+    }
     chip.onclick = null;
     const status = await fetchStatus();
     renderChip(status);

@@ -2,7 +2,9 @@
 <html lang="en"><head>
 <meta charset="UTF-8"><title>{% if dashboard_name %}{{ dashboard_name }} dashboard{% else %}{{ workspace_name }}{% endif %}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
+<link rel="stylesheet" href="assets/chat.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <link rel="stylesheet" href="assets/snapshot-readonly.css">
+<link rel="stylesheet" href="assets/progress-track.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <!-- Apply the saved light/dark theme before first paint (no flash of light). -->
 <script>(function(){try{var t=localStorage.getItem('viv.theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <!-- item 41: when this tab was spawned via ?workspace=/?build= (workspace-picker.js's
@@ -746,6 +748,30 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 :root[data-theme="dark"] .viv-bs-busy { color: #93c5fd; background: rgba(59,130,246,0.16); border-color: rgba(59,130,246,0.4); }
 </style>
 </head><body>
+<script>
+(function () {
+  // Item 70 phase 3: a local in-place workspace switch (workspace-picker.js)
+  // sets this flag right before location.reload() — show the branded splash
+  // immediately, before any other script loads, so the reload's boot gap
+  // never shows a blank/unstyled page. progress-track.css (which styles
+  // .viv-switch-splash) is already linked above, so it's available by the
+  // time body starts rendering. Dismissed by walkthrough.js, not a timer.
+  try {
+    if (!sessionStorage.getItem('viv-switch-splash')) return;
+    sessionStorage.removeItem('viv-switch-splash');
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var el = document.createElement('div');
+    el.className = 'viv-switch-splash';
+    el.id = 'viv-switch-splash';
+    var img = document.createElement('img');
+    img.className = 'viv-switch-splash-logo';
+    img.alt = 'Vivarium';
+    img.src = 'assets/vivarium-logo' + (dark ? '-dark' : '') + '.png{% if asset_version %}?v={{ asset_version }}{% endif %}';
+    el.appendChild(img);
+    document.body.appendChild(el);
+  } catch (e) { /* sessionStorage unavailable (private mode) — skip the splash */ }
+})();
+</script>
 
 <!-- item 41: hidden unless <html data-ws-boot="1"> (set pre-paint, above, when this
      tab was spawned via ?workspace=/?build=). Covers the wrong first paint while
@@ -947,6 +973,22 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Analysis</span>
       </a>
+      <!-- AI: toggles the docked chat panel on the right (docs/ai-chat.md). Not a page,
+           and deliberately NOT a .menu-link (so page switches don't clear its state).
+           Live-only — hidden in the read-only snapshot (snapshot-readonly.css). -->
+      <a href="#" id="viv-ai-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="VivaChat">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="5" y="8" width="14" height="10" rx="2.5"/>
+            <path d="M12 4.5 V8"/>
+            <circle cx="12" cy="3.6" r="0.9"/>
+            <circle cx="9.5" cy="13" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="14.5" cy="13" r="1" fill="currentColor" stroke="none"/>
+            <path d="M3 12 V15 M21 12 V15"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">VivaChat</span>
+      </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
            #viv-workspace-switcher). Hash route #github kept for back-compat. -->
@@ -967,7 +1009,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                       color:#374151;border:1px solid #e5e7eb;border-radius:4px;background:#fff;box-sizing:border-box;" />
       </div>
       <div id="viv-rail-investigations">
-        <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
+        <div class="viv-loading viv-loading-compact"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading…</span></div>
       </div>
     </div>
 
@@ -1026,7 +1068,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
        Single source of truth for the datasets/references/expert-docs lists;
        the management panels below provide the add/edit actions + bib explorer. -->
   <div id="inputs-api-render" class="panel">
-    <p class="muted" style="font-style:italic">Loading…</p>
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading inputs…</span></div>
   </div>
 
 </section>
@@ -1254,8 +1296,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
 
-    <div class="registry-tab-panel active" data-kind="composite"     id="registry-composites-container"><p class="empty-state">Loading&hellip;</p></div>
-    <div class="registry-tab-panel"        data-kind="process"       id="registry-processes-container"><p class="empty-state">Loading&hellip;</p></div>
+    <div class="registry-tab-panel active" data-kind="composite"     id="registry-composites-container"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading&hellip;</span></div></div>
+    <div class="registry-tab-panel"        data-kind="process"       id="registry-processes-container"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading&hellip;</span></div></div>
     <div class="registry-tab-panel"        data-kind="emitter"       id="registry-emitters-container"></div>
     <div class="registry-tab-panel"        data-kind="visualization" id="registry-visualizations-container"></div>
     <div class="registry-tab-panel"        data-kind="analysis"      id="registry-analyses-container"></div>
@@ -1334,7 +1376,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   <!-- List view: grouped investigation cards (Active / Closed). The grid lives on
        the per-group .investigations-grid wrappers built by _renderInvestigationSets. -->
   <div id="investigations-list">
-    <p class="empty-state">Loading…</p>
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading…</span></div>
   </div>
   </div>
 
@@ -1521,7 +1563,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
            .study-tabs (inside the iframe) actually sticks to the iframe top
            as the user scrolls through Overview → Build → … → Decide. -->
       <iframe id="investigation-study-embed-frame" src="" title="Study detail"
-              style="width:100%; height:calc(100vh - 220px); min-height:600px;
+              style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px)); min-height:600px;
                      border:0; display:block"></iframe>
     </div>
   </div>
@@ -1768,7 +1810,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </div>
     </div>
     <iframe id="study-detail-frame" src="" title="Study detail"
-            style="width:100%; height:calc(100vh - 220px); min-height:560px; border:0; display:block"></iframe>
+            style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px)); min-height:560px; border:0; display:block"></iframe>
   </div>
 </section>
 
@@ -1808,7 +1850,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <button id="sim-refresh" class="icon-btn" title="Refresh" aria-label="Refresh">&#8635;</button>
   </div>
 
-  <div id="sim-loading" style="color: #6b7280; padding: 12px;">Loading…</div>
+  <div id="sim-loading" class="viv-loading" style="padding: 12px;"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading simulations…</span></div>
   <div id="sim-empty"   style="color: #6b7280; padding: 12px; display: none;">
     No simulation runs found.
   </div>
@@ -2003,7 +2045,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
 <!-- ===== PAGE: COMPOSITE EXPLORER ===== -->
 <section id="page-composite-explore" class="page" data-page="composite-explore">
-  <div id="ce-loading" class="empty-state">Loading composite&hellip;</div>
+  <div id="ce-loading" class="empty-state"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading composite&hellip;</span></div></div>
 
   <div id="ce-main" style="display:none">
 
@@ -2028,7 +2070,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <iframe id="composite-explore-frame"
               src="/bigraph-loom/index.html"
               title="Composite Explorer"
-              style="width:100%;height:calc(100vh - 84px);min-height:520px;border:1px solid #ddd;background:#fff"></iframe>
+              style="width:100%;height:calc(100vh - 84px - var(--viv-ai-bottom, 0px));min-height:520px;border:1px solid #ddd;background:#fff"></iframe>
     </div>
 
   </div>
@@ -2038,7 +2080,57 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
   </div> <!-- /.viv-main -->
 
-  <!-- RIGHT RAIL: process code — collapsible editable Python source for the
+  <!-- AI panel: the built-in chat, docked on the RIGHT (docs/ai-chat.md). static/chat.js builds the
+     chat into #viv-ai; the settings sheet below is what the gear opens (static/ai-login.js).
+     Live-only — hidden in the read-only snapshot. -->
+<aside id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="VivaChat">
+  <div class="vp-resize" id="viv-ai-resize" title="Drag to resize"></div>
+  <div class="vp-root" id="viv-ai"></div>
+  <div id="viv-ai-card" class="vp-settings" hidden>
+    <div class="vp-settings-head">
+      <button class="vp-icon" id="viv-ai-back" type="button" title="Back to chat" aria-label="Back to chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <strong>AI Settings</strong>
+    </div>
+    <div class="vp-form">
+      <label class="vp-field"><span>Provider</span>
+        <select id="viv-ai-provider" class="vp-input">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="google">Google</option>
+          <option value="ollama">Ollama (local models)</option>
+          <option value="opencode">OpenCode Go</option>
+          <option value="bedrock">AWS Bedrock</option>
+          <option value="openai-compatible">OpenAI-compatible (vLLM, OpenRouter…)</option>
+        </select>
+      </label>
+      <div class="vp-hint" id="viv-ai-status">checking…</div>
+      <div id="viv-ai-key-row">
+        <label class="vp-field"><span>API key</span>
+          <input id="viv-ai-key" class="vp-input" type="password" placeholder="paste to save or replace"
+                 autocomplete="off" spellcheck="false">
+        </label>
+        <div class="vp-hint" id="viv-ai-storage"></div>
+      </div>
+      <label class="vp-field" id="viv-ai-url-row" hidden><span>Base URL</span>
+        <input id="viv-ai-url" class="vp-input" type="text" placeholder="http://localhost:11434/v1"
+               autocomplete="off" spellcheck="false">
+      </label>
+      <div class="vp-field"><span>Model</span>
+        <button id="viv-ai-model" class="vp-pill vp-select" type="button" aria-haspopup="menu" title="Choose a model"></button>
+      </div>
+      <div class="vp-actions">
+        <button id="viv-ai-save" class="vp-btn vp-primary" type="button">Save &amp; test</button>
+        <button id="viv-ai-use" class="vp-btn" type="button" hidden>Use this model</button>
+        <button id="viv-ai-remove" class="vp-btn" type="button" hidden>Remove key</button>
+      </div>
+      <div class="vp-msg" id="viv-ai-msg"></div>
+    </div>
+  </div>
+</aside>
+
+<!-- RIGHT RAIL: process code — collapsible editable Python source for the
        selected registry process/step. Global across tabs; collapsed by default
        to a thin edge tab (see .viv-code-collapsed CSS + process-code.js). -->
   <aside id="viv-code-rail" class="viv-code-rail viv-code-collapsed" aria-label="Process code">
@@ -2438,7 +2530,9 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/audit.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* audit view unavailable */"></script>
 <script src="assets/col-resize.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script src="assets/process-code.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* process-code panel unavailable */"></script>
+<script src="assets/perfetto-open.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* trace action unavailable */"></script>
 <script src="assets/sim-table.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<script src="assets/progress-track.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <!-- composite-card.js: the shared composite-card renderer (extracted from
      walkthrough.js, study-spine-reorg Task 6) — MUST load before
      walkthrough.js, which now calls these functions as globals rather than
@@ -2452,6 +2546,10 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
+<script src="assets/chat-core.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
+<script src="assets/ai-models.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
+<script src="assets/chat.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
+<script src="assets/ai-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* ai-login unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher
      (investigation-switcher.js). The /api/workspaces endpoints remain available

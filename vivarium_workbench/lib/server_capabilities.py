@@ -41,6 +41,9 @@ CAPABILITY_CONTAINER_JOBS = "container-jobs"
 CAPABILITY_DUAL_ENGINE_COMPARISON = "dual-engine-comparison"
 CAPABILITY_CHAIN_DISPATCH = "chain-dispatch"
 CAPABILITY_CHAIN_PROGRESS = "chain-progress"
+# GET /api/v1/simulations/{id}/trace + GET /viva/v1/composites/{id}/trace answer a
+# Chrome Trace Event JSON document (the workbench's "Open in Perfetto").
+CAPABILITY_VIVA_V1_TRACE = "viva-v1-trace"
 # The /viva/v1 path switches (CAPABILITY_VIVA_V1_SURFACE, CAPABILITY_VIVA_V1_WORKERS)
 # are defined beside the resolver that reads them, in sms_api_client, and
 # re-exported above so every name the workbench branches on is importable here.

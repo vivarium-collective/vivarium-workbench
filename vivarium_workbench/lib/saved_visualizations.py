@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.yaml_io import load_yaml
 
 
 def parsimony_viewer_dir() -> Path | None:
@@ -90,7 +91,7 @@ def build_saved_visualizations(ws_root) -> dict:
                 from vivarium_workbench.lib import behavior_test_card, study_spec
                 sf = study_spec.study_spec_file(study_dir)
                 if sf.is_file():
-                    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+                    spec = load_yaml(sf) or {}
                     bts = (spec.get("behavior_tests")
                            or spec.get("expected_behavior") or [])
                     if isinstance(bts, list) and bts:

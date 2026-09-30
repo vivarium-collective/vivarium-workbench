@@ -59,10 +59,22 @@
 
   // ── expand / collapse ──
   function isOpen() { var r = rail(); return r && !r.classList.contains('viv-code-collapsed'); }
+  // Mirror the rail's --viv-code-w onto <body> so the fill-the-pane (maximized)
+  // CSS — which pins the rail fixed and shrinks the card by that width — tracks a
+  // user-resized rail, not just the 460px default (see style.css .pcard-maximized
+  // + .viv-code-open).
+  function _syncRailWidth() {
+    try {
+      var r = rail(); if (!r) return;
+      var w = getComputedStyle(r).getPropertyValue('--viv-code-w').trim();
+      if (w) document.body.style.setProperty('--viv-code-w', w);
+    } catch (e) {}
+  }
   function open() {
     var r = rail(); if (!r) return;
     r.classList.remove('viv-code-collapsed');
     document.body.classList.add('viv-code-open');
+    _syncRailWidth();
     try { localStorage.setItem('viv.code.open', '1'); } catch (e) {}
     if (state.cm) setTimeout(function () { try { state.cm.refresh(); } catch (e) {} }, 30);
   }
@@ -437,6 +449,7 @@
       var saved = parseInt(localStorage.getItem('viv.code.width') || '0', 10);
       if (saved >= 320 && saved <= 1100) r.style.setProperty('--viv-code-w', saved + 'px');
     } catch (e) {}
+    _syncRailWidth();
     handle.addEventListener('mousedown', function (ev) {
       dragging = true; startX = ev.clientX; startW = r.getBoundingClientRect().width;
       document.body.style.userSelect = 'none'; ev.preventDefault();
@@ -445,6 +458,7 @@
       if (!dragging) return;
       var w = Math.max(320, Math.min(1100, startW + (startX - ev.clientX)));
       r.style.setProperty('--viv-code-w', w + 'px');
+      document.body.style.setProperty('--viv-code-w', w + 'px');
       if (state.cm) { try { state.cm.refresh(); } catch (e) {} }
     });
     window.addEventListener('mouseup', function () {

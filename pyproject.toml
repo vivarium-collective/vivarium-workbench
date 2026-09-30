@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vivarium-workbench"
-version = "0.3.90"
+version = "0.4.0"
 description = "Web-based workbench for Vivarium / process-bigraph workspaces"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.11"
@@ -26,7 +26,7 @@ dependencies = [
     # and `seed: 1.0` are one address — an older pbg computes a DIFFERENT
     # address, which is a silent cache miss, so this floor must not slip.
     # `migrate-artifacts` also needs 1.7.0's `legacy_artifact_id`.
-    "process-bigraph>=1.8.2",
+    "process-bigraph>=1.8.4",
     # SQLiteEmitter (and ParquetEmitter) were extracted from process-bigraph at
     # 1.4.17 into the focused emitters library; pb's `process_bigraph.emitter`
     # only re-exports SQLiteEmitter when the emitters lib is installed. The
@@ -105,13 +105,24 @@ viz = ["matplotlib", "imageio", "numpy"]
 # each study's composite loom as a PNG. After installing, fetch the browser once:
 #   python -m playwright install chromium
 loom-render = ["playwright>=1.40"]
+# Built-in AI chat (docs/ai-chat.md): provider-agnostic tool loop + approvals via
+# pydantic-ai, in-process ASGI calls via httpx, key storage via the OS keyring.
+# Optional so the tool stays installable without any LLM SDKs; every chat route
+# answers 503 "chat extra not installed" when pydantic-ai isn't importable.
+# 2.51.0 is the release the approval/streaming flow was verified against
+# (ApprovalRequired + ctx.tool_call_approved, DeferredToolResults, run_stream_events).
+chat = ["pydantic-ai-slim[anthropic,openai,google,bedrock]>=2.51.0,<3", "httpx>=0.27", "keyring>=24"]
 dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "pytest-xdist>=3.5", "pytest-split>=0.9", "mypy>=1.8", "httpx>=0.27", "import-linter>=2.0"]
 # Optional readers used only by parts of the test suite (parquet/zarr run
 # stores). Without them those tests skip (via pytest.importorskip) rather than
 # fail. Install with: uv pip install -e ".[dev,test]". See CONTRIBUTING.md.
 # (zarr is needed alongside xarray for DataTree.to_zarr in the zarr tests.)
 test = ["polars", "xarray", "zarr", "pyarrow"]
-demo = ["v2ecoli", "pbg-ptools"]
+# (No `demo` extra: v2ecoli + pbg-ptools used to sit here with sibling-checkout
+# path sources, which made a plain `uv sync` in a bare clone fail with
+# "Distribution not found at: file:///…/v2ecoli" and pinned the whole lock to
+# v2ecoli's Python 3.12.12. The local e-coli dev environment now lives in its
+# own project, demos/v2ecoli/ — see its pyproject.toml.)
 
 [project.scripts]
 # New canonical console scripts.
@@ -122,16 +133,6 @@ vivarium-workbench-publish = "vivarium_workbench.publish:main"
 vivarium-dashboard = "vivarium_workbench.cli:main"
 vdash = "vivarium_workbench.cli:main"
 vivarium-dashboard-publish = "vivarium_workbench.publish:main"
-
-# DEMO-BRANCH ONLY: the `demo` extra pulls v2ecoli, which pins Python ==3.12.12
-# exactly. The workbench package itself supports >=3.11, but a universal `uv lock`
-# must then also solve the 3.11 slice, where v2ecoli is unsatisfiable → "no
-# solution". Constrain lock resolution on this (combined-with-v2ecoli) branch to
-# 3.12.12 — the version the demo image is built on — so `uv lock` /
-# `uv sync --extra demo` resolve. This does NOT change the package's declared
-# requires-python (>=3.11 for standalone use); it only scopes the lock.
-[tool.uv]
-environments = ["python_full_version == '3.12.12'"]
 
 # Git source for the bare pbg-basic-processes dependency (not on PyPI). uv reads
 # this when vivarium-dashboard is the root project; consumers that depend on it
@@ -166,19 +167,15 @@ viva-workspace = { git = "https://github.com/vivarium-collective/viva-workspace.
 # deliberately when adopting upstream changes. Equals the currently-locked rev,
 # so this is a no-op resolve.
 investigation-contracts = { git = "https://github.com/vivarium-collective/investigation-contracts.git", rev = "65c793fd231d952e49a9cfe4244797dadde1bedc" }
-# v2ecoli is NOT a runtime dependency of the vivarium-workbench package — it is
-# only needed for the demos/v2ecoli/ scripts. Declare it in [tool.uv.sources]
-# so `uv sync --extra demo` resolves the local checkout. The bare `v2ecoli`
-# requirement is listed in [project.optional-dependencies] → `demo`.
-v2ecoli = { path = "../v2ecoli", editable = true }
-# pbg-ptools is the Pathway Tools Omics-Viewer plugin (extracted from v2ecoli).
-# LOCAL PATH source on purpose: pbg-ptools depends back on vivarium-workbench,
-# and with a path source its own `../vivarium-workbench` resolves to the real
-# sibling (== this root project), so uv unifies them — no "conflicting URLs".
-# (A git source here would collide with the root, which is why `main` installs
-# pbg-ptools via the Dockerfile instead.) This gives the local `--extra demo`
-# dev env the PTools viewer, matching the deployed image.
-pbg-ptools = { path = "../pbg-ptools", editable = true }
+# process-bigraph / bigraph-schema: NO source here, deliberately. While v2ecoli
+# was in this lock it contributed git sources for both (the image shipped
+# process-bigraph 8b9830f, a commit between 1.8.3 and 1.8.4). Pinning a git rev
+# here instead would collide with v2ecoli's own pin in demos/v2ecoli/
+# ("conflicting URLs"); a bare requirement unifies with it. The root lock takes
+# the PyPI release (process-bigraph 1.8.4, which contains 8b9830f).
+# NO sibling-checkout (path) sources here, by design: this project must install
+# from a bare clone with a plain `uv sync` (CI's `standalone` job enforces it).
+# v2ecoli / pbg-ptools for local e-coli work: demos/v2ecoli/pyproject.toml.
 
 
 # bigraph-loom was previously a PEP 508 direct git URL (not on PyPI), which
@@ -291,6 +288,7 @@ files = [
     "vivarium_workbench/lib/active_workspace.py",
     "vivarium_workbench/lib/investigation_status.py",
     "vivarium_workbench/lib/saved_visualizations.py",
+    "vivarium_workbench/lib/yaml_io.py",
     "vivarium_workbench/lib/data_sources.py",
     "vivarium_workbench/lib/git_status.py",
     "vivarium_workbench/lib/investigation_views.py",
@@ -360,6 +358,8 @@ files = [
     "vivarium_workbench/lib/smoke.py",
     "vivarium_workbench/lib/comparison_pinning.py",
     "vivarium_workbench/lib/server_capabilities.py",
+    "vivarium_workbench/lib/remote_trace.py",
+    "vivarium_workbench/lib/perfetto_ui.py",
     "vivarium_workbench/lib/remote_link.py",
     "vivarium_workbench/lib/test_run_views.py",
     "vivarium_workbench/lib/comparative_runs.py",
@@ -369,6 +369,11 @@ files = [
     "vivarium_workbench/lib/install_views.py",
     "vivarium_workbench/lib/catalog_install_views.py",
     "vivarium_workbench/lib/catalog_uninstall_views.py",
+    "vivarium_workbench/lib/ai_auth.py",
+    "vivarium_workbench/lib/ai_views.py",
+    "vivarium_workbench/lib/ai_tools.py",
+    "vivarium_workbench/lib/ai_chat.py",
+    "vivarium_workbench/lib/ai_skills.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true

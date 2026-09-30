@@ -181,6 +181,20 @@
       + '</div>';
   }
 
+  // ---- indeterminate loading (no stages, no measured fraction) -----------
+  //
+  // For a single opaque fetch with no real substructure to report (contrast
+  // with stages/measured above, which both require genuine milestones or a
+  // real numerator/denominator — fabricating either for a plain wait would be
+  // dishonest progress, not an actual signal). Just a spinner + label,
+  // reusing @keyframes ptrack-spin for visual consistency with the rest of
+  // this component.
+
+  function loadingHtml(message) {
+    return '<div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span>'
+      + '<span>' + _esc(message || 'Loading…') + '</span></div>';
+  }
+
   // ---- browser entry points (no network) ---------------------------------
 
   // Lightweight repaint of only the active fill + aria-valuenow. Used both by
@@ -234,8 +248,15 @@
     _softUpdate(root, model, Date.now());
   }
 
+  // Render an indeterminate loading state into `mount`. Browser entry point,
+  // mirrors render()'s signature shape.
+  function loading(mount, message) {
+    if (!mount) return;
+    mount.innerHTML = loadingHtml(message);
+  }
+
   var api = {
-    render: render, tick: tick, html: html,
+    render: render, tick: tick, html: html, loading: loading, loadingHtml: loadingHtml,
     stageFraction: stageFraction, softFraction: softFraction, measuredFraction: measuredFraction,
   };
 

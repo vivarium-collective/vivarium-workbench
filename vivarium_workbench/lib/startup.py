@@ -226,6 +226,8 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # route needs the prefix there to inject its base-path shim (its bundle calls
     # a root-absolute ``/api/...`` that would otherwise be routed to sms-api).
     app.state.base_path = base_path
+    # Where the server is bound decides where LLM keys may live (lib/ai_auth.storage_mode).
+    app.state.bind_host = host
 
     # Under a base path the ALB forwards the FULL /workbench/... path (no strip),
     # so wrap the app to strip the prefix for route matching AND record it as the

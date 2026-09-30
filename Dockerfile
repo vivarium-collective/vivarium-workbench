@@ -92,12 +92,13 @@ COPY . .
 # than silently re-resolving); `--no-dev` keeps test/lint tooling out of the
 # shipped image.
 #
-# This does NOT pull a workspace package: v2ecoli sits in the optional `demo`
-# extra, not in [project.dependencies], and is not requested here. Every core
+# This does NOT pull a workspace package: v2ecoli is not a dependency of this
+# project at all (the local v2ecoli dev environment is its own project,
+# demos/v2ecoli/, which this image does not install). Every core
 # dependency resolves from a git source declared in [tool.uv.sources], so no
 # private registry is involved.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra chat
 
 ENV PATH="/app/vivarium-workbench/.venv/bin:${PATH}"
 
@@ -123,6 +124,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # runtime 500 (the always-visible loom panel fires a loom-asset request for ANY
 # composite).
 RUN bash scripts/build_loom.sh
+
+# ─── Perfetto trace viewer (the Runs table's "⏱ Trace") ───────────────────────
+# A pinned Perfetto UI release (Apache-2.0), mirrored from ui.perfetto.dev and
+# verified file-by-file against hashes pinned in lib/perfetto_ui.py, then served
+# by the workbench at <base-path>/perfetto/ -- so opening a trace needs no
+# outside network at runtime (GovCloud). ~64 MB. A failed verification fails the
+# build. Without this step the server falls back to https://ui.perfetto.dev.
+ENV VIVARIUM_WORKBENCH_PERFETTO_UI_DIR=/app/perfetto-ui
+RUN python -m vivarium_workbench.lib.perfetto_ui --dest /app/perfetto-ui
 
 # Sanity: everything the SERVER itself imports resolves in one interpreter, and
 # the loom bundle actually landed on disk. `vivarium_workbench.api.app` is

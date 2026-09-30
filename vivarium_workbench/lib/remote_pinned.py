@@ -19,8 +19,9 @@ to rotate, fully reproducible.
 Resolution gotcha: sms-api registers builds under the bare repo URL
 (``github.com/org/repo``) while ``latest_simulator`` may echo an *unbuilt*
 git-tip for the ``.git`` form. So we normalize the ``.git`` suffix and pick the
-newest matching entry from ``/core/v1/simulator/versions`` (which carries the
-real ``database_id``), never trusting ``latest_simulator``.
+newest matching entry from the branch's registered builds (which carry the
+real ``database_id``; ``SmsApiClient.list_branch_builds``), never trusting
+``latest_simulator``.
 """
 
 from __future__ import annotations
@@ -196,9 +197,11 @@ def resolve_pinned_simulator_id(client: SmsApiClient, ws_root: Path) -> int | No
 def resolve_pinned_build(client: SmsApiClient, repo_url: str, branch: str) -> dict:
     """Resolve the newest registered build for ``repo_url``@``branch``.
 
-    Reads ``/core/v1/simulator/versions`` (each entry carries ``database_id``),
-    filters by normalized repo + exact branch, and returns the most-recently
-    created match::
+    Reads the branch's builds (``SmsApiClient.list_branch_builds``:
+    ``/viva/v1/environments?repo_url=&branch=`` where the server advertises
+    ``viva-v1-environments-filters``, else ``/core/v1/simulator/versions``; each
+    entry carries ``database_id``), filters by normalized repo + exact branch,
+    and returns the most-recently created match::
 
         {"simulator_id": int, "commit": str, "branch": str, "repo_url": str}
 
@@ -207,9 +210,7 @@ def resolve_pinned_build(client: SmsApiClient, repo_url: str, branch: str) -> di
     keeping this to one GET is what makes Phase 1 instant.)
     """
     want_repo = _normalize_repo(repo_url)
-    # branch_lookup: the only listing that carries git_branch (W2 -- an
-    # environment stores no branch; see SmsApiClient.list_simulators).
-    versions = (client.list_simulators(branch_lookup=True) or {}).get("versions") or []
+    versions = (client.list_branch_builds(repo_url, branch) or {}).get("versions") or []
     matches = [
         v
         for v in versions
