@@ -584,6 +584,19 @@ def test_post_workspaces_start_returns_existing_url_if_live(server, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _wait_until_ready(ready: Path, child, timeout: float = 30.0) -> None:
+    """Block until the child has installed its signal handler (it creates ``ready`` afterwards).
+
+    A fixed ``sleep`` races interpreter start-up: under load SIGTERM can land before the handler exists, and the
+    default action kills the child without the behaviour under test.
+    """
+    deadline = time.monotonic() + timeout
+    while not ready.exists():
+        assert child.poll() is None, "helper process exited before signalling readiness"
+        assert time.monotonic() < deadline, "helper process never signalled readiness"
+        time.sleep(0.02)
+
+
 def test_post_workspaces_stop_happy_path(server, tmp_path):
     """Stopping a real running subprocess sends SIGTERM, the child's atexit
     removes the global entry, and the endpoint returns 200 within 3s."""
@@ -610,6 +623,7 @@ def test_post_workspaces_stop_happy_path(server, tmp_path):
     helper.write_text(f"""
 import os, signal, sys, time
 ENTRY = {repr(str(pbg_home / "servers" / "victim-ws.json"))}
+READY = {repr(str(tmp_path / "fake_dashboard.ready"))}
 def cleanup(*_):
     try:
         os.unlink(ENTRY)
@@ -617,13 +631,14 @@ def cleanup(*_):
         pass
     sys.exit(0)
 signal.signal(signal.SIGTERM, cleanup)
+open(READY, "w").close()
 while True:
     time.sleep(60)
 """)
     fake = _sp.Popen([sys.executable, str(helper)])
     try:
-        # Wait for the child to be alive enough to handle signals.
-        time.sleep(0.2)
+        # Wait for the child to have installed its SIGTERM handler.
+        _wait_until_ready(tmp_path / "fake_dashboard.ready", fake)
         # Register a global running entry pointing at this child's PID.
         import json as _json
         (pbg_home / "servers").mkdir(exist_ok=True)
@@ -748,15 +763,16 @@ def test_post_workspaces_stop_timeout(server, tmp_path):
 
     # Spawn a child that explicitly ignores SIGTERM.
     helper = tmp_path / "stubborn.py"
-    helper.write_text("""
+    helper.write_text(f"""
 import signal, time
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
+open({repr(str(tmp_path / "stubborn.ready"))}, "w").close()
 while True:
     time.sleep(60)
 """)
     fake = _sp.Popen([sys.executable, str(helper)])
     try:
-        time.sleep(0.2)
+        _wait_until_ready(tmp_path / "stubborn.ready", fake)
         import json as _json
         (pbg_home / "servers").mkdir(exist_ok=True)
         (pbg_home / "servers" / "stubborn-ws.json").write_text(_json.dumps({
