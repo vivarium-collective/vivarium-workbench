@@ -18,6 +18,18 @@
      blocking script, so the window.fetch override is in place before any other
      script or inline fetch runs — every same-origin request then carries this
      tab's X-VW-Session header. -->
+<!-- Pop-out windows (panel-dock.js) open this same page with ?popout=<kind>&session=<id>.
+     Seed the parent tab's session id BEFORE session.js runs (it only mints when none is
+     stored) so the popped window's API calls bind to the SAME workspace. -->
+<script>
+  (function () {
+    try {
+      var p = new URLSearchParams(location.search);
+      var sid = p.get('session');
+      if (sid && p.get('popout')) sessionStorage.setItem('viv-session-id', sid);
+    } catch (e) { /* private mode / no URL support — falls back to default workspace */ }
+  })();
+</script>
 <script src="assets/session.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script>
 // Per-workspace branding (rail logo, title, brand text) is resolved
@@ -2157,9 +2169,14 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <strong id="viv-code-name">Code</strong>
           <code id="viv-code-addr" class="viv-code-addr"></code>
         </div>
-        <button class="viv-code-close" type="button" title="Close"
-                aria-label="Close code panel"
-                onclick="window.ProcessCode&&ProcessCode.toggle()">&times;</button>
+        <div class="viv-code-head-actions">
+          <button class="viv-code-popout" type="button" title="Open in a separate window"
+                  aria-label="Pop out code panel"
+                  onclick="window.ProcessCode&&ProcessCode.popout()">⧉</button>
+          <button class="viv-code-close" type="button" title="Close"
+                  aria-label="Close code panel"
+                  onclick="window.ProcessCode&&ProcessCode.toggle()">&times;</button>
+        </div>
       </div>
       <!-- New-file bar: shown only while authoring a new artifact. -->
       <div class="viv-code-newbar" id="viv-code-newbar" hidden>

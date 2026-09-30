@@ -79,6 +79,12 @@
   function open() { if (dockCtl) dockCtl.open(); }
   function collapse() { if (dockCtl) dockCtl.close(); }
   function toggle() { if (dockCtl) dockCtl.toggle(); }
+  // Open the current source in a separate window, then close the in-page rail.
+  function popout() {
+    if (!window.VivPanelDock) return;
+    window.VivPanelDock.popout('code', state.popout || {});
+    collapse();
+  }
 
   function refreshDirty() {
     var saveBtn = $('viv-code-save'), revertBtn = $('viv-code-revert');
@@ -255,6 +261,7 @@
   // ── public open() entrypoints ──
   function openProcess(address) {
     if (!address) return;
+    state.popout = { address: address };          // remembered so Pop out can reopen this view
     load({
       title: address.split(/[.:]/).pop() || 'Process',
       subtitle: address,
@@ -267,6 +274,7 @@
   function openComposite(desc) {
     desc = desc || {};
     var id = desc.id || '';
+    state.popout = { composite: id, module: desc.module || '', source_path: desc.source_path || '' };
     var q = '/api/composites/source?id=' + encodeURIComponent(id) +
       '&module=' + encodeURIComponent(desc.module || '') +
       '&source_path=' + encodeURIComponent(desc.source_path || '');
@@ -475,6 +483,7 @@
     create: create,
     toggle: toggle,
     collapse: collapse,
+    popout: popout,
     save: save,
     revert: revert,
     init: init,

@@ -119,6 +119,7 @@
     down: S('<path d="M12 5v14M6 13l6 6 6-6"/>'),
     check: S('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
     dock: S('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),
+    popout: S('<path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>'),
   };
   const statusIcon = (s) => s === 'done' ? ICON.done : s === 'error' ? ICON.error : s === 'denied' ? ICON.denied : ICON.spin;
   const e = C.esc;
@@ -982,6 +983,7 @@
   function build() {
     root.innerHTML =
       '<div class="vp-head" title="Drag to dock left, right or bottom"><span>VivaChat</span><span class="vp-spacer"></span>' +
+        '<button class="vp-icon" data-act="popout" title="Open in a separate window" aria-label="Pop out">' + ICON.popout + '</button>' +
         '<button class="vp-icon" data-act="dock" title="Move panel" aria-label="Move panel">' + ICON.dock + '</button>' +
         '<button class="vp-icon" data-act="close" title="Close" aria-label="Close">' + ICON.x + '</button></div>' +
       '<div class="vp-toolbar">' +
@@ -1075,6 +1077,7 @@
       const host = b.closest('[data-id]');
       switch (act) {
         case 'close': setOpen(false); break;
+        case 'popout': if (window.VivPanelDock) VivPanelDock.popout('chat'); setOpen(false); break;
         case 'dock': openDockMenu(b); break;
         case 'new': newChat(); break;
         case 'settings': openSettings(); break;

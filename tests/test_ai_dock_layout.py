@@ -105,3 +105,41 @@ def test_dock_core_loads_before_the_panels_that_build_on_it():
     i_dock = html.index("assets/panel-dock.js")
     i_code = html.index("assets/process-code.js")
     assert i_core < i_dock < i_code, "chat-core + panel-dock must load before process-code.js"
+
+
+# ── Pop-out to a separate window (Phase 2) ──
+
+def test_panel_dock_can_pop_a_panel_into_its_own_window():
+    js = (STATIC / "panel-dock.js").read_text()
+    assert "function popout" in js and "function initPopout" in js
+    assert "window.open(" in js
+    assert "qs.set('popout'" in js
+    assert "vivSession" in js and "qs.set('session'" in js     # carries the parent tab's workspace session
+    assert "viv-popout" in js                                   # marks <body> in the popped window
+
+
+def test_popout_window_seeds_the_parent_session_before_session_js():
+    html = TEMPLATE.read_text()
+    seed = html.index("sessionStorage.setItem('viv-session-id'")
+    assert html.index("assets/session.js") > seed, "the session seed must run BEFORE session.js"
+    # only acts on a popout window, never a normal load
+    seed_block = html[seed - 200:seed + 80]
+    assert "popout" in seed_block
+
+
+def test_both_panels_expose_a_pop_out_control():
+    chat = (STATIC / "chat.js").read_text()
+    assert 'data-act="popout"' in chat and "VivPanelDock.popout('chat')" in chat
+    code_js = (STATIC / "process-code.js").read_text()
+    assert "function popout" in code_js and "VivPanelDock.popout('code'" in code_js
+    assert "popout: popout" in code_js                          # exported on window.ProcessCode
+    html = TEMPLATE.read_text()
+    assert "ProcessCode.popout()" in html                       # the code panel header's ⧉ button
+
+
+def test_popout_body_renders_only_that_panel_full_window():
+    css = (STATIC / "style.css").read_text()
+    assert "body.viv-popout" in css
+    block = css[css.index("body.viv-popout-chat #viv-ai-panel,"):]
+    block = block[:block.index("}")]
+    assert "position:fixed" in block and "inset:0" in block     # fills the popped window

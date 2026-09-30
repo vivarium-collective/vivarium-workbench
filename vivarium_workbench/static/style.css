@@ -5168,11 +5168,32 @@ body.vp-dragging .viv-code-head{ cursor:grabbing; }
   display:block; font-size:0.72rem; color:var(--text-muted, #64748b);
   word-break:break-all; margin-top:2px;
 }
-.viv-code-close{
-  border:0; background:transparent; font-size:1.3rem; line-height:1; cursor:pointer;
+.viv-code-head-actions{ display:flex; align-items:center; gap:2px; flex:0 0 auto; }
+.viv-code-close, .viv-code-popout{
+  border:0; background:transparent; line-height:1; cursor:pointer;
   color:var(--text-muted, #64748b); padding:0 4px;
 }
-.viv-code-close:hover{ color:var(--text, #1f2937); }
+.viv-code-close{ font-size:1.3rem; }
+.viv-code-popout{ font-size:1rem; }
+.viv-code-close:hover, .viv-code-popout:hover{ color:var(--text, #1f2937); }
+
+/* ── Pop-out window (?popout=<kind>): show only the popped panel, full-window ──
+   panel-dock.js adds body.viv-popout + .viv-popout-<kind> and opens that panel.
+   A fixed, opaque, full-window panel (z-index) simply covers the rest of the SPA
+   that loaded behind it, so no per-element hiding is needed. */
+body.viv-popout{ overflow:hidden; }
+body.viv-popout-chat #viv-ai-panel,
+body.viv-popout-code  #viv-code-rail{
+  display:flex !important; position:fixed !important; inset:0 !important;
+  width:auto !important; height:auto !important; max-width:none !important;
+  border:0 !important; z-index:5000;
+}
+/* Docking / resizing / re-popping make no sense inside a popped window. */
+body.viv-popout [data-act="dock"],
+body.viv-popout [data-act="popout"],
+body.viv-popout .vp-resize,
+body.viv-popout .viv-code-resize-handle,
+body.viv-popout .viv-code-popout{ display:none !important; }
 
 .viv-code-meta{ padding:8px 14px; display:flex; flex-direction:column; gap:4px; }
 .viv-code-badge{

@@ -174,5 +174,52 @@
     };
   }
 
-  global.VivPanelDock = { make: make };
+  // ── Pop-out to a separate window ───────────────────────────────────────────
+  // Opens the SAME index route in a new window with ?popout=<kind> (+ the current
+  // workspace's session id, so the popped window binds to the same workspace — see
+  // the seed script in index.html.j2 <head>, which runs before session.js). Extra
+  // params (e.g. a code address) let the popped page reopen the same view.
+  function popout(kind, params) {
+    var qs = new URLSearchParams();
+    qs.set('popout', kind);
+    try {
+      var id = window.vivSession && window.vivSession.getId && window.vivSession.getId();
+      if (id) qs.set('session', id);
+    } catch (e) { /* no session module — falls back to default workspace */ }
+    if (params) Object.keys(params).forEach(function (k) {
+      if (params[k] != null && params[k] !== '') qs.set(k, params[k]);
+    });
+    var url = window.location.origin + window.location.pathname + '?' + qs.toString();
+    window.open(url, 'viv-popout-' + kind,
+      'width=560,height=820,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
+  }
+
+  // In a popped window (?popout=<kind>): mark <body> and open that one panel, which
+  // CSS then renders full-window. Polls briefly for the panel's controller, since
+  // this runs before chat.js / process-code.js have built their panels.
+  function initPopout() {
+    var kind;
+    try { kind = new URLSearchParams(window.location.search || '').get('popout'); } catch (e) { return; }
+    if (!kind || !document.body) return;
+    document.body.classList.add('viv-popout', 'viv-popout-' + kind);
+    var p = new URLSearchParams(window.location.search);
+    var tries = 0;
+    (function openWhenReady() {
+      if (kind === 'chat' && typeof window._openAiPanel === 'function') { window._openAiPanel(); return; }
+      if (kind === 'code' && window.ProcessCode) {
+        var addr = p.get('address'), comp = p.get('composite');
+        if (addr) window.ProcessCode.open(addr);
+        else if (comp) window.ProcessCode.openComposite({ id: comp, module: p.get('module') || '', source_path: p.get('source_path') || '' });
+        return;
+      }
+      if (++tries < 60) setTimeout(openWhenReady, 50);
+    })();
+  }
+
+  global.VivPanelDock = { make: make, popout: popout, initPopout: initPopout };
+
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initPopout);
+    else initPopout();
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
