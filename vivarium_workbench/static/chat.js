@@ -51,7 +51,7 @@
   const layout = document.querySelector('.viv-layout');
   const mainEl = layout && layout.querySelector('.viv-main');
   const codeRail = document.getElementById('viv-code-rail');
-  let dock = C.validDock(lsGet('viv.ai.dock', 'left')) ? lsGet('viv.ai.dock', 'left') : 'left';
+  let dock = C.validDock(lsGet('viv.ai.dock', 'right')) ? lsGet('viv.ai.dock', 'right') : 'right';
 
   function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (x) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (x) { /* private mode */ } }

@@ -34,12 +34,17 @@ def test_embeds_refit_and_focus_mode_hides_the_panel():
     assert "body.focus-mode .viv-ai-panel" in chat_css                       # a pop-out window has no room for it
 
 
-def test_the_panel_publishes_its_footprint_and_defaults_to_left():
+def test_the_panel_publishes_its_footprint_and_defaults_to_right():
     js = (STATIC / "chat.js").read_text()
     for var in ("--viv-ai-left", "--viv-ai-right", "--viv-ai-bottom", "--viv-ai-rw"):
         assert var in js
-    assert "lsGet('viv.ai.dock', 'left')" in js
+    assert "lsGet('viv.ai.dock', 'right')" in js                            # chat + code both default to the right dock
     assert "draggable', 'false'" in js and "pointercancel" in js            # the native link drag must never strand the ghost
+
+
+def test_both_panels_default_to_the_right_dock():
+    assert "lsGet('viv.ai.dock', 'right')" in (STATIC / "chat.js").read_text()
+    assert "defaultDock: 'right'" in (STATIC / "process-code.js").read_text()
 
 
 def test_the_rail_tab_is_called_chat_and_the_panel_keeps_the_viva_name():
