@@ -31,6 +31,20 @@ _DEFAULT_POLL_TIMEOUT = 7200.0  # 2 h wall-clock ceiling; <= 0 disables the dead
 _MAX_CONSECUTIVE_POLL_ERRORS = 5
 
 
+# Paths the workbench itself (re)writes whenever it serves a workspace — the `.viv-build.json` provenance stamp (#858),
+# the rendered report shell (`reports/index.html`, `reports/assets/`) and its per-start registry/server state. They are
+# generated output, not workspace code, and a remote dispatch installs only the code from git: counting them would make
+# a clean, pushed workspace look dirty the moment `vivarium-workbench serve` has run. Committed *results* under
+# `reports/` (e.g. a per-model report) are NOT excluded.
+_NOT_WORKSPACE_CODE = (
+    ":!.viv-build.json",
+    ":!reports/index.html",
+    ":!reports/assets",
+    ":!.pbg/registry-catalog",
+    ":!.pbg/server",
+)
+
+
 def git_pip_url(ws_root: "Path | str") -> str:
     """Return ``git+<origin>@<sha>`` for the workspace repo.
 
@@ -55,7 +69,7 @@ def git_pip_url(ws_root: "Path | str") -> str:
     # must never block a remote dispatch (#858). The primary fix stamps it
     # before the baseline commit so it's normally clean anyway; this is
     # defense-in-depth for caches materialized by an older workbench.
-    status = _git(ws_root, "status", "--porcelain", "--", ".", ":!.viv-build.json")
+    status = _git(ws_root, "status", "--porcelain", "--", ".", *_NOT_WORKSPACE_CODE)
     if status.strip():
         raise RuntimeError(
             f"Workspace at {ws_root} has uncommitted or untracked changes "
@@ -150,7 +164,7 @@ def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
         ws_root = Path(ws_root).resolve()
         # Same exclusion as git_pip_url: the .viv-build.json stamp is workbench
         # bookkeeping and must not block a dispatch (#858).
-        dirty = _git(ws_root, "status", "--porcelain", "--", ".", ":!.viv-build.json").strip()
+        dirty = _git(ws_root, "status", "--porcelain", "--", ".", *_NOT_WORKSPACE_CODE).strip()
         sha = _git(ws_root, "rev-parse", "HEAD").strip()
     except Exception as e:  # noqa: BLE001 — a git failure is a clean preflight fail, not a crash
         return {"ok": False, "reason": "error", "sha": "", "dirty_files": "",
