@@ -10108,7 +10108,7 @@
       if (btn) { btn.disabled = false; btn.textContent = '▶ Run current spec'; }
       if (!res.ok) {
         var errMsg = 'Rerun failed: ' + ((res.body && res.body.error) || res.status);
-        if (typeof _showToast === 'function') _showToast(errMsg); else alert(errMsg);
+        if (typeof _showToast === 'function') _showToast(errMsg, { danger: true }); else alert(errMsg);
         if (panel) panel.innerHTML = '<div class="inv-run-progress-banner inv-run-error">' + _h(errMsg) + '</div>';
         return;
       }
@@ -10137,7 +10137,7 @@
     }).catch(function(err) {
       if (btn) { btn.disabled = false; btn.textContent = '▶ Run current spec'; }
       var netMsg = 'Network error: ' + err;
-      if (typeof _showToast === 'function') _showToast(netMsg); else alert(netMsg);
+      if (typeof _showToast === 'function') _showToast(netMsg, { danger: true }); else alert(netMsg);
       if (panel) panel.innerHTML = '<div class="inv-run-progress-banner inv-run-error">' + _h(netMsg) + '</div>';
     });
   }
@@ -11287,8 +11287,8 @@
     // simply absent (404). A bare `<a download>` to a 404 silently does nothing,
     // which reads as a broken button. Fetch first: download the blob when it
     // exists, otherwise tell the user why there's nothing to grab.
-    function _notify(msg) {
-      if (typeof _showToast === 'function') _showToast(msg); else window.alert(msg);
+    function _notify(msg, opts) {
+      if (typeof _showToast === 'function') _showToast(msg, opts); else window.alert(msg);
     }
     fetch(url).then(function (r) {
       if (!r.ok) {
@@ -11305,7 +11305,7 @@
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       window.setTimeout(function () { URL.revokeObjectURL(href); }, 1000);
     }).catch(function (e) {
-      _notify('Figures download failed: ' + e);
+      _notify('Figures download failed: ' + e, { danger: true });
     });
   };
   // A study's ↓ notebook is its parent investigation's runnable notebook (there
