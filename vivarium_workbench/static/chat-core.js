@@ -547,7 +547,11 @@
   // marimo's model dropdown tree: one entry per provider, each with its registry models
   // (static/ai-models.js, generated from marimo's llm-info) plus the user's custom models
   // (`known`, browser-local) and the selected model when it is neither. Providers with nothing
-  // to list are omitted, as in marimo.
+  // to list are omitted, as in marimo — except an endpoint provider (OpenAI-compatible): it has no catalogue, but the
+  // Model menu is the only provider chooser, so it stays listed with a hint on how to use it.
+  var ENDPOINT_NOTES = {
+    'openai-compatible': 'Any OpenAI-style endpoint (vLLM, OpenRouter, …): enter openai-compatible/<model> below, then set its Base URL.',
+  };
   function modelTree(registry, known, selected, installed) {
     registry = registry || {};
     installed = installed || {};
@@ -569,8 +573,8 @@
       models = customs.concat(models);
       models.forEach(function (m) { m.on = !!(selected && selected.provider === p.id && selected.model === m.model); });
       return { id: p.id, label: p.label, color: p.color, mark: p.mark, description: here ? '' : (reg.description || ''),
-               url: reg.url || '', note: (here && here.note) || '', models: models, live: !!here };
-    }).filter(function (g) { return g.models.length > 0 || g.live; });   // a provider we asked about stays, with its note
+               url: reg.url || '', note: (here && here.note) || ENDPOINT_NOTES[p.id] || '', models: models, live: !!here };
+    }).filter(function (g) { return g.models.length > 0 || g.live || !!ENDPOINT_NOTES[g.id]; });   // a provider we asked about stays, with its note
   }
 
   // marimo qualifies custom models as "provider/model" (e.g. ollama/qwen3.6:27b). A first segment

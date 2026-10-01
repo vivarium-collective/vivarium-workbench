@@ -308,8 +308,8 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert(oll.models.some(m => m.model === 'glm-5.3' && !m.custom && m.thinking), 'registry models keep the reasoning flag');
   assert.strictEqual(oll.description, 'local');
   assert(tree.every(g => g.mark && g.color));
-  assert.deepStrictEqual(C.modelTree({}, {}, null), [], 'nothing to list');
-  assert.deepStrictEqual(C.modelTree(null, null, null), []);
+  assert.deepStrictEqual(C.modelTree({}, {}, null).map(g => g.id), ['openai-compatible'], 'with no catalogue only the endpoint provider stays listed (the menu is the only provider chooser)');
+  assert.deepStrictEqual(C.modelTree(null, null, null).map(g => g.id), ['openai-compatible'], 'null inputs behave like empty ones');
 
   // "Enter a custom model": provider/model like marimo; anything else belongs to the fallback provider
   assert.deepStrictEqual(C.parseQualified('ollama/qwen3.6:27b', 'openai'), { provider: 'ollama', model: 'qwen3.6:27b' });
@@ -462,3 +462,19 @@ console.log('test_chat_core: all passed');
   // no lookup at all -> the registry, as before
   assert.strictEqual(C.modelTree(registry, {}, null).find(g => g.id === 'ollama').models[0].model, 'glm-5.3');
 }
+
+// ── the Model menu is the only provider chooser: OpenAI-compatible must stay reachable from it ──
+{
+  const tree = C.modelTree({}, {}, null);
+  const oc = tree.find(g => g.id === 'openai-compatible');
+  assert(oc, 'OpenAI-compatible is listed even though it has no catalogue models');
+  assert.strictEqual(oc.models.length, 0);
+  assert(/openai-compatible\/<model>/.test(oc.note) && /Base URL/.test(oc.note), 'it tells the user how to use it');
+  // and a model the user already entered for it shows up under it, with the hint kept
+  const withCustom = C.modelTree({}, { 'openai-compatible': ['qwen3-32b'] }, null).find(g => g.id === 'openai-compatible');
+  assert.deepStrictEqual(withCustom.models.map(m => m.model), ['qwen3-32b']);
+  assert(withCustom.note);
+  // the picker's `provider/model` parser accepts it
+  assert.deepStrictEqual(C.parseQualified('openai-compatible/qwen3-32b', null), { provider: 'openai-compatible', model: 'qwen3-32b' });
+}
+console.log('chat-core model menu keeps openai-compatible: ok');
