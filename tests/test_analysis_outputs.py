@@ -75,3 +75,20 @@ def test_zip_bundles_all_result_files(tmp_path):
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         members = sorted(zf.namelist())
     assert members == ["analyses/growth.csv", "ptools/proteins.tsv", "ptools/rna.tsv"]
+
+
+def test_lists_simularium_trajectory_output(tmp_path):
+    """A non-tabular Simularium trajectory an Analysis Step writes to
+    viz/simularium/*.simularium is surfaced as a downloadable result (issue 07)."""
+    d = tmp_path / "studies" / "demo"
+    (d / "viz" / "simularium").mkdir(parents=True)
+    (d / "study.yaml").write_text("name: demo\n", encoding="utf-8")
+    (d / "viz" / "simularium" / "traj.simularium").write_text(
+        '{"trajectoryInfo":{}}', encoding="utf-8")
+    out = ao.list_analysis_outputs(tmp_path, "demo")
+    names = [f["name"] for f in out["files"]]
+    assert "traj.simularium" in names
+    sim = next(f for f in out["files"] if f["name"] == "traj.simularium")
+    assert sim["relpath"] == "viz/simularium/traj.simularium"
+    assert "study=demo" in sim["download_url"]
+    assert ".simularium" in ao._RESULT_EXTS and ".simularium" in ao._MIME

@@ -25,10 +25,11 @@ from pathlib import Path
 from vivarium_workbench.lib.download_views import DownloadError
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
-# Tabular result extensions surfaced in the Data tab. Served inline-friendly
-# (text) but offered as a download by the route. Keep in sync with the
-# front-end's expectations.
-_RESULT_EXTS = {".csv", ".tsv", ".json"}
+# Result extensions surfaced in the Data tab. Tabular ones are served
+# inline-friendly (text); non-tabular analysis outputs (e.g. a Simularium
+# trajectory an Analysis Step writes to viz/simularium/*.simularium) are listed
+# too and offered as a download. Keep in sync with the front-end's expectations.
+_RESULT_EXTS = {".csv", ".tsv", ".json", ".simularium"}
 
 # `.json` is surfaced ONLY when it lives under an ``analyses/`` folder (a run's
 # analysis artifacts, e.g. a Step's emitted JSON copied to
@@ -41,6 +42,7 @@ _MIME = {
     ".csv": "text/csv; charset=utf-8",
     ".tsv": "text/tab-separated-values; charset=utf-8",
     ".json": "application/json; charset=utf-8",
+    ".simularium": "application/octet-stream",
 }
 
 # Directories whose contents are never analysis result files — skip them so the
