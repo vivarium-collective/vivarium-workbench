@@ -85,7 +85,9 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # Only probe when VIVA_API_BASE/SMS_API_BASE is explicitly set — a local-only
     # user hasn't opted into remote and shouldn't pay a probe delay. Best-effort:
     # never blocks/raises.
-    if os.environ.get("VIVA_API_BASE") or os.environ.get("SMS_API_BASE"):
+    from vivarium_workbench.lib.sms_api_client import backend_configured
+
+    if backend_configured():
         try:
             from vivarium_workbench.lib.workspace_deps_views import remote_health
             _h = remote_health()
@@ -99,6 +101,20 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
                 )
         except Exception as e:  # noqa: BLE001
             print(f"warning: remote sms-api health check failed: {e}", file=sys.stderr)
+
+        # A backend named with --backend-base-url: say which dispatch route its
+        # capabilities give this workspace (best-effort; never blocks or raises).
+        try:
+            from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
+            _p = explicit_backend_profile()
+            if _p is not None and _p["reachable"]:
+                print(f"backend dispatch: {_p['dispatch']} (server v{_p['version']}; "
+                      f"capabilities: {', '.join(_p['capabilities']) or 'none advertised'})")
+            elif _p is not None:
+                print(f"backend dispatch: legacy (capabilities unavailable: {_p['error']})",
+                      file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: backend capability check failed: {e}", file=sys.stderr)
 
         # Start the RemoteLink circuit-breaker probe so a wedged tunnel is
         # detected in the background (~3s probe every 30s) and every sms-api call

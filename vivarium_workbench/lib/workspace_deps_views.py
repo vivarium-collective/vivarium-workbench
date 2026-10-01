@@ -53,10 +53,10 @@ def remote_health() -> dict:
     it answers. Best-effort — never raises; returns
     ``{configured, base_url, reachable, version, error}``.
     """
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench.lib.sms_api_client import SmsApiClient, backend_configured
 
     base = _sms_api_base()
-    configured = bool(os.environ.get("VIVA_API_BASE") or os.environ.get("SMS_API_BASE"))
+    configured = backend_configured()
     try:
         version = SmsApiClient(base).ping()
         return {"configured": configured, "base_url": base, "reachable": True,

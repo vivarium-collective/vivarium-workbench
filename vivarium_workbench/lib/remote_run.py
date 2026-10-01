@@ -10,11 +10,12 @@ The dashboard CLI's ``run-remote`` subcommand calls ``run_remote``.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from vivarium_workbench.lib.pbg_export import export_composite_pbg  # noqa: E402 (module-level for patch)
 
@@ -28,6 +29,20 @@ _DEFAULT_POLL_INTERVAL = 10.0
 # single network blip doesn't fail a multi-hour run. Env-tunable for slow links.
 _DEFAULT_POLL_TIMEOUT = 7200.0  # 2 h wall-clock ceiling; <= 0 disables the deadline
 _MAX_CONSECUTIVE_POLL_ERRORS = 5
+
+
+# Paths the workbench itself (re)writes whenever it serves a workspace — the `.viv-build.json` provenance stamp (#858),
+# the rendered report shell (`reports/index.html`, `reports/assets/`) and its per-start registry/server state. They are
+# generated output, not workspace code, and a remote dispatch installs only the code from git: counting them would make
+# a clean, pushed workspace look dirty the moment `vivarium-workbench serve` has run. Committed *results* under
+# `reports/` (e.g. a per-model report) are NOT excluded.
+_NOT_WORKSPACE_CODE = (
+    ":!.viv-build.json",
+    ":!reports/index.html",
+    ":!reports/assets",
+    ":!.pbg/registry-catalog",
+    ":!.pbg/server",
+)
 
 
 def git_pip_url(ws_root: "Path | str") -> str:
@@ -54,7 +69,7 @@ def git_pip_url(ws_root: "Path | str") -> str:
     # must never block a remote dispatch (#858). The primary fix stamps it
     # before the baseline commit so it's normally clean anyway; this is
     # defense-in-depth for caches materialized by an older workbench.
-    status = _git(ws_root, "status", "--porcelain", "--", ".", ":!.viv-build.json")
+    status = _git(ws_root, "status", "--porcelain", "--", ".", *_NOT_WORKSPACE_CODE)
     if status.strip():
         raise RuntimeError(
             f"Workspace at {ws_root} has uncommitted or untracked changes "
@@ -91,6 +106,47 @@ def git_pip_url(ws_root: "Path | str") -> str:
     return f"git+{origin_url}@{sha}"
 
 
+#: The site-named environment ``POST /viva/v1/composites`` accepts for a document run (viva-core
+#: ``NAMED_ENVIRONMENTS``): one container on the core runtime image. ``deployment-default`` is only
+#: the label a legacy submission is *recorded* under, not a name the route accepts.
+DEFAULT_BACKEND_ENVIRONMENT = "runtime"
+
+
+def backend_environment() -> dict:
+    """``environment`` for a /viva/v1 document run: ``VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT``
+    is a site-named environment (``runtime``) or ``id:<environment id>``; default ``runtime``."""
+    from vivarium_workbench.lib.env_compat import get_env
+
+    raw = (get_env("BACKEND_ENVIRONMENT", DEFAULT_BACKEND_ENVIRONMENT) or DEFAULT_BACKEND_ENVIRONMENT).strip()
+    return {"id": raw[3:]} if raw.startswith("id:") else {"name": raw}
+
+
+def viva_v1_document_options(
+    environment: dict, steps: int, extra_pip_deps: "list[str] | None", analysis_options: "dict | None",
+) -> dict:
+    """``execution.options`` for a document run. A named environment is one container: the
+    workspace code arrives as ``extra_pip_deps`` and ``analysis_options`` is refused by the
+    backend; an environment id is a simulator image that already holds the code."""
+    options: dict = {"interval_time": float(steps)}
+    if "name" in environment:
+        if extra_pip_deps:
+            options["extra_pip_deps"] = list(extra_pip_deps)
+    elif analysis_options:
+        options["analysis_options"] = analysis_options
+    return options
+
+
+def compose_simulation_id(run: dict) -> int:
+    """The compose simulation a /viva/v1 document run became: its ``job_id`` is ``compose:<n>``."""
+    job_id = str(run.get("job_id") or "")
+    kind, _, n = job_id.partition(":")
+    if kind != "compose" or not n.isdigit():
+        raise RuntimeError(
+            f"run {run.get('id')!r} has job_id {job_id!r}, not compose:<n>; its output has no "
+            "/viva/v1 download route the workbench knows (docs/backend-viva-v1.md)")
+    return int(n)
+
+
 def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
     """Non-raising, structured counterpart to :func:`git_pip_url`'s guards.
 
@@ -108,7 +164,7 @@ def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
         ws_root = Path(ws_root).resolve()
         # Same exclusion as git_pip_url: the .viv-build.json stamp is workbench
         # bookkeeping and must not block a dispatch (#858).
-        dirty = _git(ws_root, "status", "--porcelain", "--", ".", ":!.viv-build.json").strip()
+        dirty = _git(ws_root, "status", "--porcelain", "--", ".", *_NOT_WORKSPACE_CODE).strip()
         sha = _git(ws_root, "rev-parse", "HEAD").strip()
     except Exception as e:  # noqa: BLE001 — a git failure is a clean preflight fail, not a crash
         return {"ok": False, "reason": "error", "sha": "", "dirty_files": "",
@@ -207,6 +263,12 @@ def run_remote(
 
     ws_root = Path(ws_root).resolve()
 
+    # Only an operator who NAMED a backend (``serve --backend-base-url``) that runs
+    # documents via /viva/v1/composites takes that route; a caller-supplied client
+    # (CLI ``run-remote``, tests) and every other deployment keep /compose/v1.
+    from vivarium_workbench.lib.remote_pinned import uses_viva_v1_dispatch
+
+    via_viva_v1 = client is None and uses_viva_v1_dispatch(ws_root)
     if client is None:
         client = _SmsApiClient(_sms_api_base())
 
@@ -288,23 +350,38 @@ def run_remote(
     # double built against the pre-Task-8 compose_submit(pbg_bytes,
     # extra_pip_deps=, interval_time=) signature (no **kwargs catch-all) keeps
     # working unchanged when there's nothing to inject.
-    compose_kwargs: dict = dict(extra_pip_deps=extra_pip_deps, interval_time=float(steps))
-    if analysis_options:
-        compose_kwargs["analysis_options"] = analysis_options
-    sim_id = client.compose_submit(pbg_bytes, **compose_kwargs)
-    print(f"Submitted. Simulation id: {sim_id}")
+    if via_viva_v1:
+        run = client.create_composite_run(
+            environment=backend_environment(),
+            document=json.loads(pbg_bytes),
+            execution={"options": viva_v1_document_options(
+                backend_environment(), steps, extra_pip_deps, analysis_options)},
+            label=f"workbench: {composite_id}",
+        )
+        sim_id = run["id"]
+        print(f"Submitted to /viva/v1/composites. Run id: {sim_id}")
+        status_of = client.composite_run_status
+    else:
+        compose_kwargs: dict = dict(extra_pip_deps=extra_pip_deps, interval_time=float(steps))
+        if analysis_options:
+            compose_kwargs["analysis_options"] = analysis_options
+        sim_id = client.compose_submit(pbg_bytes, **compose_kwargs)
+        print(f"Submitted. Simulation id: {sim_id}")
+        status_of = None
 
     # Poll until terminal state — bounded by a wall-clock deadline and tolerant of a
     # few consecutive transient errors (see _poll_until_terminal).
-    status, status_data = _poll_until_terminal(client, sim_id, poll_interval, poll_timeout)
+    status, status_data = _poll_until_terminal(
+        client, sim_id, poll_interval, poll_timeout, **({"status_of": status_of} if status_of else {}))
 
     if status != "completed":
         raise RuntimeError(
             f"Remote run {sim_id} ended with status '{status}': {status_data}"
         )
 
-    # Download results (results.tar.gz — T5b)
-    results_path = client.download_compose_results(sim_id, dest)
+    # Download results (results.tar.gz — T5b). A /viva/v1 run's output is the compose
+    # simulation it became (``job_id`` = ``compose:<n>``).
+    results_path = client.download_compose_results(compose_simulation_id(run) if via_viva_v1 else sim_id, dest)
     print(f"Results landed at: {results_path}")
     return results_path
 
@@ -362,9 +439,10 @@ _TERMINAL_STATUSES = ("completed", "failed", "error", "cancelled")
 
 def _poll_until_terminal(
     client: "SmsApiClient",
-    sim_id: int,
+    sim_id: "int | str",
     poll_interval: float,
     poll_timeout: float,
+    status_of: "Callable[[int | str], dict] | None" = None,
 ) -> "tuple[str, dict]":
     """Poll ``client.compose_status(sim_id)`` until a terminal status.
 
@@ -383,7 +461,7 @@ def _poll_until_terminal(
     consecutive_errors = 0
     while True:
         try:
-            status_data = client.compose_status(sim_id)
+            status_data = (status_of or client.compose_status)(sim_id)
             consecutive_errors = 0
         except SmsApiError as exc:
             consecutive_errors += 1

@@ -75,6 +75,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"ERROR: not a workspace (no workspace.yaml): {workspace}", file=sys.stderr)
         return 2
 
+    backend_url = getattr(args, "backend_base_url", None)
+    if backend_url:
+        from vivarium_workbench.lib.sms_api_client import normalize_backend_base_url
+        try:
+            args.backend_base_url = normalize_backend_base_url(backend_url)
+        except ValueError as e:
+            print(f"ERROR: --backend-base-url: {e}", file=sys.stderr)
+            return 2
+
     if getattr(args, "detach", False):
         return _serve_detached(workspace, args)
 
@@ -92,6 +101,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     if getattr(args, "trust_proxy", False):
         os.environ["VIVARIUM_WORKBENCH_TRUST_PROXY"] = "1"
+
+    if backend_url:
+        os.environ["VIVARIUM_WORKBENCH_BACKEND_BASE_URL"] = args.backend_base_url
 
     allowed = getattr(args, "allowed_origin", None) or []
     if allowed:
@@ -1098,6 +1110,8 @@ def _serve_detached(workspace: Path, args: argparse.Namespace) -> int:
         cmd += ["--base-path", args.base_path]
     for h in getattr(args, "allowed_host", None) or []:
         cmd += ["--allowed-host", h]
+    if getattr(args, "backend_base_url", None):
+        cmd += ["--backend-base-url", args.backend_base_url]
 
     with open(log_file, "wb") as log:
         proc = subprocess.Popen(  # noqa: S603
@@ -1388,6 +1402,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Add a Host name (no port) that a loopback-bound server accepts besides localhost / "
              "127.0.0.1 / [::1] — for a tunnel or port-forward that keeps its public Host "
              "(sets VIVARIUM_WORKBENCH_ALLOWED_HOSTS). Repeatable. Without it such requests get 400.",
+    )
+    p_serve.add_argument(
+        "--backend-base-url", default=None, metavar="URL",
+        help="Base URL of the compute backend (a viva-api / viva-core deployment, e.g. "
+             "https://sms.cam.uchc.edu) that runs, tracks and returns this workspace's "
+             "simulations. Sets VIVARIUM_WORKBENCH_BACKEND_BASE_URL; overrides the "
+             "VIVA_API_BASE / SMS_API_BASE aliases. The UI and chat stay local. "
+             "Credentials in the URL are refused.",
     )
     p_serve.add_argument(
         "--detach", action="store_true",

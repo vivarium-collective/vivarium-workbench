@@ -355,7 +355,21 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     # and the pinned case to the same image dispatch, so they can never drift.
     build_ref = None
     target = "local"
-    cloud = resolve_cloud_target(ws_root, body)
+    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench.lib import remote_run as _remote_run
+
+    if remote_pinned.uses_viva_v1_dispatch(ws_root):
+        # The named backend runs this composite as a document (run_remote ->
+        # POST /viva/v1/composites): no cloud image to resolve. A named environment
+        # installs the workspace FROM GIT, so the clean+pushed preflight still applies.
+        target = "deployment"
+        cloud = None
+        pf = _remote_run.remote_dispatch_preflight(ws_root) if "name" in _remote_run.backend_environment() else {"ok": True}
+        if not pf.get("ok"):
+            return {"error": pf.get("message", "workspace not ready to run remotely"),
+                    "reason": pf.get("reason"), "preflight": pf, "run_target": "deployment"}, 409
+    else:
+        cloud = resolve_cloud_target(ws_root, body)
     if isinstance(cloud, CloudTarget):
         cfg_fn = (body.get("config_filename") or "").strip() or None
         return _dispatch_build_image_run(

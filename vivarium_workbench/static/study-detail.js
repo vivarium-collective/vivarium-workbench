@@ -2728,7 +2728,10 @@
 
   function _pollChainProgress(runId) {
     if (_chainProgressTimer) { clearTimeout(_chainProgressTimer); _chainProgressTimer = null; }
-    api('GET', '/api/remote-run-chain-progress?simulation_id=' + encodeURIComponent(runId))
+    // A legacy run is an integer simulation id; a /viva/v1 run (serve --backend-base-url)
+    // carries the backend's opaque string id, asked for as run_id.
+    var idParam = /^\d+$/.test(String(runId)) ? 'simulation_id' : 'run_id';
+    api('GET', '/api/remote-run-chain-progress?' + idParam + '=' + encodeURIComponent(runId))
       .then(function (res) {
         var d = res.body || {};
         _renderChainProgress(d);

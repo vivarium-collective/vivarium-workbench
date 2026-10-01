@@ -19,15 +19,61 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
-def sms_api_base() -> str:
-    """Base URL of the viva-api (nee sms-api; the SSM tunnel by default).
+#: Env vars naming the backend, highest precedence first. ``serve --backend-base-url``
+#: sets the first; the other two are the pre-existing names, kept as aliases.
+BACKEND_BASE_ENV_VARS = ("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "VIVA_API_BASE", "SMS_API_BASE")
+DEFAULT_BACKEND_BASE = "http://localhost:8080"
 
-    ``VIVA_API_BASE`` is the canonical name; ``SMS_API_BASE`` is kept as a
-    fallback alias since the backend repo was renamed sms-api -> viva-api. The
-    single source of truth for this lookup — ``workspace_deps_views`` and
-    ``remote_simulations`` re-export it under their old ``_sms_api_base`` name.
+
+def normalize_backend_base_url(url: str) -> str:
+    """Validate a backend base URL: http(s), a host, no credentials, no trailing slash.
+
+    Credentials are refused because the value is forwarded on a child process's
+    argv (``serve --detach``) where any local user can read it.
     """
-    return os.environ.get("VIVA_API_BASE") or os.environ.get("SMS_API_BASE", "http://localhost:8080")
+    from urllib.parse import urlsplit
+
+    raw = (url or "").strip()
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(f"backend base URL must be http(s)://host[:port][/prefix], got {raw!r}")
+    if parts.username or parts.password:
+        raise ValueError("backend base URL must not embed credentials")
+    if parts.query or parts.fragment:
+        raise ValueError("backend base URL must not carry a query or fragment")
+    return raw.rstrip("/")
+
+
+def backend_configured() -> bool:
+    """Whether the operator named a backend at all (flag or any env alias)."""
+    return any(os.environ.get(v) for v in BACKEND_BASE_ENV_VARS)
+
+
+def explicit_backend_base_url() -> "str | None":
+    """The backend the operator NAMED for this process (flag / new env), else ``None``.
+
+    Distinct from :func:`sms_api_base`, which also honours the legacy aliases and a
+    localhost default: only an explicit name opts a process into running studies on
+    the backend through ``/viva/v1/composites``.
+    """
+    return os.environ.get(BACKEND_BASE_ENV_VARS[0]) or None
+
+
+def sms_api_base() -> str:
+    """Base URL of the backend (viva-api / viva-core; nee sms-api).
+
+    Precedence: ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` (what ``serve
+    --backend-base-url`` sets) > ``VIVA_API_BASE`` > ``SMS_API_BASE`` (the
+    legacy alias, since the backend repo was renamed sms-api -> viva-api) >
+    ``http://localhost:8080`` (the SSM tunnel). The single source of truth for
+    this lookup — ``workspace_deps_views`` and ``remote_simulations`` re-export
+    it under their old ``_sms_api_base`` name.
+    """
+    for name in BACKEND_BASE_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return DEFAULT_BACKEND_BASE
 
 
 class SmsApiError(Exception):
@@ -231,6 +277,21 @@ CAPABILITY_VIVA_V1_ENVIRONMENTS_BUILD = "viva-v1-environments-build"
 #: without it silently ignores those parameters and answers the UNFILTERED list,
 #: so a branch lookup may trust the filter only when this is advertised.
 CAPABILITY_VIVA_V1_ENVIRONMENTS_FILTERS = "viva-v1-environments-filters"
+
+#: ``viva-v1-composites``: ``POST/GET/DELETE /viva/v1/composites[/{id}[/status|progress|jobs|...]]``
+#: answer -- the generic run surface (an environment + a composite id with params, or
+#: a document), not one simulator's.
+CAPABILITY_VIVA_V1_COMPOSITES = "viva-v1-composites"
+#: ``viva-v1-composites-documents``: that surface also runs a process-bigraph ``document``.
+CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS = "viva-v1-composites-documents"
+
+_COMPOSITES = "/viva/v1/composites"
+
+
+def _run_path(run_id: "str | int", leaf: str = "") -> str:
+    """``/viva/v1/composites/{id}[/leaf]`` -- the id is opaque, so it is quoted whole."""
+    return f"{_COMPOSITES}/{quote(str(run_id), safe='')}" + (f"/{leaf}" if leaf else "")
+
 
 #: Environment statuses (``/viva/v1/environments``). A build is ready only when
 #: EVERY variant row of it is (a vEcoli build has three: ``arm64``, ``amd64``,
@@ -918,6 +979,74 @@ class SmsApiClient:
         format as :meth:`simulation_trace`). ``run_id`` is the composite run id,
         which for a ``/compose/v1`` submission is its ``correlation_id``."""
         return self._get_bytes(f"/viva/v1/composites/{quote(str(run_id), safe='')}/trace")
+
+    # -- /viva/v1/composites: the generic run surface -----------------------
+    # Contract: docs/backend-viva-v1.md (verified against the deployment's own
+    # /viva/v1/openapi.json). A run ``id`` is opaque -- pass it back as given.
+
+    def create_composite_run(
+        self, *, environment: dict, composite: "dict | None" = None,
+        document: "dict | None" = None, execution: "dict | None" = None,
+        label: "str | None" = None,
+    ) -> dict:
+        """``POST /viva/v1/composites`` -> the run record (HTTP 202).
+
+        ``environment`` is ``{"id": ...}`` or ``{"name": ...}``; exactly one of
+        ``composite`` (``{"id", "params"}``, a composite the environment provides)
+        or ``document`` (a process-bigraph document) names what runs. Never
+        retried (``_post``): a retried submit could double-spend a real run.
+        """
+        if (composite is None) == (document is None):
+            raise ValueError("exactly one of composite / document is required")
+        body: dict = {"environment": environment}
+        if composite is not None:
+            body["composite"] = composite
+        else:
+            body["document"] = document
+        if execution:
+            body["execution"] = execution
+        if label:
+            body["label"] = label
+        return self._post(_COMPOSITES, json_body=body)
+
+    def list_composite_runs(self, **filters: Any) -> dict:
+        """``GET /viva/v1/composites`` (``status`` repeatable, ``composite_id``,
+        ``environment_id``, ``created_by``, ``limit``, ``offset``) -> a page."""
+        return self._get(_COMPOSITES, {k: v for k, v in filters.items() if v is not None})
+
+    def composite_run(self, run_id: "str | int") -> dict:
+        return self._get(_run_path(run_id))
+
+    def composite_run_status(self, run_id: "str | int") -> dict:
+        """``{id, status, message}``; ``status`` is a JobStatus (lower-case)."""
+        return self._get(_run_path(run_id, "status"))
+
+    def composite_run_progress(self, run_id: "str | int") -> dict:
+        """``{id, status, total, by_kind: {kind: {status: n}}}``."""
+        return self._get(_run_path(run_id, "progress"))
+
+    def composite_run_jobs(self, run_id: "str | int") -> dict:
+        return self._get(_run_path(run_id, "jobs"))
+
+    def composite_run_datasets(self, run_id: "str | int", *, limit: "int | None" = None,
+                               offset: "int | None" = None) -> dict:
+        """The run's datasets; 503 (:class:`SmsApiError`) on a deployment with no dataset store."""
+        params = {k: v for k, v in (("limit", limit), ("offset", offset)) if v is not None}
+        return self._get(_run_path(run_id, "datasets"), params or None)
+
+    def composite_run_log(self, run_id: "str | int", *, full: bool = False) -> str:
+        """The run's log as text (``text/plain``)."""
+        path = _run_path(run_id, "log") + ("?full=true" if full else "")
+        return self._get_bytes(path, accept="text/plain").decode("utf-8", errors="replace")
+
+    def cancel_composite_run(self, run_id: "str | int") -> dict:
+        """``DELETE /viva/v1/composites/{id}`` -> ``{run, pending}``. The record is kept;
+        ``pending`` names what is still being stopped (HTTP 202)."""
+        return self._delete(_run_path(run_id))
+
+    def health_v1(self) -> dict:
+        """``GET /viva/v1/health`` -> ``{status, version, services: {name: bool}}``."""
+        return self._get("/viva/v1/health")
 
     def _get_bytes(self, path: str, accept: str = "application/json") -> bytes:
         """GET ``path`` and return the body undecoded. One attempt: a trace is

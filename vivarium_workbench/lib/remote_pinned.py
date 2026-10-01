@@ -98,7 +98,26 @@ def resolve_run_target(ws_root: Path) -> str:
 
     if run_target_for(Path(ws_root)) == "deployment":
         return "deployment"
-    return "deployment" if is_pinned_enabled() else "local"
+    if is_pinned_enabled():
+        return "deployment"
+    return "deployment" if uses_viva_v1_dispatch(ws_root) else "local"
+
+
+def uses_viva_v1_dispatch(ws_root: Path) -> bool:
+    """Whether runs of ``ws_root`` go to ``POST /viva/v1/composites``.
+
+    True only for an operator who NAMED a backend (``serve --backend-base-url``)
+    that advertises the document run surface, and only when neither a session
+    build nor the pinned-build config already picked the simulator-keyed path --
+    those keep their behaviour. No named backend, or one that does not advertise
+    the surface: False with no network call at all.
+    """
+    from vivarium_workbench.lib.run_core import run_target_for
+    from vivarium_workbench.lib.server_capabilities import viva_v1_dispatch_active
+
+    if run_target_for(Path(ws_root)) == "deployment" or is_pinned_enabled():
+        return False
+    return viva_v1_dispatch_active()
 
 
 def resolved_from_session_build(ws_root: Path) -> dict | None:
