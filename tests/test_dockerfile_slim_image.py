@@ -114,3 +114,24 @@ def test_sanity_check_still_imports_api_app() -> None:
         "the build-time sanity check must import vivarium_workbench.api.app "
         "explicitly — importing the package alone does not exercise it"
     )
+
+
+def test_hosted_image_does_not_install_the_chat_extra() -> None:
+    """The AI chat stays out of hosted workbenches until the chat hardening ships.
+
+    This image is what hosted deployments run. Chat is offered there only once
+    the hardening work (#1238, #1247) is merged, released and deployed; that
+    release is where the ``[chat]`` extra comes back. Local installs keep chat
+    via ``vivarium-workbench[chat]``.
+    """
+    # Whole instructions, not physical lines: a flag on a `\` continuation line still counts.
+    joined = re.sub(r"\\\n", " ", "\n".join(_instructions()))
+    installs = [ln for ln in joined.splitlines()
+                if re.search(r"\b(uv\s+sync|uv\s+pip\s+install|pip\s+install)\b", ln)]
+    assert installs, "Dockerfile has no install step to check"
+    for ln in installs:
+        assert not re.search(r"--extra[\s=]+chat\b|--all-extras|\[chat\]|pydantic[-_]ai", ln), (
+            f"Dockerfile installs the AI chat into the hosted image: {ln.strip()!r}. "
+            "Chat stays out of hosted images until the chat hardening (#1238, #1247) "
+            "is merged, released and deployed."
+        )
