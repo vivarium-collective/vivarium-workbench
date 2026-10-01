@@ -12,13 +12,17 @@ def _walkthrough():
     return (STATIC / "walkthrough.js").read_text()
 
 
-def test_study_filter_is_debounced():
+def test_study_filter_shows_hides_instead_of_rebuilding():
     js = _walkthrough()
     start = js.index("window._filterRailStudies = function")
-    block = js[start:start + 500]
-    assert "setTimeout(" in block and "clearTimeout(" in block, "filter must debounce the re-render"
-    # the query is still recorded synchronously so state stays current
-    assert "_railStudyQuery" in block
+    block = js[start:start + 400]
+    assert "_railStudyQuery" in block                           # query recorded
+    assert "_applyRailStudyFilter()" in block                   # filters in place
+    assert "_renderRailInvestigationGroups" not in block        # NOT a rebuild per keystroke
+    # the in-place filter toggles a hidden class on existing rows (no innerHTML churn)
+    assert "classList.toggle('viv-rail-hidden'" in js
+    # and reuses the existing match engine over the stamped per-row haystack
+    assert "data-rail-hay" in js and "_tokensMatch(" in js
 
 
 def test_membership_resolution_is_indexed_not_quadratic():

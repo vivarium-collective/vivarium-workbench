@@ -12464,7 +12464,10 @@
     var nameColor = opts.indent ? '#64748b' : '#374151';
     var tip = _esc(s.name) + ' — ' + _esc(status) + (s.blocked ? ' (blocked)' : '');
     var grip = opts.orderable ? _railGrip('viv-rail-grip-study') : '';
-    return '<a class="viv-rail-sublink" data-study-name="' + _esc(s.name) + '" draggable="false" ' +
+    // Stamp the precomputed (lowercased) search haystack so the live filter can
+    // show/hide this row by a substring scan without rebuilding any DOM.
+    var hay = _esc(_studyHay(s, opts.groupTitle));
+    return '<a class="viv-rail-sublink" data-study-name="' + _esc(s.name) + '" data-rail-hay="' + hay + '" draggable="false" ' +
            'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
            'href="#" title="' + tip + '" ' +
            'style="display:flex;align-items:center;gap:6px;padding:4px 14px 4px ' + indent + ';color:' + nameColor + ';text-decoration:none;font-size:' + fontSize + ';">' +
@@ -12552,12 +12555,15 @@
       // Collapsed unless active, or the caller forces it open (first group when
       // there is no active investigation), so the rail opens on something.
       var collapsed = (isActive || forceOpen) ? '' : ' collapsed';
+      // Remember the default collapse state so the live filter can restore it when
+      // the search is cleared (it force-opens matching groups while searching).
+      var defaultCollapsed = collapsed ? ' data-default-collapsed="1"' : '';
       var activeCls = isActive ? ' rail-iset-active' : '';
       var clickName = g._ungrouped
         ? ''
         : ' onclick="window._railOpenInvestigationDetail(\'' + _esc(g.name) + '\');event.stopPropagation();"';
       var nameStyle = g._ungrouped ? '' : 'cursor:pointer;';
-      return '<div class="viv-rail-investigations-group' + collapsed + activeCls + '" data-iset="' + _esc(g.name) + '">'
+      return '<div class="viv-rail-investigations-group' + collapsed + activeCls + '" data-iset="' + _esc(g.name) + '"' + defaultCollapsed + '>'
         + '<div class="viv-rail-investigations-group-header" onclick="_vivToggleInvGroup(this)"'
         + ' title="' + _esc(g.title || g.name) + (g._ungrouped ? '' : ' — open investigation') + '">'
         + (g._ungrouped ? '' : _railGrip('viv-rail-grip-inv'))
@@ -12568,7 +12574,7 @@
         + '</div>'
         + '<div class="viv-rail-investigations-group-items">'
         + (g.studies.length
-            ? g.studies.map(function(s) { return _railStudyItem(s, { indent: true, orderable: !g._ungrouped }); }).join('')
+            ? g.studies.map(function(s) { return _railStudyItem(s, { indent: true, orderable: !g._ungrouped, groupTitle: g.title }); }).join('')
             : '<div class="viv-rail-empty" style="font-size:0.82em;color:#94a3b8;'
               + 'padding:4px 14px 4px 28px;font-style:italic">No studies</div>')
         + '</div>'
@@ -12580,64 +12586,76 @@
     // title), so e.g. "basal simulation" finds the `basal` study in the
     // v2ecoli-vEcoli comparison investigation. While searching, non-matching
     // groups are hidden and matching groups are force-expanded so hits show.
+    // Render the FULL list once (all groups, all studies) with default collapse
+    // states. The live search then shows/hides rows in place (_applyRailStudyFilter),
+    // so typing never rebuilds this DOM — the expensive part on large workspaces.
+    var groupsHtml = ordered.map(function(g, i) {
+      // With no active investigation, open the first group so the rail isn't
+      // entirely collapsed on load.
+      return _railGroupHtml(g, !hasActive && i === 0);
+    }).join('');
+
+    var ungroupedHtml = ungrouped.length
+      ? _railGroupHtml({ name: '__ungrouped__', title: 'Ungrouped', studies: ungrouped, _ungrouped: true }, false)
+      : '';
+
+    host.innerHTML = (groupsHtml + ungroupedHtml)
+      || '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
+       + 'padding:6px 14px;font-style:italic">No studies yet.</div>';
+    _wireRailDnd();                 // the full list is always present → always sortable
+    _applyRailStudyFilter();        // re-apply any active query via show/hide
+  }
+
+  // Apply the current study-search query by showing/hiding already-rendered rows —
+  // NO DOM rebuild. Groups with no visible row are hidden; matching groups are
+  // force-opened; clearing the query restores each group's default collapse state.
+  function _applyRailStudyFilter() {
+    var host = document.getElementById('viv-rail-investigations');
+    if (!host) return;
     var q = (window._railStudyQuery || '').trim().toLowerCase();
     var tokens = q ? q.split(/\s+/) : [];
     var searching = tokens.length > 0;
+    var rail = document.getElementById('viv-rail');
+    if (rail) rail.classList.toggle('viv-rail-searching', searching);
 
-    // AND-first, OR-fallback. Prefer studies matching EVERY token (precise); but
-    // if nothing matches all tokens, fall back to matching ANY token so a natural
-    // phrase like "basal simulation" still surfaces the `basal` study even when
-    // "simulation" appears in none of its fields. Consider grouped + ungrouped.
-    var requireAll = searching && (
-      ordered.some(function(g) {
-        return g.studies.some(function(s) { return _studyMatchesQuery(s, g.title, tokens, true); });
-      }) ||
-      ungrouped.some(function(s) { return _studyMatchesQuery(s, 'Ungrouped', tokens, true); })
-    );
+    var items = Array.prototype.slice.call(host.querySelectorAll('.viv-rail-sublink[data-rail-hay]'));
+    // AND-first, OR-fallback (mirrors the previous render-time semantics): prefer
+    // rows matching EVERY token, but if none do, fall back to matching ANY.
+    var requireAll = searching && items.some(function(el) {
+      return _tokensMatch(el.getAttribute('data-rail-hay') || '', tokens, true);
+    });
+    items.forEach(function(el) {
+      var show = !searching || _tokensMatch(el.getAttribute('data-rail-hay') || '', tokens, requireAll);
+      el.classList.toggle('viv-rail-hidden', !show);
+    });
 
-    // Investigation groups (middle).
-    var groupsHtml = ordered.map(function(g, i) {
-      var studies = g.studies;
+    var anyVisible = false;
+    Array.prototype.forEach.call(host.querySelectorAll('.viv-rail-investigations-group'), function(group) {
       if (searching) {
-        studies = g.studies.filter(function(s) {
-          return _studyMatchesQuery(s, g.title, tokens, requireAll);
-        });
-        if (!studies.length) return '';   // hide groups with no match
-        g = { name: g.name, title: g.title, studies: studies };
+        var vis = group.querySelector('.viv-rail-sublink[data-rail-hay]:not(.viv-rail-hidden)');
+        group.classList.toggle('viv-rail-hidden', !vis);
+        if (vis) { group.classList.remove('collapsed'); anyVisible = true; }   // force-open matches
+      } else {
+        group.classList.remove('viv-rail-hidden');
+        group.classList.toggle('collapsed', group.hasAttribute('data-default-collapsed'));
       }
-      // While searching, force groups open so matches are visible. Otherwise:
-      // with no active investigation, open the first group so the rail isn't
-      // entirely collapsed on load.
-      return _railGroupHtml(g, searching || (!hasActive && i === 0));
-    }).join('');
+    });
 
-    // Ungrouped studies (bottom): a collapsible "Ungrouped" folder, like the
-    // investigation groups (collapsed by default; force-open while searching).
-    var ungroupedList = searching
-      ? ungrouped.filter(function(s) { return _studyMatchesQuery(s, 'Ungrouped', tokens, requireAll); })
-      : ungrouped;
-    var ungroupedHtml = '';
-    if (ungroupedList.length) {
-      ungroupedHtml = _railGroupHtml(
-        { name: '__ungrouped__', title: 'Ungrouped', studies: ungroupedList, _ungrouped: true },
-        searching
-      );
+    var note = document.getElementById('viv-rail-nomatch');
+    if (searching && !anyVisible) {
+      if (!note) {
+        note = document.createElement('div');
+        note.id = 'viv-rail-nomatch';
+        note.className = 'viv-rail-empty';
+        note.setAttribute('style', 'font-size:0.85em;color:#94a3b8;padding:6px 14px;font-style:italic');
+        host.appendChild(note);
+      }
+      note.textContent = 'No studies match “' + q + '”.';
+    } else if (note) {
+      note.remove();
     }
-
-    var html = groupsHtml + ungroupedHtml;
-
-    if (!html && searching) {
-      html = '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
-           + 'padding:6px 14px;font-style:italic">No studies match “' + _esc(q) + '”.</div>';
-    }
-
-    host.innerHTML = html
-      || '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
-       + 'padding:6px 14px;font-style:italic">No studies yet.</div>';
-    // Make the freshly-rendered groups + their studies drag-sortable (unless
-    // we're filtering — reordering search results would be confusing).
-    if (!searching) _wireRailDnd();
   }
+  window._applyRailStudyFilter = _applyRailStudyFilter;
 
   // A study matches the rail search when EVERY whitespace-delimited token of the
   // query is a substring of its combined searchable text (study fields + the
@@ -12671,17 +12689,12 @@
     return _tokensMatch(_studyHay(s, groupTitle), tokens, requireAll);
   }
 
-  // Study-search input handler: store the query immediately, but DEBOUNCE the
-  // (full) rail re-render so fast typing / a held key doesn't rebuild the entire
-  // study list on every keystroke.
-  var _railFilterTimer = 0;
+  // Study-search input handler: record the query and filter in place by showing/
+  // hiding already-rendered rows. No rebuild → cheap enough to run per keystroke
+  // (so no debounce needed), and instant feedback even on large workspaces.
   window._filterRailStudies = function(value) {
     window._railStudyQuery = String(value || '');
-    if (_railFilterTimer) clearTimeout(_railFilterTimer);
-    _railFilterTimer = setTimeout(function() {
-      _railFilterTimer = 0;
-      _renderRailInvestigationGroups();
-    }, 130);
+    _applyRailStudyFilter();
   };
 
   // Per-workspace localStorage key for the remembered investigation. The URL
