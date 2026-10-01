@@ -97,8 +97,19 @@ COPY . .
 # demos/v2ecoli/, which this image does not install). Every core
 # dependency resolves from a git source declared in [tool.uv.sources], so no
 # private registry is involved.
+#
+# Deliberately WITHOUT the `[chat]` extra: this image is what hosted workbenches
+# run, and the AI chat stays out of hosted deployments until the chat hardening
+# work (#1238, with its limits follow-up #1247) is merged, released and
+# deployed. That work is what makes chat safe to serve to anonymous visitors
+# (off by default on a non-loopback bind, forged-history rejection, provider
+# isolation). Adding `--extra chat` back here belongs in that release. Local
+# installs are unaffected: `pip install 'vivarium-workbench[chat]'` still gets
+# the chat. This governs this image only: a workspace that depends on
+# `vivarium-workbench[chat]` brings the chat into any image built from that
+# workspace's own environment, so such an image must not be hosted before then.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra chat
+    uv sync --frozen --no-dev
 
 ENV PATH="/app/vivarium-workbench/.venv/bin:${PATH}"
 
