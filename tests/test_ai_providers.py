@@ -296,7 +296,7 @@ def test_a_slow_keychain_does_not_freeze_the_event_loop(monkeypatch):
 
 
 def test_ollama_models_are_the_installed_ones_sorted_and_no_key_is_sent(srv):
-    r = _client().get("/api/ai/ollama-models", params={"base_url": srv.v1})
+    r = _client().post("/api/ai/ollama-models", json={"base_url": srv.v1})
     assert r.status_code == 200, r.text
     assert r.json() == {"models": ["llama3.1:8b", "qwen2.5-coder:7b"], "source": srv.root + "/api/tags"}
     assert srv.seen == [("GET", "/api/tags", "")]                       # junk entries dropped, no Authorization
@@ -304,22 +304,35 @@ def test_ollama_models_are_the_installed_ones_sorted_and_no_key_is_sent(srv):
 
 def test_ollama_models_use_the_saved_endpoint_when_none_is_given(srv):
     ai_auth.save_credential("ollama", None, srv.v1, mode="keyring", session=None)
-    assert _client().get("/api/ai/ollama-models").json()["models"][0] == "llama3.1:8b"
+    assert _client().post("/api/ai/ollama-models", json={}).json()["models"][0] == "llama3.1:8b"
+
+
+def test_a_cross_site_page_cannot_make_the_server_probe_a_host(srv):
+    """S-13: a GET carries no Origin, so any web page could trigger the lookup blind. It is a POST now, and the
+    CSRF guard refuses a cross-site one before anything is fetched."""
+    c = _client()
+    r = c.post("/api/ai/ollama-models", json={"base_url": srv.v1}, headers={"Origin": "http://evil.example"})
+    assert r.status_code == 403, r.text
+    assert srv.seen == []                                               # nothing was contacted
+    assert c.get("/api/ai/ollama-models", params={"base_url": srv.v1}).status_code in (404, 405)   # no GET route any more
+    assert srv.seen == []
+    ok = c.post("/api/ai/ollama-models", json={"base_url": srv.v1}, headers={"Origin": "http://127.0.0.1:8000"})
+    assert ok.status_code == 200 and srv.seen                           # the page's own origin still works
 
 
 def test_ollama_not_running_is_a_readable_502():
-    r = _client().get("/api/ai/ollama-models", params={"base_url": "http://127.0.0.1:9/v1"})
+    r = _client().post("/api/ai/ollama-models", json={"base_url": "http://127.0.0.1:9/v1"})
     assert r.status_code == 502 and "ollama serve" in r.json()["error"]
 
 
 def test_ollama_models_reject_an_oversized_reply(srv):
-    r = _client().get("/api/ai/ollama-models", params={"base_url": srv.v1.replace("/v1", "/big/v1")})
+    r = _client().post("/api/ai/ollama-models", json={"base_url": srv.v1.replace("/v1", "/big/v1")})
     assert r.status_code == 502 and "too much data" in r.json()["error"]
 
 
 def test_ollama_models_on_a_hosted_server_are_ssrf_guarded():
     hosted = _client("0.0.0.0")
     for url in ("http://127.0.0.1:11434/v1", "https://169.254.169.254/v1", "https://[::1]/v1"):
-        r = hosted.get("/api/ai/ollama-models", params={"base_url": url})
+        r = hosted.post("/api/ai/ollama-models", json={"base_url": url})
         assert r.status_code == 422, (url, r.text)
 

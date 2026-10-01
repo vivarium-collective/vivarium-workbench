@@ -265,6 +265,10 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     app.state.base_path = base_path
     # Where the server is bound decides where LLM keys may live (lib/ai_auth.storage_mode).
     app.state.bind_host = host
+    # The chat is on by default only when the server is private to this machine (VIVARIUM_WORKBENCH_CHAT overrides).
+    from vivarium_workbench.lib import ai_auth, csrf
+    ai_auth.configure_default(ai_auth.default_enabled_for_bind(
+        host, proxied=bool(base_path or csrf.is_trust_proxy_via_env(os.environ) or csrf.allowed_origins_via_env(os.environ))))
 
     # Under a base path the ALB forwards the FULL /workbench/... path (no strip),
     # so wrap the app to strip the prefix for route matching AND record it as the

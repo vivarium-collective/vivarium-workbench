@@ -19,6 +19,8 @@ See ``docs/ai-chat.md``.
 from __future__ import annotations
 
 import asyncio
+import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -35,7 +37,7 @@ from fastapi import FastAPI
 from pydantic_ai import ApprovalRequired, RunContext
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 
-from vivarium_workbench.lib import ai_skills
+from vivarium_workbench.lib import ai_auth, ai_skills
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 # Operations the model must never see or call.
@@ -70,6 +72,8 @@ EXCLUDED_PATHS = frozenset({
     "/api/work-link-branch", "/api/remote-run-start", "/api/remote-run-build",
     "/api/simulation-run-download", "/api/study-analysis-zip",
     "/api/composite-run/{run_id}/download",
+    # Copies any file the server can read into the workspace (where it is served back) — a user's own action.
+    "/api/expert-doc",
 })
 
 MAX_RESPONSE_CHARS = 20_000
@@ -192,35 +196,183 @@ def session_tag(session: str | None) -> str:
     return hashlib.sha256((session or "").encode()).hexdigest()[:12]
 
 
-def append_audit(ws_root: Path, record: dict[str, Any]) -> None:
-    """Append one JSON line, fsync'd (same durability as ``lib/event_log.append``).
-    ``events.jsonl`` is not used: its schema admits only four event types."""
+def append_audit(ws_root: Path, record: dict[str, Any], *, sync: bool = True) -> None:
+    """Append one JSON line, fsync'd (same durability as ``lib/event_log.append``; ``sync=False`` for the cheap
+    read records). ``events.jsonl`` is not used: its schema admits only four event types."""
     path = audit_path(ws_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, separators=(",", ":")) + "\n")
+    with open(path, "a+b") as f:
+        f.seek(0, os.SEEK_END)
+        lead = b""
+        if f.tell():                         # a crash-truncated last line must not swallow this record
+            f.seek(-1, os.SEEK_END)
+            lead = b"" if f.read(1) == b"\n" else b"\n"
+        f.write(lead + (json.dumps(record, separators=(",", ":")) + "\n").encode("utf-8"))
         f.flush()
-        os.fsync(f.fileno())
+        if sync:
+            os.fsync(f.fileno())
+
+
+MAX_ARGS_PREVIEW = 2_000
+
+# --- approval-card fidelity -----------------------------------------------------------------------------
+# What the user approves must be what runs. Some routes take a small request that expands into something much
+# bigger on the server (shell commands from the workspace's catalog overlay, a package from a source URL, a file
+# as base64), so the card carries an ``effect`` resolved by the same lookups the route uses, and a body with the
+# opaque blobs summarised. Nothing here runs or writes anything.
+
+_B64 = re.compile(r"[A-Za-z0-9+/_-]{1000,}={0,2}")      # a long opaque blob under any key, e.g. ``content`` / ``data``
+
+
+def _display_body(body: Any, files: list[dict[str, Any]]) -> Any:
+    """``body`` with base64 payloads replaced by their size/hash (recorded in ``files``); all other text in full."""
+    if isinstance(body, dict):
+        out: dict[str, Any] = {}
+        for k, v in body.items():
+            if isinstance(v, str) and (k.endswith("_b64") or _B64.fullmatch(v)):
+                try:
+                    raw = base64.b64decode(v, validate=False)
+                except ValueError:
+                    raw = v.encode()
+                files.append({"field": k, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()})
+                out[k] = f"<{len(raw)} bytes, sha256 {files[-1]['sha256'][:12]}…>"
+            else:
+                out[k] = _display_body(v, files)
+        return out
+    if isinstance(body, list):
+        return [_display_body(v, files) for v in body]
+    return body            # never clipped: the card scrolls, and what is approved must be what runs
+
+
+def _registry_entry(ws_root: Path, name: Any) -> dict[str, Any] | None:
+    from vivarium_workbench.lib import workspace_deps_views
+    name = name.strip() if isinstance(name, str) else name      # the routes strip it; so must the preview
+    return next((m for m in workspace_deps_views.module_registry(ws_root) if m.get("name") == name), None)
+
+
+def _effect_system_deps(ws_root: Path, body: dict[str, Any]) -> dict[str, Any] | None:
+    from vivarium_workbench.lib import workspace_deps_views
+    entry = _registry_entry(ws_root, body.get("name"))
+    if entry is None:
+        return None
+    plat = workspace_deps_views.platform_key()
+    checks = {c.get("name"): c for c in (entry.get("system_dependencies") or {}).get("checks") or [] if c.get("name")}
+    cmds = []
+    for cn in body.get("check_names") or []:
+        block = (checks.get(cn) or {}).get("install")
+        spec = block.get(plat) if isinstance(block, dict) else None
+        cmds.append({"check": cn, "run": list((spec or {}).get("commands") or [])})
+    checks_run = [{"check": cn, "import_check": (checks.get(cn) or {}).get("import_check")} for cn in body.get("check_names") or []]
+    return {"summary": f"Runs these commands in a shell on the machine running the workbench ({plat}), then runs each "
+                       f"check's Python import snippet in the workspace environment:",
+            "commands": cmds, "import_checks": [c for c in checks_run if c["import_check"]]}
+
+
+def _effect_catalog_install(ws_root: Path, body: dict[str, Any]) -> dict[str, Any] | None:
+    entry = _registry_entry(ws_root, body.get("name"))
+    if entry is None:
+        return None
+    pypi, source = entry.get("pypi_name"), entry.get("source")
+    # Same rule as lib/catalog_install_views.catalog_install
+    from_pypi = bool(pypi) and not (bool(body.get("full_repo")) and source)
+    return {"summary": "Installs this package into the workspace environment:",
+            "package": pypi, "source": source,
+            "mode": "PyPI install" if from_pypi else "git submodule + editable install (runs the cloned repository's build)",
+            "system_deps_check": "skipped" if body.get("skip_system_deps_check") else "required first"}
+
+
+_EFFECTS = {"/api/system-deps-install": _effect_system_deps, "/api/catalog-install": _effect_catalog_install}
+
+
+def approval_metadata(e: dict[str, Any], ws_root: Path, path: str, query: Any, body: Any) -> dict[str, Any]:
+    """The approval-card payload for one pending change."""
+    files: list[dict[str, Any]] = []
+    shown = _display_body(body, files)
+    effect: dict[str, Any] | None = None
+    resolver = _EFFECTS.get(e["path"])
+    if resolver is not None and isinstance(body, dict):
+        try:
+            effect = resolver(ws_root, body)
+        except Exception:    # noqa: BLE001 — a preview is best effort; the card still shows the raw request
+            effect = None
+        if effect is None:   # say so: a blank must never read as "nothing more happens"
+            effect = {"summary": "The workbench could not work out what this request will run — treat it with caution.",
+                      "unresolved": True}
+    if files:
+        effect = {**(effect or {"summary": "Writes uploaded file content:"}), "files": files}
+    meta: dict[str, Any] = {"method": e["method"], "path": path, "summary": e["summary"],
+                            "query": query or {}, "body": shown}
+    if effect:
+        meta["effect"] = effect
+    return meta
+
+
+def _clip(value: Any) -> str:
+    """A key-masked, size-capped JSON rendering of one argument, for the audit log."""
+    text = ai_auth.mask_key(json.dumps(value, default=str, sort_keys=True))
+    return text if len(text) <= MAX_ARGS_PREVIEW else f"{text[:MAX_ARGS_PREVIEW]}…(+{len(text) - MAX_ARGS_PREVIEW} chars)"
+
+
+def args_record(query: Any, body: Any) -> dict[str, Any]:
+    """What an approved change was asked to do: a redacted, capped preview plus the SHA-256 of the full arguments."""
+    canonical = json.dumps({"query": query or {}, "body": body}, sort_keys=True, separators=(",", ":"), default=str)
+    return {"args": {"query": _clip(query or {}), "body": _clip(body)},
+            "args_sha256": hashlib.sha256(canonical.encode()).hexdigest()}
+
+
+@dataclass
+class _ClaimIndex:
+    """Approval claims seen so far in one audit file, and how far into it we have read."""
+    offset: int = 0
+    ident: tuple = ()           # (st_dev, st_ino, first bytes): a different file at the same path is read afresh
+    claimed: set = field(default_factory=set)
+    results: dict = field(default_factory=dict)
+
+
+_CLAIMS: dict[str, _ClaimIndex] = {}
+
+
+def _read_head(path: Path, n: int = 64) -> bytes:
+    with open(path, "rb") as f:
+        return f.read(n)
+
+
+def _read_from(path: Path, offset: int) -> bytes:
+    with open(path, "rb") as f:
+        f.seek(offset)
+        return f.read()
 
 
 def _find_claim(ws_root: Path, tool_call_id: str, digest: str) -> tuple[bool, dict[str, Any] | None]:
     """``(claimed, result_record)`` for an approved call: was its intent already recorded,
-    and if so what did the recorded result say?"""
+    and if so what did the recorded result say?
+
+    The log also carries a line per read, so it is indexed incrementally: each lookup parses only the bytes
+    appended since the previous one (a file that shrank was replaced, so it is read afresh)."""
     path = audit_path(ws_root)
     if not path.exists():
+        _CLAIMS.pop(str(path), None)
         return False, None
-    claimed, result = False, None
-    for line in path.read_text(encoding="utf-8").splitlines():
+    st = path.stat()
+    ident = (st.st_dev, st.st_ino, _read_head(path))
+    idx = _CLAIMS.setdefault(str(path), _ClaimIndex(ident=ident))
+    if st.st_size < idx.offset or idx.ident != ident:
+        idx = _CLAIMS[str(path)] = _ClaimIndex(ident=ident)
+    data = _read_from(path, idx.offset)
+    complete = data[:data.rfind(b"\n") + 1]            # a half-written last line is picked up next time
+    for line in complete.splitlines():
         try:
             r = json.loads(line)
         except ValueError:
             continue
-        if r.get("tool_call_id") == tool_call_id and r.get("digest") == digest:
-            if r.get("phase") == "intent":
-                claimed = True
-            elif r.get("phase") == "result":
-                result = r
-    return claimed, result
+        key = (r.get("tool_call_id"), r.get("digest"))
+        if r.get("phase") == "intent":
+            idx.claimed.add(key)
+        elif r.get("phase") == "result":
+            idx.results[key] = r
+    idx.offset += len(complete)
+    key = (tool_call_id, digest)
+    return key in idx.claimed, idx.results.get(key)
 
 
 def _refusal(tool_call_id: str, result: dict[str, Any] | None) -> dict[str, Any]:
@@ -304,7 +456,14 @@ def _resolve_path(template: str, path_params: dict[str, Any] | None) -> str | di
         name = seg.strip("{}").split(":")[0]
         if not path_params or name not in path_params:
             return {"error": f"missing path parameter '{name}'"}
-        out = out.replace(seg, quote(str(path_params[name]), safe="" if seg == f"{{{name}}}" else "/"))
+        value = str(path_params[name])
+        # The exclusion policy judges the *template*, so the routed path must not differ from it: no empty value, no
+        # NUL / backslash, and no ``.`` / ``..`` segment (a value may still contain ``/``, which is percent-encoded
+        # and so stays inside one segment — ``{x:path}`` routes such as composite-state/{ref} rely on that).
+        if not value or "\x00" in value or "\\" in value or any(p in (".", "..") for p in value.split("/")):
+            return {"error": f"invalid path parameter '{name}': it must be non-empty and contain no '.' or '..' "
+                             f"segment, backslash or NUL"}
+        out = out.replace(seg, quote(value, safe="" if seg == f"{{{name}}}" else "/"))
     return out
 
 
@@ -417,10 +576,8 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
         return {"error": "read-only mode (Ask): changes are disabled — ask the user to switch the "
                          "mode to Agent if they want you to change the workspace"}
     if e["mutating"] and not ctx.tool_call_approved:
-        raise ApprovalRequired(metadata={
-            "operation_id": operation_id, "method": e["method"], "path": path,
-            "summary": e["summary"], "query": query or {}, "body": body,
-        })
+        raise ApprovalRequired(metadata={"operation_id": operation_id,
+                                         **approval_metadata(e, deps.ws_root, path, query, body)})
     headers = {"X-VW-Session": deps.session_key} if deps.session_key else {}
     base = {"session": session_tag(deps.session_key), "provider": deps.provider, "model": deps.model,
             "tool_call_id": ctx.tool_call_id or "", "operation_id": operation_id,
@@ -433,7 +590,7 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
             if claimed:
                 return _refusal(base["tool_call_id"], prior)
             try:
-                append_audit(deps.ws_root, {**base, "phase": "intent",
+                append_audit(deps.ws_root, {**base, **args_record(query, body), "phase": "intent",
                                             "ts": datetime.now(timezone.utc).isoformat()})
             except OSError as exc:
                 return {"error": f"audit log unavailable ({exc}); refusing to run an unaudited change"}
@@ -457,6 +614,12 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
         raise
     if e["mutating"]:
         record_result(resp.status_code, "completed")
+    else:                                     # reads are logged by target only, best effort: never fail a read
+        with contextlib.suppress(OSError):
+            append_audit(deps.ws_root, {"session": base["session"], "tool_call_id": base["tool_call_id"],
+                                        "operation_id": operation_id, "method": e["method"], "path": path,
+                                        "status": resp.status_code, "phase": "read",
+                                        "ts": datetime.now(timezone.utc).isoformat()}, sync=False)
     out = _shape(resp, select)
     if warning:
         out["audit_warning"] = warning

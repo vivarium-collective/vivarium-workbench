@@ -180,7 +180,7 @@ def test_unknown_operation_and_missing_path_param_are_reported_not_raised(tmp_pa
 
 
 def test_path_params_are_url_quoted():
-    assert ai_tools._resolve_path("/api/x/{slug}", {"slug": "a/b c"}) == "/api/x/a%2Fb%20c"
+    assert ai_tools._resolve_path("/api/x/{slug}", {"slug": "a/b c"}) == "/api/x/a%2Fb%20c"   # stays in one segment
     assert ai_tools._resolve_path("/api/x/{rel:path}", {"rel": "a/b c"}) == "/api/x/a/b%20c"
 
 

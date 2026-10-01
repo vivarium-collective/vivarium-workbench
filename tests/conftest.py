@@ -420,3 +420,17 @@ def _restore_composite_spec_registry():
         cs.clear_registry()
         for spec in before.values():
             cs.register(spec)
+
+
+@pytest.fixture(autouse=True)
+def _chat_is_on_by_default_in_tests():
+    """The chat is off until ``serve`` declares the server private (fail closed); most chat tests drive the app
+    directly, as a private server, so they start with it on. tests/test_ai_h2_killswitch.py covers the defaults."""
+    try:
+        from vivarium_workbench.lib import ai_auth
+    except Exception:          # the [chat] extra / package is optional for unrelated tests
+        yield
+        return
+    ai_auth.configure_default(True)
+    yield
+    ai_auth.configure_default(False)

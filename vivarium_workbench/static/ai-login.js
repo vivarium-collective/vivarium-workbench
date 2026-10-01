@@ -64,7 +64,7 @@
     if (p === 'ollama' && !el.url.value) el.url.value = (r && r.base_url) || OLLAMA_DEFAULT;
     el.url.placeholder = p === 'ollama' ? OLLAMA_DEFAULT : 'https://host/v1';
     if (!status.available) {
-      el.status.textContent = 'Chat extra not installed — pip install \'vivarium-workbench[chat]\'';
+      el.status.textContent = status.reason || 'Chat extra not installed — pip install \'vivarium-workbench[chat]\'';
       [el.save, el.use, el.remove, el.model].forEach(function (b) { b.disabled = true; });
     } else if (r && r.configured) {
       var src = r.source === 'environment' ? 'from the server environment (' + (ENV[p] || 'env') + ')'

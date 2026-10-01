@@ -310,6 +310,8 @@ def test_failure_to_record_the_result_is_a_warning_not_an_exception(tmp_path, mo
     ("get", "/api/workspaces"), ("post", "/api/work-create-pr"), ("get", "/api/simulation-run-download"),
     ("get", "/api/study-analysis-zip"), ("get", "/api/composite-run/{run_id}/download"),
     ("get", "/api/study-export"),
+    # copies a file the *server* can read (any path on its disk) into the workspace: a user action, not an assistant one
+    ("post", "/api/expert-doc"),
 ])
 def test_host_level_remote_and_binary_operations_are_excluded(tmp_path, method, path):
     app, _ = _make_app(tmp_path)
@@ -631,3 +633,38 @@ def test_already_executed_without_a_result_line_says_so(tmp_path):
 
     out = asyncio.run(go())
     assert "already executed" in out["error"] and "no result" in out["error"]
+
+
+# --- S-22: a path parameter is one plain segment ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["..", ".", "", "a\\b", "x\x00y", "a/../b", "./a"])
+def test_a_path_parameter_that_is_not_one_plain_segment_is_refused_before_dispatch(tmp_path, value):
+    app, ws = _make_app(tmp_path)
+    oid = _oid(app, "get", "/api/study-charts/{slug}")
+
+    async def go():
+        async with _deps(app, ws) as d:
+            return await ai_tools.call_operation(_ctx(d), oid, path_params={"slug": value})
+
+    out = asyncio.run(go())
+    assert "error" in out and "path parameter" in out["error"], out
+
+
+@pytest.mark.parametrize("value", ["s1", "v1.2", "my study", "é数据", ".hidden", "a..b", "composites/foo.yaml"])
+def test_legitimate_path_parameters_are_not_refused(tmp_path, value):
+    """Incl. a slash-bearing value: the real ``composite-state/{ref:path}`` op is indexed as ``{ref}``."""
+    app, ws = env_ = _make_app(tmp_path)
+    assert isinstance(ai_tools._resolve_path("/api/x/{slug}", {"slug": value}), str)
+
+
+def test_a_plain_path_parameter_still_dispatches(tmp_path):
+    app, ws = _make_app(tmp_path)
+    oid = _oid(app, "get", "/api/study-charts/{slug}")
+
+    async def go():
+        async with _deps(app, ws) as d:
+            return await ai_tools.call_operation(_ctx(d), oid, path_params={"slug": "s1"})
+
+    out = asyncio.run(go())
+    assert "path parameter" not in json.dumps(out)
