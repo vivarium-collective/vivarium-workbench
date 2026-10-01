@@ -12364,6 +12364,7 @@
     if (!container || container.__vivSortable) return;
     container.__vivSortable = true;
     var dragEl = null;
+    var _dragRaf = 0, _dragY = 0;    // coalesce dragover geometry reads to one per frame
     container.addEventListener('dragstart', function (e) {
       var handle = e.target.closest ? e.target.closest(handleSel) : null;
       if (!handle) return;
@@ -12379,12 +12380,22 @@
       if (!dragEl || !container.contains(dragEl)) return;
       e.preventDefault();
       e.stopPropagation();
-      var after = _dragAfterElement(container, itemSel, e.clientY);
-      if (after == null) container.appendChild(dragEl);
-      else if (after !== dragEl) container.insertBefore(dragEl, after);
+      // _dragAfterElement reads getBoundingClientRect() for every row (a forced
+      // reflow). dragover fires continuously, so coalesce to one reposition per
+      // animation frame instead of per event — smooth even with many rows.
+      _dragY = e.clientY;
+      if (_dragRaf) return;
+      _dragRaf = requestAnimationFrame(function () {
+        _dragRaf = 0;
+        if (!dragEl || !container.contains(dragEl)) return;
+        var after = _dragAfterElement(container, itemSel, _dragY);
+        if (after == null) container.appendChild(dragEl);
+        else if (after !== dragEl) container.insertBefore(dragEl, after);
+      });
     });
     container.addEventListener('drop', function (e) { if (dragEl) { e.preventDefault(); e.stopPropagation(); } });
     container.addEventListener('dragend', function () {
+      if (_dragRaf) { cancelAnimationFrame(_dragRaf); _dragRaf = 0; }
       if (!dragEl) return;
       dragEl.classList.remove('viv-rail-dragging');
       dragEl = null;
@@ -12482,20 +12493,18 @@
       return;
     }
 
-    var memberSet = {};         // studySlug -> [isetName, ...]
-    window._isetIndex.forEach(function(iset) {
-      (iset.studies || []).forEach(function(slug) {
-        (memberSet[slug] = memberSet[slug] || []).push(iset.name);
-      });
-    });
-
     // Group studies: each iset gets its members; leftovers go to "Ungrouped".
     var groups = [];   // [{name, title, studies: [study, ...]}]
     var seen = {};
     var _studyOrderMap = _loadStudyOrder();
+    // Index studies by name ONCE so membership resolution is O(1) per slug. A
+    // per-slug Array.find made every rail render O(N^2) — the dominant cost of a
+    // rebuild on large workspaces (e.g. sms-ecoli).
+    var _studyByName = {};
+    (window._investigations || []).forEach(function(s) { _studyByName[s.name] = s; });
     window._isetIndex.forEach(function(iset) {
       var members = (iset.studies || [])
-        .map(function(slug) { return window._investigations.find(function(s) { return s.name === slug; }); })
+        .map(function(slug) { return _studyByName[slug]; })
         .filter(Boolean);
       members.forEach(function(s) { seen[s.name] = true; });
       // Order within group: the user's saved drag order first, then anything
@@ -12662,10 +12671,17 @@
     return _tokensMatch(_studyHay(s, groupTitle), tokens, requireAll);
   }
 
-  // Study-search input handler: store the query and re-render the rail groups.
+  // Study-search input handler: store the query immediately, but DEBOUNCE the
+  // (full) rail re-render so fast typing / a held key doesn't rebuild the entire
+  // study list on every keystroke.
+  var _railFilterTimer = 0;
   window._filterRailStudies = function(value) {
     window._railStudyQuery = String(value || '');
-    _renderRailInvestigationGroups();
+    if (_railFilterTimer) clearTimeout(_railFilterTimer);
+    _railFilterTimer = setTimeout(function() {
+      _railFilterTimer = 0;
+      _renderRailInvestigationGroups();
+    }, 130);
   };
 
   // Per-workspace localStorage key for the remembered investigation. The URL

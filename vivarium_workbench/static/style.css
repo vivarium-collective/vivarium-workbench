@@ -973,6 +973,10 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 
 /* Study-row pin toggle + Pinned strip + flat Ungrouped list -------------- */
 .viv-rail-sublink { position: relative; }
+/* Windowing-lite: skip layout/paint for off-screen study rows (the browser still
+   reserves ~their height via contain-intrinsic-size, so the scrollbar is stable).
+   Keeps a long study list cheap to lay out on large workspaces. */
+.viv-rail-sublink { content-visibility: auto; contain-intrinsic-size: 0 30px; }
 .viv-rail-sublink:hover { background:#f3f4f6; }
 .viv-rail-pin {
   flex: none;
