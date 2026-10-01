@@ -253,8 +253,10 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
     const open = openPort === key;
     const semantic = isOut ? contract?.outputs?.[port] : contract?.inputs?.[port];
     // Lead with the port NAME (the bound-store swatch keys it to its wire). The
-    // secondary line is the contract meaning when documented, else the raw type
-    // as a small muted tag — never a bare "float" masquerading as the headline.
+    // secondary line is the raw type as a small muted tag. The documented
+    // contract meaning (`semantic`) can be a full sentence, so it is NOT drawn
+    // inline on the card — it would wrap into a wall of overlapping paragraphs
+    // (e.g. ecoli_baseline). It lives only in the click-popover below.
     return (
       <div
         key={`${isOut ? 'o' : 'i'}lbl-${port}`}
@@ -267,14 +269,14 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
           <span className="port-in-swatch" aria-hidden="true" />
           <span className="port-in-name">{port}</span>
         </span>
-        {/* The raw type sits on its own sub-line as a small muted tag. A
-            documented contract meaning is longer, so it keeps its own line below. */}
-        {!semantic && show.types && info.type && (
+        {/* The raw type sits on its own sub-line as a small muted tag. The
+            documented contract meaning is shown only in the popover (below),
+            never inline — a sentence-long label wrecks the graph layout. */}
+        {show.types && info.type && (
           <span className="port-in-sub">
             <span className="port-in-type" title={info.fullType}>{info.type}</span>
           </span>
         )}
-        {semantic && <span className="port-in-sem">{semantic}</span>}
         {open && (
           <div className={`port-popover ${isOut ? 'is-out' : 'is-in'}`} onClick={(e) => e.stopPropagation()}>
             <div className="port-popover-head">
