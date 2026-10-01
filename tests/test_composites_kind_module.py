@@ -72,7 +72,9 @@ def server(tmp_path):
 
 
 def _get(url):
-    with urllib.request.urlopen(url, timeout=10) as r:
+    # The first /api/composites does cold composite discovery (imports every registered module); on a loaded CI
+    # runner that outlasts a 10 s read timeout. Bounded by pytest's own 120 s limit, not a tuned margin.
+    with urllib.request.urlopen(url, timeout=90) as r:
         return r.status, json.loads(r.read().decode())
 
 
