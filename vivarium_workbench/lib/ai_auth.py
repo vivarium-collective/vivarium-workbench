@@ -19,6 +19,7 @@ through :func:`mask_key` before it is logged or surfaced.
 """
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import ipaddress
 import json
@@ -531,6 +532,11 @@ def build_model(provider: str, model: str, cred: Credential):
     raise APIError(422, f"unknown provider '{provider}'")
 
 
+#: Total seconds a key check may take. Without it a server that accepts the connection and never answers holds the
+#: request (and its worker) open for as long as the peer likes.
+CHECK_KEY_TIMEOUT = 20.0
+
+
 async def check_key(provider: str, model: str, cred: Credential) -> None:
     """One minimal real request (a 1-token completion) to prove the key works.
 
@@ -544,8 +550,11 @@ async def check_key(provider: str, model: str, cred: Credential) -> None:
 
     secrets = (cred.api_key or "",)
     try:
-        await Agent(build_model(provider, model, cred)).run(
-            "ping", model_settings={"max_tokens": 1})
+        async with asyncio.timeout(CHECK_KEY_TIMEOUT):
+            await Agent(build_model(provider, model, cred)).run(
+                "ping", model_settings={"max_tokens": 1})
+    except TimeoutError:
+        raise APIError(504, f"{provider} did not answer within {CHECK_KEY_TIMEOUT:g} s") from None
     except ModelHTTPError as e:
         msg = mask_key(str(e), secrets)
         if e.status_code in (401, 403):
