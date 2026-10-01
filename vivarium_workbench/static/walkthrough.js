@@ -8340,6 +8340,42 @@
   window._isetIndex = [];        // [{name, title, status, studies:[slug, ...]}]
   window._currentIset = null;    // name of the iset currently open in detail view
 
+  // ── Shared, identity-memoized indexes over the workspace's studies/isets ──
+  // Membership resolution used to be an Array.find per member slug inside render
+  // loops → O(N^2) on large workspaces (sms-ecoli). These maps make it O(1); they
+  // rebuild only when the underlying array is REPLACED (a data (re)load swaps the
+  // reference), so no load-site wiring is needed. Same idiom the rail uses.
+  var _sbnCache = null, _sbnSrc;
+  function _studyByName() {
+    var src = window._investigations || [];
+    if (src !== _sbnSrc) {
+      _sbnSrc = src; _sbnCache = {};
+      src.forEach(function(s) { if (s && s.name) _sbnCache[s.name] = s; });
+    }
+    return _sbnCache;
+  }
+  var _ibnCache = null, _ibnSrc;
+  function _isetByName() {
+    var src = window._isetIndex || [];
+    if (src !== _ibnSrc) {
+      _ibnSrc = src; _ibnCache = {};
+      src.forEach(function(i) { if (i && i.name) _ibnCache[i.name] = i; });
+    }
+    return _ibnCache;
+  }
+  var _ifsCache = null, _ifsSrc;
+  function _investigationForStudyMap() {
+    var src = window._isetIndex || [];
+    if (src !== _ifsSrc) {
+      _ifsSrc = src; _ifsCache = {};
+      // First iset wins (a study can belong to several; matches the old .find order).
+      src.forEach(function(iset) {
+        (iset.studies || []).forEach(function(slug) { if (!(slug in _ifsCache)) _ifsCache[slug] = iset.name; });
+      });
+    }
+    return _ifsCache;
+  }
+
   function _loadInvestigationSets() {
     var list = document.getElementById('investigations-list');
     if (list) {
@@ -8682,11 +8718,9 @@
 
   // Member study objects for an investigation (from the client studies index).
   function _isetStudyObjs(iset) {
+    var byName = _studyByName();   // O(1) per slug (was Array.find → O(N) per slug)
     return ((iset && iset.studies) || [])
-      .map(function(slug) {
-        return (window._investigations || []).find(function(s) { return s.name === slug; })
-          || { name: slug };
-      });
+      .map(function(slug) { return byName[slug] || { name: slug }; });
   }
 
   function _setIsetSort(value) {
@@ -9163,7 +9197,7 @@
   // Investigation title for a slug (Studies table's Investigation column).
   function _isetTitleForSlug(inv) {
     if (!inv) return 'Ungrouped';
-    var it = (window._isetIndex || []).find(function (i) { return i.name === inv; });
+    var it = _isetByName()[inv];   // O(1)
     return (it && (it.title || it.name)) || inv;
   }
   function _fmtStudyDate(iso) {
@@ -9314,13 +9348,12 @@
     }
     var cards = document.querySelectorAll('#investigations-list .investigation-set-card');
 
-    // iset slug -> member study objects, for study-aware matching.
+    // iset slug -> member study objects, for study-aware matching (O(1) lookups).
+    var byName = _studyByName();
     var studiesByIset = {};
     (window._isetIndex || []).forEach(function(iset) {
       studiesByIset[iset.name] = (iset.studies || [])
-        .map(function(slug) {
-          return (window._investigations || []).find(function(s) { return s.name === slug; });
-        }).filter(Boolean);
+        .map(function(slug) { return byName[slug]; }).filter(Boolean);
     });
 
     function _cardMatches(card, requireAll) {
@@ -9357,6 +9390,14 @@
     if (empty) empty.style.display = anyVisible ? 'none' : '';
   }
   window._filterInvestigations = _filterInvestigations;
+  // Debounced input handler (the filter is show/hide, but still O(cards) per call —
+  // coalesce fast typing). _filterInvestigations stays immediate for programmatic use.
+  var _invFilterTimer = 0;
+  function _filterInvestigationsInput() {
+    if (_invFilterTimer) clearTimeout(_invFilterTimer);
+    _invFilterTimer = setTimeout(function() { _invFilterTimer = 0; _filterInvestigations(); }, 130);
+  }
+  window._filterInvestigationsInput = _filterInvestigationsInput;
 
   // Close/Reopen an investigation: POST the new status, then reload the list.
   // Resilient — never throws; surfaces a brief inline error on the button.
@@ -12207,10 +12248,7 @@
   // Back-compat shim for any old callers (sidebar groups still use this).
   // The investigation a study belongs to (from the iset index), or '' if none.
   function _investigationForStudy(slug) {
-    var iset = (window._isetIndex || []).find(function(i) {
-      return (i.studies || []).indexOf(slug) !== -1;
-    });
-    return iset ? iset.name : '';
+    return _investigationForStudyMap()[slug] || '';   // O(1) reverse lookup
   }
 
   // Is `slug` a member of investigation `invName`? Used so opening a study from
@@ -12218,7 +12256,7 @@
   // several investigations; _investigationForStudy returns only the FIRST).
   function _studyInInvestigation(slug, invName) {
     if (!invName) return false;
-    var iset = (window._isetIndex || []).find(function(i) { return i.name === invName; });
+    var iset = _isetByName()[invName];   // O(1)
     return !!(iset && (iset.studies || []).indexOf(slug) !== -1);
   }
   window._studyInInvestigation = _studyInInvestigation;
@@ -12756,6 +12794,14 @@
   // ── DAG helpers ─────────────────────────────────────────────────────
   // Build a children map (reverse of parent_studies) and a depth map
   // (BFS from roots) for the topological sort + Depends-on/Blocks chips.
+  // Memoized DAG: _renderInvestigations runs on every search keystroke, but the
+  // dependency graph only changes when the investigation list is replaced. Cache it
+  // by array identity so keystroke re-renders don't rebuild the BFS each time.
+  var _dagCache = null, _dagSrc;
+  function _memoInvestigationDag(all) {
+    if (all !== _dagSrc) { _dagSrc = all; _dagCache = _buildInvestigationDag(all); }
+    return _dagCache;
+  }
   function _buildInvestigationDag(all) {
     var childrenMap = {};
     all.forEach(function(inv) { childrenMap[inv.name] = []; });
@@ -12801,7 +12847,7 @@
     var grid = document.getElementById('investigations-grid');
     if (!grid) return;
     var f = window._investigationsFilter;
-    var dag = _buildInvestigationDag(window._investigations);
+    var dag = _memoInvestigationDag(window._investigations);
     window._investigationsChildren = dag.children;
     window._investigationsDepth = dag.depth;
     // Same shared engine + AND-first/OR-fallback as the rail / Investigations tab.
@@ -12983,11 +13029,14 @@
   }
   window._setInvestigationsView = _setInvestigationsView;
 
-  // Search input live-filter
+  // Search input live-filter (debounced: _renderInvestigations rebuilds the whole
+  // grid, so coalesce fast typing into one render).
+  var _invSearchTimer = 0;
   document.addEventListener('input', function(e) {
     if (e.target && e.target.id === 'investigations-search') {
       window._investigationsFilter.search = e.target.value;
-      _renderInvestigations();
+      if (_invSearchTimer) clearTimeout(_invSearchTimer);
+      _invSearchTimer = setTimeout(function() { _invSearchTimer = 0; _renderInvestigations(); }, 130);
     }
   });
 

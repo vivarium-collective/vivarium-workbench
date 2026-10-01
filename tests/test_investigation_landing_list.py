@@ -15,7 +15,7 @@ def page_investigations():
 def test_filter_input_present_and_dead_div_gone():
     p = page_investigations()
     assert 'id="investigations-filter"' in p
-    assert 'oninput="_filterInvestigations()"' in p
+    assert 'oninput="_filterInvestigationsInput()"' in p   # debounced wrapper around _filterInvestigations
     assert 'actions now live in' not in p  # dead actions comment/div removed
 
 

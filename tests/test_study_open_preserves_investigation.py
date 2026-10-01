@@ -24,7 +24,9 @@ def _fn(name):
 
 def test_membership_helper_exists():
     body = _fn("_studyInInvestigation")
-    assert "_isetIndex" in body and ".studies" in body and "indexOf" in body
+    # membership is resolved through the iset index (now via the _isetByName map,
+    # which is built from window._isetIndex) + the studies list + indexOf.
+    assert "_isetByName" in body and ".studies" in body and "indexOf" in body
 
 
 def test_open_prefers_current_investigation():
