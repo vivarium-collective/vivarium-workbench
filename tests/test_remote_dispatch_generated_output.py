@@ -112,3 +112,81 @@ def test_a_study_definition_next_to_a_run_database_still_blocks(ws):
     assert pf["ok"] is False and pf["reason"] == "dirty" and "studies/" in pf["dirty_files"], pf
     (ws / "studies" / "s1" / "study.yaml").unlink()                       # only the generated database left: clean again
     assert remote_run.remote_dispatch_preflight(ws)["ok"] is True
+
+
+# -- the generated output follows the workspace's `layout:`, not a fixed root-level `reports/` --
+
+
+@pytest.fixture
+def nested_ws(tmp_path) -> Path:
+    """A workspace laid out like a current viva-template scaffold: reports under ``workspace/reports/``, with the
+    scaffold's starter ``index.html`` committed."""
+    bare = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", str(bare))
+    work = tmp_path / "ws"
+    _git(tmp_path, "clone", "-q", str(bare), str(work))
+    (work / "workspace.yaml").write_text(
+        "name: ws\nlayout:\n  reports: workspace/reports\n  studies: workspace/studies\n")
+    (work / "pyproject.toml").write_text("[project]\nname='ws'\n")
+    (work / "workspace" / "reports" / "assets").mkdir(parents=True)
+    (work / "workspace" / "reports" / "assets" / ".keep").write_text("")
+    (work / "workspace" / "reports" / "index.html").write_text("<scaffolded>\n")
+    (work / "workspace" / "reports" / "findings.html").write_text("<science>\n")     # a committed result
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "init")
+    _git(work, "push", "-q", "origin", "HEAD:main")
+    _git(work, "fetch", "-q", "origin")
+    return work
+
+
+def test_a_rendered_dashboard_in_a_nested_layout_does_not_make_the_workspace_dirty(nested_ws):
+    """Regression: the skip list named only the root-level `reports/`, so after one `serve` rewrote
+    `workspace/reports/index.html` a template-scaffolded workspace was refused as having uncommitted changes."""
+    from vivarium_workbench.lib import report
+
+    report.render_dashboard(nested_ws)                                    # what `serve` does at start-up
+    assert (nested_ws / "workspace" / "reports" / "assets" / "chat.js").is_file()
+    pf = remote_run.remote_dispatch_preflight(nested_ws)
+    assert pf["ok"] is True, pf
+    assert remote_run.git_pip_url(nested_ws)
+
+
+def test_a_committed_result_in_a_nested_reports_dir_still_blocks(nested_ws):
+    (nested_ws / "workspace" / "reports" / "findings.html").write_text("<edited>\n")
+    pf = remote_run.remote_dispatch_preflight(nested_ws)
+    assert pf["ok"] is False and "workspace/reports/findings.html" in pf["dirty_files"], pf
+
+
+def test_the_root_level_reports_dir_is_workspace_content_when_the_layout_moves_it(nested_ws):
+    """Once `layout:` relocates reports, a root-level `reports/index.html` is not the workbench's output."""
+    (nested_ws / "reports").mkdir()
+    (nested_ws / "reports" / "index.html").write_text("<hand-written>\n")
+    assert remote_run.remote_dispatch_preflight(nested_ws)["reason"] == "dirty"
+
+
+def test_a_layout_value_is_a_path_not_a_pattern(nested_ws):
+    """`rep*` names one directory; a wildcard reading would also hide an edited, committed `repX/index.html`."""
+    (nested_ws / "repX").mkdir()
+    (nested_ws / "repX" / "index.html").write_text("<authored>\n")
+    _git(nested_ws, "add", "-A")
+    _git(nested_ws, "commit", "-q", "-m", "an authored page")
+    _git(nested_ws, "push", "-q", "origin", "HEAD:main")
+    _git(nested_ws, "fetch", "-q", "origin")
+    (nested_ws / "workspace.yaml").write_text("name: ws\nlayout:\n  reports: 'rep*'\n")
+    _git(nested_ws, "commit", "-q", "-am", "reports under a literal rep*")
+    _git(nested_ws, "push", "-q", "origin", "HEAD:main")
+    _git(nested_ws, "fetch", "-q", "origin")
+    (nested_ws / "repX" / "index.html").write_text("<edited>\n")
+    pf = remote_run.remote_dispatch_preflight(nested_ws)
+    assert pf["reason"] == "dirty" and "repX/index.html" in pf["dirty_files"], pf
+
+
+def test_an_unparseable_workspace_yaml_still_skips_the_default_generated_output(ws):
+    """A broken `workspace.yaml` falls back to the default layout — the behaviour before layouts were read —
+    rather than counting the root-level dashboard the workbench rewrites as a change."""
+    (ws / "workspace.yaml").write_text("name: [unclosed\n")
+    _git(ws, "commit", "-q", "-am", "broken config, committed")
+    _git(ws, "push", "-q", "origin", "HEAD:main")
+    _git(ws, "fetch", "-q", "origin")
+    (ws / "reports" / "index.html").write_text("<re-rendered>\n")
+    assert remote_run.remote_dispatch_preflight(ws)["ok"] is True

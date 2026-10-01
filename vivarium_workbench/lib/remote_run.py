@@ -32,25 +32,37 @@ _MAX_CONSECUTIVE_POLL_ERRORS = 5
 
 
 # Paths the workbench itself (re)writes whenever it serves a workspace or runs something in it — the `.viv-build.json`
-# provenance stamp (#858), the rendered report shell (`reports/index.html`, `reports/assets/`), its per-start
+# provenance stamp (#858), the rendered report shell (`<reports>/index.html`, `<reports>/assets/`), its per-start
 # registry/server state, and its run records and per-session state (the run registry, each study's/investigation's
 # `runs.db` and its SQLite sidecars, the composite-state and loom caches, the chat audit log). They are generated
 # output, not workspace code, and a remote dispatch installs only the code from git: counting them would make a clean,
 # pushed workspace look dirty the moment `vivarium-workbench serve` has run, and again after every run it dispatched.
-# Committed *results* under `reports/` (e.g. a per-model report) and any source or study definition are NOT excluded.
-_NOT_WORKSPACE_CODE = (
-    ":!.viv-build.json",
-    ":!reports/index.html",
-    ":!reports/assets",
-    ":!.pbg/registry-catalog",
-    ":!.pbg/server",
-    ":!.pbg/runs.jsonl",
-    ":!.pbg/composite-state-cache",
-    ":!.pbg/loom-layouts",
-    ":!.pbg/ai-actions.jsonl",
-    ":(exclude,glob)**/runs.db",
-    ":(exclude,glob)**/runs.db-*",
-)
+# Committed *results* under the reports dir (e.g. a per-model report) and any source or study definition are NOT
+# excluded. The reports and `.pbg` dirs are resolved through the workspace's `layout:` (a template-scaffolded
+# workspace keeps its reports under `workspace/reports/`), never assumed to sit at the root.
+_GENERATED_IN_REPORTS = ("index.html", "assets")
+_GENERATED_IN_PBG = ("registry-catalog", "server", "runs.jsonl", "composite-state-cache", "loom-layouts",
+                     "ai-actions.jsonl")
+
+
+def _not_workspace_code(ws_root: Path) -> "tuple[str, ...]":
+    """Git exclude pathspecs for the workbench's own generated output in ``ws_root`` (see the note above)."""
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+    specs = [":!.viv-build.json", ":(exclude,glob)**/runs.db", ":(exclude,glob)**/runs.db-*"]
+    try:
+        wp = WorkspacePaths.load(ws_root)
+    except Exception:  # noqa: BLE001 — an unparseable workspace.yaml: the default layout, as before layouts were read
+        wp = WorkspacePaths.from_config(ws_root, {})
+    root = ws_root.resolve()
+    for d, names in ((wp.reports, _GENERATED_IN_REPORTS), (wp.pbg, _GENERATED_IN_PBG)):
+        try:
+            rel = d.resolve().relative_to(root).as_posix()
+        except ValueError:                      # laid out outside the repo: git never reports it here
+            continue
+        # `literal`: a layout value is a path, never a pattern (`rep*` must not also hide `repX/index.html`)
+        specs += [f":(exclude,literal){name}" if rel == "." else f":(exclude,literal){rel}/{name}" for name in names]
+    return tuple(specs)
 
 
 def git_pip_url(ws_root: "Path | str") -> str:
@@ -77,7 +89,7 @@ def git_pip_url(ws_root: "Path | str") -> str:
     # must never block a remote dispatch (#858). The primary fix stamps it
     # before the baseline commit so it's normally clean anyway; this is
     # defense-in-depth for caches materialized by an older workbench.
-    status = _git(ws_root, "status", "--porcelain", "--", ".", *_NOT_WORKSPACE_CODE)
+    status = _git(ws_root, "status", "--porcelain", "--", ".", *_not_workspace_code(ws_root))
     if status.strip():
         raise RuntimeError(
             f"Workspace at {ws_root} has uncommitted or untracked changes "
@@ -200,7 +212,7 @@ def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
         ws_root = Path(ws_root).resolve()
         # Same exclusion as git_pip_url: the .viv-build.json stamp is workbench
         # bookkeeping and must not block a dispatch (#858).
-        dirty = _git(ws_root, "status", "--porcelain", "--", ".", *_NOT_WORKSPACE_CODE).strip()
+        dirty = _git(ws_root, "status", "--porcelain", "--", ".", *_not_workspace_code(ws_root)).strip()
         sha = _git(ws_root, "rev-parse", "HEAD").strip()
     except Exception as e:  # noqa: BLE001 — a git failure is a clean preflight fail, not a crash
         return {"ok": False, "reason": "error", "sha": "", "dirty_files": "",
