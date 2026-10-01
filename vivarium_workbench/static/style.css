@@ -973,7 +973,17 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 
 /* Study-row pin toggle + Pinned strip + flat Ungrouped list -------------- */
 .viv-rail-sublink { position: relative; }
+/* Windowing-lite: skip layout/paint for off-screen study rows (the browser still
+   reserves ~their height via contain-intrinsic-size, so the scrollbar is stable).
+   Keeps a long study list cheap to lay out on large workspaces. */
+.viv-rail-sublink { content-visibility: auto; contain-intrinsic-size: 0 30px; }
 .viv-rail-sublink:hover { background:#f3f4f6; }
+/* Live study-search filters by showing/hiding rows (walkthrough.js
+   _applyRailStudyFilter) instead of rebuilding the list. */
+.viv-rail-hidden { display: none !important; }
+/* Reordering a filtered list is confusing, so hide the drag grips while searching. */
+.viv-rail-searching .viv-rail-grip-study,
+.viv-rail-searching .viv-rail-grip-inv { display: none !important; }
 .viv-rail-pin {
   flex: none;
   font-size: 0.82em;

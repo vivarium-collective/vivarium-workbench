@@ -24,13 +24,26 @@ from vivarium_workbench.lib.report_views import (
     _has_active_run_for_study,
 )
 
-_NOW = time.time()
-_FRESH = _NOW - 5.0            # 5s ago -- well within the 300s window
-_STALE = _NOW - 10_000.0       # ~2.7h ago -- long past the window
+# Sentinels resolved to a timestamp AT CALL TIME in _spec (below). They must not be
+# frozen at import: the freshness window is 300s, and on a slow test shard (suite 1/4
+# runs many minutes) an import-time "5s ago" ages past 300s by the time the positive-
+# control test runs → it would read stale and flakily fail. Resolving per call keeps
+# "fresh" fresh and "stale" stale regardless of how long after import the test runs.
+_FRESH = "__fresh_heartbeat__"    # → ~5s ago (well within the 300s window)
+_STALE = "__stale_heartbeat__"    # → ~2.7h ago (long past the window)
 
 
 def _spec(runs):
-    return {"runs": runs}
+    now = time.time()
+    resolved = []
+    for r in runs:
+        r = dict(r)
+        if r.get("heartbeat_at") == _FRESH:
+            r["heartbeat_at"] = now - 5.0
+        elif r.get("heartbeat_at") == _STALE:
+            r["heartbeat_at"] = now - 10_000.0
+        resolved.append(r)
+    return {"runs": resolved}
 
 
 def test_stale_heartbeat_running_run_is_not_active(tmp_path):
