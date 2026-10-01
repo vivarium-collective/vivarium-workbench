@@ -185,7 +185,7 @@ vwb runs | status | logs                # inspect
 
 ```bash
 # API (base URL from .pbg/server/server-info; no auth for no-Origin requests)
-BASE=$(cat .pbg/server/server-info | tr -d '[:space:]')
+BASE=$(python3 -c "import json;print(json.load(open('.pbg/server/server-info'))['url'])")
 curl -s "$BASE/api/workspace-manifest"        # studies, investigations, registry, health — orient here
 curl -s "$BASE/api/linkage-index"             # the study/investigation reference graph
 curl -s "$BASE/openapi.json"                   # authoritative request/response shapes

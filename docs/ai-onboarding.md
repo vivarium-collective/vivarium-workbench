@@ -1,7 +1,7 @@
 # Vivarium Workbench — AI Onboarding
 
 **Audience:** an AI agent setting up a **new** Vivarium Workbench workspace repo and driving it.
-**What the Workbench is:** a local web UI + HTTP API over a *process-bigraph workspace* (a folder with a `workspace.yaml` holding composites, studies, investigations, and runs). It **reads and writes** the workspace's files and commits each change to git, so every action has an audit trail.
+**What the Workbench is:** a local web UI + HTTP API over a *process-bigraph workspace* (a folder with a `workspace.yaml` holding composites, studies, investigations, and runs). It **reads and writes** the workspace's files and commits authoring actions to git for an audit trail (note: catalog install/uninstall and study runs currently defer or skip the commit under the FastAPI server).
 **Two layers:**
 - **The Workbench** = server/UI/data. Its core has **no AI dependencies** — pure Python + static assets. It also ships an *optional* built-in chat (`pip install 'vivarium-workbench[chat]'`, see [ai-chat.md](ai-chat.md)).
 - **The LLM layer for Claude Code** = the `viva-superpowers` plugin (skills that *drive* the Workbench's HTTP API). (See §4.)
@@ -31,7 +31,7 @@ python3 scripts/lint-workspace.py   # expect: "workspace lint: OK"
 
 After this you have: `workspace.yaml`, a `pbg_<name>/` Python package, `composites/`, `studies/`, `investigations/`, and a `.pbg/` control dir. The template works standalone — **no plugin or Claude Code required** for the base tool.
 
-> If you're adding the Workbench to an *existing* process-bigraph project instead of scaffolding, just ensure the repo root has a valid `workspace.yaml` and `uv pip install vivarium-workbench` into its venv. (Note: not on PyPI during beta — install editable from a clone of `vivarium-collective/vivarium-workbench` if the PyPI install fails.)
+> If you're adding the Workbench to an *existing* process-bigraph project instead of scaffolding, just ensure the repo root has a valid `workspace.yaml` and `uv pip install vivarium-workbench` into its venv (it resolves from PyPI; or install editable from a clone of `vivarium-collective/vivarium-workbench` for development).
 
 ---
 
@@ -51,7 +51,7 @@ On start it writes the live base URL to **`.pbg/server/server-info`** — that f
 
 ## 3. Verify it's up (agent-friendly checks)
 ```bash
-BASE=$(cat .pbg/server/server-info | tr -d '[:space:]')   # e.g. http://127.0.0.1:8765
+BASE=$(python3 -c "import json;print(json.load(open('.pbg/server/server-info'))['url'])")   # e.g. http://127.0.0.1:8765
 curl -s "$BASE/api/workspace-manifest" | head              # one-call situational-awareness snapshot
 ```
 Useful endpoints:
@@ -127,7 +127,7 @@ python3 scripts/lint-workspace.py           # -> "workspace lint: OK"
 vwb serve --workspace .                      # writes .pbg/server/server-info
 
 # --- agent orientation ---
-BASE=$(cat .pbg/server/server-info | tr -d '[:space:]')
+BASE=$(python3 -c "import json;print(json.load(open('.pbg/server/server-info'))['url'])")
 curl -s "$BASE/api/workspace-manifest"       # state snapshot
 curl -s "$BASE/api/linkage-index"            # navigation graph
 curl -s "$BASE/openapi.json"                 # exact API shapes
