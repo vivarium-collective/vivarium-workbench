@@ -111,22 +111,22 @@ cached 30 s). A session build (`.viv-build.json`) or the pinned-build config kee
 | `GET /api/remote-run-config` | unchanged payload + `backend: {dispatch, version, capabilities, services, reachable, error}` (key absent when no backend is named) |
 | Run target (`remote_pinned.resolve_run_target`) | `deployment` when the above holds |
 | Study baseline / variant run, `POST /api/remote-run-submit` (no `simulator_id`) | `POST /viva/v1/composites` (document); answer `{run_id, phase, backend}` |
-| Composites-tab / detached run (`run_remote`) | `POST /viva/v1/composites`, poll `/composites/{id}/status`, results `GET /viva/v1/compose/simulation/{n}/results` |
-| `GET /api/remote-run-poll?run_id=` | `/composites/{id}/status` |
+| Composites-tab / detached run (`run_remote`) | `POST /viva/v1/composites`, poll `/composites/{id}/status`, results `GET /viva/v1/compose/simulation/{n}/results` (see below for `n`), emitter history landed into the run's own `runs.db` |
+| `POST /api/remote-run-land {study, simulation_id: <run id>}` (Runs table: **⬇ Land results**) | `GET /composites/{id}` (409 unless `completed`), `n` lookup, results archive, emitter history into the study's `runs.db` as a completed run; provenance under `viva_v1` (run id, simulation id, job id, installed commit) |
+| `GET /api/remote-run-poll?run_id=` or `?simulation_id=<run id>` | `/composites/{id}/status` |
 | `GET /api/remote-run-chain-progress?run_id=` | `/composites/{id}/progress` (`simulation` jobs = seeds) |
 | `POST /api/remote-run-cancel {simulation_id: <run id>}` | `DELETE /composites/{id}` |
 | `GET /api/remote-dispatch-preflight` | clean+pushed check; `dispatch: viva-v1-document` |
 
 Not yet wired to `/viva/v1` (still legacy, or unsupported against a viva-core-only backend):
-landing a finished **study** run into the study (`/api/remote-run-land`, still simulator/`/api/v1`
-shaped), analyses (`/api/v1/analyses*`), build/branch pickers, `/composites/{id}/{jobs,datasets,log,events}`
+analyses (`/api/v1/analyses*`), build/branch pickers, `/composites/{id}/{jobs,datasets,log,events}`
 (client methods exist, no UI consumer yet), and the ecoli pinned flow (`simulator_id`).
 
 ## Fetching results
 
 | Deployment | Route | Note |
 |---|---|---|
-| any with the compose surface | `GET /viva/v1/compose/simulation/{n}/results` (`application/zip` or `gzip`), `n` = the integer after `compose:` in the run's `job_id` | verified unauthenticated, live (HTTP range read of a finished document run: 206, `application/zip`) |
+| any with the compose surface | `GET /viva/v1/compose/simulation/{n}/results` (`application/zip` from SLURM, `application/gzip` from object storage) | verified live. **`n` is NOT the number in the run's `job_id`** (`compose:<m>`: that is the `compose_hpcrun` row; container builds take rows too, so they drift -- `compose:46` was simulation 43). No route maps one to the other, so the workbench reads `GET /viva/v1/compose/simulations/status/batch` over `ids` up to `m` and accepts only the row whose `correlation_id` is the run id AND `database_id` is `m` (`remote_run.compose_simulation_id`); none -> an error, never a guess. A zip's `emitter_history.json` (`{<emitter>: [state per step]}`) lands one `history` row per step (`remote_run_landing.land_composite_results`) |
 | with a dataset store | `GET /viva/v1/composites/{id}/datasets` then `GET /viva/v1/datasets/{dataset_id}/content` | live: store absent (503) |
 | SMS (full viva-api) | viva-api's own smoke still downloads via legacy `GET /api/v1/simulations?experiment_id=` then `/api/v1/simulations/{id}/data` | **no `/viva/v1` equivalent yet for an `ecoli-simulation` run's output** |
 

@@ -588,6 +588,7 @@ _NON_COMPOSITE_RUN_KINDS = frozenset({"synthesis"})
 # so they're stripped from the reproduction ``config`` view.
 _RUN_PROVENANCE_KEYS = frozenset({
     "source", "simulation_id", "experiment_id", "backend", "s3_uri", "store_path",
+    "viva_v1",  # a landed /viva/v1 run's record of itself (remote_run_viva_v1.land)
 })
 
 

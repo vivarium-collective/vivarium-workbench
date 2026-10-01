@@ -144,15 +144,43 @@ def viva_v1_document_options(
     return options
 
 
-def compose_simulation_id(run: dict) -> int:
-    """The compose simulation a /viva/v1 document run became: its ``job_id`` is ``compose:<n>``."""
+# One batch-status read asks for this many simulation ids; a little past the run's row covers a simulation
+# created ahead of its row.
+_SIMULATION_LOOKUP_BATCH = 200
+_SIMULATION_LOOKUP_SLACK = 20
+
+
+def compose_simulation_id(client: "SmsApiClient", run: dict) -> int:
+    """The compose simulation a /viva/v1 document run became.
+
+    The run's ``job_id`` is ``compose:<n>``, but ``n`` is the ``compose_hpcrun`` row the run's job took, not the
+    simulation id the results route is keyed by: container builds take rows too, so the two drift apart (a run
+    whose job was ``compose:46`` was simulation 43) and the gap only grows. The backend has no route from one to
+    the other, so the simulation is found where its records are: the batch status read lists, for each
+    simulation id asked, its ``correlation_id`` (the run's own id) and ``database_id`` (that row). A simulation
+    is created with its row, so it is at or below ``n``: the read walks down from just above ``n`` in batches
+    until it finds it. A row is accepted only when BOTH agree with the run -- another run's results must never be
+    landed as this one's -- and nothing agreeing is an error, never a guess.
+    """
+    run_id = run.get("id")
     job_id = str(run.get("job_id") or "")
     kind, _, n = job_id.partition(":")
-    if kind != "compose" or not n.isdigit():
+    if not run_id or kind != "compose" or not n.isdigit():
         raise RuntimeError(
-            f"run {run.get('id')!r} has job_id {job_id!r}, not compose:<n>; its output has no "
+            f"run {run_id!r} has job_id {job_id!r}, not compose:<n>; its output has no "
             "/viva/v1 download route the workbench knows (docs/backend-viva-v1.md)")
-    return int(n)
+    row_id = int(n)
+    top = row_id + _SIMULATION_LOOKUP_SLACK
+    while top >= 1:
+        ids = list(range(max(1, top - _SIMULATION_LOOKUP_BATCH + 1), top + 1))
+        for row in client.compose_status_batch(ids):
+            if row.get("correlation_id") == run_id and row.get("database_id") == row_id \
+                    and row.get("sim_id") is not None:
+                return int(row["sim_id"])
+        top = ids[0] - 1
+    raise RuntimeError(
+        f"the backend lists no compose simulation for run {run_id!r} (job {job_id}); its results cannot be "
+        "fetched without guessing which run is its own")
 
 
 def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
@@ -389,7 +417,7 @@ def run_remote(
 
     # Download results (results.tar.gz — T5b). A /viva/v1 run's output is the compose
     # simulation it became (``job_id`` = ``compose:<n>``).
-    results_path = client.download_compose_results(compose_simulation_id(run) if via_viva_v1 else sim_id, dest)
+    results_path = client.download_compose_results(compose_simulation_id(client, run) if via_viva_v1 else sim_id, dest)
     print(f"Results landed at: {results_path}")
     return results_path
 

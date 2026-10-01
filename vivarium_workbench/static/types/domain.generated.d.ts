@@ -7,7 +7,7 @@ export type RemoteJobStatus = 'unknown' | 'waiting' | 'pending' | 'queued' | 'ru
 
 export interface RemoteOrigin {
   deployment: string;
-  simulation_id: number;
+  simulation_id: number | string;
   experiment_id: string | null;
   backend: string | null;
   s3_uri: string | null;

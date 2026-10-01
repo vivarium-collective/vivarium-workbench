@@ -1367,6 +1367,22 @@ def _walk_collect(node, path: list[str], out: list[list[str]]) -> None:
     out.append(path)
 
 
+_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS history (
+    simulation_id TEXT NOT NULL,
+    step INTEGER NOT NULL,
+    global_time REAL,
+    state TEXT NOT NULL,
+    PRIMARY KEY (simulation_id, step)
+);
+"""
+
+
+def ensure_history_table(conn: sqlite3.Connection) -> None:
+    """The per-step emitted-state table the SQLiteEmitter writes (it creates it lazily on first write)."""
+    conn.executescript(_HISTORY_DDL)
+
+
 def copy_run_to_new_db(src_db: Path, dst_db: Path, run_id: str) -> int:
     """Copy one run's metadata + history rows from src_db to dst_db.
 
@@ -1380,15 +1396,7 @@ def copy_run_to_new_db(src_db: Path, dst_db: Path, run_id: str) -> int:
     dst = connect(dst_db)  # bootstraps runs_meta + index
     try:
         # SQLiteEmitter creates the history table lazily on first write; do it eagerly here.
-        dst.executescript("""
-            CREATE TABLE IF NOT EXISTS history (
-                simulation_id TEXT NOT NULL,
-                step INTEGER NOT NULL,
-                global_time REAL,
-                state TEXT NOT NULL,
-                PRIMARY KEY (simulation_id, step)
-            );
-        """)
+        ensure_history_table(dst)
 
         meta = src.execute(
             "SELECT * FROM runs_meta WHERE run_id = ?", (run_id,)

@@ -163,12 +163,17 @@ def remote_deployment_name() -> str:
 
     Config-derived via ``VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT`` (same env-driven
     pattern as :func:`pinned_config`), replacing the hardcoded ``"smsvpctest"`` so
-    a run's recorded Origin reflects the deployment it actually ran on.
+    a run's recorded Origin reflects the deployment it actually ran on. Unset, a
+    backend the operator named (``serve --backend-base-url``) is that deployment:
+    its host. ``"smsvpctest"`` only when neither says.
     """
-    return (
-        get_env("REMOTE_DEPLOYMENT", _DEFAULT_REMOTE_DEPLOYMENT)
-        or _DEFAULT_REMOTE_DEPLOYMENT
-    ).strip() or _DEFAULT_REMOTE_DEPLOYMENT
+    from urllib.parse import urlsplit
+
+    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+
+    named = explicit_backend_base_url()
+    default = (urlsplit(named).hostname if named else None) or _DEFAULT_REMOTE_DEPLOYMENT
+    return (get_env("REMOTE_DEPLOYMENT", default) or default).strip() or default
 
 
 def _normalize_repo(url: str) -> str:

@@ -38,9 +38,47 @@ import shutil
 import tarfile
 import tempfile
 import time as _time
+import zipfile
 from pathlib import Path
 
 from vivarium_workbench.lib import composite_runs as cr
+
+
+def land_composite_results(archive: Path, db_file: Path, run_id: str) -> int:
+    """Land a generic composite run's results archive into the run store; return the steps landed.
+
+    A compose simulation that ran a document serves a zip: ``emitter_history.json`` (the emitter's states,
+    ``{<emitter name>: [state per emitted step]}``), the event log and the final state. The run store's
+    ``history`` table is one row per step -- ``(simulation_id, step, global_time, state)``, the table every
+    existing viewer reads -- so landing is that mapping: each state stored whole, its time taken from the
+    state when it carries one. Landing a run again replaces its rows. An archive that is not exactly one
+    emitter's history is refused before anything is written: which emitter a state came from cannot be
+    guessed, and an unreadable result must not be recorded as a run.
+    """
+    with zipfile.ZipFile(archive) as z:
+        try:
+            history = json.loads(z.read("emitter_history.json"))
+        except KeyError:
+            raise ValueError(f"{Path(archive).name} has no emitter_history.json: not a composite run's results") from None
+    if not isinstance(history, dict) or len(history) != 1 or not isinstance(next(iter(history.values())), list):
+        raise ValueError(
+            "emitter_history.json must hold exactly one emitter's list of states, got "
+            f"{sorted(history) if isinstance(history, dict) else type(history).__name__}")
+    (states,) = history.values()
+    rows = [
+        (run_id, step, state.get("global_time") if isinstance(state, dict)
+         and isinstance(state.get("global_time"), (int, float)) else None, json.dumps(state))
+        for step, state in enumerate(states)
+    ]
+    conn = cr.connect(db_file)
+    try:
+        cr.ensure_history_table(conn)
+        with conn:
+            conn.execute("DELETE FROM history WHERE simulation_id = ?", (run_id,))
+            conn.executemany("INSERT INTO history (simulation_id, step, global_time, state) VALUES (?, ?, ?, ?)", rows)
+    finally:
+        conn.close()
+    return len(rows)
 
 
 class RemoteRunSeedCountMismatch(RuntimeError):

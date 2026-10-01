@@ -423,6 +423,15 @@ def enumerate_unblocked(spec: dict) -> tuple[list[dict], list[dict]]:
 
     # Baseline as the implicit first item.
     baseline = cond.get("baseline") or {}
+    variants = cond.get("variants") or []
+    if not baseline.get("composite"):
+        # The top-level form (``baseline: [{name, composite, params}, ...]``, ``variants: [...]``): the study
+        # runner reads it the same way (study_runs.run_study_baseline runs ``baseline[0]``).
+        top = spec.get("baseline")
+        first = top[0] if isinstance(top, list) and top else top
+        if isinstance(first, dict) and first.get("composite"):
+            baseline = first
+            variants = spec.get("variants") or []
     if baseline.get("composite"):
         item = {
             "study":          study_slug,
@@ -439,7 +448,7 @@ def enumerate_unblocked(spec: dict) -> tuple[list[dict], list[dict]]:
         else:
             runnable.append(item)
 
-    for v in cond.get("variants") or []:
+    for v in variants:
         if not isinstance(v, dict):
             continue
         item = {

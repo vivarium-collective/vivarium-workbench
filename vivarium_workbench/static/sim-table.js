@@ -316,6 +316,15 @@
     }
     add("DOWNLOAD", analysisFiles,
       remoteSimId != null ? "analyses.json — lands from the deployment, then downloads" : "analyses.json");
+    // ⬇ Land results — a run dispatched to a /viva/v1 backend (serve --backend-base-url) is recorded by the
+    // backend's own run id (a string, e.g. "simulation-E9Ec819"), and its results are brought into this study's
+    // run store on request (POST /api/remote-run-land). Shown at any status: the server answers an unfinished
+    // run with a plain "not finished yet" rather than downloading anything.
+    var vivaRunId = (typeof remoteSimId === "string" && !/^\d+$/.test(remoteSimId)) ? remoteSimId : null;
+    add("DOWNLOAD", (vivaRunId && !isSnapshot && study(row))
+      ? '<button type="button" class="action-btn js-authoring land-viva-btn" ' +
+        'title="Bring this run\'s results from the backend into this study">⬇ Land results</button>' : "",
+      "Bring the run's results into this study");
     add("DOWNLOAD", (row.run_id && (row.store_path || row.db_path))
       ? '<a class="action-btn js-authoring" title="Download this run\'s raw emitter data (.zip)" ' +
         'href="' + BP + '/api/simulation-run-download?run_id=' + runIdEnc + '" download style="text-decoration:none;">⬇ Raw data</a>' : "",
@@ -492,6 +501,43 @@
     });
   }
   window._landRemote = _landRemote;
+
+  // Land a /viva/v1 run's results into its study (POST /api/remote-run-land {study, simulation_id: <run id>}),
+  // then refresh so the landed run replaces its pending row. Same delegated, read-from-<tr> idiom as ⬇ Land.
+  function _landVivaRun(studySlug, vivaRunId, btn) {
+    if (!studySlug || !vivaRunId) return;
+    var orig = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "… landing"; btn.title = ""; }
+    // Never a blocking dialog (this file has no toast to fall back on): success refreshes the table, where the
+    // landed run replaces its pending row; a refusal stays on the button, with the reason as its tooltip.
+    function _refused(reason) {
+      if (btn) { btn.disabled = false; btn.textContent = "⚠ Not landed"; btn.title = reason; }
+      if (window.console) console.warn("Land " + vivaRunId + ": " + reason);
+    }
+    fetch((window.__BASE_PATH__ || "") + "/api/remote-run-land", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ study: studySlug, simulation_id: vivaRunId }),
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
+        .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
+    }).then(function (res) {
+      if (!res.ok) { _refused((res.body || {}).error || ("HTTP " + res.status)); return; }
+      if (btn) { btn.disabled = false; btn.textContent = orig || "⬇ Land results"; }
+      if (typeof window._initSimulations === "function") window._initSimulations(true);
+      if (typeof window._loadStudySims === "function") window._loadStudySims(true);
+    }).catch(function (err) { _refused("network error — " + err); });
+  }
+  window._landVivaRun = _landVivaRun;
+
+  function _onLandVivaClick(e) {
+    var btn = e.target.closest(".land-viva-btn");
+    if (!btn) return;
+    e.stopPropagation();
+    var tr = btn.closest("tr[data-remote-sim-id]");
+    if (!tr) return;
+    _landVivaRun(tr.getAttribute("data-study") || "", tr.getAttribute("data-remote-sim-id") || "", btn);
+  }
+  document.addEventListener("click", _onLandVivaClick, true);
 
   function _onLandButtonClick(e) {
     var btn = e.target.closest(".land-remote-btn");
