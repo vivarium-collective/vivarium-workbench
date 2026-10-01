@@ -150,6 +150,27 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
     pbg = WorkspacePaths.load(workspace).pbg
 
+    # Populate the workspace's import-time registries (analyses, composite
+    # generators) in THIS server process by importing its build_core and building
+    # a core once. The run subprocess already does this via <pkg>.core.build_core;
+    # without it here, an analysis that only registers on import of the workspace
+    # package (e.g. a Simularium analysis' ANALYSIS_REGISTRY entry) shows up as
+    # "not in registry" in the Analyses tab even though the run writes its output.
+    # Best-effort — never blocks boot.
+    try:
+        from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _add_ws
+        _add_ws(workspace)
+        _pkg = WorkspacePaths.load(workspace).package
+        _pkg_name = _pkg.name if _pkg else ""
+        if _pkg_name:
+            import importlib
+            _core_mod = importlib.import_module(f"{_pkg_name}.core")
+            if hasattr(_core_mod, "build_core"):
+                _core_mod.build_core()
+    except Exception as e:  # noqa: BLE001
+        print("warning: workspace build_core import failed at startup "
+              f"(analyses may show 'not in registry'): {e}", file=sys.stderr)
+
     # Repair runs left 'running' by a previous crash/restart — never block boot.
     try:
         from vivarium_workbench.lib.run_registry import reconcile_stale_runs
