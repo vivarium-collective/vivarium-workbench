@@ -166,10 +166,23 @@
     var PALETTE = [0xff5500, 0x0088ff, 0x33cc66, 0xffcc00, 0xcc55ff, 0xff4488];
     var geom = new THREE.SphereGeometry(1, 12, 12);
     var meshByType = {};
+    // Prefer the trajectory's own per-type colour (typeMapping[id].geometry.color,
+    // set from the study's display: params); fall back to the palette by index.
+    function colorFor(typeId) {
+      var tm = model.typeMapping && model.typeMapping[typeId];
+      var c = tm && tm.geometry && tm.geometry.color;
+      if (c !== undefined && c !== null && c !== "") {
+        if (typeof c === "number") return c;
+        var s = String(c).trim().replace(/^#/, "");
+        var n = parseInt(s, 16);
+        if (!isNaN(n)) return n;
+      }
+      return PALETTE[typeId % PALETTE.length];
+    }
     function meshFor(typeId, count) {
       if (!meshByType[typeId]) {
         var m = new THREE.InstancedMesh(geom,
-          new THREE.MeshLambertMaterial({ color: PALETTE[typeId % PALETTE.length] }),
+          new THREE.MeshLambertMaterial({ color: colorFor(typeId) }),
           Math.max(count, 1));
         m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); meshByType[typeId] = m;
       }

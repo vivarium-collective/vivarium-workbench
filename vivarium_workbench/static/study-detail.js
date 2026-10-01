@@ -2007,8 +2007,12 @@
     return api('GET', '/api/remote-run-config').then(function(cfgRes) {
       var cfg = (cfgRes.status === 200 && cfgRes.body) || {};
       if (cfg.pinned && cfg.simulator_id) return _dispatchRemotePinned(cfg);
-      if (!confirm("Run this study's CURRENT baseline spec as a new run?")) return _CANCELLED;
-      return api('POST', '/api/study-run-baseline', { study: studyName() });
+      // In-page confirm (not window.confirm): embedded/automated browsers that
+      // suppress native dialogs silently cancel the run otherwise.
+      return _confirmModal("Run this study's CURRENT baseline spec as a new run?").then(function (ok) {
+        if (!ok) return _CANCELLED;
+        return api('POST', '/api/study-run-baseline', { study: studyName() });
+      });
     });
   }
 
