@@ -52,6 +52,9 @@ def _decide(app, messages):
         raise ModelHTTPError(401, "fm", {"error": f"bad key {KEY}"})
     if "forge" in prompt:
         return ("tool", {"operation_id": _oid(app, "post", "/api/source/switch"), "body": {}})
+    if "stringified" in prompt:          # local models (qwen on Ollama) send the body as a JSON *string*
+        return ("tool", {"operation_id": _oid(app, "post", "/api/study-create"),
+                         "body": json.dumps({"name": "chat-made"})})
     return ("tool", {"operation_id": _oid(app, "post", "/api/study-create"),
                      "body": {"name": "chat-made"}})
 
@@ -159,6 +162,22 @@ def test_mutation_pauses_then_approve_executes_and_audits(env):
     rec = lines[-1]
     assert (rec["provider"], rec["model"], rec["method"], rec["path"], rec["status"], rec["approved"]) == (
         "anthropic", "fm", "POST", "/api/study-create", 200, True)
+
+
+def test_a_body_sent_as_a_json_string_runs_as_the_object_it_encodes(env):
+    """Regression: qwen sends `body` as a JSON string. `body: Any` passed it through, httpx sent a JSON string
+    literal, and every write came back 422 "Input should be a valid dictionary or object" — a loop the model
+    could not escape. The tool now decodes it, so the approval card shows (and the server gets) the object."""
+    client, ws, _ = env
+    f1 = _turn(client, prompt="create a study, stringified")
+    assert _types(f1) == ["tool-call", "approval-required", "done"]
+    ask = f1[1]
+    assert ask["metadata"]["body"] == {"name": "chat-made"}          # the card shows what will actually run
+    f2 = _turn(client, messages=f1[2]["messages"],
+               deferred_results={"approvals": {ask["tool_call_id"]: True}})
+    res = next(f for f in f2 if f["type"] == "tool-result")
+    assert res["content"]["status"] == 200, res
+    assert (ws / "studies" / "chat-made" / "study.yaml").is_file()
 
 
 def test_deny_leaves_the_tree_unchanged(env):

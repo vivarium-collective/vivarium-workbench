@@ -242,3 +242,33 @@ def test_session_header_is_forwarded_and_no_origin_is_sent(tmp_path):
 
     _run(go())
     assert seen["x-vw-session"] == "tab-1" and "origin" not in seen
+
+
+# -- object arguments: typed as objects, and a JSON object sent as a string is decoded (local models do this) --
+
+
+def _call_operation_tool():
+    from pydantic_ai.tools import Tool
+    return Tool(ai_tools.call_operation)
+
+
+def test_call_operation_tells_the_model_its_object_arguments_are_objects():
+    props = _call_operation_tool().tool_def.parameters_json_schema["properties"]
+    for name in ("path_params", "query", "body"):
+        kinds = {s.get("type") for s in props[name]["anyOf"]}
+        assert kinds == {"object", "null"}, (name, props[name])
+
+
+def test_stringified_object_arguments_are_decoded_by_the_tool_validator():
+    v = _call_operation_tool().function_schema.validator    # the validation pydantic-ai runs on every tool call
+    args = v.validate_python({"operation_id": "x", "body": '{"study": "repeat-matching"}',
+                              "query": ' {"slug": "s1"}', "path_params": '{"run_id": "r1"}'})
+    assert args["body"] == {"study": "repeat-matching"}
+    assert args["query"] == {"slug": "s1"} and args["path_params"] == {"run_id": "r1"}
+
+
+@pytest.mark.parametrize("bad", ["repeat-matching", "{not json", '["a", "b"]', "42"])
+def test_text_that_is_not_a_json_object_is_rejected_not_sent(bad):
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        _call_operation_tool().function_schema.validator.validate_python({"operation_id": "x", "body": bad})
