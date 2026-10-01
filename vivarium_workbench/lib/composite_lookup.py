@@ -26,6 +26,8 @@ from typing import Any, Callable, Optional
 
 import yaml
 
+from vivarium_workbench.lib.path_safety import is_plain_name
+
 
 _FULL_PLACEHOLDER = re.compile(r"^\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}$")
 _INLINE_PLACEHOLDER = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
@@ -259,6 +261,8 @@ def find_composite_path(ws_root: Path, package_path: str, spec_id: str) -> Path 
     if len(parts) != 2:
         return None
     pkg, stem = parts
+    if not (is_plain_name(pkg) and is_plain_name(stem)):
+        return None  # the id's segments become directory / file names; a path is not an id
     comp_dir = ws_root / pkg / "composites"
     # Workspace package first — the id's last segment as a filename stem.
     for suffix in (".composite.yaml", ".composite.yml", ".composite.json"):

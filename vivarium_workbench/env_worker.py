@@ -3184,6 +3184,29 @@ def _process_template(params: dict) -> dict:
 
 
 _SOURCE_DEP_DIR_PARTS = {".venv", "venv", "site-packages", "dist-packages", "__pypackages__"}
+# The workspace's own control directories (git metadata, dashboard state) and the file types the source editor
+# handles. Twin of ``vivarium_workbench.lib.path_safety.PROTECTED_DIRS``: this file must not import workbench
+# code, so ``tests/test_path_safety.py`` pins the two together.
+_PROTECTED_DIR_PARTS = {".git", ".pbg"}
+_SOURCE_SUFFIXES = (".py", ".yaml", ".yml", ".json")
+
+
+def _resolve_inside(root: str, rel: str, suffixes: "tuple | None" = None) -> "tuple[str | None, str | None]":
+    """Twin of ``path_safety.resolve_inside``: ``(path, None)`` when ``rel`` stays under ``root``, avoids the
+    protected directories and has an allowed suffix; else ``(None, reason)``. Lexical (``normpath``), and the
+    normalised path is the one to use."""
+    if not isinstance(rel, str) or not rel or "\x00" in rel:
+        return None, "invalid path"
+    for base in dict.fromkeys((os.path.abspath(root), os.path.realpath(root))):
+        full = os.path.normpath(os.path.join(base, rel))
+        if full == base or not full.startswith(base.rstrip(os.sep) + os.sep):
+            continue
+        if _PROTECTED_DIR_PARTS & {p.casefold() for p in full[len(base):].split(os.sep)}:
+            return None, "that location is not accessible"
+        if suffixes is not None and os.path.splitext(full)[1].lower() not in suffixes:
+            return None, "unsupported file type"
+        return full, None
+    return None, "it must be inside the workspace"
 
 
 def _source_path_editable(path: str, workspace: str) -> bool:
@@ -3207,7 +3230,9 @@ def _source_path_editable(path: str, workspace: str) -> bool:
         rel = p.relative_to(ws)
     except ValueError:
         return False  # outside the workspace tree
-    return not (_SOURCE_DEP_DIR_PARTS & set(rel.parts))
+    if (_SOURCE_DEP_DIR_PARTS | _PROTECTED_DIR_PARTS) & {p.casefold() for p in rel.parts}:
+        return False  # dependency code, or the workspace's git / dashboard control files
+    return p.suffix.lower() in _SOURCE_SUFFIXES
 
 
 def _validate_python(source: str, filename: str) -> "tuple[bool, str]":
@@ -3346,6 +3371,20 @@ def _process_source_write(params: dict) -> dict:
     return {"ok": True, "path": path, "bytes": len(new_source.encode("utf-8"))}
 
 
+def _is_discovered_spec(source: str) -> bool:
+    """True iff ``source`` is exactly the ``source`` of a composite the registry lists — how a spec that lives
+    outside the workspace (an installed package, a shared checkout) is named. Read access only follows this
+    list, never a client-chosen absolute path."""
+    if not os.path.isabs(source) or os.path.splitext(source)[1].lower() not in _SOURCE_SUFFIXES:
+        return False
+    try:
+        from pathlib import Path as _Path
+        from vivarium_workbench.lib.composite_lookup import composites_data
+        return any(c.get("source") == source for c in composites_data(_Path(_workspace)).get("composites", []))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _composite_source_path(params: dict) -> "tuple[str | None, str | None, str | None]":
     """Resolve a composite record to ``(path, lang, error)``.
 
@@ -3361,7 +3400,12 @@ def _composite_source_path(params: dict) -> "tuple[str | None, str | None, str |
     # — on a write that key carries the NEW file content, not a path.)
     source_rel = p.get("source_path")
     if source_rel:
-        path = (Path(_workspace) / str(source_rel)).resolve()
+        inside, why = _resolve_inside(_workspace, str(source_rel), _SOURCE_SUFFIXES)
+        if inside is None and _is_discovered_spec(str(source_rel)):
+            inside, why = str(source_rel), None
+        if inside is None:
+            return None, None, f"invalid source_path: {why}"
+        path = Path(inside).resolve()
         if not path.is_file():
             return None, None, f"spec file not found: {source_rel}"
         return str(path), _lang_for_path(str(path)), None

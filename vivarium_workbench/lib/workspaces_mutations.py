@@ -89,8 +89,12 @@ def workspaces_cleanup_stale(body: Any) -> tuple[dict, int]:
     if workspace_catalog.find_running(path) is not None:
         return {"error": "server is still running"}, 409
     workspace_catalog.unregister_server(path)
-    # Best-effort removal of the orphan workspace-local files.
-    sdir = Path(path).expanduser().resolve() / ".pbg" / "server"
+    # Best-effort removal of the orphan workspace-local files — only inside a real workspace: the path is
+    # caller-supplied, and a stale entry always points at one.
+    root = Path(path).expanduser().resolve()
+    if not (root / "workspace.yaml").is_file():
+        return {"ok": True}, 200
+    sdir = root / ".pbg" / "server"
     for fname in ("server-info", "server.pid"):
         try:
             (sdir / fname).unlink()

@@ -38,6 +38,7 @@ from viva_superpowers.study_io import load_yaml, save_yaml_atomic
 from viva_superpowers.workspace_paths import WorkspacePaths
 
 from vivarium_workbench.lib.expert_search import search_expert_docs
+from vivarium_workbench.lib.path_safety import plain_name
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +125,7 @@ from viva_superpowers.paths import find_workspace_root  # noqa: E402,F401
 
 
 def study_dir_from_slug(ws_root: Path, slug: str) -> Path:
-    sd = WorkspacePaths.load(ws_root).studies / slug
+    sd = WorkspacePaths.load(ws_root).studies / plain_name(slug, "study name")
     if not (sd / "study.yaml").is_file():
         raise FileNotFoundError(f"studies/{slug}/study.yaml not found under {ws_root}")
     return sd

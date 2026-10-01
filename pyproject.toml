@@ -350,6 +350,7 @@ files = [
     "vivarium_workbench/lib/investigation_viz_mutations.py",
     "vivarium_workbench/lib/job_status_views.py",
     "vivarium_workbench/lib/csrf.py",
+    "vivarium_workbench/lib/path_safety.py",
     "vivarium_workbench/lib/source_switch_views.py",
     "vivarium_workbench/lib/source_build_views.py",
     "vivarium_workbench/lib/remote_run_views.py",

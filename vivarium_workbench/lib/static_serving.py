@@ -28,6 +28,7 @@ never ``server``.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -78,7 +79,32 @@ def index_html_path(ws_root: Path) -> Path:
     return WorkspacePaths.load(ws_root).reports / "index.html"
 
 
-def resolve_asset(ws_root: Path, rel: str) -> Path:
+# Databases, event logs and pid files: run data the API serves in a shaped form, never as raw files.
+_UNSERVED_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".jsonl", ".pid")
+
+
+def _within(path: Path, root: Path) -> bool:
+    """True iff ``path`` really lives under ``root`` once symlinks are followed."""
+    try:
+        Path(os.path.realpath(path)).relative_to(os.path.realpath(root))
+    except ValueError:
+        return False
+    return True
+
+
+def is_servable(rel: str) -> bool:
+    """True iff ``rel`` (a URL path, leading slash already stripped) may be served from the workspace.
+
+    Refuses any dot-segment — ``.git``, ``.env``, ``.pbg`` (run databases, server state, the audit log),
+    ``.venv``, and ``..`` itself — plus absolute and NUL-carrying paths. The dashboard's own pages and assets
+    never live under a dot-name, so nothing legitimate is lost.
+    """
+    return (bool(rel) and "\x00" not in rel and not os.path.isabs(rel)
+            and not any(seg.startswith(".") for seg in rel.split("/") if seg)
+            and not rel.lower().endswith(_UNSERVED_SUFFIXES))
+
+
+def resolve_asset(ws_root: Path, rel: str) -> Optional[Path]:
     """Resolve a generic static asset for the catch-all route.
 
     Reproduces the legacy ``do_GET`` static branch priority EXACTLY:
@@ -92,10 +118,13 @@ def resolve_asset(ws_root: Path, rel: str) -> Path:
     4. else ``reports/rel`` — returned UNCONDITIONALLY (served as-is, so the
        caller 404s when this final path is not a file).
 
-    ``rel`` must already be ``lstrip("/")``-ed and traversal-checked by the
-    caller (the catch-all route refuses ``..`` segments first).  Returns the
-    chosen path (which may not exist).
+    ``rel`` must already be ``lstrip("/")``-ed by the caller.  Returns ``None``
+    when ``rel`` is not :func:`is_servable`, or resolves (through a symlink) to a
+    file outside the tree it is served from (the caller 404s), else the chosen
+    path (which may not exist).
     """
+    if not is_servable(rel):
+        return None
     bundled = STATIC_DIR / rel
     if bundled.is_file():
         return bundled
@@ -105,8 +134,10 @@ def resolve_asset(ws_root: Path, rel: str) -> Path:
             return bundled_alt
     primary = ws_root / rel
     if primary.is_file():
-        return primary
-    return WorkspacePaths.load(ws_root).reports / rel
+        return primary if _within(primary, ws_root) else None  # a symlink out of the tree is not served
+    reports = WorkspacePaths.load(ws_root).reports
+    final = reports / rel
+    return final if (not final.is_file() or _within(final, reports)) else None
 
 
 def resolve_loom_asset(rel: str) -> Path:

@@ -31,6 +31,7 @@ from typing import Any
 import yaml
 
 from vivarium_workbench.lib import investigation_status as _invstatus
+from vivarium_workbench.lib.path_safety import plain_name, resolve_inside
 from vivarium_workbench.lib.imports import register_import
 from vivarium_workbench.lib.study_spec import SLUG_RE as _SLUG_RE
 from vivarium_workbench.lib.workspace_yaml import (
@@ -216,6 +217,7 @@ def register_dataset(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
     if file_b64:
         if not filename:
             return {"error": "filename is required when file_b64 is provided"}, 400
+        plain_name(filename, "filename")  # a name, not a path: it is joined onto the dataset directory
         if investigation:
             dest_rel = f"investigations/{investigation}/inputs/datasets/{_safe_slug(name)}/{filename}"
         else:
@@ -233,7 +235,7 @@ def register_dataset(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
 
     # --- mutation (formerly the action() closure) ---
     if file_b64:
-        dest = ws_root / entry["path"]
+        dest = resolve_inside(ws_root, entry["path"], what="dataset path")
         sha = _save_upload(file_b64, dest)
         entry["sha256"] = sha
     elif path and not file_b64:

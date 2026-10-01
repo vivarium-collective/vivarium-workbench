@@ -25,6 +25,7 @@ from typing import Any
 import yaml
 
 from vivarium_workbench.lib import investigation_status as _invstatus
+from vivarium_workbench.lib.path_safety import plain_name
 from vivarium_workbench.lib.study_spec import SLUG_RE as _SLUG_RE
 
 
@@ -244,7 +245,7 @@ def study_rename(ws_root: Path, body: dict) -> "tuple[dict, int]":
         return {"error": "missing study or new_name"}, 400
     if not _SLUG_RE.match(new_name):
         return {"error": "new_name must be lowercase + dashes"}, 400
-    src = ws_root / "studies" / name
+    src = ws_root / "studies" / plain_name(name, "study name")
     dst = ws_root / "studies" / new_name
     if not src.is_dir():
         return {"error": "study not found"}, 404

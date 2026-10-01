@@ -5,10 +5,13 @@ from pathlib import Path
 
 import yaml
 
+from vivarium_workbench.lib.path_safety import plain_name
+
 _NODE_DIRS = ("findings", "evidence", "decisions", "conclusions")
 
 
 def study_dir(ws_root: Path, slug: str) -> Path | None:
+    plain_name(slug, "study name")  # outside the try below, which swallows errors
     try:
         from vivarium_workbench.lib.workspace_paths import WorkspacePaths
         wp = WorkspacePaths.load(ws_root)

@@ -38,6 +38,7 @@ from typing import Optional
 
 import yaml
 
+from vivarium_workbench.lib.path_safety import plain_name
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib import study_derivations as _study_derivations
 
@@ -173,6 +174,7 @@ def study_dir(ws_root: Path, name: str) -> Path:
 
     Mirrors ``server._study_dir`` parameterised on ``ws_root``.
     """
+    name = plain_name(name, "study name")
     wp = WorkspacePaths.load(ws_root)
     try:
         return wp.study_dir(name, must_exist=True)

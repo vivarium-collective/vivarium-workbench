@@ -121,7 +121,7 @@ All read through `lib/env_compat.get_env`, which prefers
 |---|---|
 | `WORKSPACE` | process default workspace root |
 | `READONLY` | **drops** authoring routes at registration (see §5) |
-| `DISABLE_CSRF`, `TRUST_PROXY`, `ALLOWED_ORIGINS` | request-guard tuning; `TRUST_PROXY` only behind a proxy you control |
+| `DISABLE_CSRF`, `TRUST_PROXY`, `ALLOWED_ORIGINS`, `ALLOWED_HOSTS` | request-guard tuning; `TRUST_PROXY` only behind a proxy you control; `ALLOWED_HOSTS` (comma-separated bare names) adds `Host` names a loopback-bound server accepts besides `localhost` / `127.0.0.1` / `[::1]` |
 | `REMOTE_PINNED`, `REMOTE_REPO_URL`, `REMOTE_BRANCH` | pinned-run mode; **`REMOTE_PINNED` alone is not enough — `REMOTE_REPO_URL` must also be set** or `pinned_config()` returns `None` |
 | `REMOTE_DEPLOYMENT` | Origin name for remote runs; defaults to `smsvpctest` |
 | `ENV_WORKER_ADVERTISE_HOST` | **selects the remote launcher** — set ⇒ worker-as-image, unset ⇒ local subprocess |

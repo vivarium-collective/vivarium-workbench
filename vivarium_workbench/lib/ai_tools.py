@@ -93,10 +93,12 @@ class ChatDeps:
 
 def make_client(app: FastAPI) -> httpx.AsyncClient:
     """An in-process client for ``app``. No ``Origin`` header is ever sent, so
-    the CSRF guard's existing rule (absent Origin ⇒ allowed) applies."""
+    the CSRF guard's existing rule (absent Origin ⇒ allowed) applies. The client never leaves the
+    process, so it presents a loopback ``Host`` — the DNS-rebinding guard (``lib.csrf.is_host_allowed``)
+    refuses any other name on a loopback-bound server."""
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
-        base_url="http://chat.internal",
+        base_url="http://127.0.0.1",
     )
 
 

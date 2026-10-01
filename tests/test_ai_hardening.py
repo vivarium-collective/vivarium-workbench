@@ -332,7 +332,20 @@ def test_keyring_mode_rejects_non_loopback_host_headers(tmp_path):
     assert TestClient(app, base_url="http://127.0.0.1:8000").get("/api/ai/status").status_code == 200
     assert TestClient(app, base_url="http://localhost:8000").get("/api/ai/status").status_code == 200
     rebound = TestClient(app, base_url="http://evil.example:8000")
-    assert rebound.get("/api/ai/status").status_code == 403
+    # the app-wide Host guard (lib/csrf.is_host_allowed) refuses a rebound name before anything is routed
+    assert rebound.get("/api/ai/status").status_code == 400
+    assert rebound.delete("/api/ai/credentials/anthropic").status_code == 400
+    assert rebound.post("/api/chat/turn", json={"prompt": "x", "messages": []}).status_code == 400
+
+
+def test_the_chat_keeps_its_own_loopback_host_check_when_the_app_wide_guard_is_widened(tmp_path, monkeypatch):
+    """VIVARIUM_WORKBENCH_ALLOWED_HOSTS widens the app-wide guard; keychain-backed routes must still refuse a
+    non-loopback Host (second layer, ``_ai_scope``)."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_ALLOWED_HOSTS", "evil.example")
+    app, _ = _make_app(tmp_path, bind_host="127.0.0.1")
+    rebound = TestClient(app, base_url="http://evil.example:8000")
+    assert rebound.get("/health").status_code == 200                       # allowed by the operator
+    assert rebound.get("/api/ai/status").status_code == 403                # but never the keychain
     assert rebound.delete("/api/ai/credentials/anthropic").status_code == 403
     assert rebound.post("/api/chat/turn", json={"prompt": "x", "messages": []}).status_code == 403
 
@@ -563,7 +576,7 @@ def test_banner_is_silenced_by_ai_auth_too():
 def test_host_with_userinfo_is_rejected(tmp_path, host):
     app, _ = _make_app(tmp_path, bind_host="127.0.0.1")
     r = TestClient(app, base_url="http://127.0.0.1:8000").get("/api/ai/status", headers={"Host": host})
-    assert r.status_code == 403
+    assert r.status_code == 400                                            # refused app-wide, before routing
 
 
 def test_no_operation_shares_the_ai_or_chat_prefix_unexcluded(tmp_path):

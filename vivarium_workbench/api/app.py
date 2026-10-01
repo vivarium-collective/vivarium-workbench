@@ -49,6 +49,7 @@ from vivarium_workbench.lib import session_env
 from vivarium_workbench.lib import session_registry
 from vivarium_workbench.lib.workspace_context import WorkspaceContext
 from vivarium_workbench.lib import csrf as _csrf
+from vivarium_workbench.lib import path_safety as _path_safety
 from vivarium_workbench.lib import source_switch_views as _source_switch_views
 from vivarium_workbench.lib import source_build_views as _source_build_views
 from vivarium_workbench.lib import job_status_views as _job_status_views
@@ -428,6 +429,30 @@ def get_workspace(request: Request = None) -> Path:
     return get_workspace_context(request).ws_root
 
 
+async def _plain_identifiers(request: Request) -> None:
+    """App-wide guard: every request field that names one directory entry (study, investigation, run id ...)
+    must be a plain name, whichever route it reaches — path, query or top-level JSON body. See
+    ``lib.path_safety.IDENTIFIER_FIELDS``. FastAPI caches the request body, so this does not consume it."""
+    _path_safety.check_identifiers(request.path_params)
+    _path_safety.check_identifiers(request.query_params.multi_items())
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and "json" in request.headers.get("content-type", ""):
+        try:
+            body = await request.json()
+        except ValueError:
+            return  # not JSON: the route's own validation reports it
+        if isinstance(body, dict):
+            _path_safety.check_identifiers(body)
+
+
+def _is_proxied(request: Request) -> bool:
+    """True when the server sits behind a proxy / under a base path (declared by flag, env or prefix)."""
+    return bool(
+        _csrf.is_trust_proxy_via_env(os.environ)
+        or _csrf.allowed_origins_via_env(os.environ)
+        or getattr(request.app.state, "base_path", "")
+    )
+
+
 def _ai_scope(request: Request) -> "tuple[_ai_auth.StorageMode, str | None]":
     """Where this request's LLM credentials live and the session key that scopes them.
 
@@ -437,11 +462,7 @@ def _ai_scope(request: Request) -> "tuple[_ai_auth.StorageMode, str | None]":
     only compares Origin to Host, so a DNS-rebound page (Host == Origin ==
     attacker's name) would otherwise reach the machine keyring and the LLM spend.
     """
-    proxied = bool(
-        _csrf.is_trust_proxy_via_env(os.environ)
-        or _csrf.allowed_origins_via_env(os.environ)
-        or getattr(request.app.state, "base_path", "")
-    )
+    proxied = _is_proxied(request)
     mode = _ai_auth.storage_mode(getattr(request.app.state, "bind_host", None), proxied=proxied)
     if mode == "keyring":
         from urllib.parse import urlsplit
@@ -591,6 +612,7 @@ def create_app() -> FastAPI:
             "structured `detail` field)."
         ),
         openapi_tags=_OPENAPI_TAGS,
+        dependencies=[Depends(_plain_identifiers)],
     )
 
     # Compress responses over 1000 bytes (perf): the SPA ships a ~1.2MB JS
@@ -753,6 +775,24 @@ def create_app() -> FastAPI:
             exc_info=exc,
         )
         return JSONResponse({"error": "internal server error"}, status_code=500)
+
+    @app.middleware("http")
+    async def _host_mw(request: Request, call_next):
+        """DNS-rebinding guard (``lib.csrf.is_host_allowed``): a loopback-bound, un-proxied server only answers
+        to ``localhost`` / ``127.0.0.1`` / ``[::1]`` (plus ``VIVARIUM_WORKBENCH_ALLOWED_HOSTS``). Registered after
+        the CSRF and session middleware so it runs before them — nothing is routed for a rebound Host."""
+        if not _csrf.is_host_allowed(
+            request.headers.get("host"),
+            bind_host=getattr(request.app.state, "bind_host", None),
+            proxied=_is_proxied(request),
+            extra_hosts=_csrf.allowed_hosts_via_env(os.environ),
+        ):
+            return JSONResponse({
+                "error": "invalid Host header",
+                "hint": "a loopback-bound workbench only answers to localhost / 127.0.0.1 / [::1]; add other "
+                        "names with --allowed-host or VIVARIUM_WORKBENCH_ALLOWED_HOSTS",
+            }, status_code=400)
+        return await call_next(request)
 
     # Registered last so it wraps the CSRF middleware and sees the final status.
     install_request_logging(app)
@@ -2273,6 +2313,8 @@ def create_app() -> FastAPI:
         ``lib.investigation_views.build_investigation_hypotheses``.
         """
         slug = (investigation or inv or name or "").strip()
+        if slug:
+            _path_safety.plain_name(slug, "investigation")
         body = _inv_views.build_investigation_hypotheses(ws, slug)
         return InvestigationHypothesesPayload.model_validate(body)
 
@@ -2530,6 +2572,7 @@ def create_app() -> FastAPI:
         # Traversal guard: no absolute paths, no parent-escape segments.
         if not ref or Path(ref).is_absolute() or ".." in Path(ref).parts:
             return JSONResponse(status_code=400, content={"error": "invalid ref"})
+        _path_safety.resolve_inside(ws, ref, what="ref", suffixes=(".json",))  # not under .git / .pbg
         study_dir = _resolve_study_dir(ws, study)
         fp = _find_config_file(ref, study_dir)
         if fp is None or not fp.is_file():
@@ -6586,7 +6629,9 @@ def create_app() -> FastAPI:
           - 404  run or study not found
           - 200  ``{composite, variant_name, study, parameter_overrides}``
         """
-        src = req.source_db or str(ws / ".pbg" / "composite-runs.db")
+        src = (str(_path_safety.resolve_inside(ws, req.source_db, what="source_db", suffixes=(".db",),
+                                               deny_dirs=(".git",)))
+               if req.source_db else str(ws / ".pbg" / "composite-runs.db"))
         body, status = _study_variants.save_run_as_variant(
             ws, run_id=req.run_id, source_db=src, study=req.study, variant_name=req.variant_name)
         return JSONResponse(status_code=status, content=body)
@@ -8316,6 +8361,8 @@ def create_app() -> FastAPI:
         if ".." in rel.split("/"):
             return Response(status_code=403)
         target = _static_serving.resolve_asset(ws, rel)
+        if target is None:
+            return Response(status_code=404)
         return _serve_static_file(target, rel)
 
     if _readonly_enabled():

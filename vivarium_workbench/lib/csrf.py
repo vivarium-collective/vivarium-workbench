@@ -13,7 +13,8 @@ do the header reads, the env read (via :func:`is_disabled_via_env`), and the
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+import ipaddress
+from typing import Iterable, Mapping, Optional
 from urllib.parse import urlsplit
 
 
@@ -99,3 +100,62 @@ def is_trust_proxy_via_env(env: Mapping[str, str]) -> bool:
     """
     from vivarium_workbench.lib.env_compat import get_env
     return get_env("TRUST_PROXY", env=env) == "1"
+
+
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def is_loopback_host(name: object) -> bool:
+    """True for a host name/literal that only ever reaches this machine: ``localhost`` (and ``*.localhost``,
+    with or without a trailing dot), any 127.0.0.0/8 address, ``::1`` and its IPv4-mapped form."""
+    if not isinstance(name, str) or not name:
+        return False
+    n = name.rstrip(".").lower()
+    if n == "localhost" or n.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(n)
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return ip.is_loopback or bool(mapped and mapped.is_loopback)
+
+
+def allowed_hosts_via_env(env: Mapping[str, str]) -> list[str]:
+    """Extra ``Host`` names accepted by a loopback-bound server (``VIVARIUM_WORKBENCH_ALLOWED_HOSTS``,
+    ``--allowed-host``).
+
+    A comma-separated list of bare host names (no port), e.g. ``mybox.internal,dev.example.test``, for setups
+    that reach a loopback-bound server through a name other than ``localhost`` / ``127.0.0.1`` / ``::1``
+    (a port-forwarding tunnel that keeps the public ``Host``). Unset/empty → ``[]``.
+    """
+    raw = env.get("VIVARIUM_WORKBENCH_ALLOWED_HOSTS") or ""  # new in the workbench era: no legacy alias
+    return [h.strip().lower().rstrip(".") for h in raw.split(",") if h.strip()]
+
+
+def is_host_allowed(
+    host_header: Optional[str],
+    *,
+    bind_host: Optional[str],
+    proxied: bool = False,
+    extra_hosts: Iterable[str] = (),
+) -> bool:
+    """DNS-rebinding guard: may a request carrying ``Host: host_header`` reach this server?
+
+    Every non-loopback configuration is left alone (``True``): a server bound beyond loopback, one behind a
+    proxy, or one whose bind address is unknown (tests, embedding). For a **loopback bind** the browser only
+    ever reaches it as a loopback name (:func:`is_loopback_host`); a different name means a web page has
+    re-pointed its own DNS name at this machine, and the same-origin CSRF check (which compares ``Origin``
+    with ``Host``, both attacker-controlled there) cannot see it.
+    """
+    if not is_loopback_host(bind_host) or proxied:
+        return True
+    raw = host_header or ""
+    if not raw or "@" in raw:
+        return False
+    try:
+        hostname = urlsplit("//" + raw).hostname
+    except ValueError:
+        return False
+    return hostname is not None and (
+        is_loopback_host(hostname) or hostname.rstrip(".") in set(extra_hosts))

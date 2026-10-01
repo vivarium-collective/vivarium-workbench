@@ -133,7 +133,9 @@ class TestWorkspacesCleanupStale:
             {"error": "server is still running"}, 409)
 
     def test_happy_200_unlinks_orphan_files(self, monkeypatch, tmp_path):
-        # Real tmp workspace with the orphan server files present.
+        # Real tmp workspace (server files are only removed inside a directory that is one) with the orphan
+        # server files present.
+        (tmp_path / "workspace.yaml").write_text("name: stale\n")
         sdir = tmp_path / ".pbg" / "server"
         sdir.mkdir(parents=True)
         info = sdir / "server-info"

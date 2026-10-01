@@ -35,6 +35,8 @@ from typing import Any
 import yaml
 
 from vivarium_workbench.lib import process_docs
+from vivarium_workbench.lib.errors import APIError
+from vivarium_workbench.lib.path_safety import is_plain_name, resolve_inside
 
 # Cache of built composite-state payloads, keyed by ``(ws_root, ref)``:
 # {ref: (built_at_epoch, payload_dict)}. Building a whole-cell composite is
@@ -43,6 +45,8 @@ from vivarium_workbench.lib import process_docs
 # (observables owns its own _OBS_CACHE as of Batch 8).
 _COMPOSITE_STATE_CACHE: dict = {}
 _COMPOSITE_STATE_TTL_S = 300.0  # seconds
+# What a workspace-relative composite reference may point at (the parser below reads json, else yaml).
+_SPEC_SUFFIXES = (".yaml", ".yml", ".json")
 
 
 def _is_parca_cache_error(msg: str) -> bool:
@@ -172,7 +176,7 @@ def _degrade_build_error(
 
     # Tier 1: static artifact.
     static = ws_root / "reports" / "composite-state" / (ref + ".json")
-    if static.is_file():
+    if is_plain_name(ref) and static.is_file():
         try:
             doc = json.loads(static.read_text(encoding="utf-8"))
             inner = doc.get("state", doc) if isinstance(doc, dict) else doc
@@ -422,13 +426,16 @@ def build_composite_state(
 
     # Fall back to workspace-relative path.
     if path is None:
-        candidate = ws_root / ref
-        if candidate.is_file():
+        try:
+            candidate = resolve_inside(ws_root, ref, what="composite reference", suffixes=_SPEC_SUFFIXES)
+        except APIError:
+            candidate = None  # not a file inside the workspace → falls through to "composite not found"
+        if candidate is not None and candidate.is_file():
             path = candidate
 
     # ROBUST: a pre-generated static composite-state (incl. alias forms a study
     # ref uses, e.g. `baseline` or `...baseline_millard`).
-    if path is None:
+    if path is None and is_plain_name(ref):
         _static = ws_root / "reports" / "composite-state" / (ref + ".json")
         if _static.is_file():
             path = _static

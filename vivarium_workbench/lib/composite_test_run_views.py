@@ -35,6 +35,7 @@ import yaml
 
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import run_registry
+from vivarium_workbench.lib.path_safety import plain_name
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
@@ -310,6 +311,8 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     }
     if not spec_id:
         return {"error": "missing id"}, 400
+    # The id becomes the run id, and the run id becomes a directory name under .pbg/runs/.
+    plain_name(spec_id, "composite id")
     # A scaffolded study.yaml carries ``composite: replace_me.composites.placeholder``
     # (scaffold_yaml.py) as a sentinel the author is meant to REPLACE with a real
     # composite id. It never names a runnable composite: dispatching it spawns a

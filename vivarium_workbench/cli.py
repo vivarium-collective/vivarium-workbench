@@ -97,6 +97,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if allowed:
         os.environ["VIVARIUM_WORKBENCH_ALLOWED_ORIGINS"] = ",".join(allowed)
 
+    allowed_hosts = getattr(args, "allowed_host", None) or []
+    if allowed_hosts:
+        os.environ["VIVARIUM_WORKBENCH_ALLOWED_HOSTS"] = ",".join(allowed_hosts)
+
     # Render the dashboard HTML once before serving.
     try:
         from vivarium_workbench.lib.report import render_dashboard
@@ -1092,6 +1096,8 @@ def _serve_detached(workspace: Path, args: argparse.Namespace) -> int:
         cmd += ["--host", args.host]
     if getattr(args, "base_path", ""):
         cmd += ["--base-path", args.base_path]
+    for h in getattr(args, "allowed_host", None) or []:
+        cmd += ["--allowed-host", h]
 
     with open(log_file, "wb") as log:
         proc = subprocess.Popen(  # noqa: S603
@@ -1376,6 +1382,12 @@ def main(argv: list[str] | None = None) -> int:
              "even when the proxy rewrites Host and omits X-Forwarded-Host "
              "(sets VIVARIUM_WORKBENCH_ALLOWED_ORIGINS). Repeatable. Use behind "
              "a proxy you control — an ALB terminating a /workbench subpath.",
+    )
+    p_serve.add_argument(
+        "--allowed-host", action="append", metavar="HOST",
+        help="Add a Host name (no port) that a loopback-bound server accepts besides localhost / "
+             "127.0.0.1 / [::1] — for a tunnel or port-forward that keeps its public Host "
+             "(sets VIVARIUM_WORKBENCH_ALLOWED_HOSTS). Repeatable. Without it such requests get 400.",
     )
     p_serve.add_argument(
         "--detach", action="store_true",
