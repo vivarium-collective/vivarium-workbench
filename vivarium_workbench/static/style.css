@@ -755,6 +755,11 @@ body.focus-mode.focus-composite-explore .page.active{
 .viv-rail-resize-handle:hover,
 .viv-rail.viv-rail-resizing .viv-rail-resize-handle{ background:#c7d2fe; }
 body.viv-rail-resizing-active{ cursor:col-resize !important; user-select:none; }
+/* During a rail drag, isolate the (potentially large) study list's layout so each
+   width change reflows it as an independent subtree rather than rippling through the
+   page — paired with the rAF-coalesced width writes in walkthrough.js. Scoped to the
+   drag only, so there is no steady-state behavior change. */
+body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 .viv-rail-header{
   display:flex; align-items:center; gap:10px;
   /* Left inset 19px = the nav-link icon inset (16px padding + 3px accent border),
