@@ -279,6 +279,44 @@ def test_upstream_refusal_is_a_502_with_the_real_reason(ws, stub, clean_backend_
     assert "building, not ready" in res.json()["error"] and res.json()["reachable"] is False
 
 
+def test_a_dependency_the_backend_does_not_allow_is_explained_not_reported_as_unreachable(
+        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+    """The real backend answers 422 "'<dep>' is not in the compose allow list". That is a policy refusal from a reachable
+    server, so the message says what to do about it, names the dependency, and keeps the backend's own wording."""
+    orig = stub.handle
+    dep = "git+https://github.com/some-org/some-repo.git@0123456789abcdef"
+
+    def refuse(method, raw_path, raw_body):
+        if method == "POST" and raw_path.startswith("/viva/v1/composites"):
+            return 422, "application/json", json.dumps({"detail": f"'{dep}' is not in the compose allow list"}).encode()
+        return orig(method, raw_path, raw_body)
+
+    stub.handle = refuse
+    _name_backend(monkeypatch, stub.url)
+    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
+    body = res.json()
+    assert res.status_code == 403, res.text
+    assert body["reason"] == "not-allow-listed" and body["dependency"] == dep and body["reachable"] is True
+    assert "does not allow" in body["error"] and "some-org/some-repo" in body["error"]
+    assert "operator" in body["error"].lower()                      # what to do about it
+    assert "not in the compose allow list" in body["backend_error"]  # the backend's own words are kept
+
+
+def test_other_upstream_refusals_are_still_reported_as_before(ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+    orig = stub.handle
+
+    def refuse(method, raw_path, raw_body):
+        if method == "POST" and raw_path.startswith("/viva/v1/composites"):
+            return 422, "application/json", json.dumps({"detail": "some other validation problem"}).encode()
+        return orig(method, raw_path, raw_body)
+
+    stub.handle = refuse
+    _name_backend(monkeypatch, stub.url)
+    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
+    assert res.status_code == 502 and "some other validation problem" in res.json()["error"]
+    assert "reason" not in res.json()
+
+
 # --- run_remote (Composites tab / detached runner) ---------------------------------------------
 
 def test_run_remote_runs_a_document_and_lands_the_compose_results(ws, stub, clean_backend_env, monkeypatch,
