@@ -46,7 +46,10 @@ from vivarium_workbench.lib.workspace_yaml import (
 # ---------------------------------------------------------------------------
 
 
-from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
+from vivarium_workbench.lib.workspace_paths import (
+    add_ws_to_sys_path as _ws_add_to_sys_path,
+    WorkspacePaths as _WorkspacePaths,
+)
 
 
 def _safe_slug(s: str) -> str:
@@ -54,6 +57,23 @@ def _safe_slug(s: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9_-]", "-", s)
     s = re.sub(r"-+", "-", s).strip("-")
     return s[:40]
+
+
+def _investigation_inputs_rel(ws_root: Path, inv: str) -> str:
+    """Return the investigation's ``inputs`` dir RELATIVE to ``ws_root``, honouring
+    the workspace ``layout:`` map (e.g. ``workspace/investigations/<inv>/inputs``).
+
+    Upload destinations must land next to the resolved ``investigation.yaml``.
+    Hardcoding ``investigations/<inv>/inputs`` writes to a second, top-level
+    ``investigations/`` tree when the workspace relocates investigations via
+    ``layout:`` — the investigation.yaml then records inputs that point outside its
+    own directory. Uses the same ``layout``-resolved relative dir as the rest of
+    the code; falls back to the flat path if resolution fails."""
+    try:
+        base = _WorkspacePaths.load(ws_root).rel("investigations")
+    except Exception:
+        base = "investigations"
+    return f"{base}/{inv}/inputs"
 
 
 def _save_upload(file_b64: str, target_path: Path) -> str:
@@ -219,7 +239,7 @@ def register_dataset(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
             return {"error": "filename is required when file_b64 is provided"}, 400
         plain_name(filename, "filename")  # a name, not a path: it is joined onto the dataset directory
         if investigation:
-            dest_rel = f"investigations/{investigation}/inputs/datasets/{_safe_slug(name)}/{filename}"
+            dest_rel = f"{_investigation_inputs_rel(ws_root, investigation)}/datasets/{_safe_slug(name)}/{filename}"
         else:
             dest_rel = f"datasets/{_safe_slug(name)}/{filename}"
         entry["path"] = dest_rel
@@ -311,7 +331,7 @@ def register_expert_doc(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int
     else:
         claims_supported = []
 
-    expert_dir = (f"investigations/{investigation}/inputs/expert"
+    expert_dir = (f"{_investigation_inputs_rel(ws_root, investigation)}/expert"
                   if investigation else "references/expert")
 
     if file_b64:
