@@ -38,6 +38,21 @@ def _run(status: str = "running", **over) -> dict:
 
 
 @pytest.fixture(autouse=True)
+def _no_ambient_github_login(tmp_path, monkeypatch):
+    """The servers these tests spawn must not see the developer's GitHub login (gh CLI / keyring / token env):
+    the legacy submit gate answers 401 only when there is no session, so the assertions would otherwise depend on
+    whoever runs them."""
+    home = tmp_path / "no-login-home"
+    home.mkdir()
+    for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("GH_CONFIG_DIR", str(home / ".config" / "gh"))
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
+
+
+@pytest.fixture(autouse=True)
 def _fresh_profile_cache():
     sc._PROFILE_CACHE.clear()
     yield
