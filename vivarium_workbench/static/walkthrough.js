@@ -4127,19 +4127,26 @@
   }
 
   // Composite ordering for the Sort control. Composites carry study info under
-  // `studies` (an object with .studies/.success_pct) and `workspace_local`
-  // instead of a process's `study_participation`/`source`, and have no
-  // Temporal/Step kind or use-count — so they get their own comparator.
+  // `studies` (an object with .studies/.success_pct) instead of a process's
+  // `study_participation`, and have no Temporal/Step kind or use-count — so they
+  // get their own comparator.
+  //
+  // Workspace-vs-imported: `workspace_local` is unreliable (the API reports it
+  // False even for a workspace's own composite), so editable-vs-imported is read
+  // off `read_only` (imported modules are read-only) — with workspace_local as an
+  // OR fallback. "Most used" ranks by study count (ecoli_baseline, with the most
+  // studies, floats to the top) rather than merely keeping workspace entries first.
   function _compositeSortCmp(a, b, key) {
     function studies(c) { return ((c.study_participation || c.studies || {}).studies) || 0; }
     function succ(c) { var s = (c.study_participation || c.studies || {}).success_pct; return s == null ? -1 : s; }
+    function wsRank(c) { return ((c.workspace_local === true) || (c.read_only === false)) ? 0 : 1; }
     var byName = String(a.name || '').localeCompare(String(b.name || ''));
-    var wsFirst = (a.workspace_local ? 0 : 1) - (b.workspace_local ? 0 : 1);
+    var wsFirst = wsRank(a) - wsRank(b);   // workspace/editable composites before imported
     if (key === 'name') return byName;
-    if (key === 'studies') return (studies(b) - studies(a)) || byName;
-    if (key === 'success') return (succ(b) - succ(a)) || byName;
+    if (key === 'studies') return (studies(b) - studies(a)) || wsFirst || byName;
+    if (key === 'success') return (succ(b) - succ(a)) || wsFirst || byName;
     if (key === 'source') return wsFirst || byName;
-    return wsFirst || byName;   // 'use' (default) / 'kind' — keep workspace-first, then name
+    return (studies(b) - studies(a)) || wsFirst || byName;   // 'use' (default) — most-referenced (by studies) first
   }
 
   function _registryEntryMatches(p) {
