@@ -31,17 +31,25 @@ _DEFAULT_POLL_TIMEOUT = 7200.0  # 2 h wall-clock ceiling; <= 0 disables the dead
 _MAX_CONSECUTIVE_POLL_ERRORS = 5
 
 
-# Paths the workbench itself (re)writes whenever it serves a workspace — the `.viv-build.json` provenance stamp (#858),
-# the rendered report shell (`reports/index.html`, `reports/assets/`) and its per-start registry/server state. They are
-# generated output, not workspace code, and a remote dispatch installs only the code from git: counting them would make
-# a clean, pushed workspace look dirty the moment `vivarium-workbench serve` has run. Committed *results* under
-# `reports/` (e.g. a per-model report) are NOT excluded.
+# Paths the workbench itself (re)writes whenever it serves a workspace or runs something in it — the `.viv-build.json`
+# provenance stamp (#858), the rendered report shell (`reports/index.html`, `reports/assets/`), its per-start
+# registry/server state, and its run records and per-session state (the run registry, each study's/investigation's
+# `runs.db` and its SQLite sidecars, the composite-state and loom caches, the chat audit log). They are generated
+# output, not workspace code, and a remote dispatch installs only the code from git: counting them would make a clean,
+# pushed workspace look dirty the moment `vivarium-workbench serve` has run, and again after every run it dispatched.
+# Committed *results* under `reports/` (e.g. a per-model report) and any source or study definition are NOT excluded.
 _NOT_WORKSPACE_CODE = (
     ":!.viv-build.json",
     ":!reports/index.html",
     ":!reports/assets",
     ":!.pbg/registry-catalog",
     ":!.pbg/server",
+    ":!.pbg/runs.jsonl",
+    ":!.pbg/composite-state-cache",
+    ":!.pbg/loom-layouts",
+    ":!.pbg/ai-actions.jsonl",
+    ":(exclude,glob)**/runs.db",
+    ":(exclude,glob)**/runs.db-*",
 )
 
 

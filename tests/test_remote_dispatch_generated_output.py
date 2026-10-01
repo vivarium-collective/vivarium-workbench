@@ -68,3 +68,47 @@ def test_a_real_change_still_blocks_the_dispatch(ws, path):
 def test_a_new_untracked_source_file_still_blocks_the_dispatch(ws):
     (ws / "newmodule.py").write_text("x = 1\n")
     assert remote_run.remote_dispatch_preflight(ws)["reason"] == "dirty"
+
+
+# -- the workbench's run records and per-session state are generated too (a dispatch must not block the next one) --
+
+
+@pytest.mark.parametrize("path", [
+    ".pbg/runs.jsonl",                              # the run registry the workbench appends to
+    "studies/s1/runs.db",                           # a study's run database
+    "investigations/i1/runs.db",
+    "studies/s1/runs.db-wal",                       # SQLite sidecars
+    ".pbg/composite-state-cache/c.json",
+    ".pbg/loom-layouts/l.json",
+    ".pbg/ai-actions.jsonl",                        # the chat's audit log
+])
+def test_run_records_and_session_state_do_not_make_the_workspace_dirty(ws, path):
+    f = ws / path
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("generated\n")
+    pf = remote_run.remote_dispatch_preflight(ws)
+    assert pf["ok"] is True, pf
+    assert remote_run.git_pip_url(ws)
+
+
+def test_a_tracked_run_database_that_was_rewritten_does_not_block_either(ws):
+    db = ws / "studies" / "s1" / "runs.db"
+    db.parent.mkdir(parents=True)
+    db.write_text("v1\n")
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-q", "-m", "commit a run db")
+    _git(ws, "push", "-q", "origin", "HEAD:main")
+    _git(ws, "fetch", "-q", "origin")
+    db.write_text("v2 rewritten by the next run\n")
+    assert remote_run.remote_dispatch_preflight(ws)["ok"] is True
+
+
+def test_a_study_definition_next_to_a_run_database_still_blocks(ws):
+    (ws / "studies" / "s1").mkdir(parents=True)
+    (ws / "studies" / "s1" / "runs.db").write_text("generated\n")
+    (ws / "studies" / "s1" / "study.yaml").write_text("name: s1\n")     # real workspace content
+    pf = remote_run.remote_dispatch_preflight(ws)
+    # git reports an untracked directory as one entry; what matters is that the real file keeps it blocking
+    assert pf["ok"] is False and pf["reason"] == "dirty" and "studies/" in pf["dirty_files"], pf
+    (ws / "studies" / "s1" / "study.yaml").unlink()                       # only the generated database left: clean again
+    assert remote_run.remote_dispatch_preflight(ws)["ok"] is True
