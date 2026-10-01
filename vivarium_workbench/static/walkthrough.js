@@ -3622,11 +3622,24 @@
         if (j && j.ok) {
           card._lastOutputs = j.outputs;
           if (typeof _ensureOutputsOpen === 'function') _ensureOutputsOpen(card);
-          var dl = card.querySelector('.pcard-dl'); if (dl) { dl.disabled = false; dl.title = 'Download outputs (JSON)'; }
-          out.innerHTML = '<div class="loom-run-ok">✓ ran — outputs' +
-            '<button class="btn-mini loom-copy-btn" onclick="_copyRunOutput(this)" title="Copy outputs JSON">⧉ Copy</button></div>' +
-            _jsonViewer(j.outputs) +
-            '<pre class="loom-run-raw" hidden>' + _esc(JSON.stringify(j.outputs, null, 2)) + '</pre>';
+          // A single isolated update() legitimately returns an empty delta for
+          // many processes — those that accumulate over many steps or emit via
+          // stores rather than their step return value. Say so, instead of the
+          // old unconditional "ran — outputs" that implied data came back.
+          var _o = j.outputs;
+          var _empty = (_o === null || _o === undefined) ||
+            (Array.isArray(_o) ? _o.length === 0 :
+              (typeof _o === 'object' ? Object.keys(_o).length === 0 : false));
+          if (_empty) {
+            out.innerHTML = '<div class="loom-run-ok">✓ ran — no outputs returned</div>' +
+              '<div class="muted" style="font-size:0.85em;margin-top:4px">A single update step produced an empty result. Many processes only produce output over multiple steps, or emit through stores/emitters rather than their step return value — usually expected, not an error.</div>';
+          } else {
+            var dl = card.querySelector('.pcard-dl'); if (dl) { dl.disabled = false; dl.title = 'Download outputs (JSON)'; }
+            out.innerHTML = '<div class="loom-run-ok">✓ ran — outputs' +
+              '<button class="btn-mini loom-copy-btn" onclick="_copyRunOutput(this)" title="Copy outputs JSON">⧉ Copy</button></div>' +
+              _jsonViewer(j.outputs) +
+              '<pre class="loom-run-raw" hidden>' + _esc(JSON.stringify(j.outputs, null, 2)) + '</pre>';
+          }
         } else {
           var stage = (j && j.stage) ? '[' + j.stage + '] ' : '';
           out.innerHTML = '<div class="loom-run-err">✗ ' + _esc(stage) + _esc((j && j.error) || 'run failed') + '</div>' +
