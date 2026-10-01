@@ -7238,7 +7238,9 @@ def create_app() -> FastAPI:
              summary="Thin-client on-demand status (build, run or analysis phase)")
     def remote_run_poll(
         simulator_id: int = 0,
-        simulation_id: int = 0,
+        # sms-api's integer id, or a /viva/v1 run's own (string) id: the Runs table polls a pending
+        # remote row by whichever id it recorded.
+        simulation_id: Union[int, str] = 0,
         analysis_id: int = 0,
         run_id: Union[str, None] = None,
     ) -> JSONResponse:

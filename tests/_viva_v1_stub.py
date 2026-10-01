@@ -125,6 +125,7 @@ class VivaV1Stub:
         self.spec = spec or load_spec()
         self.calls: list[Call] = []
         self._overrides: dict[tuple[str, str], tuple[int, Any]] = {}
+        self._byte_overrides: dict[tuple[str, str], tuple[int, str, bytes]] = {}
         self._routes: list[tuple[str, re.Pattern, str, dict]] = []
         for tmpl, item in self.spec["paths"].items():
             rx = re.compile("^" + re.sub(r"\{[^/]+\}", r"([^/]+)", tmpl) + "$")
@@ -151,6 +152,12 @@ class VivaV1Stub:
         """Override one operation's answer. The body must satisfy the contract."""
         self.validate_response(method, tmpl, status, body)
         self._overrides[(method.upper(), tmpl)] = (status, body)
+
+    def respond_bytes(self, method: str, tmpl: str, status: int, payload: bytes, content_type: str) -> None:
+        """Override one operation's answer with a download. The operation must declare that media type."""
+        declared = self.spec["paths"][tmpl][method.lower()]["responses"][str(status)].get("content") or {}
+        assert content_type in declared, f"{method} {tmpl} {status} does not declare {content_type}: {sorted(declared)}"
+        self._byte_overrides[(method.upper(), tmpl)] = (status, content_type, payload)
 
     # -- serving ---------------------------------------------------------
     def _match(self, method: str, path: str):
@@ -200,6 +207,9 @@ class VivaV1Stub:
             errors = sorted(self._validator(schema, strict=True).iter_errors(body), key=str)
             if errors:
                 return done(422, {"detail": [e.message for e in errors][:5]})
+        if (method, tmpl) in self._byte_overrides:
+            status, ctype, payload = self._byte_overrides[(method, tmpl)]
+            return done(status, payload, ctype)
         if (method, tmpl) in self._overrides:
             status, payload = self._overrides[(method, tmpl)]
             return done(status, payload)

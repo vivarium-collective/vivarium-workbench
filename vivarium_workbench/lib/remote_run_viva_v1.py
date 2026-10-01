@@ -14,11 +14,12 @@ import re
 import tempfile
 import time
 import warnings
+import zipfile
 from pathlib import Path
 
 from vivarium_workbench.lib import remote_pinned, study_spec
 from vivarium_workbench.lib.investigations import load_spec
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench.lib.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
 from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 _TERMINAL_OK = {"completed"}
@@ -95,6 +96,112 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
         return {"error": str(e), "reachable": False}, 502
     _record_pending(ws_root, study, composite_id, run["id"])
     return {"run_id": run["id"], "phase": "running", "backend": "viva-v1"}, 202
+
+
+def land(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Land a finished run's results as a study run: ``({run_id}, 200)``, the shape the legacy route answers.
+
+    The run's record (``GET /viva/v1/composites/{id}``) says whether it finished and which compose job it
+    became; the archive comes from the compose simulation that job is (:func:`remote_run.compose_simulation_id`
+    -- this deployment has no dataset store, which is where a run's outputs would otherwise be read), and its
+    emitter history lands in the study's run store (:func:`remote_run_landing.land_composite_results`).
+    Provenance is the backend's record of the run -- what it installed, which simulation, which job -- never
+    the local checkout. 409 for a run that has not completed (nothing is downloaded), 404 when the backend
+    does not know the run or lists no simulation for it, 422 for an archive that is not a run's emitter
+    history, 502 when the backend cannot be reached.
+    """
+    from vivarium_workbench.lib import composite_runs as cr
+    from vivarium_workbench.lib import remote_run
+    from vivarium_workbench.lib.remote_run_landing import land_composite_results
+
+    study = (body.get("study") or "").strip()
+    run_id = str(body.get("simulation_id") or "").strip()
+    if not study or not run_id:
+        return {"error": "study and simulation_id are required"}, 400
+    spec_path = study_spec.study_spec_path(ws_root, study)
+    if spec_path is None or not spec_path.is_file():
+        return {"error": f"study {study!r} not found"}, 404
+    baseline = (load_spec(spec_path).get("baseline") or [{}])[0]
+    spec_id = baseline.get("composite") or study
+    client = _client()
+    try:
+        run = client.composite_run(run_id)
+    except SmsApiError as e:
+        if e.status == 404:
+            return {"error": str(e), "run_id": run_id}, 404
+        return _unreachable(e)
+    raw = str(run.get("status", "")).lower()
+    if raw not in _TERMINAL_OK:
+        return {"error": f"run {run_id!r} is {raw or 'in an unknown state'}; only a completed run has results to land",
+                "phase": _phase(raw), "run_id": run_id}, 409
+    try:
+        simulation_id = remote_run.compose_simulation_id(client, run)
+    except SmsApiError as e:
+        return _unreachable(e)
+    except RuntimeError as e:
+        return {"error": str(e), "run_id": run_id}, 404
+
+    deployment = remote_pinned.remote_deployment_name()
+    execution = run.get("execution") or {}
+    # The backend's record of the run, under one key: its data is landed HERE (runs.db), so the row must not
+    # read as a remote-store run (that is what a top-level ``simulation_id`` marks, see simulations_index).
+    provenance = {
+        "source": deployment, "backend": "viva-v1",
+        "viva_v1": {"run_id": run_id, "simulation_id": simulation_id, "job_id": run.get("job_id"),
+                    "document_address": run.get("document_address"), "environment": run.get("environment"),
+                    "execution": execution},
+    }
+    study_dir = study_spec.study_dir(ws_root, study)
+    db_file = study_dir / "runs.db"
+    if db_file.is_file():
+        # Landing is idempotent: this run is landed once per study, and asking again answers that landing.
+        conn = cr.connect(db_file)
+        try:
+            found = conn.execute(
+                "SELECT run_id FROM runs_meta WHERE json_extract(params_json, '$.viva_v1.run_id') = ?",
+                (run_id,)).fetchone()
+        finally:
+            conn.close()
+        if found is not None:
+            return {"run_id": found[0], "already_landed": True}, 200
+    landed = cr.generate_run_id(spec_id, params=provenance)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            archive = client.download_compose_results(simulation_id, Path(td), timeout=DOWNLOAD_TIMEOUT)
+            if not zipfile.is_zipfile(archive):
+                return {"error": f"simulation {simulation_id} served a {archive.name}, not a document run's results "
+                                 "archive (a zip); there is nothing here to land as a study run", "run_id": run_id}, 422
+            n_steps = land_composite_results(archive, db_file, landed)
+    except SmsApiError as e:
+        return _unreachable(e)
+    except ValueError as e:
+        return {"error": f"simulation {simulation_id}'s results cannot be landed: {e}", "run_id": run_id}, 422
+
+    # What the backend installed is its record, not this checkout: the commit is the one its git requirement named.
+    installed = next((d for d in (execution.get("options") or {}).get("extra_pip_deps") or []
+                      if str(d).startswith("git+")), None)
+    url, _, sha = str(installed or "").removeprefix("git+").rpartition("@")
+    manifest = cr.build_run_manifest(
+        spec_id=spec_id, params=provenance, n_steps=n_steps, emitter="sqlite", emit_paths=[], runtime={},
+        origin="remote", study=None, generation_id=None, ws_root=None)
+    manifest["code_version"] = {"git_sha": sha or None, "package": None, "repo": None,
+                                "remote_url": url or None, "image": None}
+    conn = cr.connect(db_file)
+    try:
+        try:
+            cr.save_metadata(conn, spec_id=spec_id, run_id=landed, params=provenance,
+                             label=f"Remote run ({deployment})", started_at=time.time(), n_steps=n_steps,
+                             workspace=ws_root, manifest=manifest)
+            cr.complete_metadata(conn, run_id=landed, n_steps=n_steps, status="completed")
+        except Exception:
+            # No history rows without the run they belong to.
+            with conn:
+                conn.execute("DELETE FROM history WHERE simulation_id = ?", (landed,))
+            raise
+        cr.delete_run(conn, run_id=f"remote-pending-{run_id}", workspace=ws_root)
+    finally:
+        conn.close()
+    return {"run_id": landed}, 200
 
 
 def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str) -> None:

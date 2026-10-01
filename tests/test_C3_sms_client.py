@@ -264,3 +264,13 @@ def test_download_compose_results_streams_to_file(monkeypatch, tmp_path):
     assert cap["method"] == "GET"
     assert "/compose/v1/simulation/42/results" in cap["url"]
     assert cap["headers"].get("Accept") == "application/gzip"
+
+
+def test_download_compose_results_names_a_zip_as_a_zip(monkeypatch, tmp_path):
+    """A SLURM compose run serves a zip (a Ray/Batch one a tar.gz) from the same route; the file is named for what
+    it is, so the reader that follows does not have to guess from a name that was always results.tar.gz."""
+    fake_zip = b"PK\x03\x04fake-zip-content"
+    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", lambda req, timeout=None: _BinaryResp(fake_zip))
+    out = SmsApiClient("http://h:8080").download_compose_results(42, tmp_path)
+    assert out == tmp_path / "results.zip" and out.read_bytes() == fake_zip
+    assert not (tmp_path / "results.tar.gz").exists()

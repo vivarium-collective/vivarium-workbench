@@ -236,8 +236,9 @@ def investigation_run_unblocked(ws_root: Path, body: dict) -> tuple[dict, int]:
                     # still going. Accepting only 200 recorded every such
                     # dispatch as failed with the error text "HTTP 202", and
                     # discarded the simulation_id, leaving nothing to poll.
+                    # The handle: sms-api's simulation id, or a /viva/v1 run's own id.
                     job.update_item(idx, status="submitted",
-                                    simulation_id=resp.get("simulation_id"),
+                                    simulation_id=resp.get("simulation_id") or resp.get("run_id"),
                                     phase=resp.get("phase", "running"))
                 else:
                     job.update_item(idx, status="failed",

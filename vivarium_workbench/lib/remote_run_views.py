@@ -520,6 +520,10 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
     folded in yet (landing again later will pick it up).
     """
     body = body or {}
+    if remote_run_viva_v1.is_run_id(body.get("simulation_id")) and remote_pinned.uses_viva_v1_dispatch(ws_root):
+        # A /viva/v1 run (its id is the backend's string) on a backend the operator named for document runs:
+        # that declaration authorizes it, as it did the dispatch.
+        return remote_run_viva_v1.land(ws_root, body)
     if not _run_auth_ok():
         return {"error": "not authenticated"}, 401
     study = (body.get("study") or "").strip()
@@ -707,6 +711,8 @@ def remote_run_status(params: dict) -> tuple[dict, int]:
     params = params or {}
     if params.get("run_id"):
         return remote_run_viva_v1.status(str(params["run_id"]))
+    if remote_run_viva_v1.is_run_id(params.get("simulation_id")):
+        return remote_run_viva_v1.status(str(params["simulation_id"]))
     sim_id = params.get("simulation_id")
     sm_id = params.get("simulator_id")
     an_id = params.get("analysis_id")

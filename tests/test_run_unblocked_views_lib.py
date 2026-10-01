@@ -365,3 +365,32 @@ def test_worker_skips_non_queued_items(tmp_path, monkeypatch):
     captured["worker"](job)
     assert len(base_calls) == 1
     assert job.items[1]["status"] == "blocked"  # untouched
+
+
+def test_a_study_written_with_a_top_level_baseline_list_is_enumerated_like_the_study_runner_reads_it():
+    """``baseline: [{name, composite, params}, ...]`` / ``variants: [...]`` at the top level (the form the study
+    runner reads -- it runs ``baseline[0]``) must give the same items as the ``conditions:`` form; before, an
+    investigation of such studies queued nothing."""
+    from vivarium_workbench.lib.run_jobs import enumerate_unblocked
+
+    top = {"name": "s", "schema_version": 4,
+           "baseline": [{"name": "b", "composite": "pkg.composites.c", "params": {"k": 1}},
+                        {"name": "b2", "composite": "pkg.composites.other"}],
+           "variants": [{"name": "v1", "params": {"k": 2}}]}
+    nested = {"name": "s", "schema_version": 4,
+              "conditions": {"baseline": {"composite": "pkg.composites.c", "params": {"k": 1}},
+                             "variants": [{"name": "v1", "params": {"k": 2}}]}}
+    assert enumerate_unblocked(top) == enumerate_unblocked(nested)
+    runnable, blocked = enumerate_unblocked(top)
+    assert [(i["kind"], i["variant"], i["composite"]) for i in runnable] == [
+        ("baseline", "baseline", "pkg.composites.c"), ("variant", "v1", "pkg.composites.c")]
+    assert blocked == []
+
+
+def test_the_conditions_form_still_wins_when_a_study_carries_both():
+    from vivarium_workbench.lib.run_jobs import enumerate_unblocked
+
+    both = {"name": "s", "baseline": [{"composite": "pkg.composites.top"}],
+            "conditions": {"baseline": {"composite": "pkg.composites.nested"}}}
+    (item,), _ = enumerate_unblocked(both)
+    assert item["composite"] == "pkg.composites.nested"

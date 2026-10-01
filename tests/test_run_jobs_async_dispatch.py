@@ -197,3 +197,15 @@ def test_a_200_still_completes_the_item(tmp_path, monkeypatch):
     worker(job)
     item = job.to_dict()["items"][0]
     assert (item["status"], item["run_id"]) == ("done", "r-1")
+
+
+def test_worker_keeps_a_viva_v1_dispatchs_run_id_as_the_handle(tmp_path, monkeypatch):
+    """A /viva/v1 dispatch answers 202 with the backend's ``run_id`` (no integer simulation id); that id is the
+    only thing that can be polled or landed later, so it must be kept."""
+    ruv, worker = _capture_worker(tmp_path, monkeypatch)
+    monkeypatch.setattr(ruv.study_runs, "run_study_baseline",
+                        lambda ws, body: ({"run_id": "simulation-cDA421C", "phase": "running", "backend": "viva-v1"}, 202))
+    job = _job({"study": "study-a", "variant": "baseline", "kind": "baseline", "status": "queued"})
+    worker(job)
+    item = job.to_dict()["items"][0]
+    assert (item["status"], item["simulation_id"]) == ("submitted", "simulation-cDA421C")

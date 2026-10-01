@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import tarfile
+import zipfile
 import tempfile
 import threading
 import time
@@ -1056,7 +1057,17 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
             if req.build_ref:
                 run_remote_kwargs["build_ref"] = req.build_ref
             results_path = remote_run.run_remote(req.workspace, req.spec_id, **run_remote_kwargs)
-            if results_path is not None:
+            landed_steps = None
+            if results_path is not None and zipfile.is_zipfile(results_path):
+                # A compose run's results zip: land its emitter history into this run's own store. The remote
+                # run DID complete, so a zip that cannot be landed (no emitter history, several emitters) does
+                # not make it failed -- the reason goes in the run log, where the run's page shows it.
+                try:
+                    landed_steps = remote_run_landing.land_composite_results(
+                        results_path, Path(req.db_file), req.run_id)
+                except (ValueError, zipfile.BadZipFile) as land_exc:
+                    _write_log(req, f"\nREMOTE RESULTS NOT LANDED: {land_exc}\n")
+            elif results_path is not None:
                 try:
                     with tempfile.TemporaryDirectory() as td:
                         extract_root = Path(td)
@@ -1081,7 +1092,8 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
             _write_log(req, f"\nREMOTE RUN FAILED: {reason}\n")
             cr.complete_metadata(conn, run_id=req.run_id, n_steps=0, status="failed")
             return 1
-        cr.complete_metadata(conn, run_id=req.run_id, n_steps=req.steps,
+        cr.complete_metadata(conn, run_id=req.run_id,
+                             n_steps=landed_steps if landed_steps is not None else req.steps,
                              status="completed")
         print(f"remote run {req.run_id} completed: {req.steps} steps", flush=True)
         return 0

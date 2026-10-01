@@ -1325,10 +1325,13 @@ class SmsApiClient:
         ``land_remote_run``/``fold_analyses`` (which already read ``.tar.gz``)
         work unmodified once this lands.
 
+        A SLURM compose run serves a zip from the same route; the file is named for what it
+        is (its leading bytes decide), so a reader never has to guess from the name.
+
         Returns
         -------
         Path
-            ``dest / "results.tar.gz"``
+            ``dest / "results.tar.gz"``, or ``dest / "results.zip"`` for a zip
         """
         dest = Path(dest)
         dest.mkdir(parents=True, exist_ok=True)
@@ -1345,6 +1348,10 @@ class SmsApiClient:
             raise SmsApiError(
                 f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}"
             ) from e
+        with open(out_path, "rb") as f:
+            is_zip = f.read(4) == b"PK\x03\x04"
+        if is_zip:
+            return out_path.replace(dest / "results.zip")
         return out_path
 
     def download_data(self, simulation_id: int, dest_dir: Path, timeout: float | None = None) -> Path:
