@@ -246,3 +246,40 @@ def test_state_has_process_detects_temporal():
     from vivarium_workbench.lib.run_runner import _state_has_process
     assert _state_has_process({"agents": {"0": {"c": {"_type": "process"}}}}) is True
     assert _state_has_process({"a": {"_type": "step"}}) is False
+
+
+def test_hard_watchdog_force_terminate_marks_failed(tmp_path, monkeypatch):
+    """The hard watchdog's force-terminate marks the run failed (via a FRESH
+    connection — the stuck main thread may hold the run's own conn) and
+    hard-exits. This is the backstop for a run stuck INSIDE a single tick, where
+    the between-ticks _progress self-terminate never fires."""
+    import os as _os
+    from vivarium_workbench.lib import run_runner
+    from vivarium_workbench.lib.composite_runs import (
+        connect, query_run_meta, save_metadata)
+
+    (tmp_path / ".pbg" / "runs" / "rstuck").mkdir(parents=True)
+    db_file = str(tmp_path / ".pbg" / "composite-runs.db")
+    conn = connect(db_file)
+    save_metadata(conn, spec_id="s", run_id="rstuck", params={}, label="",
+                  started_at=0.0, n_steps=5,
+                  log_path=".pbg/runs/rstuck/run.log")
+    conn.close()
+
+    req = RunRequest(
+        run_id="rstuck", spec_id="s", pkg="p", workspace=tmp_path,
+        overrides={}, steps=5, emit_paths=[],
+        db_file=db_file, log_path=".pbg/runs/rstuck/run.log")
+
+    exited = []
+    monkeypatch.setattr(_os, "_exit", lambda code: exited.append(code))
+
+    run_runner._force_terminate_stuck_run(req, step=3)
+
+    assert exited == [1], "hard watchdog must os._exit(1)"
+    conn = connect(db_file)
+    try:
+        meta = query_run_meta(conn, run_id="rstuck")
+    finally:
+        conn.close()
+    assert meta["status"] == "failed", f"got {meta['status']}"

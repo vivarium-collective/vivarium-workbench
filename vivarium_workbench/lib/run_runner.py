@@ -13,6 +13,7 @@ import os
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import traceback
 from dataclasses import dataclass
@@ -23,6 +24,44 @@ from vivarium_workbench.lib import composite_runs as cr
 # A run exceeding this self-terminates with status='failed'. Matches the
 # "tens of minutes" target from the design spec.
 MAX_RUNTIME_SEC = 1800
+# Grace beyond MAX_RUNTIME_SEC before the hard out-of-band watchdog fires. The
+# per-tick `_progress` check self-terminates a slow-but-PROGRESSING run exactly
+# at MAX_RUNTIME_SEC (clean path); the hard watchdog (a daemon thread, below) is
+# the BACKSTOP for a run STUCK inside a single tick, where `_progress` never runs
+# again. The grace lets the clean path win first so the two don't double-fire.
+WATCHDOG_GRACE_SEC = 120
+
+
+def _force_terminate_stuck_run(req: "RunRequest", step: int) -> None:
+    """Record a hard-watchdog timeout and HARD-EXIT the run subprocess.
+
+    Called by ``execute``'s hard-watchdog daemon thread when a run blocks past
+    the wall-clock deadline inside a single tick (so the between-ticks
+    ``_progress`` self-terminate never fires). Marks the run ``failed`` on a
+    FRESH connection — the stuck main thread may hold the run's own ``conn``
+    mid-tick — then ``os._exit`` (the main thread can't be unwound). Both the
+    log and the status write are best-effort: a failure in either must not keep
+    the process alive. Module-level (not a closure) so it is unit-testable with
+    ``os._exit`` patched.
+    """
+    msg = (f"run stuck past max runtime ({MAX_RUNTIME_SEC}s + "
+           f"{WATCHDOG_GRACE_SEC}s grace) — a tick blocked without progressing; "
+           f"force-terminating at step {step} (hard watchdog)")
+    try:
+        _write_log(req, msg)
+    except Exception:  # noqa: BLE001 — logging must never block the kill
+        pass
+    try:
+        wd_conn = cr.connect(req.db_file)
+        try:
+            cr.complete_metadata(wd_conn, run_id=req.run_id, n_steps=step,
+                                 status="failed", workspace=req.workspace)
+        finally:
+            wd_conn.close()
+    except Exception:  # noqa: BLE001 — status is best-effort; still kill
+        pass
+    print(msg, flush=True)
+    os._exit(1)
 # Snapshot-budget self-terminate. The loom's SQLiteEmitter writes one full-state
 # history row per tick; a large composite emitting many stores (e.g. a 55-process
 # whole-cell model with the all-stores fall-through) can balloon composite-runs.db
@@ -1167,7 +1206,28 @@ def execute(request_path: Path) -> int:
         except OSError:
             _snapshot_baseline = 0
 
+        # Last step `_progress` saw — read by the hard watchdog so a force-kill
+        # records where the run got stuck.
+        _last_step = [0]
+
+        def _hard_watchdog() -> None:
+            # BACKSTOP for a run stuck INSIDE a single tick. The `_progress`
+            # callback (and its MAX_RUNTIME_SEC self-terminate) only runs BETWEEN
+            # ticks, so a tick blocked in a kernel I/O wait would otherwise leave
+            # the run "running" forever — observed on RENCI's NFS-backed `.pbg`,
+            # where the xarray writer blocked in `rpc_wait_bit_killable` and the
+            # 1800s budget never triggered. A blocked I/O tick releases the GIL,
+            # so this daemon thread still runs; it enforces the wall-clock
+            # deadline out of band, marks the run failed, and hard-exits. A run
+            # that finishes normally exits the process first, so this never fires.
+            time.sleep(MAX_RUNTIME_SEC + WATCHDOG_GRACE_SEC)
+            _force_terminate_stuck_run(req, _last_step[0])
+
+        threading.Thread(target=_hard_watchdog, name="hard-runtime-watchdog",
+                         daemon=True).start()
+
         def _progress(step: int) -> None:
+            _last_step[0] = step
             cr.update_progress(conn, run_id=req.run_id, progress_step=step,
                                heartbeat_at=time.time())
             if time.monotonic() - started > MAX_RUNTIME_SEC:
