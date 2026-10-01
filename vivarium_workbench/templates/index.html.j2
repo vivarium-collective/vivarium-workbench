@@ -2118,17 +2118,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <strong>AI Settings</strong>
     </div>
     <div class="vp-form">
-      <label class="vp-field"><span>Provider</span>
-        <select id="viv-ai-provider" class="vp-input">
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Anthropic</option>
-          <option value="google">Google</option>
-          <option value="ollama">Ollama (local models)</option>
-          <option value="opencode">OpenCode Go</option>
-          <option value="bedrock">AWS Bedrock</option>
-          <option value="openai-compatible">OpenAI-compatible (vLLM, OpenRouter…)</option>
-        </select>
-      </label>
+      <div class="vp-field"><span>Model</span>
+        <button id="viv-ai-model" class="vp-pill vp-select" type="button" aria-haspopup="menu" title="Choose a provider and model"></button>
+      </div>
       <div class="vp-hint" id="viv-ai-status">checking…</div>
       <div id="viv-ai-key-row">
         <label class="vp-field"><span>API key</span>
@@ -2141,9 +2133,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <input id="viv-ai-url" class="vp-input" type="text" placeholder="http://localhost:11434/v1"
                autocomplete="off" spellcheck="false">
       </label>
-      <div class="vp-field"><span>Model</span>
-        <button id="viv-ai-model" class="vp-pill vp-select" type="button" aria-haspopup="menu" title="Choose a model"></button>
-      </div>
       <div class="vp-actions">
         <button id="viv-ai-save" class="vp-btn vp-primary" type="button">Save &amp; test</button>
         <button id="viv-ai-use" class="vp-btn" type="button" hidden>Use this model</button>

@@ -5185,7 +5185,7 @@ body.viv-popout-chat #viv-ai-panel,
 body.viv-popout-code  #viv-code-rail{
   display:flex !important; position:fixed !important; inset:0 !important;
   width:auto !important; height:auto !important; max-width:none !important;
-  border:0 !important; z-index:5000;
+  border:0 !important; outline:0 !important; z-index:5000;
 }
 /* Docking / resizing / re-popping make no sense inside a popped window. */
 body.viv-popout [data-act="dock"],

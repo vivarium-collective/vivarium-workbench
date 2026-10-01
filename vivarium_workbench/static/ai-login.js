@@ -1,7 +1,8 @@
 // ai-login.js — the AI Settings sheet behind the panel's gear (docs/ai-chat.md).
 //
 // Talks to /api/ai/*: status (never contains a key), save (the server proves the endpoint/key
-// with one real 1-token request before storing it), select, remove. Provider handling mirrors
+// with one real 1-token request before storing it), select, remove. There is no separate Provider control: the Model menu qualifies every model by provider, so choosing a model chooses the
+// provider, and the key / base-URL fields below follow it. Provider handling mirrors
 // marimo's AI Providers tab: OpenAI, Anthropic, Google, Ollama (local, no key, base URL),
 // OpenCode Go (key, fixed URL), AWS Bedrock, OpenAI-compatible (base URL). The Model field is
 // marimo's model dropdown (chat.js `VivAiModelMenu`): providers → their models, plus "Enter a
@@ -14,7 +15,7 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var el = {
-    provider: $('viv-ai-provider'), keyRow: $('viv-ai-key-row'), key: $('viv-ai-key'),
+    keyRow: $('viv-ai-key-row'), key: $('viv-ai-key'),
     urlRow: $('viv-ai-url-row'), url: $('viv-ai-url'), model: $('viv-ai-model'),
     status: $('viv-ai-status'), msg: $('viv-ai-msg'), storage: $('viv-ai-storage'),
     save: $('viv-ai-save'), use: $('viv-ai-use'), remove: $('viv-ai-remove'),
@@ -24,7 +25,8 @@
   var KEYLESS = ['bedrock', 'ollama'];
   var name = function (p) { return C.providerMeta(p).label; };
   var status = null;
-  var model = '';                                   // the model chosen in the dropdown
+  var provider = 'openai';                          // implied by the model chosen in the Model menu (there is no separate Provider control)
+  var model = '';                                   // the model chosen in the menu
 
   function api(p) {
     return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p;
@@ -47,7 +49,7 @@
 
   // The model trigger: provider mark + model, like marimo's dropdown trigger.
   function renderModel() {
-    var m = C.providerMeta(el.provider.value);
+    var m = C.providerMeta(provider);
     el.model.innerHTML = model
       ? '<span><span class="vp-badge" style="background:' + C.esc(m.color) + '">' + C.esc(m.mark) + '</span><span>' + C.esc(model) + '</span></span>'
       : '<span><span class="vp-placeholder">Select a model</span></span>';
@@ -56,7 +58,7 @@
 
   function render() {
     if (!status) return;
-    var p = el.provider.value, r = row(p);
+    var p = provider, r = row(p);
     el.keyRow.hidden = KEYLESS.indexOf(p) >= 0;
     el.urlRow.hidden = !(p === 'ollama' || p === 'openai-compatible');
     if (p === 'ollama' && !el.url.value) el.url.value = (r && r.base_url) || OLLAMA_DEFAULT;
@@ -102,7 +104,7 @@
       })
       .then(function (s) {
         status = s;
-        if (s.selected && !card.dataset.touched) el.provider.value = s.selected.provider;
+        if (s.selected && !card.dataset.touched) provider = s.selected.provider;
         render();
       }, function (e) { el.status.textContent = (e && e.message) || 'Could not reach /api/ai/status'; });
   }
@@ -112,13 +114,12 @@
   // (marimo qualifies every model by provider) switches the provider with it.
   function setProvider(p, m) {
     card.dataset.touched = '1';
-    el.provider.value = p; el.key.value = ''; el.url.value = ''; say('');
+    provider = p; el.key.value = ''; el.url.value = ''; say('');
     model = m || '';
     var sel = status && status.selected;
     if (!model && sel && sel.provider === p) model = sel.model;
     render();
   }
-  el.provider.addEventListener('change', function () { setProvider(el.provider.value, ''); });
   el.key.addEventListener('input', render);
   window.addEventListener('viv:ai-prefill', function (ev) {          // picked in the chat footer, provider not set up yet
     var d = (ev && ev.detail) || {};
@@ -129,18 +130,18 @@
     var open = window.VivAiModelMenu;
     if (!open) return say('The model picker is unavailable (chat assets did not load).');
     open(el.model, {
-      ollamaUrl: el.provider.value === 'ollama' ? el.url.value.trim() : '',     // the endpoint being edited, not only the saved one
-      selected: model ? { provider: el.provider.value, model: model } : null,
-      fallback: el.provider.value,
+      ollamaUrl: provider === 'ollama' ? el.url.value.trim() : '',     // the endpoint being edited, not only the saved one
+      selected: model ? { provider: provider, model: model } : null,
+      fallback: provider,
       onPick: function (p, m) {
-        if (p === el.provider.value) { model = m; render(); } else setProvider(p, m);
+        if (p === provider) { model = m; render(); } else setProvider(p, m);
         say('');
       },
     });
   });
 
   el.save.addEventListener('click', function () {
-    var p = el.provider.value;
+    var p = provider;
     var body = { provider: p, model: model };
     if (el.key.value.trim() && !el.keyRow.hidden) body.api_key = el.key.value.trim();
     if (!el.urlRow.hidden) body.base_url = el.url.value.trim();
@@ -161,7 +162,7 @@
   });
 
   el.use.addEventListener('click', function () {
-    var p = el.provider.value;
+    var p = provider;
     if (!model) return say('Choose a model first.');
     json('POST', '/api/ai/select', { provider: p, model: model })
       .then(function () { say('Selected ' + name(p) + ' · ' + model, true); changed(); return refresh(); })
@@ -169,7 +170,7 @@
   });
 
   el.remove.addEventListener('click', function () {
-    var p = el.provider.value;
+    var p = provider;
     json('DELETE', '/api/ai/credentials/' + encodeURIComponent(p))
       .then(function () { say('Removed the saved ' + name(p) + (p === 'ollama' ? ' endpoint.' : ' key.'), true); changed(); return refresh(); })
       .catch(function (e) { say(e.message); });

@@ -14,6 +14,7 @@
   --c-bg:#ffffff; --c-panel:#ffffff; --c-border:#e2e6eb; --c-text:#1f2937; --c-muted:#6b7280;
   --c-chip:#eef1f5; --c-chip-hover:#e3e8ef; --c-code:#f3f4f6; --c-input:#f8fafc;
   --c-accent:#4f46e5; --c-accent-fg:#fff;
+  --c-frame:var(--c-accent);   /* the panel's outline: the accent, solid (contrast >= 3:1 on the surface, both themes) */
   --c-amber-bg:#fffbeb; --c-amber-bd:#fcd34d; --c-amber-fg:#92400e;
   --c-green:#15803d; --c-red:#b91c1c; --c-red-bg:#fef2f2;
 }
@@ -23,6 +24,9 @@
   display:flex; flex-direction:column; position:relative;
   background:var(--c-bg); color:var(--c-text); font-size:13px; line-height:1.5;
   border-left:1px solid var(--c-border);
+  /* A solid frame on every dock so the panel's edge is unmistakable. An outline drawn inside the box (negative offset)
+     paints above the panel's own content and leaves its size alone, so flex-basis / dock sizing are untouched. */
+  outline:2px solid var(--c-frame); outline-offset:-2px;
 }
 .viv-ai-panel[hidden]{ display:none; }
 :root[data-theme="dark"] .viv-ai-panel, :root[data-theme="dark"] .vp-pop, :root[data-theme="dark"] .viv-code-rail{
