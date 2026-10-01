@@ -10,6 +10,7 @@ backend's opaque run ids (strings), carried as ``run_id``.
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import time
 import warnings
@@ -88,6 +89,9 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
             label=f"workbench: {study}",
         )
     except SmsApiError as e:
+        refused = _not_allow_listed(e)
+        if refused is not None:
+            return refused
         return {"error": str(e), "reachable": False}, 502
     _record_pending(ws_root, study, composite_id, run["id"])
     return {"run_id": run["id"], "phase": "running", "backend": "viva-v1"}, 202
@@ -118,6 +122,26 @@ def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str) -> Non
 def _phase(raw: str) -> str:
     return "done" if raw in _TERMINAL_OK else "failed" if raw in _TERMINAL_BAD else (
         "queued" if raw in ("queued", "waiting", "pending") else "running")
+
+
+_NOT_ALLOW_LISTED = re.compile(r"'(?P<dep>[^']+)' is not in the compose allow list")
+
+
+def _not_allow_listed(e: SmsApiError) -> "tuple[dict, int] | None":
+    """The backend refused to install a dependency because it is not on its compose allow list.
+
+    That is a policy decision by a reachable server, not a connectivity failure, and retrying cannot fix it; say which
+    dependency and what to do. ``None`` for any other failure, which keeps its existing 502 report."""
+    m = _NOT_ALLOW_LISTED.search(str(e))
+    if m is None:
+        return None
+    dep = m.group("dep")
+    repo = re.sub(r"^git\+https?://github\.com/|\.git(@.*)?$|@.*$", "", dep)
+    return {
+        "error": f"This backend does not allow installing {repo or dep} yet. Ask the backend's operator to add it to the "
+                 f"compose allow list (or to register the repository), then run again.",
+        "reason": "not-allow-listed", "dependency": dep, "reachable": True, "backend_error": str(e),
+    }, 403
 
 
 def _unreachable(e: SmsApiError) -> tuple[dict, int]:
