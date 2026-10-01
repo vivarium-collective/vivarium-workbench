@@ -16,6 +16,21 @@
   function lsGet(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
 
+  // One-time reset to the current panel defaults: BOTH the chat and the process-code
+  // panel start docked RIGHT and CLOSED. Browsers that used earlier builds remember a
+  // left/open state that otherwise sticks (the default only applies when nothing is
+  // stored), so clear those four keys ONCE — then a flag lets later manual dock/open
+  // choices persist. Runs at load, before either panel reads its stored state
+  // (panel-dock.js loads before process-code.js and chat.js).
+  try {
+    if (localStorage.getItem('viv.panels.reset.v1') == null) {
+      ['viv.ai.dock', 'viv.ai.open', 'viv.code.dock', 'viv.code.open'].forEach(function (k) {
+        localStorage.removeItem(k);
+      });
+      localStorage.setItem('viv.panels.reset.v1', '1');
+    }
+  } catch (e) { /* private mode — the right/closed defaults already apply */ }
+
   function svg(inner) {
     return '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" ' +
       'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
