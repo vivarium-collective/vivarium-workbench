@@ -30,3 +30,14 @@ def test_maximized_left_edge_is_driven_by_the_rail_var():
     rule = css[css.index(".registry-entry-full.pcard-maximized{"):]
     rule = rule[:rule.index("}")]
     assert "--vw-rail-right" in rule   # the var the ResizeObserver keeps fresh
+
+
+def test_loom_embed_refit_is_debounced_on_continuous_resize():
+    # Each loom embed's own ResizeObserver re-fits (height:0 + scrollHeight) on every
+    # container-width change; dragging the left rail would otherwise run that per frame
+    # for every embed → the drag stutters. The fit must be debounced.
+    js = (STATIC / "walkthrough.js").read_text()
+    i = js.index("frame._roFit = new ResizeObserver(")
+    block = js[i:i + 260]
+    assert "setTimeout(" in block and "clearTimeout(" in block
+    assert "fit(true)" in block
