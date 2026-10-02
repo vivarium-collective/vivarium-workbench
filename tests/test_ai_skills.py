@@ -47,6 +47,54 @@ def _iso(monkeypatch, tmp_path):
 # --- discovery ---------------------------------------------------------------------------
 
 
+def _fake_installed_viva_superpowers(tmp_path, monkeypatch):
+    """Stand up a fake installed viva_superpowers package that ships skills/
+    (as viva-superpowers#305 does), and point find_spec at it — so this test
+    doesn't depend on the real dependency having shipped its skills yet."""
+    import importlib.util
+    pkg = tmp_path / "site-packages" / "viva_superpowers"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    _skill(pkg / "skills", "viva-orient", "Orient in the workspace.", desc="orientation")
+    _skill(pkg / "skills", "viva-status", "Report workspace status.", desc="status")
+    monkeypatch.setattr(
+        importlib.util, "find_spec",
+        lambda name: type("S", (), {"origin": str(pkg / "__init__.py")})() if name == "viva_superpowers" else None,
+    )
+    return pkg / "skills"
+
+
+def test_installed_viva_superpowers_skills_are_a_default_source_even_hosted(tmp_path, monkeypatch):
+    """The dependency's own packaged /viva-* skills are discovered on a HOSTED
+    (local=False) server — the whole point of shipping them in the wheel: users
+    attaching to a hosted chat get the viva skills without a local checkout or a
+    per-deploy env var. (The ~/.claude plugin source stays loopback-only.)"""
+    ws = tmp_path / "ws"
+    (ws / "skills").mkdir(parents=True)
+    pkg_skills = _fake_installed_viva_superpowers(tmp_path, monkeypatch)
+
+    assert ai_skills._package_skill_dirs() == [pkg_skills]
+    assert pkg_skills.resolve() in ai_skills.search_dirs(ws, local=False)
+    found = ai_skills.discover(ws, local=False)
+    assert "viva-orient" in found and "viva-status" in found
+
+
+def test_workspace_skill_shadows_the_packaged_one_by_name(tmp_path, monkeypatch):
+    """Priority: operator env + workspace outrank the packaged defaults, so a
+    workspace can override a viva-* skill by name (first dir wins)."""
+    ws = tmp_path / "ws"
+    _skill(ws / "skills", "viva-orient", "A workspace-specific orientation.", desc="local override")
+    _fake_installed_viva_superpowers(tmp_path, monkeypatch)
+    found = ai_skills.discover(ws, local=False)
+    assert found["viva-orient"].description == "local override"
+
+
+def test_package_skill_dirs_empty_when_dependency_absent(tmp_path, monkeypatch):
+    import importlib.util
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    assert ai_skills._package_skill_dirs() == []
+
+
 def test_discover_reads_frontmatter_and_says_what_each_skill_needs(tmp_path, monkeypatch):
     lib = tmp_path / "lib"
     _skill(lib, "status", "Call `curl $URL/api/workspace-manifest` and summarise.")

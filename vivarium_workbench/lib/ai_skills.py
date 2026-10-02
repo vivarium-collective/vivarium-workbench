@@ -66,11 +66,38 @@ def _plugin_skill_dirs() -> list[Path]:
     return out
 
 
+def _package_skill_dirs() -> list[Path]:
+    """The ``skills/`` dir shipped INSIDE an installed ``viva_superpowers`` (a
+    declared dependency of this package). Unlike :func:`_plugin_skill_dirs` — which
+    reads the server's own ``~/.claude`` plugins and is therefore loopback-only —
+    these are the dependency's OWN packaged ``/viva-*`` skills, so they are a safe,
+    canonical default on a hosted server too: exposing a dependency's shipped skills
+    is not a home-directory leak. Empty when viva_superpowers is absent or predates
+    shipping its skills in the wheel (viva-superpowers#305)."""
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("viva_superpowers")
+        origin = getattr(spec, "origin", None)
+        if origin:
+            d = Path(origin).parent / "skills"
+            if d.is_dir():
+                return [d]
+    except Exception:  # noqa: BLE001 — discovery is best-effort; never block the chat
+        pass
+    return []
+
+
 def search_dirs(ws_root: Path, *, local: bool) -> list[Path]:
     """Directories to scan, in priority order. ``local`` = a loopback server (its home directory
-    is the user's own); a hosted server only honours the operator's env var and the workspace."""
+    is the user's own); a hosted server honours the operator's env var, the workspace, and the
+    viva-superpowers dependency's own packaged skills (the last is safe on a hosted server, see
+    :func:`_package_skill_dirs`)."""
     dirs = [Path(p).expanduser() for p in os.environ.get("VIVARIUM_WORKBENCH_SKILLS_DIRS", "").split(os.pathsep) if p.strip()]
     dirs += [ws_root / ".claude" / "skills", ws_root / "skills"]
+    # The viva-superpowers dependency's shipped /viva-* skills — a canonical default
+    # on any server (not gated on ``local``). Lower priority than the operator env var
+    # and the workspace, so either can shadow a viva-* skill by name (first dir wins).
+    dirs += _package_skill_dirs()
     if local:
         dirs += _plugin_skill_dirs()
     seen: set[Path] = set()
