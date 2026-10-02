@@ -451,6 +451,10 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         emitter=None, emit_paths=emit_paths, runtime={}, pkg=pkg,
         ws_root=ws_root,
     )
+    # Where it runs, recorded in the manifest -- never in params, which a re-run sends back as the composite's
+    # inputs. The run lands into this workspace's store, so without this its Origin would read "local".
+    if plan.target == "deployment":
+        manifest["ran_on"] = remote_pinned.remote_deployment_name()
 
     conn = cr.connect(db_file)
     try:

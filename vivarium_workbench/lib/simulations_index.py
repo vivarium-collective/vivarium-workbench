@@ -291,6 +291,18 @@ def _commit_url(remote_url: str | None, commit: str | None) -> str | None:
     return "https://" + host_path.rstrip("/") + "/commit/" + commit
 
 
+def _ran_on_from_manifest(manifest_json: str | None) -> str | None:
+    """The backend a run was dispatched to, as its manifest records it (``ran_on``); None when absent."""
+    if not manifest_json:
+        return None
+    try:
+        m = json.loads(manifest_json) or {}
+    except (TypeError, ValueError):
+        return None
+    v = m.get("ran_on") if isinstance(m, dict) else None
+    return v if isinstance(v, str) and v else None
+
+
 def _source_from_manifest(manifest_json: str | None) -> dict | None:
     """Extract the run's source-provenance ``{repo, commit, …}`` from its
     stored manifest ``code_version`` block. Returns None when the run has no
@@ -373,6 +385,8 @@ def _row_to_dict(row, db_path_str: str) -> dict:
     # Where the run RAN, kept apart from where its data IS: a /viva/v1 run landed into this workspace has no
     # remote_origin (its data is local now), but it still ran on the backend its record names.
     ran_on = prov.get("source") if (remote_origin or isinstance(prov.get("viva_v1"), dict)) else None
+    if not ran_on:   # a Composite Explorer run sent to a backend records it in its manifest (params stay its inputs)
+        ran_on = _ran_on_from_manifest(row["manifest_json"] if "manifest_json" in row.keys() else None)
     # A remote run lands its native store next to runs.db (a .zarr or parquet-runs
     # dir), so its emitter type must come from that store_path — NOT from db_path,
     # which is always the runs.db SQLite metadata file (would mislabel it "SQLite").
