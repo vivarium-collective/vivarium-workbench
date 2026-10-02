@@ -13,13 +13,16 @@ def test_maximized_card_observes_the_rail_and_cleans_up():
     js = (STATIC / "composite-card.js").read_text()
     fn = js[js.index("function _toggleCardMaximize"):]
     fn = fn[:fn.index("window._toggleCardMaximize")]
-    # observes the rail so a rail resize/collapse re-fits the card
+    # observes the rail so a rail resize/collapse tracks the card
     assert "_maxRailRO" in fn and ".observe(" in fn
-    # the per-frame rail callback is the CHEAP rail-edge publish, NOT the full
-    # reposition (which reads the loom iframe geometry → reflow thrash during drag)
-    assert "ResizeObserver(_publishRailRight)" in fn
-    # and disconnects the observer when the card is restored (no leak)
+    # during a rail-size change the card is moved with a compositor-only transform
+    # (no reflow of the heavy maximized content), and the real re-fit is debounced
+    # until the rail SETTLES — this is what keeps the rail drag smooth.
+    assert "card.style.transform = 'translateX(" in fn
+    assert "setTimeout(" in fn and "_publishRailRight()" in fn
+    # the transform is cleared and the observer disconnected on restore (no leak)
     assert "_maxRailRO.disconnect()" in fn
+    assert "'transform'" in fn
 
 
 def test_maximized_left_edge_is_driven_by_the_rail_var():
