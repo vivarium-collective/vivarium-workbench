@@ -237,13 +237,13 @@
       if (res.status === 200 && b.url) window.open(b.url, "_blank", "noopener");
       else {
         var msg = "Launch failed: " + (b.error || res.status);
-        if (typeof _showToast === "function") _showToast(msg); else alert(msg);
+        if (typeof _showToast === "function") _showToast(msg, { danger: true }); else alert(msg);
       }
     }).catch(function (err) {
       btn.disabled = false;
       btn.textContent = origLabel;
       var msg = "Launch failed: " + err;
-      if (typeof _showToast === "function") _showToast(msg); else alert(msg);
+      if (typeof _showToast === "function") _showToast(msg, { danger: true }); else alert(msg);
     });
   }
   document.addEventListener("click", _onToolLaunchClick, true);
@@ -411,7 +411,7 @@
       var body = res.body || {};
       if (!res.ok) {
         var errMsg = "Rerun failed: " + (body.error || res.status);
-        if (typeof _showToast === "function") _showToast(errMsg);
+        if (typeof _showToast === "function") _showToast(errMsg, { danger: true });
         else alert(errMsg);
         return;
       }
@@ -424,7 +424,7 @@
     }).catch(function (err) {
       if (btnEl) { btnEl.disabled = false; btnEl.textContent = origLabel || "↻ Rerun"; }
       var netMsg = "Rerun failed: network error — " + err;
-      if (typeof _showToast === "function") _showToast(netMsg);
+      if (typeof _showToast === "function") _showToast(netMsg, { danger: true });
       else alert(netMsg);
     });
   }
@@ -485,7 +485,7 @@
       var b = res.body || {};
       if (!res.ok) {
         var em = "Land failed: " + (b.error || res.status);
-        if (typeof _showToast === "function") _showToast(em); else alert(em);
+        if (typeof _showToast === "function") _showToast(em, { danger: true }); else alert(em);
         return;
       }
       var n = b.ptools || 0;
@@ -497,7 +497,7 @@
     }).catch(function (err) {
       _reset();
       var nm = "Land failed: network error — " + err;
-      if (typeof _showToast === "function") _showToast(nm); else alert(nm);
+      if (typeof _showToast === "function") _showToast(nm, { danger: true }); else alert(nm);
     });
   }
   window._landRemote = _landRemote;
