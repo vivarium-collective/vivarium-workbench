@@ -370,6 +370,9 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         }
     else:
         remote_origin = None
+    # Where the run RAN, kept apart from where its data IS: a /viva/v1 run landed into this workspace has no
+    # remote_origin (its data is local now), but it still ran on the backend its record names.
+    ran_on = prov.get("source") if (remote_origin or isinstance(prov.get("viva_v1"), dict)) else None
     # A remote run lands its native store next to runs.db (a .zarr or parquet-runs
     # dir), so its emitter type must come from that store_path — NOT from db_path,
     # which is always the runs.db SQLite metadata file (would mislabel it "SQLite").
@@ -405,6 +408,7 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         "study_slug": _study_slug_from_db_path(db_path_str),
         "investigation_slug": None,
         "remote_origin": remote_origin,
+        "ran_on": ran_on,
         # Source provenance (repo + commit the run launched from), read from the
         # manifest's code_version. None here for a manifest-less legacy row —
         # list_simulations() then backfills the inferred workspace source so the
@@ -1629,6 +1633,10 @@ def backfill_index_into_jsonl(ws_root: Path) -> int:
         # so an already-folded value doesn't re-append on every build.
         has_source = bool(row.get("source_ref"))
         prev_has_source = bool(prev and prev.get("source_ref"))
+        # Same self-heal for where a run ran: a /viva/v1 run landed before rows carried ``ran_on`` has none in
+        # the log, so its Origin read "local"; re-backfill so it names the backend.
+        has_ran_on = bool(row.get("ran_on"))
+        prev_has_ran_on = bool(prev and prev.get("ran_on"))
         # Skip when already represented AND its store location is known (or the
         # legacy store has none to add) AND its composite is known AND its
         # capabilities are known AND its config is known (or the legacy store has
@@ -1638,13 +1646,14 @@ def backfill_index_into_jsonl(ws_root: Path) -> int:
                 and (prev_has_composite or not has_composite)
                 and (prev_has_capabilities or not has_capabilities)
                 and (prev_has_config or not has_config)
-                and (prev_has_source or not has_source)):
+                and (prev_has_source or not has_source)
+                and (prev_has_ran_on or not has_ran_on)):
             continue
         ev = {"run_id": rid, "event": "backfill"}
         for k in ("spec_id", "sim_name", "label", "status", "n_steps",
                   "progress_step", "started_at", "completed_at", "db_path",
                   "store_path", "emitter", "study_slug", "investigation_slug",
-                  "remote_origin", "capabilities", "config", "source_ref"):
+                  "remote_origin", "ran_on", "capabilities", "config", "source_ref"):
             v = row.get(k)
             if v is not None:
                 ev[k] = v
@@ -1667,7 +1676,7 @@ def _rec_to_simrow(run_id: str, rec: dict) -> dict:
     for k in ("spec_id", "sim_name", "label", "status", "n_steps",
               "progress_step", "started_at", "completed_at", "db_path",
               "store_path", "study_slug", "investigation_slug", "capabilities",
-              "source_ref"):
+              "source_ref", "ran_on"):
         if rec.get(k) is not None:
             row[k] = rec[k]
 

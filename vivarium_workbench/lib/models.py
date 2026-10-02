@@ -88,6 +88,9 @@ class SimRow(BaseModel):
     completed_at: Optional[float] = None
     db_path: Optional[str] = None   # None when the row isn't backed by a runs.db
     store_path: Optional[str] = None   # native data store (zarr/parquet dir or s3 uri); None -> data lives in db_path
+    # The backend a run executed on (e.g. "sms.cam.uchc.edu"), independent of where its data now lives: a
+    # landed /viva/v1 run has ran_on set and remote_origin None. None for a run that ran in this workspace.
+    ran_on: Optional[str] = None
     # Canonically "xarray" | "parquet" | "sqlite" (``EmitterKind``), but a
     # spec may declare a free-form emitter (e.g. "unknown"), so accept any str.
     emitter: Optional[str] = None
