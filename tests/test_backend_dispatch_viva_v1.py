@@ -25,6 +25,7 @@ import pytest
 import yaml
 
 from _viva_v1_stub import VivaV1Stub
+from vivarium_workbench.lib import cli_runs
 from vivarium_workbench.lib import server_capabilities as sc
 
 FIXTURE_WS = Path(__file__).parent / "_fixtures" / "ws_increase_demo"
@@ -606,3 +607,70 @@ def test_a_run_landed_before_ran_on_existed_heals_its_origin(ws, stub, clean_bac
 
     (row,) = [r for r in c.get("/api/simulations?refresh=true").json()["simulations"] if r.get("run_id") == run_id]
     assert row["ran_on"] and row["remote_origin"] is None
+
+
+def test_a_composite_explorer_run_on_the_backend_records_where_it_ran(
+        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+    """Regression: a Composite Explorer run sent to a named /viva/v1 backend recorded only its params, so its row had
+    neither remote_origin nor ran_on and the Origin column said "local". The launch now records ``ran_on`` in the
+    run's manifest -- never in its params, which a re-run sends back to the composite as its inputs."""
+    from urllib.parse import urlsplit
+
+    from vivarium_workbench.lib import rerun
+
+    _name_backend(monkeypatch, stub.url)
+    c = dashboard_client(ws)
+    res = c.post("/api/composite-test-run", json={"id": COMPOSITE, "steps": 1})
+    assert res.status_code in (200, 202), res.text
+    run_id = res.json()["run_id"]
+
+    (row,) = [r for r in c.get("/api/simulations?refresh=true").json()["simulations"] if r.get("run_id") == run_id]
+    assert row["ran_on"] == urlsplit(stub.url).hostname
+
+    replay = rerun.resolve_rerun_target(ws, run_id)
+    assert "ran_on" not in replay["params"]          # a re-run's inputs are exactly what the run was launched with
+    _, meta = cli_runs.find_run(ws, run_id)
+    assert "ran_on" not in meta["params"]            # nor in the params stored with the run
+    assert json.loads(meta["manifest_json"])["ran_on"] == urlsplit(stub.url).hostname
+
+
+def test_a_local_composite_explorer_run_does_not_claim_a_backend(
+        ws, stub, clean_backend_env, dashboard_client):
+    """With no backend named the run is local: its manifest carries no ``ran_on`` and its Origin stays "local"."""
+    c = dashboard_client(ws)
+    res = c.post("/api/composite-test-run", json={"id": COMPOSITE, "steps": 1})
+    assert res.status_code in (200, 202), res.text
+    run_id = res.json()["run_id"]
+
+    (row,) = [r for r in c.get("/api/simulations?refresh=true").json()["simulations"] if r.get("run_id") == run_id]
+    assert row["ran_on"] is None and row["remote_origin"] is None
+    _, meta = cli_runs.find_run(ws, run_id)
+    assert "ran_on" not in json.loads(meta["manifest_json"])
+    assert stub.calls_to("viva-create-composite-run") == []
+
+
+@pytest.mark.parametrize("manifest_json", [
+    None, "", "{not json", "[1]", "[]", "null", "5", '"s"',
+    "{}", '{"ran_on": ""}', '{"ran_on": 5}', '{"ran_on": null}', '{"ran_on": ["a"]}',
+])
+def test_a_manifest_without_a_usable_ran_on_names_no_backend(manifest_json):
+    from vivarium_workbench.lib.simulations_index import _ran_on_from_manifest
+
+    assert _ran_on_from_manifest(manifest_json) is None
+
+
+def test_a_manifest_names_the_backend_it_recorded():
+    from vivarium_workbench.lib.simulations_index import _ran_on_from_manifest
+
+    assert _ran_on_from_manifest('{"ran_on": "sms.cam.uchc.edu"}') == "sms.cam.uchc.edu"
+
+
+def test_a_landed_runs_own_provenance_wins_over_a_manifest_ran_on():
+    """The manifest value is only a fallback: a run whose params already say where it ran keeps that answer."""
+    from vivarium_workbench.lib.simulations_index import _row_to_dict
+
+    row = {"run_id": "r1", "spec_id": "s", "sim_name": "sim", "label": "Run 1", "status": "completed",
+           "n_steps": 1, "progress_step": 1, "started_at": 1.0, "completed_at": 2.0,
+           "params_json": json.dumps({"source": "landed.example", "viva_v1": {"run_id": RUN_ID}}),
+           "manifest_json": json.dumps({"ran_on": "manifest.example"})}
+    assert _row_to_dict(row, "/ws/studies/demo/runs.db")["ran_on"] == "landed.example"
