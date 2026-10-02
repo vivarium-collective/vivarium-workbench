@@ -176,6 +176,15 @@
       card._maxEsc = function (e) { if (e.key === 'Escape') _toggleCardMaximize(btn); };
       window.addEventListener('resize', card._maxReposition);
       document.addEventListener('keydown', card._maxEsc);
+      // The card's left edge clears the left rail via --vw-rail-right, but that var is
+      // only republished here — a window resize doesn't fire when the RAIL itself is
+      // resized (drag) or collapsed, so the maximized card would stop tracking the menu.
+      // Observe the rail's size so every rail width change re-fits the card.
+      var railEl = document.querySelector('.viv-rail');
+      if (railEl && window.ResizeObserver) {
+        card._maxRailRO = new ResizeObserver(card._maxReposition);
+        card._maxRailRO.observe(railEl);
+      }
       // Re-fit once the Explore section has finished expanding.
       setTimeout(function () { if (card.classList.contains('pcard-maximized')) _positionMaximizedCard(card); }, 120);
     } else {
@@ -185,6 +194,7 @@
       if (frame) { frame.style.height = ''; frame.style.maxHeight = ''; }
       if (card._maxReposition) window.removeEventListener('resize', card._maxReposition);
       if (card._maxEsc) document.removeEventListener('keydown', card._maxEsc);
+      if (card._maxRailRO) { card._maxRailRO.disconnect(); card._maxRailRO = null; }
       card._maxReposition = card._maxEsc = null;
       card.scrollIntoView({ block: 'nearest' });
     }
