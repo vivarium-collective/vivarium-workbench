@@ -131,17 +131,23 @@
   }
   window._cardMaximizeBtn = _cardMaximizeBtn;
 
-  function _positionMaximizedCard(card) {
-    // The card's fixed geometry is CSS-driven (see .pcard-maximized) off a single
-    // CSS var so a card re-render can't strip inline positioning. Here we only
-    // (a) publish the rail's right edge so the card clears the menu bar, and
-    // (b) grow the embedded loom to fill from its top to the bottom of the pane.
-    // In an embed IFRAME (Study→Model) there is no rail (it's in the parent,
-    // covered by the full-window iframe), so the card fills from the left edge.
+  // Publish ONLY the rail's right edge. The maximized card's left edge (and hence
+  // width) then tracks the rail purely via CSS (left: calc(var(--vw-rail-right) …)).
+  // Cheap: one rail-rect read + one var write, NO loom-iframe geometry read — so it
+  // is safe to run on every frame of a rail resize (see the rail ResizeObserver).
+  // In an embed IFRAME (Study→Model) there is no rail, so the card fills from x=0.
+  function _publishRailRight() {
     var inIframe = !!(window.parent && window.parent !== window);
     var rail = document.querySelector('.viv-rail');
     var railRight = inIframe ? 0 : (rail ? rail.getBoundingClientRect().right : 240);
     document.documentElement.style.setProperty('--vw-rail-right', railRight + 'px');
+  }
+  function _positionMaximizedCard(card) {
+    // (a) track the rail (cheap) and (b) grow the embedded loom to fill from its top
+    // to the bottom of the pane. The loom HEIGHT depends on the viewport + bottom
+    // docks, NOT on the rail WIDTH, so a rail resize only needs (a) — that heavy
+    // frame.getBoundingClientRect() reflow must stay off the per-frame rail path.
+    _publishRailRight();
     var frame = card.querySelector('.ccard-loom-frame');
     if (frame) {
       var fr = frame.getBoundingClientRect();
@@ -182,7 +188,10 @@
       // Observe the rail's size so every rail width change re-fits the card.
       var railEl = document.querySelector('.viv-rail');
       if (railEl && window.ResizeObserver) {
-        card._maxRailRO = new ResizeObserver(card._maxReposition);
+        // Only the cheap rail-edge publish per rail-resize frame — NOT the full
+        // reposition (which reads the loom iframe's geometry and would reflow it
+        // every frame, making the rail drag stutter).
+        card._maxRailRO = new ResizeObserver(_publishRailRight);
         card._maxRailRO.observe(railEl);
       }
       // Re-fit once the Explore section has finished expanding.

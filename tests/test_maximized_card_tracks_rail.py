@@ -14,8 +14,10 @@ def test_maximized_card_observes_the_rail_and_cleans_up():
     fn = js[js.index("function _toggleCardMaximize"):]
     fn = fn[:fn.index("window._toggleCardMaximize")]
     # observes the rail so a rail resize/collapse re-fits the card
-    assert "ResizeObserver" in fn and ".viv-rail" in fn
     assert "_maxRailRO" in fn and ".observe(" in fn
+    # the per-frame rail callback is the CHEAP rail-edge publish, NOT the full
+    # reposition (which reads the loom iframe geometry → reflow thrash during drag)
+    assert "ResizeObserver(_publishRailRight)" in fn
     # and disconnects the observer when the card is restored (no leak)
     assert "_maxRailRO.disconnect()" in fn
 
