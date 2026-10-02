@@ -52,10 +52,68 @@ const SYM: Record<string, string> = {
 const isSub = (c: string) => Object.prototype.hasOwnProperty.call(SUB, c);
 const isSup = (c: string) => Object.prototype.hasOwnProperty.call(SUP, c);
 
+const ALNUM = /[A-Za-z0-9]/;
+
+/** Read one subscript segment at `i`: a Unicode-sub run (`ᵢⱼ` → "ij") or an
+ * ASCII `_word` (`_deg_c` → "deg,c"). Returns [text, next] or null. */
+function readSub(s: string, i: number): [string, number] | null {
+  if (isSub(s[i])) {
+    let r = '';
+    while (i < s.length && isSub(s[i])) { r += SUB[s[i]]; i++; }
+    return [r, i];
+  }
+  if (s[i] === '_' && ALNUM.test(s[i + 1] ?? '')) {
+    i++;
+    let r = '';
+    while (i < s.length && ALNUM.test(s[i])) {
+      r += s[i]; i++;
+      if (s[i] === '_' && ALNUM.test(s[i + 1] ?? '')) { r += ','; i++; }
+    }
+    return [r, i];
+  }
+  return null;
+}
+
+/** Superscript analogue of readSub: Unicode-sup run or ASCII `^x`. */
+function readSup(s: string, i: number): [string, number] | null {
+  if (isSup(s[i])) {
+    let r = '';
+    while (i < s.length && isSup(s[i])) { r += SUP[s[i]]; i++; }
+    return [r, i];
+  }
+  if (s[i] === '^' && /[A-Za-z0-9+\-]/.test(s[i + 1] ?? '')) {
+    i++;
+    let r = '';
+    while (i < s.length && /[A-Za-z0-9+\-]/.test(s[i])) { r += s[i]; i++; }
+    return [r, i];
+  }
+  return null;
+}
+
+/** Consume ALL adjacent segments (Unicode and/or ASCII) into ONE group, so we
+ * never emit two adjacent `_{…}` (illegal double subscript in KaTeX). */
+function mergeScripts(
+  s: string, i: number, mark: '_' | '^',
+  read: (s: string, i: number) => [string, number] | null,
+): [string, number] | null {
+  const parts: string[] = [];
+  let seg = read(s, i);
+  while (seg) {
+    parts.push(seg[0]);
+    i = seg[1];
+    seg = read(s, i);
+  }
+  if (!parts.length) return null;
+  const r = parts.join(',');
+  return [r.length === 1 ? `${mark}${r}` : `${mark}{${r}}`, i];
+}
+
 /** Normalize a math string to LaTeX for KaTeX: Unicode sub/superscript runs →
- * `_{…}`/`^{…}`, Unicode operators → macros, ASCII `_x`/`^x` → braced groups
- * (consecutive `_a_b` merged to `_{a,b}` so KaTeX doesn't see an illegal double
- * subscript). Plain letters/words/brackets pass through unchanged. */
+ * `_{…}`/`^{…}`, Unicode operators → macros, ASCII `_x`/`^x` → braced groups.
+ * Adjacent sub (or sup) segments, whether Unicode or ASCII, are merged into a
+ * single comma-joined group (`nᵢ_deg` → `n_{i,deg}`, `n_deg_c` → `n_{deg,c}`,
+ * `aᵢⱼ` → `a_{ij}`) so KaTeX never sees an illegal double subscript. Plain
+ * letters/words/brackets pass through unchanged. */
 export function toLatex(s: string): string {
   if (!s) return s;
   let out = '';
@@ -63,40 +121,12 @@ export function toLatex(s: string): string {
   const n = s.length;
   while (i < n) {
     const c = s[i];
-    if (isSub(c)) {
-      let r = '';
-      while (i < n && isSub(s[i])) { r += SUB[s[i]]; i++; }
-      out += r.length === 1 ? `_${r}` : `_{${r}}`;
-      continue;
-    }
-    if (isSup(c)) {
-      let r = '';
-      while (i < n && isSup(s[i])) { r += SUP[s[i]]; i++; }
-      out += r.length === 1 ? `^${r}` : `^{${r}}`;
-      continue;
-    }
+    const sub = mergeScripts(s, i, '_', readSub);
+    if (sub) { out += sub[0]; i = sub[1]; continue; }
+    const sup = mergeScripts(s, i, '^', readSup);
+    if (sup) { out += sup[0]; i = sup[1]; continue; }
     if (Object.prototype.hasOwnProperty.call(SYM, c)) { out += SYM[c] + ' '; i++; continue; }
-    if (c === '_') {
-      i++;
-      if (s[i] === '{') { out += '_'; continue; } // already braced — hand to KaTeX
-      // Consume the subscript run PLUS any further `_`-joined segments so
-      // `n_deg_c` → `_{deg,c}` (one subscript), never `_{deg}_c` (illegal).
-      let r = '';
-      while (i < n && /[A-Za-z0-9]/.test(s[i])) {
-        r += s[i]; i++;
-        if (s[i] === '_' && /[A-Za-z0-9]/.test(s[i + 1] ?? '')) { r += ','; i++; }
-      }
-      out += r ? (r.length === 1 ? `_${r}` : `_{${r}}`) : '_';
-      continue;
-    }
-    if (c === '^') {
-      i++;
-      if (s[i] === '{') { out += '^'; continue; }
-      let r = '';
-      while (i < n && /[A-Za-z0-9+\-]/.test(s[i])) { r += s[i]; i++; }
-      out += r ? (r.length === 1 ? `^${r}` : `^{${r}}`) : '^';
-      continue;
-    }
+    // Bare `_`/`^` (already-braced `_{…}`, or no alnum follows): pass through.
     out += c; i++;
   }
   return out;
