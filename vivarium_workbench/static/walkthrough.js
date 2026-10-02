@@ -3622,11 +3622,43 @@
         if (j && j.ok) {
           card._lastOutputs = j.outputs;
           if (typeof _ensureOutputsOpen === 'function') _ensureOutputsOpen(card);
-          var dl = card.querySelector('.pcard-dl'); if (dl) { dl.disabled = false; dl.title = 'Download outputs (JSON)'; }
-          out.innerHTML = '<div class="loom-run-ok">✓ ran — outputs' +
-            '<button class="btn-mini loom-copy-btn" onclick="_copyRunOutput(this)" title="Copy outputs JSON">⧉ Copy</button></div>' +
-            _jsonViewer(j.outputs) +
-            '<pre class="loom-run-raw" hidden>' + _esc(JSON.stringify(j.outputs, null, 2)) + '</pre>';
+          // Distinguish a run that produced actual VALUES from one that returned
+          // only structure. A single isolated update() on the default empty
+          // state is common for multi-entity processes: they return a delta
+          // keyed per agent/cell/field entry, so with zero agents/cells the
+          // output is a "shell" like {agents:{}} / {cells:{}} / {fields:{}} —
+          // ok:true, non-empty at the top level, but with no leaf data. A bare
+          // Object.keys()==0 check misses those shells, so walk for any leaf: a
+          // scalar (incl. 0 / false / "") is data; an empty container is not.
+          var _hasData = function (v) {
+            if (v === null || v === undefined) return false;
+            if (Array.isArray(v)) return v.some(_hasData);
+            if (typeof v === 'object') return Object.keys(v).some(function (k) { return _hasData(v[k]); });
+            return true;
+          };
+          var _o = j.outputs;
+          if (!_hasData(_o)) {
+            // Shell (e.g. {agents:{}}) vs literal {}/null/[] — show the shell's
+            // structure in a collapsible so the user sees WHAT came back empty.
+            var _literalEmpty = (_o === null || _o === undefined) ||
+              (Array.isArray(_o) ? _o.length === 0 :
+                (typeof _o === 'object' ? Object.keys(_o).length === 0 : false));
+            var _rawDetails = _literalEmpty ? '' :
+              '<details style="margin-top:4px"><summary style="cursor:pointer">raw output</summary>' +
+              '<pre style="font-size:0.8em;white-space:pre-wrap;margin:4px 0 0">' +
+              _esc(JSON.stringify(_o, null, 2)) + '</pre></details>';
+            out.innerHTML = '<div class="loom-run-ok">✓ ran — no data produced</div>' +
+              '<div class="muted" style="font-size:0.85em;margin-top:4px">The process ran but returned no values. ' +
+              'Many processes emit a delta keyed per agent/cell/field entry, so a single run on the default empty ' +
+              'state has nothing to populate — seed state (agents, a sized field) in Configure, or run it inside ' +
+              'its composite. This is expected, not an error.' + _rawDetails + '</div>';
+          } else {
+            var dl = card.querySelector('.pcard-dl'); if (dl) { dl.disabled = false; dl.title = 'Download outputs (JSON)'; }
+            out.innerHTML = '<div class="loom-run-ok">✓ ran — outputs' +
+              '<button class="btn-mini loom-copy-btn" onclick="_copyRunOutput(this)" title="Copy outputs JSON">⧉ Copy</button></div>' +
+              _jsonViewer(j.outputs) +
+              '<pre class="loom-run-raw" hidden>' + _esc(JSON.stringify(j.outputs, null, 2)) + '</pre>';
+          }
         } else {
           var stage = (j && j.stage) ? '[' + j.stage + '] ' : '';
           out.innerHTML = '<div class="loom-run-err">✗ ' + _esc(stage) + _esc((j && j.error) || 'run failed') + '</div>' +
@@ -4127,19 +4159,26 @@
   }
 
   // Composite ordering for the Sort control. Composites carry study info under
-  // `studies` (an object with .studies/.success_pct) and `workspace_local`
-  // instead of a process's `study_participation`/`source`, and have no
-  // Temporal/Step kind or use-count — so they get their own comparator.
+  // `studies` (an object with .studies/.success_pct) instead of a process's
+  // `study_participation`, and have no Temporal/Step kind or use-count — so they
+  // get their own comparator.
+  //
+  // Workspace-vs-imported: `workspace_local` is unreliable (the API reports it
+  // False even for a workspace's own composite), so editable-vs-imported is read
+  // off `read_only` (imported modules are read-only) — with workspace_local as an
+  // OR fallback. "Most used" ranks by study count (ecoli_baseline, with the most
+  // studies, floats to the top) rather than merely keeping workspace entries first.
   function _compositeSortCmp(a, b, key) {
     function studies(c) { return ((c.study_participation || c.studies || {}).studies) || 0; }
     function succ(c) { var s = (c.study_participation || c.studies || {}).success_pct; return s == null ? -1 : s; }
+    function wsRank(c) { return ((c.workspace_local === true) || (c.read_only === false)) ? 0 : 1; }
     var byName = String(a.name || '').localeCompare(String(b.name || ''));
-    var wsFirst = (a.workspace_local ? 0 : 1) - (b.workspace_local ? 0 : 1);
+    var wsFirst = wsRank(a) - wsRank(b);   // workspace/editable composites before imported
     if (key === 'name') return byName;
-    if (key === 'studies') return (studies(b) - studies(a)) || byName;
-    if (key === 'success') return (succ(b) - succ(a)) || byName;
+    if (key === 'studies') return (studies(b) - studies(a)) || wsFirst || byName;
+    if (key === 'success') return (succ(b) - succ(a)) || wsFirst || byName;
     if (key === 'source') return wsFirst || byName;
-    return wsFirst || byName;   // 'use' (default) / 'kind' — keep workspace-first, then name
+    return (studies(b) - studies(a)) || wsFirst || byName;   // 'use' (default) — most-referenced (by studies) first
   }
 
   function _registryEntryMatches(p) {

@@ -27,11 +27,12 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI
+from pydantic import BeforeValidator
 from pydantic_ai import ApprovalRequired, RunContext
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 
@@ -395,14 +396,31 @@ def _shape(resp: httpx.Response, select: str | None = None) -> dict[str, Any]:
     return out
 
 
+def _decode_json_object(v: Any) -> Any:
+    """Local models (e.g. qwen on Ollama) often send an object argument as a JSON *string*. Decode one that is a
+    JSON object; leave anything else for validation to reject with an error the model can act on."""
+    if isinstance(v, str) and v.strip().startswith("{"):
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v
+    return v
+
+
+# Every request body in the workbench API is a JSON object (or omitted), and so are query and path params.
+# Typing them so (rather than `Any`) tells the model the shape, and the decoder means a stringified object reaches
+# the approval card and the server as the object it encodes — not a string the server rejects with a 422.
+JsonObject = Annotated[dict[str, Any] | None, BeforeValidator(_decode_json_object)]
+
+
 async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
-                         path_params: dict[str, Any] | None = None,
-                         query: dict[str, Any] | None = None,
-                         body: Any = None, select: str | None = None) -> dict[str, Any]:
+                         path_params: JsonObject = None,
+                         query: JsonObject = None,
+                         body: JsonObject = None, select: str | None = None) -> dict[str, Any]:
     """Call one workbench API operation. GET runs immediately; every other
     method pauses until the user approves it (you'll be told if they decline).
-    Pass ``path_params``, ``query`` and a JSON ``body`` exactly as
-    ``describe_operation`` specifies. Check the returned ``status`` — a failed
+    Pass ``path_params``, ``query`` and ``body`` exactly as ``describe_operation``
+    specifies, each as a JSON object (not a string). Check the returned ``status`` — a failed
     operation can still come back as a normal result. A response over ~20k chars comes
     back as a ``shape`` (its keys and sizes) instead of the data: re-call with ``select``
     (a path like ``processes[0:25]`` or ``types.0``) to read just that part."""
