@@ -19,6 +19,8 @@ or running the doctor never raises.
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
+import re
 from typing import Any
 
 # (import target, why it matters, how to fix) — the framework deps whose
@@ -39,6 +41,57 @@ _PROBES: list[tuple[str, str, str]] = [
 ]
 
 
+# (dist, min version, why it matters, how to fix) — framework deps whose *stale
+# but importable* version silently breaks a composite at runtime. A stale import
+# (above) is a hard crash; these are the subtler "it imports, but misbehaves"
+# failures that the field hit repeatedly (RENCI). The floors track the fixes that
+# shipped: process-bigraph 1.8.5 = core_extensions + the #217 emitter fix +
+# requests/fire; viva-emitters 0.4.2 = graceful drop of a removed-cell emit port.
+_VERSION_FLOORS: list[tuple[str, str, str, str]] = [
+    ("process-bigraph", "1.8.5",
+     "the composite core_extensions mechanism, the #217 emitter fix, and the "
+     "requests/fire server deps",
+     "process-bigraph is below the 1.8.5 floor — upgrade it "
+     "(uv lock --upgrade-package process-bigraph && uv sync)"),
+    ("viva-emitters", "0.4.2",
+     "the graceful drop of a removed-cell emit port — a composite that divides or "
+     "removes cells otherwise KeyErrors mid-run",
+     "viva-emitters is below the 0.4.2 floor — upgrade it "
+     "(uv lock --upgrade-package viva-emitters && uv sync)"),
+]
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    """Leading-numeric version tuple, tolerant of suffixes (``1.8.5.dev1`` → (1,8,5))."""
+    parts: list[int] = []
+    for comp in str(v).split("."):
+        m = re.match(r"\d+", comp)
+        if not m:
+            break
+        parts.append(int(m.group()))
+    return tuple(parts)
+
+
+def _check_version_floors() -> list[dict[str, Any]]:
+    """Findings for installed-but-too-old framework deps. A dep that isn't
+    installed is not this probe's concern (skipped) — only an installed version
+    below its floor is a finding. Never raises."""
+    out: list[dict[str, Any]] = []
+    for dist, floor, why, fix in _VERSION_FLOORS:
+        try:
+            installed = importlib.metadata.version(dist)
+        except Exception:  # noqa: BLE001 — not installed: nothing to floor-check
+            continue
+        target = f"{dist}>={floor}"
+        if _version_tuple(installed) < _version_tuple(floor):
+            out.append({"ok": False, "target": target, "why": why,
+                        "detail": f"{installed} installed, below {floor}", "fix": fix})
+        else:
+            out.append({"ok": True, "target": target, "why": why,
+                        "detail": f"{installed} ✓", "fix": ""})
+    return out
+
+
 def check_framework_deps() -> list[dict[str, Any]]:
     """Probe the framework deps. Returns one finding dict per probe:
     ``{ok: bool, target: str, why: str, detail: str, fix: str}``. Never raises."""
@@ -50,6 +103,7 @@ def check_framework_deps() -> list[dict[str, Any]]:
         except Exception as e:  # noqa: BLE001 — any import failure is a finding, not a crash
             out.append({"ok": False, "target": target, "why": why,
                         "detail": f"{type(e).__name__}: {e}", "fix": fix})
+    out.extend(_check_version_floors())
     return out
 
 
@@ -72,11 +126,11 @@ def format_report(findings: list[dict[str, Any]] | None = None) -> str:
     probs = [f for f in findings if not f.get("ok")]
     lines.append("" if probs else "All framework dependencies are current. ✓")
     if probs:
-        lines.append(f"{len(probs)} stale dependency finding(s) — see fixes above.")
+        lines.append(f"{len(probs)} dependency finding(s) — see fixes above.")
     return "\n".join(lines)
 
 
 def warn_lines(findings: list[dict[str, Any]] | None = None) -> list[str]:
     """One compact warning line per problem, for startup logging (no-op if healthy)."""
-    return [f"stale dependency: {f['target']} not importable ({f['detail']}). {f['fix']}"
+    return [f"dependency problem: {f['target']} — {f['detail']}. {f['fix']}"
             for f in problems(findings)]
