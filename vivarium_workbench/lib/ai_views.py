@@ -86,5 +86,5 @@ def ai_capabilities(app: Any) -> dict[str, Any]:
 
 
 async def ai_ollama_models(base_url: str | None, mode: StorageMode, session: str | None) -> dict[str, Any]:
-    """``GET /api/ai/ollama-models`` — the models installed in the user's Ollama (feeds the model dropdown)."""
+    """``POST /api/ai/ollama-models`` — the models installed in the user's Ollama (feeds the model dropdown)."""
     return await ai_auth.list_ollama_models(base_url=base_url, mode=mode, session=session)

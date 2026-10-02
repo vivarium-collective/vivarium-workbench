@@ -153,6 +153,11 @@ body.snapshot #viv-ai-panel{ display:none !important; }
 .vp-tool-body{ padding:8px; display:flex; flex-direction:column; gap:8px; }
 .vp-tool pre, .vp-approve pre{ margin:0; padding:8px 10px; background:var(--c-code); border:1px solid var(--c-border);
   border-radius:6px; overflow:auto; max-height:220px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.vp-approve pre{ max-height:min(60vh, 520px); }   /* a long request scrolls; its size is stated above it */
+.vp-size{ text-transform:none; letter-spacing:0; }
+.vp-warn{ border-color:var(--c-amber, #b7791f); color:var(--c-amber, #b7791f); }
+.vp-effect{ display:flex; flex-direction:column; gap:4px; }
+.vp-bulk-list .vp-sum{ display:block; color:var(--c-muted); font-size:11px; overflow-wrap:anywhere; }
 .vp-k{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--c-muted); margin-bottom:2px; }
 .vp-note{ padding:8px 10px; border:1px solid var(--c-border); border-radius:6px; font-size:12px; color:var(--c-muted);
   background:color-mix(in srgb, var(--c-chip) 40%, transparent); }

@@ -135,7 +135,7 @@ def test_read_turn_streams_tool_call_result_text_and_done(env):
 
 def test_system_instructions_carry_the_live_manifest(env):
     client, _, _ = env
-    _turn(client, prompt="please list")
+    _turn(client, prompt="please list", include_manifest=True)   # unset defaults by server kind (S-26, test_ai_h2_transcript)
     ins = SEEN["instructions"][0]
     assert "call_operation" in ins and '"name":"chat-test"' in ins
 

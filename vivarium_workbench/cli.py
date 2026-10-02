@@ -109,6 +109,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if allowed:
         os.environ["VIVARIUM_WORKBENCH_ALLOWED_ORIGINS"] = ",".join(allowed)
 
+    if getattr(args, "no_chat", False):
+        os.environ["VIVARIUM_WORKBENCH_CHAT"] = "0"
+
     allowed_hosts = getattr(args, "allowed_host", None) or []
     if allowed_hosts:
         os.environ["VIVARIUM_WORKBENCH_ALLOWED_HOSTS"] = ",".join(allowed_hosts)
@@ -1112,6 +1115,8 @@ def _serve_detached(workspace: Path, args: argparse.Namespace) -> int:
         cmd += ["--allowed-host", h]
     if getattr(args, "backend_base_url", None):
         cmd += ["--backend-base-url", args.backend_base_url]
+    if getattr(args, "no_chat", False):
+        cmd += ["--no-chat"]
 
     with open(log_file, "wb") as log:
         proc = subprocess.Popen(  # noqa: S603
@@ -1396,6 +1401,11 @@ def main(argv: list[str] | None = None) -> int:
              "even when the proxy rewrites Host and omits X-Forwarded-Host "
              "(sets VIVARIUM_WORKBENCH_ALLOWED_ORIGINS). Repeatable. Use behind "
              "a proxy you control — an ALB terminating a /workbench subpath.",
+    )
+    p_serve.add_argument(
+        "--no-chat", action="store_true",
+        help="Switch the built-in AI chat off (sets VIVARIUM_WORKBENCH_CHAT=0). The chat is on by default only "
+             "for a loopback, un-proxied bind; set VIVARIUM_WORKBENCH_CHAT=1 to enable it elsewhere.",
     )
     p_serve.add_argument(
         "--allowed-host", action="append", metavar="HOST",

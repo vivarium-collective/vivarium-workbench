@@ -36,7 +36,7 @@ The panel, top to bottom:
   **Enter a custom model** box at the bottom takes `provider/model` (e.g. `ollama/qwen3.6:27b`)
   for anything not listed. **Ollama is the exception to marimo's static list**: its submenu shows
   the models actually installed on your machine (the server asks Ollama's `/api/tags` through
-  `GET /api/ai/ollama-models`, with the same SSRF rules as saving an endpoint, no redirects and a
+  `POST /api/ai/ollama-models` (a POST, so the CSRF guard refuses a cross-site page), with the same SSRF rules as saving an endpoint, no redirects and a
   size cap), or says why it can't (not running / nothing pulled). Choosing another
   provider's model switches the provider and shows the fields it needs. OpenAI-compatible has no catalogue, so it is
   listed with a hint: enter `openai-compatible/<model>` in the custom-model box, then set its Base URL. The model lists are
@@ -106,7 +106,7 @@ browser (chat.js, chat-core.js)          server
 - **Manifest.** Unless switched off in Capabilities, each turn injects a live
   `GET /api/workspace-manifest` snapshot as instructions (the orientation call
   `ai-onboarding.md` §3 prescribes). The request also carries the chosen `mode`
-  (`manual` | `ask` | `agent`) and `include_manifest`; reasoning streams as `reasoning-delta` frames.
+  (`manual` | `ask` | `agent`) and `include_manifest` (optional: unset = on for a local server, off for a shared one; never in `manual`); reasoning streams as `reasoning-delta` frames.
 
 ### Action surface = the app's own live OpenAPI
 
@@ -225,7 +225,7 @@ Where a key lives depends on how the server is bound:
 | server | storage | notes |
 |---|---|---|
 | loopback bind (`127.0.0.1`, `localhost`, `::1`), no proxy flags, no base path | OS keyring, service `vivarium-workbench-llm` (process memory if no usable backend) | `~/.config/vivarium-workbench/ai.yaml` holds the non-secret parts: provider/model choice, a keyless endpoint (Ollama's URL), and which providers have a keychain entry (never `workspace.yaml`, which is git-tracked scientific record). The request's `Host` must itself be loopback — a DNS-rebound page (Host == Origin == the attacker's name) gets 403 on `/api/ai/*` and `/api/chat/*` |
-| anything else — hosted pod, `0.0.0.0`, **any** `--trust-proxy` / `--allowed-origin` / `--base-path`, or an unknown bind | **process memory only**, per `X-VW-Session`, never disk or keyring | selection is per-session memory too; `openai-compatible` `base_url` must be public `https` (SSRF guard, incl. NAT64/IPv4-mapped/scoped addresses); **the server's own env keys (`ANTHROPIC_API_KEY`, …) and AWS role are NOT lent to sessions** unless the operator sets `VIVARIUM_WORKBENCH_CHAT_ALLOW_SERVER_CREDENTIALS=1` |
+| anything else — hosted pod, `0.0.0.0`, **any** `--trust-proxy` / `--allowed-origin` / `--base-path`, or an unknown bind | **process memory only**, per `X-VW-Session`, never disk or keyring | selection is per-session memory too; `openai-compatible` `base_url` must be public `https` (SSRF guard, incl. NAT64/IPv4-mapped/scoped addresses); **the server's own env keys (`ANTHROPIC_API_KEY`, …) and AWS role are NOT lent to sessions** unless the operator sets `VIVARIUM_WORKBENCH_CHAT_ALLOW_SERVER_CREDENTIALS=1`. The OpenAI-style clients (openai, openai-compatible, ollama, opencode) are given an explicit key (a placeholder for keyless ones) and send only an allow-list of headers, so values the SDK would take from the server's environment — `OLLAMA_API_KEY`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` — are never sent to an endpoint a user names. (Anthropic, Google and Bedrock talk only to their fixed vendor hosts.) |
 
 On a loopback server the ambient environment keys and AWS credentials are picked
 up as a convenience ("from the server environment"). Re-saving an
@@ -240,6 +240,30 @@ retried for a minute; a fresh install never touches it.
 Keys are never returned by any route; `mask_key` scrubs key-shaped strings and the
 exact stored value from every error string that could carry one.
 
+## Switching the chat off
+
+The chat is **on by default only when the server is private to the machine** (a loopback bind, no proxy flags, no
+base path). On any other bind it is **off** unless the operator opts in.
+
+| setting | effect |
+|---|---|
+| `VIVARIUM_WORKBENCH_CHAT=0` (or `false`/`no`/`off`), or `serve --no-chat` | the chat is off everywhere: `/api/chat/turn` and the routes that save, select or test credentials answer 503, `GET /api/ai/status` reports `available: false` with a `reason` (and reads no stored credentials), and the UI shows that reason. Removing an already-saved key (`DELETE /api/ai/credentials/{provider}`) still works |
+| `VIVARIUM_WORKBENCH_CHAT=1` | on, even on a non-loopback / proxied bind (the operator's decision) |
+| unset | on for a loopback, un-proxied bind **started with `serve`**; off otherwise — including a bare `uvicorn vivarium_workbench.api.app:app` launch, which never tells the app it is private |
+
+## Data leaving your machine
+
+Every turn sends the following to the **provider endpoint you chose** (your own Ollama stays on your machine;
+OpenAI, Anthropic, Google, Bedrock, OpenCode and an OpenAI-compatible URL do not):
+
+- the system prompt and the skills you loaded;
+- the conversation so far, including the results of every tool the assistant ran (each capped at 20 000 characters;
+  `select` can read any part of a response), and attachments you add;
+- a summary of the workspace (its manifest) **only if** *Workspace summary* is on. Unset, it is on for a local
+  (keyring) server and off for a shared one; **Manual** mode never sends it.
+
+The transcript is also kept, in plaintext, in this browser's `localStorage` on a loopback server. The Capabilities popover names the destination endpoint; the AI Settings sheet states that messages go to the selected provider's endpoint.
+
 ## Threat model (what is and isn't defended)
 
 - **Prompt injection via workspace content or tool results**: results are data
@@ -247,13 +271,27 @@ exact stored value from every error string that could carry one.
   without a human approving the exact method/path/body shown.
 - **Tampered client transcript**: the user could already call the API directly,
   so approving a tampered call grants nothing new; the exclusion list is still
-  enforced server-side.
+  enforced server-side. The server also accepts only what a real client sends — plain-text prompts, tool calls, reasoning, and plain-JSON tool
+  returns — and answers 422 for anything else: a system prompt, or media/document/uploaded-file content in a prompt
+  or in a tool return (pydantic-ai turns such JSON into objects the provider or this server would fetch).
+- **The approval card shows what runs**: for routes that expand into something larger on the server it also shows
+  the resolved effect — the shell commands a `system-deps-install` would run (read from the workspace's catalog
+  overlay), the package and source a `catalog-install` would fetch, the size and SHA-256 of an uploaded file instead
+  of its base64; the body text is never clipped (the card scrolls). Invisible, direction-changing and control characters
+  are shown as `\uXXXX`, the card states the size of the request, and if the server cannot work out what a request
+  will run it says so. Path parameters the assistant supplies may not be empty or contain a `.` / `..` segment,
+  backslash or NUL.
+- **Audit log** (`.pbg/ai-actions.jsonl`): an `intent` line (before a change runs) carries a redacted, size-capped
+  preview of the query/body and the SHA-256 of the full arguments; reads are recorded by path only. The log is
+  inside the workspace's protected `.pbg` directory, which the dashboard never serves or lets a request write.
 - **Session keys are routing ids, not auth.** Anyone holding a hosted session's
   key can use the credentials saved under it, so the key is kept out of the
   publicly served audit file (hashed) and must be treated as a secret by operators.
 - **Hosted servers are anonymous**: without the operator opt-in above, visitors
   can only use keys they bring themselves; with it, every visitor can spend the
   server's credentials (and choose the model) — enable only behind your own auth.
+- **Not reachable by the assistant**: `expert-doc` (it copies any file the server can read into the workspace) —
+  a user's own action in the UI.
 - **Residual**: the hosted `base_url` check resolves DNS once (a rebinding race is
   theoretically possible; redirects are not followed by the SDK); approved
   operations that are themselves powerful (starting runs — read-only servers keep

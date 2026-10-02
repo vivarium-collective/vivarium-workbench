@@ -311,6 +311,7 @@ from vivarium_workbench.lib.models import (
     AuthPayload,
     AiCapabilitiesPayload,
     AiCredentialsRequest,
+    AiOllamaModelsRequest,
     AiOkPayload,
     AiOllamaModelsPayload,
     AiSelectRequest,
@@ -564,7 +565,7 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/auth/github/start", "/api/auth/github/logout",
     # built-in chat: provider login + the chat turn (its own mutating calls are
     # still limited to the routes this filter leaves registered)
-    "/api/ai/credentials", "/api/ai/credentials/{provider}", "/api/ai/select",
+    "/api/ai/credentials", "/api/ai/credentials/{provider}", "/api/ai/select", "/api/ai/ollama-models",
     "/api/chat/turn",
     # benign UI telemetry
     "/api/click",
@@ -7508,15 +7509,17 @@ def create_app() -> FastAPI:
         _ai_scope(request)
         return _ai_views.ai_capabilities(request.app)
 
-    @app.get(
+    @app.post(
         "/api/ai/ollama-models",
         response_model=AiOllamaModelsPayload,
         tags=["AI"],
         summary="The models installed in the user's Ollama server (its /api/tags)",
     )
-    async def ai_ollama_models(request: Request, base_url: str | None = None) -> dict:
+    async def ai_ollama_models(request: Request, body: AiOllamaModelsRequest) -> dict:
+        # A POST on purpose: browsers send ``Origin`` on every cross-site POST, so the CSRF guard refuses a web page
+        # that would otherwise make this server contact a host of its choosing (a GET carries no Origin).
         mode, session = _ai_scope(request)
-        return await _ai_views.ai_ollama_models(base_url, mode, session)
+        return await _ai_views.ai_ollama_models(body.base_url, mode, session)
 
     @app.post(
         "/api/ai/credentials",

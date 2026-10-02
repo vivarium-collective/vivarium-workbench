@@ -3465,24 +3465,31 @@ class AiSelection(BaseModel):
 
 class AiStatusPayload(BaseModel):
     """``GET /api/ai/status``. ``available`` is False when the ``[chat]`` extra
-    is not installed; ``storage_mode`` is ``keyring`` (loopback bind) or
+    is not installed or the chat is switched off (``reason`` says which); ``storage_mode`` is ``keyring`` (loopback bind) or
     ``memory`` (hosted — keys live only in this process, per session).
 
     Source: ``lib.ai_views.ai_status``.
     """
 
     available: bool
+    reason: Optional[str] = None
     providers: list[AiProviderStatus]
     selected: Optional[AiSelection] = None
     storage_mode: Literal["keyring", "memory"]
 
 
 class AiOllamaModelsPayload(BaseModel):
-    """``GET /api/ai/ollama-models`` — the models installed in an Ollama server (its
+    """``POST /api/ai/ollama-models`` — the models installed in an Ollama server (its
     ``/api/tags``); ``source`` is the URL asked."""
 
     models: list[str]
     source: str
+
+
+class AiOllamaModelsRequest(BaseModel):
+    """``POST /api/ai/ollama-models`` body: the Ollama endpoint to ask (default: the saved one, else localhost)."""
+
+    base_url: Optional[str] = Field(default=None, max_length=2048)
 
 
 class AiCredentialsRequest(BaseModel):
@@ -3490,17 +3497,17 @@ class AiCredentialsRequest(BaseModel):
     ``openai-compatible``) is checked with one real 1-token request to ``model``
     before anything is stored."""
 
-    provider: str
-    model: str
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
+    provider: str = Field(max_length=64)
+    model: str = Field(max_length=256)
+    api_key: Optional[str] = Field(default=None, max_length=8192)
+    base_url: Optional[str] = Field(default=None, max_length=2048)
 
 
 class AiSelectRequest(BaseModel):
     """``POST /api/ai/select`` body — switch provider/model."""
 
-    provider: str
-    model: str
+    provider: str = Field(max_length=64)
+    model: str = Field(max_length=256)
 
 
 class AiOkPayload(BaseModel):
@@ -3528,8 +3535,9 @@ class ChatTurnRequest(BaseModel):
     # marimo's footer modes: manual = pure chat (no tools), ask = read-only tools,
     # agent = read + write tools (every write still pauses for approval).
     mode: Literal["manual", "ask", "agent"] = "agent"
-    # Inject a live workspace summary into the instructions (costs tokens).
-    include_manifest: bool = True
+    # Inject a live workspace summary into the instructions (costs tokens, and it leaves the machine).
+    # Unset: on for a local (keyring) server, off on a shared one. Manual mode never sends it.
+    include_manifest: Optional[bool] = None
 
 
 class AiCapabilitiesPayload(BaseModel):

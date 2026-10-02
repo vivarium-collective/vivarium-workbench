@@ -205,16 +205,39 @@
   function statusLabel(status) { return LABELS[status] || status; }
 
   // What the approval card shows: the operation, its method/path and the body.
+  // Bidirectional-control and zero-width characters can make the text shown differ from the text that runs
+  // (a reordered or invisible character), so an approval card shows them as \uXXXX instead of rendering them.
+  // Every format (Cf: bidi marks/overrides, zero-width, soft hyphen, tag characters), control (Cc, except tab/newline),
+  // line/paragraph separator and the common invisible fillers and variation selectors.
+  var HIDDEN = /(?![\t\n\r])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}͏ᅟᅠㅤ⠀︀-️\u{E0100}-\u{E01EF}]/gu;
+  function revealHidden(s) {
+    return String(s).replace(HIDDEN, function (c) {
+      var cp = c.codePointAt(0).toString(16).toUpperCase();
+      return cp.length > 4 ? '\\u{' + cp + '}' : '\\u' + ('0000' + cp).slice(-4);
+    });
+  }
+  function revealDeep(v) {
+    if (typeof v === 'string') return revealHidden(v);
+    if (Array.isArray(v)) return v.map(revealDeep);
+    if (v && typeof v === 'object') { var o = {}; Object.keys(v).forEach(function (k) { o[revealHidden(k)] = revealDeep(v[k]); }); return o; }
+    return v;
+  }
+
   function describeApproval(part) {
     var ap = part.approval || {};
     var body = ap.body !== undefined && ap.body !== null ? ap.body
       : (part.args && part.args.body !== undefined ? part.args.body : null);
     var query = ap.query && Object.keys(ap.query).length ? ap.query : null;
+    var raw = JSON.stringify({ q: query, b: body, p: ap.path, s: ap.summary, e: ap.effect || null, o: ap.operation_id, m: ap.method });
+    var bodyText = body === null ? '' : revealHidden(JSON.stringify(body, null, 2));
     return {
-      title: ap.operation_id || (part.args && part.args.operation_id) || part.name,
-      method: ap.method || '', path: ap.path || '', summary: ap.summary || '',
-      query: query ? JSON.stringify(query, null, 2) : '',
-      body: body === null ? '' : JSON.stringify(body, null, 2),
+      title: revealHidden(ap.operation_id || (part.args && part.args.operation_id) || part.name || ''),
+      method: revealHidden(ap.method || ''), path: revealHidden(ap.path || ''), summary: revealHidden(ap.summary || ''),
+      query: query ? revealHidden(JSON.stringify(query, null, 2)) : '',
+      body: bodyText,
+      effect: ap.effect ? revealDeep(ap.effect) : null,
+      hidden: (HIDDEN.lastIndex = 0, HIDDEN.test(raw)) && !(HIDDEN.lastIndex = 0),
+      stats: { chars: bodyText.length, lines: bodyText ? bodyText.split('\n').length : 0 },
     };
   }
 
@@ -642,7 +665,7 @@
   }
 
   var api = {
-    esc: esc, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
+    esc: esc, revealHidden: revealHidden, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
     startResume: startResume, applyFrame: applyFrame, decide: decide, decideAll: decideAll,
     buildPromptRequest: buildPromptRequest, buildResumeRequest: buildResumeRequest, canRetry: canRetry,
     retryBody: retryBody,

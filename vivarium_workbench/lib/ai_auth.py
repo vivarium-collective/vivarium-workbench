@@ -19,6 +19,7 @@ through :func:`mask_key` before it is logged or surfaced.
 """
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import ipaddress
 import json
@@ -97,15 +98,47 @@ class Credential:
 # ---------------------------------------------------------------------------
 
 
+CHAT_ENV = "VIVARIUM_WORKBENCH_CHAT"
+_OFF = frozenset({"0", "false", "no", "off"})
+_ON = frozenset({"1", "true", "yes", "on"})
+_DEFAULT_ON = False      # fail closed: a launch path that never calls configure_default (e.g. bare uvicorn) is shared
+
+
+def default_enabled_for_bind(host: str, *, proxied: bool) -> bool:
+    """On by default only where the server is private to this machine: a loopback bind that is not proxied."""
+    from vivarium_workbench.lib import csrf
+    return csrf.is_loopback_host(host) and not proxied
+
+
+def configure_default(enabled: bool) -> None:
+    """Set what an unset ``VIVARIUM_WORKBENCH_CHAT`` means (``serve`` calls it at start-up; until then it is off)."""
+    global _DEFAULT_ON
+    _DEFAULT_ON = bool(enabled)
+
+
+def unavailable_reason() -> str | None:
+    """Why the chat cannot be used right now, or ``None`` when it can."""
+    if importlib.util.find_spec("pydantic_ai") is None:
+        return INSTALL_HINT
+    raw = (os.environ.get(CHAT_ENV) or "").strip().lower()
+    if raw in _OFF:
+        return f"The chat is switched off ({CHAT_ENV}={raw})."
+    if raw in _ON or _DEFAULT_ON:
+        return None
+    return (f"The chat is off by default on a server that is not private to this machine; "
+            f"start it with {CHAT_ENV}=1 to enable it.")
+
+
 def chat_available() -> bool:
-    """True when the optional ``[chat]`` extra (pydantic-ai) is importable."""
-    return importlib.util.find_spec("pydantic_ai") is not None
+    """True when the ``[chat]`` extra is importable and the chat has not been switched off."""
+    return unavailable_reason() is None
 
 
 def require_chat() -> None:
-    """Raise the canonical 503 when the ``[chat]`` extra is missing."""
-    if not chat_available():
-        raise APIError(503, INSTALL_HINT)
+    """Raise the canonical 503 when the chat is unavailable (extra missing, or switched off)."""
+    reason = unavailable_reason()
+    if reason is not None:
+        raise APIError(503, reason)
 
 
 def mask_key(text: str, secrets: tuple[str, ...] = ()) -> str:
@@ -420,8 +453,9 @@ def set_selection(provider: str, model: str, *, mode: StorageMode, session: str 
 def status(*, mode: StorageMode, session: str | None) -> dict[str, Any]:
     """The ``GET /api/ai/status`` body — never contains a key."""
     providers = []
+    off = unavailable_reason() is not None      # switched off: do not read the keyring (an OS prompt) for a dead feature
     for p in PROVIDERS:
-        cred = get_credential(p, mode=mode, session=session)
+        cred = None if off else get_credential(p, mode=mode, session=session)
         providers.append({
             "id": p,
             "configured": cred is not None,
@@ -430,8 +464,9 @@ def status(*, mode: StorageMode, session: str | None) -> dict[str, Any]:
         })
     return {
         "available": chat_available(),
+        "reason": unavailable_reason(),
         "providers": providers,
-        "selected": get_selection(mode=mode, session=session),
+        "selected": None if off else get_selection(mode=mode, session=session),
         "storage_mode": mode,
     }
 
@@ -439,6 +474,27 @@ def status(*, mode: StorageMode, session: str | None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Model construction + live key check (needs the [chat] extra)
 # ---------------------------------------------------------------------------
+
+
+# Headers an OpenAI-style provider call may carry. Anything else is dropped before it leaves the process: the SDKs
+# fall back to the *server's* environment (``OPENAI_ORG_ID``, ``OPENAI_PROJECT_ID``, ``OPENAI_CUSTOM_HEADERS``,
+# ``OLLAMA_API_KEY`` …) and, with a user-named ``base_url``, that would send the operator's values to an endpoint the
+# user chose. ``x-stainless-*`` is the SDK's own (non-secret) client telemetry.
+_EGRESS_HEADERS = frozenset({"host", "authorization", "content-type", "content-length", "accept", "accept-encoding",
+                             "connection", "user-agent", "idempotency-key"})
+
+
+async def _strip_foreign_headers(request) -> None:
+    for name in [h for h in request.headers if h.lower() not in _EGRESS_HEADERS and not h.lower().startswith("x-stainless-")]:
+        del request.headers[name]
+
+
+def _egress_client():
+    """An ``httpx`` client for a provider call that sends nothing but the allow-listed headers."""
+    import httpx
+    from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT
+    return httpx.AsyncClient(timeout=httpx.Timeout(DEFAULT_HTTP_TIMEOUT, connect=5),
+                             event_hooks={"request": [_strip_foreign_headers]})
 
 
 def build_model(provider: str, model: str, cred: Credential):
@@ -454,15 +510,18 @@ def build_model(provider: str, model: str, cred: Credential):
         # An openai-compatible endpoint (Ollama, vLLM) may need no key, but the
         # SDK refuses an empty one — a placeholder is the documented convention.
         key = cred.api_key or ("unused" if provider == "openai-compatible" else None)
-        return OpenAIChatModel(model, provider=OpenAIProvider(base_url=cred.base_url, api_key=key))
+        return OpenAIChatModel(model, provider=OpenAIProvider(base_url=cred.base_url, api_key=key, http_client=_egress_client()))
     if provider == "ollama":
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.ollama import OllamaProvider
-        return OpenAIChatModel(model, provider=OllamaProvider(base_url=cred.base_url or OLLAMA_DEFAULT))
+        # An explicit placeholder key (else the provider sends the server's OLLAMA_API_KEY to the user's URL) and an
+        # egress client that drops any header the SDK took from the server's environment.
+        return OpenAIChatModel(model, provider=OllamaProvider(
+            base_url=cred.base_url or OLLAMA_DEFAULT, api_key="ollama", http_client=_egress_client()))
     if provider == "opencode":
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
-        return OpenAIChatModel(model, provider=OpenAIProvider(base_url=OPENCODE_BASE, api_key=cred.api_key))
+        return OpenAIChatModel(model, provider=OpenAIProvider(base_url=OPENCODE_BASE, api_key=cred.api_key or "unused", http_client=_egress_client()))
     if provider == "google":
         from pydantic_ai.models.google import GoogleModel
         from pydantic_ai.providers.google import GoogleProvider
@@ -471,6 +530,11 @@ def build_model(provider: str, model: str, cred: Credential):
         from pydantic_ai.models.bedrock import BedrockConverseModel
         return BedrockConverseModel(model)
     raise APIError(422, f"unknown provider '{provider}'")
+
+
+#: Total seconds a key check may take. Without it a server that accepts the connection and never answers holds the
+#: request (and its worker) open for as long as the peer likes.
+CHECK_KEY_TIMEOUT = 20.0
 
 
 async def check_key(provider: str, model: str, cred: Credential) -> None:
@@ -486,8 +550,11 @@ async def check_key(provider: str, model: str, cred: Credential) -> None:
 
     secrets = (cred.api_key or "",)
     try:
-        await Agent(build_model(provider, model, cred)).run(
-            "ping", model_settings={"max_tokens": 1})
+        async with asyncio.timeout(CHECK_KEY_TIMEOUT):
+            await Agent(build_model(provider, model, cred)).run(
+                "ping", model_settings={"max_tokens": 1})
+    except TimeoutError:
+        raise APIError(504, f"{provider} did not answer within {CHECK_KEY_TIMEOUT:g} s") from None
     except ModelHTTPError as e:
         msg = mask_key(str(e), secrets)
         if e.status_code in (401, 403):

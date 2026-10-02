@@ -46,6 +46,7 @@ from pydantic_ai.messages import (
     ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
+    UserPromptPart,
 )
 from pydantic_ai.run import AgentRunResultEvent
 from pydantic_ai.usage import UsageLimits
@@ -329,6 +330,49 @@ def _repair_dangling(history: list[Any]) -> list[Any]:
         ToolReturnPart(tool_name=n, content=INTERRUPTED, tool_call_id=i) for i, n in missing])]
 
 
+def _wants_manifest(body: ChatTurnRequest, mode: StorageMode) -> bool:
+    """Send the workspace summary? Never in Manual ("no tools, cannot read the workspace"); otherwise what the
+    client asked, else on only for a server private to this machine (``keyring``)."""
+    if body.mode == "manual":
+        return False
+    return body.include_manifest if body.include_manifest is not None else mode == "keyring"
+
+
+def _plain_json(v: Any) -> bool:
+    """True for a value that came from JSON: str/number/bool/None and lists/dicts of them. pydantic-ai rehydrates
+    some JSON shapes (``{"kind": "image-url", ...}``) into media objects; those are not plain."""
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return True
+    if isinstance(v, list):
+        return all(_plain_json(x) for x in v)
+    if isinstance(v, dict):
+        return all(isinstance(k, str) and _plain_json(x) for k, x in v.items())
+    return False
+
+
+def _refuse_forged_parts(history: list[Any]) -> None:
+    """The transcript comes from the browser: allow only what this server itself streams.
+
+    The UI round-trips exactly three request parts (plain-text prompts, tool returns, retry prompts) and three
+    response parts (text, tool calls, reasoning). Anything else — a system prompt, media or document URLs, uploaded
+    files, binary content, in a prompt *or nested in a tool return* — can only be forged, and would be fetched by
+    the provider or this server, so it is refused rather than filtered.
+    """
+    for msg in history:
+        for part in getattr(msg, "parts", ()):
+            if isinstance(part, UserPromptPart):
+                ok = isinstance(part.content, str)
+            elif isinstance(part, (ToolReturnPart, RetryPromptPart)):
+                ok = _plain_json(part.content)
+            elif isinstance(part, (TextPart, ToolCallPart, ThinkingPart)):
+                ok = True
+            else:                                  # system prompt, files, speech, compaction, …
+                ok = False
+            if not ok:
+                raise APIError(422, f"invalid transcript: it contains a {getattr(part, 'part_kind', 'part')} "
+                                    f"a chat client never sends")
+
+
 def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: StorageMode,
                  session: str | None) -> Turn:
     """Validate everything a turn needs; raises ``APIError`` (409/422/503) up front."""
@@ -348,6 +392,7 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
         history = ModelMessagesTypeAdapter.validate_python(body.messages)
     except ValueError as e:
         raise APIError(422, f"invalid transcript: {ai_auth.mask_key(str(e))[:300]}") from None
+    _refuse_forged_parts(list(history))
     if body.prompt is not None:
         history = _repair_dangling(list(history))
     deferred = _deferred_results(body.deferred_results) if body.deferred_results is not None else None
@@ -363,4 +408,4 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
                              session_key=session, provider=provider, model=model, mode=body.mode, skills=skills)
     return Turn(agent=agent, deps=deps, history=list(history), prompt=body.prompt,
                 deferred=deferred, secrets=(cred.api_key or "",), mode=body.mode,
-                include_manifest=body.include_manifest)
+                include_manifest=_wants_manifest(body, mode))

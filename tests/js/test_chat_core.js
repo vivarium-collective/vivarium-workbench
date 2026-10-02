@@ -478,3 +478,42 @@ console.log('test_chat_core: all passed');
   assert.deepStrictEqual(C.parseQualified('openai-compatible/qwen3-32b', null), { provider: 'openai-compatible', model: 'qwen3-32b' });
 }
 console.log('chat-core model menu keeps openai-compatible: ok');
+// ── S-06: the approval card shows what is really there ──
+{
+  // bidi / zero-width characters are made visible, never rendered raw (a reordered or invisible character can make
+  // the shown text differ from what runs)
+  assert.strictEqual(C.revealHidden('safe'), 'safe');
+  assert.strictEqual(C.revealHidden('a‮b​c﻿d'), 'a\\u202Eb\\u200Bc\\uFEFFd');
+  const mk = (ap) => ({ approval: ap, args: {} });
+  const card = C.describeApproval(mk({ operation_id: 'op', method: 'POST', path: '/api/x‮', body: { cmd: 'rm​ -rf' } }));
+  assert(card.path.indexOf('‮') < 0 && card.path.indexOf('\\u202E') >= 0, 'path is revealed');
+  assert(card.body.indexOf('​') < 0 && card.body.indexOf('\\u200B') >= 0, 'body is revealed');
+  assert.strictEqual(card.hidden, true, 'the card can warn that hidden characters were present');
+  assert.strictEqual(C.describeApproval(mk({ operation_id: 'op', method: 'POST', path: '/p', body: {} })).hidden, false);
+
+  // size is stated so a long body is visibly long
+  const big = C.describeApproval(mk({ operation_id: 'op', method: 'POST', path: '/p', body: { items: new Array(500).fill('x') } }));
+  assert(big.stats.lines > 500 && big.stats.chars > 1000);
+
+  // the server's resolved effect is passed through (and revealed), not dropped
+  const eff = C.describeApproval(mk({ operation_id: 'op', method: 'POST', path: '/p',
+    effect: { summary: 'Runs these commands', commands: [{ check: 'c', run: ['echo‮ hi'] }] } }));
+  assert.strictEqual(eff.effect.commands[0].run[0], 'echo\\u202E hi');
+  assert.strictEqual(eff.effect.summary, 'Runs these commands');
+  assert.strictEqual(C.describeApproval(mk({ operation_id: 'op', method: 'GET', path: '/p' })).effect, null);
+}
+console.log('chat-core S-06 card: ok');
+
+// ── S-06 follow-up: the full invisible-character set ──
+{
+  const hidden = ['؜', '͏', 'ㅤ', '⠀', '️', ' ', '\u0085', '\u007F', '\u{E0041}', '\u{E0100}', '­'];
+  hidden.forEach(function (ch) {
+    const out = C.revealHidden('a' + ch + 'b');
+    assert(out.indexOf(ch) < 0 && /\\u/.test(out), 'revealed: U+' + ch.codePointAt(0).toString(16));
+  });
+  assert.strictEqual(C.revealHidden('a\tb\nc\r\nd é数据 ü'), 'a\tb\nc\r\nd é数据 ü', 'ordinary text, tabs and newlines untouched');
+  assert.strictEqual(C.revealHidden('x\u{E0041}'), 'x\\u{E0041}');
+  const card = C.describeApproval({ approval: { operation_id: 'op‮', method: 'P​OST', path: '/p' }, args: {} });
+  assert(card.title.indexOf('‮') < 0 && card.method.indexOf('​') < 0 && card.hidden === true);
+}
+console.log('chat-core hidden set: ok');

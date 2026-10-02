@@ -180,3 +180,14 @@ def test_capabilities_endpoint_counts_the_real_surface(env):
     assert body["writes"] == sum(1 for e in idx.values() if e["mutating"])
     assert body["reads"] > 50 and body["writes"] > 50
     assert any("/api/workspaces" in x for x in body["excluded"])
+
+
+def test_manual_mode_never_sends_the_workspace_summary(env):
+    """S-21: Manual means "no tools, cannot read the workspace" — so the manifest must not go to the provider either,
+    whatever the client asked for."""
+    client, _, _ = env
+    _turn(client, prompt="hello", mode="manual", include_manifest=True)
+    _turn(client, prompt="hello", mode="ask", include_manifest=True)
+    manual, ask = SEEN["instructions"][-2], SEEN["instructions"][-1]
+    assert '"name":"modes"' not in manual
+    assert '"name":"modes"' in ask
