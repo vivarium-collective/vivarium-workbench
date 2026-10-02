@@ -1,5 +1,6 @@
 import builtins
 import importlib
+import importlib.metadata
 
 from vivarium_workbench.lib import dep_doctor
 
@@ -32,6 +33,32 @@ def test_never_raises_and_flags_a_missing_module(monkeypatch):
     # warn_lines produces one compact line per problem
     lines = dep_doctor.warn_lines(findings)
     assert any("viva_superpowers.test_audit" in ln for ln in lines)
+
+
+def test_version_floor_flags_a_too_old_dep(monkeypatch):
+    monkeypatch.setattr(dep_doctor.importlib.metadata, "version",
+                        lambda dist: "1.4.12" if dist == "process-bigraph" else "9.9.9")
+    findings = dep_doctor.check_framework_deps()          # must not raise
+    pb = next(f for f in findings if f["target"] == "process-bigraph>=1.8.5")
+    assert pb["ok"] is False
+    assert "1.4.12" in pb["detail"]
+    assert pb["fix"]                                       # actionable fix text present
+    assert any(p["target"] == "process-bigraph>=1.8.5" for p in dep_doctor.problems(findings))
+
+
+def test_version_floor_passes_when_current(monkeypatch):
+    monkeypatch.setattr(dep_doctor.importlib.metadata, "version", lambda dist: "2.0.0")
+    findings = dep_doctor.check_framework_deps()
+    pb = next(f for f in findings if f["target"] == "process-bigraph>=1.8.5")
+    assert pb["ok"] is True
+
+
+def test_version_floor_skips_an_uninstalled_dep(monkeypatch):
+    def fake(dist):
+        raise importlib.metadata.PackageNotFoundError(dist)
+    monkeypatch.setattr(dep_doctor.importlib.metadata, "version", fake)
+    findings = dep_doctor.check_framework_deps()          # must not raise
+    assert not any(f["target"].startswith("process-bigraph>=") for f in findings)
 
 
 def test_format_report_is_readable():
