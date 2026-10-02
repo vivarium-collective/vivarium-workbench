@@ -45,16 +45,23 @@
       '" title="emitter / persistence format">' + esc(t) + "</span>";
   }
 
+  // Where the run RAN: its remote deployment while its data is remote, and the backend it ran on once landed
+  // (row.ran_on — a landed run's data is local, so it has no remote_origin, but it did not run here).
   function originLabel(row) {
     var o = row && row.remote_origin;
-    return o ? String(o.deployment || "remote") : "local";
+    if (o) return String(o.deployment || "remote");
+    return (row && row.ran_on) ? String(row.ran_on) : "local";
   }
 
   function originPill(row) {
     var o = row && row.remote_origin;
+    if (!o && row && row.ran_on) {
+      return '<span class="origin-pill origin-remote" title="' +
+        esc("Ran on " + row.ran_on + "; results landed into this workspace") + '">' + esc(row.ran_on) + "</span>";
+    }
     if (!o) return '<span class="origin-pill origin-local" title="local run">local</span>';
     var dep = originLabel(row);
-    var tip = "Remote run on " + dep + " (AWS GovCloud)" +
+    var tip = "Remote run on " + dep +
       (o.simulation_id != null ? " — sim " + o.simulation_id : "") +
       (o.experiment_id ? "\nexperiment: " + o.experiment_id : "") +
       (o.s3_uri ? "\nS3: " + o.s3_uri : "");

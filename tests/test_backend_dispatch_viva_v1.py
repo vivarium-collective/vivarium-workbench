@@ -519,6 +519,27 @@ def test_a_viva_v1_run_shows_in_the_run_list_while_pending_and_as_a_local_store_
     assert row["config"] is None  # the backend's record is provenance, not a reproduction config
 
 
+def test_a_landed_viva_v1_run_still_says_which_backend_it_ran_on(
+        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+    """Regression: once landed, the row has no remote_origin (its data is local), and the Runs table's Origin column
+    -- which read only remote_origin -- flipped from the backend's name to "local". Where a run RAN is separate from
+    where its data IS: the landed row carries ``ran_on`` = the backend, and remote_origin stays None."""
+    _name_backend(monkeypatch, stub.url)
+    stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("completed"))
+    _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
+    c = dashboard_client(ws)
+    assert c.post("/api/remote-run-submit", json={"study": "demo"}).status_code == 202
+    (pending,) = [r for r in c.get("/api/simulations").json()["simulations"]
+                  if r.get("run_id") == f"remote-pending-{RUN_ID}"]
+    backend = pending["remote_origin"]["deployment"]
+    assert backend
+
+    run_id = c.post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID}).json()["run_id"]
+    (row,) = [r for r in c.get("/api/simulations?refresh=true").json()["simulations"] if r.get("run_id") == run_id]
+    assert row["ran_on"] == backend
+    assert row["remote_origin"] is None            # unchanged: the data lives in this workspace now
+
+
 def test_the_run_lists_status_poll_reads_a_viva_v1_run_by_its_own_id(
         ws, stub, clean_backend_env, dashboard_client, monkeypatch):
     """The Runs table polls a pending remote row by the id it recorded; for a /viva/v1 run that is the backend's
@@ -565,3 +586,23 @@ def test_a_string_id_is_not_landed_through_viva_v1_unless_a_document_backend_is_
     res = dashboard_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
     assert res.status_code == 401
     assert stub.calls_to("viva-get-composite-run") == []
+
+
+def test_a_run_landed_before_ran_on_existed_heals_its_origin(ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+    """Runs landed by an older workbench have run-log records without ``ran_on``; the next listing must re-backfill
+    them so their Origin names the backend instead of staying "local"."""
+    _name_backend(monkeypatch, stub.url)
+    stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("completed"))
+    _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
+    c = dashboard_client(ws)
+    assert c.post("/api/remote-run-submit", json={"study": "demo"}).status_code == 202
+    run_id = c.post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID}).json()["run_id"]
+    c.get("/api/simulations?refresh=true")
+    log = ws / ".pbg" / "runs.jsonl"
+    records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    for r in records:
+        r.pop("ran_on", None)                       # what an older workbench wrote
+    log.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+
+    (row,) = [r for r in c.get("/api/simulations?refresh=true").json()["simulations"] if r.get("run_id") == run_id]
+    assert row["ran_on"] and row["remote_origin"] is None
