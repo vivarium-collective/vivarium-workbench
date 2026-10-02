@@ -131,17 +131,23 @@
   }
   window._cardMaximizeBtn = _cardMaximizeBtn;
 
-  function _positionMaximizedCard(card) {
-    // The card's fixed geometry is CSS-driven (see .pcard-maximized) off a single
-    // CSS var so a card re-render can't strip inline positioning. Here we only
-    // (a) publish the rail's right edge so the card clears the menu bar, and
-    // (b) grow the embedded loom to fill from its top to the bottom of the pane.
-    // In an embed IFRAME (Study→Model) there is no rail (it's in the parent,
-    // covered by the full-window iframe), so the card fills from the left edge.
+  // Publish ONLY the rail's right edge. The maximized card's left edge (and hence
+  // width) then tracks the rail purely via CSS (left: calc(var(--vw-rail-right) …)).
+  // Cheap: one rail-rect read + one var write, NO loom-iframe geometry read — so it
+  // is safe to run on every frame of a rail resize (see the rail ResizeObserver).
+  // In an embed IFRAME (Study→Model) there is no rail, so the card fills from x=0.
+  function _publishRailRight() {
     var inIframe = !!(window.parent && window.parent !== window);
     var rail = document.querySelector('.viv-rail');
     var railRight = inIframe ? 0 : (rail ? rail.getBoundingClientRect().right : 240);
     document.documentElement.style.setProperty('--vw-rail-right', railRight + 'px');
+  }
+  function _positionMaximizedCard(card) {
+    // (a) track the rail (cheap) and (b) grow the embedded loom to fill from its top
+    // to the bottom of the pane. The loom HEIGHT depends on the viewport + bottom
+    // docks, NOT on the rail WIDTH, so a rail resize only needs (a) — that heavy
+    // frame.getBoundingClientRect() reflow must stay off the per-frame rail path.
+    _publishRailRight();
     var frame = card.querySelector('.ccard-loom-frame');
     if (frame) {
       var fr = frame.getBoundingClientRect();
@@ -176,15 +182,43 @@
       card._maxEsc = function (e) { if (e.key === 'Escape') _toggleCardMaximize(btn); };
       window.addEventListener('resize', card._maxReposition);
       document.addEventListener('keydown', card._maxEsc);
+      // The card's left edge clears the left rail via --vw-rail-right, but that var is
+      // only republished here — a window resize doesn't fire when the RAIL itself is
+      // resized (drag) or collapsed, so the maximized card would stop tracking the menu.
+      // Observe the rail and track it, but DON'T reflow the heavy maximized content
+      // (loom iframe + config panel) every frame — that's what made the drag stutter.
+      // During a rail-size change we only apply a compositor-only transform so the
+      // card's left edge follows live (no reflow); once the rail SETTLES we drop the
+      // transform and do the real width/loom re-fit exactly once.
+      var railEl = document.querySelector('.viv-rail');
+      if (railEl && window.ResizeObserver) {
+        var _settle = 0, _base = null;
+        card._maxRailRO = new ResizeObserver(function () {
+          var inIframe = !!(window.parent && window.parent !== window);
+          var rr = inIframe ? 0 : railEl.getBoundingClientRect().right;
+          if (_base === null) {
+            _base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--vw-rail-right')) || rr;
+          }
+          card.style.transform = 'translateX(' + Math.round(rr - _base) + 'px)';   // cheap, no reflow
+          if (_settle) clearTimeout(_settle);
+          _settle = setTimeout(function () {
+            _settle = 0; _base = null;
+            card.style.transform = '';
+            if (card.classList.contains('pcard-maximized')) _publishRailRight();    // real re-fit, once
+          }, 90);
+        });
+        card._maxRailRO.observe(railEl);
+      }
       // Re-fit once the Explore section has finished expanding.
       setTimeout(function () { if (card.classList.contains('pcard-maximized')) _positionMaximizedCard(card); }, 120);
     } else {
       btn.title = 'Fill the pane — maximize (Esc to exit)';
-      ['position', 'top', 'left', 'width', 'height', 'zIndex'].forEach(function (p) { card.style[p] = ''; });
+      ['position', 'top', 'left', 'width', 'height', 'zIndex', 'transform'].forEach(function (p) { card.style[p] = ''; });
       var frame = card.querySelector('.ccard-loom-frame');
       if (frame) { frame.style.height = ''; frame.style.maxHeight = ''; }
       if (card._maxReposition) window.removeEventListener('resize', card._maxReposition);
       if (card._maxEsc) document.removeEventListener('keydown', card._maxEsc);
+      if (card._maxRailRO) { card._maxRailRO.disconnect(); card._maxRailRO = null; }
       card._maxReposition = card._maxEsc = null;
       card.scrollIntoView({ block: 'nearest' });
     }

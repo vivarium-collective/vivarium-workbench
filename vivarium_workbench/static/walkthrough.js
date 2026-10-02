@@ -475,7 +475,17 @@
       try {
         var doc = frame.contentDocument;
         if (doc && doc.body && window.ResizeObserver && !frame._roFit) {
-          frame._roFit = new ResizeObserver(function () { fit(true); });
+          // Debounce the refit. A CONTINUOUS container resize — e.g. dragging the
+          // left rail, which reflows the content width every frame — would otherwise
+          // run fit() (a height:0 + scrollHeight measure + scroll-restore, i.e. two
+          // forced iframe reflows) on EVERY frame for EVERY visible embed, which is
+          // what makes the rail drag stutter. Coalesce to one fit ~80ms after the
+          // size settles; late async growth is still covered by the catch-up poll.
+          var _roFitT = 0;
+          frame._roFit = new ResizeObserver(function () {
+            if (_roFitT) clearTimeout(_roFitT);
+            _roFitT = setTimeout(function () { _roFitT = 0; fit(true); }, 80);
+          });
           frame._roFit.observe(doc.body);
           // Observe documentElement too: a tab switch / async chart render can
           // grow the document without changing body's observed box, so a
