@@ -3484,7 +3484,7 @@ class AiOllamaModelsPayload(BaseModel):
 class AiOllamaModelsRequest(BaseModel):
     """``POST /api/ai/ollama-models`` body: the Ollama endpoint to ask (default: the saved one, else localhost)."""
 
-    base_url: Optional[str] = None
+    base_url: Optional[str] = Field(default=None, max_length=2048)
 
 
 class AiCredentialsRequest(BaseModel):
@@ -3492,17 +3492,17 @@ class AiCredentialsRequest(BaseModel):
     ``openai-compatible``) is checked with one real 1-token request to ``model``
     before anything is stored."""
 
-    provider: str
-    model: str
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
+    provider: str = Field(max_length=64)
+    model: str = Field(max_length=256)
+    api_key: Optional[str] = Field(default=None, max_length=8192)
+    base_url: Optional[str] = Field(default=None, max_length=2048)
 
 
 class AiSelectRequest(BaseModel):
     """``POST /api/ai/select`` body — switch provider/model."""
 
-    provider: str
-    model: str
+    provider: str = Field(max_length=64)
+    model: str = Field(max_length=256)
 
 
 class AiOkPayload(BaseModel):
