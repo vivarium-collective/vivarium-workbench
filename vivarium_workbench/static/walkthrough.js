@@ -3622,17 +3622,36 @@
         if (j && j.ok) {
           card._lastOutputs = j.outputs;
           if (typeof _ensureOutputsOpen === 'function') _ensureOutputsOpen(card);
-          // A single isolated update() legitimately returns an empty delta for
-          // many processes — those that accumulate over many steps or emit via
-          // stores rather than their step return value. Say so, instead of the
-          // old unconditional "ran — outputs" that implied data came back.
+          // Distinguish a run that produced actual VALUES from one that returned
+          // only structure. A single isolated update() on the default empty
+          // state is common for multi-entity processes: they return a delta
+          // keyed per agent/cell/field entry, so with zero agents/cells the
+          // output is a "shell" like {agents:{}} / {cells:{}} / {fields:{}} —
+          // ok:true, non-empty at the top level, but with no leaf data. A bare
+          // Object.keys()==0 check misses those shells, so walk for any leaf: a
+          // scalar (incl. 0 / false / "") is data; an empty container is not.
+          var _hasData = function (v) {
+            if (v === null || v === undefined) return false;
+            if (Array.isArray(v)) return v.some(_hasData);
+            if (typeof v === 'object') return Object.keys(v).some(function (k) { return _hasData(v[k]); });
+            return true;
+          };
           var _o = j.outputs;
-          var _empty = (_o === null || _o === undefined) ||
-            (Array.isArray(_o) ? _o.length === 0 :
-              (typeof _o === 'object' ? Object.keys(_o).length === 0 : false));
-          if (_empty) {
-            out.innerHTML = '<div class="loom-run-ok">✓ ran — no outputs returned</div>' +
-              '<div class="muted" style="font-size:0.85em;margin-top:4px">A single update step produced an empty result. Many processes only produce output over multiple steps, or emit through stores/emitters rather than their step return value — usually expected, not an error.</div>';
+          if (!_hasData(_o)) {
+            // Shell (e.g. {agents:{}}) vs literal {}/null/[] — show the shell's
+            // structure in a collapsible so the user sees WHAT came back empty.
+            var _literalEmpty = (_o === null || _o === undefined) ||
+              (Array.isArray(_o) ? _o.length === 0 :
+                (typeof _o === 'object' ? Object.keys(_o).length === 0 : false));
+            var _rawDetails = _literalEmpty ? '' :
+              '<details style="margin-top:4px"><summary style="cursor:pointer">raw output</summary>' +
+              '<pre style="font-size:0.8em;white-space:pre-wrap;margin:4px 0 0">' +
+              _esc(JSON.stringify(_o, null, 2)) + '</pre></details>';
+            out.innerHTML = '<div class="loom-run-ok">✓ ran — no data produced</div>' +
+              '<div class="muted" style="font-size:0.85em;margin-top:4px">The process ran but returned no values. ' +
+              'Many processes emit a delta keyed per agent/cell/field entry, so a single run on the default empty ' +
+              'state has nothing to populate — seed state (agents, a sized field) in Configure, or run it inside ' +
+              'its composite. This is expected, not an error.' + _rawDetails + '</div>';
           } else {
             var dl = card.querySelector('.pcard-dl'); if (dl) { dl.disabled = false; dl.title = 'Download outputs (JSON)'; }
             out.innerHTML = '<div class="loom-run-ok">✓ ran — outputs' +
