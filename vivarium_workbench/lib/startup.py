@@ -51,6 +51,11 @@ class _BasePathStripMiddleware:
         await self.app(scope, receive, send)
 
 
+# A stop waits this long for open requests before cancelling them. Without a limit uvicorn waits for ever, and an
+# open Claude Code approval (a request held open for the user, lib/claude_mcp.py) would keep a Ctrl-C from ever finishing.
+GRACEFUL_SHUTDOWN_S = 10
+
+
 def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path: str = "") -> int:
     """Boot the FastAPI dashboard app under uvicorn against ``workspace``.
 
@@ -265,6 +270,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     app.state.base_path = base_path
     # Where the server is bound decides where LLM keys may live (lib/ai_auth.storage_mode).
     app.state.bind_host = host
+    app.state.bind_port = port        # Claude Code reaches the app's own MCP endpoint here (lib/claude_mcp.py)
     # The chat is on by default only when the server is private to this machine (VIVARIUM_WORKBENCH_CHAT overrides).
     from vivarium_workbench.lib import ai_auth, csrf
     ai_auth.configure_default(ai_auth.default_enabled_for_bind(
@@ -289,5 +295,6 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     uvicorn.run(
         served, host=host, port=port, log_level="info",
         proxy_headers=True, forwarded_allow_ips="*",
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S,
     )
     return 0

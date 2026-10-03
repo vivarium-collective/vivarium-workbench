@@ -118,17 +118,13 @@ def test_a_hosted_server_never_lends_its_claude_login(monkeypatch):
     assert ai_auth.get_credential("claude-code", mode="keyring", session=None).source == "cli"
 
 
-def test_chat_turn_is_refused_on_a_hosted_server_and_outside_manual_mode(tmp_path, monkeypatch):
+def test_chat_turn_is_refused_on_a_hosted_server_in_every_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(claude_cli, "logged_in", lambda: True)
     hosted = TestClient(_app("0.0.0.0", tmp_path))
     ai_auth.set_selection("claude-code", MODEL, mode="memory", session="tab-1")
-    r = hosted.post("/api/chat/turn", json={"messages": [], "prompt": "hi", "mode": "manual"}, headers=H)
-    assert r.status_code == 409 and "not available" in r.json()["error"]
-    local = TestClient(_app("127.0.0.1", tmp_path), base_url="http://127.0.0.1:8000")
-    ai_auth.set_selection("claude-code", MODEL, mode="keyring", session=None)
-    for mode in ("ask", "agent"):
-        r = local.post("/api/chat/turn", json={"messages": [], "prompt": "hi", "mode": mode})
-        assert r.status_code == 422 and "Manual" in r.json()["error"]
+    for mode in ("manual", "ask", "agent"):            # a shared server never offers one login to many visitors
+        r = hosted.post("/api/chat/turn", json={"messages": [], "prompt": "hi", "mode": mode}, headers=H)
+        assert r.status_code == 409 and "not available" in r.json()["error"]
 
 
 def test_the_child_leaves_a_parent_claude_code_session_but_keeps_the_users_own_settings():
@@ -481,10 +477,12 @@ def test_a_turns_own_text_cannot_forge_another_speaker():
     assert p.count("<assistant>") == 1 and p.count("</assistant>") == 1
 
 
-def test_manual_mode_only_and_local_only_are_enforced_by_the_runner_itself():
-    ai_claude_code.check_supported("manual", False, "keyring")
-    for args, code in [(("manual", False, "memory"), 409), (("ask", False, "keyring"), 422),
-                       (("agent", False, "keyring"), 422), (("manual", True, "keyring"), 422)]:
+def test_local_only_and_approvals_only_with_tools_are_enforced_by_the_runner_itself():
+    for mode in ("manual", "ask", "agent"):
+        ai_claude_code.check_supported(mode, False, "keyring")
+    ai_claude_code.check_supported("agent", True, "keyring")
+    for args, code in [(("manual", False, "memory"), 409), (("agent", False, "memory"), 409),
+                       (("manual", True, "keyring"), 422)]:       # no tools in Manual: nothing to approve
         with pytest.raises(APIError) as e:
             ai_claude_code.check_supported(*args)
         assert e.value.status_code == code

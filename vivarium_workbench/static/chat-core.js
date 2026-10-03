@@ -587,7 +587,7 @@
     },
   };
   var ENDPOINT_NOTES = {
-    'claude-code': 'Runs the `claude` on this machine, in Manual mode for now. Sign in once with `claude auth login` in a terminal.',
+    'claude-code': 'Runs the `claude` on this machine, in Manual, Ask and Agent mode. Sign in once with `claude auth login` in a terminal.',
     'openai-compatible': 'Any OpenAI-style endpoint (vLLM, OpenRouter, …): enter openai-compatible/<model> below, then set its Base URL.',
   };
   function modelTree(registry, known, selected, installed) {
