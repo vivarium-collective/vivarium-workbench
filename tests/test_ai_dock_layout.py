@@ -47,17 +47,17 @@ def test_both_panels_default_to_the_right_dock():
     assert "defaultDock: 'right'" in (STATIC / "process-code.js").read_text()
 
 
-def test_the_rail_tab_is_called_chat_and_the_panel_keeps_the_viva_name():
+def test_the_rail_tab_and_the_panel_are_both_called_chat():
     html = (STATIC.parent / "templates" / "index.html.j2").read_text()
     rail = html[html.index('id="viv-ai-toggle"'):][:900]
-    # the LEFT-RAIL TAB is just "Chat" (pairs with the "Code" tab)
+    # the LEFT-RAIL TAB is "Chat" (pairs with the "Code" tab)
     assert 'title="Chat"' in rail and '<span class="viv-rail-link-label">Chat</span>' in rail
     chat_js = (STATIC / "chat.js").read_text()
     assert "el.toggle.title = 'Chat — click to toggle" in chat_js             # the tab's runtime tooltip
-    # the panel itself keeps the VivaChat name (product identity, not the tab)
-    assert 'id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="VivaChat"' in html
-    assert '<span>VivaChat</span><span class="vp-spacer">' in chat_js         # panel header
-    assert "<span>VivaChat</span>'" in chat_js                                 # drag ghost
+    # the panel header is "Chat" too (renamed from VivaChat)
+    assert 'id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="Chat"' in html
+    assert '<span>Chat</span><span class="vp-spacer">' in chat_js             # panel header
+    assert "<span>Chat</span>'" in chat_js                                     # drag ghost
 
 
 # ── The process-code panel is a dockable panel too, built on the same shared engine ──
@@ -134,14 +134,20 @@ def test_popout_window_seeds_the_parent_session_before_session_js():
     assert "popout" in seed_block
 
 
-def test_both_panels_expose_a_pop_out_control():
+def test_both_panels_expose_pop_out_inside_the_dock_menu():
+    # Pop-out shares the dock menu now (one "move this panel" control), not a
+    # separate header button.
     chat = (STATIC / "chat.js").read_text()
-    assert 'data-act="popout"' in chat and "VivPanelDock.popout('chat')" in chat
+    assert "VivPanelDock.popout('chat')" in chat                # reached from the chat's dock menu
+    assert 'data-act="popout"' not in chat                      # the standalone header button is gone
     code_js = (STATIC / "process-code.js").read_text()
     assert "function popout" in code_js and "VivPanelDock.popout('code'" in code_js
-    assert "popout: popout" in code_js                          # exported on window.ProcessCode
+    assert "popout: popout" in code_js                          # passed into VivPanelDock.make → dock menu
+    dock = (STATIC / "panel-dock.js").read_text()
+    assert 'data-act="popout"' in dock and "opts.popout" in dock   # the shared dock menu's Pop out item
     html = TEMPLATE.read_text()
-    assert "ProcessCode.popout()" in html                       # the code panel header's ⧉ button
+    assert "ProcessCode.popout()" not in html                   # no standalone ⧉ button in the code header
+    assert "ProcessCode.browseMenu(this)" in html               # the code header's new Browse button
 
 
 def test_popout_body_renders_only_that_panel_full_window():
@@ -158,11 +164,12 @@ def test_code_head_reuses_the_chat_panel_chrome():
     html = TEMPLATE.read_text()
     assert 'class="viv-code-head vp-head"' in html               # same header bar as the chat
     head = html[html.index('class="viv-code-head vp-head"'):][:2000]
-    # three .vp-icon controls: pop-out, dock, close — same as the chat header
+    # three .vp-icon controls: browse, dock, close — same chrome as the chat header
+    # (pop-out moved into the dock menu).
     assert head.count('class="vp-icon"') >= 3
-    assert "ProcessCode.popout()" in head and "ProcessCode.dockMenu(this)" in head and "ProcessCode.toggle()" in head
-    # the pop-out icon is the SAME external-link glyph the chat uses
-    assert 'd="M14 3h7v7"' in head
+    assert "ProcessCode.browseMenu(this)" in head and "ProcessCode.dockMenu(this)" in head and "ProcessCode.toggle()" in head
+    # the pop-out external-link glyph now lives in the shared dock menu (panel-dock.js)
+    assert 'd="M14 3h7v7"' in (STATIC / "panel-dock.js").read_text()
     # the code rail carries the chat's --c-* design tokens so .vp-* renders identically
     assert ".viv-code-rail" in (STATIC / "chat.css").read_text().split("--c-bg")[0]
 
@@ -175,3 +182,16 @@ def test_both_panels_share_one_dock_menu():
     code_js = (STATIC / "process-code.js").read_text()
     assert "function dockMenu" in code_js and "dockMenu: dockMenu" in code_js
     assert "openDockMenu: openDockMenu" in js                     # exposed on the controller
+
+
+def test_code_panel_can_browse_processes_and_composites():
+    """The Code header has a Browse control that lists available Processes and
+    Composites and opens the pick straight into the panel — no Registry trip."""
+    html = TEMPLATE.read_text()
+    assert "ProcessCode.browseMenu(this)" in html                 # the header's Browse button
+    js = (STATIC / "process-code.js").read_text()
+    assert "function browseMenu" in js and "browseMenu: browseMenu" in js
+    # it loads both lists and opens either kind via the existing loaders
+    assert "/api/registry" in js and "/api/composites" in js
+    assert "openProcess(" in js and "openComposite(" in js
+    assert "vp-browse-menu" in (STATIC / "style.css").read_text()  # styled dropdown

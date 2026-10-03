@@ -42,6 +42,9 @@
     right:  svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
     bottom: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14h18"/>'),
   };
+  // Pop-out shares the dock dropdown (one "move this panel" menu) instead of a
+  // separate header button.
+  var POPOUT_GLYPH = svg('<path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>');
 
   // A single shared dock dropdown (only one open at a time). Uses the chat's .vp-pop /
   // .vp-pop-item chrome so it matches the rest of the panel UI.
@@ -133,16 +136,24 @@
       var menu = document.createElement('div');
       menu.className = 'vp-pop vp-dock-menu';
       menu.setAttribute('role', 'menu');
-      menu.innerHTML = C.DOCKS.map(function (z) {
+      var html = C.DOCKS.map(function (z) {
         return '<button type="button" role="menuitemradio" aria-checked="' + (dock === z) + '" ' +
           'class="vp-pop-item' + (dock === z ? ' on' : '') + '" data-zone="' + z + '">' +
           DOCK_GLYPH[z] + '<span>Dock ' + z + '</span></button>';
       }).join('');
+      // Pop-out as the last item of the same menu (only if this panel supports it).
+      if (typeof opts.popout === 'function') {
+        html += '<div class="vp-pop-sep" role="separator"></div>' +
+          '<button type="button" role="menuitem" class="vp-pop-item" data-act="popout">' +
+          POPOUT_GLYPH + '<span>Pop out</span></button>';
+      }
+      menu.innerHTML = html;
       document.body.appendChild(menu);
       var r = anchor.getBoundingClientRect();
       menu.style.top = Math.round(r.bottom + 4) + 'px';
       menu.style.left = Math.round(Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + 'px';
       menu.addEventListener('click', function (ev) {
+        if (ev.target.closest('[data-act="popout"]')) { closeMenu(); opts.popout(); return; }
         var b = ev.target.closest('[data-zone]'); if (!b) return;
         dockTo(b.getAttribute('data-zone'), true);
         if (!isOpen()) setOpen(true);
