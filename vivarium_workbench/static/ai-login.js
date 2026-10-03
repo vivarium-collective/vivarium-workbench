@@ -22,7 +22,7 @@
   };
   var ENV = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', google: 'GOOGLE_API_KEY' };
   var OLLAMA_DEFAULT = 'http://localhost:11434/v1';
-  var KEYLESS = ['bedrock', 'ollama'];
+  var KEYLESS = ['bedrock', 'ollama', 'claude-code'];
   var name = function (p) { return C.providerMeta(p).label; };
   var status = null;
   var provider = 'openai';                          // implied by the model chosen in the Model menu (there is no separate Provider control)
@@ -69,9 +69,13 @@
     } else if (r && r.configured) {
       var src = r.source === 'environment' ? 'from the server environment (' + (ENV[p] || 'env') + ')'
         : r.source === 'aws' ? 'using the server\'s AWS credentials'
+        : r.source === 'cli' ? 'signed in — uses the `claude` on this machine (nothing is stored here)'
         : p === 'ollama' ? 'connected at ' + (r.base_url || OLLAMA_DEFAULT)
         : 'saved (' + r.source + ')';
       el.status.textContent = name(p) + ' — ' + src;
+      el.save.disabled = false;
+    } else if (p === 'claude-code') {
+      el.status.textContent = 'Claude Code — not available: it needs a local server and the `claude` command signed in (run `claude auth login` in a terminal)';
       el.save.disabled = false;
     } else {
       el.status.textContent = name(p) + ' — not configured';
@@ -85,7 +89,9 @@
     if (r && r.base_url && !el.url.value) el.url.value = r.base_url;
     var sel = status.selected;
     if (sel && sel.provider === p && !model) model = sel.model;
-    el.storage.textContent = status.storage_mode === 'keyring'
+    el.storage.textContent = p === 'claude-code'
+      ? 'Claude Code stores nothing in the workbench: it uses the login of the `claude` command on this machine.'
+      : status.storage_mode === 'keyring'
       ? 'Keys go to your operating-system keyring (kept in this server\'s memory only if no keyring is available).'
       : 'Hosted server: keys are kept in server memory for this browser session only and are never written to disk.';
     el.save.textContent = configured && !el.key.value && !KEYLESS.concat(['opencode']).some(function (x) { return x === p; })

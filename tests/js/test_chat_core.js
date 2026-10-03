@@ -286,7 +286,7 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
 // ── providers + model dropdown helpers (marimo groups models by provider with icon + count) ──
 {
   assert.deepStrictEqual(C.PROVIDERS.map(p => p.id),
-    ['openai', 'anthropic', 'google', 'ollama', 'opencode', 'bedrock', 'openai-compatible']);
+    ['openai', 'anthropic', 'google', 'ollama', 'opencode', 'bedrock', 'claude-code', 'openai-compatible']);
   assert.strictEqual(C.providerMeta('opencode').label, 'OpenCode Go');
   assert.strictEqual(C.providerMeta('ollama').label, 'Ollama');
   assert.strictEqual(C.providerMeta('mystery').label, 'mystery', 'unknown providers degrade gracefully');
@@ -301,15 +301,15 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   };
   const sel = { provider: 'ollama', model: 'qwen3.6:27b' };
   const tree = C.modelTree(registry, { ollama: ['my-tune'], 'openai-compatible': ['gpt-x'] }, sel);
-  assert.deepStrictEqual(tree.map(g => g.id), ['anthropic', 'ollama', 'openai-compatible'], 'marimo order; empty providers omitted');
+  assert.deepStrictEqual(tree.map(g => g.id), ['anthropic', 'ollama', 'claude-code', 'openai-compatible'], 'marimo order, then Claude Code; empty providers omitted');
   const oll = tree.find(g => g.id === 'ollama');
   assert.deepStrictEqual(oll.models.map(m => m.model), ['qwen3.6:27b', 'my-tune', 'glm-5.3'], 'custom first (selected, then newest), then the registry');
   assert(oll.models.some(m => m.model === 'qwen3.6:27b' && m.custom && m.on), 'the selected model is listed and marked, even if custom');
   assert(oll.models.some(m => m.model === 'glm-5.3' && !m.custom && m.thinking), 'registry models keep the reasoning flag');
   assert.strictEqual(oll.description, 'local');
   assert(tree.every(g => g.mark && g.color));
-  assert.deepStrictEqual(C.modelTree({}, {}, null).map(g => g.id), ['openai-compatible'], 'with no catalogue only the endpoint provider stays listed (the menu is the only provider chooser)');
-  assert.deepStrictEqual(C.modelTree(null, null, null).map(g => g.id), ['openai-compatible'], 'null inputs behave like empty ones');
+  assert.deepStrictEqual(C.modelTree({}, {}, null).map(g => g.id), ['claude-code', 'openai-compatible'], 'with no registry only the built-in Claude Code list and the endpoint provider stay listed (the menu is the only provider chooser)');
+  assert.deepStrictEqual(C.modelTree(null, null, null).map(g => g.id), ['claude-code', 'openai-compatible'], 'null inputs behave like empty ones');
 
   // "Enter a custom model": provider/model like marimo; anything else belongs to the fallback provider
   assert.deepStrictEqual(C.parseQualified('ollama/qwen3.6:27b', 'openai'), { provider: 'ollama', model: 'qwen3.6:27b' });
@@ -517,3 +517,17 @@ console.log('chat-core S-06 card: ok');
   assert(card.title.indexOf('‮') < 0 && card.method.indexOf('​') < 0 && card.hidden === true);
 }
 console.log('chat-core hidden set: ok');
+
+// ── Claude Code is not in marimo's registry: it ships its own aliases, under the registry, with a note ──
+{
+  const cc = C.modelTree({}, {}, null).find(g => g.id === 'claude-code');
+  assert(cc, 'Claude Code is listed without any registry entry');
+  assert.deepStrictEqual(cc.models.map(m => m.model), ['sonnet', 'opus', 'haiku']);
+  assert(/claude auth login/.test(cc.note) && /Manual/.test(cc.note), 'the menu says how to sign in and that it is Manual-only for now');
+  const sel = C.modelTree({}, {}, { provider: 'claude-code', model: 'opus' }).find(g => g.id === 'claude-code');
+  assert.deepStrictEqual(sel.models.filter(m => m.on).map(m => m.model), ['opus']);
+  const reg = { 'claude-code': { models: [{ model: 'sonnet-x', name: 'X' }] } };
+  assert.deepStrictEqual(C.modelTree(reg, {}, null).find(g => g.id === 'claude-code').models.map(m => m.model), ['sonnet-x'], 'a registry entry wins over the built-in list');
+  assert.deepStrictEqual(C.parseQualified('claude-code/sonnet', null), { provider: 'claude-code', model: 'sonnet' });
+}
+console.log('chat-core Claude Code menu entry: ok');

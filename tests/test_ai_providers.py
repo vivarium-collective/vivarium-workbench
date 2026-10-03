@@ -126,8 +126,9 @@ def _client(bind="127.0.0.1"):
 
 
 def test_provider_list_follows_marimos_order_and_includes_the_new_ones():
+    # marimo's order, then claude-code (not marimo's: the user's own `claude` CLI), then the generic entry
     assert ai_auth.PROVIDERS == ("openai", "anthropic", "google", "ollama", "opencode",
-                                 "bedrock", "openai-compatible")
+                                 "bedrock", "claude-code", "openai-compatible")
 
 
 def test_ollama_needs_no_key_and_defaults_its_base_url():

@@ -40,6 +40,7 @@ import yaml
 # import it lazily from request handlers, so silence it here, before any of them.
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
+from vivarium_workbench.lib import claude_cli as _claude  # noqa: E402
 from vivarium_workbench.lib import csrf as _csrf  # noqa: E402
 from vivarium_workbench.lib.atomic_io import atomic_write_text  # noqa: E402
 from vivarium_workbench.lib.errors import APIError
@@ -50,9 +51,10 @@ KEYRING_SERVICE = "vivarium-workbench-llm"
 INSTALL_HINT = "chat extra not installed: pip install 'vivarium-workbench[chat]'"
 
 # Order follows marimo's AI Providers tab (OpenAI, Anthropic, Google, Ollama, OpenCode Go,
-# Bedrock, then the generic OpenAI-compatible entry).
-PROVIDERS = ("openai", "anthropic", "google", "ollama", "opencode", "bedrock", "openai-compatible")
-Provider = Literal["openai", "anthropic", "google", "ollama", "opencode", "bedrock", "openai-compatible"]
+# Bedrock, then the generic OpenAI-compatible entry). ``claude-code`` is not in marimo's set: it is
+# the user's own signed-in `claude` CLI (lib/claude_cli.py) — no key, loopback-only.
+PROVIDERS = ("openai", "anthropic", "google", "ollama", "opencode", "bedrock", "claude-code", "openai-compatible")
+Provider = Literal["openai", "anthropic", "google", "ollama", "opencode", "bedrock", "claude-code", "openai-compatible"]
 
 # Ollama: marimo's placeholder base URL; no API key.
 OLLAMA_DEFAULT = "http://localhost:11434/v1"
@@ -60,7 +62,7 @@ OLLAMA_DEFAULT = "http://localhost:11434/v1"
 # base URL fixed. Its /models list is public, which powers the model dropdown.
 OPENCODE_BASE = "https://opencode.ai/zen/go/v1"
 StorageMode = Literal["keyring", "memory"]
-Source = Literal["keyring", "memory", "environment", "aws", "config"]
+Source = Literal["keyring", "memory", "environment", "aws", "config", "cli"]
 
 # Providers with no secret to store: only an endpoint. It goes in ai.yaml, never the keychain —
 # a URL is not a secret, and a keychain read is what makes macOS ask "python wants to use
@@ -280,6 +282,10 @@ def get_credential(provider: str, *, mode: StorageMode, session: str | None) -> 
     or hosted ones whose operator opted in) the server's environment / AWS role.
     A hosted server never lends its own credentials to anonymous sessions by default."""
     ambient = mode == "keyring" or server_credentials_allowed()
+    if provider == _claude.PROVIDER:
+        # Never lent on a shared server (one login would serve every visitor), and nothing is stored here:
+        # "configured" only means the machine's own `claude` says it is signed in.
+        return Credential(source="cli") if (mode == "keyring" and _claude.logged_in()) else None
     if provider == "bedrock":
         return Credential(source="aws") if (ambient and _aws_credentials_present()) else None
     if mode == "keyring":
@@ -334,6 +340,12 @@ def validate_request(provider: str, api_key: str | None, base_url: str | None,
     if provider not in PROVIDERS:
         raise APIError(422, f"unknown provider '{provider}'", providers=list(PROVIDERS))
     api_key = (api_key or "").strip() or None
+    if provider == _claude.PROVIDER:
+        if mode != "keyring":
+            raise APIError(422, "claude-code is only available on a local (loopback) server")
+        if api_key or base_url:
+            raise APIError(422, "claude-code takes no key or base_url: sign in with `claude auth login` in a terminal")
+        return None, None
     if provider == "bedrock":
         if api_key or base_url:
             raise APIError(422, "bedrock uses the server's ambient AWS credentials; "
@@ -529,6 +541,8 @@ def build_model(provider: str, model: str, cred: Credential):
     if provider == "bedrock":
         from pydantic_ai.models.bedrock import BedrockConverseModel
         return BedrockConverseModel(model)
+    if provider == _claude.PROVIDER:
+        raise APIError(422, "claude-code runs its own loop (lib/ai_claude_code.py); it is not a pydantic-ai model")
     raise APIError(422, f"unknown provider '{provider}'")
 
 
@@ -545,6 +559,16 @@ async def check_key(provider: str, model: str, cred: Credential) -> None:
     :func:`mask_key`.
     """
     require_chat()
+    if provider == _claude.PROVIDER:
+        try:
+            async with asyncio.timeout(CHECK_KEY_TIMEOUT):
+                await _claude.check(model)
+        except TimeoutError:
+            raise APIError(504, f"claude did not answer within {CHECK_KEY_TIMEOUT:g} s") from None
+        except _claude.ClaudeCliError as e:
+            msg = mask_key(str(e))
+            raise APIError(401 if "not signed in" in msg else 422 if "model" in msg.lower() else 502, msg) from None
+        return
     from pydantic_ai import Agent
     from pydantic_ai.exceptions import ModelHTTPError
 
