@@ -215,6 +215,9 @@
     host.innerHTML = '<p class="muted" style="padding:10px;font-size:0.85em">Resolving composite (this can take a moment)…</p>';
     var apiUrl = (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
     var tabParam = det.getAttribute('data-view') ? '&tab=' + encodeURIComponent(det.getAttribute('data-view')) : '';
+    // data-graph="open" (set by "fill the pane" / pop-out) → mount the loom with
+    // the graph already expanded, so a full view lands on it without a grip-click.
+    var graphParam = det.getAttribute('data-graph') === 'open' ? '&graph=open' : '';
     var liveInner = document.body.classList.contains('snapshot')
       ? '' : '&id=' + encodeURIComponent(id) + '&live=1';
     var fullSurface = det.getAttribute('data-surface') === 'full';
@@ -238,9 +241,9 @@
     } catch (e) { /* VivEnv unavailable → default local behavior */ }
     var loomUrl = (det._loomLive || (fullSurface && !isSnapshot))
       ? apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id) +
-          (det._overrides ? '&overrides=' + encodeURIComponent(det._overrides) : '') + chromeParam + tabParam + rtParam
+          (det._overrides ? '&overrides=' + encodeURIComponent(det._overrides) : '') + chromeParam + tabParam + rtParam + graphParam
       : apiUrl('/bigraph-loom/index.html') + '?static=1&stateUrl=' +
-          encodeURIComponent(_compositeStateUrl(id, det._overrides)) + liveInner + chromeParam + tabParam;
+          encodeURIComponent(_compositeStateUrl(id, det._overrides)) + liveInner + chromeParam + tabParam + graphParam;
     var f = document.createElement('iframe');
     f.className = 'ccard-loom-iframe' + (fullSurface ? ' ccard-loom-iframe-full' : '');
     f.setAttribute('title', 'Loom — ' + id);

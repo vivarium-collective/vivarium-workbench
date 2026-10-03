@@ -116,7 +116,10 @@
     if (!id) return;
     var apiUrl = (window.DataSource && window.DataSource.apiUrl)
       ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
-    var url = apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id);
+    // Pop-out lands on the graph too. The standalone loom already opens with the
+    // graph visible (no ?header=off), but pass ?graph=open explicitly so the intent
+    // survives any change to that default.
+    var url = apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id) + '&graph=open';
     try { url = new URL(url, window.location.href).href; } catch (e) { /* keep relative */ }
     window.open(url, '_blank',
       'width=1180,height=940,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
@@ -171,7 +174,12 @@
     document.body.classList.toggle('pcard-maximized', on);
     if (on) {
       btn.title = 'Restore (Esc)';
-      // Make sure the Explore section is open so the loom is actually visible.
+      // Fill-the-pane lands on the graph, not on the compact run+outputs strip:
+      // mark the embed so the loom lazy-mounts with its graph expanded
+      // (loom-embed.js turns data-graph="open" into ?graph=open). Then open the
+      // Explore section so the loom is actually visible.
+      var _lembed = card.querySelector('.ccard-loom-embed');
+      if (_lembed) _lembed.setAttribute('data-graph', 'open');
       var explore = card.querySelector('.pcard-sec-explore');
       if (explore && !explore.classList.contains('pcard-sec-open')) {
         var head = explore.querySelector('.pcard-sec-head');
