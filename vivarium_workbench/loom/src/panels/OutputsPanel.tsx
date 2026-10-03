@@ -126,6 +126,7 @@ export function OutputsPanel(props: OutputsPanelProps) {
             runId={props.runId}
             downloadable={props.downloadable}
             readOnly={props.readOnly}
+            isRunning={props.isRunning}
           />
         )}
         {activeTab === 'visualizations' && (
