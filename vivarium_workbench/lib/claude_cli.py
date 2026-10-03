@@ -24,6 +24,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -108,7 +109,7 @@ class Attach:
 
 
 def build_argv(exe: str, model: str, system_prompt: str, mcp_config_path: str | None = None,
-               attach: Attach | None = None) -> list[str]:
+               attach: Attach | None = None, plugin_dirs: tuple[str, ...] | None = None) -> list[str]:
     """Plain chat (no ``attach``): no built-in tools, no MCP servers, none of the user's settings (so no plugins,
     hooks, skills or CLAUDE.md), nothing written to disk.
 
@@ -116,15 +117,67 @@ def build_argv(exe: str, model: str, system_prompt: str, mcp_config_path: str | 
     skill can be LOADED but whatever it asks for beyond the workbench tools has nowhere to run), MCP servers are
     only the workbench's own (``--strict-mcp-config``), the user's settings are read so their installed plugins and
     skills load natively, and ``--permission-prompts none`` denies automatically anything not pre-allowed — so the
-    only things that can run are the workbench's four tools and ``Skill``."""
+    only things that can run are the workbench's four tools and ``Skill``.
+
+    ``plugin_dirs`` (opt-in, see ``plugin_allowlist``): read none of the user's settings and load exactly these plugin
+    directories (``--plugin-dir``), so only the allowed plugins' skills reach the model. ``None`` (the default) leaves
+    the argv exactly as described above."""
     head = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
             "--include-partial-messages"]
     tail = ["--no-session-persistence", "--model", model, "--system-prompt", system_prompt]
     if attach is None:
         return head + ["--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands"] + tail
-    return head + ["--tools", "Skill", "--strict-mcp-config", "--mcp-config", str(mcp_config_path),
-                   "--allowedTools", ",".join((*attach.allowed, "Skill")), "--permission-prompts", "none",
-                   "--setting-sources", setting_sources()] + tail
+    mid = ["--tools", "Skill", "--strict-mcp-config", "--mcp-config", str(mcp_config_path),
+           "--allowedTools", ",".join((*attach.allowed, "Skill")), "--permission-prompts", "none"]
+    if plugin_dirs is None:
+        return head + mid + ["--setting-sources", setting_sources()] + tail
+    return head + mid + ["--setting-sources", ""] + [a for d in plugin_dirs for a in ("--plugin-dir", d)] + tail
+
+
+_PLUGIN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(@[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$")
+
+
+def plugin_allowlist() -> tuple[str, ...] | None:
+    """Opt-in restriction of the plugins a tool-using chat loads (``VIVARIUM_WORKBENCH_CLAUDE_PLUGINS``). Unset,
+    empty or ``all`` (the default): ``None``, the user's plugins load natively as before. ``none``: ``()``. Otherwise a
+    comma-separated list of installed plugin ids (``viva-superpowers`` or ``viva-superpowers@viva-superpowers``). A name
+    that is not a plain plugin id is refused (it only ever lands in an argv list, never a shell, but is validated anyway)."""
+    from vivarium_workbench.lib.env_compat import get_env
+    raw = (get_env("CLAUDE_PLUGINS", "") or "").strip()
+    if raw.lower() in ("", "all"):
+        return None
+    if raw.lower() == "none":
+        return ()
+    names = tuple(n.strip() for n in raw.split(",") if n.strip())
+    bad = [n for n in names if not _PLUGIN_ID.fullmatch(n)]
+    if bad or not names:
+        raise ClaudeCliError("VIVARIUM_WORKBENCH_CLAUDE_PLUGINS must be `all`, `none` or a comma-separated list of plugin "
+                             f"ids like `viva-superpowers` (not accepted: {', '.join(repr(b[:40]) for b in bad) or repr(raw[:40])})")
+    return names
+
+
+def resolve_plugin_dirs(exe: str, names: tuple[str, ...]) -> tuple[str, ...]:
+    """The install directories of the allowed plugins, asked of the user's own ``claude plugin list --json`` (the CLI's
+    own record of what is installed and enabled; nothing is read from ``~/.claude`` here). A name that is not an
+    installed, enabled plugin is an error, not silently dropped."""
+    if not names:
+        return ()
+    try:
+        out = subprocess.run([exe, "plugin", "list", "--json"], capture_output=True, text=True, timeout=30,
+                             env=child_env(), stdin=subprocess.DEVNULL, check=False, cwd=tempfile.gettempdir()).stdout
+        rows = [r for r in json.loads(out) if isinstance(r, dict)]
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        raise ClaudeCliError("could not read the list of installed plugins from `claude plugin list --json`") from None
+    dirs: list[str] = []
+    for name in names:
+        hit = [r["installPath"] for r in rows
+               if r.get("enabled") and isinstance(r.get("id"), str) and name in (r["id"], r["id"].split("@")[0])
+               and isinstance(r.get("installPath"), str) and os.path.isdir(r["installPath"])]
+        if not hit:
+            raise ClaudeCliError(f"VIVARIUM_WORKBENCH_CLAUDE_PLUGINS names `{name}`, which is not an installed, enabled "
+                                 "Claude Code plugin (see `claude plugin list`)")
+        dirs.extend(d for d in hit if d not in dirs)
+    return tuple(dirs)
 
 
 def setting_sources() -> str:
@@ -193,7 +246,14 @@ class ClaudeSession:
         self._tmp = tempfile.TemporaryDirectory(prefix="vw-claude-")
         cfg_path: str | None = None
         env = child_env()
+        plugin_dirs: tuple[str, ...] | None = None
         if self.attach is not None:
+            try:
+                allow = plugin_allowlist()
+                plugin_dirs = None if allow is None else await asyncio.to_thread(resolve_plugin_dirs, exe, allow)
+            except ClaudeCliError:
+                self._tmp.cleanup()
+                raise
             # The MCP config carries this process's bearer token: a 0600 file in its private directory, not argv.
             cfg_path = os.path.join(self._tmp.name, ".mcp.json")
             fd = os.open(cfg_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -204,7 +264,7 @@ class ClaudeSession:
             env["MCP_TOOL_TIMEOUT"] = env["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"] = str(int((TURN_MAX_S + 300) * 1000))
         try:
             self.proc = await asyncio.create_subprocess_exec(
-                *build_argv(exe, self.model, self.system_prompt, cfg_path, self.attach),
+                *build_argv(exe, self.model, self.system_prompt, cfg_path, self.attach, plugin_dirs),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 cwd=self._tmp.name, env=env, limit=LINE_LIMIT, start_new_session=True)
         except OSError as e:
