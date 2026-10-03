@@ -318,10 +318,16 @@ export default function App() {
   const WIDE_CARD_GRAPH_PX = 720;
   const CLICK_SLOP_PX = 4;   // pointer travel under this = a click, not a drag
   const [graphHeight, setGraphHeight] = useState<number | null>(hideHeader ? DEFAULT_CARD_GRAPH_PX : null);
+  // `?graph=open` forces the graph visible even in the card embed — the card's
+  // "fill the pane" / pop-out pass it so a full view lands on the graph directly,
+  // without the extra grip-click.
+  const graphOpenParam = (() => {
+    try { return new URLSearchParams(window.location.search).get('graph') === 'open'; } catch { return false; }
+  })();
   // Card embed: mount with the graph COLLAPSED so the compact run + outputs strip
-  // leads (the loom owns run/outputs; the graph is one grip-click away). Standalone
-  // / popout open with the graph visible.
-  const [graphCollapsed, setGraphCollapsed] = useState(hideHeader);
+  // leads (the loom owns run/outputs; the graph is one grip-click away) — UNLESS
+  // ?graph=open is set. Standalone / popout open with the graph visible anyway.
+  const [graphCollapsed, setGraphCollapsed] = useState(hideHeader && !graphOpenParam);
   const surfaceRootRef = useRef<HTMLDivElement | null>(null);
   const graphRowRef = useRef<HTMLDivElement | null>(null);
   const graphDragRef = useRef<{ startY: number; startH: number; moved: boolean } | null>(null);
