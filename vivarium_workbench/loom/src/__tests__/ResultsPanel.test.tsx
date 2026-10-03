@@ -114,3 +114,26 @@ describe('ResultsPanel download link', () => {
     expect(screen.getByText('obs')).toBeTruthy();
   });
 });
+
+describe('ResultsPanel run-in-progress status', () => {
+  // Empty-observables trajectory (mid-run the stream can yield rows with no
+  // observable columns yet). While a run is live we must NOT claim it's done.
+  const emptyTraj = [{ step: 1, state: {} }];
+
+  it('does NOT say "Run complete" while a run is still in flight', () => {
+    render(<ResultsPanel trajectory={emptyTraj} hasRun={false} isRunning />);
+    expect(screen.queryByText(/Run complete/i)).toBeNull();
+    expect(screen.getByText(/Running…/i)).toBeTruthy();
+  });
+
+  it('says "Run complete — no observables emitted" only once the run is done', () => {
+    render(<ResultsPanel trajectory={emptyTraj} hasRun={true} isRunning={false} />);
+    expect(screen.getByText(/Run complete — no observables emitted/i)).toBeTruthy();
+  });
+
+  it('shows a running message (not "Loading trajectory") before any rows arrive', () => {
+    render(<ResultsPanel trajectory={null} hasRun={false} isRunning />);
+    expect(screen.getByText(/Running…/i)).toBeTruthy();
+    expect(screen.queryByText(/Run complete/i)).toBeNull();
+  });
+});

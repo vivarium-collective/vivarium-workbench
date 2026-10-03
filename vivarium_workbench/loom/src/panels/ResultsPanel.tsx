@@ -14,6 +14,7 @@ export interface ResultsPanelProps {
   runId?: string | null;
   downloadable?: boolean;
   readOnly?: boolean;
+  isRunning?: boolean;                 // a run is live right now (don't say "Run complete")
 }
 
 function _trajectoryToObservables(
@@ -102,7 +103,7 @@ function ObservableRow({ name, entries }: { name: string; entries: any[] }) {
   );
 }
 
-export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly }: ResultsPanelProps) {
+export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly, isRunning }: ResultsPanelProps) {
   const wrap: React.CSSProperties = { padding: 16, fontFamily: 'system-ui, sans-serif' };
 
   const downloadLink = downloadable && runId ? (
@@ -134,6 +135,7 @@ export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly
         <p style={{ color: '#6b7280' }}>
           {readOnly
             ? 'The read-only mirror does not include run data — run this composite in a live dashboard to see results.'
+            : isRunning ? 'Running… results appear as the trajectory is captured.'
             : hasRun ? 'Loading trajectory…' : 'No run yet — press ▶ Run above.'}
         </p>
       </div>
@@ -150,8 +152,9 @@ export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly
       {downloadLink}
       {keys.length === 0 ? (
         <p style={{ color: '#6b7280' }}>
-          Run complete — no observables emitted. Toggle stores in the View
-          tab to capture their values.
+          {isRunning
+            ? 'Running… no observables captured yet — values appear here as stores are emitted.'
+            : 'Run complete — no observables emitted. Toggle stores in the View tab to capture their values.'}
         </p>
       ) : (
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
