@@ -2107,7 +2107,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   <!-- AI panel: the built-in chat, docked on the RIGHT (docs/ai-chat.md). static/chat.js builds the
      chat into #viv-ai; the settings sheet below is what the gear opens (static/ai-login.js).
      Live-only — hidden in the read-only snapshot. -->
-<aside id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="VivaChat">
+<aside id="viv-ai-panel" class="viv-ai-panel" hidden aria-label="Chat">
   <div class="vp-resize" id="viv-ai-resize" title="Drag to resize"></div>
   <div class="vp-root" id="viv-ai"></div>
   <div id="viv-ai-card" class="vp-settings" hidden>
@@ -2162,11 +2162,11 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <code id="viv-code-addr" class="viv-code-addr"></code>
         </div>
         <span class="vp-spacer"></span>
-        <button class="vp-icon" type="button" data-act="popout" title="Open in a separate window" aria-label="Pop out"
-                onclick="window.ProcessCode&&ProcessCode.popout()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+        <button class="vp-icon" type="button" data-act="browse" title="Browse Processes &amp; Composites" aria-label="Browse Processes and Composites"
+                onclick="window.ProcessCode&&ProcessCode.browseMenu(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
         </button>
-        <button class="vp-icon" type="button" data-act="dock" title="Move panel" aria-label="Move panel"
+        <button class="vp-icon" type="button" data-act="dock" title="Move or pop out panel" aria-label="Move or pop out panel"
                 onclick="window.ProcessCode&&ProcessCode.dockMenu(this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
         </button>

@@ -930,7 +930,7 @@
       let ghost = null, zones = null, zone = null, active = false;
       const mk = function () {
         ghost = document.createElement('div');
-        ghost.className = 'vp-ghost'; ghost.innerHTML = ICON.bot + '<span>VivaChat</span>';
+        ghost.className = 'vp-ghost'; ghost.innerHTML = ICON.bot + '<span>Chat</span>';
         zones = document.createElement('div');
         zones.className = 'vp-zones';
         zones.innerHTML = ['left', 'right', 'bottom'].map(function (z) { return '<div class="vp-zone vp-zone-' + z + '" data-zone="' + z + '"><span>Dock ' + z + '</span></div>'; }).join('');
@@ -979,12 +979,18 @@
   function openDockMenu(anchor) {
     const glyph = (d) => S('<rect x="3" y="4" width="18" height="16" rx="2"/>' +
       (d === 'left' ? '<path d="M9 4v16"/>' : d === 'right' ? '<path d="M15 4v16"/>' : '<path d="M3 14h18"/>'));
+    const items = [['left', 'Dock left'], ['right', 'Dock right'], ['bottom', 'Dock bottom']].map(function (d) {
+      return { id: d[0], label: d[1], icon: glyph(d[0]), on: dock === d[0] };
+    });
+    // Pop-out shares this menu (one "move this panel" control), not a separate header button.
+    items.push({ id: 'popout', label: 'Pop out', icon: ICON.popout });
     dropdown(anchor, {
-      items: [['left', 'Dock left'], ['right', 'Dock right'], ['bottom', 'Dock bottom']].map(function (d) {
-        return { id: d[0], label: d[1], icon: glyph(d[0]), on: dock === d[0] };
-      }),
+      items: items,
       width: 180,
-      onPick: function (id) { dockTo(id, true); },
+      onPick: function (id) {
+        if (id === 'popout') { if (window.VivPanelDock) VivPanelDock.popout('chat'); setOpen(false); return; }
+        dockTo(id, true);
+      },
     });
   }
 
@@ -1006,9 +1012,8 @@
   // ── DOM ───────────────────────────────────────────────────────────────────
   function build() {
     root.innerHTML =
-      '<div class="vp-head" title="Drag to dock left, right or bottom"><span>VivaChat</span><span class="vp-spacer"></span>' +
-        '<button class="vp-icon" data-act="popout" title="Open in a separate window" aria-label="Pop out">' + ICON.popout + '</button>' +
-        '<button class="vp-icon" data-act="dock" title="Move panel" aria-label="Move panel">' + ICON.dock + '</button>' +
+      '<div class="vp-head" title="Drag to dock left, right or bottom"><span>Chat</span><span class="vp-spacer"></span>' +
+        '<button class="vp-icon" data-act="dock" title="Move or pop out panel" aria-label="Move or pop out panel">' + ICON.dock + '</button>' +
         '<button class="vp-icon" data-act="close" title="Close" aria-label="Close">' + ICON.x + '</button></div>' +
       '<div class="vp-toolbar">' +
         '<button class="vp-icon" data-act="new" title="New chat" aria-label="New chat">' + ICON.plus + '</button><span class="vp-spacer"></span>' +

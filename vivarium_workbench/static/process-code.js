@@ -87,6 +87,92 @@
     collapse();
   }
 
+  // ── Browse available Processes & Composites, right from the panel ──────────
+  // A searchable dropdown (grouped Processes / Composites) that opens the pick
+  // straight into this panel via openProcess/openComposite — no Registry trip.
+  var _browseMenu = null, _browseCache = null;
+  function _onBrowseDoc(ev) { if (_browseMenu && !_browseMenu.contains(ev.target)) _closeBrowse(); }
+  function _onBrowseKey(ev) { if (ev.key === 'Escape') _closeBrowse(); }
+  function _closeBrowse() {
+    if (!_browseMenu) return;
+    _browseMenu.remove(); _browseMenu = null;
+    document.removeEventListener('mousedown', _onBrowseDoc, true);
+    document.removeEventListener('keydown', _onBrowseKey, true);
+  }
+  function _loadBrowse() {
+    if (_browseCache) return Promise.resolve(_browseCache);
+    var J = function (r) { return r.ok ? r.json() : null; };
+    return Promise.all([
+      fetch(_api('/api/registry')).then(J).catch(function () { return null; }),
+      fetch(_api('/api/composites')).then(J).catch(function () { return null; }),
+    ]).then(function (res) {
+      var reg = res[0] || {}, comp = res[1] || {};
+      var procs = (reg.processes || []).map(function (p) {
+        return { kind: 'process', address: p.address,
+                 label: p.name || String(p.address || '').split(/[.:]/).pop(), hint: p.source || p.module || '' };
+      }).filter(function (p) { return p.address; });
+      var list = Array.isArray(comp) ? comp : (comp.composites || []);
+      var comps = (list || []).map(function (c) {
+        return { kind: 'composite', id: c.id, module: c.module || '', source_path: c.source_path || '',
+                 label: c.name || String(c.id || '').split('.').pop(), hint: c.source || c.module || '' };
+      }).filter(function (c) { return c.id; });
+      _browseCache = { procs: procs, comps: comps };
+      return _browseCache;
+    });
+  }
+  function _browseRows(data, q) {
+    q = (q || '').trim().toLowerCase();
+    function match(it) { return !q || (it.label + ' ' + (it.address || it.id) + ' ' + it.hint).toLowerCase().indexOf(q) >= 0; }
+    function group(title, items, attrs) {
+      var rows = items.filter(match);
+      if (!rows.length) return '';
+      return '<div class="vp-browse-group">' + title + ' <span class="vp-browse-n">' + rows.length + '</span></div>' +
+        rows.map(function (it) {
+          return '<button type="button" class="vp-pop-item vp-browse-row" ' + attrs(it) + '>' +
+            '<span class="vp-browse-name">' + esc(it.label) + '</span>' +
+            '<code class="vp-browse-addr">' + esc(it.address || it.id) + '</code></button>';
+        }).join('');
+    }
+    var html =
+      group('Processes', data.procs, function (it) { return 'data-kind="process" data-address="' + esc(it.address) + '"'; }) +
+      group('Composites', data.comps, function (it) {
+        return 'data-kind="composite" data-id="' + esc(it.id) + '" data-module="' + esc(it.module) + '" data-src="' + esc(it.source_path) + '"';
+      });
+    return html || '<div class="vp-browse-empty">No matches.</div>';
+  }
+  function browseMenu(anchor) {
+    if (_browseMenu) { _closeBrowse(); return; }   // toggle
+    var menu = document.createElement('div');
+    menu.className = 'vp-pop vp-browse-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML =
+      '<input type="text" class="vp-browse-search" placeholder="Search processes & composites…" aria-label="Search" spellcheck="false">' +
+      '<div class="vp-browse-list"><div class="vp-browse-empty">Loading…</div></div>';
+    document.body.appendChild(menu);
+    var r = anchor.getBoundingClientRect();
+    menu.style.top = Math.round(r.bottom + 4) + 'px';
+    menu.style.left = Math.round(Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    _browseMenu = menu;
+    var search = menu.querySelector('.vp-browse-search');
+    var listEl = menu.querySelector('.vp-browse-list');
+    var data = null;
+    _loadBrowse().then(function (d) { data = d; listEl.innerHTML = _browseRows(data, ''); },
+                       function () { listEl.innerHTML = '<div class="vp-browse-empty">Could not load the catalog.</div>'; });
+    search.addEventListener('input', function () { if (data) listEl.innerHTML = _browseRows(data, search.value); });
+    menu.addEventListener('click', function (ev) {
+      var row = ev.target.closest('.vp-browse-row'); if (!row) return;
+      _closeBrowse();
+      if (!isOpen()) open();
+      if (row.getAttribute('data-kind') === 'process') openProcess(row.getAttribute('data-address'));
+      else openComposite({ id: row.getAttribute('data-id'), module: row.getAttribute('data-module'), source_path: row.getAttribute('data-src') });
+    });
+    setTimeout(function () {
+      document.addEventListener('mousedown', _onBrowseDoc, true);
+      document.addEventListener('keydown', _onBrowseKey, true);
+      try { search.focus(); } catch (e) { /* ignore */ }
+    }, 0);
+  }
+
   function refreshDirty() {
     var saveBtn = $('viv-code-save'), revertBtn = $('viv-code-revert');
     var dirty = state.editable && (getValue() !== state.original);
@@ -462,6 +548,7 @@
       launcher: document.getElementById('viv-code-toggle'),
       resizeHandle: 'viv-code-resize-handle',
       dragHandles: ['.viv-code-head'],
+      popout: popout,   // pop-out lives IN the dock menu now (no separate header button)
       defaultDock: 'right', defaultSize: { side: 460, bottom: 320 },
       onOpen: function () { _syncRailWidth(); _refreshCm(); },
       onResize: function () { _syncRailWidth(); _refreshCm(); },
@@ -486,6 +573,7 @@
     collapse: collapse,
     popout: popout,
     dockMenu: dockMenu,
+    browseMenu: browseMenu,   // browse/open a Process or Composite from the panel
     save: save,
     revert: revert,
     init: init,
