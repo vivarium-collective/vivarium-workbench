@@ -122,7 +122,8 @@ loom-render = ["playwright>=1.40"]
 # answers 503 "chat extra not installed" when pydantic-ai isn't importable.
 # 2.51.0 is the release the approval/streaming flow was verified against
 # (ApprovalRequired + ctx.tool_call_approved, DeferredToolResults, run_stream_events).
-chat = ["pydantic-ai-slim[anthropic,openai,google,bedrock]>=2.51.0,<3", "httpx>=0.27", "keyring>=24"]
+# `mcp` (the official SDK, 2.x) serves the workbench's tools to Claude Code (docs/ai-chat.md, "Claude Code").
+chat = ["pydantic-ai-slim[anthropic,openai,google,bedrock]>=2.51.0,<3", "httpx>=0.27", "keyring>=24", "mcp>=2.3,<3"]
 dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "pytest-xdist>=3.5", "pytest-split>=0.9", "mypy>=1.8", "httpx>=0.27", "import-linter>=2.0"]
 # Optional readers used only by parts of the test suite (parquet/zarr run
 # stores). Without them those tests skip (via pytest.importorskip) rather than
@@ -388,6 +389,7 @@ files = [
     "vivarium_workbench/lib/ai_skills.py",
     "vivarium_workbench/lib/claude_cli.py",
     "vivarium_workbench/lib/ai_claude_code.py",
+    "vivarium_workbench/lib/claude_mcp.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true

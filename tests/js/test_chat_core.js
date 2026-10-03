@@ -523,7 +523,7 @@ console.log('chat-core hidden set: ok');
   const cc = C.modelTree({}, {}, null).find(g => g.id === 'claude-code');
   assert(cc, 'Claude Code is listed without any registry entry');
   assert.deepStrictEqual(cc.models.map(m => m.model), ['sonnet', 'opus', 'haiku']);
-  assert(/claude auth login/.test(cc.note) && /Manual/.test(cc.note), 'the menu says how to sign in and that it is Manual-only for now');
+  assert(/claude auth login/.test(cc.note) && /Agent/.test(cc.note) && !/for now/.test(cc.note), 'the menu says how to sign in and that every mode works');
   const sel = C.modelTree({}, {}, { provider: 'claude-code', model: 'opus' }).find(g => g.id === 'claude-code');
   assert.deepStrictEqual(sel.models.filter(m => m.on).map(m => m.model), ['opus']);
   const reg = { 'claude-code': { models: [{ model: 'sonnet-x', name: 'X' }] } };

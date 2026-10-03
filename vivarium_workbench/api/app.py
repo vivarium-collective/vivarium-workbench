@@ -25,6 +25,7 @@ Run it standalone and browse the auto-generated **Swagger UI**:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from pathlib import Path
@@ -59,6 +60,8 @@ from vivarium_workbench.lib import remote_run_views as _remote_run_views
 from vivarium_workbench.lib import remote_analysis_figures as _remote_analysis_figures
 from vivarium_workbench.lib import auth_views as _auth_views
 from vivarium_workbench.lib import ai_auth as _ai_auth
+from vivarium_workbench.lib import claude_cli as _claude_cli
+from vivarium_workbench.lib import claude_mcp as _claude_mcp
 from vivarium_workbench.lib import ai_views as _ai_views
 from vivarium_workbench.lib import composite_run_views as _cr_views
 from vivarium_workbench.lib import composite_test_run_views as _composite_test_run_views
@@ -627,6 +630,28 @@ def create_app() -> FastAPI:
     # that don't send `Accept-Encoding: gzip` or for responses under the
     # threshold.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    # Claude Code (Ask / Agent mode) reaches the workbench's tools through an MCP server mounted here, on the app's
+    # own event loop (lib/claude_mcp.py). Mounted BEFORE the `/{rel:path}` catch-all so it is routed first; its
+    # session manager must run for the lifetime of the app. Absent when the optional `mcp` package is not installed.
+    _mcp = _claude_mcp.build()
+    if _mcp is not None:
+        app.mount(_claude_mcp.MOUNT, _mcp.asgi)
+        _inner_lifespan = app.router.lifespan_context
+
+        @contextlib.asynccontextmanager
+        async def _lifespan(a):
+            async with _inner_lifespan(a):
+                async with _mcp.server.session_manager.run():
+                    try:
+                        yield
+                    finally:
+                        # An open approval holds an MCP request open: answer them and end the Claude processes, or
+                        # a graceful stop waits for them.
+                        _claude_mcp.shutdown()
+                        await _claude_cli.shutdown()
+
+        app.router.lifespan_context = _lifespan
 
     @app.middleware("http")
     async def _csrf_mw(request: Request, call_next):

@@ -401,7 +401,10 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
     deferred = _deferred_results(body.deferred_results) if body.deferred_results is not None else None
     if provider == claude_cli.PROVIDER:      # runs its own loop in its own process — see lib/ai_claude_code.py
         ai_claude_code.check_supported(body.mode, deferred is not None, mode)
-        return ai_claude_code.prepare(history, body.prompt or "", model, session or "")
+        return ai_claude_code.prepare(
+            history, body.prompt or "", model, session or "", mode=body.mode, app=app, ws_root=ws_root, session=session,
+            instructions=build_instructions(body.mode) if body.mode != "manual" else None,
+            manifest=_manifest if _wants_manifest(body, mode) else None, deferred=deferred)
     # Skills: instructions the model can load. A hosted server never reads its own home directory for them.
     skills = {} if body.mode == "manual" else ai_skills.discover(ws_root, local=(mode == "keyring"))
     agent: Agent[ai_tools.ChatDeps, str | DeferredToolRequests] = Agent(

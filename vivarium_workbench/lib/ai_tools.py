@@ -418,12 +418,16 @@ async def list_operations(ctx: RunContext[ChatDeps], tag: str | None = None,
     ``query`` (words that must all appear in the id, path or summary). Read
     (GET) operations run immediately; every other method needs the user's
     approval. Results are capped — narrow with ``query`` if ``truncated``."""
+    return list_ops(ctx.deps, tag, query)
+
+
+def list_ops(deps: ChatDeps, tag: str | None, query: str | None) -> dict[str, Any]:
     words = (query or "").lower().split()
     hits = []
-    for e in get_index(ctx.deps.app).values():
+    for e in get_index(deps.app).values():
         if tag and e["tag"] != tag:
             continue
-        if e["mutating"] and ctx.deps.mode != "agent":
+        if e["mutating"] and deps.mode != "agent":
             continue                      # Ask mode: the model never even sees the write operations
         hay = f'{e["operation_id"]} {e["path"]} {e["summary"]}'.lower()
         if all(w in hay for w in words):
@@ -435,10 +439,14 @@ async def list_operations(ctx: RunContext[ChatDeps], tag: str | None = None,
 async def describe_operation(ctx: RunContext[ChatDeps], operation_id: str) -> dict[str, Any]:
     """Describe one operation: its parameters and request-body JSON schema. Call
     this before ``call_operation`` on anything you have not used yet."""
-    e = get_index(ctx.deps.app).get(operation_id)
+    return describe_op(ctx.deps, operation_id)
+
+
+def describe_op(deps: ChatDeps, operation_id: str) -> dict[str, Any]:
+    e = get_index(deps.app).get(operation_id)
     if e is None:
         return {"error": f"unknown operation '{operation_id}' — use list_operations"}
-    schemas = ctx.deps.app.openapi().get("components", {}).get("schemas", {})
+    schemas = deps.app.openapi().get("components", {}).get("schemas", {})
     op = e["op"]
     body = (op.get("requestBody", {}).get("content", {})
             .get("application/json", {}).get("schema"))
@@ -584,6 +592,22 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
     back as a ``shape`` (its keys and sizes) instead of the data: re-call with ``select``
     (a path like ``processes[0:25]`` or ``types.0``) to read just that part."""
     deps = ctx.deps
+    prepared = prepare_call(deps, operation_id, path_params)
+    if isinstance(prepared, dict):
+        return prepared
+    e, path = prepared
+    if e["mutating"] and not ctx.tool_call_approved:
+        raise ApprovalRequired(metadata={"operation_id": operation_id,
+                                         **approval_metadata(e, deps.ws_root, path, query, body)})
+    return await execute_call(deps, e, path, query, body, select,
+                              tool_call_id=ctx.tool_call_id or "", epoch=_call_epoch(ctx))
+
+
+def prepare_call(deps: ChatDeps, operation_id: str,
+                 path_params: dict[str, Any] | None) -> tuple[dict[str, Any], str] | dict[str, Any]:
+    """Validate one call up to (not including) approval: ``(index entry, resolved path)``, or the error
+    result the model should see. Shared by every front end of these tools (pydantic-ai's ``call_operation``
+    and the Claude Code MCP server), so the exclusion list, the path rules and the Ask-mode refusal live once."""
     e = get_index(deps.app).get(operation_id)
     if e is None:
         return {"error": f"unknown operation '{operation_id}' — use list_operations"}
@@ -593,14 +617,19 @@ async def call_operation(ctx: RunContext[ChatDeps], operation_id: str,
     if e["mutating"] and deps.mode != "agent":
         return {"error": "read-only mode (Ask): changes are disabled — ask the user to switch the "
                          "mode to Agent if they want you to change the workspace"}
-    if e["mutating"] and not ctx.tool_call_approved:
-        raise ApprovalRequired(metadata={"operation_id": operation_id,
-                                         **approval_metadata(e, deps.ws_root, path, query, body)})
+    return e, path
+
+
+async def execute_call(deps: ChatDeps, e: dict[str, Any], path: str, query: Any, body: Any,
+                       select: str | None, *, tool_call_id: str, epoch: str) -> dict[str, Any]:
+    """Run an already prepared — and, if it mutates, already APPROVED — call: claim the approval, record
+    intent, dispatch in-process, record the result. The caller is responsible for the approval itself."""
+    operation_id = e["operation_id"]
     headers = {"X-VW-Session": deps.session_key} if deps.session_key else {}
     base = {"session": session_tag(deps.session_key), "provider": deps.provider, "model": deps.model,
-            "tool_call_id": ctx.tool_call_id or "", "operation_id": operation_id,
+            "tool_call_id": tool_call_id, "operation_id": operation_id,
             "method": e["method"], "path": path, "approved": True,
-            "digest": _call_digest(operation_id, path, query, body, _call_epoch(ctx))}
+            "digest": _call_digest(operation_id, path, query, body, epoch)}
     if e["mutating"]:
         # Claim the approval (single use) and record intent BEFORE dispatching.
         with _AUDIT_LOCK:
@@ -650,6 +679,10 @@ MAX_WAIT_S = 30
 async def wait_seconds(ctx: RunContext[ChatDeps], seconds: float) -> dict[str, Any]:
     """Pause for ``seconds`` (at most 30). Use it between polls of a running job instead of
     calling the status endpoint back-to-back."""
+    return await pause(seconds)
+
+
+async def pause(seconds: float) -> dict[str, Any]:
     s = max(0.0, min(float(seconds), MAX_WAIT_S))
     await asyncio.sleep(s)
     return {"waited": s}
