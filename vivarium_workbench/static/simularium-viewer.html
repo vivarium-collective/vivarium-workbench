@@ -20,6 +20,7 @@
   <b>Simularium</b>
   <span id="title" class="muted"></span>
   <span style="flex:1"></span>
+  <a id="sim" class="muted" target="_blank" rel="noopener" hidden>open in Simularium ↗</a>
   <a id="dl" class="muted" download>download .simularium</a>
 </div>
 <div id="viewer"></div>
@@ -50,6 +51,22 @@
   }
   dl.href = trajUrl;
 
+  // Hand off to the full Allen Simularium viewer, which loads a trajectory from a
+  // public URL (?trajUrl=...). Only offer it when the file is reachable from the
+  // open internet — a localhost dev server is not fetchable by allencell.org.
+  var sim = document.getElementById("sim");
+  try {
+    var absUrl = new URL(trajUrl, location.href).href;
+    var h = new URL(absUrl).hostname;
+    var local = /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?|.*\.local)$/i.test(h) ||
+      /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+    if (/^https?:$/.test(new URL(absUrl).protocol) && !local) {
+      sim.href = "https://simularium.allencell.org/viewer?trajUrl=" +
+        encodeURIComponent(absUrl);
+      sim.hidden = false;
+    }
+  } catch (e) { /* leave the Simularium link hidden */ }
+
   fetch(trajUrl).then(function (r) {
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.arrayBuffer();
@@ -57,10 +74,12 @@
     var data = parseSimularium(buf);
     render(data);
   }).catch(function (e) {
-    fail("Could not load trajectory: <code>" + e.message + "</code><br><br>" +
-      "You can <a href='" + traj + "' download>download the file</a> and open it " +
-      "at <a href='https://simularium.allencell.org/viewer' target='_blank'>" +
-      "simularium.allencell.org</a>.");
+    var openLink = sim.hidden
+      ? "open it at <a href='https://simularium.allencell.org/viewer' target='_blank'>simularium.allencell.org</a>"
+      : "<a href='" + sim.href + "' target='_blank' rel='noopener'>open it in the Simularium viewer ↗</a>";
+    fail("Could not preview trajectory inline: <code>" + e.message + "</code><br><br>" +
+      "You can <a href='" + trajUrl + "' download>download the file</a>, or " +
+      openLink + ".");
   });
 
   function parseSimularium(buf) {
@@ -73,10 +92,14 @@
   }
 
   function parseBinary(buf) {
-    // Header: 16b magic, u32 headerLen, u32 nBlocks, then nBlocks*(u32 offset,
-    // u32 type, u32 length). Each block: u32 type, u32 length, payload.
+    // SIMULARIUMBINARY header: 16b magic, then u32 headerLen, u32 headerVersion,
+    // u32 nBlocks, then nBlocks*(u32 offset, u32 type, u32 length). Each block:
+    // u32 type, u32 length, payload. (This inline preview covers the common
+    // JSON-bundle .simularium; for the full binary stream, the "Open in
+    // Simularium" button hands off to the Allen viewer, which parses both.)
     var dv = new DataView(buf); var o = 16;
     var headerLen = dv.getUint32(o, true); o += 4;
+    var headerVersion = dv.getUint32(o, true); o += 4;
     var nBlocks = dv.getUint32(o, true); o += 4;
     var blocks = [];
     for (var i = 0; i < nBlocks; i++) {
