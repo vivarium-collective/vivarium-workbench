@@ -32,7 +32,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, AsyncIterator
+from typing import Any, AsyncGenerator
 
 PROVIDER = "claude-code"
 WAKE = "_wake"        # a synthetic event type: the caller's wake queue had a signal (not something the CLI emits)

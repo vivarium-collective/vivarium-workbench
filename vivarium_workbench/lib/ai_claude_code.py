@@ -16,6 +16,7 @@ See ``docs/ai-chat.md`` ("Claude Code").
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -258,6 +259,10 @@ class ClaudeCodeTurn:
             if not port or self.ws_root is None or self.app is None:
                 raise claude_cli.ClaudeCliError("Ask and Agent need this server's own address to give Claude Code its "
                                                 "tools; start the workbench with `vivarium-workbench serve`")
+            # The first tool call would otherwise build the app's OpenAPI index on the event loop (about a second,
+            # cold), stalling every other request — including the rest of a parallel batch. Build it in a worker
+            # thread first; it is cached on the app, so this happens once.
+            await asyncio.to_thread(ai_tools.get_index, self.app)
             deps = ai_tools.ChatDeps(app=self.app, client=ai_tools.make_client(self.app), ws_root=self.ws_root,
                                      session_key=self.session, provider=claude_cli.PROVIDER, model=self.model,
                                      mode=self.mode)
