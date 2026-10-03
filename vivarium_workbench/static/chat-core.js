@@ -548,6 +548,7 @@
     { id: 'ollama', label: 'Ollama', color: '#4b5563', mark: 'Ol' },
     { id: 'opencode', label: 'OpenCode Go', color: '#2563eb', mark: 'OC' },
     { id: 'bedrock', label: 'AWS Bedrock', color: '#f59e0b', mark: 'AWS' },
+    { id: 'claude-code', label: 'Claude Code', color: '#d97757', mark: 'CC' },
     { id: 'openai-compatible', label: 'OpenAI-compatible', color: '#6366f1', mark: '⇄' },
   ];
   function providerMeta(id) {
@@ -572,14 +573,28 @@
   // (`known`, browser-local) and the selected model when it is neither. Providers with nothing
   // to list are omitted, as in marimo — except an endpoint provider (OpenAI-compatible): it has no catalogue, but the
   // Model menu is the only provider chooser, so it stays listed with a hint on how to use it.
+  // Not in marimo's registry (so not in the generated ai-models.js): Claude Code is the user's own `claude` CLI,
+  // which resolves these aliases itself. Merged under the registry, which wins for any id it ever defines.
+  var BUILTIN_MODELS = {
+    'claude-code': {
+      description: 'Your own signed-in Claude Code (the `claude` command on this machine).',
+      url: 'https://code.claude.com/docs',
+      models: [
+        { model: 'sonnet', name: 'Claude Sonnet', description: 'Claude Code\'s current Sonnet', thinking: true },
+        { model: 'opus', name: 'Claude Opus', description: 'Claude Code\'s current Opus', thinking: true },
+        { model: 'haiku', name: 'Claude Haiku', description: 'Claude Code\'s current Haiku', thinking: false },
+      ],
+    },
+  };
   var ENDPOINT_NOTES = {
+    'claude-code': 'Runs the `claude` on this machine, in Manual mode for now. Sign in once with `claude auth login` in a terminal.',
     'openai-compatible': 'Any OpenAI-style endpoint (vLLM, OpenRouter, …): enter openai-compatible/<model> below, then set its Base URL.',
   };
   function modelTree(registry, known, selected, installed) {
     registry = registry || {};
     installed = installed || {};
     return PROVIDERS.map(function (p) {
-      var reg = registry[p.id] || {};
+      var reg = registry[p.id] || BUILTIN_MODELS[p.id] || {};
       var here = installed[p.id];          // {models:[names], note} — what THIS machine actually has (Ollama)
       var models = here && Array.isArray(here.models)
         ? here.models.filter(function (n) { return typeof n === 'string' && n; })

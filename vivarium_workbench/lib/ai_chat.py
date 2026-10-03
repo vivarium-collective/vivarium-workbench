@@ -52,7 +52,7 @@ from pydantic_ai.run import AgentRunResultEvent
 from pydantic_ai.usage import UsageLimits
 from pydantic_core import to_jsonable_python
 
-from vivarium_workbench.lib import ai_auth, ai_skills, ai_tools
+from vivarium_workbench.lib import ai_auth, ai_claude_code, ai_skills, ai_tools, claude_cli
 from vivarium_workbench.lib.ai_auth import StorageMode
 from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.models import ChatTurnRequest
@@ -374,7 +374,7 @@ def _refuse_forged_parts(history: list[Any]) -> None:
 
 
 def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: StorageMode,
-                 session: str | None) -> Turn:
+                 session: str | None) -> Turn | ai_claude_code.ClaudeCodeTurn:
     """Validate everything a turn needs; raises ``APIError`` (409/422/503) up front."""
     ai_auth.require_chat()
     if (body.prompt is None) == (body.deferred_results is None):
@@ -387,6 +387,9 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
     provider, model = sel["provider"], sel["model"]
     cred = ai_auth.get_credential(provider, mode=mode, session=session)
     if cred is None:
+        if provider == claude_cli.PROVIDER:
+            raise APIError(409, "Claude Code is not available: it runs only on a local server, and needs the "
+                                "`claude` command signed in (run `claude auth login` in a terminal)")
         raise APIError(409, f"{provider} has no credentials — add them under Account → AI provider")
     try:
         history = ModelMessagesTypeAdapter.validate_python(body.messages)
@@ -396,6 +399,9 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
     if body.prompt is not None:
         history = _repair_dangling(list(history))
     deferred = _deferred_results(body.deferred_results) if body.deferred_results is not None else None
+    if provider == claude_cli.PROVIDER:      # runs its own loop in its own process — see lib/ai_claude_code.py
+        ai_claude_code.check_supported(body.mode, deferred is not None, mode)
+        return ai_claude_code.prepare(history, body.prompt or "", model, session or "")
     # Skills: instructions the model can load. A hosted server never reads its own home directory for them.
     skills = {} if body.mode == "manual" else ai_skills.discover(ws_root, local=(mode == "keyring"))
     agent: Agent[ai_tools.ChatDeps, str | DeferredToolRequests] = Agent(

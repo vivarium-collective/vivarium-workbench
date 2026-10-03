@@ -54,8 +54,9 @@ async def ai_save_credentials(body: AiCredentialsRequest, mode: StorageMode,
             raise APIError(422, "no ambient AWS credentials found on the server")
         cred = got
     await ai_auth.check_key(body.provider, body.model, cred)
-    source: str = "aws"
-    if body.provider != "bedrock":
+    # Nothing is stored for bedrock (ambient AWS credentials) or claude-code (the machine's own `claude` login).
+    source: str = {"bedrock": "aws", "claude-code": "cli"}.get(body.provider, "")
+    if not source:
         source = await off(ai_auth.save_credential, body.provider, api_key, base_url, mode=mode, session=session)
     await off(ai_auth.set_selection, body.provider, body.model, mode=mode, session=session)
     return {"ok": True, "provider": body.provider, "model": body.model, "source": source}
