@@ -52,20 +52,39 @@
   dl.href = trajUrl;
 
   // Hand off to the full Allen Simularium viewer, which loads a trajectory from a
-  // public URL (?trajUrl=...). Only offer it when the file is reachable from the
+  // public URL (?trajUrl=...). Only possible when the file is reachable from the
   // open internet — a localhost dev server is not fetchable by allencell.org.
   var sim = document.getElementById("sim");
+  var allenUrl = null;
   try {
     var absUrl = new URL(trajUrl, location.href).href;
     var h = new URL(absUrl).hostname;
     var local = /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?|.*\.local)$/i.test(h) ||
       /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
     if (/^https?:$/.test(new URL(absUrl).protocol) && !local) {
-      sim.href = "https://simularium.allencell.org/viewer?trajUrl=" +
+      allenUrl = "https://simularium.allencell.org/viewer?trajUrl=" +
         encodeURIComponent(absUrl);
+      sim.href = allenUrl;
       sim.hidden = false;
     }
   } catch (e) { /* leave the Simularium link hidden */ }
+
+  // When the trajectory is publicly reachable, open it in the FULL Allen
+  // Simularium viewer by default (robust parsing, true 3D, playback controls)
+  // rather than the lightweight in-page preview. Pass ?inline=1 to force the
+  // in-page preview instead.
+  if (allenUrl && q.get("inline") == null) {
+    document.getElementById("viewer").hidden = true;
+    msg.hidden = false;
+    var fname = traj.split("/").pop();
+    var inlineHref = "?traj=" + encodeURIComponent(traj) + "&inline=1";
+    msg.innerHTML = "Opening <b>" + fname + "</b> in the " +
+      "<a href='" + allenUrl + "'>Simularium viewer</a>…<br><br>" +
+      "Not redirected? <a href='" + allenUrl + "'>Open in Simularium ↗</a>" +
+      " &nbsp;·&nbsp; <a href='" + inlineHref + "'>preview inline instead</a>";
+    location.replace(allenUrl);
+    return;
+  }
 
   fetch(trajUrl).then(function (r) {
     if (!r.ok) throw new Error("HTTP " + r.status);
