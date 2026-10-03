@@ -142,3 +142,57 @@ def test_run_with_no_store_graceful_empty(tmp_path):
     assert status == 200
     assert payload["present"] is False
     assert payload.get("run_id") == "demo:baseline"
+
+
+def _make_remote_run_db(db_path: Path, run_id="remote-run-1"):
+    """A remote-run db as viva-biomodels imports it from the cluster: only
+    ``runs_meta`` + ``history`` (no emitter ``simulations`` table), ONE
+    snapshot step with a NULL ``global_time``, and a comparison-style state —
+    a nested matrix of scalar numbers beside per-engine series lists."""
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE runs_meta (
+            run_id TEXT PRIMARY KEY, spec_id TEXT NOT NULL, label TEXT,
+            params_json TEXT, started_at REAL NOT NULL, completed_at REAL,
+            n_steps INTEGER, status TEXT NOT NULL, sim_name TEXT
+        );
+        CREATE TABLE history (
+            simulation_id TEXT NOT NULL, step INTEGER NOT NULL,
+            global_time REAL, state TEXT NOT NULL,
+            PRIMARY KEY (simulation_id, step)
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO runs_meta VALUES (?,?,?,?,?,?,?,?,?)",
+        (run_id, "spec", "Remote run", "{}", 1.0, 2.0, 1, "completed", "compare"),
+    )
+    state = {
+        "comparisons": {"M1": {"job": {"matrix": {
+            "copasi": {"tellurium": 0.25},
+            "tellurium": {"copasi": 0.25},
+        }}}},
+        "results": {"M1": {"job": {"copasi": {"time": [0.0, 1.0], "A": [1.0, 2.0]}}}},
+    }
+    conn.execute(
+        "INSERT INTO history VALUES (?,?,?,?)", (run_id, 0, None, json.dumps(state))
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_remote_snapshot_run_previews_comparison_scalars(tmp_path):
+    """A remote run db has no ``simulations`` table and a NULL ``global_time``;
+    its comparison scalars must still preview (the preview used to say
+    'emitted no scalar observables' because the store reader bailed out)."""
+    study_dir = tmp_path / "studies" / "demo"
+    study_dir.mkdir(parents=True)
+    _make_remote_run_db(study_dir / "runs.db")
+    payload, status = build_study_results(tmp_path, "demo")
+    assert status == 200
+    assert payload["present"] is True
+    by_path = {s["path"]: s for s in payload["stores"]}
+    key = "comparisons.M1.job.matrix.copasi.tellurium"
+    assert key in by_path, f"expected {key!r} among {sorted(by_path)}"
+    assert by_path[key]["first"] == by_path[key]["last"] == 0.25

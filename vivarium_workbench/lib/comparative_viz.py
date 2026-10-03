@@ -84,12 +84,16 @@ def _extract_trace(db_path: Path,
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
-        if "simulations" not in tables or "history" not in tables:
+        if "history" not in tables:
             return [], []
         if sim_id:
             # Caller supplied the exact simulation_id — use it directly,
-            # skipping the name/latest lookup entirely.
+            # skipping the name/latest lookup entirely. (This is also the only
+            # path a remote-run db can take: it has runs_meta + history but no
+            # emitter ``simulations`` table.)
             pass
+        elif "simulations" not in tables:
+            return [], []
         else:
             row = None
             if sim_name:
@@ -128,7 +132,7 @@ def _extract_trace(db_path: Path,
         # path emitter nests captured state to mirror the path, so one resolves.
         sql_path, ag_path = agents0_json_extract_pair(observable_path, observable_index)
         cursor = conn.execute(
-            "SELECT global_time, json_extract(state, ?), json_extract(state, ?) "
+            "SELECT global_time, json_extract(state, ?), json_extract(state, ?), step "
             "FROM history WHERE simulation_id=? AND (step % ?) = 0 ORDER BY step ASC",
             (sql_path, ag_path, sim_id, stride),
         )
@@ -145,14 +149,16 @@ def _extract_trace(db_path: Path,
 
         times: list[float] = []
         values: list[float] = []
-        for tm, v, v_ag in cursor:
+        for tm, v, v_ag, step in cursor:
             val = _num(v)
             if val is None:
                 val = _num(v_ag)
             if val is None:
                 continue
             values.append(val)
-            times.append(float(tm))
+            # A remote snapshot row carries no global_time; its step index is
+            # the only x-axis it has.
+            times.append(float(tm if tm is not None else step))
         return times, values
     finally:
         conn.close()
