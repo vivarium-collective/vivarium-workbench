@@ -335,17 +335,14 @@ def test_ask_and_agent_say_so_up_front_when_the_mcp_package_is_missing(server, s
     assert code == 200 and frames[-1]["type"] == "done"
 
 
-def test_serve_gives_uvicorn_a_graceful_shutdown_timeout(tmp_path, monkeypatch):
-    """Without one uvicorn waits for ever for open requests BEFORE it runs lifespan shutdown, so an open approval
-    would keep a Ctrl-C from finishing (the test above proves a stop completes with this very constant)."""
-    import uvicorn
-    seen = {}
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: seen.update(kw))
-    ws = tmp_path / "ws"
-    (ws / ".pbg").mkdir(parents=True)
-    (ws / "workspace.yaml").write_text("name: t\n")
-    startup.serve_fastapi(ws, 0)
-    assert seen["timeout_graceful_shutdown"] == startup.GRACEFUL_SHUTDOWN_S and startup.GRACEFUL_SHUTDOWN_S > 0
+def test_serve_gives_uvicorn_a_graceful_shutdown_timeout():
+    """Without one uvicorn waits for ever for open requests BEFORE it runs lifespan shutdown, so an open approval would
+    keep a Ctrl-C from finishing (the test above proves a stop completes with this very constant). Checked from the
+    source, not by running `serve_fastapi`: that starts process-lifetime background threads (the remote-link probe,
+    the cache warmer) which would leak into every later test in the same process."""
+    import inspect
+    assert "timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S" in inspect.getsource(startup.serve_fastapi)
+    assert startup.GRACEFUL_SHUTDOWN_S > 0
 
 
 def test_the_process_gets_the_tool_flags_a_private_0600_config_and_long_timeouts_and_no_token_in_argv(server, stub, monkeypatch, tmp_path):
