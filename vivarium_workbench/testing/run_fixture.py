@@ -2,6 +2,18 @@
 
 Tests in studies/<slug>/tests/test_*.py receive a `run` fixture that resolves
 to a `Run` bound to the study's latest emitter row.
+
+Schema contract (the writers of record, not a local restatement):
+
+* ``runs_meta`` -- created by ``lib.composite_runs.connect`` and populated by
+  ``lib.composite_runs.save_metadata``/``complete_metadata``: one row per run
+  keyed by ``run_id``, with ``spec_id`` (composite), ``label`` (the study's
+  baseline/variant entry name), ``params_json``, ``started_at``, ``n_steps``,
+  ``status`` and ``manifest_json``.
+* ``history`` -- written by ``viva_emitters.SQLiteEmitter`` (same DDL as
+  ``lib.composite_runs.ensure_history_table``): one row per emitted step,
+  ``(simulation_id = run_id, step, global_time, state)`` where ``state`` is the
+  JSON of the whole emitted dict for that step (values may be nested maps).
 """
 from __future__ import annotations
 import json, sqlite3
@@ -9,6 +21,36 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
+
+from vivarium_workbench.lib.run_index import row_seed
+
+
+_MISSING = object()
+
+
+def _get_dotted(state, name: str):
+    """Value at ``name`` in an emitted-state dict; a dotted name ("species.X")
+    descends into nested maps. Returns ``_MISSING`` when absent."""
+    if isinstance(state, dict) and name in state:
+        return state[name]
+    node = state
+    for part in name.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return _MISSING
+        node = node[part]
+    return node
+
+
+def _flatten(state: dict, prefix: str = "") -> dict:
+    """Nested emitted-state dict -> {dotted.path: leaf value}."""
+    out = {}
+    for k, v in state.items():
+        key = f"{prefix}{k}"
+        if isinstance(v, dict) and v:
+            out.update(_flatten(v, key + "."))
+        else:
+            out[key] = v
+    return out
 
 
 class RunNotAvailableError(RuntimeError):
@@ -32,7 +74,7 @@ class Run:
 
     def _latest_run_id(self) -> str | None:
         row = self._db.execute(
-            "SELECT run_id FROM runs_meta ORDER BY timestamp DESC LIMIT 1"
+            "SELECT run_id FROM runs_meta ORDER BY started_at DESC, run_id DESC LIMIT 1"
         ).fetchone()
         return row["run_id"] if row else None
 
@@ -42,16 +84,21 @@ class Run:
         ).fetchone()
         if row is None:
             raise RunNotAvailableError(f"run_id {self._run_id!r} not found")
-        params = row["params"]
+        params = json.loads(row["params_json"]) if row["params_json"] else {}
         return {
             "run_id": row["run_id"],
-            "params": json.loads(params) if params else {},
-            "seed": row["seed"],
+            "params": params,
+            # Same derivation rerun/find_matching_run use: manifest seed,
+            # else params["seed"], else None. manifest_json is a migrated
+            # column, absent from a runs.db older than it.
+            "seed": row_seed({"params": params,
+                              "manifest_json": row["manifest_json"]
+                              if "manifest_json" in row.keys() else None}),
             "status": row["status"],
             "n_steps": row["n_steps"] or 0,
-            "variant": row["variant"],
-            "composite": row["composite"],
-            "timestamp": row["timestamp"],
+            "label": row["label"],
+            "composite": row["spec_id"],
+            "timestamp": row["started_at"],
         }
 
     # Metadata
@@ -66,25 +113,42 @@ class Run:
     @property
     def n_steps(self) -> int: return self._meta["n_steps"]
     @property
-    def variant(self) -> str | None: return self._meta["variant"]
+    def label(self) -> str | None:
+        """The study baseline/variant entry name this run was launched as."""
+        return self._meta["label"]
+    @property
+    def variant(self) -> str | None:
+        """Always ``None``: runs_meta records the launched entry name in
+        ``label`` for baseline and variant runs alike, with no field saying
+        which kind it was, so the variant cannot be derived from the run row.
+        Use :attr:`label`."""
+        return None
     @property
     def composite(self) -> str: return self._meta["composite"]
+    @property
+    def timestamp(self) -> float: return self._meta["timestamp"]
 
     # Trajectory
+    def _history(self) -> list[tuple[int, dict]]:
+        """(step, emitted-state dict) for this run, in step order."""
+        if not hasattr(self, "_history_cache"):
+            rows = self._db.execute(
+                "SELECT step, state FROM history WHERE simulation_id = ? ORDER BY step",
+                (self._run_id,),
+            ).fetchall()
+            self._history_cache = [(r["step"], json.loads(r["state"])) for r in rows]
+        return self._history_cache
+
     def observable(self, name: str) -> np.ndarray:
-        rows = self._db.execute(
-            "SELECT step, value FROM history WHERE run_id = ? AND observable = ? ORDER BY step",
-            (self._run_id, name),
-        ).fetchall()
-        return np.array([r["value"] for r in rows], dtype=float)
+        """Per-step values of ``name`` (dotted paths reach into nested maps,
+        e.g. "species.X"); steps where it was not emitted are skipped."""
+        values = [_get_dotted(state, name) for _, state in self._history()]
+        return np.array([v for v in values if v is not _MISSING], dtype=float)
 
     @property
     def time(self) -> np.ndarray:
-        rows = self._db.execute(
-            "SELECT DISTINCT step FROM history WHERE run_id = ? ORDER BY step",
-            (self._run_id,),
-        ).fetchall()
-        return np.array([r["step"] for r in rows], dtype=float)
+        """The emitted steps, in order."""
+        return np.array([step for step, _ in self._history()], dtype=float)
 
     def final(self, name: str) -> float:
         arr = self.observable(name)
@@ -105,7 +169,8 @@ class Run:
 
     @property
     def trajectory(self):
-        """Pivoted DataFrame of (step × observable → value). Requires pandas."""
+        """DataFrame of (step × observable → value); nested maps are
+        flattened to dotted column names ("species.X"). Requires pandas."""
         try:
             import pandas as pd
         except ImportError as e:
@@ -113,10 +178,11 @@ class Run:
                 "pandas is required for Run.trajectory; install via "
                 "`pip install pandas`"
             ) from e
-        return pd.read_sql_query(
-            "SELECT step, observable, value FROM history WHERE run_id = ?",
-            self._db, params=(self._run_id,),
-        ).pivot(index="step", columns="observable", values="value")
+        hist = self._history()
+        frame = pd.DataFrame([_flatten(state) for _, state in hist],
+                             index=pd.Index([step for step, _ in hist], name="step"))
+        frame.columns.name = "observable"
+        return frame
 
 
 def _find_study_dir(test_file: Path) -> Path:
@@ -138,7 +204,7 @@ def _all_run_ids(db_path: Path) -> list[str]:
     conn.row_factory = sqlite3.Row
     try:
         return [r["run_id"] for r in conn.execute(
-            "SELECT run_id FROM runs_meta ORDER BY timestamp ASC"
+            "SELECT run_id FROM runs_meta ORDER BY started_at ASC, run_id ASC"
         ).fetchall()]
     finally:
         conn.close()
@@ -200,7 +266,7 @@ def run(request) -> Run:
         conn.row_factory = sqlite3.Row
         try:
             row = conn.execute(
-                "SELECT run_id FROM runs_meta ORDER BY timestamp ASC LIMIT 1"
+                "SELECT run_id FROM runs_meta ORDER BY started_at ASC, run_id ASC LIMIT 1"
             ).fetchone()
             if row is None:
                 raise RunNotAvailableError(f"runs.db at {db} contains no runs")
