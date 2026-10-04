@@ -1,5 +1,52 @@
 """attach_process_docs: resolve per-process docstrings for the inspector."""
-from vivarium_workbench.lib.process_docs import attach_process_docs, _doc_for_address
+from vivarium_workbench.lib.process_docs import (
+    attach_process_docs,
+    _doc_for_address,
+    _contract_for_class,
+)
+
+
+class _WithFullContract:
+    """A class declaring a full (plain-dict) contract, like a ProcessContract.to_dict()."""
+
+    contract = {
+        "summary": "Binds ligand to TF.",
+        "description": "Longer prose.",
+        "status": "",
+        "math": ["dX/dt = -k*X"],
+        "symbols": {"X": "species count (counts)"},
+        "inputs": {"bulk": "Reads ligand + TF counts."},
+        "outputs": {"bulk": "Writes the binding delta."},
+        "config": {"rate": "Binding rate k (1/s)."},
+        "assumptions": ["Fast reactions reach equilibrium each step."],
+        "references": ["Sekimizu 1987."],
+    }
+
+
+class _NoContract:
+    pass
+
+
+def test_contract_for_class_forwards_full_contract():
+    # The loom Inspector renders per-port inputs/outputs, assumptions and
+    # references — _contract_for_class must FORWARD them, not drop them.
+    c = _contract_for_class(_WithFullContract)
+    assert c is not None
+    assert c["inputs"] == {"bulk": "Reads ligand + TF counts."}
+    assert c["outputs"] == {"bulk": "Writes the binding delta."}
+    assert c["config"] == {"rate": "Binding rate k (1/s)."}
+    assert c["assumptions"] == ["Fast reactions reach equilibrium each step."]
+    assert c["references"] == ["Sekimizu 1987."]
+    assert c["math"] == ["dX/dt = -k*X"]
+    assert c["symbols"] == {"X": "species count (counts)"}
+
+
+def test_contract_for_class_none_without_summary():
+    # No declared contract (or no summary) → None, so no Contract callout renders.
+    assert _contract_for_class(_NoContract) is None
+    class _NoSummary:
+        contract = {"math": ["x=1"]}
+    assert _contract_for_class(_NoSummary) is None
 
 
 def test_doc_for_address_resolves_full_dotted_path():

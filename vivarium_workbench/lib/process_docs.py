@@ -79,13 +79,23 @@ def _contract_for_class(cls: Any) -> dict | None:
             c = None
     if not isinstance(c, dict) or not c.get("summary"):
         return None
+    # Forward the FULL contract to the loom's `_contract` shape. The Inspector
+    # renders per-port semantics (contract.inputs[port]/outputs[port]),
+    # assumptions and references, and uses `status` for draft detection — so a
+    # ProcessContract that declares them must have them carried through, not
+    # dropped. `config` is forwarded too (the Contract type carries it). Keys the
+    # contract omits default to empty on both sides (contract.ts `blankContract`).
     return {
         "summary": c["summary"],
         "description": c.get("description") or c["summary"],
-        "status": "",
+        "status": c.get("status", ""),
         "math": list(c.get("math", [])),
         "symbols": dict(c.get("symbols", {})),
-        "inputs": {}, "outputs": {},
+        "inputs": dict(c.get("inputs", {})),
+        "outputs": dict(c.get("outputs", {})),
+        "config": dict(c.get("config", {})),
+        "assumptions": list(c.get("assumptions", [])),
+        "references": list(c.get("references", [])),
     }
 
 
