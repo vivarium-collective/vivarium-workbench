@@ -144,13 +144,18 @@
       document.removeEventListener("mousedown", onOutside, true);
     }
 
-    // Open a workspace in a NEW tab, or SWITCH the current one.
+    // Open a workspace in a NEW tab, or SWITCH the current one. Both paths now
+    // go through the workspace's self-describing URL: `/?workspace=<name>`.
     //  - New tab: prefer the workspace's own running-server URL; else spawn via
     //    the ?workspace= session bootstrap (session.js binds it).
-    //  - Switch this tab: RE-POINT the local server to the workspace's path
-    //    (/api/source/switch) then reload, so the whole workbench — name AND
-    //    content — reflects it. (A ?workspace= session-switch left the
-    //    server-rendered header name stale.)
+    //  - Switch this tab: NAVIGATE to `/?workspace=<name>`, so the workspace is
+    //    reflected in the address bar and the link stays valid + shareable after
+    //    the switch. The server honors ?workspace= with PRECEDENCE (binds this
+    //    session + renders that workspace's name AND content), so this no longer
+    //    leaves the header name stale — the reason the old code re-pointed by
+    //    path + reloaded (which clobbered the shared cookie, breaking other
+    //    tabs' links). A nameless legacy catalog row still falls back to the
+    //    path re-point.
     function openWs(ws, newTab) {
       close();
       _wsRecordUsed(ws && ws.path);   // stamp before we navigate/switch away
@@ -174,22 +179,24 @@
           "\" to open in a new tab. Start it from that repo, then it'll appear here.");
         return;
       }
-      if (ws && ws.path) {
+      // Item 70 phase 3: flag the branded splash for the next paint
+      // (index.html.j2's inline body script reads + clears it) — covers the
+      // boot gap a navigation/reload otherwise leaves blank while scripts load.
+      if (ws && ws.name) {
+        try { sessionStorage.setItem("viv-switch-splash", "1"); } catch (e) { /* private mode */ }
+        window.location.assign(BP + "/?workspace=" + encodeURIComponent(ws.name));
+      } else if (ws && ws.path) {
+        // Legacy fallback: a catalog row with a path but no name. Re-point by
+        // path + reload (the old behavior). Prefer giving rows a name.
         fetch("/api/source/switch", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path: ws.path }) })
           .then(function (r) {
             if (r.ok) {
-              // Item 70 phase 3: flag the branded splash for the reload's
-              // first paint (index.html.j2's inline body script reads +
-              // clears this) — covers the boot gap a plain reload otherwise
-              // leaves blank while the SPA's own scripts load.
               try { sessionStorage.setItem("viv-switch-splash", "1"); } catch (e) { /* private mode */ }
               location.reload();
             } else window.alert("Switch failed.");
           })
           .catch(function () { window.alert("Switch failed (network)."); });
-      } else if (ws && ws.name) {
-        window.location.assign(BP + "/?workspace=" + encodeURIComponent(ws.name));
       }
     }
 

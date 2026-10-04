@@ -685,3 +685,51 @@ def test_strip_process_instances():
     assert out["leaf"] == 42
     # Original not mutated.
     assert "instance" in state["proc"]
+
+
+# ---------------------------------------------------------------------------
+# Native libraries writing to stdout after the results block
+# ---------------------------------------------------------------------------
+
+# Verbatim libroadrunner (CVODE) warnings, observed after @@@RESULTS@@@ on a
+# completed viva-tellurium run: C stdio flushes its buffer at process exit.
+_CVODE_TAIL = (
+    "[WARNING][rank 0][.../sundials/src/cvodes/cvodes.c:3528][CVode] Internal t = 30 "
+    "and h = 3.34948822688634e-18 are such that t + h = t on the next step. The solver "
+    "will continue anyway.\n"
+    "[WARNING][rank 0][.../sundials/src/cvodes/cvodes.c:3533][CVode] The above warning "
+    "has been issued mxhnil times and will not be issued again for this problem.\n"
+)
+
+
+def test_trailing_native_stdout_after_results_still_parses(tmp_path, monkeypatch):
+    ws = _make_ws(tmp_path, runtime={"default_emitter": "sqlite"})
+    db = tmp_path / "runs.db"
+    spec = _gen_spec(monkeypatch)
+    monkeypatch.setattr(cs.subprocess, "run", FakeRun(stdout=_ok_stdout() + _CVODE_TAIL))
+    resp, code = cs.run_composite_subprocess(
+        ws, **_run_kwargs(ws, db, spec_id=spec, run_id="rN"))
+    assert code == 200, resp
+    assert resp["results"] == {"foo.bar": [1, 2, 3]}
+
+
+def test_parse_results_block_with_a_real_child_writing_at_exit():
+    """A real child prints the results, then writes to fd 1 at exit, as C stdio
+    does, so the trailing text comes after the JSON."""
+    child = (
+        "import atexit, json, os\n"
+        f"atexit.register(os.write, 1, {_CVODE_TAIL.encode()!r})\n"
+        "print('@@@RESULTS@@@')\n"
+        "print(json.dumps({'results': {'x': [1.0, 2.0]}, 'viz_html': {}}), flush=True)\n"
+    )
+    out = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True,
+                         check=True).stdout
+    assert out.rstrip().endswith("this problem.")
+    assert cs.parse_results_block(out) == {"results": {"x": [1.0, 2.0]}, "viz_html": {}}
+
+
+def test_parse_results_block_without_a_value_still_fails():
+    with pytest.raises(json.JSONDecodeError):
+        cs.parse_results_block("@@@RESULTS@@@\n" + _CVODE_TAIL)
+    with pytest.raises(IndexError):
+        cs.parse_results_block("no marker here")
