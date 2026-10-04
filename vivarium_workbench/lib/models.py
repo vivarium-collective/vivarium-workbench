@@ -3549,3 +3549,47 @@ class AiCapabilitiesPayload(BaseModel):
     writes: int
     excluded: list[str]
 
+
+
+class ComparisonEngineRun(BaseModel):
+    """One engine's run of one job (``diagnostics.runs.<model>.<job>.<engine>``)."""
+
+    status: str                      # ok | unavailable | error | ...
+    runtime_s: Optional[float] = None
+    n_points: Optional[int] = None
+    error: str = ""
+
+
+class ComparisonJob(BaseModel):
+    """One ``comparisons.<model>.<job>`` entry, reduced for display
+    (``lib/study_comparison.py``). ``matrix`` is the engine-by-engine NRMSE
+    (null where a cell was non-finite or absent); the per-species ``pairs``
+    blobs are intentionally not carried."""
+
+    model: str
+    job: str
+    engines: list[str]
+    matrix: dict[str, dict[str, Optional[float]]]
+    max_nrmse: Optional[float] = None
+    worst_pair: Optional[list[str]] = None
+    bucket: Optional[str] = None
+    bucket_label: Optional[str] = None
+    closeness_bucket_label: Optional[str] = None
+    runs: dict[str, ComparisonEngineRun] = Field(default_factory=dict)
+
+
+class ComparisonBucketCount(BaseModel):
+    label: str
+    count: int
+
+
+class StudyComparison(BaseModel):
+    """The ``comparison`` block of ``GET /api/study-results`` when the latest
+    run's state carries cross-engine comparisons. ``jobs`` is worst-first;
+    ``buckets`` is best-to-worst."""
+
+    n_models: int
+    n_jobs: int
+    engines: list[str]
+    buckets: list[ComparisonBucketCount]
+    jobs: list[ComparisonJob]

@@ -118,6 +118,11 @@ _MODELS: list[type[BaseModel]] = [
     _models.StudyBigraphPaths,
     _models.VisualizationStatus,
     _models.VisualizationInstances,
+    # Study-results comparison block (lib/study_comparison.py)
+    _models.ComparisonEngineRun,
+    _models.ComparisonJob,
+    _models.ComparisonBucketCount,
+    _models.StudyComparison,
     # Workspace & source models
     _models.SourceBuilds,
     _models.WorkspacesList,

@@ -169,7 +169,7 @@ def _make_remote_run_db(db_path: Path, run_id="remote-run-1"):
         (run_id, "spec", "Remote run", "{}", 1.0, 2.0, 1, "completed", "compare"),
     )
     state = {
-        "comparisons": {"M1": {"job": {"matrix": {
+        "metrics": {"M1": {"job": {"matrix": {
             "copasi": {"tellurium": 0.25},
             "tellurium": {"copasi": 0.25},
         }}}},
@@ -193,6 +193,6 @@ def test_remote_snapshot_run_previews_comparison_scalars(tmp_path):
     assert status == 200
     assert payload["present"] is True
     by_path = {s["path"]: s for s in payload["stores"]}
-    key = "comparisons.M1.job.matrix.copasi.tellurium"
+    key = "metrics.M1.job.matrix.copasi.tellurium"
     assert key in by_path, f"expected {key!r} among {sorted(by_path)}"
     assert by_path[key]["first"] == by_path[key]["last"] == 0.25

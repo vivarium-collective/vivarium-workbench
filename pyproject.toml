@@ -312,6 +312,7 @@ files = [
     "vivarium_workbench/lib/study_enrichment.py",
     "vivarium_workbench/lib/rigor_views.py",
     "vivarium_workbench/lib/observables_views.py",
+    "vivarium_workbench/lib/study_comparison.py",
     "vivarium_workbench/lib/composite_state_views.py",
     "vivarium_workbench/lib/composite_run_views.py",
     "vivarium_workbench/lib/composite_test_run_views.py",
