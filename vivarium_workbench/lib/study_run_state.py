@@ -115,6 +115,27 @@ def resolve_study_baseline_state(ws_root, pkg, spec_id, params):
         if candidate_mods:
             discover_generators()
         entry = _REGISTRY.get(spec_id)
+    if entry is None and ws_root is not None:
+        # #1271: resolve a workspace composite file the way the Composites tab
+        # lists it (composite_lookup), so "listed" implies "runnable". The
+        # installed-distribution scan below misses workspace packages whose
+        # editable install writes no top_level.txt (hatchling). Overrides are
+        # filtered to the spec's declared parameters, as for generators.
+        from vivarium_workbench.lib.composite_lookup import (
+            find_composite_path, load_spec, substitute_parameters,
+        )
+        path = find_composite_path(Path(ws_root), pkg, spec_id)
+        if path is not None:
+            spec = load_spec(path)
+            state = spec.get("state") if isinstance(spec, dict) else None
+            if not isinstance(state, dict):
+                return None, {"error": (
+                    f"YAML composite {spec_id!r} has no `state:` block "
+                    "(check the spec shape)"
+                )}
+            declared = spec.get("parameters") or {}
+            overrides = {k: v for k, v in (params or {}).items() if k in declared}
+            return substitute_parameters(state, declared, overrides), None
     if entry is None:
         # mem3dg-readdy friction #21: fall back to file-discovered composites
         # (the OTHER registry — viva_superpowers.composite_discovery walks

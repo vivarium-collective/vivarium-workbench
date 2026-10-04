@@ -86,6 +86,75 @@ def test_resolve_generator_build_failure_returns_error(tmp_path, monkeypatch):
     assert "generator build failed: kaboom" in err["error"]
 
 
+# #1271: a workspace composite FILE resolves for a run the way the Composites
+# tab lists it, without depending on installed-distribution metadata. Real
+# files on disk; only the generator registry (the other path) is held empty.
+
+_SPEC = {
+    "name": "decay",
+    "parameters": {
+        "k": {"type": "float", "default": 0.5},
+        "x0": {"type": "float", "default": 2.0},
+    },
+    "state": {
+        "proc": {"_type": "process", "address": "local:Decay",
+                 "config": {"k": "${k}"}, "interval": 1.0},
+        "stores": {"x": "${x0}"},
+    },
+}
+
+
+def _workspace_spec(tmp_path, spec=_SPEC, stem="decay", pkg="wspkg"):
+    ws = tmp_path / "ws"
+    comp_dir = ws / pkg / "composites"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / f"{stem}.composite.yaml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+    return ws, f"{pkg}.composites.{stem}"
+
+
+def test_resolve_workspace_yaml_substitutes_defaults(tmp_path, monkeypatch):
+    ws, spec_id = _workspace_spec(tmp_path)
+    _empty_registry(monkeypatch)
+    state, err = srs.resolve_study_baseline_state(ws, "wspkg", spec_id, {})
+    assert err is None
+    assert state["proc"]["config"]["k"] == 0.5
+    assert state["stores"]["x"] == 2.0
+
+
+def test_resolve_workspace_yaml_applies_declared_overrides_only(tmp_path, monkeypatch):
+    """Variants override declared parameters; run-time keys a study also
+    stores (e.g. perturbations) are ignored, as for generators."""
+    ws, spec_id = _workspace_spec(tmp_path)
+    _empty_registry(monkeypatch)
+    state, err = srs.resolve_study_baseline_state(
+        ws, "wspkg", spec_id, {"k": 0.1, "max_generations": 3})
+    assert err is None
+    assert state["proc"]["config"]["k"] == 0.1
+    assert state["stores"]["x"] == 2.0
+
+
+def test_resolve_workspace_yaml_without_state_errors(tmp_path, monkeypatch):
+    ws, spec_id = _workspace_spec(tmp_path, spec={"name": "decay", "parameters": {}})
+    _empty_registry(monkeypatch)
+    state, err = srs.resolve_study_baseline_state(ws, "wspkg", spec_id, {})
+    assert state is None and "no `state:` block" in err["error"]
+
+
+def test_every_listed_workspace_composite_resolves_for_a_run(tmp_path, monkeypatch):
+    """Listed implies runnable: each id the Composites tab lists resolves."""
+    from vivarium_workbench.lib.composite_lookup import discover_workspace_composites
+    ws, _ = _workspace_spec(tmp_path)
+    second = dict(_SPEC, name="other")
+    (ws / "wspkg" / "composites" / "other.composite.yaml").write_text(
+        yaml.safe_dump(second), encoding="utf-8")
+    _empty_registry(monkeypatch)
+    listed = discover_workspace_composites(ws, "wspkg")
+    assert len(listed) == 2
+    for spec_id in listed:
+        state, err = srs.resolve_study_baseline_state(ws, "wspkg", spec_id, {})
+        assert err is None and isinstance(state, dict), spec_id
+
+
 def test_resolve_reads_ws_root_for_cache_dir_not_global(tmp_path, monkeypatch):
     """The cache_dir existence check resolves relative to the passed ws_root
     (no global): when ws_root has the ParCa cache, cache_dir is KEPT (passed to

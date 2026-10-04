@@ -214,10 +214,10 @@ see what was swept), run launches, and package installs on the host (they execut
 package code — the approval card shows what will be installed). `GET /api/ai/capabilities`
 lists the excluded set.
 
-**Known product gaps the assistant works around** (pinned as strict `xfail` in
+**Known product gap the assistant works around** (pinned as a strict `xfail` in
 `tests/test_ai_automation.py`, not patched by the chat): `study-create` with a YAML composite
-`source` writes a legacy spec that later steps cannot extend, and the in-process `study-run-*`
-routes cannot resolve YAML fixture composites (the detached `composite-test-run` can).
+`source` writes a legacy spec that later steps cannot extend. (The in-process `study-run-*`
+routes resolve YAML composites since #1271.)
 
 ## Claude Code (the `claude-code` provider)
 
