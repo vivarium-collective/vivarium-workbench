@@ -46,7 +46,7 @@ def _flatten(state: dict, prefix: str = "") -> dict:
     out = {}
     for k, v in state.items():
         key = f"{prefix}{k}"
-        if isinstance(v, dict) and v:
+        if isinstance(v, dict):    # an empty map has no leaves, so no columns
             out.update(_flatten(v, key + "."))
         else:
             out[key] = v

@@ -136,6 +136,20 @@ def test_run_trajectory_flattens_nested_maps(tmp_path):
     assert list(traj["species.X"]) == [1.0, 2.0]
 
 
+def test_run_trajectory_skips_empty_maps(tmp_path):
+    """A step whose map is still empty (e.g. stores not yet initialised at
+    t = 0) contributes no column, so it doesn't add an object-typed column of {}."""
+    pytest.importorskip("pandas")
+    db = tmp_path / "runs.db"
+    _make_runs_db(db, runs=[{"run_id": "r1", "states": [
+        {"species": {}, "time": 0.0},
+        {"species": {"X": 2.0}, "time": 0.5},
+    ]}])
+    traj = Run(db).trajectory
+    assert sorted(traj.columns) == ["species.X", "time"]
+    assert traj["species.X"].isna().tolist() == [True, False]
+
+
 def test_all_run_ids_ordered_by_started_at(tmp_path):
     from vivarium_workbench.testing.run_fixture import _all_run_ids
     db = tmp_path / "runs.db"
