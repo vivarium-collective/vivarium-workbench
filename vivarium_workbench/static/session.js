@@ -124,30 +124,8 @@
     var build = params.get("build");
     if (!ws && !build) return null;
 
-    clearId();          // discard any inherited (copied) id
-    ensureId();         // mint this tab's own fresh id — race-free, before the bind
-
-    var endpoint, payload, key;
-    if (ws) {
-      endpoint = "/api/source/switch"; payload = { name: ws }; key = "workspace";
-    } else {
-      endpoint = "/api/source/switch-build";
-      payload = { simulator_id: Number(build) }; key = "build";
-    }
-
-    function stripParam() {
-      try {
-        params.delete(key);
-        var qs = params.toString();
-        var clean = (loc.pathname || "/") + (qs ? "?" + qs : "") + (loc.hash || "");
-        window.history.replaceState(null, "", clean);
-      } catch (e) { /* history unavailable — harmless */ }
-    }
-
-    // item 41: any path that does NOT end in a reload must explicitly dismiss the
-    // boot overlay + surface a real error — a reload never happens on those
-    // paths, so the pre-paint script never gets to re-run and clear it on its
-    // own, which would otherwise strand the user behind a spinner forever.
+    // item 41: a path that does NOT end in a reload must explicitly dismiss the
+    // boot overlay + surface a real error — else the user is stranded on a spinner.
     function bindFailed(message) {
       try { document.documentElement.removeAttribute("data-ws-boot"); } catch (e) { /* no-op */ }
       try {
@@ -157,23 +135,70 @@
       } catch (e) { /* renderFailure unavailable — overlay is still dismissed above */ }
     }
 
-    return window.fetch(endpoint, {
+    // --- `?workspace=<name>` : URL-addressable workspace -----------------------
+    // KEEP the param in the URL (the link is self-describing + reload-proof; the
+    // server honors it with precedence). Bind this tab's session to the workspace
+    // on EVERY load (idempotent — survives a server restart that dropped the
+    // registry). Reload only on the FIRST bind in this tab, so API fetches route
+    // to the now-bound session without a race; subsequent reloads just load (the
+    // server already paints the right workspace via the param), avoiding a loop.
+    if (ws) {
+      var BOUND_KEY = "viv-ws-bound";
+      var firstBind = true;
+      try { var _s0 = _store(); firstBind = !_s0 || _s0.getItem(BOUND_KEY) !== ws; } catch (e) { /* private mode */ }
+      if (firstBind) clearId();   // fresh tab (or new workspace): discard any inherited/old id
+      ensureId();                 // ensure this tab has its own id before the bind
+      return window.fetch("/api/source/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: ws }),
+      }).then(function (r) {
+        if (r && r.ok) {
+          try { var _s1 = _store(); if (_s1) _s1.setItem(BOUND_KEY, ws); } catch (e) { /* private mode */ }
+          if (firstBind && window.location && typeof window.location.reload === "function") {
+            window.location.reload();   // one-time: re-request so fetches use the bound session
+          } else {
+            // reload path: the server already painted this workspace via ?workspace=;
+            // the bind above just re-established routing. Dismiss the boot overlay.
+            try { document.documentElement.removeAttribute("data-ws-boot"); } catch (e) { /* no-op */ }
+          }
+        } else {
+          bindFailed("Failed to open workspace '" + ws + "' — /api/source/switch returned " + (r ? r.status : "no response"));
+        }
+        return r;
+      }).catch(function () {
+        bindFailed("Failed to open workspace '" + ws + "' — network error");
+      });
+    }
+
+    // --- `?build=<simulator_id>` : remote build (unchanged) --------------------
+    // A remote build materializes a transient workspace; strip the param so a
+    // reload is a plain load of the now-bound session (not a re-materialize).
+    clearId();
+    ensureId();
+    function stripBuildParam() {
+      try {
+        params.delete("build");
+        var qs = params.toString();
+        var clean = (loc.pathname || "/") + (qs ? "?" + qs : "") + (loc.hash || "");
+        window.history.replaceState(null, "", clean);
+      } catch (e) { /* history unavailable — harmless */ }
+    }
+    return window.fetch("/api/source/switch-build", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ simulator_id: Number(build) }),
     }).then(function (r) {
-      stripParam();
-      // Reload the (now clean) URL so GET / re-renders for the bound workspace.
+      stripBuildParam();
       if (r && r.ok && window.location && typeof window.location.reload === "function") {
         window.location.reload();
       } else if (!r || !r.ok) {
-        bindFailed("Failed to open workspace — " + endpoint + " returned " + (r ? r.status : "no response"));
+        bindFailed("Failed to open build — /api/source/switch-build returned " + (r ? r.status : "no response"));
       }
       return r;
     }).catch(function () {
-      // Bind failed — leave the app on its default workspace.
-      stripParam();
-      bindFailed("Failed to open workspace — network error contacting " + endpoint);
+      stripBuildParam();
+      bindFailed("Failed to open build — network error");
     });
   }
 

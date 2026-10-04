@@ -222,3 +222,39 @@ team before building. (session-registry §3 should be updated to match once agre
   sessions idle-expire (session-registry §5 `T_session`) and their worker idle-evicts
   (protocol §17) — confirm the horizons feel right for the per-tab cadence (many
   short-lived tabs).
+
+## 11. URL-addressable workspaces — `?workspace=<name>` is the source of truth
+
+The per-tab session id is **opaque**: it says *which* session, not *which
+workspace*. Workspace identity therefore lived only in mutable server/browser
+state (the registry entry + the browser-wide `vw_session` cookie) and was **never
+in the URL** — the `?workspace=` spawn param was consumed and stripped on load.
+That made a workbench link un-shareable and un-reloadable: a bare `/` resolves
+through the cookie, and because `/api/source/switch` re-aligns that
+browser-wide cookie, switching workspace in *one* tab silently re-pointed every
+other tab's plain navigation (reload, typed URL, bookmark) at the new workspace.
+A link a user kept "stopped working" after they switched.
+
+**Fix: the workspace lives in the URL, and the server honors it with precedence.**
+
+- The client **keeps** `?workspace=<name>` in the address bar (no
+  `history.replaceState` strip). The link is self-describing and reload-proof.
+- `_session_workspace_mw` (api/app.py): when a request carries
+  `?workspace=<name>`, it resolves the catalog entry (`source_switch_views`,
+  by name) and **rebinds this request's session to it before resolving the
+  workspace root** — so the param wins over the cookie/registry. An
+  unknown/ambiguous name falls through to the normal cookie/default resolution
+  (harmless). This is what makes `GET /?workspace=X` render X's name *and*
+  content even when the cookie points elsewhere (it also retired the stale
+  server-rendered-name problem that had forced the switcher to re-point by path
+  + reload).
+- The client binds on **every** load with the param (idempotent — survives a
+  server restart that dropped the in-memory registry) but reloads only on the
+  **first** bind in a tab (a `viv-ws-bound` sessionStorage guard), so fetches
+  route to the bound session without a race and a reload never loops.
+
+This resolves the §10 "re-point a live tab" open question in favour of allowing
+re-point: the switcher's **Switch** now navigates the current tab to
+`/?workspace=<name>` (same URL shape as **Open ↗**, which uses a new tab), rather
+than a path re-point that mutated the shared cookie. Tabs stay independent (§9);
+each tab's URL carries its own workspace, so no switch clobbers another tab.

@@ -738,6 +738,25 @@ def create_app() -> FastAPI:
         # act on the session even on its FIRST request — before the id round-trips.
         session_key = existing or session_registry.mint_key()
         request.state.session_key = session_key
+        # URL-addressable workspace: a `?workspace=<name>` query param binds this
+        # session to the named catalog workspace, taking PRECEDENCE over whatever
+        # the cookie/registry last held. This makes every workbench URL
+        # self-describing: a bookmarked / shared / reloaded `/?workspace=<name>`
+        # link always restores THAT workspace, even after another tab switched the
+        # shared cookie. Unknown/ambiguous names fall through to the normal
+        # cookie/default resolution (harmless). See docs/session-binding.md §11.
+        ws_param = request.query_params.get("workspace")
+        if ws_param:
+            try:
+                from vivarium_workbench.lib import source_switch_views
+
+                _res, _st = source_switch_views.source_switch(
+                    {"name": ws_param}, switch_active=False
+                )
+                if _st == 200:
+                    session_registry.rebind(session_key, _res["source"]["path"])
+            except Exception:
+                pass  # resolution failure must never break request routing
         ctx = workspace_context.resolve(session_key)
         token = _root.set_request_workspace_root(ctx.ws_root)
         try:
