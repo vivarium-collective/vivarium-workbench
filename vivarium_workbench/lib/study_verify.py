@@ -316,7 +316,7 @@ def _check_parent_studies(study: dict, ws_root: Path | None) -> Iterable[VerifyF
         slug = p if isinstance(p, str) else (p.get("study") if isinstance(p, dict) else None)
         if not isinstance(slug, str) or not slug:
             continue
-        target = WorkspacePaths.load(ws_root).studies / slug / "study.yaml"
+        target = WorkspacePaths.load(ws_root).study_dir(slug) / "study.yaml"
         if not target.is_file():
             yield VerifyFinding(
                 level="error",

@@ -26,6 +26,7 @@ from typing import Optional
 
 import yaml
 
+from vivarium_workbench.lib.path_safety import is_plain_name
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 from vivarium_workbench.lib.study_spec import study_dir as _study_dir
@@ -242,9 +243,9 @@ def build_investigation_hypotheses(ws_root: Path, name: str) -> dict:
     study_specs = []
     for s in investigation_member_slugs(inv_spec):
         slug: Optional[str] = s.get("name") if isinstance(s, dict) else s
-        if not slug:
+        if not is_plain_name(slug):  # malformed member: skip it (the resolver 400s on a non-plain name)
             continue
-        f = wp.studies / str(slug) / "study.yaml"
+        f = wp.study_dir(slug) / "study.yaml"
         if not f.is_file():
             continue
         try:

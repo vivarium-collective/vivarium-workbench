@@ -23,7 +23,7 @@ _STORELESS_KINDS = frozenset({"derived_scalar", "derived", "config_value"})
 
 def grade_study(ws_root: Path, slug: str) -> tuple[dict, int]:
     ws_root = Path(ws_root)
-    study_dir = WorkspacePaths.load(ws_root).studies / slug
+    study_dir = WorkspacePaths.load(ws_root).study_dir(slug)
     spec_path = study_dir / "study.yaml"
     read_only = False
     if not spec_path.exists():

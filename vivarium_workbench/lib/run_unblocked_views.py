@@ -98,7 +98,7 @@ def investigation_run_unblocked(ws_root: Path, body: dict) -> tuple[dict, int]:
         # host study.yaml; copy it into the host workspace so it isn't skipped and
         # its run can write outputs there.
         study_runs._materialize_federated_study(ws_root, member_name)
-        spec_path = WorkspacePaths.load(ws_root).studies / member_name / "study.yaml"
+        spec_path = WorkspacePaths.load(ws_root).study_dir(member_name) / "study.yaml"
         if not spec_path.is_file():
             # legacy: investigations/<name>/spec.yaml
             spec_path = WorkspacePaths.load(ws_root).investigations / member_name / "spec.yaml"

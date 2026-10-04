@@ -387,26 +387,16 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
     composite cannot build, returns 422 with authored-only rows + an explanatory
     ``note`` (never a 500).
     """
-    from .study_spec import SLUG_RE, study_spec_file
+    from .study_spec import SLUG_RE, study_dir as _study_dir, study_spec_file
     from .spec_migration import migrate_v2_to_v3
 
     ws_root = Path(ws_root)
     if not SLUG_RE.match(slug or ""):
         return {"error": "invalid slug"}, 400
 
-    # Resolve the study dir honoring the workspace layout (workspace.yaml may
-    # nest studies under e.g. workspace/studies — v2ecoli). Fall back to the
-    # flat root layout if WorkspacePaths can't load.
-    try:
-        from .workspace_paths import WorkspacePaths
-        wp = WorkspacePaths.load(ws_root)
-        study_dir = wp.studies / slug
-        if not study_dir.is_dir():
-            study_dir = wp.investigations / slug
-    except Exception:  # noqa: BLE001
-        study_dir = ws_root / "studies" / slug
-        if not study_dir.is_dir():
-            study_dir = ws_root / "investigations" / slug
+    # The shared layout-aware resolver (the one GET /api/study/{slug} uses):
+    # honors workspace.yaml `layout:` and nested investigations/<inv>/studies/.
+    study_dir = _study_dir(ws_root, slug)
     sf = study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": f"study not found: {slug}"}, 404

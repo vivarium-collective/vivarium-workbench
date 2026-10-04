@@ -315,7 +315,11 @@ def study_prereqs(ws, slug: str) -> list[str]:
     """
     import yaml
 
-    p = ws.studies / slug / "study.yaml"
+    from vivarium_workbench.lib.path_safety import is_plain_name
+
+    if not is_plain_name(slug):  # the resolver 400s on a non-plain name
+        return []
+    p = ws.study_dir(slug) / "study.yaml"
     if not p.exists():
         return []
     try:

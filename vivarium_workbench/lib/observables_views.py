@@ -211,26 +211,15 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
     does not expose. If the composite can't build, returns a clear non-500
     (422 + all readouts marked aspirational with a note), never a crash.
     """
-    from vivarium_workbench.lib.study_spec import SLUG_RE, study_spec_file
+    from vivarium_workbench.lib.study_spec import SLUG_RE, study_spec_path
 
     ws_root = Path(ws_root)
     if not SLUG_RE.match(slug or ""):
         return {"error": "invalid slug"}, 400
 
-    # Resolve the study dir honoring the workspace layout (workspace.yaml may
-    # nest studies under e.g. workspace/studies — v2ecoli). Fall back to the
-    # flat root layout if WorkspacePaths can't load. (Mirrors readouts_views.)
-    try:
-        from .workspace_paths import WorkspacePaths
-        wp = WorkspacePaths.load(ws_root)
-        study_dir = wp.studies / slug
-        if not study_dir.is_dir():
-            study_dir = wp.investigations / slug
-    except Exception:  # noqa: BLE001
-        study_dir = ws_root / "studies" / slug
-        if not study_dir.is_dir():
-            study_dir = ws_root / "investigations" / slug
-    sf = study_spec_file(study_dir)
+    # The shared layout-aware resolver (the one GET /api/study/{slug} uses):
+    # honors workspace.yaml `layout:` and nested investigations/<inv>/studies/.
+    sf = study_spec_path(ws_root, slug)
     if not sf.is_file():
         return {"error": f"study not found: {slug}"}, 404
 

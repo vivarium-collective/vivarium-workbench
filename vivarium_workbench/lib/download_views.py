@@ -97,7 +97,7 @@ def study_export_zip(ws_root: Path, name: str) -> bytes:
     Moved verbatim from ``server._study_export_zip`` (``server`` keeps a thin
     re-export shim for its existing call-sites / tests).
     """
-    src = ws_root / "studies" / name
+    src = WorkspacePaths.load(ws_root).study_dir(name)
     return _zip_dir(src)
 
 
@@ -117,7 +117,7 @@ def build_study_export(ws_root: Path, name: str) -> tuple[bytes, str, str]:
     name = (name or "").strip()
     if not name:
         raise DownloadError({"error": "missing study"}, 400)
-    src = WorkspacePaths.load(ws_root).studies / name
+    src = WorkspacePaths.load(ws_root).study_dir(name)
     if not src.is_dir():
         # Federation fallback: a read-only study shipped by a linked
         # workspace (installed under external/<repo>/) is surfaced by the

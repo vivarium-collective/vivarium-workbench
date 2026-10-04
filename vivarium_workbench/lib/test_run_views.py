@@ -39,7 +39,7 @@ def study_tests_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     slug = (body or {}).get("study")
     if not slug:
         return {"error": "missing 'study' in body"}, 400
-    spec_path = WorkspacePaths.load(ws_root).studies / slug / "study.yaml"
+    spec_path = WorkspacePaths.load(ws_root).study_dir(slug) / "study.yaml"
     if not spec_path.exists():
         return {"error": f"study not found: {slug}"}, 404
     from vivarium_workbench.lib.study_tests import (
