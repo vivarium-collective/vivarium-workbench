@@ -424,6 +424,39 @@ export interface VisualizationStatus {
 export interface VisualizationInstances {
 }
 
+export interface ComparisonEngineRun {
+  status: string;
+  runtime_s: number | null;
+  n_points: number | null;
+  error: string;
+}
+
+export interface ComparisonJob {
+  model: string;
+  job: string;
+  engines: string[];
+  matrix: Record<string, Record<string, number | null>>;
+  max_nrmse: number | null;
+  worst_pair: string[] | null;
+  bucket: string | null;
+  bucket_label: string | null;
+  closeness_bucket_label: string | null;
+  runs: Record<string, ComparisonEngineRun>;
+}
+
+export interface ComparisonBucketCount {
+  label: string;
+  count: number;
+}
+
+export interface StudyComparison {
+  n_models: number;
+  n_jobs: number;
+  engines: string[];
+  buckets: ComparisonBucketCount[];
+  jobs: ComparisonJob[];
+}
+
 export interface SourceBuilds {
 }
 

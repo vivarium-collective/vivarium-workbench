@@ -921,6 +921,13 @@
           'below, or see rendered figures in the <strong>Visualizations</strong> tab.</p>';
         return;
       }
+      // Remote batch runs carry cross-engine comparisons: a heatmap view
+      // (comparison-view.js) replaces the flat scalar table. Needs no network
+      // beyond this payload, so it works in a published snapshot too.
+      if (d.comparison && window.ComparisonView) {
+        window.ComparisonView.render(mount, d.comparison, { runLabel: d.run_label || d.run_id });
+        return;
+      }
       var stores = d.stores || [];
       if (!stores.length) {
         mount.innerHTML = '<p class="empty-message">The latest run (' +

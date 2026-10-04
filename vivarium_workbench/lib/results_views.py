@@ -99,7 +99,10 @@ def build_study_results(ws_root: Path, slug: "str | None") -> tuple[dict, int]:
       "status", "stores": [{"path", "dtype", "first", "last", "min", "max",
       "sparkline": [...]}]}`` — per-store preview of the latest run. ``stores``
       is ``[]`` when the run emitted no scalar leaves (still ``present: True``
-      — the run exists, there's just nothing scalar to preview).
+      — the run exists, there's just nothing scalar to preview). When the
+      run's state carries cross-engine ``comparisons`` the payload instead has
+      ``"comparison"`` (a ``models.StudyComparison``) and ``stores: []`` — see
+      ``lib/study_comparison.py``.
     """
     from .study_spec import SLUG_RE
 
@@ -128,6 +131,20 @@ def build_study_results(ws_root: Path, slug: "str | None") -> tuple[dict, int]:
         "completed_at": row.get("completed_at"),
         "status": row.get("status"),
     }
+
+    # A remote batch run's snapshot carries cross-engine comparisons: show
+    # those (a heatmap per model/job) instead of hundreds of scalar rows.
+    # ``None`` for every other run -> the scalar preview below, unchanged.
+    try:
+        from .study_comparison import build_comparison
+
+        # Index rows carry workspace-relative paths (the explorer readers
+        # below take ``workspace=`` for the same reason).
+        comparison = build_comparison(str(ws_root / db_path), run_id)
+    except Exception:  # noqa: BLE001 — a malformed state must degrade to the scalar preview
+        comparison = None
+    if comparison is not None:
+        return {"present": True, "stores": [], "comparison": comparison, **common}, 200
 
     try:
         from . import explorer_data

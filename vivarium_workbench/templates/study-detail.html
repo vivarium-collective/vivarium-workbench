@@ -536,6 +536,57 @@
 :root[data-theme="dark"] .di-gain-medium{background:rgba(245,158,11,0.15);color:#fcd34d}
 :root[data-theme="dark"] .di-gain-low{background:var(--surface-3);color:var(--text-muted)}
 :root[data-theme="dark"] .di-chip{background:var(--surface-3);color:var(--text-muted)}
+
+/* ── Cross-engine comparison view (static/comparison-view.js) ───────────
+   Heat levels are translucent hues, so one rule set reads on the light page
+   and (via the dark overrides) on the dark surfaces; values are always
+   printed in the cell, never color-only. */
+.cv-head{font-size:0.88em;margin:0 0 10px}
+.cv-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.cv-chip{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:9999px;padding:3px 12px;font-size:0.82em;cursor:pointer}
+.cv-chip.cv-on{background:#e0e7ff;border-color:#818cf8;color:#3730a3}
+.cv-tools{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:8px}
+.cv-q{flex:1 1 220px;max-width:340px;padding:5px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.88em;background:#fff;color:inherit}
+.cv-prob{font-size:0.84em}
+.cv-count{margin-left:auto;font-size:0.82em}
+.cv-row{border:1px solid #e5e7eb;border-radius:6px;margin-bottom:4px}
+.cv-row>summary{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:6px 10px;cursor:pointer;font-size:0.88em}
+.cv-model{font-weight:600;font-family:ui-monospace,monospace}
+.cv-job,.cv-worst{color:#64748b}
+.cv-num{font-variant-numeric:tabular-nums;text-align:right}
+.cv-pill{display:inline-block;padding:1px 9px;border-radius:9999px;font-size:0.82em;background:#e2e8f0;color:#334155}
+.cv-ok{background:rgba(22,163,74,0.16);color:#166534}
+.cv-bad{background:rgba(220,38,38,0.14);color:#991b1b}
+.cv-b0{background:rgba(22,163,74,0.18);color:#166534}.cv-b1{background:rgba(132,204,22,0.22);color:#3f6212}
+.cv-b2{background:rgba(234,179,8,0.25);color:#854d0e}.cv-b3{background:rgba(249,115,22,0.22);color:#9a3412}
+.cv-b4{background:rgba(220,38,38,0.18);color:#991b1b}
+.cv-body{padding:4px 12px 12px}
+.cv-detail{display:flex;flex-wrap:wrap;gap:24px}
+.cv-sub{font-size:0.78em;text-transform:uppercase;letter-spacing:0.04em;color:#64748b;margin-bottom:4px}
+.cv-note{font-size:0.8em;color:#64748b;margin-top:4px}
+.cv-heat,.cv-runs{border-collapse:collapse;font-size:0.84em}
+.cv-heat th,.cv-heat td,.cv-runs th,.cv-runs td{padding:4px 9px;border:1px solid #e5e7eb}
+.cv-heat th,.cv-runs th{font-weight:600;text-align:left}
+.cv-heat td{text-align:center;font-variant-numeric:tabular-nums;min-width:64px}
+.cv-h0{background:rgba(22,163,74,0.25)}.cv-h1{background:rgba(132,204,22,0.28)}.cv-h2{background:rgba(234,179,8,0.30)}
+.cv-h3{background:rgba(249,115,22,0.30)}.cv-h4{background:rgba(220,38,38,0.30)}
+.cv-self,.cv-na{color:#94a3b8}
+.cv-err{color:#64748b;max-width:420px;word-break:break-word}
+.cv-more{margin:8px 0;padding:5px 14px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer}
+:root[data-theme="dark"] .cv-chip,:root[data-theme="dark"] .cv-more{background:var(--surface-3);border-color:var(--border-2);color:var(--text)}
+:root[data-theme="dark"] .cv-chip.cv-on{background:var(--active);border-color:#6366f1;color:#c7d2fe}
+:root[data-theme="dark"] .cv-q{background:var(--field);border-color:var(--border-2);color:var(--text)}
+:root[data-theme="dark"] .cv-row,:root[data-theme="dark"] .cv-heat th,:root[data-theme="dark"] .cv-heat td,
+:root[data-theme="dark"] .cv-runs th,:root[data-theme="dark"] .cv-runs td{border-color:var(--border)}
+:root[data-theme="dark"] .cv-job,:root[data-theme="dark"] .cv-worst,:root[data-theme="dark"] .cv-sub,
+:root[data-theme="dark"] .cv-note,:root[data-theme="dark"] .cv-err{color:var(--text-muted)}
+:root[data-theme="dark"] .cv-pill{background:var(--surface-3);color:var(--text)}
+:root[data-theme="dark"] .cv-ok,:root[data-theme="dark"] .cv-b0{background:rgba(22,163,74,0.20);color:#86efac}
+:root[data-theme="dark"] .cv-b1{background:rgba(132,204,22,0.20);color:#bef264}
+:root[data-theme="dark"] .cv-b2{background:rgba(234,179,8,0.20);color:#fde047}
+:root[data-theme="dark"] .cv-b3{background:rgba(249,115,22,0.22);color:#fdba74}
+:root[data-theme="dark"] .cv-bad,:root[data-theme="dark"] .cv-b4{background:rgba(220,38,38,0.22);color:#fca5a5}
+:root[data-theme="dark"] .cv-self,:root[data-theme="dark"] .cv-na{color:var(--text-muted)}
 </style>
 
 <style>
@@ -1164,7 +1215,7 @@
   <p class="muted">What came back from this study's runs — a per-store preview of the latest run, plus the raw emitter store (zarr/parquet/runs.db) for every run.</p>
 
   <h4>Latest run preview</h4>
-  <p class="muted" style="font-size:0.9em">Per-store sparkline + first/last/min/max from the most recent run's emitted trajectory. This is a downsampled PREVIEW, not the full data — use the per-store or Download-all links for the complete arrays.</p>
+  <p class="muted" style="font-size:0.9em">Per-store sparkline + first/last/min/max from the most recent run's emitted trajectory. This is a downsampled PREVIEW, not the full data — use the per-store or Download-all links for the complete arrays. For a cross-engine comparison run, this shows how closely the simulators agree, model by model, instead.</p>
   <div id="results-preview" data-study="{{ name }}">
     <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading results preview…</span></div>
   </div>
@@ -2307,6 +2358,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
 <script src="/composite-card.js"></script>
 <script src="/checklist-select.js"></script>
 <script src="/progress-track.js"></script>
+<script src="/comparison-view.js"></script>
 <script src="/study-detail.js"></script>
 <script>
 // Re-assert the refresh-aware seed handlers AFTER study-detail.js (which

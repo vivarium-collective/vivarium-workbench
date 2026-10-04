@@ -329,6 +329,15 @@ appear. In-memory job tracking (`lib/run_jobs.py`) is *only* progress signalling
 for multi-variant investigation runs and is lost on restart — `runs.db` is the
 durable artifact.
 
+**Results tab for cross-engine runs.** A remote batch run from viva-biomodels
+lands as one snapshot step whose state carries `comparisons` (an engine-by-engine
+NRMSE matrix per model/job) and `diagnostics` (per-engine status/runtime).
+`GET /api/study-results` detects that and returns a `comparison` block
+(`lib/study_comparison.py`, model `StudyComparison`) instead of scalar rows;
+`static/comparison-view.js` renders it as bucket chips, a filter, and collapsed
+per-model heatmaps. Any other run keeps the scalar preview. The block is baked
+into the published bundle with the rest of `api/study-results/<slug>.json`.
+
 ---
 
 ## 5. Data lifecycle: spec → rendered dashboard
