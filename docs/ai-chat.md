@@ -289,6 +289,17 @@ All three modes work: **Manual** (a pure chat, no tools), **Ask** (read-only: Cl
   can be *loaded*, but a shell step it asks for has nowhere to run (verified with a skill that embeds a shell command: it is
   denied). `VIVARIUM_WORKBENCH_CLAUDE_USER_SETTINGS=0` reads none of it — no plugins, skills, hooks or `CLAUDE.md`, only the
   workbench's tools. `lib/ai_skills.py` remains the way the *other* providers get `viva-superpowers` and friends.
+- **Opt-in: load only some plugins (`VIVARIUM_WORKBENCH_CLAUDE_PLUGINS`).** Unset (or `all`) is the default and changes
+  nothing. Set it to `viva-superpowers` (or a comma-separated list, each `name` or `name@marketplace`), or `none`, and the
+  process reads none of your Claude Code settings and loads exactly those plugins: the server asks your own
+  `claude plugin list --json` for each named plugin's install directory and passes it as `--plugin-dir`. A name that is
+  not an installed, enabled plugin makes the chat fail with a clear message rather than being dropped. Because user
+  settings are not read, this also leaves out everything else in them: your own `~/.claude/skills`, `~/.claude/CLAUDE.md`
+  and settings-defined hooks (which is where most of the first-turn tokens are on a machine with many personal skills).
+  Measured on one machine (haiku, trivial prompt, empty tool server; `claude` 2.1.289): default 8.5k first-turn tokens,
+  `viva-superpowers` only 4.8k, nothing 3.2k. Disabling plugins through `--settings` `enabledPlugins` was measured too and
+  saved almost nothing, since personal skills stay loaded. Only the Claude Code provider is affected; the other providers'
+  `viva-superpowers` skills (`lib/ai_skills.py`) are untouched.
 - **Cost.** Measured first-turn tokens on the same prompt (sonnet; real CLI): a normal Claude Code session ≈ 35k, Ask mode
   with plugins off ≈ 1.9k, Ask mode with the user's plugins on ≈ 19k (the difference is the plugins' skill lists and
   start-up context). Each chat then keeps one cached process (below), so later turns do not re-pay it.

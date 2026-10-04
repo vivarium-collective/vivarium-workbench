@@ -532,3 +532,109 @@ def test_real_claude_in_agent_mode_respects_a_refusal(server):
     assert f2[-1]["type"] == "done"
     assert not (ws / "studies" / "refused-study").exists()
     assert not [a for a in audit(ws) if a.get("phase") in ("intent", "result")]
+
+
+# --- opt-in plugin allowlist (VIVARIUM_WORKBENCH_CLAUDE_PLUGINS) -----------------------------------------
+
+
+_ATTACH = claude_cli.Attach(mcp_config="{}", allowed=("mcp__workbench__a", "mcp__workbench__b"))
+_DEFAULT_ASK_ARGV = [
+    "claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+    "--tools", "Skill", "--strict-mcp-config", "--mcp-config", "/cfg.json",
+    "--allowedTools", "mcp__workbench__a,mcp__workbench__b,Skill", "--permission-prompts", "none", "--setting-sources", "user",
+    "--no-session-persistence", "--model", "sonnet", "--system-prompt", "SYS"]
+
+
+def test_default_argv_is_unchanged_by_the_allowlist_feature(monkeypatch):
+    """Falsifies: the opt-in changed what an unconfigured install spawns. The expected list is the argv as it was before
+    this feature (literal, not derived from the builder), and the unset / empty / ``all`` env values all mean 'default'."""
+    for value in (None, "", "all", " ALL "):
+        monkeypatch.delenv("VIVARIUM_WORKBENCH_CLAUDE_PLUGINS", raising=False)
+        if value is not None:
+            monkeypatch.setenv("VIVARIUM_WORKBENCH_CLAUDE_PLUGINS", value)
+        assert claude_cli.plugin_allowlist() is None
+    assert claude_cli.build_argv("claude", "sonnet", "SYS", "/cfg.json", _ATTACH) == _DEFAULT_ASK_ARGV
+    assert claude_cli.build_argv("claude", "sonnet", "SYS", "/cfg.json", _ATTACH, None) == _DEFAULT_ASK_ARGV
+
+
+def test_plain_chat_argv_ignores_the_allowlist():
+    """Falsifies: a plain chat (no tools) could pick up plugins. It never reads settings, whatever ``plugin_dirs`` says."""
+    a = claude_cli.build_argv("claude", "sonnet", "SYS", plugin_dirs=("/p/one",))
+    assert a[a.index("--setting-sources") + 1] == "" and "--plugin-dir" not in a
+
+
+def test_allowlist_reads_no_user_settings_and_loads_exactly_the_given_directories():
+    a = claude_cli.build_argv("claude", "sonnet", "SYS", "/cfg.json", _ATTACH, ("/p/one", "/p/two"))
+    assert a[a.index("--setting-sources") + 1] == ""
+    assert [a[i + 1] for i, x in enumerate(a) if x == "--plugin-dir"] == ["/p/one", "/p/two"]
+    assert a[a.index("--tools") + 1] == "Skill" and "--strict-mcp-config" in a     # the safety net is untouched
+    assert claude_cli.build_argv("claude", "sonnet", "SYS", "/cfg.json", _ATTACH, ()).count("--plugin-dir") == 0
+
+
+@pytest.mark.parametrize("raw", ["viva; rm -rf ~", "../../etc", "a b", "$(id)", "viva@", "@x", ",", "x" * 80, "a\nb", "-rf"])
+def test_allowlist_refuses_names_that_are_not_plain_plugin_ids(monkeypatch, raw):
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_CLAUDE_PLUGINS", raw)
+    with pytest.raises(claude_cli.ClaudeCliError):
+        claude_cli.plugin_allowlist()
+
+
+def test_allowlist_parses_none_and_names(monkeypatch):
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_CLAUDE_PLUGINS", "none")
+    assert claude_cli.plugin_allowlist() == ()
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_CLAUDE_PLUGINS", "viva-superpowers, slack@claude-plugins-official")
+    assert claude_cli.plugin_allowlist() == ("viva-superpowers", "slack@claude-plugins-official")
+
+
+def _enabled_plugins():
+    import subprocess
+    out = subprocess.run(["claude", "plugin", "list", "--json"], capture_output=True, text=True, timeout=30, cwd="/").stdout
+    return [r for r in json.loads(out) if r.get("enabled") and os.path.isdir(r.get("installPath", ""))]
+
+
+@live
+def test_real_cli_resolves_installed_plugins_and_refuses_unknown_ones():
+    """Falsifies: the resolver trusts a fixture. It asks the real ``claude plugin list --json``."""
+    rows = _enabled_plugins()
+    if not rows:
+        pytest.skip("no enabled Claude Code plugin installed")
+    exe = claude_cli.installed()
+    r = rows[0]
+    assert r["installPath"] in claude_cli.resolve_plugin_dirs(exe, (r["id"],))
+    assert r["installPath"] in claude_cli.resolve_plugin_dirs(exe, (r["id"].split("@")[0],))
+    with pytest.raises(claude_cli.ClaudeCliError):
+        claude_cli.resolve_plugin_dirs(exe, ("no-such-plugin-xyz",))
+
+
+@live
+def test_real_claude_with_an_allowlist_loads_only_that_plugin_and_fewer_tokens(tmp_path):
+    """Falsifies: the restriction is cosmetic. Two real first turns with the workbench's own argv (tiny prompt, haiku): the
+    default one loads the user's whole plugin set; the allowlisted one loads the named plugin and not the others, and its
+    first turn is smaller. (Skipped when fewer than two plugins are enabled: nothing to restrict.)"""
+    import subprocess
+    rows = _enabled_plugins()
+    if len(rows) < 2:
+        pytest.skip("needs two or more enabled Claude Code plugins")
+    exe = claude_cli.installed()
+    keep = rows[0]
+    dirs = claude_cli.resolve_plugin_dirs(exe, (keep["id"],))
+    cfg = tmp_path / ".mcp.json"
+    cfg.write_text('{"mcpServers":{}}')
+    attach = claude_cli.Attach(mcp_config="{}", allowed=())
+
+    def first_turn(plugin_dirs):
+        argv = claude_cli.build_argv(exe, "haiku", "Reply briefly.", str(cfg), attach, plugin_dirs)
+        msg = json.dumps({"type": "user", "message": {"role": "user", "content": "Reply with one word: ok"}}) + "\n"
+        p = subprocess.run(argv, input=msg, capture_output=True, text=True, cwd=tmp_path, timeout=180, env=claude_cli.child_env())
+        evs = [json.loads(line) for line in p.stdout.splitlines() if line.startswith("{")]
+        init = next(e for e in evs if e.get("type") == "system" and e.get("subtype") == "init")
+        u = next(e for e in evs if e.get("type") == "result")["usage"]
+        tokens = u["input_tokens"] + (u.get("cache_creation_input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0)
+        return {x["name"] if isinstance(x, dict) else x for x in init["plugins"]}, tokens
+
+    full_plugins, full_tokens = first_turn(None)
+    only_plugins, only_tokens = first_turn(dirs)
+    name = keep["id"].split("@")[0]
+    others = {r["id"].split("@")[0] for r in rows[1:]} - {name}
+    assert name in full_plugins and name in only_plugins
+    assert others & full_plugins and not others & only_plugins
+    assert only_tokens < full_tokens
