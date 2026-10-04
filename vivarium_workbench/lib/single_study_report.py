@@ -57,7 +57,7 @@ def _load_study_spec(ws_root: Path, study_slug: str) -> dict:
     if missing, ValueError on parse error.
     """
     wp = WorkspacePaths.load(ws_root)
-    p = wp.studies / study_slug / "study.yaml"
+    p = wp.study_dir(study_slug) / "study.yaml"
     if not p.is_file():
         # Legacy fallback: investigations/<slug>/spec.yaml (pre-studies layout)
         p = wp.investigations / study_slug / "spec.yaml"
@@ -90,7 +90,7 @@ def _collect_viz_html(ws_root: Path, study_slug: str) -> list[dict]:
     The HTML is inlined verbatim so the report opens standalone in a browser
     without needing the dashboard server to be running.
     """
-    viz_dir = WorkspacePaths.load(ws_root).studies / study_slug / "viz"
+    viz_dir = WorkspacePaths.load(ws_root).study_dir(study_slug) / "viz"
     if not viz_dir.is_dir():
         # Federation fallback -- see _load_study_spec. Best-effort: a
         # malformed/absent linked workspace just leaves viz_dir missing and

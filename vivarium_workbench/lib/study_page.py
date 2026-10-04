@@ -28,6 +28,7 @@ import vivarium_workbench as _vd_pkg
 _TEMPLATES_DIR: Path = Path(_vd_pkg.__file__).parent / "templates"
 
 from vivarium_workbench.lib.study_spec import SLUG_RE as _SLUG_RE  # noqa: E402
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths  # noqa: E402
 from markupsafe import Markup as _Markup, escape as _escape  # noqa: E402
 
 
@@ -881,8 +882,8 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict, *, base_path:
     try:
         import re as _re
         from urllib.parse import quote as _urlquote
-        sdir = next((b / name for b in (ws_root / "workspace" / "studies",
-                                        ws_root / "studies") if (b / name).is_dir()), None)
+        sdir = WorkspacePaths.load(ws_root).study_dir(name)
+        sdir = sdir if sdir.is_dir() else None
         vizzes = spec.get("visualizations") or []
         addr = lambda v: (str(v.get("address", "")).split(":", 1)[-1]
                           if isinstance(v, dict) else "")

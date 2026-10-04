@@ -25,7 +25,7 @@ class StudyTestsResult:
 
 
 def _study_paths(workspace: Path, slug: str) -> tuple[Path, Path, Path]:
-    study_dir = WorkspacePaths.load(workspace).studies / slug
+    study_dir = WorkspacePaths.load(workspace).study_dir(slug)
     tests_dir = study_dir / "tests"
     spec_path = study_dir / "study.yaml"
     return study_dir, tests_dir, spec_path

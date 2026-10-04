@@ -71,17 +71,38 @@ def _append_investigation_member(ws_root: Path, investigation: str, study_name: 
     workspace, ``whole-cell-model-comparison``, already uses ``members:``,
     with its own comment noting the dashboard reads member studies from
     exactly that key). Idempotent: a slug already present is not duplicated.
+
+    Comment-preserving: the file is a hand-authored document (like that
+    ``members:`` comment), so it goes through the same ruamel round-trip the
+    feedback writers use (``feedback_actions._ruamel``), with the file's own
+    block-sequence indentation detected by ruamel's ``load_yaml_guess_indent``
+    so an indented ``  - item`` list is not re-indented.
     """
+    from io import StringIO
+
+    from ruamel.yaml.util import load_yaml_guess_indent
+
     from vivarium_workbench.lib.atomic_io import atomic_write_text
+    from vivarium_workbench.lib.feedback_actions import _ruamel
     from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 
     inv_yaml = WorkspacePaths.load(ws_root).investigations / investigation / "investigation.yaml"
-    data = yaml.safe_load(inv_yaml.read_text(encoding="utf-8")) or {}
+    text = inv_yaml.read_text(encoding="utf-8")
+    y = _ruamel()
+    _, seq_indent, seq_offset = load_yaml_guess_indent(text)
+    if seq_indent is not None:
+        y.indent(mapping=2, sequence=seq_indent, offset=seq_offset)
+    data = y.load(text) or {}
     key = "studies" if data.get("studies") else "members"
-    current = investigation_member_slugs(data)
-    if study_name not in current:
-        data[key] = [*current, study_name]
-        atomic_write_text(inv_yaml, yaml.safe_dump(data, sort_keys=False))
+    if study_name in investigation_member_slugs(data):
+        return
+    if isinstance(data.get(key), list):
+        data[key].append(study_name)
+    else:
+        data[key] = [study_name]
+    buf = StringIO()
+    y.dump(data, buf)
+    atomic_write_text(inv_yaml, buf.getvalue())
 
 
 def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":

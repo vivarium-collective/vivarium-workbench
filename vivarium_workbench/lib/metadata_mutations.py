@@ -245,7 +245,7 @@ def set_study_objective(ws_root: Path, body: dict) -> tuple[dict, int]:
     text = body.get("text") or ""
     if not name:
         return {"error": "missing study"}, 400
-    sf = ws_root / "studies" / name / "study.yaml"
+    sf = _study_spec_lib.study_spec_path(ws_root, name)
     if not sf.is_file():
         return {"error": "study not found"}, 404
     spec: dict = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
@@ -298,7 +298,7 @@ def set_study_narrative(ws_root: Path, body: dict) -> tuple[dict, int]:
                 ),
             }, 400
 
-    sf = ws_root / "studies" / name / "study.yaml"
+    sf = _study_spec_lib.study_spec_path(ws_root, name)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 

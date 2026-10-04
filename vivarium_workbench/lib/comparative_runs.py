@@ -24,6 +24,7 @@ from __future__ import annotations
 import yaml as _yaml
 
 from vivarium_workbench.lib import study_run_state
+from vivarium_workbench.lib.path_safety import is_plain_name
 from vivarium_workbench.lib.comparative_viz import render_comparative_time_series
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
@@ -61,9 +62,10 @@ def render_investigation_comparative_visualisations(
     """
     for member in investigation_member_slugs(iset):
         study_slug = member if isinstance(member, str) else (member or {}).get("study")
-        if not study_slug:
+        if not is_plain_name(study_slug):  # malformed member: skip it (the resolver 400s on a non-plain name)
             continue
-        spec_path = WorkspacePaths.load(ws_root).studies / study_slug / "study.yaml"
+        study_d = WorkspacePaths.load(ws_root).study_dir(study_slug)
+        spec_path = study_d / "study.yaml"
         if not spec_path.is_file():
             continue
         try:
@@ -73,9 +75,9 @@ def render_investigation_comparative_visualisations(
         specs = study_spec.get("comparative_visualizations") or []
         if not specs:
             continue
-        viz_dir = WorkspacePaths.load(ws_root).studies / study_slug / "viz"
+        viz_dir = study_d / "viz"
         viz_dir.mkdir(parents=True, exist_ok=True)
-        study_db = WorkspacePaths.load(ws_root).studies / study_slug / "runs.db"
+        study_db = study_d / "runs.db"
         if not study_db.is_file():
             continue
         for cv in specs:

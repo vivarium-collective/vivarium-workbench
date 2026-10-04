@@ -21,6 +21,7 @@ from pathlib import Path
 
 import yaml
 
+from vivarium_workbench.lib.path_safety import is_plain_name
 from vivarium_workbench.lib.investigation_members import (
     investigation_member_slugs,
     member_slug,
@@ -548,7 +549,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
     # study list comes solely from here). Normalize dict/bare-slug entries.
     for entry in investigation_member_slugs(inv):
         slug = member_slug(entry)
-        if not slug:
+        if not is_plain_name(slug):  # malformed member: skip it (the resolver 400s on a non-plain name)
             continue
         try:
             spec = _load_study_spec(ws_root, slug)
@@ -568,7 +569,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         #   1. `image:`-addressed raster/vector figures → data-URIs
         #   2. on-disk viz/charts HTML (the committed render of every `local:`
         #      live visualization current workspaces use) → inlined HTML
-        study_dir = wp.studies / real_slug
+        study_dir = wp.study_dir(real_slug)
         figs = []
         if spec.get("visualizations"):
             figs.extend(_embed_visualizations(study_dir, spec["visualizations"], img_budget))
@@ -586,7 +587,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
             s["model_topology"] = topo
         # embed a pre-rendered loom image (offline-safe Model view) if the study
         # saved one via `vivarium-workbench render-loom`
-        loom_img = _model_loom_img(wp.studies / real_slug, img_budget)
+        loom_img = _model_loom_img(study_dir, img_budget)
         if loom_img:
             s["model_loom"] = loom_img
         studies.append(s)

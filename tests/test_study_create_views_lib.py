@@ -245,3 +245,48 @@ def test_no_real_git_no_commit(tmp_path):
     body, status = views.study_create(ws, {"name": "inv-nogit"})
     assert status == 200
     assert not (ws / ".git").exists()
+
+
+# ---------------------------------------------------------------------------
+# investigation membership: comment-preserving append (regression)
+# ---------------------------------------------------------------------------
+
+_COMMENTED_INV_YAML = """\
+# Investigation header comment -- hand-authored, must survive.
+name: inv1
+title: Investigation One  # inline comment on title
+# The dashboard reads member studies from `members:` (keep this note).
+members:
+- existing-study  # the first member
+status: in-progress
+"""
+
+
+@pytest.mark.parametrize("seq_prefix", ["", "  "], ids=["flush-list", "indented-list"])
+def test_study_create_with_investigation_preserves_comments(tmp_path, seq_prefix):
+    """Both block-list styles real investigation.yaml files use survive verbatim."""
+    ws = _make_ws(tmp_path)
+    inv_yaml = ws / "investigations" / "inv1" / "investigation.yaml"
+    inv_yaml.parent.mkdir(parents=True)
+    original = _COMMENTED_INV_YAML.replace("\n- ", "\n" + seq_prefix + "- ")
+    inv_yaml.write_text(original, encoding="utf-8")
+
+    body, status = views.study_create(ws, {"name": "new-study", "investigation": "inv1"})
+    assert status == 200, body
+
+    text = inv_yaml.read_text(encoding="utf-8")
+    for comment in (
+        "# Investigation header comment -- hand-authored, must survive.",
+        "# inline comment on title",
+        "# The dashboard reads member studies from `members:` (keep this note).",
+        "# the first member",
+    ):
+        assert comment in text, text
+    data = yaml.safe_load(text)
+    assert data["members"] == ["existing-study", "new-study"]
+    assert data["status"] == "in-progress"
+    # Only the member line was added: the rest of the document is byte-identical.
+    assert text == original.replace(
+        "- existing-study  # the first member\n",
+        f"- existing-study  # the first member\n{seq_prefix}- new-study\n",
+    )

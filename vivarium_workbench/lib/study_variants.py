@@ -7,17 +7,12 @@ from pathlib import Path
 import yaml
 
 from vivarium_workbench.lib import composite_runs
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _study_yaml(workspace: Path, study: str) -> Path | None:
-    for base in (Path(workspace) / "studies" / study,):
-        p = base / "study.yaml"
-        if p.is_file():
-            return p
-    # nested investigations/<inv>/studies/<study>/study.yaml
-    for p in Path(workspace).glob(f"investigations/*/studies/{study}/study.yaml"):
-        return p
-    return None
+    p = WorkspacePaths.load(workspace).study_dir(study) / "study.yaml"
+    return p if p.is_file() else None
 
 
 def save_run_as_variant(workspace, *, run_id, source_db, study, variant_name):

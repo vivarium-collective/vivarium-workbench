@@ -125,7 +125,7 @@ from viva_superpowers.paths import find_workspace_root  # noqa: E402,F401
 
 
 def study_dir_from_slug(ws_root: Path, slug: str) -> Path:
-    sd = WorkspacePaths.load(ws_root).studies / plain_name(slug, "study name")
+    sd = WorkspacePaths.load(ws_root).study_dir(plain_name(slug, "study name"))
     if not (sd / "study.yaml").is_file():
         raise FileNotFoundError(f"studies/{slug}/study.yaml not found under {ws_root}")
     return sd

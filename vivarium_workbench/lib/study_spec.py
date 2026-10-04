@@ -410,7 +410,7 @@ def read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]:
 
     Mirrors ``server._read_runs_db_for_study`` parameterised on ``ws_root``.
     """
-    runs_db = WorkspacePaths.load(ws_root).studies / name / "runs.db"
+    runs_db = study_dir(ws_root, name) / "runs.db"
     # A runs.db is the canonical per-step source, but it's optional: emitter-less
     # workspaces record runs only in study.yaml (merged in below). So don't bail
     # when it's absent — fall through with an empty db result.
@@ -598,8 +598,9 @@ def discover_viz_html_files(ws_root: Path, name: str) -> list[dict]:
     out: list[dict] = []
 
     # Source 1: studies/<name>/viz/*.html (auto-rendered from runs.db).
-    viz_dir = wp.studies / name / "viz"
-    runs_db = wp.studies / name / "runs.db"
+    sdir = wp.study_dir(name)
+    viz_dir = sdir / "viz"
+    runs_db = sdir / "runs.db"
     if viz_dir.is_dir() and runs_db.is_file():
         # Freshness reference: the latest recorded run time (WAL-immune), not the
         # db file mtime. A small grace absorbs sub-second render/commit ordering.

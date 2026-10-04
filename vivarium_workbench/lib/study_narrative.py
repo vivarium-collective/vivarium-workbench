@@ -50,7 +50,7 @@ def _walk_to_workspace(start: Path) -> Path:
 
 
 def _study_yaml(ws_root: Path, slug: str) -> Path:
-    p = WorkspacePaths.load(ws_root).studies / slug / "study.yaml"
+    p = WorkspacePaths.load(ws_root).study_dir(slug) / "study.yaml"
     if not p.is_file():
         raise FileNotFoundError(
             f"Study '{slug}' not found at {p}. Run '/viva-study new <name> "

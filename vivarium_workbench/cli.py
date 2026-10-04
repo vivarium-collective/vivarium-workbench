@@ -1319,7 +1319,7 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
             viewport={"width": int(args.width), "height": int(args.height)},
             device_scale_factor=float(args.device_scale))
         for slug, comp, opts in jobs:
-            out = wp.studies / slug / "viz" / "model-loom.png"
+            out = wp.study_dir(slug) / "viz" / "model-loom.png"
             loom_url = (f"{url}/bigraph-loom/?id={quote(comp)}"
                         "&tabs=explore,document&nopersist=1")
             # Render style (--style / loom.style), e.g. ?style=minimal.

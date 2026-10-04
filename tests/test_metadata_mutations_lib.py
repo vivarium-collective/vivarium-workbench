@@ -603,3 +603,100 @@ class TestInvestigationPatchRoute:
         for p in ("/api/investigation-set-observables", "/api/investigation-set-conclusions",
                   "/api/investigation-set-overview", "/api/investigation-set-status"):
             assert p not in paths
+
+
+# ---------------------------------------------------------------------------
+# 4. Layout-aware study resolution (regression)
+#
+# The study setters used to hardcode ``ws_root / "studies" / name``, so a
+# workspace with a ``layout:`` override, or a study nested under its
+# investigation, got a 404 from PATCH /api/study/{slug} even though
+# GET /api/study/{slug} (layout-aware) found it.
+# ---------------------------------------------------------------------------
+
+
+def _layout_spec(slug):
+    # A spec GET /api/study/{slug} accepts (baseline is schema-required), so
+    # the route test can prove GET and PATCH resolve the same file.
+    return {
+        "schema_version": 4,
+        "name": slug,
+        "objective": "old",
+        "baseline": [{"name": "core", "composite": "pkg.composites.foo", "params": {}}],
+    }
+
+
+@pytest.fixture
+def layout_ws(tmp_path):
+    """Workspace with a non-default ``layout:``, one flat study under the
+    relocated studies root and one study nested under its investigation."""
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    (ws_root / "workspace.yaml").write_text(
+        "name: layout-test\n"
+        "layout:\n"
+        "  studies: workspace/studies\n"
+        "  investigations: workspace/investigations\n",
+        encoding="utf-8",
+    )
+    flat = ws_root / "workspace" / "studies" / "flat-s"
+    flat.mkdir(parents=True)
+    (flat / "study.yaml").write_text(
+        yaml.safe_dump(_layout_spec("flat-s")),
+        encoding="utf-8",
+    )
+    inv = ws_root / "workspace" / "investigations" / "inv1"
+    nested = inv / "studies" / "nested-s"
+    nested.mkdir(parents=True)
+    (inv / "investigation.yaml").write_text("name: inv1\n", encoding="utf-8")
+    (nested / "study.yaml").write_text(
+        yaml.safe_dump(_layout_spec("nested-s")),
+        encoding="utf-8",
+    )
+    return ws_root
+
+
+_LAYOUT_STUDY_FILES = {
+    "flat-s": ("workspace", "studies", "flat-s", "study.yaml"),
+    "nested-s": ("workspace", "investigations", "inv1", "studies", "nested-s", "study.yaml"),
+}
+
+
+def _read_layout_study(ws_root, slug):
+    return yaml.safe_load(ws_root.joinpath(*_LAYOUT_STUDY_FILES[slug]).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("slug", sorted(_LAYOUT_STUDY_FILES))
+class TestLayoutAwareStudySetters:
+    def test_set_objective_writes_resolved_study(self, layout_ws, slug):
+        resp, code = mm.set_study_objective(layout_ws, {"study": slug, "text": "new"})
+        assert (resp, code) == ({"ok": True}, 200)
+        assert _read_layout_study(layout_ws, slug)["objective"] == "new"
+        # Nothing was written to the default flat location.
+        assert not (layout_ws / "studies").exists()
+
+    def test_set_narrative_writes_resolved_study(self, layout_ws, slug):
+        resp, code = mm.set_study_narrative(
+            layout_ws, {"study": slug, "path": "biological_summary", "value": "N"})
+        assert (resp, code) == ({"ok": True}, 200)
+        assert _read_layout_study(layout_ws, slug)["biological_summary"] == "N"
+        assert not (layout_ws / "studies").exists()
+
+    def test_patch_route_get_and_patch_agree(self, layout_ws, slug):
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: layout_ws
+        c = TestClient(app)
+        assert c.get(f"/api/study/{slug}").status_code == 200
+        r = c.patch(f"/api/study/{slug}", json={
+            "objective": "patched",
+            "narrative": {"path": "biological_summary", "value": "N"},
+        })
+        assert r.status_code == 200, r.text
+        assert set(r.json()["applied"]) == {"objective", "narrative"}
+        spec = _read_layout_study(layout_ws, slug)
+        assert spec["objective"] == "patched"
+        assert spec["biological_summary"] == "N"
+
+    def test_unknown_study_still_404(self, layout_ws, slug):
+        resp, code = mm.set_study_objective(layout_ws, {"study": slug + "-nope", "text": "x"})
+        assert (resp, code) == ({"error": "study not found"}, 404)

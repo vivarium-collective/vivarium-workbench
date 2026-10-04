@@ -42,7 +42,7 @@ def study_refresh_viz(ws_root: Path, name: str) -> dict:
     from vivarium_workbench.lib.refresh_viz import refresh_study_viz
     from vivarium_workbench.lib.study_charts import latest_run_row
 
-    study_dir = WorkspacePaths.load(ws_root).studies / name
+    study_dir = WorkspacePaths.load(ws_root).study_dir(name)
     if not study_dir.is_dir():
         return {"error": f"study {name!r} not found", "not_found": True}
     spec_path = study_dir / "study.yaml"
