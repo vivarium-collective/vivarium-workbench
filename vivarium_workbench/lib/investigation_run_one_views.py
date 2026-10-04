@@ -341,9 +341,8 @@ def investigation_run_one(ws_root: Path, body: dict) -> tuple[dict, int]:
             # dashboard's static-file handler can serve it.
             viz_html_resp = {}
             try:
-                payload = json.loads(
-                    result.stdout.split("@@@RESULTS@@@", 1)[1].strip()
-                )
+                from vivarium_workbench.lib.composite_subprocess import parse_results_block
+                payload = parse_results_block(result.stdout)
                 viz_html = payload.get("viz_html") or {}
             except (IndexError, json.JSONDecodeError):
                 viz_html = {}

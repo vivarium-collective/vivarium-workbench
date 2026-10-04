@@ -36,6 +36,25 @@ from vivarium_workbench.lib import run_store
 import yaml
 
 
+RESULTS_MARKER = "@@@RESULTS@@@"
+
+
+def parse_results_block(stdout: str, object_hook=None):
+    """Decode the JSON value printed after ``@@@RESULTS@@@``.
+
+    Only the first JSON value is decoded (``JSONDecoder.raw_decode``); anything
+    after it is ignored. Native libraries in the child write to the same stdout
+    through C stdio, whose buffer is flushed at process exit, i.e. after the
+    results line. libroadrunner's CVODE warnings are an example
+    (``[WARNING]... t + h = t on the next step``). Parsing the whole tail made a
+    completed run fail with "Extra data". Raises ``IndexError`` without the
+    marker and ``json.JSONDecodeError`` when no JSON value follows it.
+    """
+    tail = stdout.split(RESULTS_MARKER, 1)[1].lstrip()
+    value, _ = json.JSONDecoder(object_hook=object_hook).raw_decode(tail)
+    return value
+
+
 def strip_process_instances(state):
     """Strip live Process/Step instances from a state tree before JSON encoding.
 
@@ -802,10 +821,7 @@ def run_composite_subprocess(
         try:
             from bigraph_schema.json_codec import bigraph_json_hook
 
-            payload = json.loads(
-                out.split("@@@RESULTS@@@", 1)[1].strip(),
-                object_hook=bigraph_json_hook,
-            )
+            payload = parse_results_block(out, object_hook=bigraph_json_hook)
         except (IndexError, json.JSONDecodeError):
             cr.complete_metadata(
                 conn, run_id=run_id, n_steps=0, status="failed", workspace=ws_root
