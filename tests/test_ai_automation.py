@@ -297,8 +297,7 @@ def test_create_baseline_variant_run_poll_and_read_results_through_the_chat_tool
 # --- documented product gaps, pinned (fix them => these flip and force a doc/prompt update) ---
 
 
-@pytest.mark.xfail(strict=True, reason="PRODUCT GAP: study-run-baseline resolves composites in-process and cannot "
-                                       "find a YAML fixture composite (detached composite-test-run can)")
+# Closed by #1271: the in-process study-run path resolves workspace YAML composites.
 def test_pin_study_run_baseline_resolves_a_yaml_composite(tmp_path, monkeypatch):
     app, ws = _make_app(tmp_path, monkeypatch, fixture=True)
 
