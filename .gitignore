@@ -42,5 +42,3 @@ vivarium_workbench/loom/_dist
 # demos/v2ecoli pins sibling checkouts by path; its lock only records their HEADs
 # at lock time and goes stale as they move, so it is local, not committed.
 demos/v2ecoli/uv.lock
-.superpowers/
-.superpowers/

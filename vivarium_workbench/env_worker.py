@@ -3081,7 +3081,7 @@ def _find_candidates(params):
                        "fails": list(getattr(r, "fails", []) or [])} for r in results]
         return {"status": "ok", "candidates": candidates}
     except Exception as error:  # noqa: BLE001 - never 500 the worker
-        return {"status": "error", "message": str(error), "candidates": []}
+        return {"status": "error", "error": str(error), "candidates": []}
 
 
 def _get_workspace_core():
