@@ -67,8 +67,90 @@ def test_find_candidates_endpoint_shape(tmp_path, monkeypatch):
     assert body["status"] == "ok" and isinstance(body["candidates"], list)
     assert seen["method"] == "find_candidates"
     assert seen["params"] == {"inputs": {"m": "float"}, "outputs": {"m": "float"}}
-    # empty / malformed bodies are handled, never a 500
-    assert c.post("/api/find-candidates", json={}).status_code == 200
-    assert c.post("/api/find-candidates", json={"inputs": "x"}).status_code == 200
-    assert c.post("/api/find-candidates", content=b"{bad",
-                  headers={"content-type": "application/json"}).status_code < 500
+
+
+def test_find_candidates_malformed_bodies(tmp_path, monkeypatch):
+    """Malformed/garbage bodies are handled, never a 500/unhandled exception."""
+    try:
+        from fastapi.testclient import TestClient
+    except RuntimeError as e:
+        pytest.skip(str(e))
+    from vivarium_workbench.api.app import create_app, get_workspace
+    from vivarium_workbench.lib import env_worker_pool
+
+    class _Pool:
+        def call(self, ws, method, params=None, **kw):
+            return {"status": "ok", "candidates": []}
+
+    monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Pool())
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: tmp_path
+    c = TestClient(app)
+
+    # Empty body → 200 with status field (route coerces to {})
+    r = c.post("/api/find-candidates", json={})
+    assert r.status_code == 200
+    assert r.json().get("status") in ("ok", "unavailable", "error")
+    assert "candidates" in r.json()
+
+    # Non-dict inputs → 200 with status field (route coerces to {})
+    r = c.post("/api/find-candidates", json={"inputs": "not-a-dict"})
+    assert r.status_code == 200
+    assert r.json().get("status") in ("ok", "unavailable", "error")
+    assert "candidates" in r.json()
+
+    # Non-dict outputs → 200 with status field
+    r = c.post("/api/find-candidates", json={"outputs": 123})
+    assert r.status_code == 200
+    assert r.json().get("status") in ("ok", "unavailable", "error")
+    assert "candidates" in r.json()
+
+    # Both malformed → still 200 with status
+    r = c.post("/api/find-candidates", json={"inputs": "x", "outputs": "y"})
+    assert r.status_code == 200
+    assert r.json().get("status") in ("ok", "unavailable", "error")
+    assert "candidates" in r.json()
+
+    # Bad JSON → handled (200 or 4xx), never 500
+    r = c.post("/api/find-candidates", content=b"{bad",
+               headers={"content-type": "application/json"})
+    assert r.status_code < 500
+
+
+def test_find_candidates_e2e_with_fixture(monkeypatch):
+    """End-to-end test: post matching face to endpoint, find process with match:'full'."""
+    try:
+        from fastapi.testclient import TestClient
+    except RuntimeError as e:
+        pytest.skip(str(e))
+    from vivarium_workbench.api.app import create_app, get_workspace
+    from pathlib import Path
+
+    # Use ws_increase_demo fixture which has IncreaseProcess: inputs/outputs = {'level': 'float'}
+    fixture_ws = Path(__file__).parent / "_fixtures" / "ws_increase_demo"
+    if not fixture_ws.exists():
+        pytest.skip(f"fixture workspace {fixture_ws} not found")
+
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: fixture_ws
+    c = TestClient(app)
+
+    # Post a matching face: level float input + output
+    r = c.post("/api/find-candidates",
+               json={"inputs": {"level": "float"}, "outputs": {"level": "float"}})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok", f"unexpected status: {body}"
+    assert isinstance(body["candidates"], list), "candidates should be a list"
+    # IncreaseProcess should appear with match:'full' (exact match on both inputs/outputs)
+    matches = [c for c in body["candidates"] if "IncreaseProcess" in c.get("address", "")]
+    assert len(matches) > 0, f"IncreaseProcess not found in candidates: {body['candidates']}"
+    assert matches[0]["match"] == "full", f"expected match='full', got {matches[0]}"
+
+    # Post a non-matching face: no process provides 'zzz' input
+    r = c.post("/api/find-candidates",
+               json={"inputs": {"zzz": "float"}, "outputs": {}})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["candidates"] == [], f"expected no candidates for non-matching face, got {body['candidates']}"
