@@ -161,6 +161,8 @@ def build_investigation_composite_doc(
     """
     if not investigation or not composite:
         raise InvViewError({"error": "investigation + composite required"}, 400)
+    if not is_plain_name(composite):
+        raise InvViewError({"error": "invalid composite: it must be a plain name, not a path"}, 400)
     study_dir = _study_dir(ws_root, investigation)
     composite_path = study_dir / "composites" / f"{composite}.yaml"
     if not composite_path.is_file():
@@ -195,6 +197,8 @@ def build_investigation_state_tree(
 
     if not investigation or not composite:
         raise InvViewError({"error": "investigation + composite required"}, 400)
+    if not is_plain_name(composite):
+        raise InvViewError({"error": "invalid composite: it must be a plain name, not a path"}, 400)
     composite_path = _study_dir(ws_root, investigation) / "composites" / f"{composite}.yaml"
     if not composite_path.is_file():
         raise InvViewError(

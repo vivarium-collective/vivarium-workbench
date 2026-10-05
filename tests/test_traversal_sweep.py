@@ -38,7 +38,7 @@ from vivarium_workbench.lib import _root
 IDENT_FIELDS = {
     "study", "investigation", "inv", "slug", "name", "new_name", "target_name", "composite_name",
     "run_id", "uid", "item_id", "bib_key", "simulator_id", "class_name", "job_id", "spec_id",
-    "source_prefix", "target_prefix", "n", "ext", "point_id", "mode", "names", "run_ids",
+    "source_prefix", "target_prefix", "n", "ext", "point_id", "mode", "names", "run_ids", "composite",
 }
 # Values that name a file (workspace-relative, or an id that resolves to one).
 FILE_FIELDS = {
