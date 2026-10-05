@@ -22,10 +22,23 @@ assert.ok(_contractBadge({ status: 'fail', findings: [{ severity: 'error', messa
 assert.ok(_contractBadge({ status: 'incomplete', grade: 0.2 }).includes('contract-incomplete'));
 assert.ok(_contractBadge({ status: 'unavailable' }).includes('contract-none'));
 
-// test_absent_contract_audit_renders_empty
+// test_absent_contract_audit_renders_empty (pre-4A snapshots, emitters)
 assert.strictEqual(_contractBadge(undefined), '');
 assert.strictEqual(_contractPanelBody(undefined), '');
 assert.strictEqual(_contractBadge(null), '');
+assert.strictEqual(_contractPanelBody(null), '');
+// empty object (no contract_audit key)
+assert.strictEqual(_contractBadge({}), '');
+assert.strictEqual(_contractPanelBody({}), '');
+// partial record: status only, no findings/ports/grade
+const partialBadge = _contractBadge({ status: 'pass' });
+assert.ok(partialBadge && partialBadge.length > 0, 'partial badge should render');
+assert.ok(!partialBadge.includes('NaN'), 'partial badge should not contain NaN');
+assert.ok(!partialBadge.includes('undefined'), 'partial badge should not contain undefined');
+const partialPanel = _contractPanelBody({ status: 'pass' });
+assert.ok(partialPanel && partialPanel.length > 0, 'partial panel should render');
+assert.ok(!partialPanel.includes('NaN'), 'partial panel should not contain NaN');
+assert.ok(!partialPanel.includes('undefined'), 'partial panel should not contain undefined');
 
 // test_panel_escapes_finding_message
 const panel = _contractPanelBody({ status: 'fail', grade: 0.5,
