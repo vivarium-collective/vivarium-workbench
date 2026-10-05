@@ -1302,7 +1302,8 @@ def create_app() -> FastAPI:
         from `.pbg/loom-layouts/<id>__<mode>.json`; `{}` if none."""
         import json as _json, re as _re
         safe = _re.sub(r"[^A-Za-z0-9._-]+", "_", str(id))
-        p = ws / ".pbg" / "loom-layouts" / f"{safe}__{mode}.json"
+        safe_mode = _re.sub(r"[^A-Za-z0-9._-]+", "_", str(mode))  # a file-name part, like ``id``
+        p = ws / ".pbg" / "loom-layouts" / f"{safe}__{safe_mode}.json"
         if p.exists():
             try:
                 return {"positions": _json.loads(p.read_text())}
@@ -1330,7 +1331,8 @@ def create_app() -> FastAPI:
         safe = _re.sub(r"[^A-Za-z0-9._-]+", "_", cid)
         d = ws / ".pbg" / "loom-layouts"
         d.mkdir(parents=True, exist_ok=True)
-        (d / f"{safe}__{mode}.json").write_text(_json.dumps(positions))
+        safe_mode = _re.sub(r"[^A-Za-z0-9._-]+", "_", mode)  # a file-name part, like ``id``
+        (d / f"{safe}__{safe_mode}.json").write_text(_json.dumps(positions))
         return {"ok": True}
 
     @app.get(
@@ -1399,7 +1401,8 @@ def create_app() -> FastAPI:
         mode = str(view.get("mode", "hierarchy"))
         ld = ws / ".pbg" / "loom-layouts"
         ld.mkdir(parents=True, exist_ok=True)
-        (ld / f"{safe}__{mode}.json").write_text(_json.dumps(view.get("positions", {}) or {}))
+        safe_mode = _re.sub(r"[^A-Za-z0-9._-]+", "_", mode)  # a file-name part, like ``id``
+        (ld / f"{safe}__{safe_mode}.json").write_text(_json.dumps(view.get("positions", {}) or {}))
         # (3) mirror into the git-tracked committed view if one exists. Alias:
         # bridge the static <-> generator id forms of a figure composite.
         aliases = [cid]
