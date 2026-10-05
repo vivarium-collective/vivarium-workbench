@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json as _json
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -417,6 +418,9 @@ def read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]:
     conn = sqlite3.connect(str(runs_db)) if runs_db.is_file() else None
     if conn is not None:
         conn.row_factory = sqlite3.Row
+    # Every record read from this database is persisted in it, and says so: the rigor scorecard (viva_superpowers.rigor,
+    # run persistence) accepts a run only if its record carries an emitter or a run-db reference such as ``db_path``.
+    db_path = os.path.relpath(runs_db, ws_root).replace(os.sep, "/") if conn is not None else None
     try:
         # Discover available tables; both should exist for pbg_runner-wrapped
         # runs, but older backfilled DBs may only have runs_meta.
@@ -451,6 +455,7 @@ def read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]:
                     "started_at":    r["started_at"],
                     "completed_at":  r["completed_at"],
                     "generation_id": r["generation_id"],
+                    "db_path":       db_path,
                     "source":        "runs_meta",
                 }
         if conn is not None and "simulations" in tables:
@@ -478,6 +483,7 @@ def read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]:
                         "status":       "ran",
                         "started_at":   r["started_at"],
                         "completed_at": r["completed_at"],
+                        "db_path":      db_path,
                         "source":       "simulations",
                     }
     finally:
