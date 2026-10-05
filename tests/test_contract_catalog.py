@@ -66,3 +66,21 @@ def test_local_prefixed_address_normalized():
     prefixed = contract_audit_payload(core, 'local:c')
     assert prefixed['status'] != 'not-declared'
     assert prefixed['status'] == contract_audit_payload(core, 'c')['status']
+
+
+def test_composite_contract_audit_is_wellformed_or_unavailable():
+    core = _core_with('c', _Contracted)
+    payload = contract_audit_payload(core, 'c') if CONTRACT_AUDIT_AVAILABLE else {'status': 'unavailable'}
+    assert payload['status'] in ('pass', 'fail', 'incomplete', 'not-declared', 'unavailable', 'error')
+
+
+def test_composites_data_records_carry_contract_audit(tmp_path, monkeypatch):
+    import vivarium_workbench.lib.composite_lookup as cl
+    (tmp_path / 'workspace.yaml').write_text('name: x\npackage_path: pbg_x_nonexistent\n')
+    monkeypatch.setattr(cl, 'discover_all_composites',
+                        lambda root, pkg: {'a': {'id': 'a', 'name': 'a', 'module': ''}})
+    out = cl.composites_data(tmp_path)
+    recs = out['composites']
+    assert recs, out
+    for r in recs:
+        assert r['contract_audit']['status'] in ('pass', 'fail', 'incomplete', 'not-declared', 'unavailable', 'error')
