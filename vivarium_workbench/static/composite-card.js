@@ -62,7 +62,7 @@
   // pre-4A snapshots). All dynamic text goes through window._esc.
   function _contractBadge(ca) {
     if (!ca || !ca.status) return '';
-    var esc = window._esc;
+    var esc = _esc;
     var map = {
       pass:         { cls: 'contract-pass',       glyph: '✓', label: 'contract' },
       fail:         { cls: 'contract-fail',       glyph: '✗', label: 'contract' },
@@ -82,7 +82,7 @@
 
   function _contractPanelBody(ca) {
     if (!ca || !ca.status) return '';
-    var esc = window._esc;
+    var esc = _esc;
     var rows = [];
     rows.push('<div class="contract-status-line">Status: <b>' + esc(ca.status) + '</b>' +
       (typeof ca.grade === 'number' ? ' · ' + Math.round(ca.grade * 100) + '% declared' : '') + '</div>');

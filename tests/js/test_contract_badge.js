@@ -7,13 +7,15 @@ const vm = require('vm');
 // minimal window with the escaper the helpers rely on
 const noop = () => {};
 const document = { addEventListener: noop, createElement: () => ({}) };
-const window = { document, addEventListener: noop, _esc: (s) => String(s == null ? '' : s)
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') };
+// NOTE: deliberately NO window._esc stub — helpers must use the file's in-scope _esc.
+const window = { document, addEventListener: noop };
 const sandbox = { window, document, console };
 vm.createContext(sandbox);
 const src = fs.readFileSync(path.join(__dirname, '../../vivarium_workbench/static/composite-card.js'), 'utf8');
 vm.runInContext(src, sandbox);
+assert.strictEqual(sandbox.window._esc, undefined, 'window._esc must stay undefined');
 const { _contractBadge, _contractPanelBody } = sandbox.window;
+assert.ok(_contractBadge({ status: 'pass', grade: 1 }).length > 0);
 
 // test_badge_per_status
 assert.ok(_contractBadge({ status: 'pass', grade: 1 }).includes('contract-pass'));

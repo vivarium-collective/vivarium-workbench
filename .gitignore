@@ -43,4 +43,3 @@ vivarium_workbench/loom/_dist
 # at lock time and goes stale as they move, so it is local, not committed.
 demos/v2ecoli/uv.lock
 .superpowers/
-.superpowers/
