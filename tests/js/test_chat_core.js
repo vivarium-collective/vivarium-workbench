@@ -531,3 +531,36 @@ console.log('chat-core hidden set: ok');
   assert.deepStrictEqual(C.parseQualified('claude-code/sonnet', null), { provider: 'claude-code', model: 'sonnet' });
 }
 console.log('chat-core Claude Code menu entry: ok');
+
+// ── a command (or trust) card is never approved in bulk; Deny all still covers it ──
+{
+  const st = C.newState(); C.startUserTurn(st, 'inspect');
+  const cmd = { effect: { kind: 'command', command_line: ['/bin/ls', '-la'], cwd: '/ws' } };
+  const trust = { effect: { kind: 'trust', workspace: '/ws' } };
+  [['a', {}], ['b', cmd], ['c', trust], ['d', {}]].forEach(([id, md]) => {
+    C.applyFrame(st, { type: 'tool-call', tool_call_id: id, tool_name: 't', args: {} });
+    C.applyFrame(st, { type: 'approval-required', tool_call_id: id, tool_name: 't', args: {}, metadata: md });
+  });
+  C.applyFrame(st, { type: 'done', pending_approval: true, messages: [{ m: 1 }] });
+  assert.strictEqual(C.needsOwnClick(st, 'b'), true);
+  assert.strictEqual(C.needsOwnClick(st, 'c'), true);
+  assert.strictEqual(C.needsOwnClick(st, 'a'), false);
+  assert.strictEqual(C.decideAll(st, true), false, 'commands remain, so the turn cannot resume yet');
+  assert.deepStrictEqual(st.decisions, { a: true, d: true });
+  assert.deepStrictEqual(st.pending.slice().sort(), ['b', 'c'], 'the command and trust cards stay pending');
+  C.decide(st, 'b', true);                     // the user clicks the command card itself
+  assert.strictEqual(st.decisions.b, true);
+  assert.strictEqual(C.decideAll(st, false, 'no'), true, 'Deny all covers a card that needs its own click');
+  assert.deepStrictEqual(st.decisions.c, { denied: 'no' });
+}
+
+// ── a command line with invisible or direction-changing characters is shown as \uXXXX ──
+{
+  const st = C.newState(); C.startUserTurn(st, 'x');
+  C.applyFrame(st, { type: 'tool-call', tool_call_id: 'k', tool_name: 't', args: {} });
+  C.applyFrame(st, { type: 'approval-required', tool_call_id: 'k', tool_name: 't', args: {},
+    metadata: { effect: { kind: 'command', command_line: ['/bin/cat', 'a‮txt.exe', 'b​c'], cwd: '/ws' } } });
+  const a = C.describeApproval(C.findTool(st, 'k'));
+  assert.deepStrictEqual(a.effect.command_line, ['/bin/cat', 'a\\u202Etxt.exe', 'b\\u200Bc']);
+  assert.strictEqual(a.hidden, true, 'the card warns that invisible characters were found');
+}

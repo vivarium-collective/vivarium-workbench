@@ -38,7 +38,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from vivarium_workbench.lib import ai_auth, ai_tools, claude_cli, claude_mcp
+from vivarium_workbench.lib import ai_auth, ai_tools, chat_commands, claude_cli, claude_mcp
 from vivarium_workbench.lib.errors import APIError
 
 # How to read a replayed conversation (see claude_cli.replay_prompt).
@@ -265,14 +265,17 @@ class ClaudeCodeTurn:
             await asyncio.to_thread(ai_tools.get_index, self.app)
             deps = ai_tools.ChatDeps(app=self.app, client=ai_tools.make_client(self.app), ws_root=self.ws_root,
                                      session_key=self.session, provider=claude_cli.PROVIDER, model=self.model,
-                                     mode=self.mode)
+                                     mode=self.mode, local_only=True)    # check_supported refused anything non-local
             token, live.binding = claude_mcp.register(deps, approval_ttl=claude_cli.IDLE_S)
             url = claude_mcp.endpoint_url(getattr(self.app.state, "bind_host", None), int(port))
         s: claude_cli.ClaudeSession | None = None
         try:
             if deps is not None and token is not None and url is not None:
+                cmd_tools = tuple(claude_mcp.TOOL_PREFIX + n for n in chat_commands.TOOL_NAMES)
+                on = chat_commands.enabled()      # the explicit startup switch: off, the model never sees the command tools
                 attach = claude_cli.Attach(mcp_config=claude_mcp.mcp_config(url, token),
-                                           allowed=tuple(claude_mcp.TOOL_PREFIX + n for n in claude_mcp.TOOL_NAMES))
+                                           allowed=tuple(claude_mcp.TOOL_PREFIX + n for n in claude_mcp.TOOL_NAMES) + (cmd_tools if on else ()),
+                                           blocked=() if on else cmd_tools)
                 if self.manifest is not None:
                     instructions += ("\nThe live workspace manifest follows (an orientation snapshot; re-read it with a tool "
                                      f"if you need fresh state):\n{await self.manifest(deps)}")

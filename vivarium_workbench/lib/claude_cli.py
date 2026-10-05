@@ -108,6 +108,7 @@ class Attach:
     user's installed plugins."""
     mcp_config: str                     # the --mcp-config JSON for this process (lib.claude_mcp.mcp_config)
     allowed: tuple[str, ...]            # the MCP tools to pre-allow; nothing else can run
+    blocked: tuple[str, ...] = ()       # MCP tools hidden from the model entirely (--disallowedTools)
 
 
 def build_argv(exe: str, model: str, system_prompt: str, mcp_config_path: str | None = None,
@@ -131,6 +132,8 @@ def build_argv(exe: str, model: str, system_prompt: str, mcp_config_path: str | 
         return head + ["--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands"] + tail
     mid = ["--tools", "Skill", "--strict-mcp-config", "--mcp-config", str(mcp_config_path),
            "--allowedTools", ",".join((*attach.allowed, "Skill")), "--permission-prompts", "none"]
+    if attach.blocked:
+        mid += ["--disallowedTools", ",".join(attach.blocked)]
     if plugin_dirs is None:
         return head + mid + ["--setting-sources", setting_sources()] + tail
     return head + mid + ["--setting-sources", ""] + [a for d in plugin_dirs for a in ("--plugin-dir", d)] + tail

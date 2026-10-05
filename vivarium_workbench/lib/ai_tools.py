@@ -93,6 +93,7 @@ class ChatDeps:
     provider: str
     model: str
     mode: str = "agent"          # manual (no tools are registered) | ask (reads only) | agent
+    local_only: bool = False     # True only for a binding the local-only Claude Code provider made (lib/chat_commands gate)
     skills: dict[str, ai_skills.Skill] = field(default_factory=dict)   # discovered SKILL.md folders, this turn
 
 

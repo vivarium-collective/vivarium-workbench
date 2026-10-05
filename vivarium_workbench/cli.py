@@ -102,6 +102,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if getattr(args, "trust_proxy", False):
         os.environ["VIVARIUM_WORKBENCH_TRUST_PROXY"] = "1"
 
+    if getattr(args, "enable_run_command", False):
+        os.environ["VIVARIUM_WORKBENCH_ENABLE_RUN_COMMAND"] = "1"
+
     if backend_url:
         os.environ["VIVARIUM_WORKBENCH_BACKEND_BASE_URL"] = args.backend_base_url
 
@@ -1386,6 +1389,13 @@ def main(argv: list[str] | None = None) -> int:
         "--base-path", default="",
         help="Serve under a URL path prefix (e.g. /workbench) for hosting behind a "
              "shared reverse proxy / ALB. Default empty = serve at root.",
+    )
+    p_serve.add_argument(
+        "--enable-run-command", action="store_true",
+        help="Let VivaChat's Claude Code provider ask to run read-only inspection commands (ls, cat, grep, find, "
+             "read-only git ...) in a trusted workspace, each after you approve it on a card (sets "
+             "VIVARIUM_WORKBENCH_ENABLE_RUN_COMMAND=1). Off by default; local servers only, never on a hosted "
+             "deployment. See docs/ai-chat.md.",
     )
     p_serve.add_argument(
         "--trust-proxy", action="store_true",
