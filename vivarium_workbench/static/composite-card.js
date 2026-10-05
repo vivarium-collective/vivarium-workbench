@@ -57,6 +57,67 @@
   }
   window._compositeBadge = _compositeBadge;
 
+  // contract-audit badge + panel (Phase 4B). Renders the 4A `contract_audit`.
+  // Pure string helpers; empty string when there is no contract_audit (emitters,
+  // pre-4A snapshots). All dynamic text goes through window._esc.
+  function _contractBadge(ca) {
+    if (!ca || !ca.status) return '';
+    var esc = window._esc;
+    var map = {
+      pass:         { cls: 'contract-pass',       glyph: '✓', label: 'contract' },
+      fail:         { cls: 'contract-fail',       glyph: '✗', label: 'contract' },
+      incomplete:   { cls: 'contract-incomplete', glyph: '◐', label: 'contract' },
+      'not-declared': { cls: 'contract-none',     glyph: '—', label: 'no contract' },
+      unavailable:  { cls: 'contract-none',       glyph: '—', label: 'contract n/a' },
+      error:        { cls: 'contract-none',       glyph: '—', label: 'contract' }
+    };
+    var m = map[ca.status] || map.error;
+    var n = (ca.findings || []).filter(function (f) { return f && f.severity === 'error'; }).length;
+    var count = (ca.status === 'fail' && n) ? ' (' + n + ')' : '';
+    var title = 'Contract audit: ' + esc(ca.status) +
+      (typeof ca.grade === 'number' ? ' · ' + Math.round(ca.grade * 100) + '% declared' : '');
+    return '<span class="contract-badge ' + m.cls + '" title="' + title + '">' +
+      m.glyph + ' ' + esc(m.label) + count + '</span>';
+  }
+
+  function _contractPanelBody(ca) {
+    if (!ca || !ca.status) return '';
+    var esc = window._esc;
+    var rows = [];
+    rows.push('<div class="contract-status-line">Status: <b>' + esc(ca.status) + '</b>' +
+      (typeof ca.grade === 'number' ? ' · ' + Math.round(ca.grade * 100) + '% declared' : '') + '</div>');
+    function portRows(side, ports) {
+      var ks = Object.keys(ports || {});
+      if (!ks.length) return '';
+      return '<div class="contract-ports"><div class="contract-sub">' + esc(side) + '</div>' +
+        ks.map(function (p) {
+          var s = ports[p] || {}; var b = [];
+          if (s._min != null || s._max != null) b.push('[' + esc(s._min == null ? '' : s._min) + ', ' + esc(s._max == null ? '' : s._max) + ']');
+          if (s._units) b.push(esc(s._units));
+          return '<div class="contract-port"><code>' + esc(p) + '</code> ' + esc(s._type || '') + ' ' + b.join(' ') + '</div>';
+        }).join('') + '</div>';
+    }
+    if (ca.ports) { rows.push(portRows('inputs', ca.ports.inputs)); rows.push(portRows('outputs', ca.ports.outputs)); }
+    if ((ca.conditions || []).length) {
+      rows.push('<div class="contract-conditions"><div class="contract-sub">conditions</div>' +
+        ca.conditions.map(function (c) {
+          return '<div class="contract-cond"><b>' + esc(c.kind) + '</b> ' + esc(c.name || '') +
+            ': <code>' + esc(c.expr || '') + '</code></div>';
+        }).join('') + '</div>');
+    }
+    if ((ca.findings || []).length) {
+      rows.push('<div class="contract-findings"><div class="contract-sub">findings</div>' +
+        ca.findings.map(function (f) {
+          return '<div class="contract-finding is-' + esc(f.severity) + '">' +
+            esc(f.severity) + ' <code>' + esc(f.code) + '</code> ' + esc(f.where || '') + ' — ' + esc(f.message || '') + '</div>';
+        }).join('') + '</div>');
+    }
+    return rows.filter(Boolean).join('');
+  }
+
+  window._contractBadge = _contractBadge;
+  window._contractPanelBody = _contractPanelBody;
+
   // TIER of a figure composite — draft interface / executable compilation / live
   // topology rewrite — inferred from its display name (see the meta-modelers
   // naming). A small colored badge makes the role scannable at a glance.
