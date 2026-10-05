@@ -4113,6 +4113,62 @@
   }
   window._setRegistryTab = _setRegistryTab;
 
+  // <find-candidates>
+  // Registry "Find candidates" panel: enter a face, list registered processes
+  // that fit it via POST /api/find-candidates. The renderer is pure.
+  function _renderCandidateList(result) {
+    var r = result || {};
+    var note = function (t) { return '<div class="fc-note fc-muted">' + t + '</div>'; };
+    if (r.status === 'unavailable') return note('contract matching unavailable');
+    if (r.status === 'error') return note('Error: ' + _esc(r.error || 'request failed'));
+    var cands = Array.isArray(r.candidates) ? r.candidates : [];
+    if (!cands.length) return note('no matching processes');
+    return '<ul class="fc-list">' + cands.map(function (c) {
+      var full = c.match === 'full';
+      var tag = '<span class="fc-tag ' + (full ? 'fc-full' : 'fc-near') + '">' +
+        (full ? 'full' : 'near-miss') + '</span>';
+      var fails = (!full && Array.isArray(c.fails) && c.fails.length)
+        ? '<ul class="fc-fails">' + c.fails.map(function (f) {
+            return '<li><code>' + _esc(f && f.condition) + '</code> ' + _esc(f && f.reason) + '</li>';
+          }).join('') + '</ul>'
+        : '';
+      return '<li class="fc-item"><code class="fc-addr">' + _esc(c.address) + '</code> ' + tag + fails + '</li>';
+    }).join('') + '</ul>';
+  }
+  window._renderCandidateList = _renderCandidateList;
+
+  function _parsePortSpec(text) {
+    var out = {};
+    String(text || '').split(',').forEach(function (tok) {
+      tok = tok.trim();
+      if (!tok) return;
+      var i = tok.indexOf(':');
+      if (i < 0) out[tok] = 'any';
+      else out[tok.slice(0, i).trim()] = tok.slice(i + 1).trim() || 'any';
+    });
+    return out;
+  }
+
+  function _findCandidates() {
+    var inEl = document.getElementById('fc-inputs');
+    var outEl = document.getElementById('fc-outputs');
+    var res = document.getElementById('fc-results');
+    if (!res) return;
+    res.innerHTML = '<div class="fc-note fc-muted">Searching&hellip;</div>';
+    var body = { inputs: _parsePortSpec(inEl && inEl.value), outputs: _parsePortSpec(outEl && outEl.value) };
+    try {
+      apiFetch('POST', '/api/find-candidates', body)
+        .then(function (r) { return r.json(); })
+        .then(function (j) { res.innerHTML = _renderCandidateList(j); })
+        .catch(function (e) { res.innerHTML = _renderCandidateList({ status: 'error', error: String(e && e.message || e) }); });
+    } catch (e) {
+      res.innerHTML = _renderCandidateList({ status: 'error', error: String(e && e.message || e) });
+    }
+  }
+  window._findCandidates = _findCandidates;
+  // </find-candidates>
+
+
   // Context-aware "+ New" buttons for the active sub-tab. Only process/step and
   // composite/generator are authorable from here (emitters/viz/types/tests are
   // framework- or discovery-defined).

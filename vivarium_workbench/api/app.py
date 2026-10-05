@@ -1431,6 +1431,27 @@ def create_app() -> FastAPI:
                 "figure_build_kicked": kicked}
 
     @app.post(
+        "/api/find-candidates",
+        tags=["Registry & catalog"],
+        summary="Find registered processes/steps whose ports match a face",
+    )
+    def find_candidates_route(
+        payload: dict = Body(default={}), ws: Path = Depends(get_workspace)
+    ) -> dict:
+        """Given a target face ``{inputs, outputs}`` (port-name -> schema), rank
+        the workspace's registered processes whose ports match it. Runs in the
+        warm env-worker (catalog-class: it instantiates every process)."""
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        inputs = payload.get("inputs")
+        outputs = payload.get("outputs")
+        try:
+            return get_pool().call(ws, "find_candidates", {
+                "inputs": inputs if isinstance(inputs, dict) else {},
+                "outputs": outputs if isinstance(outputs, dict) else {}})
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "error": str(e), "candidates": []}
+
+    @app.post(
         "/api/registry/run-process",
         tags=["Registry & catalog"],
         summary="Instantiate a registry process/step and run one update()",
