@@ -10,6 +10,7 @@ A run's `simulation_id` and our `run_id` are the same string by convention:
 from __future__ import annotations
 import hashlib
 import json
+import math
 import sqlite3
 import time
 from pathlib import Path
@@ -146,23 +147,36 @@ def run_with_division(composite, steps: int, chunk: int = 100) -> int:
     Division only exists for composites with an ``agents`` store. Any other
     composite runs all ``steps`` ticks, and an exception from ``run()`` (a
     process's own failure) propagates so the run is recorded as failed (#1292).
+    Removal of ``agents['0']`` counts as division only if it existed at the
+    start. Inside an ``agents`` composite a raise is still taken as division,
+    as v2ecoli's own loop does, so a real failure there is indistinguishable.
+
+    A division part-way through a chunk counts the whole ticks of model time
+    (``global_time``) that chunk completed, not zero.
     """
     steps = int(steps)
-    divides = "agents" in (getattr(composite, "state", None) or {})
+
+    def _state():
+        return getattr(composite, "state", None) or {}
+
+    divides = "agents" in _state()
+    tracks_parent = divides and "0" in (_state().get("agents") or {})
     done = 0
     while done < steps:
         n = min(chunk, steps - done)
+        t0 = _state().get("global_time")
         try:
             composite.run(n)
         except Exception:
             if not divides:
                 raise
+            t1 = _state().get("global_time")
+            if isinstance(t0, (int, float)) and isinstance(t1, (int, float)):
+                done += max(0, min(n, math.floor(t1 - t0 + 1e-9)))
             break  # division — composite raised
         done += n
-        if divides:
-            agents = (getattr(composite, "state", None) or {}).get("agents") or {}
-            if agents.get("0") is None:
-                break  # division — parent agent removed
+        if tracks_parent and (_state().get("agents") or {}).get("0") is None:
+            break  # division — parent agent removed
     return done
 
 
