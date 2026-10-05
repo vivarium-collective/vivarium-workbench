@@ -2,6 +2,7 @@
 parses results, writes a compact summary into study.yaml.tests.last_results.
 """
 from __future__ import annotations
+import importlib.util
 import json, os, subprocess, sys, time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -22,6 +23,35 @@ class StudyTestsResult:
     tests: list[dict]    # [{nodeid, outcome, duration, message?, traceback?}]
     note: str | None = None
     raw_stderr: str = ""
+
+
+def _json_report_plugin_available() -> bool:
+    """Whether the ``pytest-json-report`` plugin is importable in THIS interpreter.
+
+    The runner shells out to ``sys.executable -m pytest --json-report``, so the
+    plugin must be importable here (same interpreter) for pytest to recognise the
+    ``--json-report`` flag. When it is absent pytest aborts with a usage error
+    (exit code 4) and writes no report.
+    """
+    return importlib.util.find_spec("pytest_jsonreport") is not None
+
+
+def _no_report_note(returncode: int) -> str:
+    """Human-readable note for the case where pytest produced no JSON report.
+
+    #1280: the common cause is the ``pytest-json-report`` plugin being missing
+    (pytest usage error, exit code 4), which the old opaque "no JSON report"
+    message never named. Detect that and point at the missing dependency.
+    """
+    if not _json_report_plugin_available():
+        return (
+            "pytest-json-report is not installed, so the Tests tab cannot collect "
+            "per-test results (pytest exited with code "
+            f"{returncode} — a usage error for the unrecognized --json-report flag). "
+            "Install it with `pip install 'pytest-json-report>=1.5'`; it is a runtime "
+            "dependency of vivarium-workbench, so a normal install already includes it."
+        )
+    return f"pytest exited with code {returncode}, no JSON report"
 
 
 def _study_paths(workspace: Path, slug: str) -> tuple[Path, Path, Path]:
@@ -97,11 +127,12 @@ def run_study_tests(workspace: Path, slug: str) -> StudyTestsResult:
         duration = time.time() - t0
 
         if not json_report.exists():
-            # pytest crashed before writing the report
+            # pytest wrote no report — most often the pytest-json-report plugin is
+            # missing (usage error, exit code 4); otherwise pytest crashed. #1280.
             result = StudyTestsResult(
                 summary={"passed": 0, "failed": 0, "skipped": 0, "duration_s": duration},
                 tests=[],
-                note=f"pytest exited with code {proc.returncode}, no JSON report",
+                note=_no_report_note(proc.returncode),
                 raw_stderr=proc.stderr,
             )
             _write_last_results(spec_path, result)
