@@ -878,7 +878,7 @@
         ' title="Double-click to Explore (maximized bigraph)">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
-          '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong>' + _compositeBadge() + _compositeTierBadge(c) + wsPill + '</div>' +
+          '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong>' + _compositeBadge() + _compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + '</div>' +
           '<code class="reg-card-addr">' + _esc(addr) + '</code>' +
           meta +
           (short ? '<p class="reg-card-desc">' + _esc(short) + '</p>' : '') +
@@ -1042,7 +1042,7 @@
       '<div class="loom-card loom-card-stack loom-card-composite">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" ondblclick="event.stopPropagation();_maximizeCardFromHeader(this)" title="Click to pin to top · double-click to maximize">' +
-            '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + wsPill + roPill +
+            '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + roPill +
             '<span class="pcard-runtarget" data-role="runtarget" title="checking where a Run will execute…" ' +
               'style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
               'background:#eef1f4;color:#8a97a4;vertical-align:middle">Runs: …</span>' +
@@ -1110,6 +1110,8 @@
           // Run/Step · Outputs), lazy-mounted on first open. Graph collapsed at
           // first so run + outputs lead.
           _pcardSection('explore', 'Explore', '<span class="pcard-sec-hint">◆ Configure · run · outputs — click to open</span>', _compositeLoomExplore(c), { wide: true, feature: true }) +
+          // Composites carry {status:'unavailable'} today (4A deferred composite audit): neutral state until it lands.
+          (c.contract_audit ? _pcardSection('contract', 'Contract', _contractBadge(c.contract_audit), _contractPanelBody(c.contract_audit)) : '') +
         '</div>' +
       '</div>' +
     '</div>';
