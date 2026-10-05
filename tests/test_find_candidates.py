@@ -1,3 +1,4 @@
+import pytest
 def _core_with_processes():
     from bigraph_schema.core import allocate_core
     from bigraph_schema.edge import Edge
@@ -38,3 +39,36 @@ def test_unavailable_when_matcher_missing(monkeypatch):
     import vivarium_workbench.env_worker as ew
     monkeypatch.setattr(ew, 'FIND_CANDIDATES_AVAILABLE', False)
     assert ew._find_candidates({'inputs': {}, 'outputs': {}})['status'] == 'unavailable'
+
+
+def test_find_candidates_endpoint_shape(tmp_path, monkeypatch):
+    try:
+        from fastapi.testclient import TestClient
+    except RuntimeError as e:  # venv lacks the TestClient HTTP dependency
+        pytest.skip(str(e))
+    from vivarium_workbench.api.app import create_app, get_workspace
+    from vivarium_workbench.lib import env_worker_pool
+
+    seen = {}
+
+    class _Pool:
+        def call(self, ws, method, params=None, **kw):
+            seen.update(method=method, params=params)
+            return {"status": "ok", "candidates": []}
+
+    monkeypatch.setattr(env_worker_pool, "get_pool", lambda: _Pool())
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: tmp_path
+    c = TestClient(app)
+    r = c.post("/api/find-candidates",
+               json={"inputs": {"m": "float"}, "outputs": {"m": "float"}})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok" and isinstance(body["candidates"], list)
+    assert seen["method"] == "find_candidates"
+    assert seen["params"] == {"inputs": {"m": "float"}, "outputs": {"m": "float"}}
+    # empty / malformed bodies are handled, never a 500
+    assert c.post("/api/find-candidates", json={}).status_code == 200
+    assert c.post("/api/find-candidates", json={"inputs": "x"}).status_code == 200
+    assert c.post("/api/find-candidates", content=b"{bad",
+                  headers={"content-type": "application/json"}).status_code < 500

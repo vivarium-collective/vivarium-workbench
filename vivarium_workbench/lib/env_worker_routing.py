@@ -87,6 +87,7 @@ CATALOG_CLASS_METHODS = frozenset({
     "registry_catalog",     # GET /api/registry (+ /api/catalog, /api/marketplace)
     "composites_full",      # GET /api/composites
     "discover_composites",  # generator discovery for the Composites tab
+    "find_candidates",      # POST /api/find-candidates (instantiates every process)
 })
 
 

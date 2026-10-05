@@ -76,7 +76,8 @@ def test_job_class_methods_run_in_the_deployments_own_environment(routed, tmp_pa
 
 
 @pytest.mark.parametrize("method", ["registry_catalog", "discover_composites",
-                                    "attach_process_docs", "list_generators"])
+                                    "attach_process_docs", "list_generators",
+                                    "find_candidates"])
 def test_interactive_methods_follow_the_deployment(routed, tmp_path, method):
     pool, local, remote = routed
     r = pool.call(tmp_path, method, interpreter="/usr/bin/python3")
