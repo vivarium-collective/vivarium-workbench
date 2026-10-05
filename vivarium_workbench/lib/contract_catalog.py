@@ -35,6 +35,9 @@ def contract_audit_payload(core, address):
     try:
         # Get the process class from link_registry to access its contract with amendments
         process_cls = core.link_registry.get(address)
+        if process_cls is None and ':' in address:
+            # local:-prefixed addresses: fall back to the bare registry key
+            process_cls = core.link_registry.get(address.split(':')[-1])
         if process_cls is None:
             return {'status': 'not-declared'}
         contract = getattr(process_cls, 'contract', None)

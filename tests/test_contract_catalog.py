@@ -59,3 +59,10 @@ def test_unavailable_when_import_missing(monkeypatch):
     import vivarium_workbench.lib.contract_catalog as cc
     monkeypatch.setattr(cc, 'CONTRACT_AUDIT_AVAILABLE', False)
     assert contract_audit_payload(_core_with('c', _Contracted), 'c')['status'] == 'unavailable'
+
+
+def test_local_prefixed_address_normalized():
+    core = _core_with('c', _Contracted)
+    prefixed = contract_audit_payload(core, 'local:c')
+    assert prefixed['status'] != 'not-declared'
+    assert prefixed['status'] == contract_audit_payload(core, 'c')['status']

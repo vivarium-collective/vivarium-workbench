@@ -294,14 +294,21 @@ def _registry_catalog() -> dict:
         except Exception:
             pass
         seen_classes[cls_id] = len(processes)
-        processes.append({
+        _rec = {
             "name": name, "address": addr, "kind": kind,
             "schema_preview": schema_preview, "aliases": [], "source": source,
             "description": description,
             "config_schema": config_schema,
             "inputs": inputs_schema,
             "outputs": outputs_schema,
-        })
+        }
+        if kind in ("process", "step"):
+            try:
+                from vivarium_workbench.lib.contract_catalog import contract_audit_payload
+                _rec["contract_audit"] = contract_audit_payload(core, name)
+            except Exception:  # noqa: BLE001 - contract audit must never break the catalog
+                _rec["contract_audit"] = {"status": "error"}
+        processes.append(_rec)
     # Also surface WORKSPACE-owned vivarium-bridge processes — vivarium-core
     # Steps injected into the WCM engine via the ecoli topology bridge
     # (registered in ecoli.processes.process_registry), NOT the pbg core. e.g.
