@@ -63,6 +63,12 @@ def is_trusted(ws_root: Path | str) -> bool:
     return isinstance(entry, dict) and entry.get("path") == os.path.realpath(ws_root)
 
 
+def list_trusted() -> list[dict[str, Any]]:
+    """Every workspace the user has trusted to run commands: ``{"path", "at"}``, oldest first."""
+    entries = [e for e in _read_trust().values() if isinstance(e, dict) and isinstance(e.get("path"), str)]
+    return sorted(({"path": e["path"], "at": str(e.get("at", ""))} for e in entries), key=lambda e: (e["at"], e["path"]))
+
+
 def grant_trust(ws_root: Path | str) -> None:
     """Record the user's explicit decision. Called only from the approval of the trust card, never from a tool."""
     with _LOCK:

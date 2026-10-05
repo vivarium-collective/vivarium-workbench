@@ -640,6 +640,28 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if dep_doctor.problems() else 0
 
 
+def cmd_workspace_trust(args: argparse.Namespace) -> int:
+    """List the workspaces trusted to run chat commands, or revoke one (docs/ai-chat.md, "Running commands")."""
+    import os as _os
+
+    from vivarium_workbench.lib import user_state
+
+    if args.revoke:
+        real = _os.path.realpath(args.revoke)
+        if user_state.revoke_trust(real):
+            print(f"revoked: {real}")
+            return 0
+        print(f"not trusted (nothing to revoke): {real}", file=sys.stderr)
+        return 1
+    trusted = user_state.list_trusted()
+    if not trusted:
+        print(f"No workspace is trusted to run commands ({user_state.config_dir()}).")
+        return 0
+    for e in trusted:
+        print(f"{e['path']}\t(trusted {e['at']})")
+    return 0
+
+
 def cmd_smoke(args: argparse.Namespace) -> int:
     """Local spine smoke check (docs/dual-engine-comparison.md §5.4)."""
     from pathlib import Path as _Path
@@ -1445,6 +1467,14 @@ def main(argv: list[str] | None = None) -> int:
     p_doctor = sub.add_parser(
         "doctor", help="Check framework-dependency health (stale process-bigraph / viva-superpowers)")
     p_doctor.set_defaults(func=cmd_doctor)
+
+    p_trust = sub.add_parser(
+        "workspace-trust",
+        help="List the workspaces trusted to run VivaChat commands, or revoke one (stored in your config folder)")
+    trust_what = p_trust.add_mutually_exclusive_group(required=True)
+    trust_what.add_argument("--list", action="store_true", help="Show every trusted workspace")
+    trust_what.add_argument("--revoke", metavar="PATH", help="Stop trusting the workspace at PATH")
+    p_trust.set_defaults(func=cmd_workspace_trust)
 
     p_warm = sub.add_parser(
         "warm-catalog",

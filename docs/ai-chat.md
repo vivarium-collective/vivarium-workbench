@@ -456,7 +456,8 @@ can. The card, the allow-list and the checks below shrink what there is to appro
   `~/.config/vivarium-workbench/trusted-workspaces.json` (override the folder with `VIVARIUM_WORKBENCH_CONFIG_DIR`),
   never inside the workspace, because text in a workspace (files, notes, run results, skills) can try to steer the
   assistant. Trust is keyed by the workspace's real path: a different repository later cloned to the same path inherits
-  it, and there is no revoke button yet (remove the entry from that file).
+  it. See what is trusted with `vivarium-workbench workspace-trust --list` and withdraw trust with
+  `vivarium-workbench workspace-trust --revoke PATH`.
 * **What is allowed** (`lib/run_command.py`): an explicit allow-list of programs and flags, no shell. `ls pwd wc head
   tail file which cat grep`; `find` with `-name -iname -type -maxdepth -mindepth` only; `git status log diff show
   branch ls-files rev-parse`, where `git branch` can only list. Anything else, including `python`, `make`, `uv` and
