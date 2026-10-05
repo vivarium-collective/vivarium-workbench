@@ -35,6 +35,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 
+from vivarium_workbench.lib.proc_group import signal_group
+
 PROVIDER = "claude-code"
 WAKE = "_wake"        # a synthetic event type: the caller's wake queue had a signal (not something the CLI emits)
 # Aliases the CLI itself resolves to the current model of each tier (a full model id works too).
@@ -412,9 +414,7 @@ _TASKS: set[asyncio.Future[Any]] = set()
 _IDLE: dict[tuple, ClaudeSession] = {}      # key -> a session waiting for its chat's next turn (insertion = age)
 
 
-def _signal_group(pid: int, sig: int) -> None:
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pid, sig)        # start_new_session made pgid == pid: this is our child's group only
+_signal_group = signal_group
 
 
 @atexit.register
