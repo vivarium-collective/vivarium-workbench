@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import json
 import os
 import re
 import signal
+import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -48,8 +50,19 @@ _SECRET = re.compile(
     r"|(^|/)\.env(\.[^/]*)?(/|$)"
     r"|(^|/)id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$"
     r"|\.(pem|p12|pfx|key)$"
-    r"|(^|/)(credentials|secrets?)(\.[a-z]+)?$",
+    r"|(^|/)\.?(credentials|secrets?)(\.[a-z]+)?$",
     re.IGNORECASE)
+# Per-user tool state (the provider's own folder, cloud/shell history, tokens): refused anywhere outside the workspace.
+_HOME_STATE = re.compile(r"(^|/)(\.claude|\.azure|\.bash_history|\.zsh_history|\.pgpass|\.vault-token|\.credentials\.json)(/|$)",
+                         re.IGNORECASE)
+_BROAD = frozenset(Path(p) for p in ("/etc", "/var", "/usr", "/bin", "/sbin", "/System", "/Library", "/Applications", "/opt",
+                                     "/dev", "/proc", "/sys", "/root", "/boot", "/tmp", "/private", "/private/etc",
+                                     "/private/var", "/private/tmp"))
+# Directories and files a recursive search must never enter or read (the arguments are checked literally; a recursion is not).
+_SECRET_DIRS = (".git", ".pbg", ".ssh", ".aws", ".gnupg", ".kube", ".docker", ".config", ".claude", ".azure")
+_SECRET_FILES = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*", ".netrc",
+                 ".git-credentials", ".npmrc", ".pypirc", "credentials*", ".credentials*", "secrets*", ".pgpass", ".vault-token")
+_GIT_EXCLUDES = tuple([f":(exclude,glob)**/{n}" for n in _SECRET_FILES] + [f":(exclude,glob)**/{d}/**" for d in _SECRET_DIRS])
 _PROTECTED = frozenset({".git", ".pbg"})      # the audit/claim store and the repository internals: never a path argument
 _REV = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/~^@{}:-]*$")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
@@ -75,7 +88,8 @@ class Plan:
     @property
     def key(self) -> str:
         """Identity of this exact command for a remembered approval: argv + realpath cwd + extra folders."""
-        return "\x1f".join([*self.argv, "\x1e", str(self.cwd), "\x1e", *map(str, self.extra_dirs)])
+        return json.dumps([str(self.roots[0]), list(self.argv), str(self.cwd), [str(d) for d in self.extra_dirs]],
+                          separators=(",", ":"))
 
 
 # --- paths -------------------------------------------------------------------------------------------------
@@ -102,8 +116,11 @@ def _resolve(arg: str, cwd: Path, roots: tuple[Path, ...], *, what: str = "path"
         raise CommandRefused(f"{what} {arg!r} resolves outside the workspace and the approved folders ({p})")
     _refuse_secret(str(p), what)
     root = next(r for r in roots if _inside(p, (r,)))
-    if _PROTECTED.intersection(p.relative_to(root).parts):
+    # casefolded: on a case-insensitive volume (macOS) `.PBG` is the same folder as `.pbg`
+    if _PROTECTED.intersection(part.casefold() for part in p.relative_to(root).parts):
         raise CommandRefused(f"{what} {arg!r}: .git and .pbg are not accessible to commands")
+    if not _inside(p, roots[:1]) and _HOME_STATE.search(str(p)):
+        raise CommandRefused(f"{what} {arg!r} is per-user tool state or history; refused")
     return p
 
 
@@ -122,8 +139,10 @@ def _extra_dirs(raw: object, ws: Path) -> tuple[Path, ...]:
         _refuse_secret(str(p), "extra folder")
         if not p.is_dir():
             raise CommandRefused(f"extra folder {d!r} is not an existing folder")
-        if p == Path(p.anchor) or p == home:
-            raise CommandRefused(f"extra folder {d!r} is too broad (the filesystem root or your home folder)")
+        if p == Path(p.anchor) or p in _BROAD or home.is_relative_to(p):
+            raise CommandRefused(f"extra folder {d!r} is too broad (a system folder, your home folder or a folder above it)")
+        if _HOME_STATE.search(str(p)):
+            raise CommandRefused(f"extra folder {d!r} is per-user tool state or history; refused")
         if p != ws and p not in out:
             out.append(p)
     return tuple(out)
@@ -225,6 +244,20 @@ def _parse_flags(cmd: _Cmd, args: list[str], name: str) -> tuple[list[str], list
     return flags, pos, after
 
 
+def _is_recursive(cmd: _Cmd, flags: list[str]) -> bool:
+    valued = cmd.num_short | cmd.pattern_short
+    i = 0
+    while i < len(flags):
+        f = flags[i]
+        if len(f) == 2 and f[1] in valued:
+            i += 2                                  # a flag and its value
+            continue
+        if f.startswith("-") and not f.startswith("--") and "r" in f[1:]:
+            return True
+        i += 1
+    return False
+
+
 def _check_len(argv: list[str]) -> None:
     if not 1 <= len(argv) <= MAX_ARGS:
         raise CommandRefused(f"a command is 1 to {MAX_ARGS} arguments")
@@ -242,6 +275,8 @@ def _plan_simple(name: str, args: list[str], cwd: Path, roots: tuple[Path, ...])
     flags, pos, after = _parse_flags(cmd, args, name)
     pos += after
     out = list(flags)
+    if name == "grep" and _is_recursive(cmd, flags):
+        out += [f"--exclude-dir={d}" for d in _SECRET_DIRS] + [f"--exclude={f}" for f in _SECRET_FILES]
     if cmd.first_is_pattern and not any(f == "-e" for f in flags):
         if not pos:
             raise CommandRefused("grep needs a pattern")
@@ -267,7 +302,8 @@ def _plan_find(args: list[str], cwd: Path, roots: tuple[Path, ...]) -> list[str]
     while i < len(args) and not args[i].startswith("-"):
         starts.append(args[i])
         i += 1
-    out = [*(_paths(starts, cwd, roots) or [str(cwd)])]
+    options: list[str] = []          # -maxdepth / -mindepth: they must come right after the start paths
+    tests: list[str] = []
     while i < len(args):
         pred = args[i]
         kind = _FIND_PREDICATES.get(pred)
@@ -280,9 +316,37 @@ def _plan_find(args: list[str], cwd: Path, roots: tuple[Path, ...]) -> list[str]
             raise CommandRefused(f"find: bad value {val!r} for {pred}")
         if kind == "pattern":
             _refuse_secret(val, "a pattern")
-        out += [pred, val]
+        (options if kind == "num" else tests).extend([pred, val])
         i += 2
-    return out
+    # A recursion is not a literal argument: never descend into the secret and internal directories.
+    prune: list[str] = ["("]
+    for n, d in enumerate(_SECRET_DIRS):
+        prune += (["-o"] if n else []) + ["-name", d]
+    prune += [")", "-prune", "-o"]
+    return [*(_paths(starts, cwd, roots) or [str(cwd)]), *options, *prune, *(["(", *tests, ")"] if tests else []), "-print"]
+
+
+def _git_preflight(cwd: Path, roots: tuple[Path, ...]) -> str:
+    """Refuse a git whose repository (or git directory) lies outside the workspace and approved folders, and return the
+    empty tree's id (used to switch off in-tree attributes). Runs only read-only plumbing with the scrubbed environment."""
+    exe = _locate("git")
+    with tempfile.TemporaryDirectory(prefix="vwb-git-") as home:
+        env = build_env(home)
+
+        def git(*a: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run([exe, "-c", "core.fsmonitor=false", *a], cwd=str(cwd), env=env, capture_output=True,
+                                  text=True, timeout=10, stdin=subprocess.DEVNULL)
+        r = git("rev-parse", "--show-toplevel", "--absolute-git-dir")
+        lines = r.stdout.splitlines()
+        if r.returncode != 0 or len(lines) < 2:
+            raise CommandRefused("git: this folder is not inside a git repository")
+        for what, path in (("repository", lines[0]), ("git directory", lines[1])):
+            if not _inside(Path(os.path.realpath(path)), roots):
+                raise CommandRefused(f"git: this folder's {what} ({path}) is outside the workspace and the approved folders")
+        empty = git("hash-object", "--no-filters", "-t", "tree", os.devnull).stdout.strip()
+        if not empty or git(f"--attr-source={empty}", "rev-parse", "--git-dir").returncode != 0:
+            raise CommandRefused("git: this git is too old (needs --attr-source, git 2.40 or newer) to be used safely here")
+        return empty
 
 
 def _plan_git(args: list[str], cwd: Path, roots: tuple[Path, ...]) -> list[str]:
@@ -292,6 +356,8 @@ def _plan_git(args: list[str], cwd: Path, roots: tuple[Path, ...]) -> list[str]:
     cmd = _GIT[sub]
     flags, pos, after = _parse_flags(cmd, rest, f"git {sub}")
     out = [sub, *(["--no-ext-diff", "--no-textconv"] if sub in _GIT_NO_EXT else []), *flags]
+    if sub == "branch" and (pos or after) and "--list" not in flags:
+        raise CommandRefused("git branch: naming a branch would create it; only --list [pattern] is allowed")
     if cmd.positional == "none":
         if pos or after:
             raise CommandRefused(f"git {sub} takes no arguments")
@@ -303,8 +369,12 @@ def _plan_git(args: list[str], cwd: Path, roots: tuple[Path, ...]) -> list[str]:
             if "/" in r and os.path.exists(os.path.join(cwd, r)):          # path-like: must stay inside
                 _resolve(r, cwd, roots, what="revision")
         out += pos
-        if after:
-            out += ["--", *_paths(after, cwd, roots)]
+        paths = _paths(after, cwd, roots)
+        if sub in _GIT_NO_EXT and not any(":" in r for r in pos):
+            # history and diffs print file CONTENT: leave tracked secrets out of them (a blob is named, so it is checked above)
+            out += ["--", *(paths or [":/"]), *_GIT_EXCLUDES]
+        elif paths:
+            out += ["--", *paths]
     else:                                                                  # "paths"
         paths = _paths(pos + after, cwd, roots)
         if paths:
@@ -345,7 +415,9 @@ def build_plan(ws_root: Path | str, argv: object, cwd: object = None, extra_dirs
         raise CommandRefused(f"working folder {cwd!r} is not a folder")
     if name == "git":
         body = _plan_git(argv_l[1:], cwd_p, roots)
-        args = ["--no-pager", "-c", "core.fsmonitor=false", *body]
+        empty_tree = _git_preflight(cwd_p, roots)
+        # --attr-source=<empty tree>: a repository's own .gitattributes cannot name a filter/textconv driver to run
+        args = ["--no-pager", f"--attr-source={empty_tree}", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + os.devnull, *body]
     elif name == "find":
         args = _plan_find(argv_l[1:], cwd_p, roots)
     elif name in _CMDS:

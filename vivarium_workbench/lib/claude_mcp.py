@@ -59,6 +59,7 @@ class Decision:
     approved: bool
     reason: str = ""          # the user's own note on a refusal
     message: str = ""         # a complete message for the model when the system (not the user) decided: timeout, stop
+    remember: bool = False    # the user also asked to remember this approval for the rest of the chat (commands only)
 
 
 @dataclass
@@ -143,6 +144,9 @@ class Binding:
     deps: "ai_tools.ChatDeps"
     coord: Coordinator = field(default_factory=Coordinator)
     approval_ttl: float = 600.0
+    # Commands the user approved "for this chat": exact keys (lib/run_command.Plan.key). It lives and dies with this
+    # binding, i.e. with the Claude process of one chat; it is never persisted and never shared.
+    remembered: set[str] = field(default_factory=set)
 
 
 BINDINGS: dict[str, Binding] = {}

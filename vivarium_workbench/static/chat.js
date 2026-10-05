@@ -167,6 +167,8 @@
         effectHtml(a.effect) +
         (a.query ? '<div><div class="vp-k">Query</div><pre>' + e(a.query) + '</pre></div>' : '') +
         (a.body ? '<div><div class="vp-k">Request body <span class="vp-size">(' + a.stats.lines + ' lines, ' + a.stats.chars + ' characters)</span></div><pre>' + e(a.body) + '</pre></div>' : '') +
+        (a.effect && a.effect.kind === 'command' && a.effect.remember
+          ? '<label class="vp-note"><input type="checkbox" data-remember> Don\'t ask again for this exact command in this chat</label>' : '') +
         '<div class="vp-actions"><button class="vp-btn" data-act="deny">Deny</button>' +
         '<button class="vp-btn vp-primary" data-act="approve">' + (a.effect && a.effect.kind === 'trust' ? 'Trust this workspace'
           : a.effect && a.effect.kind === 'command' ? 'Run this command' : 'Approve') + '</button></div></div>';
@@ -835,8 +837,8 @@
     save(); renderAll();
     streamTurn(body);
   }
-  function decide(id, approved) {
-    const all = C.decide(state, id, approved);
+  function decide(id, approved, remember) {
+    const all = C.decide(state, id, approved, undefined, remember);
     save();
     if (all) resume(); else renderAll();
   }
@@ -1135,7 +1137,10 @@
         case 'unattach': attached.splice(+b.getAttribute('data-idx'), 1); renderPills(); break;
         case 'send': if (state.busy) abortStream(); else submit(); break;
         case 'stop': abortStream(); break;
-        case 'approve': if (host) decide(host.getAttribute('data-id'), true); break;
+        case 'approve': if (host) {
+          const box = host.querySelector('[data-remember]');
+          decide(host.getAttribute('data-id'), true, !!(box && box.checked));
+        } break;
         case 'deny': if (host) decide(host.getAttribute('data-id'), false); break;
         case 'approve-all': decideEvery(true); break;
         case 'deny-all': decideEvery(false); break;

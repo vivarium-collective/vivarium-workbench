@@ -443,31 +443,48 @@ VivaChat can ask to run a **read-only inspection command** on the machine runnin
 uv run vivarium-workbench serve --workspace . --enable-run-command     # or VIVARIUM_WORKBENCH_ENABLE_RUN_COMMAND=1
 ```
 
-Without the switch the model never sees the tools (`--disallowedTools`). A hosted pod must never be started with it.
+Without the switch the model never sees the tools (`--disallowedTools`) and the handlers refuse anyway. A hosted pod
+must never be started with it. **There is no OS sandbox:** an approved command runs as you and can read whatever you
+can. The card, the allow-list and the checks below shrink what there is to approve; they do not contain a command.
 
 * **Where it exists.** Two MCP tools, `run_command` and `request_workspace_trust`, served only by the token-guarded MCP
-  server of the Claude Code provider (`lib/claude_mcp.py`, `lib/chat_commands.py`). There is **no HTTP route**: approval
-  is enforced by the chat, not by the server, so a plain route would let any local process run commands. Agent mode and a
-  local (loopback) server are required, and every handler re-checks them.
+  server of the Claude Code provider (`lib/claude_mcp.py`, `lib/chat_commands.py`). There is **no HTTP route**:
+  approval is enforced by the chat, not by the server, so a plain route would let any local process run commands. Agent
+  mode and a local (loopback) server are required, and every handler re-checks them.
 * **Trust.** Commands are disabled in a workspace until you trust it. `request_workspace_trust` shows its own card (the
-  workspace's real path and what trust allows); only your approval of that card writes the mark, and it is stored in
-  `~/.config/vivarium-workbench/` (override: `VIVARIUM_WORKBENCH_CONFIG_DIR`), never inside the workspace, because text
-  in a workspace (files, notes, run results, skills) can try to steer the assistant.
-* **What is allowed** (`lib/run_command.py`): an explicit allow-list of programs and flags, no shell. `ls pwd wc head tail
-  file which cat grep`; `find` with `-name -iname -type -maxdepth -mindepth` only; `git status log diff show branch
-  ls-files rev-parse` with a fixed config (no `-c`, `-C`, pager, external diff or fsmonitor: a repository's own config
-  cannot make git run a program). Anything else, including `python`, `make`, `uv` and `pip`, is refused in this version.
-* **Where it may look.** Every path (working folder, path arguments, approved extra folders) is resolved with
-  `realpath` and must be inside the workspace or an extra folder shown on the card. `.git` and `.pbg` are never path
-  arguments. Commands naming a secret location (`~/.ssh`, `~/.config`, `~/.aws`, `.env`, git credentials, keys) are
-  refused. This is **best effort** (a command can build a path itself), and there is **no OS sandbox**: an approved
-  command can read whatever your user can, so the card is the control.
+  workspace's real path and what trust allows); only your approval of that card writes the mark, in
+  `~/.config/vivarium-workbench/trusted-workspaces.json` (override the folder with `VIVARIUM_WORKBENCH_CONFIG_DIR`),
+  never inside the workspace, because text in a workspace (files, notes, run results, skills) can try to steer the
+  assistant. Trust is keyed by the workspace's real path: a different repository later cloned to the same path inherits
+  it, and there is no revoke button yet (remove the entry from that file).
+* **What is allowed** (`lib/run_command.py`): an explicit allow-list of programs and flags, no shell. `ls pwd wc head
+  tail file which cat grep`; `find` with `-name -iname -type -maxdepth -mindepth` only; `git status log diff show
+  branch ls-files rev-parse`, where `git branch` can only list. Anything else, including `python`, `make`, `uv` and
+  `pip`, is refused in this version.
+* **Where it may look.** Every path (working folder, path arguments, approved extra folders) is resolved with `realpath`
+  and must be inside the workspace or an extra folder shown on the card. `.git` and `.pbg` are never path arguments, in
+  any letter case. A **recursive** `grep -r` or `find` skips `.git`, `.pbg` and the secret folders and files instead of
+  being checked argument by argument. Commands naming a secret location (`~/.ssh`, `~/.config`, `~/.aws`, `.env`, git
+  credentials, keys) are refused, and so are extra folders that are system folders, your home folder or a folder above
+  it, or per-user tool state (`~/.claude`, shell history). This is **best effort**: a command can build a path itself.
+* **Git.** It must run in a repository whose work tree **and** git directory are inside the workspace (a workspace
+  under a parent repository, or a `.git` file pointing elsewhere, is refused). It runs with a fixed configuration:
+  no pager, no hooks, fsmonitor off, no external diff or text conversion, and the repository's own attributes switched
+  off (`--attr-source=<empty tree>`, which needs git 2.40 or newer) so a `filter` driver named by `.gitattributes` and
+  the repository's config cannot run. `log`, `diff` and `show` leave tracked secrets (`.env`, keys, ...) out of what they
+  print. A repository is still data from the workspace: this is why a workspace must be trusted first.
 * **How it runs.** Its own process group, closed stdin, a scrubbed environment built from an allow-list (never copied
   from the server) with a throw-away `HOME`, a 30 s deadline and a 64 KiB per-stream cap; stopped by exact pid.
 * **The card** shows the program and every argument that will actually run (including the ones the runner adds or
   resolves) as a JSON array, the real working folder, each extra folder, and the limits. Hidden and direction-changing
-  characters are shown as `\uXXXX`. "Approve all" never includes a command or a trust request: each needs its own click.
-  What you approved is validated again just before it runs.
-* **Audit.** Before it runs, the command is recorded in `.pbg/ai-actions.jsonl` and in a protected, append-only copy
-  under `~/.config/vivarium-workbench/command-log/`; if either cannot be written, the command does not run.
-
+  characters are shown as `\uXXXX`. The chat panel's "Approve all" never includes a command or a trust request: each
+  needs its own click. What you approved is validated again just before it runs.
+* **Remembering.** For a fixed set of read-only inspectors only (`ls pwd wc head tail file which`) the card has a
+  "Don't ask again for this exact command in this chat" box. The server decides what may be remembered, the match is
+  exact (program, arguments, real working folder, extra folders), it lives on that chat's Claude process and is gone
+  when the chat ends, and a remembered command is still re-validated, still needs the workspace to be trusted, and is
+  still audited (marked `remembered`).
+* **Audit.** Before a command runs it is recorded in `.pbg/ai-actions.jsonl` and in an append-only copy under
+  `~/.config/vivarium-workbench/command-log/` (outside the workspace, so a command cannot erase it through the
+  workspace); if either cannot be written, or the workspace's audit file or folder is a symbolic link, the command does
+  not run. The copy is not tamper-proof against another process running as you.

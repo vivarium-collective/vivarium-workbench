@@ -564,3 +564,23 @@ console.log('chat-core Claude Code menu entry: ok');
   assert.deepStrictEqual(a.effect.command_line, ['/bin/cat', 'a\\u202Etxt.exe', 'b\\u200Bc']);
   assert.strictEqual(a.hidden, true, 'the card warns that invisible characters were found');
 }
+
+// ── "remember for this chat" travels inside the approval, only when asked ──
+{
+  const st = C.newState(); C.startUserTurn(st, 'x');
+  ['p', 'q', 'r'].forEach(id => {
+    C.applyFrame(st, { type: 'tool-call', tool_call_id: id, tool_name: 't', args: {} });
+    C.applyFrame(st, { type: 'approval-required', tool_call_id: id, tool_name: 't', args: {},
+      metadata: { effect: { kind: 'command', remember: id !== 'r', command_line: ['/bin/ls'] } } });
+  });
+  C.applyFrame(st, { type: 'done', pending_approval: true, messages: [{ m: 1 }] });
+  C.decide(st, 'p', true, undefined, true);
+  C.decide(st, 'q', true);
+  C.decide(st, 'r', false, 'no', true);
+  assert.deepStrictEqual(st.decisions.p, { approved: true, remember: true });
+  assert.strictEqual(st.decisions.q, true, 'no checkbox: a plain approval');
+  assert.deepStrictEqual(st.decisions.r, { denied: 'no' }, 'a refusal never carries remember');
+  const body = C.buildResumeRequest(st);
+  assert.deepStrictEqual(body.deferred_results.approvals.p, { approved: true, remember: true });
+  assert.strictEqual(C.describeApproval(C.findTool(st, 'p')).effect.remember, true);
+}

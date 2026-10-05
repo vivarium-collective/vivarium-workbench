@@ -295,13 +295,25 @@ def _deferred_results(raw: dict[str, Any]) -> DeferredToolResults:
     if not isinstance(approvals, dict) or not approvals:
         raise APIError(422, "deferred_results.approvals must be a non-empty object")
     for call_id, decision in approvals.items():
-        if decision is True:
+        if decision is True or (isinstance(decision, dict) and decision.get("approved") is True):
+            if isinstance(decision, dict) and not isinstance(decision.get("remember", False), bool):
+                raise APIError(422, f"approval for '{call_id}': remember must be true or false")
             res.approvals[call_id] = True
         elif isinstance(decision, dict) and "denied" in decision:
             res.approvals[call_id] = ToolDenied(str(decision["denied"]) or "The user declined this action.")
         else:
-            raise APIError(422, f"approval for '{call_id}' must be true or {{\"denied\": reason}}")
+            raise APIError(422, f"approval for '{call_id}' must be true, {{\"approved\": true, \"remember\": bool}} or {{\"denied\": reason}}")
     return res
+
+
+def _remember_ids(raw: dict[str, Any] | None) -> frozenset[str]:
+    """The approvals the user asked to remember for this chat (``{"approved": true, "remember": true}``). Only the Claude
+    Code provider acts on it, and only for the commands the server itself says may be remembered."""
+    approvals = (raw or {}).get("approvals")
+    if not isinstance(approvals, dict):
+        return frozenset()
+    return frozenset(i for i, d in approvals.items()
+                     if isinstance(d, dict) and d.get("approved") is True and d.get("remember") is True)
 
 
 INTERRUPTED = ("This action did not finish (the turn was interrupted or the approval was lost). "
@@ -404,7 +416,8 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
         return ai_claude_code.prepare(
             history, body.prompt or "", model, session or "", mode=body.mode, app=app, ws_root=ws_root, session=session,
             instructions=build_instructions(body.mode) if body.mode != "manual" else None,
-            manifest=_manifest if _wants_manifest(body, mode) else None, deferred=deferred)
+            manifest=_manifest if _wants_manifest(body, mode) else None, deferred=deferred,
+            remember=_remember_ids(body.deferred_results))
     # Skills: instructions the model can load. A hosted server never reads its own home directory for them.
     skills = {} if body.mode == "manual" else ai_skills.discover(ws_root, local=(mode == "keyring"))
     agent: Agent[ai_tools.ChatDeps, str | DeferredToolRequests] = Agent(

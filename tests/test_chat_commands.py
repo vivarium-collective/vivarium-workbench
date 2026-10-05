@@ -303,3 +303,145 @@ def test_off_by_default_the_model_never_sees_the_tools():
     assert argv[i + 1] == "mcp__workbench__run_command,mcp__workbench__request_workspace_trust"
     on = claude_cli.Attach(mcp_config="{}", allowed=("a",))
     assert "--disallowedTools" not in claude_cli.build_argv("claude", "m", "sys", "/tmp/cfg.json", on, None)
+
+
+# --- remembering a fixed read-only inspector for this chat --------------------------------------------------------
+
+
+def ask_again(b: Binding, call_id: str, argv, decision: Decision = Decision(True), **kw):
+    """Like run_cmd, but fails if a card appears when none is expected (returns None for the meta then)."""
+    async def main():
+        task = asyncio.ensure_future(chat_commands.command_call(b, call_id, argv, kw.get("cwd"), kw.get("extra_dirs")))
+        for _ in range(60):
+            if call_id in b.coord.pending:
+                b.coord.decide({call_id: decision})
+                return True, await task
+            if task.done():
+                return False, task.result()
+            await asyncio.sleep(0.01)
+        return False, await task
+    return go(main())
+
+
+def test_an_approved_inspector_can_be_remembered_for_the_chat_and_runs_without_a_card_next_time(env):
+    ws, _ = env
+    trusted(ws)
+    b = binding(ws)
+    meta, out = run_cmd(b, "m1", ["ls"], Decision(True, remember=True))
+    assert meta["effect"]["remember"] is True and "a.txt" in out["stdout"]
+    carded, out2 = ask_again(b, "m2", ["ls"])
+    assert carded is False and "a.txt" in out2["stdout"], "a remembered inspector must not ask again"
+    recs = log_lines(user_state.command_log_path(ws))
+    assert [r.get("remembered") for r in recs if r["phase"] == "intent"] == [False, True]      # the second run says why it did not ask
+    assert [r["tool_call_id"] for r in recs if r["phase"] == "intent"] == ["m1", "m2"]
+
+
+def test_only_an_exact_match_is_remembered(env, tmp_path):
+    ws, _ = env
+    trusted(ws)
+    other = tmp_path / "other"
+    other.mkdir()
+    b = binding(ws)
+    run_cmd(b, "e1", ["ls"], Decision(True, remember=True))
+    for i, (argv, kw) in enumerate([(["ls", "-l"], {}), (["ls"], {"cwd": "sub"}), (["ls"], {"extra_dirs": [str(other)]}),
+                                    (["ls", "sub"], {}), (["pwd"], {})]):
+        carded, _ = ask_again(b, f"e{i + 2}", argv, Decision(False), **kw)
+        assert carded, f"{argv} {kw} must ask again: it is not the same command"
+
+
+def test_the_server_not_the_browser_decides_what_may_be_remembered(env):
+    ws, _ = env
+    trusted(ws)
+    b = binding(ws)
+    for i, argv in enumerate((["cat", "a.txt"], ["grep", "-n", "beta", "a.txt"], ["find", ".", "-name", "a.txt"])):
+        run_cmd(b, f"n{i}", argv, Decision(True, remember=True))      # the browser asked to remember; none of these may be
+        carded, _ = ask_again(b, f"n{i}b", argv, Decision(False))
+        assert carded, f"{argv} is not a fixed inspector: it must ask every time"
+    assert not b.remembered
+
+
+def test_a_refusal_never_remembers(env):
+    ws, _ = env
+    trusted(ws)
+    b = binding(ws)
+    run_cmd(b, "d1", ["ls"], Decision(False, remember=True))
+    assert not b.remembered
+    carded, _ = ask_again(b, "d2", ["ls"], Decision(False))
+    assert carded
+
+
+def test_remembered_choices_belong_to_one_chat_only(env):
+    ws, _ = env
+    trusted(ws)
+    first = binding(ws)
+    run_cmd(first, "c1", ["ls"], Decision(True, remember=True))
+    second = binding(ws)                     # another chat (another Claude process, another binding)
+    carded, _ = ask_again(second, "c2", ["ls"], Decision(False))
+    assert carded and not second.remembered
+
+
+def test_a_remembered_command_still_needs_trust_and_the_gates(env, monkeypatch):
+    ws, _ = env
+    trusted(ws)
+    b = binding(ws)
+    run_cmd(b, "t1", ["ls"], Decision(True, remember=True))
+    user_state.revoke_trust(ws)
+    assert "not trusted" in go(chat_commands.command_call(b, "t2", ["ls"], None, None))["error"]
+    trusted(ws)
+    monkeypatch.delenv("VIVARIUM_WORKBENCH_ENABLE_RUN_COMMAND")
+    assert "switched off" in go(chat_commands.command_call(b, "t3", ["ls"], None, None))["error"]
+
+
+def test_a_remembered_command_is_still_revalidated_and_recorded(env, tmp_path):
+    ws, _ = env
+    trusted(ws)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    b = binding(ws)
+    run_cmd(b, "v1", ["ls", "sub"], Decision(True, remember=True))
+    (ws / "sub" / "b.txt").unlink()
+    (ws / "sub").rmdir()
+    (ws / "sub").symlink_to(outside)         # the folder it names now leads out of the workspace
+    out = go(chat_commands.command_call(b, "v2", ["ls", "sub"], None, None))
+    assert "error" in out and "stdout" not in out
+
+
+# --- the decision on the wire -----------------------------------------------------------------------------------
+
+
+def test_the_decision_shape_with_remember_is_accepted_and_only_the_claude_path_reads_it():
+    from vivarium_workbench.lib import ai_chat, ai_claude_code
+    from vivarium_workbench.lib.errors import APIError
+    raw = {"approvals": {"a": {"approved": True, "remember": True}, "b": True, "c": {"denied": "no"},
+                         "d": {"approved": True}}}
+    res = ai_chat._deferred_results(raw)
+    assert res.approvals["a"] is True and res.approvals["b"] is True and res.approvals["d"] is True
+    assert ai_chat._remember_ids(raw) == frozenset({"a"})
+    dec = ai_claude_code.decisions_from(res, ai_chat._remember_ids(raw))
+    assert dec["a"].remember and dec["a"].approved and not dec["b"].remember and not dec["c"].approved
+    for bad in ({"a": {"approved": True, "remember": "yes"}}, {"a": {"approved": False}}, {"a": {"remember": True}}, {"a": 1}):
+        with pytest.raises(APIError):
+            ai_chat._deferred_results({"approvals": bad})
+    assert ai_chat._remember_ids(None) == frozenset() and ai_chat._remember_ids({"approvals": 3}) == frozenset()
+
+
+def test_a_workspace_cannot_redirect_the_audit_trail_with_a_symlink(env, tmp_path):
+    ws, _ = env
+    trusted(ws)
+    elsewhere = tmp_path / "elsewhere.jsonl"
+    elsewhere.write_text("")
+    (ws / ".pbg" / "ai-actions.jsonl").symlink_to(elsewhere)
+    _, out = run_cmd(binding(ws), "s1", ["cat", "a.txt"])
+    assert "symbolic link" in out["error"] and "alpha" not in json.dumps(out)
+    assert elsewhere.read_text() == "", "nothing may be written through the link"
+
+
+def test_a_symlinked_audit_folder_is_refused_too(env, tmp_path):
+    ws, _ = env
+    trusted(ws)
+    (ws / ".pbg").rmdir()
+    target = tmp_path / "somewhere"
+    target.mkdir()
+    (ws / ".pbg").symlink_to(target)
+    _, out = run_cmd(binding(ws), "s2", ["cat", "a.txt"])
+    assert "symbolic link" in out["error"] and not list(target.iterdir())

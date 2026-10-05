@@ -304,3 +304,170 @@ def test_git_cannot_read_a_path_outside_through_diff(ws, tmp_path):
         build_plan(ws, ["git", "diff", str(tmp_path / "x.txt"), str(tmp_path / "y.txt")])
     with pytest.raises(CommandRefused):
         build_plan(ws, ["git", "show", "HEAD:.env"])
+
+
+# --- findings from the adversarial review (each one reproduced before it was fixed) ---------------------------------
+
+
+def test_two_different_requests_never_share_a_remember_key(ws):
+    """An argument may contain control characters: they must not let ['ls','a\\x1fb'] pose as ['ls','a','b']."""
+    a, b = plan(ws, "ls", "a\x1fb"), plan(ws, "ls", "a", "b")
+    assert a.key != b.key
+    keys = {plan(ws, *argv).key for argv in (["ls"], ["ls", "-l"], ["ls", "a.txt"], ["ls", "sub"], ["pwd"], ["ls", "a\x1eb"])}
+    assert len(keys) == 6
+
+
+@pytest.mark.parametrize("argv", [["cat", ".PBG/ai-actions.jsonl"], ["ls", ".Pbg"], ["cat", ".GIT/config"], ["ls", ".gIt"],
+                                  ["head", "-n", "1", "sub/../.PBG/ai-actions.jsonl"]])
+def test_the_internal_folders_are_refused_whatever_their_case(ws, argv):
+    """macOS volumes are case-insensitive: .PBG is the same folder as .pbg."""
+    with pytest.raises(CommandRefused):
+        build_plan(ws, argv)
+
+
+@pytest.fixture
+def secrets_ws(ws):
+    (ws / "sub" / "ok.txt").write_text("visible TOKEN here\n")
+    (ws / ".env").write_text("TOKEN=hunter2\n")
+    (ws / ".pbg" / "ai-actions.jsonl").write_text('{"TOKEN":"audit"}\n')
+    (ws / ".ssh").mkdir()
+    (ws / ".ssh" / "id_ed25519").write_text("TOKEN-private-key\n")
+    (ws / "secrets.yaml").write_text("TOKEN: s3cret\n")
+    (ws / "sub" / "server.pem").write_text("TOKEN-pem\n")
+    (ws / "sub" / ".env.local").write_text("TOKEN=local\n")
+    (ws / ".git").mkdir()
+    (ws / ".git" / "config").write_text("TOKEN-gitconfig\n")
+    return ws
+
+
+def test_a_recursive_grep_never_enters_or_reads_the_secret_places(secrets_ws):
+    out = run(plan(secrets_ws, "grep", "-rn", "TOKEN", "."))["stdout"]
+    assert "sub/ok.txt" in out, out
+    for leaked in ("hunter2", "audit", "private-key", "s3cret", "TOKEN-pem", "local", "gitconfig"):
+        assert leaked not in out, f"a recursive grep read {leaked!r}"
+
+
+def test_a_recursive_find_prunes_the_internal_and_secret_folders(secrets_ws):
+    out = run(plan(secrets_ws, "find", ".", "-name", "*"))["stdout"]
+    assert "ok.txt" in out
+    for pruned in (".pbg/", ".ssh/", ".git/", "ai-actions.jsonl", "id_ed25519"):
+        assert pruned not in out, f"find descended into {pruned!r}"
+    # tests and depth limits still work together with the pruning
+    out2 = run(plan(secrets_ws, "find", ".", "-maxdepth", "2", "-type", "f", "-name", "ok.txt"))["stdout"]
+    assert out2.strip().endswith("sub/ok.txt")
+
+
+def test_the_recursion_excludes_are_added_only_for_a_recursive_grep(ws):
+    assert not any(a.startswith("--exclude") for a in plan(ws, "grep", "-n", "x", "a.txt").args)
+    assert not any(a.startswith("--exclude") for a in plan(ws, "grep", "-e", "r", "a.txt").args)      # 'r' is a pattern here
+    assert any(a == "--exclude-dir=.pbg" for a in plan(ws, "grep", "-rn", "x", "sub").args)
+
+
+def test_files_in_a_dot_claude_folder_inside_the_workspace_stay_readable(ws):
+    (ws / ".claude").mkdir()
+    (ws / ".claude" / "settings.json").write_text("{}\n")
+    assert run(plan(ws, "cat", ".claude/settings.json"))["stdout"] == "{}\n"
+
+
+def test_extra_folders_that_are_too_broad_or_per_user_state_are_refused(ws):
+    home = Path(os.path.expanduser("~"))
+    for bad in ("/etc", "/usr", "/private/etc", str(home.parent), str(home / ".claude"), str(home / ".azure")):
+        with pytest.raises(CommandRefused):
+            build_plan(ws, ["ls"], extra_dirs=[bad])
+
+
+# --- git: confined to the workspace, read-only, and the repository's own config/attributes cannot run anything -----
+
+
+def _git(path: Path, *a: str, check: bool = True):
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    return subprocess.run(["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(path), *a],
+                          check=check, env=env, capture_output=True, text=True)
+
+
+@needs_git
+def test_git_in_a_workspace_that_sits_under_a_parent_repo_is_refused(tmp_path):
+    parent = tmp_path / "parent"
+    (parent / "ws").mkdir(parents=True)
+    (parent / "topsecret.txt").write_text("outside the workspace")
+    _git(parent, "init", "-q")
+    _git(parent, "add", "-A")
+    _git(parent, "commit", "-q", "-m", "x")
+    for argv in (["git", "show", "HEAD:topsecret.txt"], ["git", "status"], ["git", "log", "--oneline"]):
+        with pytest.raises(CommandRefused, match="outside the workspace"):
+            build_plan(parent / "ws", argv)
+
+
+@needs_git
+def test_git_whose_directory_was_redirected_outside_the_workspace_is_refused(tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "f.txt").write_text("x")
+    _git(tmp_path, "init", "-q", f"--separate-git-dir={tmp_path / 'elsewhere.git'}", str(ws))
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-q", "-m", "x")
+    assert (ws / ".git").is_file(), "setup: .git is a gitfile pointing outside"
+    with pytest.raises(CommandRefused, match="git directory"):
+        build_plan(ws, ["git", "status"])
+
+
+@needs_git
+def test_git_branch_cannot_create_a_branch(ws):
+    _git(ws, "init", "-q", "-b", "main")
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-q", "-m", "x")
+    for argv in (["git", "branch", "newbranch"], ["git", "branch", "newbranch", "HEAD"]):
+        with pytest.raises(CommandRefused, match="create"):
+            build_plan(ws, argv)
+    assert "main" in run(plan(ws, "git", "branch", "-a"))["stdout"]
+    assert "main" in run(plan(ws, "git", "branch", "--list"))["stdout"]
+    assert "newbranch" not in _git(ws, "branch").stdout
+
+
+@needs_git
+def test_a_repositorys_attributes_cannot_make_git_run_a_filter(ws):
+    marker = ws.parent / "filter-ran"
+    hook = ws.parent / "filter.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n")
+    hook.chmod(0o755)
+    _git(ws, "init", "-q", "-b", "main")
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-q", "-m", "one")
+    _git(ws, "config", "filter.x.clean", str(hook))
+    (ws / ".gitattributes").write_text("a.txt filter=x\n")
+    (ws / "a.txt").write_text("ALPHA\nBETA\n")           # same length as before: git must READ the file to see a change
+    os.utime(ws / "a.txt", (1, 1))                        # and its timestamp no longer matches the index
+    marker.unlink(missing_ok=True)
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "-C", str(ws), "status"], env=env, capture_output=True)
+    subprocess.run(["git", "-C", str(ws), "diff"], env=env, capture_output=True)
+    assert marker.exists(), "control failed: plain git did not run the in-tree filter, so this test proves nothing"
+    marker.unlink()
+    for argv in (["git", "status"], ["git", "diff"], ["git", "log", "-p"], ["git", "show", "HEAD"]):
+        assert run(plan(ws, *argv))["exit_code"] == 0
+    assert not marker.exists(), "git ran a filter named by the repository's own attributes and config"
+
+
+@needs_git
+def test_history_and_diffs_leave_out_tracked_secrets(ws):
+    (ws / "keys").mkdir()
+    (ws / "keys" / "id_rsa").write_text("PRIVATE-KEY-ONE\n")
+    (ws / "keys" / "server.pem").write_text("PEM-ONE\n")
+    _git(ws, "init", "-q", "-b", "main")
+    _git(ws, "add", "-A", "-f")
+    _git(ws, "commit", "-q", "-m", "one")
+    (ws / "a.txt").write_text("alpha CHANGED\n")
+    (ws / ".env").write_text("TOKEN=hunter2-CHANGED\n")
+    (ws / "keys" / "id_rsa").write_text("PRIVATE-KEY-TWO\n")
+    _git(ws, "add", "-A", "-f")
+    _git(ws, "commit", "-q", "-m", "two")
+    (ws / "a.txt").write_text("alpha UNCOMMITTED\n")
+    (ws / ".env").write_text("TOKEN=hunter2-UNCOMMITTED\n")
+    for argv in (["git", "log", "-p"], ["git", "show", "HEAD"], ["git", "diff"], ["git", "diff", "HEAD~1"], ["git", "show", "HEAD~1"]):
+        out = run(plan(ws, *argv))
+        assert out["exit_code"] == 0, (argv, out)
+        for leaked in ("hunter2", "PRIVATE-KEY", "PEM-ONE"):
+            assert leaked not in out["stdout"], f"{argv} printed {leaked}"
+    assert "alpha CHANGED" in run(plan(ws, "git", "show", "HEAD"))["stdout"]          # ordinary content is still shown
+    assert "alpha UNCOMMITTED" in run(plan(ws, "git", "diff"))["stdout"]
+    assert "a.txt" in run(plan(ws, "git", "diff", "HEAD~1", "--stat"))["stdout"]

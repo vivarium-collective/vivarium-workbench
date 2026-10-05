@@ -104,12 +104,13 @@ def _dump(messages: list[Any]) -> list[dict[str, Any]]:
     return ModelMessagesTypeAdapter.dump_python(messages, mode="json")
 
 
-def decisions_from(deferred: DeferredToolResults) -> dict[str, claude_mcp.Decision]:
-    """pydantic-ai's parsed approvals (``True`` | ``ToolDenied``) as the MCP server's decisions."""
+def decisions_from(deferred: DeferredToolResults, remember: frozenset[str] = frozenset()) -> dict[str, claude_mcp.Decision]:
+    """pydantic-ai's parsed approvals (``True`` | ``ToolDenied``) as the MCP server's decisions. ``remember`` are the ids
+    whose approval carried "remember this for the chat"; the command tool decides whether it may."""
     out: dict[str, claude_mcp.Decision] = {}
     for call_id, v in deferred.approvals.items():
         if v is True:
-            out[call_id] = claude_mcp.Decision(True)
+            out[call_id] = claude_mcp.Decision(True, remember=call_id in remember)
             continue
         note = v.message if isinstance(v, ToolDenied) else ""
         out[call_id] = claude_mcp.Decision(False, "" if note == "The user declined this action." else note)
@@ -392,13 +393,13 @@ class ClaudeCodeTurn:
 def prepare(history: list[Any], prompt: str, model: str, scope: str, *, mode: str = "manual",
             app: FastAPI | None = None, ws_root: Path | None = None, session: str | None = None,
             instructions: str | None = None, manifest: ManifestFn | None = None,
-            deferred: DeferredToolResults | None = None) -> ClaudeCodeTurn:
+            deferred: DeferredToolResults | None = None, remember: frozenset[str] = frozenset()) -> ClaudeCodeTurn:
     """A ready turn. ``instructions`` is ai_chat's Ask / Agent text (Manual uses Claude Code's own)."""
     text = (MANUAL_INSTRUCTIONS if mode == "manual"
             else (instructions or "") + (AGENT_NOTE if mode == "agent" else "") + PLUGINS_NOTE)
     turn = ClaudeCodeTurn(history=list(history), prompt=prompt, model=model, instructions=text, scope=scope, mode=mode,
                           app=app, ws_root=ws_root, session=session, manifest=manifest,
-                          deferred=decisions_from(deferred) if deferred is not None else None)
+                          deferred=decisions_from(deferred, remember) if deferred is not None else None)
     if turn.deferred is not None:
         parked = claude_cli.peek(turn.key_for(_dump(turn.history)))
         live = parked.state if parked is not None else None

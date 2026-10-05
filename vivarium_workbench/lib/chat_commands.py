@@ -8,8 +8,10 @@ that can reach the workbench's port can run a command without the chat's approva
    refuses anything else; the binding records it (``deps.local_only``) so this check cannot be skipped;
 3. the command passes :func:`lib.run_command.build_plan` (allow-list, realpath containment, no secret locations);
 4. the workspace is trusted, which only the user's explicit answer to its own approval card can grant;
-5. the user approves THIS command on its card. What was approved is re-validated just before it runs, and it is
-   recorded, before it runs, in the workspace's audit log and in a protected copy outside the workspace.
+5. the user approves THIS command on its card (or, for a fixed read-only inspector, already did for this chat and
+   asked to remember it: an exact match on program, arguments, real folder and extra folders, kept only on the
+   chat's binding). What was approved is re-validated just before it runs, and it is recorded, before it runs, in
+   the workspace's audit log and in a protected copy outside the workspace.
 """
 from __future__ import annotations
 
@@ -111,6 +113,9 @@ def _record(deps: Any, tool_use_id: str, phase: str, extra: dict[str, Any], *, m
     rec = {"session": ai_tools.session_tag(deps.session_key), "provider": deps.provider, "model": deps.model,
            "tool_call_id": tool_use_id, "approved": True, "phase": phase, "ts": datetime.now(timezone.utc).isoformat(), **extra}
     errors = []
+    audit = ai_tools.audit_path(deps.ws_root)
+    if os.path.islink(audit) or os.path.islink(audit.parent):        # a workspace must not redirect the audit trail elsewhere
+        return f"{audit} (or its folder) is a symbolic link; not writing the audit trail through it" if must else None
     for write in (lambda: ai_tools.append_audit(deps.ws_root, rec), lambda: user_state.append_command_log(deps.ws_root, rec)):
         try:
             write()
@@ -148,10 +153,16 @@ async def command_call(b: "Binding", tool_use_id: str, argv: Any, cwd: Any, extr
                          "user's answer, then try this command again."}
     if not tool_use_id:
         return {"error": "this command cannot be tied to an approval card (the call carried no id); not running it"}
-    args = {"argv": list(plan.argv), "cwd": cwd, "extra_dirs": extra_dirs}
-    d = await b.coord.ask(tool_use_id, args, command_card(plan), b.approval_ttl)
-    if not d.approved:
-        return _declined(d)
+    # A command the user already approved "for this chat" (exact program, arguments, real folder and extra folders, and only
+    # a fixed read-only inspector) runs without a new card. Everything else asks, every time.
+    remembered = plan.rememberable and plan.key in b.remembered
+    remember_it = False
+    if not remembered:
+        args = {"argv": list(plan.argv), "cwd": cwd, "extra_dirs": extra_dirs}
+        d = await b.coord.ask(tool_use_id, args, command_card(plan), b.approval_ttl)
+        if not d.approved:
+            return _declined(d)
+        remember_it = d.remember and plan.rememberable          # the server decides what may be remembered, not the browser
     # What the user approved is what runs: validate again now, and refuse if anything it touches has moved since.
     try:
         again = run_command.build_plan(deps.ws_root, argv, cwd, extra_dirs)
@@ -160,9 +171,11 @@ async def command_call(b: "Binding", tool_use_id: str, argv: Any, cwd: Any, extr
     if not _same(plan, again) or not user_state.is_trusted(deps.ws_root):
         return {"error": "not run: the folders involved (or the workspace's trust) changed after you approved; ask again"}
     meta = {"operation_id": "run_command", "method": "RUN", "argv": list(again.argv), "command_line": [again.exe, *again.args],
-            "cwd": str(again.cwd), "extra_dirs": [str(x) for x in again.extra_dirs]}
+            "cwd": str(again.cwd), "extra_dirs": [str(x) for x in again.extra_dirs], "remembered": remembered}
     if (bad := _record(deps, tool_use_id, "intent", meta, must=True)) is not None:
         return {"error": f"audit log unavailable ({bad}); refusing to run an unrecorded command"}
+    if remember_it:
+        b.remembered.add(plan.key)
     result = await run_command.run(again)
     _record(deps, tool_use_id, "result", {"operation_id": "run_command", "exit_code": result.get("exit_code"),
                                           "timed_out": result.get("timed_out"), "truncated": result.get("truncated"),

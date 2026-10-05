@@ -155,9 +155,11 @@
   // ── Approvals ─────────────────────────────────────────────────────────────
   // Records the user's decision. Returns true once EVERY pending call has been
   // answered (i.e. the caller should now resume the turn).
-  function decide(state, id, approved, reason) {
+  // `remember` (a rememberable command only) travels inside the approval; the server decides whether it may be kept.
+  function decide(state, id, approved, reason, remember) {
     var t = findTool(state, id);
-    state.decisions[id] = approved ? true : { denied: reason || 'The user declined this action.' };
+    state.decisions[id] = approved ? (remember ? { approved: true, remember: true } : true)
+      : { denied: reason || 'The user declined this action.' };
     if (t) t.status = approved ? 'running' : 'denied';
     state.pending = state.pending.filter(function (p) { return p !== id; });
     return state.pending.length === 0;
