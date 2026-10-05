@@ -47,6 +47,47 @@ from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add
 _HEAVY_RUN_STEPS = 250
 
 
+# The repo's whole-cell default config. In the vEcoli lineage it runs the
+# standard whole-cell E. coli model (the canonical whole-cell baseline), so it is
+# a legitimate fallback when the build carries no config named after the requested
+# composite — but NEVER the alphabetically-first arbitrary file (#1113).
+_WHOLE_CELL_DEFAULT_CONFIG = "api_simulation_default.json"
+
+
+def _config_for_spec(spec_id: str, cfgs: "list[str]") -> "str | None":
+    """Pick the discovered config that matches the requested composite (#1113).
+
+    ``spec_id`` is a dotted composite id (e.g.
+    ``v2ecoli.composites.ecoli_baseline``); its last dotted segment is the
+    composite name. A vEcoli-lineage config file's name (its ``experiment_id``
+    stem) identifies the simulation it runs, and discovery exposes only those
+    filenames — so config selection keys off the filename, and must NEVER fall
+    back to the repo's alphabetically-first file, which bears no relation to the
+    requested composite.
+
+    Resolution, first match wins:
+
+    1. a config whose filename stem equals the composite name (case-insensitive)
+       — the config named after the composite, the strongest ``spec_id`` match;
+    2. ``api_simulation_default.json`` — the whole-cell default — when present,
+       as the fallback for a whole-cell composite the repo ships no named config
+       for (this preserves the working v2ecoli ``ecoli_baseline`` path).
+
+    Returns the chosen filename, or ``None`` when nothing matches — the caller
+    then FAILS CLOSED rather than silently dispatch an unrelated config.
+    """
+    leaf = (spec_id or "").rsplit(".", 1)[-1].strip().lower()
+    by_stem: dict[str, str] = {}
+    for c in cfgs:
+        stem = c[:-5] if c.lower().endswith(".json") else c
+        by_stem.setdefault(stem.lower(), c)
+    if leaf and leaf in by_stem:
+        return by_stem[leaf]
+    if _WHOLE_CELL_DEFAULT_CONFIG in cfgs:
+        return _WHOLE_CELL_DEFAULT_CONFIG
+    return None
+
+
 def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filename, spec_id):
     """Dispatch a registered build's PRE-BUILT image via sms-api run_simulation
     (plan B) and return the composite-test-run response tuple.
@@ -67,18 +108,21 @@ def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filena
     # 'api_simulation_default.json', which only exists in the vEcoli-lineage
     # repos (e.g. v2ecoli) — a build whose repo lacks it (e.g. the sms-ecoli fork,
     # which carries only CD-specific configs) 404s when the config is omitted. So
-    # when the caller didn't pin one, ask discovery and prefer the whole-cell
-    # default.
+    # when the caller didn't pin one, ask discovery and pick the config that
+    # actually matches the requested composite (``spec_id``).
     #
-    # #1113: do NOT fall back to the build's first available config (cfgs[0]).
-    # ``spec_id`` (the composite actually requested) never mapped to that pick, so
-    # cfgs[0] — the alphabetically-first file in the build's repo — silently ran an
-    # UNRELATED simulation (e.g. every ecoli_baseline card-run against build #211,
-    # which lacks the whole-cell default, resolved to fss_pathway_oe_native_oe_carina
-    # and burned real Batch/ParCa compute before failing later for an unrelated
-    # reason). Fail CLOSED instead: a wrong-config dispatch that happens to succeed
-    # would attribute a real result to the wrong composite. The caller must pick a
-    # config explicitly when the build has no whole-cell default.
+    # #1113: config selection MUST consult ``spec_id``. It used to only (a) prefer
+    # 'api_simulation_default.json' regardless of which composite was requested, or
+    # (b) fall back to the build's alphabetically-first file (cfgs[0]). ``spec_id``
+    # — the composite actually requested — never fed the pick, only the human-
+    # readable description, so a dispatch could run an UNRELATED simulation while
+    # its description named the right composite (e.g. every ecoli_baseline card-run
+    # against build #211, which lacks the whole-cell default, silently resolved to
+    # fss_pathway_oe_native_oe_carina and burned real Batch/ParCa compute before
+    # failing later for an unrelated reason). Now key off ``spec_id`` via
+    # :func:`_config_for_spec`, and FAIL CLOSED when nothing matches — a wrong-config
+    # dispatch that happens to succeed would attribute a real result to the wrong
+    # composite. The caller must then pick a config explicitly.
     if not config_filename:
         cfgs: list = []
         try:
@@ -87,14 +131,13 @@ def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filena
             cfgs = disc.get("config_filenames") or []
         except Exception:  # noqa: BLE001 — discovery is best-effort; treated as "none discovered"
             cfgs = []
-        if "api_simulation_default.json" in cfgs:
-            config_filename = "api_simulation_default.json"
-        else:
+        config_filename = _config_for_spec(spec_id, cfgs)
+        if not config_filename:
             _avail = ", ".join(cfgs) if cfgs else "(none discovered)"
             return {
-                "error": (f"Cloud build #{simulator_id} has no default config for "
-                          f"'{spec_id}'. Pick a config explicitly before dispatching "
-                          f"— configs available on this build: {_avail}."),
+                "error": (f"Cloud build #{simulator_id} has no config matching "
+                          f"composite '{spec_id}'. Pick a config explicitly before "
+                          f"dispatching — configs available on this build: {_avail}."),
                 "reason": "no-config-for-composite",
                 "run_target": "deployment",
                 "spec_id": spec_id,
