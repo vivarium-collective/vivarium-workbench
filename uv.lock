@@ -139,7 +139,7 @@ wheels = [
 
 [[package]]
 name = "bigraph-schema"
-version = "1.6.0"
+version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
@@ -148,9 +148,9 @@ dependencies = [
     { name = "pint" },
     { name = "plum-dispatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5c/f2/bd6d2029b27aba06e9aed03ec00bc3461f12e8ad83efe738436fa788552c/bigraph_schema-1.6.0.tar.gz", hash = "sha256:2e3cd98cb6a17d1b7898a931623bdbd2b8996e314582e9c5f561373bf06876cf", size = 167253, upload-time = "2026-08-13T01:50:36.65Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/11/81195272ac43485123ac486028da54ad3a6c74e81b76ad5565e85606eec4/bigraph_schema-1.7.0.tar.gz", hash = "sha256:ceb3c7d9c72eb8b3f9c42f1ced704b498b9e32fb7a28a4008922917a04bb48b6", size = 184929, upload-time = "2026-10-04T18:16:41.109Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/bb/b48c015d2c4b26754b0d3ad793af43c0c9a96c1f1dabab8d4f06dc9ea236/bigraph_schema-1.6.0-py3-none-any.whl", hash = "sha256:c6c855d0bbf851f949b15ddb24b608f7e1b1ef1f93af62d7eaf364c8a8ef6938", size = 172850, upload-time = "2026-08-13T01:50:35.403Z" },
+    { url = "https://files.pythonhosted.org/packages/12/ec/5386cd413066f6a5b1500a3599c9bd30c5e247b96a3f1f032b03325ae5a5/bigraph_schema-1.7.0-py3-none-any.whl", hash = "sha256:406a87bdd5d4f259b1082c820a45930643cda72969cc89719408a404efbae40d", size = 184400, upload-time = "2026-10-04T18:16:39.356Z" },
 ]
 
 [[package]]
@@ -1159,7 +1159,7 @@ name = "importlib-metadata"
 version = "9.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6f/7e/1e7e8dc30634b93ebb3d58a3dea569ad146e656218d3960ab04f62047b29/importlib_metadata-9.0.1.tar.gz", hash = "sha256:ab830580bc0ef3db61ce8fae716389e5462b67e033018bab6d8f80ef17172f99", size = 59124, upload-time = "2026-08-28T15:30:34.646Z" }
 wheels = [
@@ -3609,7 +3609,7 @@ viz = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bigraph-schema", specifier = ">=1.4.3" },
+    { name = "bigraph-schema", specifier = ">=1.7.0" },
     { name = "boto3", specifier = ">=1.34" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },
