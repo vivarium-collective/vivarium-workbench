@@ -5343,3 +5343,13 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 :root[data-theme="dark"] .contract-fail { background: #2a0f0f; color: #fca5a5; border-color: #7f1d1d; }
 :root[data-theme="dark"] .contract-incomplete { background: #2a2109; color: #fcd34d; border-color: #78350f; }
 :root[data-theme="dark"] .contract-none { background: #1f2937; color: #9ca3af; border-color: #374151; }
+
+.find-candidates{ margin-top:8px; font-size:13px; }
+.find-candidates .fc-form{ display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+.find-candidates .fc-form input{ flex:1 1 200px; }
+.fc-muted{ color:#888; }
+.fc-list,.fc-fails{ list-style:none; margin:4px 0; padding-left:0; }
+.fc-fails{ padding-left:16px; color:#888; }
+.fc-tag{ font-size:11px; padding:1px 6px; border-radius:8px; }
+.fc-full{ background:#d8f3dc; color:#1b4332; }
+.fc-near{ background:#fff3cd; color:#664d03; }

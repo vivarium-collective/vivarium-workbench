@@ -1316,6 +1316,15 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           </select>
         </span>
       </div>
+      <details class="find-candidates" id="find-candidates">
+        <summary>Find candidates</summary>
+        <div class="fc-form">
+          <input type="text" id="fc-inputs" placeholder="inputs: port or port:type, comma-separated">
+          <input type="text" id="fc-outputs" placeholder="outputs: port or port:type, comma-separated">
+          <button type="button" onclick="_findCandidates()">Find candidates</button>
+        </div>
+        <div id="fc-results"></div>
+      </details>
     </div>
 
     <div class="registry-tab-panel active" data-kind="composite"     id="registry-composites-container"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading&hellip;</span></div></div>
