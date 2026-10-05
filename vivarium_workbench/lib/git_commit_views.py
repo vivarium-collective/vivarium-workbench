@@ -83,9 +83,12 @@ def dirty_commit_all(ws_root: Path, body: dict | None) -> tuple[dict, int]:
         r = subprocess.run(["git", "checkout", branch], cwd=ws_root, capture_output=True, text=True)
         if r.returncode != 0:
             return {"error": f"could not check out '{branch}': {r.stderr[:200]}"}, 500
-    dirty = git_status.dirty_workspace(ws_root).strip()
-    if not dirty:
+    dirty = git_status.dirty_workspace(ws_root)
+    if not dirty.strip():
         return {"error": "working tree is already clean"}, 409
+    # Porcelain lines are "XY path": two status characters, a space, the path. The block must NOT be stripped before it
+    # is sliced: a leading space on the first line (" M path", a modified-but-unstaged file) would be removed and
+    # `line[3:]` would then cut the first character of that path (and of the commit message built from it).
     paths = [line[3:] for line in dirty.splitlines() if len(line) >= 4]
     message = git_status.suggest_dirty_commit_message(paths)
     try:
