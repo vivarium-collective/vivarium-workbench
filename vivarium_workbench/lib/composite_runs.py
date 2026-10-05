@@ -142,19 +142,27 @@ def run_with_division(composite, steps: int, chunk: int = 100) -> int:
     instead crashed the whole run at division, so any run length that crossed
     the division point failed with a 502. Mirrors the chunked, division-aware
     loop in ``scripts/run_default_baseline.py``. Returns ticks actually run.
+
+    Division only exists for composites with an ``agents`` store. Any other
+    composite runs all ``steps`` ticks, and an exception from ``run()`` (a
+    process's own failure) propagates so the run is recorded as failed (#1292).
     """
     steps = int(steps)
+    divides = "agents" in (getattr(composite, "state", None) or {})
     done = 0
     while done < steps:
         n = min(chunk, steps - done)
         try:
             composite.run(n)
         except Exception:
+            if not divides:
+                raise
             break  # division — composite raised
         done += n
-        agents = (getattr(composite, "state", None) or {}).get("agents") or {}
-        if agents.get("0") is None:
-            break  # division — parent agent removed
+        if divides:
+            agents = (getattr(composite, "state", None) or {}).get("agents") or {}
+            if agents.get("0") is None:
+                break  # division — parent agent removed
     return done
 
 
