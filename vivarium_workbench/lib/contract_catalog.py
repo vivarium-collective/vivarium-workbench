@@ -65,8 +65,6 @@ def contract_audit_payload(core, address):
 
     if any(f['severity'] == 'error' for f in findings):
         status = 'fail'
-    elif not conditions and grade < _INCOMPLETE_BELOW:
-        status = 'incomplete'
     elif grade < _INCOMPLETE_BELOW:
         status = 'incomplete'
     else:
