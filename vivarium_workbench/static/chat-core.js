@@ -155,17 +155,31 @@
   // ── Approvals ─────────────────────────────────────────────────────────────
   // Records the user's decision. Returns true once EVERY pending call has been
   // answered (i.e. the caller should now resume the turn).
-  function decide(state, id, approved, reason) {
+  // `remember` (a rememberable command only) travels inside the approval; the server decides whether it may be kept.
+  function decide(state, id, approved, reason, remember) {
     var t = findTool(state, id);
-    state.decisions[id] = approved ? true : { denied: reason || 'The user declined this action.' };
+    state.decisions[id] = approved ? (remember ? { approved: true, remember: true } : true)
+      : { denied: reason || 'The user declined this action.' };
     if (t) t.status = approved ? 'running' : 'denied';
     state.pending = state.pending.filter(function (p) { return p !== id; });
     return state.pending.length === 0;
   }
 
-  // Answer EVERY pending approval the same way (the "Approve all / Deny all" click).
+  // A command (or a workspace-trust request) is never approved in bulk: its card shows the exact command line, and
+  // it needs its own click. Deny-all still covers it.
+  function needsOwnClick(state, id) {
+    var t = findTool(state, id);
+    var ef = t && t.approval && t.approval.effect;
+    return !!(ef && (ef.kind === 'command' || ef.kind === 'trust'));
+  }
+
+  // Answer every pending approval the same way (the "Approve all / Deny all" click). "Approve all" skips the ones that
+  // need their own click and leaves them pending, so it returns false while any remain.
   function decideAll(state, approved, reason) {
-    state.pending.slice().forEach(function (id) { decide(state, id, approved, reason); });
+    state.pending.slice().forEach(function (id) {
+      if (approved && needsOwnClick(state, id)) return;
+      decide(state, id, approved, reason);
+    });
     return state.pending.length === 0;
   }
 
@@ -681,7 +695,7 @@
 
   var api = {
     esc: esc, revealHidden: revealHidden, createSplitter: createSplitter, newState: newState, startUserTurn: startUserTurn,
-    startResume: startResume, applyFrame: applyFrame, decide: decide, decideAll: decideAll,
+    startResume: startResume, applyFrame: applyFrame, decide: decide, decideAll: decideAll, needsOwnClick: needsOwnClick,
     buildPromptRequest: buildPromptRequest, buildResumeRequest: buildResumeRequest, canRetry: canRetry,
     retryBody: retryBody,
     statusLabel: statusLabel, describeApproval: describeApproval, snapshot: snapshot,

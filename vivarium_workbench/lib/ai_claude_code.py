@@ -38,7 +38,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from vivarium_workbench.lib import ai_auth, ai_tools, claude_cli, claude_mcp
+from vivarium_workbench.lib import ai_auth, ai_tools, chat_commands, claude_cli, claude_mcp
 from vivarium_workbench.lib.errors import APIError
 
 # How to read a replayed conversation (see claude_cli.replay_prompt).
@@ -104,12 +104,13 @@ def _dump(messages: list[Any]) -> list[dict[str, Any]]:
     return ModelMessagesTypeAdapter.dump_python(messages, mode="json")
 
 
-def decisions_from(deferred: DeferredToolResults) -> dict[str, claude_mcp.Decision]:
-    """pydantic-ai's parsed approvals (``True`` | ``ToolDenied``) as the MCP server's decisions."""
+def decisions_from(deferred: DeferredToolResults, remember: frozenset[str] = frozenset()) -> dict[str, claude_mcp.Decision]:
+    """pydantic-ai's parsed approvals (``True`` | ``ToolDenied``) as the MCP server's decisions. ``remember`` are the ids
+    whose approval carried "remember this for the chat"; the command tool decides whether it may."""
     out: dict[str, claude_mcp.Decision] = {}
     for call_id, v in deferred.approvals.items():
         if v is True:
-            out[call_id] = claude_mcp.Decision(True)
+            out[call_id] = claude_mcp.Decision(True, remember=call_id in remember)
             continue
         note = v.message if isinstance(v, ToolDenied) else ""
         out[call_id] = claude_mcp.Decision(False, "" if note == "The user declined this action." else note)
@@ -265,14 +266,17 @@ class ClaudeCodeTurn:
             await asyncio.to_thread(ai_tools.get_index, self.app)
             deps = ai_tools.ChatDeps(app=self.app, client=ai_tools.make_client(self.app), ws_root=self.ws_root,
                                      session_key=self.session, provider=claude_cli.PROVIDER, model=self.model,
-                                     mode=self.mode)
+                                     mode=self.mode, local_only=True)    # check_supported refused anything non-local
             token, live.binding = claude_mcp.register(deps, approval_ttl=claude_cli.IDLE_S)
             url = claude_mcp.endpoint_url(getattr(self.app.state, "bind_host", None), int(port))
         s: claude_cli.ClaudeSession | None = None
         try:
             if deps is not None and token is not None and url is not None:
+                cmd_tools = tuple(claude_mcp.TOOL_PREFIX + n for n in chat_commands.TOOL_NAMES)
+                on = chat_commands.enabled()      # the explicit startup switch: off, the model never sees the command tools
                 attach = claude_cli.Attach(mcp_config=claude_mcp.mcp_config(url, token),
-                                           allowed=tuple(claude_mcp.TOOL_PREFIX + n for n in claude_mcp.TOOL_NAMES))
+                                           allowed=tuple(claude_mcp.TOOL_PREFIX + n for n in claude_mcp.TOOL_NAMES) + (cmd_tools if on else ()),
+                                           blocked=() if on else cmd_tools)
                 if self.manifest is not None:
                     instructions += ("\nThe live workspace manifest follows (an orientation snapshot; re-read it with a tool "
                                      f"if you need fresh state):\n{await self.manifest(deps)}")
@@ -389,13 +393,13 @@ class ClaudeCodeTurn:
 def prepare(history: list[Any], prompt: str, model: str, scope: str, *, mode: str = "manual",
             app: FastAPI | None = None, ws_root: Path | None = None, session: str | None = None,
             instructions: str | None = None, manifest: ManifestFn | None = None,
-            deferred: DeferredToolResults | None = None) -> ClaudeCodeTurn:
+            deferred: DeferredToolResults | None = None, remember: frozenset[str] = frozenset()) -> ClaudeCodeTurn:
     """A ready turn. ``instructions`` is ai_chat's Ask / Agent text (Manual uses Claude Code's own)."""
     text = (MANUAL_INSTRUCTIONS if mode == "manual"
             else (instructions or "") + (AGENT_NOTE if mode == "agent" else "") + PLUGINS_NOTE)
     turn = ClaudeCodeTurn(history=list(history), prompt=prompt, model=model, instructions=text, scope=scope, mode=mode,
                           app=app, ws_root=ws_root, session=session, manifest=manifest,
-                          deferred=decisions_from(deferred) if deferred is not None else None)
+                          deferred=decisions_from(deferred, remember) if deferred is not None else None)
     if turn.deferred is not None:
         parked = claude_cli.peek(turn.key_for(_dump(turn.history)))
         live = parked.state if parked is not None else None

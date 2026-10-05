@@ -59,6 +59,7 @@ class Decision:
     approved: bool
     reason: str = ""          # the user's own note on a refusal
     message: str = ""         # a complete message for the model when the system (not the user) decided: timeout, stop
+    remember: bool = False    # the user also asked to remember this approval for the rest of the chat (commands only)
 
 
 @dataclass
@@ -143,6 +144,9 @@ class Binding:
     deps: "ai_tools.ChatDeps"
     coord: Coordinator = field(default_factory=Coordinator)
     approval_ttl: float = 600.0
+    # Commands the user approved "for this chat": exact keys (lib/run_command.Plan.key). It lives and dies with this
+    # binding, i.e. with the Claude process of one chat; it is never persisted and never shared.
+    remembered: set[str] = field(default_factory=set)
 
 
 BINDINGS: dict[str, Binding] = {}
@@ -292,6 +296,26 @@ def build() -> Mount | None:
         b = _binding_of(ctx)
         async with b.coord.running(_call_id(ctx)):
             return await ai_tools.pause(seconds)
+
+    # The command tools (lib/chat_commands.py): registered here and nowhere else, so they have no HTTP route. They are
+    # only visible to (and pre-allowed for) a chat when the server was started with --enable-run-command, and every
+    # handler checks the same gates again.
+    from vivarium_workbench.lib import chat_commands
+
+    @server.tool(description=chat_commands.RUN_DOC)
+    async def run_command(ctx: Context, argv: list[str], cwd: str | None = None,
+                          extra_dirs: list[str] | None = None) -> dict[str, Any]:
+        b = _binding_of(ctx)
+        use_id = _tool_use_id(ctx)
+        async with b.coord.running(use_id or _call_id(ctx)):
+            return await chat_commands.command_call(b, use_id, argv, cwd, extra_dirs)
+
+    @server.tool(description=chat_commands.TRUST_DOC)
+    async def request_workspace_trust(ctx: Context) -> dict[str, Any]:
+        b = _binding_of(ctx)
+        use_id = _tool_use_id(ctx)
+        async with b.coord.running(use_id or _call_id(ctx)):
+            return await chat_commands.trust_call(b, use_id)
 
     # Loopback hosts only (DNS-rebinding protection), whatever the SDK would default to.
     security = TransportSecuritySettings(enable_dns_rebinding_protection=True,

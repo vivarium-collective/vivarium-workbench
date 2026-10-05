@@ -28,7 +28,7 @@ import uvicorn  # noqa: E402
 from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse, ToolCallPart, ToolReturnPart  # noqa: E402
 
 from vivarium_workbench.api import app as appmod  # noqa: E402
-from vivarium_workbench.lib import ai_auth, ai_tools, claude_cli, claude_mcp, startup  # noqa: E402
+from vivarium_workbench.lib import ai_auth, ai_tools, chat_commands, claude_cli, claude_mcp, startup  # noqa: E402
 
 CREATE = "study_create_api_study_create_post"
 live = pytest.mark.skipif(not (shutil.which("claude") and claude_cli.logged_in()),
@@ -476,7 +476,9 @@ def test_the_mcp_endpoint_only_answers_a_registered_token_and_forgets_it_with_th
     token, _ = claude_mcp.register(deps, 60.0)
     ok = client.post(url, json=rpc, headers={**hdr, "Authorization": f"Bearer {token}"})
     assert ok.status_code == 200
-    assert sorted(t["name"] for t in ok.json()["result"]["tools"]) == sorted(claude_mcp.TOOL_NAMES)
+    # the server registers the command tools too; they reach the model only when the server was started with the
+    # explicit switch (--disallowedTools hides them otherwise), and every handler re-checks its gates
+    assert sorted(t["name"] for t in ok.json()["result"]["tools"]) == sorted(claude_mcp.TOOL_NAMES + chat_commands.TOOL_NAMES)
     claude_mcp.unregister(token)
     assert client.post(url, json=rpc, headers={**hdr, "Authorization": f"Bearer {token}"}).status_code == 401
 

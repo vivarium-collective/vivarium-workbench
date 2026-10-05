@@ -102,6 +102,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if getattr(args, "trust_proxy", False):
         os.environ["VIVARIUM_WORKBENCH_TRUST_PROXY"] = "1"
 
+    if getattr(args, "enable_run_command", False):
+        os.environ["VIVARIUM_WORKBENCH_ENABLE_RUN_COMMAND"] = "1"
+
     if backend_url:
         os.environ["VIVARIUM_WORKBENCH_BACKEND_BASE_URL"] = args.backend_base_url
 
@@ -635,6 +638,28 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     print(dep_doctor.format_report())
     return 1 if dep_doctor.problems() else 0
+
+
+def cmd_workspace_trust(args: argparse.Namespace) -> int:
+    """List the workspaces trusted to run chat commands, or revoke one (docs/ai-chat.md, "Running commands")."""
+    import os as _os
+
+    from vivarium_workbench.lib import user_state
+
+    if args.revoke:
+        real = _os.path.realpath(args.revoke)
+        if user_state.revoke_trust(real):
+            print(f"revoked: {real}")
+            return 0
+        print(f"not trusted (nothing to revoke): {real}", file=sys.stderr)
+        return 1
+    trusted = user_state.list_trusted()
+    if not trusted:
+        print(f"No workspace is trusted to run commands ({user_state.config_dir()}).")
+        return 0
+    for e in trusted:
+        print(f"{e['path']}\t(trusted {e['at']})")
+    return 0
 
 
 def cmd_smoke(args: argparse.Namespace) -> int:
@@ -1388,6 +1413,13 @@ def main(argv: list[str] | None = None) -> int:
              "shared reverse proxy / ALB. Default empty = serve at root.",
     )
     p_serve.add_argument(
+        "--enable-run-command", action="store_true",
+        help="Let VivaChat's Claude Code provider ask to run read-only inspection commands (ls, cat, grep, find, "
+             "read-only git ...) in a trusted workspace, each after you approve it on a card (sets "
+             "VIVARIUM_WORKBENCH_ENABLE_RUN_COMMAND=1). Off by default; local servers only, never on a hosted "
+             "deployment. See docs/ai-chat.md.",
+    )
+    p_serve.add_argument(
         "--trust-proxy", action="store_true",
         help="Trust X-Forwarded-Host for the CSRF same-origin check "
              "(sets VIVARIUM_WORKBENCH_TRUST_PROXY=1). Only enable behind a "
@@ -1435,6 +1467,14 @@ def main(argv: list[str] | None = None) -> int:
     p_doctor = sub.add_parser(
         "doctor", help="Check framework-dependency health (stale process-bigraph / viva-superpowers)")
     p_doctor.set_defaults(func=cmd_doctor)
+
+    p_trust = sub.add_parser(
+        "workspace-trust",
+        help="List the workspaces trusted to run VivaChat commands, or revoke one (stored in your config folder)")
+    trust_what = p_trust.add_mutually_exclusive_group(required=True)
+    trust_what.add_argument("--list", action="store_true", help="Show every trusted workspace")
+    trust_what.add_argument("--revoke", metavar="PATH", help="Stop trusting the workspace at PATH")
+    p_trust.set_defaults(func=cmd_workspace_trust)
 
     p_warm = sub.add_parser(
         "warm-catalog",

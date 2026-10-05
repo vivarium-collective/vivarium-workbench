@@ -35,6 +35,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 
+from vivarium_workbench.lib.proc_group import signal_group
+
 PROVIDER = "claude-code"
 WAKE = "_wake"        # a synthetic event type: the caller's wake queue had a signal (not something the CLI emits)
 # Aliases the CLI itself resolves to the current model of each tier (a full model id works too).
@@ -106,6 +108,7 @@ class Attach:
     user's installed plugins."""
     mcp_config: str                     # the --mcp-config JSON for this process (lib.claude_mcp.mcp_config)
     allowed: tuple[str, ...]            # the MCP tools to pre-allow; nothing else can run
+    blocked: tuple[str, ...] = ()       # MCP tools hidden from the model entirely (--disallowedTools)
 
 
 def build_argv(exe: str, model: str, system_prompt: str, mcp_config_path: str | None = None,
@@ -129,6 +132,8 @@ def build_argv(exe: str, model: str, system_prompt: str, mcp_config_path: str | 
         return head + ["--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands"] + tail
     mid = ["--tools", "Skill", "--strict-mcp-config", "--mcp-config", str(mcp_config_path),
            "--allowedTools", ",".join((*attach.allowed, "Skill")), "--permission-prompts", "none"]
+    if attach.blocked:
+        mid += ["--disallowedTools", ",".join(attach.blocked)]
     if plugin_dirs is None:
         return head + mid + ["--setting-sources", setting_sources()] + tail
     return head + mid + ["--setting-sources", ""] + [a for d in plugin_dirs for a in ("--plugin-dir", d)] + tail
@@ -412,9 +417,7 @@ _TASKS: set[asyncio.Future[Any]] = set()
 _IDLE: dict[tuple, ClaudeSession] = {}      # key -> a session waiting for its chat's next turn (insertion = age)
 
 
-def _signal_group(pid: int, sig: int) -> None:
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pid, sig)        # start_new_session made pgid == pid: this is our child's group only
+_signal_group = signal_group
 
 
 @atexit.register

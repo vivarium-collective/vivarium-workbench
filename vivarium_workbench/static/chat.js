@@ -141,6 +141,18 @@
     if (ef.package || ef.source) h += '<pre>' + e([ef.package && 'package: ' + ef.package, ef.source && 'source: ' + ef.source, ef.mode && 'install: ' + ef.mode,
       ef.system_deps_check && 'system-dependency check: ' + ef.system_deps_check].filter(Boolean).join('\n')) + '</pre>';
     (ef.files || []).forEach(function (f) { h += '<pre>' + e(f.field + ': ' + f.bytes + ' bytes, sha256 ' + f.sha256) + '</pre>'; });
+    if (ef.kind === 'command') {
+      // The exact program and arguments that will run, as a JSON array so spaces and empty items are visible; never clipped.
+      h += '<div class="vp-k">Command line (one entry per argument)</div><pre>' + e(JSON.stringify(ef.command_line || [], null, 2)) + '</pre>' +
+        '<div class="vp-k">Working folder</div><pre>' + e(ef.cwd || '') + '</pre>';
+      if ((ef.extra_dirs || []).length) h += '<div class="vp-k">Extra folders you are granting for this command</div><pre>' + e(ef.extra_dirs.join('\n')) + '</pre>';
+      const l = ef.limits || {};
+      h += '<div class="vp-k">Limits</div><pre>' + e('stops after ' + l.timeout_s + ' s; output kept up to ' + l.output_cap_bytes + ' bytes per stream; no shell, no input') + '</pre>';
+    }
+    if (ef.kind === 'trust') {
+      h += '<div class="vp-k">Workspace</div><pre>' + e(ef.workspace || '') + '</pre>' +
+        '<div class="vp-k">Where this choice is stored</div><pre>' + e(ef.stored || '') + '</pre>';
+    }
     return h + '</div>';
   }
 
@@ -155,8 +167,11 @@
         effectHtml(a.effect) +
         (a.query ? '<div><div class="vp-k">Query</div><pre>' + e(a.query) + '</pre></div>' : '') +
         (a.body ? '<div><div class="vp-k">Request body <span class="vp-size">(' + a.stats.lines + ' lines, ' + a.stats.chars + ' characters)</span></div><pre>' + e(a.body) + '</pre></div>' : '') +
+        (a.effect && a.effect.kind === 'command' && a.effect.remember
+          ? '<label class="vp-note"><input type="checkbox" data-remember> Don\'t ask again for this exact command in this chat</label>' : '') +
         '<div class="vp-actions"><button class="vp-btn" data-act="deny">Deny</button>' +
-        '<button class="vp-btn vp-primary" data-act="approve">Approve</button></div></div>';
+        '<button class="vp-btn vp-primary" data-act="approve">' + (a.effect && a.effect.kind === 'trust' ? 'Trust this workspace'
+          : a.effect && a.effect.kind === 'command' ? 'Run this command' : 'Approve') + '</button></div></div>';
     }
     let body = '';
     if (p.args && Object.keys(p.args).length) body += '<div><div class="vp-k">Arguments</div><pre>' + e(pretty(p.args)) + '</pre></div>';
@@ -194,12 +209,14 @@
       const a = t ? C.describeApproval(t) : null;
       const what = a ? (a.effect && a.effect.commands ? ' — runs: ' + a.effect.commands.map(function (c) { return (c.run || []).join('; '); }).join('; ')
         : a.body ? ' — ' + a.body.replace(/\s+/g, ' ').slice(0, 160) + (a.body.length > 160 ? '…' : '') : '') : '';
-      return '<li><code>' + e(a ? (a.method + ' ' + (a.path || a.title)).trim() : id) + '</code><span class="vp-sum">' + e(what) + '</span></li>';
+      const own = C.needsOwnClick(state, id) ? ' — needs its own click (not included in Approve all)' : '';
+      return '<li><code>' + e(a ? (a.method + ' ' + (a.path || a.title)).trim() : id) + '</code><span class="vp-sum">' + e(what + own) + '</span></li>';
     }).join('') : '';
     const bulk = waiting >= 2
       ? '<div class="vp-bulk"><span>' + waiting + ' actions are waiting for your approval</span><ul class="vp-bulk-list">' + listed + '</ul>' +
         '<button class="vp-btn" data-act="deny-all">Deny all</button>' +
-        '<button class="vp-btn vp-primary" data-act="approve-all">Approve all</button></div>' : '';
+        '<button class="vp-btn vp-primary" data-act="approve-all">' + (state.pending.some(function (id) { return C.needsOwnClick(state, id); })
+          ? 'Approve all except commands' : 'Approve all') + '</button></div>' : '';
     return '<div class="vp-body">' + html + bulk + (busy ? '<span class="vp-typing"></span>' : '') + '</div>' +
       '<button class="vp-icon vp-copy" data-act="copy" title="Copy">' + ICON.copy + '</button>';
   }
@@ -820,8 +837,8 @@
     save(); renderAll();
     streamTurn(body);
   }
-  function decide(id, approved) {
-    const all = C.decide(state, id, approved);
+  function decide(id, approved, remember) {
+    const all = C.decide(state, id, approved, undefined, remember);
     save();
     if (all) resume(); else renderAll();
   }
@@ -1120,7 +1137,10 @@
         case 'unattach': attached.splice(+b.getAttribute('data-idx'), 1); renderPills(); break;
         case 'send': if (state.busy) abortStream(); else submit(); break;
         case 'stop': abortStream(); break;
-        case 'approve': if (host) decide(host.getAttribute('data-id'), true); break;
+        case 'approve': if (host) {
+          const box = host.querySelector('[data-remember]');
+          decide(host.getAttribute('data-id'), true, !!(box && box.checked));
+        } break;
         case 'deny': if (host) decide(host.getAttribute('data-id'), false); break;
         case 'approve-all': decideEvery(true); break;
         case 'deny-all': decideEvery(false); break;
