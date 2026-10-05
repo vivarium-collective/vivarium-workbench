@@ -84,3 +84,22 @@ def test_composites_data_records_carry_contract_audit(tmp_path, monkeypatch):
     assert recs, out
     for r in recs:
         assert r['contract_audit']['status'] in ('pass', 'fail', 'incomplete', 'not-declared', 'unavailable', 'error')
+
+
+def test_registry_payload_preserves_contract_audit(tmp_path, monkeypatch):
+    """build_registry's annotation path must not strip worker-supplied contract_audit."""
+    from vivarium_workbench.lib import registry
+    (tmp_path / 'workspace.yaml').write_text('name: x\npackage_path: viva_x_nonexistent\n')
+    registry._REGISTRY_CACHE.clear()
+    monkeypatch.setenv('VIVARIUM_WORKBENCH_CATALOG_CACHE_DIR', str(tmp_path / 'cache'))
+    raw = {'processes': [{'name': 'Bar', 'address': 'viva_x.processes.Bar', 'kind': 'process',
+                          'contract_audit': {'status': 'pass', 'grade': 'A'}}], 'types': []}
+
+    class _Pool:
+        def call(self, ws_root, method, *a, **k):
+            return raw
+
+    monkeypatch.setattr('vivarium_workbench.lib.env_worker_pool.get_pool', lambda: _Pool())
+    data = registry.build_registry(tmp_path)
+    rec = next(p for p in data['processes'] if p['name'] == 'Bar')
+    assert rec['contract_audit']['status'] == 'pass'
