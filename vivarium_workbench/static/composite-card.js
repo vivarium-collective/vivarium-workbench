@@ -57,6 +57,67 @@
   }
   window._compositeBadge = _compositeBadge;
 
+  // contract-audit badge + panel (Phase 4B). Renders the 4A `contract_audit`.
+  // Pure string helpers; empty string when there is no contract_audit (emitters,
+  // pre-4A snapshots). All dynamic text goes through window._esc.
+  function _contractBadge(ca) {
+    if (!ca || !ca.status) return '';
+    var esc = _esc;
+    var map = {
+      pass:         { cls: 'contract-pass',       glyph: '✓', label: 'contract' },
+      fail:         { cls: 'contract-fail',       glyph: '✗', label: 'contract' },
+      incomplete:   { cls: 'contract-incomplete', glyph: '◐', label: 'contract' },
+      'not-declared': { cls: 'contract-none',     glyph: '—', label: 'no contract' },
+      unavailable:  { cls: 'contract-none',       glyph: '—', label: 'contract n/a' },
+      error:        { cls: 'contract-none',       glyph: '—', label: 'contract' }
+    };
+    var m = map[ca.status] || map.error;
+    var n = (ca.findings || []).filter(function (f) { return f && f.severity === 'error'; }).length;
+    var count = (ca.status === 'fail' && n) ? ' (' + n + ')' : '';
+    var title = 'Contract audit: ' + esc(ca.status) +
+      (typeof ca.grade === 'number' ? ' · ' + Math.round(ca.grade * 100) + '% declared' : '');
+    return '<span class="contract-badge ' + m.cls + '" title="' + title + '">' +
+      m.glyph + ' ' + esc(m.label) + count + '</span>';
+  }
+
+  function _contractPanelBody(ca) {
+    if (!ca || !ca.status) return '';
+    var esc = _esc;
+    var rows = [];
+    rows.push('<div class="contract-status-line">Status: <b>' + esc(ca.status) + '</b>' +
+      (typeof ca.grade === 'number' ? ' · ' + Math.round(ca.grade * 100) + '% declared' : '') + '</div>');
+    function portRows(side, ports) {
+      var ks = Object.keys(ports || {});
+      if (!ks.length) return '';
+      return '<div class="contract-ports"><div class="contract-sub">' + esc(side) + '</div>' +
+        ks.map(function (p) {
+          var s = ports[p] || {}; var b = [];
+          if (s._min != null || s._max != null) b.push('[' + esc(s._min == null ? '' : s._min) + ', ' + esc(s._max == null ? '' : s._max) + ']');
+          if (s._units) b.push(esc(s._units));
+          return '<div class="contract-port"><code>' + esc(p) + '</code> ' + esc(s._type || '') + ' ' + b.join(' ') + '</div>';
+        }).join('') + '</div>';
+    }
+    if (ca.ports) { rows.push(portRows('inputs', ca.ports.inputs)); rows.push(portRows('outputs', ca.ports.outputs)); }
+    if ((ca.conditions || []).length) {
+      rows.push('<div class="contract-conditions"><div class="contract-sub">conditions</div>' +
+        ca.conditions.map(function (c) {
+          return '<div class="contract-cond"><b>' + esc(c.kind) + '</b> ' + esc(c.name || '') +
+            ': <code>' + esc(c.expr || '') + '</code></div>';
+        }).join('') + '</div>');
+    }
+    if ((ca.findings || []).length) {
+      rows.push('<div class="contract-findings"><div class="contract-sub">findings</div>' +
+        ca.findings.map(function (f) {
+          return '<div class="contract-finding is-' + esc(f.severity) + '">' +
+            esc(f.severity) + ' <code>' + esc(f.code) + '</code> ' + esc(f.where || '') + ' — ' + esc(f.message || '') + '</div>';
+        }).join('') + '</div>');
+    }
+    return rows.filter(Boolean).join('');
+  }
+
+  window._contractBadge = _contractBadge;
+  window._contractPanelBody = _contractPanelBody;
+
   // TIER of a figure composite — draft interface / executable compilation / live
   // topology rewrite — inferred from its display name (see the meta-modelers
   // naming). A small colored badge makes the role scannable at a glance.
@@ -817,7 +878,7 @@
         ' title="Double-click to Explore (maximized bigraph)">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
-          '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong>' + _compositeBadge() + _compositeTierBadge(c) + wsPill + '</div>' +
+          '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong>' + _compositeBadge() + _compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + '</div>' +
           '<code class="reg-card-addr">' + _esc(addr) + '</code>' +
           meta +
           (short ? '<p class="reg-card-desc">' + _esc(short) + '</p>' : '') +
@@ -981,7 +1042,7 @@
       '<div class="loom-card loom-card-stack loom-card-composite">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" ondblclick="event.stopPropagation();_maximizeCardFromHeader(this)" title="Click to pin to top · double-click to maximize">' +
-            '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + wsPill + roPill +
+            '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + roPill +
             '<span class="pcard-runtarget" data-role="runtarget" title="checking where a Run will execute…" ' +
               'style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
               'background:#eef1f4;color:#8a97a4;vertical-align:middle">Runs: …</span>' +
@@ -1049,6 +1110,8 @@
           // Run/Step · Outputs), lazy-mounted on first open. Graph collapsed at
           // first so run + outputs lead.
           _pcardSection('explore', 'Explore', '<span class="pcard-sec-hint">◆ Configure · run · outputs — click to open</span>', _compositeLoomExplore(c), { wide: true, feature: true }) +
+          // Composites carry {status:'unavailable'} today (4A deferred composite audit): neutral state until it lands.
+          (c.contract_audit ? _pcardSection('contract', 'Contract', _contractBadge(c.contract_audit), _contractPanelBody(c.contract_audit)) : '') +
         '</div>' +
       '</div>' +
     '</div>';

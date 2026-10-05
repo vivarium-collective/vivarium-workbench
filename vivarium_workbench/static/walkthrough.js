@@ -2488,7 +2488,7 @@
         ' title="Double-click to zoom in on this ' + (p.kind || 'process') + '">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
-          '<div class="reg-card-head"><strong class="reg-card-name">' + esc(p.name) + '</strong>' + _procKindBadge(p.kind) + _procBridgeBadge(p) + defaultBadge + _regUseBadge(p) + '</div>' +
+          '<div class="reg-card-head"><strong class="reg-card-name">' + esc(p.name) + '</strong>' + _procKindBadge(p.kind) + _procBridgeBadge(p) + defaultBadge + _regUseBadge(p) + _contractBadge(p.contract_audit) + '</div>' +
           '<code class="reg-card-addr">' + addr + '</code>' +
           (short ? '<p class="reg-card-desc">' + esc(short) + '</p>' : '') +
         '</div>' +
@@ -2526,7 +2526,7 @@
       }).join('');
     }
     var bodyHead =
-      '<div class="loom-body-head"><span class="loom-name">' + _esc(p.name) + '</span>' + _procKindBadge(kind) + _regUseBadge(p) + '</div>' +
+      '<div class="loom-body-head"><span class="loom-name">' + _esc(p.name) + '</span>' + _procKindBadge(kind) + _regUseBadge(p) + _contractBadge(p.contract_audit) + '</div>' +
       '<code class="loom-addr">' + _esc(p.address || kind) + '</code>' +
       (desc ? '<p class="loom-desc">' + _esc(desc) + '</p>' : '');
 
@@ -2804,7 +2804,7 @@
       '<div class="loom-card loom-card-stack loom-card-' + kind + '">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" title="Click to pin to top">' +
-            '<span class="loom-name">' + _esc(p.name) + '</span>' + kindBadge + _regUseBadge(p) +
+            '<span class="loom-name">' + _esc(p.name) + '</span>' + kindBadge + _regUseBadge(p) + _contractBadge(p.contract_audit) +
             '<code class="loom-addr">' + _esc(p.address || kind) + '</code>' +
             (/^(process|step)$/.test(kind) ? _processCodeBtn(p.address) : '') +
             _cardPopoutBtn(p.address || kind, kind) +
@@ -2822,6 +2822,7 @@
           section('inputs', 'Inputs', '<span class="pcard-sec-count">' + nIn + '</span>', inputsBody, { resizable: true }) +
           runBar +
           section('outputs', 'Outputs', '<span class="pcard-sec-count">' + nOut + '</span>', outputsBody, dlBtn ? { headExtra: dlBtn } : {}) +
+          (p.contract_audit ? section('contract', 'Contract', _contractBadge(p.contract_audit), _contractPanelBody(p.contract_audit)) : '') +
         '</div>' +
       '</div>' +
     '</div>';
