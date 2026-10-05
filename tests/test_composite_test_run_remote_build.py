@@ -265,6 +265,76 @@ def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypa
     assert captured["simulator_id"] == 124
 
 
+def test_config_selection_honors_spec_id_over_default(tmp_path, monkeypatch):
+    """#1113: config selection must key off ``spec_id``. When the build carries a
+    config NAMED after the requested composite AND the generic whole-cell default,
+    the dispatch must run the composite's own config — NOT silently prefer the
+    default (the bug: ``spec_id`` only fed the description, never the config pick,
+    so a mecillinam composite ran the whole-cell default)."""
+    from vivarium_workbench.lib import composite_test_run_views as v
+    from vivarium_workbench.lib import run_registry, remote_run
+    from vivarium_workbench.lib import sms_api_client as sac
+
+    (tmp_path / ".pbg").mkdir()
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight",
+                        lambda ws: (_ for _ in ()).throw(AssertionError("preflight skipped")))
+    monkeypatch.setattr(run_registry, "spawn_detached",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no compose spawn")))
+    # Build carries BOTH the whole-cell default and a config named after the composite.
+    monkeypatch.setattr(sac.SmsApiClient, "_get",
+                        lambda self, path, params=None: {"config_filenames":
+                            ["api_simulation_default.json", "mecillinam_wellmixed.json"]})
+    captured = {}
+    monkeypatch.setattr(sac.SmsApiClient, "run_simulation",
+                        lambda self, **kw: (captured.update(kw), {"database_id": 501})[1])
+
+    body = {"id": "v2ecoli.composites.mecillinam_wellmixed", "steps": 7,
+            "run_target": "deployment",
+            "build": {"simulator_id": 211,
+                      "repo_url": "https://github.com/CovertLabEcoli/sms-ecoli.git",
+                      "commit": "33ecd77"}}
+    resp, status = v.composite_test_run(tmp_path, body)
+    assert status == 202, resp
+    # The composite's OWN config ran — not the generic whole-cell default.
+    assert captured["config_filename"] == "mecillinam_wellmixed.json"
+
+
+def test_config_selection_spec_match_no_default(tmp_path, monkeypatch):
+    """#1113: on a build with NO whole-cell default, a composite whose config IS
+    present must resolve to it (keyed off ``spec_id``) rather than fail closed —
+    and must NEVER silently pick the alphabetically-first unrelated config
+    (``fss_pathway_oe_native_oe_carina`` here)."""
+    from vivarium_workbench.lib import composite_test_run_views as v
+    from vivarium_workbench.lib import run_registry, remote_run
+    from vivarium_workbench.lib import sms_api_client as sac
+
+    (tmp_path / ".pbg").mkdir()
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight",
+                        lambda ws: (_ for _ in ()).throw(AssertionError("preflight skipped")))
+    monkeypatch.setattr(run_registry, "spawn_detached",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no compose spawn")))
+    # No whole-cell default; fss_* is alphabetically first (the old silent pick).
+    monkeypatch.setattr(sac.SmsApiClient, "_get",
+                        lambda self, path, params=None: {"config_filenames":
+                            ["fss_pathway_oe_native_oe_carina.json", "mecillinam_wellmixed.json"]})
+    captured = {}
+    monkeypatch.setattr(sac.SmsApiClient, "run_simulation",
+                        lambda self, **kw: (captured.update(kw), {"database_id": 502})[1])
+
+    body = {"id": "v2ecoli.composites.mecillinam_wellmixed", "steps": 7,
+            "run_target": "deployment",
+            "build": {"simulator_id": 211,
+                      "repo_url": "https://github.com/CovertLabEcoli/sms-ecoli.git",
+                      "commit": "33ecd77"}}
+    resp, status = v.composite_test_run(tmp_path, body)
+    assert status == 202, resp
+    assert captured["config_filename"] == "mecillinam_wellmixed.json"
+
+
 def test_composite_test_run_no_config_no_default_fails_closed(tmp_path, monkeypatch):
     """#1113: a Cloud image dispatch with NO explicit config, against a build whose
     repo has no whole-cell default, must FAIL CLOSED (409 no-config-for-composite)
