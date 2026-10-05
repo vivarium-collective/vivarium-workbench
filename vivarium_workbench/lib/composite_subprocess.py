@@ -428,6 +428,7 @@ def run_composite_subprocess(
                 from vivarium_workbench.lib import composite_runs as cr
                 from bigraph_schema.json_codec import BigraphJSONEncoder as _BJE
                 _payload = {payload!r}
+                _steps_run = None  # set where run_with_division drives the run
                 if _payload['spec_id'] not in _REGISTRY: discover_generators()
                 entry = _REGISTRY[_payload['spec_id']]
                 core = build_core()
@@ -591,7 +592,7 @@ def run_composite_subprocess(
                         state = cr.inject_sqlite_emitter(
                             state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                         composite = Composite({{'state': state}}, core=core)
-                        cr.run_with_division(composite, _payload['steps'])
+                        _steps_run = cr.run_with_division(composite, _payload['steps'])
                         results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
@@ -646,7 +647,7 @@ def run_composite_subprocess(
                 with open({_state_path!r}) as _sf:
                     _state = json.load(_sf, object_hook=bigraph_json_hook)
                 composite = Composite({{'state': _state}}, core=core)
-                cr.run_with_division(composite, {steps})
+                _steps_run = cr.run_with_division(composite, {steps})
                 results = gather_emitter_results(composite)
         """).lstrip("\n")
 
@@ -681,7 +682,8 @@ def run_composite_subprocess(
                 pass
             from bigraph_schema.json_codec import BigraphJSONEncoder as _BJE
             print('@@@RESULTS@@@')
-            print(json.dumps({{'results': out, 'viz_html': viz_html}}, cls=_BJE))
+            print(json.dumps({{'results': out, 'viz_html': viz_html,
+                              'steps_run': _steps_run}}, cls=_BJE))
         except Exception as e:
             print('@@@ERROR@@@')
             print(traceback.format_exc())
@@ -838,9 +840,13 @@ def run_composite_subprocess(
 
         # Subprocess emits {results, viz_html}; older versions emitted the
         # results dict directly. Handle both for forward/backward compat.
+        # steps_run: ticks run_with_division actually ran (fewer than requested
+        # when a v2ecoli composite divides); None on paths it does not drive.
+        steps_run = None
         if isinstance(payload, dict) and "results" in payload:
             results = payload.get("results") or {}
             viz_html = payload.get("viz_html") or {}
+            steps_run = payload.get("steps_run")
         else:
             results = payload
             viz_html = {}
@@ -876,7 +882,7 @@ def run_composite_subprocess(
         cr.complete_metadata(
             conn,
             run_id=run_id,
-            n_steps=steps,
+            n_steps=steps_run if isinstance(steps_run, int) else steps,
             status="completed",
             workspace=ws_root,
             emitter_path=_emitter_path,
