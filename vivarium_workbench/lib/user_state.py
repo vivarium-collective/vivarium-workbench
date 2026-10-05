@@ -1,5 +1,5 @@
 """State the workbench keeps OUTSIDE any workspace: which workspaces the user has trusted to run commands, and a
-protected, append-only copy of the command audit trail (docs/plan-autonomous-bash-commands.md, R7 and R8).
+protected, append-only copy of the command audit trail (see "Running commands" in docs/ai-chat.md).
 
 It lives in the user's config folder, keyed by the workspace's real path, because a workspace is the one place a
 cloned repository (or an approved command) can write: a repo must not be able to mark itself trusted, and a command

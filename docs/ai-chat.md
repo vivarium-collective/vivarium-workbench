@@ -471,4 +471,3 @@ Without the switch the model never sees the tools (`--disallowedTools`). A hoste
 * **Audit.** Before it runs, the command is recorded in `.pbg/ai-actions.jsonl` and in a protected, append-only copy
   under `~/.config/vivarium-workbench/command-log/`; if either cannot be written, the command does not run.
 
-Design, threat model and the reasons for each choice: [plan-autonomous-bash-commands.md](plan-autonomous-bash-commands.md).

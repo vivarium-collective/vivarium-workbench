@@ -1,4 +1,4 @@
-"""Validate and run ONE approved command for the chat (docs/plan-autonomous-bash-commands.md).
+"""Validate and run ONE approved command for the chat (see "Running commands" in docs/ai-chat.md).
 
 Nothing here decides whether a command may run: the user does, on an approval card, and the Claude Code MCP
 handler asks them (``lib/claude_mcp``). This module makes sure that what the card shows is what runs, and that

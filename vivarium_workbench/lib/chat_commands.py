@@ -1,8 +1,7 @@
 """The chat's command tools for the Claude Code provider: ``run_command`` and ``request_workspace_trust``.
 
 Served by the MCP server in :mod:`lib.claude_mcp` and NOWHERE else: there is no HTTP route for them, so nothing
-that can reach the workbench's port can run a command without the chat's approval step (docs/plan-autonomous-bash-
-commands.md, R1). The gates, in the order they are checked:
+that can reach the workbench's port can run a command without the chat's approval step (see "Running commands" in docs/ai-chat.md). The gates, in the order they are checked:
 
 1. the server was started with the explicit switch (``--enable-run-command``), because a hosted pod may run as root;
 2. Agent mode, and a local (loopback) server: the Claude Code provider only runs there, and its turn preflight
