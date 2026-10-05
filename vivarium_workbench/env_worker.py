@@ -98,7 +98,7 @@ _CAPABILITIES = ["initialize", "ping", "list_generators", "registry_catalog",
                  "scaffold_template", "authoring_validate", "authoring_create",
                  "viz_classes", "resolve_composite_state", "config_to_composite", "observables",
                  "study_readout_check", "attach_process_docs", "discover_composites", "composites_full",
-                 "validate_generated_visualization", "study_precheck", "run_study_analyses", "run_study", "run_investigation_analysis", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "data_sources_provider", "analysis_viewers", "shutdown"]
+                 "validate_generated_visualization", "study_precheck", "run_study_analyses", "run_study", "run_investigation_analysis", "viz_class_inputs", "render_viz_doc", "viz_preview", "report_core_snapshot", "reexport_map", "data_sources_provider", "analysis_viewers", "find_candidates", "shutdown"]
 
 _FRAMEWORK_PKGS = {
     "process_bigraph", "bigraph_schema", "bigraph_viz",
@@ -3054,6 +3054,35 @@ def _list_generators() -> dict:
 
 _WS_CORE: dict = {}
 
+try:
+    from bigraph_schema.matching import find_candidates as _find_candidates_impl
+    from bigraph_schema.schema import Site as _Site
+    FIND_CANDIDATES_AVAILABLE = True
+except Exception:  # noqa: BLE001 - workspace env may predate bigraph-schema 1.7.0
+    FIND_CANDIDATES_AVAILABLE = False
+
+
+def _find_candidates(params):
+    """Processes whose declared contract fits a requested face literal.
+    params: {"inputs": {port: type}, "outputs": {port: type}}. Returns
+    {"status","candidates":[{address,match,over_provides,fails}]}. Face-literal
+    only (contract_registry/open-Sites not surfaced yet)."""
+    if not FIND_CANDIDATES_AVAILABLE:
+        return {"status": "unavailable", "candidates": []}
+    try:
+        inputs = dict((params or {}).get("inputs") or {})
+        outputs = dict((params or {}).get("outputs") or {})
+        core = _get_workspace_core()
+        # A raw-dict _sort yields a None hole; the link schema must be resolved via core.access.
+        link = core.access({"_type": "link", "_inputs": inputs, "_outputs": outputs})
+        results = _find_candidates_impl(core, _Site(_sort=link))
+        candidates = [{"address": r.address, "match": r.match,
+                       "over_provides": list(getattr(r, "over_provides", []) or []),
+                       "fails": list(getattr(r, "fails", []) or [])} for r in results]
+        return {"status": "ok", "candidates": candidates}
+    except Exception as error:  # noqa: BLE001 - never 500 the worker
+        return {"status": "error", "message": str(error), "candidates": []}
+
 
 def _get_workspace_core():
     """Build (once, cached) the workspace's core — reused across run-process calls."""
@@ -4174,6 +4203,8 @@ def _handle(method: str, params: dict) -> dict:
         return _data_sources_provider(params)
     if method == "analysis_viewers":
         return _analysis_viewers(params)
+    if method == "find_candidates":
+        return _find_candidates(params)
     if method == "install_modules":
         # Runtime provisioning: the workbench pushes the workspace's declared
         # module install specs so composites that reference them can register
