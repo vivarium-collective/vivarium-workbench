@@ -1,9 +1,16 @@
 """Tests for the per-study pytest runner."""
+import sys
 import yaml
 from pathlib import Path
 from vivarium_workbench.lib.study_tests import (
     run_study_tests, StudyTestsResult, StudyTestsConcurrentError,
 )
+from vivarium_workbench.lib import study_tests as study_tests_mod
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover
+    import tomli as tomllib
 
 
 def _make_study(workspace: Path, slug: str, *, test_body: str) -> Path:
@@ -61,6 +68,44 @@ def test_run_study_tests_writes_last_results_to_yaml(tmp_path):
     assert lr is not None
     assert lr["passed"] == 1
     assert "timestamp" in lr
+
+
+def test_no_report_note_names_missing_plugin(monkeypatch):
+    # #1280: when pytest ran but wrote no JSON report because the
+    # pytest-json-report plugin is absent (pytest usage error, exit code 4),
+    # the note must name the missing dependency instead of the opaque
+    # "no JSON report" message.
+    monkeypatch.setattr(
+        study_tests_mod, "_json_report_plugin_available", lambda: False
+    )
+    note = study_tests_mod._no_report_note(4)
+    assert "pytest-json-report" in note
+    assert "4" in note
+
+
+def test_no_report_note_generic_when_plugin_present(monkeypatch):
+    # Plugin is installed but pytest still produced no report (a genuine crash):
+    # keep the generic note and surface the exit code.
+    monkeypatch.setattr(
+        study_tests_mod, "_json_report_plugin_available", lambda: True
+    )
+    note = study_tests_mod._no_report_note(2)
+    assert "pytest-json-report" not in note
+    assert "2" in note
+
+
+def test_pytest_json_report_declared_as_runtime_dependency():
+    # #1280: the Tests tab runner shells out to `pytest --json-report`, a RUNTIME
+    # feature. The plugin must be a runtime dependency so a normal install
+    # (e.g. vivarium-workbench[chat]) pulls it in — declaring it only in the
+    # `dev` extra left the endpoint returning an opaque "no JSON report" note.
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    runtime_deps = data["project"]["dependencies"]
+    assert any(
+        d.replace(" ", "").lower().startswith("pytest-json-report")
+        for d in runtime_deps
+    ), "pytest-json-report must be a runtime dependency (not dev-only) for #1280"
 
 
 def test_run_study_tests_concurrent_raises(tmp_path):

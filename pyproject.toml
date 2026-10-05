@@ -20,6 +20,17 @@ dependencies = [
     "pydantic>=2",
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    # Runtime, not dev-only (#1280): the dashboard Tests tab's
+    # POST /api/study-tests-run shells out to `python -m pytest --json-report`
+    # (lib/study_tests.py) and parses the JSON report. That `--json-report` flag
+    # comes from the pytest-json-report plugin, so the runtime feature needs it in
+    # a NORMAL install (e.g. vivarium-workbench[chat]) — not just in `[dev]`, where
+    # it used to live. Without it pytest aborts with a usage error (exit code 4)
+    # and the endpoint returned an opaque "no JSON report" note. This also pulls
+    # pytest itself transitively (pytest-json-report requires pytest), so the
+    # subprocess invocation resolves in a plain install. (Kept in `[dev]` too, so
+    # dev installs are unchanged.)
+    "pytest-json-report>=1.5",
     # Floor, not decoration: `lib/artifacts/hashing.py` re-exports
     # `process_bigraph.artifacts.artifact_id` instead of hand-porting it.
     # 1.7.0 is the release that narrows whole floats correctly, so `seed: 1`
