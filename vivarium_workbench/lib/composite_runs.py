@@ -911,8 +911,16 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
     # never re-fires — `trigger_steps` has nothing to match against. When
     # the scan above found no spec emitter to mirror, fall back to
     # wiring `global_time` so every Process apply re-enqueues us.
-    if not inputs:
-        inputs = {"global_time": ["global_time"]}
+    #
+    # Whatever emitter is mirrored (a composite's own, the declared-path
+    # user_emitter, or none), also emit `global_time` itself: the emitter fills
+    # the history.global_time column from the emitted `global_time`, and a
+    # mirrored emitter that doesn't wire it (most composites' own emitters, the
+    # flat user_emitter) left that column NULL. The key is always wired to the
+    # composite's global_time, so a store that merely flattens to the same name
+    # (`global/time`) cannot stand in for it.
+    emit_schema["global_time"] = "node"
+    inputs["global_time"] = ["global_time"]
 
     new_state = dict(state)
     new_state["sqlite_emitter"] = {
@@ -1029,12 +1037,6 @@ def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
         node = _resolve(path_parts)
         emit_schema[key] = "tree[node]" if _is_node_tree(node) else "node"
         inputs[key] = list(path_parts)
-    # Always also wire ``global_time``, as inject_emitter_for_declared_paths
-    # does. The SQLiteEmitter mirrors this emitter and takes the
-    # ``history.global_time`` column from the emitted ``global_time``; without
-    # it a run with declared paths (e.g. a study's readouts) records no time.
-    emit_schema.setdefault("global_time", "node")
-    inputs.setdefault("global_time", ["global_time"])
 
     new_state = dict(state)
     new_state["user_emitter"] = {

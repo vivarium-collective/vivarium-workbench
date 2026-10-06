@@ -12,8 +12,8 @@ def test_tree_node_store_emitted_whole():
     out = inject_emitter_for_paths(state, ["colony"])
     emit = out["user_emitter"]["config"]["emit"]
     # captured as ONE whole-subtree observable typed tree[node], not flattened leaves
-    assert emit == {"colony": "tree[node]", "global_time": "node"}
-    assert out["user_emitter"]["inputs"] == {"colony": ["colony"], "global_time": ["global_time"]}
+    assert emit == {"colony": "tree[node]"}
+    assert out["user_emitter"]["inputs"] == {"colony": ["colony"]}
 
 
 def test_scalar_stores_still_flatten():
@@ -21,7 +21,7 @@ def test_scalar_stores_still_flatten():
                         "sub": {"a": {"_type": "float", "_default": 2.0}}}}
     out = inject_emitter_for_paths(state, ["stores"])
     assert out["user_emitter"]["config"]["emit"] == {
-        "stores_level": "node", "stores_sub_a": "node", "global_time": "node"}
+        "stores_level": "node", "stores_sub_a": "node"}
 
 
 def test_is_node_tree_discriminates():
