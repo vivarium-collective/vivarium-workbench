@@ -10,6 +10,7 @@ column NULL and the stored state without a time.
 Real ``Composite`` objects, the real SQLiteEmitter and real study-run
 subprocesses against the ``ws_increase_demo`` fixture; nothing is mocked.
 """
+import json
 import shutil
 import sqlite3
 import sys
@@ -92,4 +93,7 @@ def test_a_store_that_flattens_to_global_time_cannot_replace_it(ws):
              "global": {"time": 42.0}}
     db_file = _run(ws, state, steps=2, run_id="collide-1",
                    emit_paths=["global/time", "stores/level"])
-    assert [t for t, _ in _history(db_file, "collide-1")] == [0.0, 0.5, 1.0, 1.5, 2.0]
+    rows = _history(db_file, "collide-1")
+    assert [t for t, _ in rows] == [0.0, 0.5, 1.0, 1.5, 2.0]
+    # the declared store is still recorded, under its dotted path
+    assert {json.loads(state)["global.time"] for _, state in rows} == {42.0}
