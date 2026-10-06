@@ -1029,6 +1029,12 @@ def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
         node = _resolve(path_parts)
         emit_schema[key] = "tree[node]" if _is_node_tree(node) else "node"
         inputs[key] = list(path_parts)
+    # Always also wire ``global_time``, as inject_emitter_for_declared_paths
+    # does. The SQLiteEmitter mirrors this emitter and takes the
+    # ``history.global_time`` column from the emitted ``global_time``; without
+    # it a run with declared paths (e.g. a study's readouts) records no time.
+    emit_schema.setdefault("global_time", "node")
+    inputs.setdefault("global_time", ["global_time"])
 
     new_state = dict(state)
     new_state["user_emitter"] = {

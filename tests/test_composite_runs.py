@@ -276,8 +276,8 @@ def test_inject_emitter_for_paths_leaf():
     em = out["user_emitter"]
     assert em["_type"] == "step"
     assert em["address"] == "local:RAMEmitter"
-    assert em["config"]["emit"] == {"stores_level": "node"}
-    assert em["inputs"] == {"stores_level": ["stores", "level"]}
+    assert em["config"]["emit"] == {"stores_level": "node", "global_time": "node"}
+    assert em["inputs"] == {"stores_level": ["stores", "level"], "global_time": ["global_time"]}
 
 
 def test_inject_emitter_for_paths_subtree_cascades():
@@ -289,10 +289,12 @@ def test_inject_emitter_for_paths_subtree_cascades():
     assert em["config"]["emit"] == {
         "stores_fields_glucose": "node",
         "stores_level": "node",
+        "global_time": "node",
     }
     assert em["inputs"] == {
         "stores_fields_glucose": ["stores", "fields", "glucose"],
         "stores_level": ["stores", "level"],
+        "global_time": ["global_time"],
     }
 
 
@@ -307,8 +309,8 @@ def test_inject_emitter_for_paths_skips_processes():
     }
     out = inject_emitter_for_paths(state, ["root"])
     em = out["user_emitter"]
-    assert em["config"]["emit"] == {"root_store": "node"}
-    assert em["inputs"] == {"root_store": ["root", "store"]}
+    assert em["config"]["emit"] == {"root_store": "node", "global_time": "node"}
+    assert em["inputs"] == {"root_store": ["root", "store"], "global_time": ["global_time"]}
 
 
 def test_inject_emitter_for_paths_empty_list_noop():
@@ -575,3 +577,47 @@ def test_delete_run_removes_row(tmp_path):
     assert delete_run(conn, run_id="s__1__a") is True
     assert query_run_meta(conn, run_id="s__1__a") is None
     assert delete_run(conn, run_id="nope") is False
+
+
+def test_declared_path_run_records_global_time(tmp_path):
+    """Regression: a run whose emitter comes from declared paths (a study's
+    readouts) records the time axis. inject_emitter_for_paths wired only the
+    declared stores, the SQLiteEmitter mirrors that emitter, and history kept
+    neither a global_time column value nor a global_time key."""
+    import json
+    import sqlite3
+    from process_bigraph import Composite, Process, allocate_core
+    from viva_emitters.sqlite_emitter import SQLiteEmitter
+
+    class Grow(Process):
+        config_schema = {}
+
+        def inputs(self):
+            return {"level": "float"}
+
+        def outputs(self):
+            return {"level": "float"}
+
+        def update(self, state, interval):
+            return {"level": interval}
+
+    core = allocate_core()
+    core.register_link("Grow", Grow)
+    core.register_link("SQLiteEmitter", SQLiteEmitter)
+    state = {
+        "stores": {"level": 0.0},
+        "grow": {"_type": "process", "address": "local:Grow", "interval": 0.5,
+                 "inputs": {"level": ["stores", "level"]},
+                 "outputs": {"level": ["stores", "level"]}},
+    }
+    state = inject_emitter_for_paths(state, ["stores/level"])
+    state = inject_sqlite_emitter(state, run_id="r1", db_file=tmp_path / "runs.db")
+    composite = Composite({"state": state}, core=core)
+    composite.run(2.0)
+    rows = sqlite3.connect(tmp_path / "runs.db").execute(
+        "SELECT global_time, state FROM history WHERE simulation_id = 'r1' ORDER BY step"
+    ).fetchall()
+    times = [t for t, _ in rows]
+    assert times[0] == 0.0 and times[-1] == 2.0
+    assert all(a < b for a, b in zip(times, times[1:]))
+    assert [json.loads(s)["global_time"] for _, s in rows] == times
