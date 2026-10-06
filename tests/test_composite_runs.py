@@ -156,8 +156,8 @@ def test_inject_sqlite_emitter_copies_existing_emitter_inputs():
     consume the same input ports so persistence captures the same observables."""
     state = _example_state_with_emitter()
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
-    assert out["sqlite_emitter"]["inputs"] == {"level": ["stores", "level"]}
-    assert out["sqlite_emitter"]["config"]["emit"] == {"level": "float"}
+    assert out["sqlite_emitter"]["inputs"] == {"level": ["stores", "level"], "global_time": ["global_time"]}
+    assert out["sqlite_emitter"]["config"]["emit"] == {"level": "float", "global_time": "node"}
 
 
 def test_inject_sqlite_emitter_matches_lowercase_emitter_address():
@@ -187,8 +187,8 @@ def test_inject_sqlite_emitter_matches_lowercase_emitter_address():
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     # The SQLite emitter must have picked up the schema + inputs from the
     # kebab-case emitter, NOT defaulted to empty.
-    assert out["sqlite_emitter"]["config"]["emit"] == {"level": "float"}
-    assert out["sqlite_emitter"]["inputs"] == {"level": ["stores", "level"]}
+    assert out["sqlite_emitter"]["config"]["emit"] == {"level": "float", "global_time": "node"}
+    assert out["sqlite_emitter"]["inputs"] == {"level": ["stores", "level"], "global_time": ["global_time"]}
 
 
 def test_inject_sqlite_emitter_no_emitter_in_spec_falls_back_to_global_time():
@@ -204,7 +204,7 @@ def test_inject_sqlite_emitter_no_emitter_in_spec_falls_back_to_global_time():
     }
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     assert "sqlite_emitter" in out
-    assert out["sqlite_emitter"]["config"]["emit"] == {}
+    assert out["sqlite_emitter"]["config"]["emit"] == {"global_time": "node"}
     assert out["sqlite_emitter"]["inputs"] == {"global_time": ["global_time"]}
 
 
@@ -231,11 +231,12 @@ def test_inject_sqlite_emitter_prefers_user_emitter():
     }
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     assert out["sqlite_emitter"]["config"]["emit"] == {
-        "stores_level": "node", "stores_extra": "node",
+        "stores_level": "node", "stores_extra": "node", "global_time": "node",
     }
     assert out["sqlite_emitter"]["inputs"] == {
         "stores_level": ["stores", "level"],
         "stores_extra": ["stores", "extra"],
+        "global_time": ["global_time"],
     }
 
 

@@ -903,8 +903,22 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
     # never re-fires — `trigger_steps` has nothing to match against. When
     # the scan above found no spec emitter to mirror, fall back to
     # wiring `global_time` so every Process apply re-enqueues us.
-    if not inputs:
-        inputs = {"global_time": ["global_time"]}
+    #
+    # Whatever emitter is mirrored (a composite's own, the declared-path
+    # user_emitter, or none), also emit `global_time` itself: the emitter fills
+    # the history.global_time column from the emitted `global_time`, and a
+    # mirrored emitter that doesn't wire it (most composites' own emitters, the
+    # flat user_emitter) left that column NULL. The key is always wired to the
+    # composite's global_time. A mirrored store that merely flattens to the
+    # same name (`global/time` -> `global_time`) keeps being recorded, under
+    # its dotted path (`global.time`), instead of standing in for the time.
+    wire = inputs.get("global_time")
+    if wire is not None and list(wire) != ["global_time"]:
+        renamed = ".".join(str(step) for step in wire)
+        inputs[renamed] = inputs.pop("global_time")
+        emit_schema[renamed] = emit_schema.pop("global_time", "node")
+    emit_schema["global_time"] = "node"
+    inputs["global_time"] = ["global_time"]
 
     new_state = dict(state)
     new_state["sqlite_emitter"] = {
