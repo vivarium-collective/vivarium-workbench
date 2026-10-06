@@ -162,3 +162,25 @@ describe('ResultsPanel — failed run', () => {
     expect(screen.queryByText(/Run failed/)).toBeNull();
   });
 });
+
+describe('ResultsPanel — authoritative status', () => {
+  it('says "Running…" (not "Run complete") while status is running with no observables', () => {
+    render(<ResultsPanel trajectory={[{ step: 0, state: {} }]} hasRun={true}
+                         runStatus={'running'} />);
+    expect(screen.getByText(/Running… no observables captured yet/)).toBeTruthy();
+    expect(screen.queryByText(/Run complete/)).toBeNull();
+  });
+
+  it('says "Run complete" only once status is completed', () => {
+    render(<ResultsPanel trajectory={[{ step: 0, state: {} }]} hasRun={true}
+                         runStatus={'completed'} />);
+    expect(screen.getByText(/Run complete — no observables emitted/)).toBeTruthy();
+  });
+
+  it('does not assert completion for an unknown terminal status', () => {
+    render(<ResultsPanel trajectory={[{ step: 0, state: {} }]} hasRun={true}
+                         runStatus={'cancelled'} />);
+    expect(screen.getByText(/No observables captured yet\./)).toBeTruthy();
+    expect(screen.queryByText(/Run complete/)).toBeNull();
+  });
+});

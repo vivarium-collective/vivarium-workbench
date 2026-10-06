@@ -32,6 +32,9 @@ export interface OutputsPanelProps {
    *  Results tab says "Run failed" instead of "Run complete — no observables". */
   runFailed?: boolean;
   runError?: string | null;
+  /** Authoritative run status (running|completed|failed|…) so the Results tab
+   *  only says "Run complete" once the run has actually completed. */
+  runStatus?: string | null;
 }
 
 /** Split the run's HTML artifacts (viz_html) across the sub-tabs by name: a
@@ -133,6 +136,7 @@ export function OutputsPanel(props: OutputsPanelProps) {
             isRunning={props.isRunning}
             runFailed={props.runFailed}
             runError={props.runError}
+            runStatus={props.runStatus}
           />
         )}
         {activeTab === 'visualizations' && (
