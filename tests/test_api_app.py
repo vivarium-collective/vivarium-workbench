@@ -39,15 +39,19 @@ def test_health(client):
 
 
 def test_server_version_shape(client):
-    """GET /api/server-version returns {"git_rev", "version"} — both strings,
-    never absent. This is the exact shape the /viva-* skills match on for
-    skill<->server skew detection."""
+    """GET /api/server-version returns {"git_rev", "version", "boot_id"} — all
+    strings, never absent. git_rev/version are what the /viva-* skills match on
+    for skill<->server skew detection; boot_id is a per-process id the SPA uses
+    to notice the server was restarted (static/server-reload.js)."""
     r = client.get("/api/server-version")
     assert r.status_code == 200
     body = r.json()
-    assert set(body.keys()) == {"git_rev", "version"}
+    assert set(body.keys()) == {"git_rev", "version", "boot_id"}
     assert isinstance(body["git_rev"], str) and body["git_rev"]
     assert isinstance(body["version"], str) and body["version"]
+    assert isinstance(body["boot_id"], str) and body["boot_id"]
+    # boot_id is stable within one server process
+    assert client.get("/api/server-version").json()["boot_id"] == body["boot_id"]
 
 
 def test_server_version_available_in_readonly(client, monkeypatch):
@@ -60,7 +64,7 @@ def test_server_version_available_in_readonly(client, monkeypatch):
     rc = TestClient(app)
     r = rc.get("/api/server-version")
     assert r.status_code == 200
-    assert set(r.json().keys()) == {"git_rev", "version"}
+    assert set(r.json().keys()) == {"git_rev", "version", "boot_id"}
 
 
 # ---------------------------------------------------------------------------

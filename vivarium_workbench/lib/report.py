@@ -574,7 +574,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # panel-dock.js / process-code.js alone would be served stale from the cache.
     _chat_stamp = max(int(_mtime(f)) for f in (
         "chat.js", "chat-core.js", "chat.css", "ai-login.js", "ai-models.js",
-        "panel-dock.js", "process-code.js",
+        "panel-dock.js", "process-code.js", "server-reload.js",
     ))
     asset_version = (
         _mtime("walkthrough.js") + "_" + _mtime("style.css") + "_" + str(_chat_stamp)
