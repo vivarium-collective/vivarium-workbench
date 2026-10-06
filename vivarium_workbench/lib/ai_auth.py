@@ -28,6 +28,7 @@ import os
 import re
 import socket
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -43,6 +44,7 @@ os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 from vivarium_workbench.lib import claude_cli as _claude  # noqa: E402
 from vivarium_workbench.lib import csrf as _csrf  # noqa: E402
 from vivarium_workbench.lib.atomic_io import atomic_write_text  # noqa: E402
+from vivarium_workbench.lib.env_compat import get_env
 from vivarium_workbench.lib.errors import APIError
 
 log = logging.getLogger(__name__)
@@ -171,7 +173,6 @@ def storage_mode(bind_host: str | None, *, proxied: bool = False) -> StorageMode
 def server_credentials_allowed() -> bool:
     """Operator opt-in (``VIVARIUM_WORKBENCH_CHAT_ALLOW_SERVER_CREDENTIALS=1``) to let
     a *hosted* server's own env/AWS credentials serve every visitor's chat."""
-    from vivarium_workbench.lib.env_compat import get_env
     return (get_env("CHAT_ALLOW_SERVER_CREDENTIALS", "") or "").strip().lower() in ("1", "true", "yes")
 
 
@@ -182,6 +183,44 @@ _LOCK = Lock()
 _MEMORY: dict[tuple[str, str], Credential] = {}
 # scope -> {"provider": ..., "model": ...} — memory-mode selection.
 _SELECTION: dict[str, dict[str, str]] = {}
+# scope -> last time it was saved to or read. A shared server must not keep every visitor's key forever: a session
+# idle past MEMORY_TTL_S, or the least recently used one beyond MEMORY_MAX_SESSIONS, is forgotten (the visitor
+# simply enters the key again). VIVARIUM_WORKBENCH_CHAT_STORE_MAX / _STORE_TTL_S override; 0 turns a limit off.
+MEMORY_MAX_SESSIONS = 1000
+MEMORY_TTL_S = 24 * 3600
+_TOUCHED: "OrderedDict[str, float]" = OrderedDict()
+
+
+def _store_limit(name: str, default: int) -> int:
+    raw = (get_env(name, "") or "").strip()
+    try:
+        return int(raw) if raw and int(raw) >= 0 else default      # unreadable or negative: keep the default, never lift the limit
+    except ValueError:
+        return default
+
+
+def _reap(*, keep: str | None = None) -> None:
+    """Forget idle and surplus sessions. The caller holds ``_LOCK``."""
+    cap, ttl = _store_limit("CHAT_STORE_MAX", MEMORY_MAX_SESSIONS), _store_limit("CHAT_STORE_TTL_S", MEMORY_TTL_S)
+    cutoff = time.monotonic() - ttl
+    while _TOUCHED:
+        scope, seen = next(iter(_TOUCHED.items()))
+        if scope != keep and ((ttl and seen < cutoff) or (cap and len(_TOUCHED) > cap)):
+            del _TOUCHED[scope]
+            _SELECTION.pop(scope, None)
+            for key in [k for k in _MEMORY if k[0] == scope]:
+                del _MEMORY[key]
+        else:
+            break
+
+
+def _touch(scope: str) -> None:
+    """Mark ``scope`` as just used (caller holds ``_LOCK``); the single-user scope ``""`` is never forgotten."""
+    if not scope:
+        return
+    _TOUCHED[scope] = time.monotonic()
+    _TOUCHED.move_to_end(scope)
+    _reap(keep=scope)
 
 
 def _scope(mode: StorageMode, session: str | None) -> str:
@@ -300,7 +339,10 @@ def get_credential(provider: str, *, mode: StorageMode, session: str | None) -> 
         if url and provider in KEYLESS_ENDPOINT_PROVIDERS:
             return Credential(None, str(url), "config")
     with _LOCK:
+        _reap()
         cred = _MEMORY.get((_scope(mode, session), provider))
+        if cred:
+            _touch(_scope(mode, session))
     if cred:
         return cred
     env = ENV_KEYS.get(provider)
@@ -383,7 +425,9 @@ def save_credential(provider: str, api_key: str | None, base_url: str | None,
         _update_cfg(lambda c: c.__setitem__("keyring", sorted({*(c.get("keyring") or []), provider})))
         return "keyring"
     with _LOCK:
-        _MEMORY[(_scope(mode, session), provider)] = cred
+        scope = _scope(mode, session)
+        _MEMORY[(scope, provider)] = cred
+        _touch(scope)
     return "memory"
 
 
@@ -436,6 +480,7 @@ def _update_cfg(mutate) -> None:
 def get_selection(*, mode: StorageMode, session: str | None) -> dict[str, str] | None:
     if mode == "memory":
         with _LOCK:
+            _reap()
             sel = _SELECTION.get(session or "")
         return dict(sel) if sel else None
     data = _read_cfg()
@@ -453,6 +498,7 @@ def set_selection(provider: str, model: str, *, mode: StorageMode, session: str 
     if mode == "memory":
         with _LOCK:
             _SELECTION[session or ""] = sel
+            _touch(session or "")
         return
     _update_cfg(lambda c: c.update(sel))
 
