@@ -1,11 +1,13 @@
-"""``run_with_division`` treats early stops as division only for composites
-with an ``agents`` store (#1292).
+"""``run_with_division`` reads division from the state only: in a single-cell
+composite, a map update replacing the parent ``agents['0']`` with daughters
+(#1292).
 
-It was written for v2ecoli, where division makes ``composite.run()`` raise or
-removes ``agents['0']``. Applied to every composite, it swallowed a process's
-own failure (the study run was recorded ``completed`` with a truncated
-trajectory) and stopped any composite without an ``agents`` store after its
-first chunk.
+An exception from ``composite.run()`` always propagates, so the run is
+recorded failed. Taking a raise as division (inside any composite with an
+``agents`` store) recorded real failures as ``completed``, and on the
+generator path it did so for composites without agents too: the declared-path
+emitter wires the ``agents/0/<p>`` variants that collect_emit_paths_from_spec
+adds for every readout, which creates an ``agents`` store.
 
 Real ``Composite`` objects and real study-run subprocesses throughout, against
 the ``ws_increase_demo`` fixture (same setup as
@@ -93,19 +95,148 @@ def test_plain_composite_failure_propagates(ws):
         cr.run_with_division(composite, 10, chunk=1)
 
 
-def test_agents_composite_still_stops_cleanly_at_division(ws):
-    # v2ecoli's own loop takes any raise inside an agents composite as division
-    # (scripts/run_default_baseline.py), so this models division by a raise
+def test_agents_composite_failure_propagates(ws):
+    # a raise inside an agents composite is a failure, not division
     composite = _composite(_agents_state(rate=2.0, max_level=5.0))
-    # 1 -> 3 -> 9, then the update at 9 raises: two ticks ran
-    assert cr.run_with_division(composite, 10, chunk=1) == 2
-    assert composite.state["agents"]["0"]["level"] == 9.0
+    with pytest.raises(RuntimeError, match="exceeded max_level"):
+        cr.run_with_division(composite, 10, chunk=1)
 
 
-def test_division_part_way_through_a_chunk_counts_the_ticks_it_ran(ws):
-    # rate 1 doubles the level each tick; the update at tick 121 sees 2**120
-    composite = _composite(_agents_state(rate=1.0, max_level=2.0 ** 119.5))
-    assert cr.run_with_division(composite, 250, chunk=100) == 120
+def _map_composite(agents, update_3):
+    """A real Process that applies ``update_3`` (a process-bigraph map update)
+    to the ``agents`` map on its third update."""
+    from process_bigraph import Composite, Process, allocate_core
+
+    class Edit(Process):
+        config_schema = {}
+
+        def initialize(self, config):
+            self.updates = 0
+
+        def inputs(self):
+            return {}
+
+        def outputs(self):
+            return {"agents": "map[float]"}
+
+        def update(self, state, interval):
+            self.updates += 1
+            return {"agents": update_3} if self.updates == 3 else {}
+
+    core = allocate_core()
+    core.register_link("Edit", Edit)
+    return Composite({"state": {
+        "agents": dict(agents),
+        "edit": {"_type": "process", "address": "local:Edit", "interval": 1.0,
+                 "outputs": {"agents": ["agents"]}},
+    }}, core=core)
+
+
+_DIVIDE = {"_remove": ["0"], "_add": [("1", 0.5), ("2", 0.5)]}
+
+
+def test_division_stops_the_run_after_the_parent_is_replaced():
+    composite = _map_composite({"0": 1.0}, _DIVIDE)
+    assert cr.run_with_division(composite, 10, chunk=1) == 3
+    assert composite.state["agents"] == {"1": 0.5, "2": 0.5}
+    assert composite.state["global_time"] == 3.0
+
+
+def test_division_mid_chunk_stops_at_the_end_of_that_chunk():
+    # run(n) cannot stop part-way, so the chunk that divided runs to its end
+    # and its ticks are counted: they ran
+    composite = _map_composite({"0": 1.0}, _DIVIDE)
+    assert cr.run_with_division(composite, 250, chunk=100) == 100
+    assert composite.state["global_time"] == 100.0
+
+
+def test_a_parent_removed_without_daughters_runs_every_step():
+    composite = _map_composite({"0": 1.0}, {"_remove": ["0"]})
+    assert cr.run_with_division(composite, 10, chunk=1) == 10
+    assert composite.state["agents"] == {}
+
+
+def test_a_colony_runs_every_step_when_agent_0_divides():
+    composite = _map_composite({"0": 1.0, "1": 1.0}, _DIVIDE)
+    assert cr.run_with_division(composite, 10, chunk=1) == 10
+
+
+def test_a_cell_that_divides_itself_stops_the_run():
+    # the v2ecoli shape: a division Step inside agents/0 removes its own agent
+    # and adds daughters with fresh process edges, while a sibling Process runs
+    from process_bigraph import Composite, Process, Step, allocate_core
+
+    class Grow(Process):
+        config_schema = {}
+
+        def inputs(self):
+            return {"mass": "float"}
+
+        def outputs(self):
+            return {"mass": "float"}
+
+        def update(self, state, interval):
+            return {"mass": state["mass"] * interval}
+
+    def cell(mass, agent_id, threshold):
+        return {"mass": mass,
+                "grow": {"_type": "process", "address": "local:Grow", "interval": 1.0,
+                         "inputs": {"mass": ["mass"]}, "outputs": {"mass": ["mass"]}},
+                "division": {"_type": "step", "address": "local:SelfDivide",
+                             "config": {"agent_id": agent_id, "threshold": threshold},
+                             "inputs": {"mass": ["mass"]}, "outputs": {"agents": [".."]}}}
+
+    class SelfDivide(Step):
+        config_schema = {"agent_id": "string", "threshold": "float"}
+
+        def inputs(self):
+            return {"mass": "float"}
+
+        def outputs(self):
+            return {"agents": {"_type": "map", "_value": "node"}}
+
+        def update(self, state):
+            if state["mass"] < self.config["threshold"]:
+                return {}
+            parent, half = self.config["agent_id"], state["mass"] / 2
+            return {"agents": {"_remove": [parent], "_add": [
+                (parent + d, cell(half, parent + d, 1e300)) for d in ("0", "1")]}}
+
+    core = allocate_core()
+    core.register_link("Grow", Grow)
+    core.register_link("SelfDivide", SelfDivide)
+    composite = Composite({"state": {"agents": {"0": cell(1.0, "0", 4.0)}}}, core=core)
+    # mass doubles each tick: 1 -> 2 -> 4, divides at t = 2
+    ticks = cr.run_with_division(composite, 10, chunk=1)
+    assert sorted(composite.state["agents"]) == ["00", "01"]
+    assert ticks == composite.state["global_time"] < 10
+
+
+@pytest.mark.parametrize("agents", [[{"x": 1.0}, {"x": 2.0}], [1.0, 2.0]])
+def test_an_agents_list_runs_every_step(agents):
+    # a spatial or particle simulator may keep agents as a list, not a map
+    from process_bigraph import Composite, Process, allocate_core
+
+    class Tick(Process):
+        config_schema = {}
+
+        def inputs(self):
+            return {}
+
+        def outputs(self):
+            return {"level": "float"}
+
+        def update(self, state, interval):
+            return {"level": interval}
+
+    core = allocate_core()
+    core.register_link("Tick", Tick)
+    composite = Composite({"state": {
+        "agents": agents, "level": 0.0,
+        "tick": {"_type": "process", "address": "local:Tick", "interval": 1.0,
+                 "outputs": {"level": ["level"]}}}}, core=core)
+    assert cr.run_with_division(composite, 10, chunk=1) == 10
+    assert composite.state["global_time"] == 10
 
 
 def test_agents_store_without_a_parent_agent_runs_every_step(ws):
@@ -142,14 +273,12 @@ def test_study_run_runs_and_records_every_step_past_one_chunk(ws):
     assert json.loads(last)["stores_level"] == 2.0 ** 150
 
 
-def test_study_run_records_steps_run_when_a_cell_divides(ws):
-    # 1 -> 3 -> 9, then the update at 9 raises: division after two ticks,
-    # inside the first (default 100-tick) chunk
-    _, code, row = _study_run(ws, _agents_state(rate=2.0, max_level=5.0),
-                              steps=150, run_id="divides-1")
-    assert code == 200
-    assert row["status"] == "completed"
-    assert row["n_steps"] == 2
+def test_study_run_whose_agent_raises_is_recorded_failed(ws):
+    resp, code, row = _study_run(ws, _agents_state(rate=2.0, max_level=5.0),
+                                 steps=150, run_id="agent-raises-1")
+    assert code == 502
+    assert "exceeded max_level" in resp["traceback"]
+    assert row["status"] == "failed"
 
 
 # --- the generator path (the one #1292 was reported on) --------------------
@@ -202,12 +331,12 @@ def generator_ids(ws):
             composite_spec.register(spec)
 
 
-def _generator_run(ws, spec_id, steps, run_id):
+def _generator_run(ws, spec_id, steps, run_id, emit_paths=("stores/level",)):
     db_file = ws / "workspace" / "studies" / "s1" / "runs.db"
     db_file.parent.mkdir(parents=True, exist_ok=True)
     resp, code = cs.run_composite_subprocess(
         ws, pkg=PKG, state={}, steps=steps, db_file=str(db_file), run_id=run_id,
-        spec_id=spec_id, emit_paths=["stores/level"], label="baseline",
+        spec_id=spec_id, emit_paths=list(emit_paths), label="baseline",
     )
     script = (db_file.parent / "sims" / f"{run_id}.subprocess.py").read_text()
     assert "build_generator(" in script, "expected the generator path"
@@ -219,6 +348,20 @@ def _generator_run(ws, spec_id, steps, run_id):
 
 def test_generator_run_whose_process_raises_is_recorded_failed(ws, generator_ids):
     resp, code, row = _generator_run(ws, generator_ids["raises_1292"], 10, "gen-raises-1")
+    assert code == 502
+    assert "exceeded max_level" in resp["traceback"]
+    assert row["status"] == "failed"
+
+
+def test_generator_run_with_a_readout_whose_process_raises_is_recorded_failed(ws, generator_ids):
+    # the emit paths a real study derives from a readout, including the
+    # agents/0/<p> variant: it must not create an agents store that turns a
+    # failure into "division"
+    emit_paths = cr.collect_emit_paths_from_spec(
+        {"readouts": [{"name": "level", "store_path": "stores.level"}]})
+    assert "agents/0/stores/level" in emit_paths
+    resp, code, row = _generator_run(ws, generator_ids["raises_1292"], 10, "gen-raises-2",
+                                     emit_paths=emit_paths)
     assert code == 502
     assert "exceeded max_level" in resp["traceback"]
     assert row["status"] == "failed"
@@ -237,3 +380,36 @@ def test_generator_run_runs_every_step_past_one_chunk(ws, generator_ids):
     last = json.loads(last)
     assert last["global_time"] == 150.0
     assert last["stores"]["level"] == 2.0 ** 150
+
+
+# --- declared-path emitter: a store created at run time --------------------
+
+def test_declared_agent_path_is_recorded_when_agents_is_created_at_run_time():
+    # an agents store absent from the spec-time state, created by a process
+    # output: the declared path must still be wired and emitted
+    from process_bigraph import Composite, Process, allocate_core, gather_emitter_results
+
+    class Inoculate(Process):
+        config_schema = {}
+
+        def inputs(self):
+            return {"agents": "map[float]"}
+
+        def outputs(self):
+            return {"agents": "map[float]"}
+
+        def update(self, state, interval):
+            if "0" not in state["agents"]:
+                return {"agents": {"_add": [("0", 1.0)]}}
+            return {"agents": {"0": 1.0}}
+
+    core = allocate_core()
+    core.register_link("Inoculate", Inoculate)
+    state = cr.inject_emitter_for_declared_paths({"inoculate": {
+        "_type": "process", "address": "local:Inoculate", "interval": 1.0,
+        "inputs": {"agents": ["agents"]}, "outputs": {"agents": ["agents"]}}},
+        ["agents/0"])
+    composite = Composite({"state": state}, core=core)
+    composite.run(3)
+    emitted = gather_emitter_results(composite)[("user_emitter",)]
+    assert [row["agents"]["0"] for row in emitted if row["agents"]] == [1.0, 2.0, 3.0]

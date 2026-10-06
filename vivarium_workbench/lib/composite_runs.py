@@ -10,9 +10,9 @@ A run's `simulation_id` and our `run_id` are the same string by convention:
 from __future__ import annotations
 import hashlib
 import json
-import math
 import sqlite3
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 from vivarium_workbench.lib import run_log
@@ -133,50 +133,42 @@ def connect(db_file: str | Path) -> sqlite3.Connection:
 def run_with_division(composite, steps: int, chunk: int = 100) -> int:
     """Run ``composite`` up to ``steps`` ticks, stopping cleanly at division.
 
-    v2ecoli single-cell composites signal cell division in one of two ways:
-    ``composite.run()`` raises, or ``agents['0']`` is removed from the state.
-    The dashboard runs each study as a single generation, so either signal
-    means the cell cycle finished — we stop and let the caller gather whatever
-    the emitter captured up to that point.
+    The dashboard runs a single-cell study as one generation. Division is read
+    from the state, the way process-bigraph expresses it: in a composite whose
+    ``agents`` map holds only the parent ``'0'`` at the start, a map update
+    replaces ``'0'`` with daughters (``_remove`` + ``_add``). The run then stops
+    after that chunk, and the caller gathers whatever the emitter captured.
+    Every other composite runs all ``steps`` ticks, including a colony of
+    several agents and a parent that is removed without daughters.
 
-    Running ``steps`` in one ``composite.run(steps)`` call (the old behaviour)
-    instead crashed the whole run at division, so any run length that crossed
-    the division point failed with a 502. Mirrors the chunked, division-aware
-    loop in ``scripts/run_default_baseline.py``. Returns ticks actually run.
+    An exception from ``composite.run()`` always propagates, so the run is
+    recorded as failed (#1292). A raise is never read as division: it cannot
+    be told apart from a process's own failure.
 
-    Division only exists for composites with an ``agents`` store. Any other
-    composite runs all ``steps`` ticks, and an exception from ``run()`` (a
-    process's own failure) propagates so the run is recorded as failed (#1292).
-    Removal of ``agents['0']`` counts as division only if it existed at the
-    start. Inside an ``agents`` composite a raise is still taken as division,
-    as v2ecoli's own loop does, so a real failure there is indistinguishable.
-
-    A division part-way through a chunk counts the whole ticks of model time
-    (``global_time``) that chunk completed, not zero.
+    ``run(n)`` cannot stop part-way, so the chunk in which the cell divides
+    runs to its end on the daughters, and its ticks are counted. Returns ticks
+    actually run.
     """
     steps = int(steps)
 
-    def _state():
-        return getattr(composite, "state", None) or {}
+    def _agent_ids():
+        # only an agents map has agent ids; a spatial or particle simulator may
+        # keep a top-level ``agents`` list or array, which never divides here
+        agents = (getattr(composite, "state", None) or {}).get("agents")
+        if not isinstance(agents, Mapping):
+            return set()
+        return {k for k in agents if not str(k).startswith("_")}
 
-    divides = "agents" in _state()
-    tracks_parent = divides and "0" in (_state().get("agents") or {})
+    single_cell = _agent_ids() == {"0"}
     done = 0
     while done < steps:
         n = min(chunk, steps - done)
-        t0 = _state().get("global_time")
-        try:
-            composite.run(n)
-        except Exception:
-            if not divides:
-                raise
-            t1 = _state().get("global_time")
-            if isinstance(t0, (int, float)) and isinstance(t1, (int, float)):
-                done += max(0, min(n, math.floor(t1 - t0 + 1e-9)))
-            break  # division — composite raised
+        composite.run(n)
         done += n
-        if tracks_parent and (_state().get("agents") or {}).get("0") is None:
-            break  # division — parent agent removed
+        if single_cell:
+            ids = _agent_ids()
+            if "0" not in ids and ids:
+                break  # division: the parent was replaced by daughters
     return done
 
 
