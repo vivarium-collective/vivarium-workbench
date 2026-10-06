@@ -290,6 +290,13 @@ export default function App() {
   // Latest run id + downloadable flag, lifted from SetupRunPanel via onRunState.
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [downloadable, setDownloadable] = useState(false);
+  // The most recent run's status + failure detail, lifted from the run bar via
+  // onRunState, so the Results tab labels itself from the AUTHORITATIVE status
+  // ("Running…"/"Run complete"/"Run failed") rather than a proxy that can read
+  // "complete" mid-run.
+  const [runStatus, setRunStatus] = useState<string | null>(null);
+  const [runFailed, setRunFailed] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
   // The docked Outputs panel starts collapsed (just its tab strip) so the empty
   // dock doesn't eat vertical space before a run; it auto-expands on completion.
   const [outputsOpen, setOutputsOpen] = useState(false);
@@ -856,6 +863,9 @@ export default function App() {
       setVizHtml(null);
       setActiveRunId(null);
       setDownloadable(false);
+      setRunStatus(null);
+      setRunFailed(false);
+      setRunError(null);
     });
     if (!readyFiredRef.current) {
       readyFiredRef.current = true;
@@ -2056,6 +2066,9 @@ export default function App() {
     setVizHtml(null);
     setActiveRunId(null);
     setDownloadable(false);
+    setRunStatus(null);
+    setRunFailed(false);
+    setRunError(null);
   }, [focus]);
 
   // Drill INTO a Composite Process: fetch its inner composite and show it in
@@ -2841,7 +2854,7 @@ export default function App() {
                         onTrajectory={setTrajectory}
                         onVizHtml={setVizHtml}
                         onCompleted={() => { /* Outputs is docked below — always visible */ }}
-                        onRunState={(s) => { setActiveRunId(s.runId); setDownloadable(s.downloadable); }}
+                        onRunState={(s) => { setActiveRunId(s.runId); setDownloadable(s.downloadable); setRunStatus(s.status ?? null); setRunFailed(s.status === 'failed' || s.status === 'orphaned'); setRunError(s.error ?? null); }}
                         transport={transport}
                         emitCandidates={emitCandidates}
                         onToggleEmit={toggleEmit}
@@ -2886,7 +2899,11 @@ export default function App() {
                     readOnly={STATIC}
                     baseName={compositeId ? compositeId.split('.').pop() : (name || 'composite')}
                     declaredViz={declaredViz}
-                    isRunning={activeRunId != null && vizHtml == null}
+                    isRunning={runStatus === 'running' || runStatus === 'queued'
+                      || (runStatus == null && activeRunId != null && vizHtml == null)}
+                    runStatus={runStatus}
+                    runFailed={runFailed}
+                    runError={runError}
                   />
                 </div>
               )}

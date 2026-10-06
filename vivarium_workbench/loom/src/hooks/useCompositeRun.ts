@@ -54,7 +54,7 @@ export interface UseCompositeRunArgs {
   onTrajectory?: (rows: TrajectoryRow[]) => void;
   onVizHtml?: (vizHtml: Record<string, { html: string }> | null) => void;
   onCompleted?: () => void;
-  onRunState?: (s: { runId: string | null; downloadable: boolean }) => void;
+  onRunState?: (s: { runId: string | null; downloadable: boolean; status?: string; error?: string | null }) => void;
   /** Returns the config overrides to run with — evaluated at click time so the
    *  caller can hand over the latest applied/edited values. */
   buildOverrides?: () => Record<string, unknown>;
@@ -189,7 +189,7 @@ export function useCompositeRun(args: UseCompositeRunArgs) {
       setLink('ok');
       setLinkStalled(false);
       setStatus(s);
-      onRunStateRef.current?.({ runId: id, downloadable: s.downloadable ?? false });
+      onRunStateRef.current?.({ runId: id, downloadable: s.downloadable ?? false, status: s.status, error: s.error ?? (s.log_path ? 'See log: ' + s.log_path : null) });
       if (s.viz_html) onVizHtmlRef.current?.(s.viz_html);
       if (s.status === 'running') {
         // Live-scrub refresh only — throttled + non-overlapping. Progress and

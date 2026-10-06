@@ -34,7 +34,7 @@ export interface ExploreRunBarProps {
   onTrajectory?: (rows: Array<{ step: number; time?: number; state: Record<string, unknown> }>) => void;
   onVizHtml?: (vizHtml: Record<string, { html: string }> | null) => void;
   onCompleted?: () => void;
-  onRunState?: (s: { runId: string | null; downloadable: boolean }) => void;
+  onRunState?: (s: { runId: string | null; downloadable: boolean; status?: string; error?: string | null }) => void;
   // Playback transport — folded INTO this bar so run + step are one control.
   // Present (frameIdx != null) only once a run has produced a steppable trajectory.
   transport?: {

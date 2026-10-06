@@ -15,6 +15,9 @@ export interface ResultsPanelProps {
   downloadable?: boolean;
   readOnly?: boolean;
   isRunning?: boolean;                 // a run is live right now (don't say "Run complete")
+  runFailed?: boolean;                 // the most recent run ended in failure/orphaned
+  runError?: string | null;            // the failure detail, when available
+  runStatus?: string | null;           // authoritative status: running|completed|failed|…
 }
 
 function _trajectoryToObservables(
@@ -103,7 +106,13 @@ function ObservableRow({ name, entries }: { name: string; entries: any[] }) {
   );
 }
 
-export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly, isRunning }: ResultsPanelProps) {
+export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly, isRunning, runFailed, runError, runStatus }: ResultsPanelProps) {
+  // A run is live whenever the authoritative status says so (or the legacy
+  // isRunning proxy, for callers that don't pass runStatus). "Run complete" is
+  // only truthful once the status is actually 'completed' — otherwise a live run
+  // whose stores haven't emitted yet would mislabel itself as finished.
+  const live = isRunning || runStatus === 'running' || runStatus === 'queued';
+  const completed = runStatus == null || runStatus === 'completed';
   const wrap: React.CSSProperties = { padding: 16, fontFamily: 'system-ui, sans-serif' };
 
   const downloadLink = downloadable && runId ? (
@@ -127,7 +136,24 @@ export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly
     </div>
   ) : null;
 
+  // A failed/orphaned run produces no trajectory — say so plainly instead of
+  // the benign "no observables"/"loading" copy (which otherwise reads as if the
+  // run succeeded). The run bar above carries the same failure + a "why?" link.
+  const failedView = runFailed && !live ? (
+    <div style={wrap}>
+      <h3 style={{ marginTop: 0 }}>Results</h3>
+      {runLine}
+      <p style={{ color: '#b42318', fontWeight: 600, marginBottom: 4 }}>
+        Run failed — no results produced.
+      </p>
+      <p style={{ color: '#6b7280', margin: 0 }}>
+        {runError ? runError : 'See the run bar above (“why?”) for the error detail.'}
+      </p>
+    </div>
+  ) : null;
+
   if (!trajectory) {
+    if (failedView) return failedView;
     return (
       <div style={wrap}>
         <h3 style={{ marginTop: 0 }}>Results</h3>
@@ -135,7 +161,7 @@ export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly
         <p style={{ color: '#6b7280' }}>
           {readOnly
             ? 'The read-only mirror does not include run data — run this composite in a live dashboard to see results.'
-            : isRunning ? 'Running… results appear as the trajectory is captured.'
+            : live ? 'Running… results appear as the trajectory is captured.'
             : hasRun ? 'Loading trajectory…' : 'No run yet — press ▶ Run above.'}
         </p>
       </div>
@@ -151,11 +177,22 @@ export function ResultsPanel({ trajectory, hasRun, runId, downloadable, readOnly
       {runLine}
       {downloadLink}
       {keys.length === 0 ? (
-        <p style={{ color: '#6b7280' }}>
-          {isRunning
-            ? 'Running… no observables captured yet — values appear here as stores are emitted.'
-            : 'Run complete — no observables emitted. Toggle stores in the View tab to capture their values.'}
-        </p>
+        runFailed && !live ? (
+          <p style={{ color: '#b42318', fontWeight: 600 }}>
+            Run failed — no results produced.{' '}
+            <span style={{ color: '#6b7280', fontWeight: 400 }}>
+              {runError ? runError : 'See the run bar above (“why?”) for the error detail.'}
+            </span>
+          </p>
+        ) : (
+          <p style={{ color: '#6b7280' }}>
+            {live
+              ? 'Running… no observables captured yet — values appear here as stores are emitted.'
+              : completed
+              ? 'Run complete — no observables emitted. Toggle stores in the View tab to capture their values.'
+              : 'No observables captured yet.'}
+          </p>
+        )
       ) : (
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead>
