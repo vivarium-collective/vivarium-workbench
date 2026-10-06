@@ -849,15 +849,18 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/server-version",
         tags=["System"],
-        summary="Served-tree git revision + package version (skew detection)",
+        summary="Served-tree git revision + package version + boot id",
     )
     def server_version() -> dict[str, str]:
-        """``{"git_rev": "<short sha>", "version": "<package version>"}``.
+        """``{"git_rev": "<short sha>", "version": "<package version>", "boot_id": "<hex>"}``.
 
         The git rev comes from the served tree (this package's source checkout);
-        both fields fall back to ``"unknown"`` when git is unavailable. Read-only
-        and dependency-light so the ``/viva-*`` skills can detect skill<->server
-        skew (it stays available in readonly mode).
+        git_rev/version fall back to ``"unknown"`` when git is unavailable.
+        ``boot_id`` is a per-process uuid that changes on every restart — the SPA
+        (``static/server-reload.js``) polls it to offer a reload when the server
+        it loaded against has been replaced. Read-only and dependency-light so the
+        ``/viva-*`` skills can detect skill<->server skew (stays available in
+        readonly mode).
         """
         from vivarium_workbench.lib.server_version import server_version as _sv
         return _sv()

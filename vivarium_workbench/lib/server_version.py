@@ -9,7 +9,17 @@ the ``git_rev`` field to ``"unknown"``, never raises.
 from __future__ import annotations
 
 import subprocess
+import uuid
 from pathlib import Path
+
+# A per-process boot id, minted once when this module is first imported (i.e.
+# once per server process). Unlike ``git_rev`` — which only changes when the
+# served code changes — ``boot_id`` changes on *every* restart, including a
+# restart of the same code. The SPA uses it to notice that the server it loaded
+# against has been replaced and to offer a reload, so a long-lived browser tab
+# doesn't silently break after a restart (its click handlers fire requests the
+# new process never saw a session for).
+_BOOT_ID = uuid.uuid4().hex
 
 
 def _package_version() -> str:
@@ -44,9 +54,16 @@ def _git_rev() -> str:
     return rev or "unknown"
 
 
-def server_version() -> dict[str, str]:
-    """``{"git_rev": "<short sha>", "version": "<package version>"}``.
+def boot_id() -> str:
+    """This server process's boot id (stable for the life of the process)."""
+    return _BOOT_ID
 
-    Both fields degrade gracefully to ``"unknown"`` rather than failing.
+
+def server_version() -> dict[str, str]:
+    """``{"git_rev": "<short sha>", "version": "<pkg version>", "boot_id": "<hex>"}``.
+
+    ``git_rev``/``version`` degrade to ``"unknown"`` rather than failing;
+    ``boot_id`` is a per-process uuid that changes on every restart (see module
+    docstring) so a client can detect that the server was replaced.
     """
-    return {"git_rev": _git_rev(), "version": _package_version()}
+    return {"git_rev": _git_rev(), "version": _package_version(), "boot_id": _BOOT_ID}
