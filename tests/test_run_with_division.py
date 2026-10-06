@@ -212,6 +212,33 @@ def test_a_cell_that_divides_itself_stops_the_run():
     assert ticks == composite.state["global_time"] < 10
 
 
+@pytest.mark.parametrize("agents", [[{"x": 1.0}, {"x": 2.0}], [1.0, 2.0]])
+def test_an_agents_list_runs_every_step(agents):
+    # a spatial or particle simulator may keep agents as a list, not a map
+    from process_bigraph import Composite, Process, allocate_core
+
+    class Tick(Process):
+        config_schema = {}
+
+        def inputs(self):
+            return {}
+
+        def outputs(self):
+            return {"level": "float"}
+
+        def update(self, state, interval):
+            return {"level": interval}
+
+    core = allocate_core()
+    core.register_link("Tick", Tick)
+    composite = Composite({"state": {
+        "agents": agents, "level": 0.0,
+        "tick": {"_type": "process", "address": "local:Tick", "interval": 1.0,
+                 "outputs": {"level": ["level"]}}}}, core=core)
+    assert cr.run_with_division(composite, 10, chunk=1) == 10
+    assert composite.state["global_time"] == 10
+
+
 def test_agents_store_without_a_parent_agent_runs_every_step(ws):
     state = {"agents": {"a": {
         "increase": _process("IncreaseProcess", {"rate": 1.0}, ["level"]),

@@ -12,6 +12,7 @@ import hashlib
 import json
 import sqlite3
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 from vivarium_workbench.lib import run_log
@@ -151,7 +152,11 @@ def run_with_division(composite, steps: int, chunk: int = 100) -> int:
     steps = int(steps)
 
     def _agent_ids():
-        agents = (getattr(composite, "state", None) or {}).get("agents") or {}
+        # only an agents map has agent ids; a spatial or particle simulator may
+        # keep a top-level ``agents`` list or array, which never divides here
+        agents = (getattr(composite, "state", None) or {}).get("agents")
+        if not isinstance(agents, Mapping):
+            return set()
         return {k for k in agents if not str(k).startswith("_")}
 
     single_cell = _agent_ids() == {"0"}
