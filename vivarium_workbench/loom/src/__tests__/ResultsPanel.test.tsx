@@ -137,3 +137,28 @@ describe('ResultsPanel run-in-progress status', () => {
     expect(screen.queryByText(/Run complete/i)).toBeNull();
   });
 });
+
+describe('ResultsPanel — failed run', () => {
+  it('says the run failed (not "no observables") when runFailed with no trajectory', () => {
+    render(<ResultsPanel trajectory={null} hasRun={true} runFailed={true}
+                         runError={'generator build failed: boom'} />);
+    expect(screen.getByText(/Run failed — no results produced/)).toBeTruthy();
+    expect(screen.getByText(/generator build failed: boom/)).toBeTruthy();
+    expect(screen.queryByText(/no observables emitted/)).toBeNull();
+  });
+
+  it('points at the run bar when no error detail is available', () => {
+    render(<ResultsPanel trajectory={null} hasRun={true} runFailed={true} />);
+    expect(screen.getByText(/See the run bar above/)).toBeTruthy();
+  });
+
+  it('still shows "no observables" for a genuinely empty SUCCESSFUL run', () => {
+    render(<ResultsPanel trajectory={[{ step: 0, state: {} }]} hasRun={true} />);
+    expect(screen.getByText(/no observables emitted/)).toBeTruthy();
+  });
+
+  it('does not claim failure while a run is still live', () => {
+    render(<ResultsPanel trajectory={null} hasRun={true} runFailed={true} isRunning={true} />);
+    expect(screen.queryByText(/Run failed/)).toBeNull();
+  });
+});

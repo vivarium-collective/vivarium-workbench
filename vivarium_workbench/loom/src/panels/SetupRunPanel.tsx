@@ -120,7 +120,7 @@ export interface SetupRunPanelProps {
   onCompleted: () => void;
   /** Called on every status poll tick with the latest run id + downloadable
    *  flag so App can pass them through to the Results tab. */
-  onRunState?: (s: { runId: string | null; downloadable: boolean }) => void;
+  onRunState?: (s: { runId: string | null; downloadable: boolean; status?: string; error?: string | null }) => void;
   /** Read-only posture (static/snapshot mode): render the parameter form but
    *  disable Run + Preview wiring, since no live dashboard backend exists. */
   readOnly?: boolean;
@@ -229,7 +229,7 @@ export function SetupRunPanel(props: SetupRunPanelProps) {
         return; // transient — try again next tick
       }
       setStatus(s);
-      onRunStateRef.current?.({ runId: id, downloadable: s.downloadable ?? false });
+      onRunStateRef.current?.({ runId: id, downloadable: s.downloadable ?? false, status: s.status, error: s.error ?? (s.log_path ? 'See log: ' + s.log_path : null) });
       if (s.viz_html) onVizHtmlRef.current?.(s.viz_html);
       if (s.status === 'running') {
         void loadTrajectory(id, { throttleMs: LIVE_TRAJ_MS });  // throttled live-scrub

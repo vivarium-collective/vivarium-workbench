@@ -28,6 +28,10 @@ export interface OutputsPanelProps {
   /** Current run phase + whether a run is live, for the expected-card status. */
   runPhase?: string | null;
   isRunning?: boolean;
+  /** The most recent run ended in failure/orphaned, with its detail — so the
+   *  Results tab says "Run failed" instead of "Run complete — no observables". */
+  runFailed?: boolean;
+  runError?: string | null;
 }
 
 /** Split the run's HTML artifacts (viz_html) across the sub-tabs by name: a
@@ -127,6 +131,8 @@ export function OutputsPanel(props: OutputsPanelProps) {
             downloadable={props.downloadable}
             readOnly={props.readOnly}
             isRunning={props.isRunning}
+            runFailed={props.runFailed}
+            runError={props.runError}
           />
         )}
         {activeTab === 'visualizations' && (
