@@ -1,12 +1,13 @@
-"""``run_with_division`` reads division from the state only: a map update
-removing the parent agent ``agents['0']`` (#1292).
+"""``run_with_division`` reads division from the state only: in a single-cell
+composite, a map update replacing the parent ``agents['0']`` with daughters
+(#1292).
 
 An exception from ``composite.run()`` always propagates, so the run is
 recorded failed. Taking a raise as division (inside any composite with an
 ``agents`` store) recorded real failures as ``completed``, and on the
 generator path it did so for composites without agents too: the declared-path
-emitter wired the ``agents/0/<p>`` variants that collect_emit_paths_from_spec
-adds for every readout, creating a stub ``agents`` store.
+emitter wires the ``agents/0/<p>`` variants that collect_emit_paths_from_spec
+adds for every readout, which creates an ``agents`` store.
 
 Real ``Composite`` objects and real study-run subprocesses throughout, against
 the ``ws_increase_demo`` fixture (same setup as
@@ -101,43 +102,41 @@ def test_agents_composite_failure_propagates(ws):
         cr.run_with_division(composite, 10, chunk=1)
 
 
-class _Divide:
-    """A real Process that divides agent '0' into '1' and '2' on its third
-    update, through process-bigraph's map ``_remove``/``_add`` updates."""
+def _map_composite(agents, update_3):
+    """A real Process that applies ``update_3`` (a process-bigraph map update)
+    to the ``agents`` map on its third update."""
+    from process_bigraph import Composite, Process, allocate_core
 
-    @staticmethod
-    def composite():
-        from process_bigraph import Composite, Process, allocate_core
+    class Edit(Process):
+        config_schema = {}
 
-        class Divide(Process):
-            config_schema = {}
+        def initialize(self, config):
+            self.updates = 0
 
-            def initialize(self, config):
-                self.updates = 0
+        def inputs(self):
+            return {}
 
-            def inputs(self):
-                return {}
+        def outputs(self):
+            return {"agents": "map[float]"}
 
-            def outputs(self):
-                return {"agents": "map[float]"}
+        def update(self, state, interval):
+            self.updates += 1
+            return {"agents": update_3} if self.updates == 3 else {}
 
-            def update(self, state, interval):
-                self.updates += 1
-                if self.updates == 3:
-                    return {"agents": {"_remove": ["0"], "_add": [("1", 0.5), ("2", 0.5)]}}
-                return {}
-
-        core = allocate_core()
-        core.register_link("Divide", Divide)
-        return Composite({"state": {
-            "agents": {"0": 1.0},
-            "divide": {"_type": "process", "address": "local:Divide", "interval": 1.0,
-                       "outputs": {"agents": ["agents"]}},
-        }}, core=core)
+    core = allocate_core()
+    core.register_link("Edit", Edit)
+    return Composite({"state": {
+        "agents": dict(agents),
+        "edit": {"_type": "process", "address": "local:Edit", "interval": 1.0,
+                 "outputs": {"agents": ["agents"]}},
+    }}, core=core)
 
 
-def test_division_stops_the_run_after_the_parent_is_removed():
-    composite = _Divide.composite()
+_DIVIDE = {"_remove": ["0"], "_add": [("1", 0.5), ("2", 0.5)]}
+
+
+def test_division_stops_the_run_after_the_parent_is_replaced():
+    composite = _map_composite({"0": 1.0}, _DIVIDE)
     assert cr.run_with_division(composite, 10, chunk=1) == 3
     assert composite.state["agents"] == {"1": 0.5, "2": 0.5}
     assert composite.state["global_time"] == 3.0
@@ -146,9 +145,71 @@ def test_division_stops_the_run_after_the_parent_is_removed():
 def test_division_mid_chunk_stops_at_the_end_of_that_chunk():
     # run(n) cannot stop part-way, so the chunk that divided runs to its end
     # and its ticks are counted: they ran
-    composite = _Divide.composite()
+    composite = _map_composite({"0": 1.0}, _DIVIDE)
     assert cr.run_with_division(composite, 250, chunk=100) == 100
     assert composite.state["global_time"] == 100.0
+
+
+def test_a_parent_removed_without_daughters_runs_every_step():
+    composite = _map_composite({"0": 1.0}, {"_remove": ["0"]})
+    assert cr.run_with_division(composite, 10, chunk=1) == 10
+    assert composite.state["agents"] == {}
+
+
+def test_a_colony_runs_every_step_when_agent_0_divides():
+    composite = _map_composite({"0": 1.0, "1": 1.0}, _DIVIDE)
+    assert cr.run_with_division(composite, 10, chunk=1) == 10
+
+
+def test_a_cell_that_divides_itself_stops_the_run():
+    # the v2ecoli shape: a division Step inside agents/0 removes its own agent
+    # and adds daughters with fresh process edges, while a sibling Process runs
+    from process_bigraph import Composite, Process, Step, allocate_core
+
+    class Grow(Process):
+        config_schema = {}
+
+        def inputs(self):
+            return {"mass": "float"}
+
+        def outputs(self):
+            return {"mass": "float"}
+
+        def update(self, state, interval):
+            return {"mass": state["mass"] * interval}
+
+    def cell(mass, agent_id, threshold):
+        return {"mass": mass,
+                "grow": {"_type": "process", "address": "local:Grow", "interval": 1.0,
+                         "inputs": {"mass": ["mass"]}, "outputs": {"mass": ["mass"]}},
+                "division": {"_type": "step", "address": "local:SelfDivide",
+                             "config": {"agent_id": agent_id, "threshold": threshold},
+                             "inputs": {"mass": ["mass"]}, "outputs": {"agents": [".."]}}}
+
+    class SelfDivide(Step):
+        config_schema = {"agent_id": "string", "threshold": "float"}
+
+        def inputs(self):
+            return {"mass": "float"}
+
+        def outputs(self):
+            return {"agents": {"_type": "map", "_value": "node"}}
+
+        def update(self, state):
+            if state["mass"] < self.config["threshold"]:
+                return {}
+            parent, half = self.config["agent_id"], state["mass"] / 2
+            return {"agents": {"_remove": [parent], "_add": [
+                (parent + d, cell(half, parent + d, 1e300)) for d in ("0", "1")]}}
+
+    core = allocate_core()
+    core.register_link("Grow", Grow)
+    core.register_link("SelfDivide", SelfDivide)
+    composite = Composite({"state": {"agents": {"0": cell(1.0, "0", 4.0)}}}, core=core)
+    # mass doubles each tick: 1 -> 2 -> 4, divides at t = 2
+    ticks = cr.run_with_division(composite, 10, chunk=1)
+    assert sorted(composite.state["agents"]) == ["00", "01"]
+    assert ticks == composite.state["global_time"] < 10
 
 
 def test_agents_store_without_a_parent_agent_runs_every_step(ws):
@@ -294,17 +355,34 @@ def test_generator_run_runs_every_step_past_one_chunk(ws, generator_ids):
     assert last["stores"]["level"] == 2.0 ** 150
 
 
-# --- declared-path emitter: agents/0 variants ------------------------------
+# --- declared-path emitter: a store created at run time --------------------
 
-def test_declared_paths_skip_agent_variants_without_an_agents_store():
-    state = {"stores": {"level": 1.0}}
-    out = cr.inject_emitter_for_declared_paths(
-        state, ["stores/level", "agents/0/stores/level"])
-    assert out["user_emitter"]["inputs"] == {
-        "stores": {"level": ["stores", "level"]}, "global_time": ["global_time"]}
+def test_declared_agent_path_is_recorded_when_agents_is_created_at_run_time():
+    # an agents store absent from the spec-time state, created by a process
+    # output: the declared path must still be wired and emitted
+    from process_bigraph import Composite, Process, allocate_core, gather_emitter_results
 
+    class Inoculate(Process):
+        config_schema = {}
 
-def test_declared_paths_keep_agent_variants_with_an_agents_store():
-    state = {"agents": {"0": {"level": 1.0}}}
-    out = cr.inject_emitter_for_declared_paths(state, ["level", "agents/0/level"])
-    assert out["user_emitter"]["inputs"]["agents"] == {"0": {"level": ["agents", "0", "level"]}}
+        def inputs(self):
+            return {"agents": "map[float]"}
+
+        def outputs(self):
+            return {"agents": "map[float]"}
+
+        def update(self, state, interval):
+            if "0" not in state["agents"]:
+                return {"agents": {"_add": [("0", 1.0)]}}
+            return {"agents": {"0": 1.0}}
+
+    core = allocate_core()
+    core.register_link("Inoculate", Inoculate)
+    state = cr.inject_emitter_for_declared_paths({"inoculate": {
+        "_type": "process", "address": "local:Inoculate", "interval": 1.0,
+        "inputs": {"agents": ["agents"]}, "outputs": {"agents": ["agents"]}}},
+        ["agents/0"])
+    composite = Composite({"state": state}, core=core)
+    composite.run(3)
+    emitted = gather_emitter_results(composite)[("user_emitter",)]
+    assert [row["agents"]["0"] for row in emitted if row["agents"]] == [1.0, 2.0, 3.0]

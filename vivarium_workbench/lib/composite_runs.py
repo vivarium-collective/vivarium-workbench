@@ -132,37 +132,38 @@ def connect(db_file: str | Path) -> sqlite3.Connection:
 def run_with_division(composite, steps: int, chunk: int = 100) -> int:
     """Run ``composite`` up to ``steps`` ticks, stopping cleanly at division.
 
-    The dashboard runs each study as a single generation. Division is read
-    from the state, the way process-bigraph expresses it: a composite whose
-    ``agents`` map holds a parent agent ``'0'`` at the start divides when a
-    map update removes it. The run then stops after that chunk, and the
-    caller gathers whatever the emitter captured. Any composite without that
-    parent runs all ``steps`` ticks.
+    The dashboard runs a single-cell study as one generation. Division is read
+    from the state, the way process-bigraph expresses it: in a composite whose
+    ``agents`` map holds only the parent ``'0'`` at the start, a map update
+    replaces ``'0'`` with daughters (``_remove`` + ``_add``). The run then stops
+    after that chunk, and the caller gathers whatever the emitter captured.
+    Every other composite runs all ``steps`` ticks, including a colony of
+    several agents and a parent that is removed without daughters.
 
     An exception from ``composite.run()`` always propagates, so the run is
     recorded as failed (#1292). A raise is never read as division: it cannot
-    be told apart from a process's own failure, and taking it as division
-    recorded real failures as ``completed`` in any composite with an
-    ``agents`` store, including stores the workbench's own emitter wiring
-    created.
+    be told apart from a process's own failure.
 
-    Running in chunks keeps a division part-way through ``steps`` from
-    running the rest of the requested ticks on the daughters. Returns ticks
+    ``run(n)`` cannot stop part-way, so the chunk in which the cell divides
+    runs to its end on the daughters, and its ticks are counted. Returns ticks
     actually run.
     """
     steps = int(steps)
 
-    def _state():
-        return getattr(composite, "state", None) or {}
+    def _agent_ids():
+        agents = (getattr(composite, "state", None) or {}).get("agents") or {}
+        return {k for k in agents if not str(k).startswith("_")}
 
-    tracks_parent = "0" in (_state().get("agents") or {})
+    single_cell = _agent_ids() == {"0"}
     done = 0
     while done < steps:
         n = min(chunk, steps - done)
         composite.run(n)
         done += n
-        if tracks_parent and (_state().get("agents") or {}).get("0") is None:
-            break  # division: the parent agent was removed
+        if single_cell:
+            ids = _agent_ids()
+            if "0" not in ids and ids:
+                break  # division: the parent was replaced by daughters
     return done
 
 
@@ -1219,11 +1220,7 @@ def inject_emitter_for_declared_paths(state: dict,
       ``outputs`` wires and aren't present in the spec-time state. v2ecoli's
       listener Steps materialise ``agents/0/listeners/<...>`` only after the
       composite runs, so the walk-existing-state approach (_collect_emit_leaves)
-      skips them. This variant trusts the declared paths, with one exception:
-      an ``agents/...`` path is wired only when the state has an ``agents``
-      store. collect_emit_paths_from_spec adds an ``agents/0/<p>`` variant of
-      every declared path; wiring it into a composite without agents would
-      create a stub ``agents`` store, which no simulator declared.
+      skips them. This variant trusts the declared paths.
 
     Why nested vs flat:
       Flat ``"_".join(path)`` port names produce flat JSON keys that
@@ -1242,8 +1239,6 @@ def inject_emitter_for_declared_paths(state: dict,
     if not declared_paths:
         return state
     paths = list(declared_paths)
-    if "agents" not in state:
-        paths = [p for p in paths if [seg for seg in p.split("/") if seg][:1] != ["agents"]]
     if "global_time" not in paths:
         paths.append("global_time")
 
