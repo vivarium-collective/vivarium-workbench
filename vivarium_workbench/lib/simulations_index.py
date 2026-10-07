@@ -2284,13 +2284,26 @@ def build_simulation_run_zip(workspace: Path, run_id: str) -> "tuple[bytes, str,
         with open(f, "rb") as src, zf.open(zinfo, "w") as dst:
             shutil.copyfileobj(src, dst)
 
+    # Archive a native store dir under a SHORT root instead of its on-disk
+    # name. A store dir is named "<run_id>.<ext>", and run_ids are long (a
+    # dotted module path + "__<ts>__<hash>"), so the on-disk name alone runs
+    # ~75 chars — and the zarr layout then repeats the full run_id AGAIN inside
+    # ("experiment_id=<run_id>/..."), pushing entry paths past Windows'
+    # 260-char MAX_PATH so Explorer reports the (intact) archive as "corrupted".
+    # Collapse the OUTER copy to the same compact token used for the zip
+    # filename: the store opens fine under any root name, and the run_id is
+    # still recorded inside the store and in the download filename. (The inner
+    # experiment_id= copy is owned by the emitter's store layout, not this zip.)
+    short_root = _re.sub(r"[^A-Za-z0-9._-]+", "_",
+                         str(run_id).rsplit(".", 1)[-1].split("__", 1)[0]).strip("_") or "run"
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         if target.is_dir():
-            base = target.parent
+            root = Path(f"{short_root}{target.suffix}" if target.suffix else short_root)
             for f in sorted(target.rglob("*")):
                 if f.is_file():
-                    _write(zf, f, f.relative_to(base))
+                    _write(zf, f, root / f.relative_to(target))
         else:
             _write(zf, target, Path(target.name))
 

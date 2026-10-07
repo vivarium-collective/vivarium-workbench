@@ -895,8 +895,9 @@ def test_build_zip_handles_epoch_zero_mtime(tmp_path):
     import zipfile
     import io
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        assert zf.namelist() == ["runs.example.zarr/zarr.json"]
-        assert zf.read("runs.example.zarr/zarr.json") == b"{}"
+        # Archive root is the compact run token (not the on-disk store name).
+        assert zf.namelist() == ["r-remote.zarr/zarr.json"]
+        assert zf.read("r-remote.zarr/zarr.json") == b"{}"
 
 
 def test_build_zip_preserves_normal_mtime(tmp_path):
@@ -917,7 +918,41 @@ def test_build_zip_preserves_normal_mtime(tmp_path):
     import zipfile
     import io
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        assert zf.namelist() == ["runs.example.zarr/zarr.json"]
+        assert zf.namelist() == ["r-local.zarr/zarr.json"]
+
+
+def test_build_zip_shortens_long_run_id_archive_root(tmp_path):
+    """A long run_id store dir is archived under a compact root, so entry paths
+    don't blow past Windows' 260-char MAX_PATH (RENCI Issue 10). The full
+    run_id survives in the zip filename and inside the store layout."""
+    ws = tmp_path / "ws"
+    (ws / ".pbg").mkdir(parents=True)
+    run_id = ("spatio_flux.composites.comets."
+              "comets_nt_particles_dfba__1791376674__2318c2")
+    store = ws / f"{run_id}.zarr"
+    # A representative deep zarr entry: the emitter repeats the run_id in the
+    # experiment_id= partition (that inner copy is the emitter's concern).
+    deep = (store / f"experiment_id={run_id}" / "variant=0" / "lineage_seed=0"
+            / "spatial_kinetics" / "monod_kinetics[19,19]" / "config")
+    deep.mkdir(parents=True)
+    (deep / "zarr.json").write_text("{}")
+
+    _seed_run_with_store(ws / ".pbg" / "composite-runs.db",
+                         run_id=run_id, store_path=f"{run_id}.zarr")
+
+    data, filename, status = build_simulation_run_zip(ws, run_id)
+    assert status == 200
+
+    import zipfile
+    import io
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        names = zf.namelist()
+    # Outer run_id copy is collapsed to the compact token + .zarr.
+    assert all(n.startswith("comets_nt_particles_dfba.zarr/") for n in names)
+    # The long dotted/module-path form is gone from the archive root.
+    assert not any(n.startswith(f"{run_id}.zarr/") for n in names)
+    # Every entry is comfortably shorter than before (outer copy removed).
+    assert max(len(n) for n in names) < len(run_id) + 200
 
 
 def test_build_zip_unknown_run_404s(tmp_path):
