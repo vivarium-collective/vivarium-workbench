@@ -203,13 +203,22 @@ def build_observables(ws_root: Path, ref: str) -> tuple[dict, int]:
 def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
     """GET /api/study-observable-check?study=<slug> worker — ``(payload_dict, status)``.
 
-    Validates every readout in a study against its baseline composite's real
-    structure (the never-fabricate guard): ``{"composite": ref, "readouts":
-    [{name, status, detail}]}`` with ``status`` ∈
-    ``ok|unresolved|not_in_structure|aspirational``. ``not_in_structure`` is the
-    never-fabricate flag — a selector pointing at an observable the composite
-    does not expose. If the composite can't build, returns a clear non-500
-    (422 + all readouts marked aspirational with a note), never a crash.
+    Validates every readout in a study against its baseline composites' real
+    structure (the never-fabricate guard): ``{"composite": ref, "composites":
+    [refs], "readouts": [{name, status, detail, composite}]}`` with ``status``
+    ∈ ``ok|unresolved|not_in_structure|aspirational``. ``not_in_structure`` is
+    the never-fabricate flag — a selector pointing at an observable no baseline
+    composite exposes.
+
+    A study may declare more than one baseline composite (e.g. a sweep over
+    several analytic models); each readout belongs to whichever baseline
+    exposes it, so a readout is validated against EVERY baseline composite and
+    reported with its best status across them — ``ok`` if any baseline exposes
+    it — rather than against ``baseline[0]`` alone (#1306). ``composite`` in the
+    payload stays the first baseline (back-compat); ``composites`` lists all
+    baselines checked, and each readout carries the ``composite`` that produced
+    its reported status. If no baseline composite can build, returns a clear
+    non-500 (422 + all readouts marked aspirational with a note), never a crash.
     """
     from vivarium_workbench.lib.study_spec import SLUG_RE, study_spec_path
 
@@ -241,48 +250,104 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
     baseline = spec.get("baseline") or []
     if not (isinstance(baseline, list) and baseline and isinstance(baseline[0], dict)):
         return {"error": "study has no baseline composite", "readouts": []}, 422
-    ref = baseline[0].get("composite")
-    if not ref:
+    # Every baseline composite the study declares (not just baseline[0]):
+    # order-preserving, de-duplicated. A readout belongs to whichever baseline
+    # exposes it, so each is validated against ALL of these (#1306).
+    refs: list[str] = []
+    for b in baseline:
+        if isinstance(b, dict):
+            c = b.get("composite")
+            if isinstance(c, str) and c.strip() and c.strip() not in refs:
+                refs.append(c.strip())
+    if not refs:
         return {"error": "baseline entry has no composite ref", "readouts": []}, 422
+    ref = refs[0]  # back-compat: the payload's top-level "composite"
 
     readouts = spec.get("readouts") or []
 
-    def _aspirational(reason: str) -> tuple[dict, int]:
-        # Composite can't build → clear non-500: surface every readout as
-        # aspirational (unverifiable) with a note, rather than crashing.
-        out = [
+    def _aspirational_results(cref: str) -> list[dict]:
+        # One composite can't build → surface its readouts as aspirational
+        # (unverifiable) rather than crashing; they lose to an ``ok`` from
+        # another baseline in the merge below.
+        return [
             {"name": r.get("name", f"readout_{i}"), "status": "aspirational",
-             "detail": f"composite {ref!r} could not be built — readout unverified"}
+             "detail": f"composite {cref!r} could not be built — readout unverified",
+             "composite": cref}
             for i, r in enumerate(readouts)
         ]
-        return {"composite": ref, "readouts": out,
-                "note": f"composite {ref!r} could not be built: {reason}"}, 422
 
-    # The build + available_observables + augment + validate_readouts all run in
-    # the env worker (live core + polars). The lineage-alias augmentation is the
-    # dashboard's agent-structure convention, applied worker-side before the
-    # general validator (never-fabricate: only a leading ``agents.<n>.`` stripped).
-    r = _call_obs_worker(ws_root, "study_readout_check", {"ref": ref, "spec": spec})
-    if r is None:
-        return _aspirational("environment worker unavailable")
-    if "__not_registered__" in r:
-        try:
-            params = _resolve_spec_params(ws_root, ref)
-        except Exception as e:  # noqa: BLE001 (LookupError / parse both → can't build)
-            return _aspirational(str(e))
-        r = _call_obs_worker(ws_root, "study_readout_check", {**params, "spec": spec})
+    def _check_ref(cref: str):
+        """Validate every readout against one composite. Returns
+        ``("readouts", [...])`` on a real build, ``("buildfail", reason)`` when
+        that composite can't build, or ``("hard", (body, status))`` for a
+        workspace-level error (501/500) that should abort the whole check.
+
+        The build + available_observables + augment + validate_readouts all run
+        in the env worker (live core + polars). The lineage-alias augmentation
+        is the dashboard's agent-structure convention, applied worker-side
+        before the general validator (never-fabricate: only a leading
+        ``agents.<n>.`` stripped).
+        """
+        r = _call_obs_worker(ws_root, "study_readout_check", {"ref": cref, "spec": spec})
         if r is None:
-            return _aspirational("environment worker unavailable")
+            return "buildfail", "environment worker unavailable"
+        if "__not_registered__" in r:
+            try:
+                params = _resolve_spec_params(ws_root, cref)
+            except Exception as e:  # noqa: BLE001 (LookupError / parse → can't build)
+                return "buildfail", str(e)
+            r = _call_obs_worker(ws_root, "study_readout_check", {**params, "spec": spec})
+            if r is None:
+                return "buildfail", "environment worker unavailable"
+        if "__no_validator__" in r:
+            return "hard", ({"error": f"readout_validation unavailable: {r['__no_validator__']}"}, 501)
+        if "__build_error__" in r:
+            return "buildfail", r["__build_error__"]
+        if "__introspect_error__" in r or "__validate_error__" in r:
+            return "hard", ({"error": r.get("__introspect_error__") or r.get("__validate_error__"),
+                             "composite": cref}, 500)
+        results = r.get("readouts", [])
+        for res in results:
+            res.setdefault("composite", cref)
+        return "readouts", results
 
-    if "__no_validator__" in r:
-        return {"error": f"readout_validation unavailable: {r['__no_validator__']}"}, 501
-    if "__build_error__" in r:
-        return _aspirational(r["__build_error__"])
-    if "__introspect_error__" in r or "__validate_error__" in r:
-        return {"error": r.get("__introspect_error__") or r.get("__validate_error__"),
-                "composite": ref}, 500
+    # Merge each composite's per-readout result, keeping the best status across
+    # baselines (ok < aspirational < unresolved < not_in_structure). A readout
+    # that any baseline exposes is ``ok``; one no baseline exposes stays flagged.
+    _RANK = {"ok": 0, "aspirational": 1, "unresolved": 2, "not_in_structure": 3}
 
-    return {"composite": ref, "readouts": r.get("readouts", [])}, 200
+    def _rank(entry: dict) -> int:
+        s = entry.get("status")
+        return _RANK.get(s, 2) if isinstance(s, str) else 2
+
+    best: dict[int, dict] = {}
+    any_built = False
+    build_notes: list[str] = []
+    for cref in refs:
+        kind, payload = _check_ref(cref)
+        if kind == "hard":
+            return payload  # 501/500 — workspace-level, abort
+        if kind == "buildfail":
+            build_notes.append(f"{cref}: {payload}")
+            results = _aspirational_results(cref)
+        else:
+            any_built = True
+            results = payload
+        for i, res in enumerate(results):
+            cur = best.get(i)
+            if cur is None or _rank(res) < _rank(cur):
+                best[i] = res
+
+    merged = [best[i] for i in sorted(best)]
+
+    if not any_built:
+        # No baseline composite could be built → clear non-500 (as before),
+        # every readout aspirational with a note.
+        return {"composite": ref, "composites": refs, "readouts": merged,
+                "note": "no baseline composite could be built: "
+                        + "; ".join(build_notes)}, 422
+
+    return {"composite": ref, "composites": refs, "readouts": merged}, 200
 
 
 def observables_for_ref_payload(ws_root: Path, ref: str) -> dict:
