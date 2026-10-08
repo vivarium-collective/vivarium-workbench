@@ -122,11 +122,12 @@ def test_emitter_roundtrips_through_broker(kind, tmp_path):
         assert rkind == "sqlite"
         assert Path(resolved) == Path(db_file)
         assert emitters.reader_for("sqlite") is comparative_viz._extract_trace
-        # The flat-key minimal store reads back via load_history (the emitter's
-        # own canonical reader — the appropriate read for this store shape).
+        # The store reads back via load_history (the emitter's own canonical
+        # reader). The record is NESTED (``counter_store/value`` → nested key
+        # ``counter_store.value``, #1301), the shape the dotted readers expect.
         import viva_emitters
         rows = viva_emitters.load_history(db_file, "e2e")
-        series = [r["counter_store_value"] for r in rows]
+        series = [r["counter_store"]["value"] for r in rows]
         assert len(series) >= STEPS
         assert any(v > 0 for v in series)  # the counter actually advanced
 
@@ -188,8 +189,11 @@ def _ram_series(composite) -> list[float]:
             inst = node.get("instance")
             if inst is not None and type(inst).__name__ == "RAMEmitter":
                 for row in getattr(inst, "history", []) or []:
-                    if isinstance(row, dict) and "counter_store_value" in row:
-                        out.append(row["counter_store_value"])
+                    # Nested record shape (#1301): counter_store/value ->
+                    # {"counter_store": {"value": x}}.
+                    store = row.get("counter_store") if isinstance(row, dict) else None
+                    if isinstance(store, dict) and "value" in store:
+                        out.append(store["value"])
             for v in node.values():
                 walk(v)
 

@@ -270,7 +270,10 @@ def test_study_run_runs_and_records_every_step_past_one_chunk(ws):
     (last,) = db.execute("SELECT state FROM history WHERE simulation_id = 'long-1' "
                          "ORDER BY step DESC LIMIT 1").fetchone()
     db.close()
-    assert json.loads(last)["stores_level"] == 2.0 ** 150
+    # Nested record shape (#1301): the flat-path builder now records
+    # ``stores/level`` under the nested key ``stores.level``, matching the
+    # declared-path builder (see the agents test below).
+    assert json.loads(last)["stores"]["level"] == 2.0 ** 150
 
 
 def test_study_run_whose_agent_raises_is_recorded_failed(ws):

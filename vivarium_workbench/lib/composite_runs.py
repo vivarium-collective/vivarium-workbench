@@ -908,10 +908,12 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
     # user_emitter, or none), also emit `global_time` itself: the emitter fills
     # the history.global_time column from the emitted `global_time`, and a
     # mirrored emitter that doesn't wire it (most composites' own emitters, the
-    # flat user_emitter) left that column NULL. The key is always wired to the
-    # composite's global_time. A mirrored store that merely flattens to the
-    # same name (`global/time` -> `global_time`) keeps being recorded, under
-    # its dotted path (`global.time`), instead of standing in for the time.
+    # declared-path user_emitter) left that column NULL. The key is always
+    # wired to the composite's global_time. A mirrored emitter that wires some
+    # other store to the top-level key `global_time` (e.g. a composite's own
+    # emitter) keeps being recorded, under its dotted path, instead of standing
+    # in for the time. (The declared-path builders record nested keys, so a
+    # `global/time` store nests under `global.time` and never collides here.)
     wire = inputs.get("global_time")
     if wire is not None and list(wire) != ["global_time"]:
         renamed = ".".join(str(step) for step in wire)
@@ -991,6 +993,52 @@ def inject_declared_emitter(state: dict, *, spec_id: str, run_id: str,
     return new_state, kind
 
 
+def _nested_emit_from_paths(
+    path_specs: list[tuple[list[str], str]],
+) -> tuple[dict, dict]:
+    """Build a NESTED ``(emit_schema, inputs)`` pair mirroring each path's
+    store hierarchy — the record shape the dotted readers understand
+    (``Run.observable`` / ``json_extract('$.<dotted>')`` /
+    ``comparative_viz`` / ``study_charts``).
+
+    ``path_specs`` is an iterable of ``(path_parts, leaf_type)``: a store path
+    split into components, plus the bigraph schema type to record its leaf as
+    (``"node"`` for a scalar store, ``"tree[node]"`` for a place-graph subtree
+    emitted whole). Nesting mirrors the wire structure so e.g. ``stores/x``
+    records under ``{"stores": {"x": <value>}}`` — addressable as the declared
+    readout ``stores.x`` — never a flat ``stores_x`` key that the dotted
+    readers can't navigate (#1301). Both declared-path emitter builders route
+    through here so they record identical keys for identical readouts.
+
+    A degenerate empty path (the whole-root blob) keeps the historical
+    ``"root"`` top-level key wired to ``[]``.
+    """
+    emit_schema: dict = {}
+    inputs: dict = {}
+    for path_parts, leaf_type in path_specs:
+        if not path_parts:
+            emit_schema["root"] = leaf_type
+            inputs["root"] = []
+            continue
+        schema_node = emit_schema
+        wire_node = inputs
+        for p in path_parts[:-1]:
+            nxt = schema_node.get(p)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                schema_node[p] = nxt
+            schema_node = nxt
+            wnxt = wire_node.get(p)
+            if not isinstance(wnxt, dict):
+                wnxt = {}
+                wire_node[p] = wnxt
+            wire_node = wnxt
+        leaf = path_parts[-1]
+        schema_node[leaf] = leaf_type
+        wire_node[leaf] = list(path_parts)
+    return emit_schema, inputs
+
+
 def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
     """Inject a RAMEmitter step that captures the user-selected store paths.
 
@@ -1000,6 +1048,13 @@ def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
     leaf-ish store node (anything that isn't a dict with
     ``_type='process'`` or ``_type='step'``). The resulting set is used to
     build the emitter's ``config.emit`` schema and ``inputs`` wiring.
+
+    The emit schema / inputs are NESTED (mirroring the store hierarchy), the
+    same shape :func:`inject_emitter_for_declared_paths` produces — so both
+    builders record the same keys for the same readouts and the dotted readers
+    (``Run.observable``, ``json_extract``) resolve either path's history
+    identically (#1301). A single-leaf topology subtree is still recorded whole
+    with its ``tree[node]`` type.
 
     The injected emitter is named ``user_emitter``; idempotent on re-call —
     a second call with the same path set is a no-op.
@@ -1022,19 +1077,16 @@ def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
             node = node.get(p)
         return node
 
-    emit_schema: dict = {}
-    inputs: dict = {}
-    for path_parts in sorted(leaves, key=lambda p: tuple(p)):
-        # Slug-safe port name from the path
-        key = "_".join(path_parts) if path_parts else "root"
-        # A place-graph subtree keeps its tree[node] type so the emitter
-        # tree_copies the WHOLE structure each tick (topology preserved for a
-        # stepping viewer). Everything else uses process-bigraph's permissive
-        # "node" leaf type (see emitter.anyize_paths); "any" trips a
-        # bigraph-schema bug in append_link_path that assumes a dict schema.
-        node = _resolve(path_parts)
-        emit_schema[key] = "tree[node]" if _is_node_tree(node) else "node"
-        inputs[key] = list(path_parts)
+    # A place-graph subtree keeps its tree[node] type so the emitter
+    # tree_copies the WHOLE structure each tick (topology preserved for a
+    # stepping viewer). Everything else uses process-bigraph's permissive
+    # "node" leaf type (see emitter.anyize_paths); "any" trips a
+    # bigraph-schema bug in append_link_path that assumes a dict schema.
+    specs = [
+        (path_parts, "tree[node]" if _is_node_tree(_resolve(path_parts)) else "node")
+        for path_parts in sorted(leaves, key=lambda p: tuple(p))
+    ]
+    emit_schema, inputs = _nested_emit_from_paths(specs)
 
     new_state = dict(state)
     new_state["user_emitter"] = {
@@ -1261,27 +1313,17 @@ def inject_emitter_for_declared_paths(state: dict,
     if "global_time" not in paths:
         paths.append("global_time")
 
-    wires: dict = {}
-    for raw in paths:
-        parts = [p for p in raw.split("/") if p]
-        if not parts:
-            continue
-        node = wires
-        for p in parts[:-1]:
-            existing = node.get(p)
-            if not isinstance(existing, dict):
-                existing = {}
-                node[p] = existing
-            node = existing
-        node[parts[-1]] = list(parts)
+    # Route through the same nested builder as inject_emitter_for_paths so the
+    # two record identical keys for identical readouts (#1301). Every declared
+    # leaf is a scalar "node"; empty components are dropped.
+    specs = [
+        ([p for p in raw.split("/") if p], "node")
+        for raw in paths
+    ]
+    specs = [(parts, t) for parts, t in specs if parts]
+    emit_schema, wires = _nested_emit_from_paths(specs)
     if not wires:
         return state
-
-    def _to_schema(node):
-        if isinstance(node, dict):
-            return {k: _to_schema(v) for k, v in node.items()}
-        return "node"
-    emit_schema = _to_schema(wires)
 
     new_state = dict(state)
     existing = state.get("user_emitter")
