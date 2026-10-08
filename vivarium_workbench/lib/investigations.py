@@ -1315,6 +1315,21 @@ def inject_emitter_step(doc: dict, observables: list) -> dict:
         else:
             emit_schema[port_name] = 'any'
 
+    # Mirror inject_sqlite_emitter (#1299): always also emit ``global_time``.
+    # The SQLiteEmitter fills ``history.global_time`` from the emitted
+    # ``global_time``; this path wired only the observable ports, so a run on
+    # the investigations path recorded a NULL time column and its readers had
+    # to fall back. If an observable already claimed the ``global_time`` port
+    # (its last path segment is literally ``global_time``), keep it under its
+    # dotted path so it isn't mistaken for the time axis.
+    wire = inputs.get('global_time')
+    if wire is not None and list(wire) != ['global_time']:
+        renamed = '.'.join(str(seg) for seg in wire)
+        inputs[renamed] = inputs.pop('global_time')
+        emit_schema[renamed] = emit_schema.pop('global_time', 'any')
+    emit_schema['global_time'] = 'node'
+    inputs['global_time'] = ['global_time']
+
     state['emitter'] = {
         '_type': 'step',
         'address': 'local:SQLiteEmitter',
