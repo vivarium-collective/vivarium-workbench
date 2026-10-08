@@ -540,7 +540,10 @@ def test_inject_emitter_from_observables_paths():
     assert em['_type'] == 'step'
     assert em['inputs']['DnaA_count'] == ['chromosome', 'DnaA_count']
     assert em['inputs']['free_DnaA'] == ['chromosome', 'free_DnaA']
-    assert em['config']['emit'] == {'DnaA_count': 'integer', 'free_DnaA': 'float'}
+    # global_time is always wired too, so the SQLiteEmitter records the time axis.
+    assert em['inputs']['global_time'] == ['global_time']
+    assert em['config']['emit'] == {
+        'DnaA_count': 'integer', 'free_DnaA': 'float', 'global_time': 'node'}
 
 
 def test_inject_emitter_skips_missing_paths():
@@ -562,9 +565,10 @@ def test_inject_emitter_empty_observables_returns_empty_emit():
     doc = {'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 100}}}}
     out = inject_emitter_step(doc, [])
     em = out['state']['emitter']
-    # No observables = empty inputs + empty emit schema; runtime decides what to do.
-    assert em['inputs'] == {}
-    assert em['config']['emit'] == {}
+    # No observables still wires global_time so the run records a time axis
+    # (mirrors inject_sqlite_emitter's no-emitter fallback, #1299).
+    assert em['inputs'] == {'global_time': ['global_time']}
+    assert em['config']['emit'] == {'global_time': 'node'}
 
 
 def test_inject_emitter_handles_emit_all_sentinel():
@@ -576,6 +580,64 @@ def test_inject_emitter_handles_emit_all_sentinel():
     em = out['state']['emitter']
     # 'state' port wires at root; emit schema is left empty (runtime serializes everything)
     assert em.get('inputs', {}).get('state') == [] or em.get('config', {}).get('emit_all') is True
+
+
+def test_inject_emitter_step_records_global_time(tmp_path):
+    """Regression (#1305): the investigations-path emitter must also emit
+    ``global_time`` so the SQLiteEmitter fills ``history.global_time``. Before
+    the fix this path wired only the observable ports, leaving the time axis
+    NULL (its readers had to fall back). Mirrors what #1299 did for
+    ``inject_sqlite_emitter``. Real Composite + real SQLiteEmitter, nothing
+    mocked."""
+    import json as _json
+    import sqlite3
+    from process_bigraph import Composite, Process, allocate_core
+    from viva_emitters.sqlite_emitter import SQLiteEmitter
+    from vivarium_workbench.lib.investigations import inject_emitter_step
+
+    class Grow(Process):
+        config_schema = {}
+
+        def inputs(self):
+            return {'level': 'float'}
+
+        def outputs(self):
+            return {'level': 'float'}
+
+        def update(self, state, interval):
+            return {'level': interval}
+
+    doc = {
+        'state': {
+            'stores': {'level': {'_type': 'float', '_default': 0.0}},
+            'grow': {'_type': 'process', 'address': 'local:Grow', 'interval': 0.5,
+                     'inputs': {'level': ['stores', 'level']},
+                     'outputs': {'level': ['stores', 'level']}},
+        }
+    }
+    out = inject_emitter_step(doc, [{'path': ['stores', 'level']}])
+    em = out['state']['emitter']
+    # Pure assertion: the observable is wired, and so is the time axis.
+    assert em['inputs']['level'] == ['stores', 'level']
+    assert em['config']['emit']['global_time'] == 'node'
+    assert em['inputs']['global_time'] == ['global_time']
+
+    # End-to-end: history.global_time is actually populated (not NULL), and
+    # the stored state carries a global_time value on every row.
+    em['config'].update({'file_path': str(tmp_path), 'db_file': 'runs.db',
+                         'simulation_id': 'r1'})
+    core = allocate_core()
+    core.register_link('Grow', Grow)
+    core.register_link('SQLiteEmitter', SQLiteEmitter)
+    composite = Composite({'state': out['state']}, core=core)
+    composite.run(2.0)
+    rows = sqlite3.connect(tmp_path / 'runs.db').execute(
+        "SELECT global_time, state FROM history WHERE simulation_id='r1' ORDER BY step"
+    ).fetchall()
+    times = [t for t, _ in rows]
+    assert times[0] == 0.0 and times[-1] == 2.0
+    assert all(a < b for a, b in zip(times, times[1:]))
+    assert [_json.loads(s)['global_time'] for _, s in rows] == times
 
 
 # ---------------------------------------------------------------------------
