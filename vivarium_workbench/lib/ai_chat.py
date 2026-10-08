@@ -23,7 +23,7 @@ import json
 import asyncio
 import contextlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -37,6 +37,7 @@ from pydantic_ai.messages import (
     FunctionToolResultEvent,
     ModelMessagesTypeAdapter,
     ModelRequest,
+    ModelResponse,
     PartDeltaEvent,
     PartStartEvent,
     RetryPromptPart,
@@ -52,7 +53,7 @@ from pydantic_ai.run import AgentRunResultEvent
 from pydantic_ai.usage import UsageLimits
 from pydantic_core import to_jsonable_python
 
-from vivarium_workbench.lib import ai_auth, ai_claude_code, ai_skills, ai_tools, claude_cli
+from vivarium_workbench.lib import ai_auth, ai_claude_code, ai_skills, ai_tools, chat_limits, claude_cli
 from vivarium_workbench.lib.ai_auth import StorageMode
 from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.models import ChatTurnRequest
@@ -170,6 +171,9 @@ class Turn:
     secrets: tuple[str, ...] = ()
     mode: str = "agent"
     include_manifest: bool = True
+    session: str | None = None
+    shared: bool = False              # a server shared with anonymous visitors: runs are charged to the session's token budget
+    tokens_left: int | None = None    # what the session may still use, or None for no limit
 
     async def frames(self) -> AsyncIterator[dict[str, Any]]:
         """Yield the turn's NDJSON frames. The agent runs in its OWN task and hands
@@ -199,10 +203,12 @@ class Turn:
     async def _run(self, emit: Any) -> None:
         executed_tool = False
         failed = False
+        seen: list[Any] = []
         try:
             # capture_run_messages() lets a failed turn still hand the browser the
             # transcript up to the failure (see the checkpoint below).
             with capture_run_messages() as captured:
+                seen = captured
                 try:
                     instructions = build_instructions(self.mode, self.deps.skills)
                     if self.include_manifest:
@@ -216,7 +222,8 @@ class Turn:
                         deferred_tool_results=self.deferred,
                         instructions=instructions,
                         deps=self.deps,
-                        usage_limits=USAGE_LIMITS,
+                        usage_limits=(USAGE_LIMITS if self.tokens_left is None
+                                      else replace(USAGE_LIMITS, total_tokens_limit=self.tokens_left)),
                     ) as stream:
                         async for ev in stream:
                             if isinstance(ev, FunctionToolResultEvent):
@@ -237,7 +244,15 @@ class Turn:
                     emit({"type": "done", "pending_approval": False, "incomplete": True,
                           "messages": ModelMessagesTypeAdapter.dump_python(list(captured), mode="json")})
         finally:
+            # Charge the session for what this run used, however it ended (finished, failed, stopped by the limit, or
+            # cancelled): a run stopped by the budget raises, and would otherwise never be counted.
+            chat_limits.spend(self.session, _tokens_used(seen, len(self.history)), self.shared)
             emit(None)
+
+
+def _tokens_used(captured: Any, prior: int) -> int:
+    """Tokens used by the model responses a run added after the ``prior`` messages it was given."""
+    return sum((m.usage.total_tokens or 0) for m in list(captured)[prior:] if isinstance(m, ModelResponse))
 
 
 async def _manifest(deps: ai_tools.ChatDeps) -> str:
@@ -419,6 +434,8 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
             manifest=_manifest if _wants_manifest(body, mode) else None, deferred=deferred,
             remember=_remember_ids(body.deferred_results))
     # Skills: instructions the model can load. A hosted server never reads its own home directory for them.
+    shared = mode == "memory"
+    tokens_left = chat_limits.tokens_left(session, shared)          # 429 for a spent session, before any client is built
     skills = {} if body.mode == "manual" else ai_skills.discover(ws_root, local=(mode == "keyring"))
     agent: Agent[ai_tools.ChatDeps, str | DeferredToolRequests] = Agent(
         ai_auth.build_model(provider, model, cred),
@@ -430,4 +447,5 @@ def prepare_turn(app: FastAPI, body: ChatTurnRequest, ws_root: Path, mode: Stora
                              session_key=session, provider=provider, model=model, mode=body.mode, skills=skills)
     return Turn(agent=agent, deps=deps, history=list(history), prompt=body.prompt,
                 deferred=deferred, secrets=(cred.api_key or "",), mode=body.mode,
-                include_manifest=_wants_manifest(body, mode))
+                include_manifest=_wants_manifest(body, mode),
+                session=session, shared=shared, tokens_left=tokens_left)

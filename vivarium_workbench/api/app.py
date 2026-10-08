@@ -60,6 +60,7 @@ from vivarium_workbench.lib import remote_run_views as _remote_run_views
 from vivarium_workbench.lib import remote_analysis_figures as _remote_analysis_figures
 from vivarium_workbench.lib import auth_views as _auth_views
 from vivarium_workbench.lib import ai_auth as _ai_auth
+from vivarium_workbench.lib import chat_limits as _chat_limits
 from vivarium_workbench.lib import claude_cli as _claude_cli
 from vivarium_workbench.lib import claude_mcp as _claude_mcp
 from vivarium_workbench.lib import ai_views as _ai_views
@@ -7638,7 +7639,12 @@ def create_app() -> FastAPI:
         _ai_auth.require_chat()
         from vivarium_workbench.lib import ai_chat   # needs the [chat] extra
         mode, session = _ai_scope(request)
-        turn = ai_chat.prepare_turn(request.app, body, ws, mode, session)
+        release = _chat_limits.claim_turn(mode == "memory")      # 429 here, before any streaming (or client) exists
+        try:
+            turn = ai_chat.prepare_turn(request.app, body, ws, mode, session)
+        except BaseException:
+            release()
+            raise
 
         async def frames():
             async for frame in turn.frames():
@@ -7647,7 +7653,7 @@ def create_app() -> FastAPI:
         # `Content-Encoding: identity` opts out of GZipMiddleware, which would
         # otherwise buffer small NDJSON chunks and stall the live token stream.
         return StreamingResponse(
-            frames(), media_type="application/x-ndjson",
+            _chat_limits.Held(frames(), release), media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store", "Content-Encoding": "identity",
                      "X-Accel-Buffering": "no"})
 
