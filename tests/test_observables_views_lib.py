@@ -80,6 +80,69 @@ def test_study_observable_check_real_build(demo_ws):
                for r in lib_body["readouts"])
 
 
+_SECOND_REF = "pbg_ws_increase_demo.composites.other-demo"
+_SECOND_LEAF = "stores.other"
+
+
+def _write_second_composite(ws: Path) -> None:
+    """Write a sibling spec composite whose only leaf is ``stores.other`` (a
+    DIFFERENT structure from increase-demo's ``stores.level``)."""
+    (ws / "pbg_ws_increase_demo" / "composites" / "other-demo.composite.yaml").write_text(
+        yaml.safe_dump({
+            "name": "other-demo",
+            "requires": {"processes": ["IncreaseProcess", "RAMEmitter"]},
+            "state": {
+                "increase": {
+                    "_type": "process",
+                    "address": "local:IncreaseProcess",
+                    "config": {"rate": 2.0},
+                    "inputs": {"level": ["stores", "other"]},
+                    "outputs": {"level": ["stores", "other"]},
+                    "interval": 1.0,
+                },
+                "stores": {"other": 1.0},
+                "emitter": {
+                    "_type": "step",
+                    "address": "local:RAMEmitter",
+                    "config": {"emit": {"other": "float"}},
+                    "inputs": {"other": ["stores", "other"]},
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+
+
+def test_study_observable_check_validates_against_all_baselines(demo_ws):
+    """A study with more than one baseline composite must validate each readout
+    against ALL baseline composites, not only baseline[0] (#1306). A readout
+    that is a real leaf of the SECOND baseline (but not the first) must not be
+    reported ``not_in_structure``."""
+    _write_second_composite(demo_ws)
+    _write_study(demo_ws, "multi-baseline", {
+        "name": "multi-baseline",
+        "baseline": [
+            {"name": "base-a", "composite": _REF},          # exposes stores.level
+            {"name": "base-b", "composite": _SECOND_REF},   # exposes stores.other
+        ],
+        "readouts": [
+            {"name": "from-first", "store_path": _REAL_LEAF},     # ok vs base-a
+            {"name": "from-second", "store_path": _SECOND_LEAF},  # ok vs base-b only
+            {"name": "phantom", "store_path": "stores.nowhere"},  # in neither
+        ],
+    })
+    lib_body, lib_status = ov.build_study_observable_check(demo_ws, "multi-baseline")
+    assert lib_status == 200, lib_body
+    by_name = {r["name"]: r for r in lib_body["readouts"]}
+    # The readout belonging to the non-first baseline must NOT be a false negative.
+    assert by_name["from-second"]["status"] == "ok", lib_body
+    assert by_name["from-first"]["status"] == "ok", lib_body
+    # A readout exposed by no baseline is still flagged (never-fabricate holds).
+    assert by_name["phantom"]["status"] == "not_in_structure", lib_body
+    # Every declared baseline composite was considered.
+    assert set(lib_body.get("composites") or []) == {_REF, _SECOND_REF}, lib_body
+
+
 def test_study_observable_check_invalid_slug_400(demo_ws):
     lib_body, lib_status = ov.build_study_observable_check(demo_ws, "UPPER-CASE")
     assert lib_status == 400
