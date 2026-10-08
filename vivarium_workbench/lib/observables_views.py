@@ -315,6 +315,11 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
     # baselines (ok < aspirational < unresolved < not_in_structure). A readout
     # that any baseline exposes is ``ok``; one no baseline exposes stays flagged.
     _RANK = {"ok": 0, "aspirational": 1, "unresolved": 2, "not_in_structure": 3}
+
+    def _rank(entry: dict) -> int:
+        s = entry.get("status")
+        return _RANK.get(s, 2) if isinstance(s, str) else 2
+
     best: dict[int, dict] = {}
     any_built = False
     build_notes: list[str] = []
@@ -330,7 +335,7 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
             results = payload
         for i, res in enumerate(results):
             cur = best.get(i)
-            if cur is None or _RANK.get(res.get("status"), 2) < _RANK.get(cur.get("status"), 2):
+            if cur is None or _rank(res) < _rank(cur):
                 best[i] = res
 
     merged = [best[i] for i in sorted(best)]
