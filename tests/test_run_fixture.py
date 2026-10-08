@@ -110,17 +110,45 @@ def test_run_reads_pre_migration_runs_meta(tmp_path):
 def test_run_observable_dotted_path_into_nested_map(tmp_path):
     db = tmp_path / "runs.db"
     _make_runs_db(db, runs=[{"run_id": "r1", "states": [
-        {"species": {"X": 1.0, "Y": 5.0}, "time": 0.0},
-        {"species": {"X": 2.0, "Y": 4.0}, "time": 0.5},
-        {"species": {"X": 3.0, "Y": 3.0}, "time": 1.0},
+        {"species": {"X": 1.0, "Y": 5.0}, "global_time": 0.0},
+        {"species": {"X": 2.0, "Y": 4.0}, "global_time": 0.5},
+        {"species": {"X": 3.0, "Y": 3.0}, "global_time": 1.0},
     ]}])
     run = Run(db)
     assert list(run.observable("species.X")) == [1.0, 2.0, 3.0]
-    assert list(run.observable("time")) == [0.0, 0.5, 1.0]
-    assert list(run.time) == [0.0, 1.0, 2.0]
+    assert list(run.observable("global_time")) == [0.0, 0.5, 1.0]
+    assert list(run.time) == [0.0, 0.5, 1.0]
     assert run.final("species.Y") == 3.0
     with pytest.raises(KeyError):
         run.final("species.missing")
+
+
+def test_run_time_is_global_time_not_step_index(tmp_path):
+    """Run.time is the simulated-time axis (history.global_time), not the
+    0..n emitted-step indices; the two differ whenever the emit interval is
+    not 1 time unit. Run.steps exposes the step indices separately."""
+    db = tmp_path / "runs.db"
+    _make_runs_db(db, runs=[{"run_id": "r1", "states": [
+        {"x": 1.0, "global_time": 0.0},
+        {"x": 2.0, "global_time": 0.5},
+        {"x": 3.0, "global_time": 1.0},
+    ]}])
+    run = Run(db)
+    assert list(run.time) == [0.0, 0.5, 1.0]
+    assert list(run.steps) == [0, 1, 2]
+
+
+def test_run_time_is_nan_when_global_time_unrecorded(tmp_path):
+    """An older runs.db (or an emitter that never wired global_time) left the
+    column NULL; Run.time surfaces that as NaN rather than a bogus step axis."""
+    import numpy as np
+    db = tmp_path / "runs.db"
+    _make_runs_db(db, runs=[{"run_id": "r1", "states": [
+        {"x": 1.0}, {"x": 2.0},
+    ]}])
+    run = Run(db)
+    assert np.isnan(run.time).all()
+    assert list(run.steps) == [0, 1]
 
 
 def test_run_trajectory_flattens_nested_maps(tmp_path):

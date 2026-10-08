@@ -129,26 +129,45 @@ class Run:
     def timestamp(self) -> float: return self._meta["timestamp"]
 
     # Trajectory
-    def _history(self) -> list[tuple[int, dict]]:
-        """(step, emitted-state dict) for this run, in step order."""
+    def _history(self) -> list[tuple[int, float | None, dict]]:
+        """(step, global_time, emitted-state dict) for this run, in step order.
+
+        ``step`` is the composite tick index the emitter stored; ``global_time``
+        is the simulated model time it recorded in the same row (``None`` when
+        an older run or an emitter that never wired ``global_time`` left the
+        column NULL)."""
         if not hasattr(self, "_history_cache"):
             rows = self._db.execute(
-                "SELECT step, state FROM history WHERE simulation_id = ? ORDER BY step",
+                "SELECT step, global_time, state FROM history "
+                "WHERE simulation_id = ? ORDER BY step",
                 (self._run_id,),
             ).fetchall()
-            self._history_cache = [(r["step"], json.loads(r["state"])) for r in rows]
+            self._history_cache = [
+                (r["step"], r["global_time"], json.loads(r["state"])) for r in rows
+            ]
         return self._history_cache
 
     def observable(self, name: str) -> np.ndarray:
         """Per-step values of ``name`` (dotted paths reach into nested maps,
         e.g. "species.X"); steps where it was not emitted are skipped."""
-        values = [_get_dotted(state, name) for _, state in self._history()]
+        values = [_get_dotted(state, name) for _, _, state in self._history()]
         return np.array([v for v in values if v is not _MISSING], dtype=float)
 
     @property
     def time(self) -> np.ndarray:
-        """The emitted steps, in order."""
-        return np.array([step for step, _ in self._history()], dtype=float)
+        """Simulated model time at each emitted step (the ``history.global_time``
+        column the emitter records). This is the time axis to plot observables
+        against; it equals the step index only when the emit interval is one
+        time unit. A step whose ``global_time`` was not recorded is ``NaN`` (use
+        :attr:`steps` for the raw emitted-step indices)."""
+        return np.array([t for _, t, _ in self._history()], dtype=float)
+
+    @property
+    def steps(self) -> np.ndarray:
+        """The emitted composite-tick indices, in order (the ``history.step``
+        column). These are not simulated time unless the emit interval is one
+        time unit; for the time axis use :attr:`time`."""
+        return np.array([step for step, _, _ in self._history()], dtype=float)
 
     def final(self, name: str) -> float:
         arr = self.observable(name)
@@ -179,8 +198,8 @@ class Run:
                 "`pip install pandas`"
             ) from e
         hist = self._history()
-        frame = pd.DataFrame([_flatten(state) for _, state in hist],
-                             index=pd.Index([step for step, _ in hist], name="step"))
+        frame = pd.DataFrame([_flatten(state) for _, _, state in hist],
+                             index=pd.Index([step for step, _, _ in hist], name="step"))
         frame.columns.name = "observable"
         return frame
 
