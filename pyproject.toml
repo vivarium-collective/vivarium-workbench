@@ -67,7 +67,7 @@ dependencies = [
     # `polars` unconditionally at module level — not lazily like duckdb/xarray.
     # Without this extra, `polars` is absent and discover_generators skips
     # run_reader entirely (ModuleNotFoundError: No module named 'polars').
-    "viva-emitters[sqlite,xarray,parquet]>=0.2.3",
+    "viva-emitters[sqlite,xarray,parquet]>=0.4.3",
     "xarray>=2026.04",
     # Uncapped (>= not ~=): ~=3.1.6 excluded 3.2.x — a downgrade for py3.12+ vs
     # the prior version-split. The [test] extra below uses a bare `zarr`, so
