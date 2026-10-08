@@ -319,6 +319,13 @@ def generator_ids(ws):
     core.write_text(core.read_text() + f"\nimport {PKG}.generators_1292  # noqa: E402,F401\n")
     before = dict(composite_spec.all_specs())
     import importlib
+    # Evict any stale copy of this shared fixture package left cached in
+    # sys.modules by an earlier test in the same worker (many tests import
+    # pbg_ws_increase_demo.core). Without this, import_module is a no-op, the
+    # appended `generators_1292` import never runs, and the `next(...)` below
+    # raises StopIteration ("generator raised StopIteration") at fixture setup.
+    for name in [m for m in sys.modules if m == PKG or m.startswith(PKG + ".")]:
+        del sys.modules[name]
     importlib.import_module(f"{PKG}.core")
     from process_bigraph.composite_generator import _REGISTRY
     ids = {name: next(k for k in _REGISTRY if k.endswith(name))
