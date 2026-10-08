@@ -529,6 +529,7 @@ def run_composite_subprocess(
                         max_steps=_payload['steps'],
                         max_generations=_payload['max_generations'],
                     )
+                    _steps_run = _xarr['steps']  # actual ticks run (issue #1304)
                     results = {{'zarr_store': _xarr['store'],
                                'generations': _xarr['generations'],
                                'steps': _xarr['steps']}}
@@ -556,6 +557,7 @@ def run_composite_subprocess(
                         store_path=_payload['zarr_store'])
                     composite = _prov.get('composite')
                     if _prov.get('output_kind') == 'zarr':
+                        _steps_run = _prov.get('steps')  # actual ticks run (issue #1304)
                         results = {{'zarr_store': _prov.get('store_path'),
                                    'output_kind': 'zarr',
                                    'steps': _prov.get('steps')}}
@@ -586,6 +588,7 @@ def run_composite_subprocess(
                             single_daughters=bool(_payload.get('single_daughters')),
                             core=core,
                         )
+                        _steps_run = _sq['steps']  # actual ticks run (issue #1304)
                         results = {{'steps': _sq['steps'],
                                    'generations': _sq['generations']}}
                     else:

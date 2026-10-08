@@ -497,6 +497,40 @@ def test_xarray_default_child_script_gates_on_v2ecoli(tmp_path, monkeypatch):
     assert "_mg > 1 and _v2ecoli_available" in script
 
 
+def test_multigen_xarray_branches_record_actual_steps_run(tmp_path, monkeypatch):
+    """Issue #1304: ``n_steps`` must reflect the ACTUAL steps executed, not the
+    requested count, for the multigen/xarray paths. The legacy path records the
+    truth because it assigns ``_steps_run`` from ``cr.run_with_division``'s
+    return. The multigen/xarray branches each carry an actual step count in
+    their ``results['steps']`` (``_xarr['steps']`` / ``_sq['steps']`` /
+    ``_prov.get('steps')``), and the generated child script must thread that
+    into ``_steps_run`` so the parent's
+    ``n_steps = steps_run if isinstance(steps_run, int) else steps`` records the
+    real number — matching the legacy path's semantics."""
+    ws = _make_genpkg_ws(tmp_path, default_emitter="xarray")
+    db = ws / "runs.db"
+    spec_id, _cleanup = _register_genpkg(ws)
+    fake = FakeRun(stdout=_ok_stdout())
+    monkeypatch.setattr(cs.subprocess, "run", fake)
+    try:
+        cs.run_composite_subprocess(
+            ws, pkg="genpkg", state={}, steps=4, db_file=str(db),
+            run_id="g-steps", spec_id=spec_id, label="g")
+    finally:
+        _cleanup()
+
+    script = fake.script
+    # v2ecoli multi-gen xarray branch
+    assert "_steps_run = _xarr['steps']" in script, \
+        "multigen xarray branch does not record actual steps run"
+    # v2ecoli multi-gen sqlite branch
+    assert "_steps_run = _sq['steps']" in script, \
+        "multigen sqlite branch does not record actual steps run"
+    # generic single-gen flat-Step xarray branch
+    assert "_steps_run = _prov.get('steps')" in script, \
+        "generic xarray branch does not record actual steps run"
+
+
 def test_xarray_default_nonv2ecoli_multigen_falls_back_to_sqlite(tmp_path, monkeypatch):
     """The documented boundary (FU2b): a non-v2ecoli, xarray-default,
     MULTI-generation study run still resolves to sqlite — there is NO generic
