@@ -168,7 +168,8 @@ def test_run_with_emitter_short_run_does_not_silently_empty(tmp_path):
     # The fall-back store holds the run's data (so the run is NOT empty).
     import viva_emitters
     rows = viva_emitters.load_history(db_file, "r-short")
-    series = [r.get("counter_store_value") for r in rows]
+    # Nested record shape (#1301): counter_store/value -> counter_store.value.
+    series = [(r.get("counter_store") or {}).get("value") for r in rows]
     assert len(rows) >= 1
     assert any((v or 0) > 0 for v in series)
 

@@ -20,8 +20,10 @@ def test_scalar_stores_still_flatten():
     state = {"stores": {"level": {"_type": "float", "_default": 1.0},
                         "sub": {"a": {"_type": "float", "_default": 2.0}}}}
     out = inject_emitter_for_paths(state, ["stores"])
+    # Scalar leaves record under their nested store keys (never flat
+    # ``stores_level`` keys the dotted readers can't navigate).
     assert out["user_emitter"]["config"]["emit"] == {
-        "stores_level": "node", "stores_sub_a": "node"}
+        "stores": {"level": "node", "sub": {"a": "node"}}}
 
 
 def test_is_node_tree_discriminates():

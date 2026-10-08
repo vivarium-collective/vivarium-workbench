@@ -4,8 +4,8 @@ The SQLiteEmitter fills ``history.global_time`` from the emitted
 ``global_time``, and ``inject_sqlite_emitter`` mirrors whichever emitter the
 run carries: a composite's own, the declared-path ``user_emitter``, or none.
 A mirrored emitter that didn't wire ``global_time`` (most composites' own
-emitters, and the flat ``user_emitter`` a study's readouts produce) left the
-column NULL and the stored state without a time.
+emitters, and the declared-path ``user_emitter`` a study's readouts produce)
+left the column NULL and the stored state without a time.
 
 Real ``Composite`` objects, the real SQLiteEmitter and real study-run
 subprocesses against the ``ws_increase_demo`` fixture; nothing is mocked.
@@ -87,13 +87,16 @@ def test_study_run_with_readouts_records_global_time(ws):
     assert list(Run(db_file, "readout-1").observable("global_time")) == times
 
 
-def test_a_store_that_flattens_to_global_time_cannot_replace_it(ws):
-    # declared path global/time flattens to the key "global_time"
+def test_a_store_named_global_time_does_not_replace_the_real_time(ws):
+    # A declared store at path global/time now records NESTED
+    # ({"global": {"time": ...}}, #1301), so it never collides with the run's
+    # own top-level global_time x-axis column — no dotted-rename hack needed.
     state = {"increase": _increase(["stores", "level"]), "stores": {"level": 1.0},
              "global": {"time": 42.0}}
     db_file = _run(ws, state, steps=2, run_id="collide-1",
                    emit_paths=["global/time", "stores/level"])
     rows = _history(db_file, "collide-1")
+    # history.global_time holds the real model time, not the store's 42.0
     assert [t for t, _ in rows] == [0.0, 0.5, 1.0, 1.5, 2.0]
-    # the declared store is still recorded, under its dotted path
-    assert {json.loads(state)["global.time"] for _, state in rows} == {42.0}
+    # the declared store is recorded under its nested path, distinct from time
+    assert {json.loads(state)["global"]["time"] for _, state in rows} == {42.0}

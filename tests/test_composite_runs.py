@@ -270,30 +270,32 @@ def test_auto_label_truncated_to_80():
 # -- inject_emitter_for_paths ------------------------------------------------
 
 def test_inject_emitter_for_paths_leaf():
-    """Single-leaf path: user_emitter wires that leaf via a slug port."""
+    """Single-leaf path: user_emitter wires that leaf under its nested key."""
     state = {"stores": {"level": 1.0}}
     out = inject_emitter_for_paths(state, ["stores/level"])
     assert "user_emitter" in out
     em = out["user_emitter"]
     assert em["_type"] == "step"
     assert em["address"] == "local:RAMEmitter"
-    assert em["config"]["emit"] == {"stores_level": "node"}
-    assert em["inputs"] == {"stores_level": ["stores", "level"]}
+    assert em["config"]["emit"] == {"stores": {"level": "node"}}
+    assert em["inputs"] == {"stores": {"level": ["stores", "level"]}}
 
 
 def test_inject_emitter_for_paths_subtree_cascades():
-    """Subtree path: every leaf under the subtree becomes its own port."""
+    """Subtree path: every leaf under the subtree is recorded under its nested
+    key, mirroring the store hierarchy."""
     state = {"stores": {"level": 1.0, "fields": {"glucose": 5.0}}}
     out = inject_emitter_for_paths(state, ["stores"])
     em = out["user_emitter"]
     # Two leaves: stores/level and stores/fields/glucose
     assert em["config"]["emit"] == {
-        "stores_fields_glucose": "node",
-        "stores_level": "node",
+        "stores": {"level": "node", "fields": {"glucose": "node"}},
     }
     assert em["inputs"] == {
-        "stores_fields_glucose": ["stores", "fields", "glucose"],
-        "stores_level": ["stores", "level"],
+        "stores": {
+            "level": ["stores", "level"],
+            "fields": {"glucose": ["stores", "fields", "glucose"]},
+        },
     }
 
 
@@ -308,8 +310,8 @@ def test_inject_emitter_for_paths_skips_processes():
     }
     out = inject_emitter_for_paths(state, ["root"])
     em = out["user_emitter"]
-    assert em["config"]["emit"] == {"root_store": "node"}
-    assert em["inputs"] == {"root_store": ["root", "store"]}
+    assert em["config"]["emit"] == {"root": {"store": "node"}}
+    assert em["inputs"] == {"root": {"store": ["root", "store"]}}
 
 
 def test_inject_emitter_for_paths_empty_list_noop():
@@ -318,6 +320,35 @@ def test_inject_emitter_for_paths_empty_list_noop():
     out = inject_emitter_for_paths(state, [])
     assert out is state
     assert "user_emitter" not in out
+
+
+def test_flat_and_nested_builders_record_same_keys():
+    """Both declared-path emitter builders must record the SAME nested record
+    shape for the same readouts (#1301). The flat builder used to key a store
+    ``stores/x`` under ``stores_x`` while the nested builder used ``stores.x``;
+    the dotted readers (``Run.observable`` / json_extract) can only navigate
+    the nested form, so the two now agree."""
+    from vivarium_workbench.lib.composite_runs import (
+        inject_emitter_for_declared_paths,
+    )
+
+    state = {"stores": {"x": 10.0, "y": 5.0}}
+    readouts = ["stores/x", "stores/y"]
+
+    flat = inject_emitter_for_paths(state, readouts)["user_emitter"]
+    nested = inject_emitter_for_declared_paths(state, readouts)["user_emitter"]
+
+    # The nested builder always also wires global_time; drop it so the
+    # comparison is over the declared readouts alone.
+    nested_emit = {k: v for k, v in nested["config"]["emit"].items()
+                   if k != "global_time"}
+    nested_inputs = {k: v for k, v in nested["inputs"].items()
+                     if k != "global_time"}
+
+    assert flat["config"]["emit"] == nested_emit == {
+        "stores": {"x": "node", "y": "node"}}
+    assert flat["inputs"] == nested_inputs == {
+        "stores": {"x": ["stores", "x"], "y": ["stores", "y"]}}
 
 
 # -- all_store_paths ---------------------------------------------------------
