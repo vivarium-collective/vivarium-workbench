@@ -882,6 +882,52 @@ def run_composite_subprocess(
                 _emitter_path = str(_cand)
         except Exception:  # noqa: BLE001 — best-effort; never blocks completion
             pass
+        # Silent-truncation guard (#1275): the child reported success
+        # (@@@RESULTS@@@) and claims to have run `_expected` ticks, but if a
+        # process (notably the emitter) raised MID-RUN and process-bigraph
+        # swallowed it, the recorded sqlite history is far shorter than the
+        # ticks driven. The observed failure was a composite that died at t=0
+        # (`TypeError: Object of type ndarray is not JSON serializable` inside
+        # the emitter): stderr empty, no @@@ERROR@@@, yet runs_meta recorded
+        # `completed` with 100 steps and a single history row. Treat a run
+        # whose recorded sqlite history is strictly shorter than the ticks it
+        # claims to have run as FAILED, not completed.
+        #
+        # Only the sqlite-history path is checkable: a zarr/parquet run leaves
+        # no `history` table, so count returns 0 and the guard is skipped (we
+        # can't tell "no sqlite history" from "died before the first emit").
+        # A healthy run emits ~one history row per tick (inject_sqlite_emitter /
+        # inject_emitter_for_declared_paths both wire `global_time`, which
+        # advances every apply), so `recorded >= expected` for a clean run and
+        # strict `<` never trips on a legitimate completion.
+        _expected = steps_run if isinstance(steps_run, int) else steps
+        _recorded = cr.count_run_history_rows(conn, run_id=run_id)
+        if isinstance(_expected, int) and 0 < _recorded < _expected:
+            cr.complete_metadata(
+                conn,
+                run_id=run_id,
+                n_steps=_recorded,
+                status="failed",
+                workspace=ws_root,
+                emitter_path=_emitter_path,
+            )
+            return (
+                {
+                    "simulation_id": run_id,
+                    "error": "run truncated",
+                    "detail": (
+                        f"recorded history ({_recorded} row(s)) is shorter than "
+                        f"the {_expected} tick(s) the run claims to have executed; "
+                        f"the composite likely raised mid-run (e.g. inside the "
+                        f"emitter) and the error was swallowed"
+                    ),
+                    "recorded_steps": _recorded,
+                    "expected_steps": _expected,
+                    "results": results,
+                },
+                502,
+            )
+
         cr.complete_metadata(
             conn,
             run_id=run_id,

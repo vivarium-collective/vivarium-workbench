@@ -792,6 +792,26 @@ def query_run(conn: sqlite3.Connection, *, run_id: str,
     return out
 
 
+def count_run_history_rows(conn: sqlite3.Connection, *, run_id: str) -> int:
+    """Number of ``history`` rows recorded for one run (0 if none).
+
+    Cheap ``COUNT(*)`` over the SQLiteEmitter ``history`` table. Returns 0 when
+    the table doesn't exist (no SQLiteEmitter ever wrote to this DB — e.g. a
+    zarr/parquet run) or when the run has no rows. Used to detect a silently
+    truncated run (#1275): a child that reported success but whose recorded
+    history is far shorter than the ticks it claims to have run.
+    """
+    has_history = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"
+    ).fetchone()
+    if not has_history:
+        return 0
+    row = conn.execute(
+        "SELECT COUNT(*) FROM history WHERE simulation_id=?", (run_id,)
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
 def query_run_state(conn: sqlite3.Connection, *, run_id: str,
                     step: int) -> dict | None:
     """Return the single state dict at one step, or None if missing."""
