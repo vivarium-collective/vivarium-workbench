@@ -156,6 +156,63 @@ def resolve_loom_asset(rel: str) -> Path:
     return asset_dir() / rel
 
 
+def loom_bundle_present() -> bool:
+    """True when the vendored bigraph-loom bundle (``_dist/index.html``) exists.
+
+    False means the server is running against a package whose ``loom/_dist`` is
+    absent — e.g. an editable install whose source worktree was deleted/moved out
+    from under a long-lived server, or a build that never vendored the bundle. In
+    that state ``/bigraph-loom/index.html`` 404s and every composite-card loom
+    EMBED renders as a blank iframe pane with no error (see
+    :func:`loom_bundle_missing_html`)."""
+    from vivarium_workbench.loom_assets import asset_dir
+    try:
+        return (asset_dir() / "index.html").is_file()
+    except Exception:  # noqa: BLE001 — a resolution failure is "not present"
+        return False
+
+
+def loom_bundle_missing_html() -> str:
+    """A self-contained HTML page shown IN the loom iframe when the bundle is
+    absent, instead of the browser's blank 404 body.
+
+    The composite-card embed mounts ``/bigraph-loom/index.html`` in an iframe; a
+    bare 404 there leaves the user staring at an empty pane with no clue what
+    broke. This page names the cause (missing vendored ``_dist``) and the fix
+    (reinstall the workbench / restart the server from a live checkout), so the
+    failure is visible and actionable rather than silent. It carries its own
+    styles and theme handling so it needs no sibling assets (which are also
+    absent)."""
+    from vivarium_workbench.loom_assets import asset_dir
+    where = str(asset_dir())
+    return (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+        "<title>bigraph-loom unavailable</title><style>"
+        ":root{color-scheme:light dark}"
+        "body{margin:0;min-height:100vh;display:flex;align-items:center;"
+        "justify-content:center;font-family:system-ui,sans-serif;"
+        "background:#fff7ed;color:#7c2d12;padding:24px;box-sizing:border-box}"
+        "@media (prefers-color-scheme:dark){body{background:#2a1a0e;color:#fcd9b6}}"
+        ".box{max-width:520px}.box h1{font-size:15px;margin:0 0 8px}"
+        ".box p{font-size:13px;line-height:1.5;margin:0 0 8px}"
+        "code{background:rgba(124,45,18,.12);padding:1px 5px;border-radius:4px;"
+        "font-size:12px;word-break:break-all}"
+        "@media (prefers-color-scheme:dark){code{background:rgba(252,217,182,.12)}}"
+        "</style></head><body><div class=\"box\">"
+        "<h1>⚠ The bigraph-loom viewer bundle is missing</h1>"
+        "<p>This server cannot find its vendored loom build, so the graph view "
+        "cannot render. The bundle was expected at:</p>"
+        f"<p><code>{where}</code></p>"
+        "<p>This usually means the running server was launched from a "
+        "<code>vivarium_workbench</code> install whose source directory was later "
+        "moved or deleted (e.g. a git worktree removed out from under a long-lived "
+        "server). Reinstall the workbench and restart the server from a live "
+        "checkout — then reload this view.</p>"
+        "</div></body></html>"
+    )
+
+
 def resolve_parsimony_asset(rel: str) -> Optional[Path]:
     """Resolve a ``parsimony-viewer`` asset, or ``None`` when unavailable.
 
