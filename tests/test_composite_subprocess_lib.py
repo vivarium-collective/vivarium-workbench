@@ -349,6 +349,116 @@ def test_run_child_error_block_returns_502(tmp_path, monkeypatch):
     assert "boom" in resp["traceback"]
 
 
+def _ok_stdout_steps(steps_run, results=None):
+    """A success stdout whose payload also carries ``steps_run`` (the ticks the
+    child's run loop actually drove)."""
+    payload = {"results": results or {"foo.bar": [1]}, "viz_html": {},
+               "steps_run": steps_run}
+    return "@@@RESULTS@@@\n" + json.dumps(payload) + "\n"
+
+
+def _seed_history(db_file, run_id, n_rows, *, start_step=0):
+    """Pre-create the SQLiteEmitter ``history`` table and insert ``n_rows`` rows
+    for ``run_id`` — stands in for what the (mocked-away) child subprocess would
+    have emitted to the run's sqlite store."""
+    import sqlite3
+    conn = sqlite3.connect(str(db_file))
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS history "
+            "(simulation_id TEXT, step INTEGER, global_time REAL, state TEXT)")
+        conn.executemany(
+            "INSERT INTO history (simulation_id, step, global_time, state) "
+            "VALUES (?,?,?,?)",
+            [(run_id, start_step + i, float(start_step + i), "{}")
+             for i in range(n_rows)])
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _status_of(db_file, run_id):
+    conn = cr.connect(str(db_file))
+    try:
+        meta = cr.query_run_meta(conn, run_id=run_id)
+    finally:
+        conn.close()
+    return (meta or {}).get("status")
+
+
+def test_child_raise_records_failed_status_via_error_path(tmp_path, monkeypatch):
+    """#1275 requirement 1: a child composite that RAISES (here a t=0 TypeError
+    inside the emitter) surfaces through the existing ``@@@ERROR@@@`` path and
+    the run is recorded as ``failed`` with the traceback — never ``completed``."""
+    ws = _make_ws(tmp_path)
+    db = tmp_path / "runs.db"
+    spec = _gen_spec(monkeypatch)
+    tb = ("Traceback (most recent call last):\n  ...\n"
+          "TypeError: Object of type ndarray is not JSON serializable\n")
+    fake = FakeRun(stdout="@@@ERROR@@@\n" + tb)
+    monkeypatch.setattr(cs.subprocess, "run", fake)
+
+    resp, code = cs.run_composite_subprocess(
+        ws, **_run_kwargs(ws, db, spec_id=spec, run_id="raise0"))
+    assert code == 502
+    assert resp["error"] == "run failed"
+    assert "ndarray is not JSON serializable" in resp["traceback"]
+    assert _status_of(db, "raise0") == "failed"
+
+
+def test_truncated_history_completed_run_is_flagged_failed(tmp_path, monkeypatch):
+    """#1275 requirement 2: the child reported success and claims 100 ticks, but
+    only 1 history row landed (the emitter raised at t=0 and process-bigraph
+    swallowed it). The run must be recorded ``failed``, not ``completed``."""
+    ws = _make_ws(tmp_path, runtime={"default_emitter": "sqlite"})
+    db = tmp_path / "runs.db"
+    spec = _gen_spec(monkeypatch)
+    _seed_history(db, "trunc1", 1)
+    fake = FakeRun(stdout=_ok_stdout_steps(100))
+    monkeypatch.setattr(cs.subprocess, "run", fake)
+
+    resp, code = cs.run_composite_subprocess(
+        ws, **_run_kwargs(ws, db, spec_id=spec, run_id="trunc1", steps=100))
+    assert code == 502, resp
+    assert resp["error"] == "run truncated"
+    assert resp["recorded_steps"] == 1
+    assert resp["expected_steps"] == 100
+    assert _status_of(db, "trunc1") == "failed"
+
+
+def test_full_history_run_stays_completed(tmp_path, monkeypatch):
+    """The truncation guard never trips a legitimate completion: a run whose
+    recorded history is at least as long as the ticks it ran stays ``completed``
+    (a healthy run emits ~one history row per tick)."""
+    ws = _make_ws(tmp_path, runtime={"default_emitter": "sqlite"})
+    db = tmp_path / "runs.db"
+    spec = _gen_spec(monkeypatch)
+    _seed_history(db, "okfull", 5)   # 5 rows >= 4 ticks run
+    fake = FakeRun(stdout=_ok_stdout_steps(4))
+    monkeypatch.setattr(cs.subprocess, "run", fake)
+
+    resp, code = cs.run_composite_subprocess(
+        ws, **_run_kwargs(ws, db, spec_id=spec, run_id="okfull", steps=4))
+    assert code == 200, resp
+    assert _status_of(db, "okfull") == "completed"
+
+
+def test_no_sqlite_history_run_stays_completed(tmp_path, monkeypatch):
+    """A run that leaves no sqlite ``history`` table (e.g. a zarr/parquet run)
+    is NOT flagged — the guard can't distinguish "no sqlite history" from "died
+    before the first emit", so it skips rather than false-positive."""
+    ws = _make_ws(tmp_path, runtime={"default_emitter": "sqlite"})
+    db = tmp_path / "runs.db"
+    spec = _gen_spec(monkeypatch)
+    fake = FakeRun(stdout=_ok_stdout_steps(100))   # no history table seeded
+    monkeypatch.setattr(cs.subprocess, "run", fake)
+
+    resp, code = cs.run_composite_subprocess(
+        ws, **_run_kwargs(ws, db, spec_id=spec, run_id="nohist", steps=100))
+    assert code == 200, resp
+    assert _status_of(db, "nohist") == "completed"
+
+
 def test_run_unparseable_output_returns_502(tmp_path, monkeypatch):
     ws = _make_ws(tmp_path)
     db = tmp_path / "runs.db"
