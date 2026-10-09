@@ -2382,13 +2382,15 @@ textarea.sr-input {
    originals stay the default (1) and a saved view / headless render keeps the
    chosen size. */
 .loom-canvas { --loom-fs: 1; }
-/* process titles (base + per-tier) */
-.process-node-title { font-size: calc(25px * var(--loom-fs, 1)); }
-.process-node-glyph  .process-node-title { font-size: calc(38px * var(--loom-fs, 1)); }
-.process-node-ports  .process-node-title { font-size: calc(31px * var(--loom-fs, 1)); }
-.process-node-types  .process-node-title { font-size: calc(28px * var(--loom-fs, 1)); }
-.process-node-config .process-node-title { font-size: calc(25px * var(--loom-fs, 1)); }
-.process-node-noports .process-node-title { font-size: calc(28px * var(--loom-fs, 1)) !important; }
+/* process titles (base + per-tier). Bases trimmed (was 25/38/31) so a process
+   title no longer balloons away from the store/port labels as --loom-fs grows —
+   the spread between the largest and smallest text is narrowed at the source. */
+.process-node-title { font-size: calc(22px * var(--loom-fs, 1)); }
+.process-node-glyph  .process-node-title { font-size: calc(32px * var(--loom-fs, 1)); }
+.process-node-ports  .process-node-title { font-size: calc(28px * var(--loom-fs, 1)); }
+.process-node-types  .process-node-title { font-size: calc(26px * var(--loom-fs, 1)); }
+.process-node-config .process-node-title { font-size: calc(24px * var(--loom-fs, 1)); }
+.process-node-noports .process-node-title { font-size: calc(26px * var(--loom-fs, 1)) !important; }
 /* process meta / port labels / prose / equations */
 .process-node-meta { font-size: calc(17px * var(--loom-fs, 1)); }
 .process-node-config .process-node-meta { font-size: calc(26px * var(--loom-fs, 1)); }
@@ -2396,12 +2398,17 @@ textarea.sr-input {
 .port-in-type { font-size: calc(15px * var(--loom-fs, 1)); }
 .process-node-config .port-in-name { font-size: calc(24px * var(--loom-fs, 1)); }
 .process-node-config .port-in-type { font-size: calc(17px * var(--loom-fs, 1)); }
+/* hierarchy-mode port chips (hang off the node edges) — these were a flat 14px
+   with NO --loom-fs multiplier, so they ignored the Text size control entirely.
+   Base lifted 14->16 and now scales with everything else. */
+.port-label-name { font-size: calc(16px * var(--loom-fs, 1)); }
 .contract-recital { font-size: calc(18px * var(--loom-fs, 1)); }
 .process-node-description { font-size: calc(15px * var(--loom-fs, 1)); }
 .process-node-symbols { font-size: calc(15px * var(--loom-fs, 1)); }
 .process-node-math .katex { font-size: calc(1.7em * var(--loom-fs, 1)); }
-/* store labels / values / types (base + per-tier) */
-.store-label { font-size: calc(15px * var(--loom-fs, 1)); }
+/* store labels / values / types (base + per-tier). Base lifted 15->18 to sit
+   closer to the (trimmed) process-title base so the two track together. */
+.store-label { font-size: calc(18px * var(--loom-fs, 1)); }
 .store-node-value { font-size: calc(10px * var(--loom-fs, 1)); }
 .store-node-type  { font-size: calc(12px * var(--loom-fs, 1)); }
 .store-node-ports .store-label { font-size: calc(30px * var(--loom-fs, 1)); }
