@@ -2171,10 +2171,26 @@ def _run_study(params: dict) -> dict:
                 #     {"error": "run failed", "status": 502}
                 # and nothing else -- the traceback was three feet away in the
                 # response dict, under a key nobody read.
-                for key in ("traceback", "stderr", "stdout"):
+                #
+                # This list names EVERY diagnostic key the producer
+                # (composite_subprocess) ships on a 4xx/5xx — stderr/stdout/
+                # traceback plus the truncation-guard trio detail/
+                # recorded_steps/expected_steps and the partial results dict
+                # (#1275). test_launch_carries_stderr parses the producer's own
+                # failure-return keys and fails the moment one is dropped here,
+                # so a new diagnostic added on the producing side is a failing
+                # test on the consuming side rather than a silent drop.
+                #
+                # String diagnostics (tracebacks, logs) are tail-bounded so a
+                # multi-megabyte log can't be carried in a JSONB task record;
+                # scalar/structured diagnostics (step counts, the partial
+                # results dict) are small and pass through unchanged.
+                _diag_keys = ("traceback", "stderr", "stdout", "detail", "recorded_steps", "expected_steps", "results")  # noqa: E501
+                for key in _diag_keys:
                     text = resp.get(key)
                     if text:
-                        entry[key] = str(text)[-_LAUNCH_OUTPUT_TAIL:]
+                        entry[key] = (str(text)[-_LAUNCH_OUTPUT_TAIL:]
+                                      if isinstance(text, str) else text)
             result["errors"].append(entry)
         if run_id:
             run_ids.append(run_id)
