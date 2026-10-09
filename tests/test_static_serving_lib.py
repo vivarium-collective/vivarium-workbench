@@ -96,6 +96,28 @@ def test_resolve_loom_asset_traversal_rejected(monkeypatch):
         ss.resolve_loom_asset("../secret")
 
 
+def test_loom_bundle_present_true_when_index_exists(monkeypatch, tmp_path):
+    (tmp_path / "index.html").write_text("<html></html>")
+    monkeypatch.setattr("vivarium_workbench.loom_assets.asset_dir", lambda: tmp_path, raising=False)
+    assert ss.loom_bundle_present() is True
+
+
+def test_loom_bundle_present_false_when_dir_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "vivarium_workbench.loom_assets.asset_dir", lambda: tmp_path / "gone", raising=False
+    )
+    assert ss.loom_bundle_present() is False
+
+
+def test_loom_bundle_missing_html_names_cause_and_path(monkeypatch):
+    fake_dir = Path("/tmp/loom-assets-xyz")
+    monkeypatch.setattr("vivarium_workbench.loom_assets.asset_dir", lambda: fake_dir, raising=False)
+    html = ss.loom_bundle_missing_html()
+    assert "<html" in html.lower()
+    assert str(fake_dir) in html          # points at the expected location
+    assert "missing" in html.lower()      # states the cause plainly
+
+
 def test_resolve_parsimony_asset_none_when_no_dir(monkeypatch):
     monkeypatch.setattr(ss, "parsimony_viewer_dir", lambda: None)
     assert ss.resolve_parsimony_asset("") is None

@@ -4192,6 +4192,18 @@ def create_app() -> FastAPI:
         except _static_serving.AssetTraversal:
             return Response(status_code=403)
         name = rel or "index.html"
+        # Missing loom bundle (deleted/moved editable source under a long-lived
+        # server, or a build that never vendored _dist): the HTML entry would
+        # otherwise 404 with an empty body, leaving the composite-card embed a
+        # blank iframe pane. Serve a visible, actionable error page IN the iframe
+        # instead (503 — the body still renders in a frame). Asset requests
+        # (.js/.css) keep the bare 404.
+        if name.endswith(".html") and not target.is_file():
+            return Response(
+                content=_static_serving.loom_bundle_missing_html(),
+                status_code=503,
+                headers={"Content-Type": "text/html", "Cache-Control": "no-store"},
+            )
         # root_path is set only when the middleware STRIPPED the prefix. The ALB
         # also routes /bigraph-loom/* here UNPREFIXED (no root_path), so fall back
         # to the prefix the server was configured with.
