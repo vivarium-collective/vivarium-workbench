@@ -14,6 +14,21 @@ def test_check_returns_a_finding_per_probe():
         assert set(f) >= {"ok", "target", "why", "detail", "fix"}
 
 
+def test_includes_loom_bundle_finding():
+    findings = dep_doctor.check_framework_deps()
+    assert any(f["target"] == "bigraph-loom bundle" for f in findings)
+
+
+def test_loom_bundle_flagged_when_missing(monkeypatch):
+    gone = __import__("pathlib").Path("/definitely/not/here/_dist")
+    monkeypatch.setattr("vivarium_workbench.loom_assets.asset_dir", lambda: gone, raising=False)
+    findings = dep_doctor.check_framework_deps()                  # must not raise
+    loom = next(f for f in findings if f["target"] == "bigraph-loom bundle")
+    assert loom["ok"] is False
+    assert loom["fix"]                                            # actionable fix text
+    assert any("bigraph-loom bundle" in ln for ln in dep_doctor.warn_lines(findings))
+
+
 def test_never_raises_and_flags_a_missing_module(monkeypatch):
     real_import = importlib.import_module
 

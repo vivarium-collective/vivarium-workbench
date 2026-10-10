@@ -78,27 +78,13 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # opaquely — the server subprocess crashes on boot, or the Assurance
     # Audit/Build tabs render blank "unavailable" — with no hint the fix is a
     # dependency refresh. Best-effort: never blocks or raises.
+    # dep_doctor now includes the bigraph-loom bundle check, so a missing loom
+    # bundle surfaces here too (one source of truth for both `doctor` and the
+    # startup warnings).
     try:
         from vivarium_workbench.lib import dep_doctor
         for _w in dep_doctor.warn_lines():
             logging.getLogger("vivarium_workbench").warning(_w)
-    except Exception:  # noqa: BLE001
-        pass
-
-    # Surface a missing bigraph-loom bundle at startup. When the vendored
-    # loom/_dist is absent (e.g. the server was launched from an editable source
-    # that was later moved/deleted — a worktree removed out from under it), every
-    # composite-card graph view silently renders a blank iframe. Warn loudly so
-    # the operator sees the cause in the log, not just an unexplained blank pane.
-    try:
-        from vivarium_workbench.lib import static_serving as _ss
-        if not _ss.loom_bundle_present():
-            from vivarium_workbench.loom_assets import asset_dir
-            logging.getLogger("vivarium_workbench").warning(
-                "bigraph-loom bundle missing at %s — composite graph views will "
-                "not render. Reinstall vivarium-workbench and restart the server "
-                "from a live checkout.", asset_dir(),
-            )
     except Exception:  # noqa: BLE001
         pass
 

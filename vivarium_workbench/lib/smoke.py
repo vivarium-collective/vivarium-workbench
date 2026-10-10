@@ -33,6 +33,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -233,6 +234,31 @@ def _free_port() -> int:
     return port
 
 
+def _check_loom_endpoint(base: str) -> tuple[bool, str]:
+    """The ``/bigraph-loom/index.html`` contract: 200 (bundle built) or a guarded
+    503 error page (bundle absent) — never a blank/empty 404 or a 500. Returns
+    ``(ok, detail)``; the detail records which arm held so a 503-in-CI (no loom
+    build) reads as expected degradation, not a failure."""
+    url = base + "/bigraph-loom/index.html"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            body = r.read(4096)
+            if r.status == 200 and body:
+                return True, "loom bundle served (200)"
+            return False, f"GET /bigraph-loom/index.html -> {r.status}, {len(body)}b"
+    except urllib.error.HTTPError as e:
+        body = b""
+        try:
+            body = e.read(4096)
+        except Exception:  # noqa: BLE001
+            pass
+        if e.code == 503 and b"bigraph-loom" in body:
+            return True, "loom bundle absent — guarded 503 page (expected without a loom build)"
+        return False, f"GET /bigraph-loom/index.html -> {e.code} (not the guarded 503 page)"
+    except Exception as e:  # noqa: BLE001
+        return False, f"loom probe {type(e).__name__}: {e}"
+
+
 def _check_server(ws: Path, timeout_s: float = 45.0) -> tuple[bool, str]:
     """``serve`` boots and answers ``/health`` and ``/`` (then is torn down)."""
     port = _free_port()
@@ -260,7 +286,14 @@ def _check_server(ws: Path, timeout_s: float = 45.0) -> tuple[bool, str]:
         with urllib.request.urlopen(base + "/", timeout=10) as r:
             if r.status != 200:
                 return False, f"GET / -> {r.status}"
-        return True, f"/health + / OK on :{port}"
+        # The bigraph-loom embed contract: the endpoint the composite-card graph
+        # view iframes must NEVER silently blank. Either the bundle is built and
+        # serves 200, or it is absent and serves the guarded 503 error page — any
+        # other outcome (empty 404, 500) is the blank-pane regression we guard.
+        loom_ok, loom_detail = _check_loom_endpoint(base)
+        if not loom_ok:
+            return False, loom_detail
+        return True, f"/health + / + loom OK on :{port} ({loom_detail})"
     except Exception as e:  # noqa: BLE001
         return False, f"{type(e).__name__}: {e}"
     finally:
