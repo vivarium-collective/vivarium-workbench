@@ -92,6 +92,30 @@ def _check_version_floors() -> list[dict[str, Any]]:
     return out
 
 
+def _check_loom_bundle() -> dict[str, Any]:
+    """Finding for the vendored bigraph-loom bundle (``loom/_dist/index.html``).
+
+    Missing means ``/bigraph-loom/*`` 404s and every composite-card graph view
+    renders blank (the symptom that cost real debugging time: a long-lived server
+    launched from an editable install whose source dir was later moved/deleted).
+    Never raises."""
+    why = "the bigraph-loom viewer bundle every composite graph view embeds"
+    fix = ("the loom bundle is missing — composite graph views will not render. "
+           "Reinstall vivarium-workbench and restart the server from a live checkout "
+           "(a built wheel always ships it; an editable install needs loom/_dist built).")
+    try:
+        from vivarium_workbench.lib import static_serving as _ss
+        from vivarium_workbench.loom_assets import asset_dir
+        if _ss.loom_bundle_present():
+            return {"ok": True, "target": "bigraph-loom bundle", "why": why,
+                    "detail": f"present at {asset_dir()}", "fix": ""}
+        return {"ok": False, "target": "bigraph-loom bundle", "why": why,
+                "detail": f"missing at {asset_dir()}", "fix": fix}
+    except Exception as e:  # noqa: BLE001 — a probe failure is a finding, not a crash
+        return {"ok": False, "target": "bigraph-loom bundle", "why": why,
+                "detail": f"{type(e).__name__}: {e}", "fix": fix}
+
+
 def check_framework_deps() -> list[dict[str, Any]]:
     """Probe the framework deps. Returns one finding dict per probe:
     ``{ok: bool, target: str, why: str, detail: str, fix: str}``. Never raises."""
@@ -104,6 +128,7 @@ def check_framework_deps() -> list[dict[str, Any]]:
             out.append({"ok": False, "target": target, "why": why,
                         "detail": f"{type(e).__name__}: {e}", "fix": fix})
     out.extend(_check_version_floors())
+    out.append(_check_loom_bundle())
     return out
 
 

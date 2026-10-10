@@ -3131,6 +3131,22 @@ class TestStaticRoutes:
         assert r.headers["cache-control"] == "no-store"
         assert r.text == "<loom/>"
 
+    def test_bigraph_loom_missing_bundle_serves_guard_page(self, client, tmp_path, monkeypatch):
+        # When the vendored _dist is absent (e.g. the server was launched from an
+        # editable install whose source dir was later moved/deleted), the HTML
+        # entry must serve a VISIBLE guarded error page (503) rather than an empty
+        # 404 that leaves the composite-card graph view a blank iframe pane.
+        gone = tmp_path / "loom-gone" / "_dist"
+        monkeypatch.setattr("vivarium_workbench.loom_assets.asset_dir", lambda: gone, raising=False)
+        r = client.get("/bigraph-loom/index.html")
+        assert r.status_code == 503
+        assert r.headers["content-type"] == "text/html"
+        assert "bigraph-loom" in r.text          # the guard marker the smoke check keys on
+        assert "missing" in r.text.lower()       # states the cause
+        assert str(gone) in r.text               # names the expected location
+        # A missing *asset* (not the HTML entry) still 404s — only the entry is guarded.
+        assert client.get("/bigraph-loom/assets/index.js").status_code == 404
+
     def test_parsimony_404_when_no_dir(self, client, monkeypatch):
         monkeypatch.setattr(api_app._static_serving, "parsimony_viewer_dir", lambda: None)
         r = client.get("/parsimony-viewer/")
