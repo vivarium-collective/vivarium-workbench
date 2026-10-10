@@ -23,7 +23,14 @@ assert.strictEqual(_contractBadge(undefined), '');
 const count = (n) => src.split(n).length - 1;
 assert.ok(src.includes("_compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + '</div>'"), 'grid head');
 assert.ok(src.includes("_compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + roPill"), 'full header');
-assert.ok(src.includes("c.contract_audit ? _pcardSection('contract', 'Contract', _contractBadge(c.contract_audit), _contractPanelBody(c.contract_audit)) : ''"), 'accordion guarded');
-assert.strictEqual(count('_contractBadge(c.contract_audit)'), 3);
+// The contract now lives behind a header "§ Contract" button that lazy-fetches
+// the real composite audit into a panel — not an always-open accordion section.
+assert.ok(!src.includes("_pcardSection('contract'"), 'no contract accordion section');
+assert.ok(src.includes("c.contract_audit ? _compositeContractBtn()"), 'contract button wired in header');
+assert.ok(src.includes('data-role="composite-contract"'), 'contract panel present');
+assert.ok(typeof sandbox.window._compositeContractBtn === 'function', '_compositeContractBtn exported');
+assert.ok(typeof sandbox.window._compositeContractPanelBody === 'function', '_compositeContractPanelBody exported');
+// Two badges remain (grid card, full header); the accordion's was removed.
+assert.strictEqual(count('_contractBadge(c.contract_audit)'), 2);
 
 console.log('test_composite_card_contract OK');

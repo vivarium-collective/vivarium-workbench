@@ -2618,6 +2618,58 @@
     });
   }
   window._toggleCompositeJson = _toggleCompositeJson;
+  // Contract-audit panel toggle — mirrors _toggleCompositeJson. The REAL
+  // composite audit is expensive (it builds the composite's core), so it's
+  // fetched lazily on first open from /api/composite-contract-audit and the
+  // header badge is back-patched with the real status once it lands.
+  function _toggleCompositeContract(btn) {
+    var card = btn.closest('.registry-entry-full'); if (!card) return;
+    var panel = card.querySelector('[data-role="composite-contract"]'); if (!panel) return;
+    var show = panel.hidden;
+    panel.hidden = !show;
+    btn.classList.toggle('active', show);
+    if (!show || panel._loaded) return;
+    panel._loaded = true;
+    var id = card.getAttribute('data-address');
+    var body = panel.querySelector('.pcard-contract-body');
+    if (body) body.innerHTML = '<span class="muted" style="font-size:0.85em">Auditing composite contracts… (building the core)</span>';
+    fetch('/api/composite-contract-audit?id=' + encodeURIComponent(id))
+      .then(function (r) { return r.json(); })
+      .then(function (a) {
+        if (body) {
+          body.innerHTML = (typeof _compositeContractPanelBody === 'function')
+            ? _compositeContractPanelBody(a)
+            : '<pre>' + _esc(JSON.stringify(a, null, 2)) + '</pre>';
+        }
+        panel._audit = a;
+        // Back-patch the header badge so the at-a-glance status is now real,
+        // not the coreless "contract n/a" stub.
+        try {
+          var badge = card.querySelector('.contract-badge');
+          if (badge && a && a.status && typeof _contractBadge === 'function') {
+            var tmp = document.createElement('div');
+            tmp.innerHTML = _contractBadge(a);
+            if (tmp.firstChild) badge.replaceWith(tmp.firstChild);
+          }
+        } catch (e) { /* badge back-patch is best-effort */ }
+      })
+      .catch(function (e) {
+        if (body) body.innerHTML = '<span class="loom-run-err">Audit failed: ' + _esc(String(e)) + '</span>';
+        panel._loaded = false;
+      });
+  }
+  window._toggleCompositeContract = _toggleCompositeContract;
+  // Process-card contract toggle — the per-process audit is already inline on
+  // the card (pre-rendered into the panel), so this just reveals it. No fetch,
+  // no badge back-patch (the header badge is already the real status).
+  function _toggleProcessContract(btn) {
+    var card = btn.closest('.registry-entry-full'); if (!card) return;
+    var panel = card.querySelector('[data-role="process-contract"]'); if (!panel) return;
+    var show = panel.hidden;
+    panel.hidden = !show;
+    btn.classList.toggle('active', show);
+  }
+  window._toggleProcessContract = _toggleProcessContract;
   function _copyCompositeJson(btn) {
     var panel = btn.closest('[data-role="composite-json"]');
     var pre = panel && panel.querySelector('.pcard-json-raw');
@@ -2807,6 +2859,7 @@
             '<span class="loom-name">' + _esc(p.name) + '</span>' + kindBadge + _regUseBadge(p) + _contractBadge(p.contract_audit) +
             '<code class="loom-addr">' + _esc(p.address || kind) + '</code>' +
             (/^(process|step)$/.test(kind) ? _processCodeBtn(p.address) : '') +
+            (p.contract_audit ? _processContractBtn() : '') +
             _cardPopoutBtn(p.address || kind, kind) +
           '</div>' +
           '<div class="pcard-summary">' +
@@ -2816,13 +2869,20 @@
               (desc ? '<p class="loom-desc pcard-desc-clamp" onclick="_pcardToggleDesc(this)" title="Click to expand / collapse">' + _esc(desc) + '</p>' : '') +
             '</div>' +
           '</div>' +
+          // Contract-audit panel — hidden until the header "§ Contract" button
+          // toggles it (mirrors the composite card). The per-process audit is
+          // already inline on the card, so it's pre-rendered here, not fetched.
+          (p.contract_audit
+            ? '<div class="pcard-json-view pcard-contract-view" data-role="process-contract" hidden>' +
+                '<div class="pcard-contract-body">' + _contractPanelBody(p.contract_audit) + '</div>' +
+              '</div>'
+            : '') +
         '</div>' +
         '<div class="pcard-acc">' +
           section('configure', 'Configure', '<span class="pcard-sec-count">' + nCfg + '</span><span class="pcard-config-chips" data-role="config-chips" hidden></span>', configBody, { resizable: true }) +
           section('inputs', 'Inputs', '<span class="pcard-sec-count">' + nIn + '</span>', inputsBody, { resizable: true }) +
           runBar +
           section('outputs', 'Outputs', '<span class="pcard-sec-count">' + nOut + '</span>', outputsBody, dlBtn ? { headExtra: dlBtn } : {}) +
-          (p.contract_audit ? section('contract', 'Contract', _contractBadge(p.contract_audit), _contractPanelBody(p.contract_audit)) : '') +
         '</div>' +
       '</div>' +
     '</div>';

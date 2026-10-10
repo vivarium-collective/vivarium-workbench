@@ -223,3 +223,40 @@ def test_status_endpoint_404s_for_unknown_run(server):
     base = server["url"]
     status, _ = _get_raw(f"{base}/api/composite-run/no-such-run/status")
     assert status == 404
+
+
+@pytest.mark.timeout(240)
+def test_composite_contract_audit_endpoint_wellformed(server):
+    """GET /api/composite-contract-audit returns a well-formed roll-up for a real
+    composite (status in the enum; wiring block present) and degrades cleanly for
+    an unknown id — never 500s.
+
+    The valid-id path builds the composite's core in a cold env-worker, which can
+    take a while on a loaded CI box (the audit *logic* is covered deterministically
+    by tests/test_composite_audit.py); it gets a generous timeout and skips rather
+    than fails if a cold build is pathologically slow. The unknown-id degrade path
+    builds no core, so it stays a hard assertion."""
+    import urllib.error
+    base = server["url"]
+    spec_id = "pbg_ws_increase_demo.composites.increase-demo"
+    url = f"{base}/api/composite-contract-audit?id={spec_id}"
+    try:
+        with urllib.request.urlopen(url, timeout=180) as r:
+            status, body = r.status, json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:  # a real 5xx must fail, not skip
+        status, body = e.code, json.loads(e.read().decode())
+    except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+        pytest.skip(f"cold composite-core build too slow for this runner: {e!r}")
+    assert status == 200, body
+    assert body.get("status") in (
+        "pass", "fail", "incomplete", "not-declared", "unavailable", "error"), body
+    if body["status"] not in ("unavailable", "error"):
+        assert isinstance(body.get("processes"), list)
+        assert "wiring" in body and body["wiring"]["status"] in ("pass", "warn", "fail")
+
+    # Unknown id degrades, not 500 (no core build — always fast).
+    status, body = _get_raw(
+        f"{base}/api/composite-contract-audit?id=pbg_ws_increase_demo.composites.nope")
+    assert status == 200
+    assert body.get("status") == "unavailable"
+    assert body.get("notice")

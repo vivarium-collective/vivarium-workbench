@@ -1785,6 +1785,40 @@ def create_app() -> FastAPI:
                 _degraded_result(id, e, kind=kind)
             )
 
+    @app.get(
+        "/api/composite-contract-audit",
+        tags=["Composites"],
+        summary="Real composite-level contract audit (per-process roll-up + wiring)",
+    )
+    def composite_contract_audit(
+        id: str,
+        overrides: str = "{}",
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Audit a composite's contracts for real (not the coreless
+        ``{"status":"unavailable"}`` stub the Composites list carries).
+
+        Runs in the warm env-worker — which builds the composite's core + a live
+        ``Composite`` — and rolls up: Phase 1 the per-process contract audit of
+        every process the composite instantiates, Phase 2 a wiring/interface
+        audit (do processes sharing a store agree on its type + units). Returns
+        ``{status, grade, n_processes, processes:[...], wiring:{status,findings}}``.
+        Lazy / on-demand (the card's "§ Contract" panel calls it on open), so the
+        fast Composites-tab list never pays the per-composite core build. A build
+        failure or unknown id degrades to ``{"status":"unavailable","notice":…}``;
+        never 500s."""
+        try:
+            ov = json.loads(overrides) if overrides else {}
+        except (json.JSONDecodeError, TypeError):
+            ov = {}
+        if not isinstance(ov, dict):
+            ov = {}
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        try:
+            return get_pool().call(ws, "composite_contract_audit", {"ref": id, "overrides": ov})
+        except Exception as e:  # noqa: BLE001
+            return {"id": id, "status": "unavailable", "notice": f"audit worker error: {e}"}
+
     @app.post(
         "/api/composite-config-translate",
         tags=["Composites"],
