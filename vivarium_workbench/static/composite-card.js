@@ -85,7 +85,26 @@
     var esc = _esc;
     var rows = [];
     rows.push('<div class="contract-status-line">Status: <b>' + esc(ca.status) + '</b>' +
-      (typeof ca.grade === 'number' ? ' · ' + Math.round(ca.grade * 100) + '% declared' : '') + '</div>');
+      (typeof ca.grade === 'number' ? ' · completeness ' + Math.round(ca.grade * 100) + '%' : '') + '</div>');
+    // Explain the grade: typed ports (75%) + declared predicate conditions (25%),
+    // with the concrete pieces still missing. Mirrors the composite panel.
+    var c = ca.completeness;
+    if (c) {
+      rows.push('<div class="contract-sub muted">completeness = typed ports (75%) + declared predicate conditions (25%)</div>');
+      var parts = [];
+      if (typeof c.ports_total === 'number') {
+        var ok = c.ports_total && c.ports_typed === c.ports_total;
+        parts.push('<span class="cmpl-part ' + (ok ? 'is-ok' : 'is-gap') + '">ports ' +
+          c.ports_typed + '/' + c.ports_total + ' typed</span>');
+      }
+      parts.push('<span class="cmpl-part ' + (c.has_predicates ? 'is-ok' : 'is-gap') + '">predicates ' +
+        (c.n_predicates || 0) + '</span>');
+      rows.push('<div class="contract-cmpl">' + parts.join(' · ') + '</div>');
+      if ((c.missing || []).length) {
+        rows.push('<div class="contract-cmpl-missing">to reach 100%: ' +
+          c.missing.map(function (m) { return esc(m); }).join('; ') + '</div>');
+      }
+    }
     function portRows(side, ports) {
       var ks = Object.keys(ports || {});
       if (!ks.length) return '';
@@ -105,9 +124,12 @@
             ': <code>' + esc(c.expr || '') + '</code></div>';
         }).join('') + '</div>');
     }
-    if ((ca.findings || []).length) {
+    // Drop the library's own "completeness grade" info finding — the breakdown
+    // above already shows it, more usefully.
+    var findings = (ca.findings || []).filter(function (f) { return f.code !== 'completeness'; });
+    if (findings.length) {
       rows.push('<div class="contract-findings"><div class="contract-sub">findings</div>' +
-        ca.findings.map(function (f) {
+        findings.map(function (f) {
           return '<div class="contract-finding is-' + esc(f.severity) + '">' +
             esc(f.severity) + ' <code>' + esc(f.code) + '</code> ' + esc(f.where || '') + ' — ' + esc(f.message || '') + '</div>';
         }).join('') + '</div>');
@@ -115,8 +137,85 @@
     return rows.filter(Boolean).join('');
   }
 
+  // Render the REAL composite audit (from /api/composite-contract-audit):
+  // overall status, the Phase-2 wiring findings, then a per-process roll-up.
+  // Shape: {status, grade, n_processes, processes:[{name,status,grade,findings}],
+  //         wiring:{status, findings:[{severity,code,where,message}]}, notice?}.
+  function _compositeContractPanelBody(a) {
+    if (!a || !a.status) return '<div class="contract-status-line muted">No audit data.</div>';
+    var esc = _esc;
+    function findingRows(fs) {
+      return (fs || []).map(function (f) {
+        return '<div class="contract-finding is-' + esc(f.severity) + '">' +
+          esc(f.severity) + ' <code>' + esc(f.code || '') + '</code> ' +
+          esc(f.where || '') + ' — ' + esc(f.message || '') + '</div>';
+      }).join('');
+    }
+    // Per-process completeness is 75% typed ports + 25% declared predicates;
+    // render it as that arithmetic so the grade is self-explaining, and drop the
+    // library's own "completeness grade" info finding (we show it better here).
+    function completenessLine(c) {
+      if (!c) return '';
+      var parts = [];
+      if (typeof c.ports_total === 'number') {
+        var ok = c.ports_total && c.ports_typed === c.ports_total;
+        parts.push('<span class="cmpl-part ' + (ok ? 'is-ok' : 'is-gap') + '">ports ' +
+          c.ports_typed + '/' + c.ports_total + ' typed</span>');
+      }
+      parts.push('<span class="cmpl-part ' + (c.has_predicates ? 'is-ok' : 'is-gap') + '">predicates ' +
+        (c.n_predicates || 0) + '</span>');
+      var line = '<div class="contract-cmpl">' + parts.join(' · ') + '</div>';
+      if ((c.missing || []).length) {
+        line += '<div class="contract-cmpl-missing">to reach 100%: ' +
+          c.missing.map(function (m) { return esc(m); }).join('; ') + '</div>';
+      }
+      return line;
+    }
+    function nonCompletenessFindings(fs) {
+      return (fs || []).filter(function (f) { return f.code !== 'completeness'; });
+    }
+    var rows = [];
+    rows.push('<div class="contract-status-line">Status: <b>' + esc(a.status) + '</b>' +
+      (typeof a.grade === 'number' ? ' · completeness ' + Math.round(a.grade * 100) + '%' : '') +
+      (typeof a.n_processes === 'number' ? ' · ' + a.n_processes + ' process' + (a.n_processes === 1 ? '' : 'es') : '') +
+      '</div>');
+    rows.push('<div class="contract-sub muted">completeness = typed ports (75%) + declared predicate conditions (25%)</div>');
+    if (a.notice) rows.push('<div class="contract-sub muted">' + esc(a.notice) + '</div>');
+    // Composite-level "to improve" — the concrete, deduplicated actions.
+    if ((a.improve || []).length) {
+      rows.push('<div class="contract-improve"><div class="contract-sub">to improve</div>' +
+        a.improve.map(function (it) {
+          return '<div class="contract-improve-item">▸ ' + esc(it.action) +
+            ' <span class="muted">(' + it.n_processes + ' process' + (it.n_processes === 1 ? '' : 'es') + ')</span></div>';
+        }).join('') + '</div>');
+    }
+    // Phase 2 — wiring / interface
+    var w = a.wiring || {};
+    var wf = w.findings || [];
+    rows.push('<div class="contract-ports"><div class="contract-sub">wiring: <b>' +
+      esc(w.status || 'n/a') + '</b></div>' +
+      (wf.length ? findingRows(wf)
+                 : '<div class="contract-port muted">all shared stores type-consistent</div>') +
+      '</div>');
+    // Phase 1 — per-process roll-up
+    if ((a.processes || []).length) {
+      rows.push('<div class="contract-findings"><div class="contract-sub">processes</div>' +
+        a.processes.map(function (p) {
+          var extra = nonCompletenessFindings(p.findings);
+          return '<div class="contract-proc is-' + esc(p.status) + '">' +
+            '<code>' + esc(p.name) + '</code> <b>' + esc(p.status) + '</b>' +
+            (typeof p.grade === 'number' ? ' · ' + Math.round(p.grade * 100) + '%' : '') +
+            completenessLine(p.completeness) +
+            (extra.length ? findingRows(extra) : '') +
+            '</div>';
+        }).join('') + '</div>');
+    }
+    return rows.filter(Boolean).join('');
+  }
+
   window._contractBadge = _contractBadge;
   window._contractPanelBody = _contractPanelBody;
+  window._compositeContractPanelBody = _compositeContractPanelBody;
 
   // TIER of a figure composite — draft interface / executable compilation / live
   // topology rewrite — inferred from its display name (see the meta-modelers
@@ -311,6 +410,17 @@
   }
   window._compositeJsonBtn = _compositeJsonBtn;
 
+  // "§ Contract" — reveal the contract-audit panel (status/ports/conditions/
+  // findings) in a hidden inline view, toggled from the header exactly like the
+  // JSON button. Replaces the always-open accordion section. Rendered only when
+  // the card carries a contract_audit; the small header badge still shows the
+  // status at a glance. Inert where _toggleCompositeContract isn't defined.
+  function _compositeContractBtn() {
+    return '<button class="pcard-json-btn pcard-contract-btn" type="button" title="View this composite\'s contract audit" ' +
+      'onclick="event.stopPropagation();_toggleCompositeContract(this)">§ Contract</button>';
+  }
+  window._compositeContractBtn = _compositeContractBtn;
+
   // "</> Code" — open the code rail for this card. Header-styled variant, used by
   // the full cards; the grid/table views inline their own smaller buttons.
   function _compositeCodeBtn(id) {
@@ -324,6 +434,17 @@
       'onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + _esc(address) + '\')">&lt;/&gt; Code</button>';
   }
   window._processCodeBtn = _processCodeBtn;
+
+  // "§ Contract" — reveal the process's contract-audit panel from the header,
+  // exactly like the composite card's § Contract button, replacing the always-
+  // open CONTRACT accordion section. The per-process audit is already inline on
+  // the card (p.contract_audit), so the toggle just shows a pre-rendered panel —
+  // no fetch. Inert where _toggleProcessContract isn't defined.
+  function _processContractBtn() {
+    return '<button class="pcard-json-btn pcard-contract-btn" type="button" title="View this process\'s contract audit" ' +
+      'onclick="event.stopPropagation();_toggleProcessContract(this)">§ Contract</button>';
+  }
+  window._processContractBtn = _processContractBtn;
 
   // "🔗 Share" — copy a shareable link to this composite's interactive
   // bigraph view. The onclick references _shareCompositeFromHeader
@@ -1058,6 +1179,7 @@
             '<button class="pcard-hdr-collapse" type="button" onclick="event.stopPropagation();_toggleCardHeader(this)" title="Collapse this bar to maximize the view">⌃</button>' +
             _shareCompositeBtn() +
             _compositeJsonBtn() +
+            (c.contract_audit ? _compositeContractBtn() : '') +
             _compositeCodeBtn(c.id) +
             _cardMaximizeBtn() +
             _cardPopoutBtn(c.id, 'composite') +
@@ -1078,6 +1200,17 @@
           '<div class="pcard-json-view" data-role="composite-json" hidden>' +
             '<div class="pcard-json-body"></div>' +
           '</div>' +
+          // Contract-audit panel — hidden until the header "§ Contract" button
+          // toggles it (mirrors the JSON view). The REAL composite audit (a
+          // per-process roll-up + wiring check) is expensive — it builds the
+          // composite's core — so it's fetched lazily on first open from
+          // /api/composite-contract-audit, not baked into the card. The card's
+          // own c.contract_audit is the coreless stub ("unavailable").
+          (c.contract_audit
+            ? '<div class="pcard-json-view pcard-contract-view" data-role="composite-contract" hidden>' +
+                '<div class="pcard-contract-body"></div>' +
+              '</div>'
+            : '') +
         '</div>' +
         '<div class="pcard-acc">' +
           // Card-owned Cloud-run status chip. When a Run dispatches to the Cloud
@@ -1110,8 +1243,8 @@
           // Run/Step · Outputs), lazy-mounted on first open. Graph collapsed at
           // first so run + outputs lead.
           _pcardSection('explore', 'Explore', '<span class="pcard-sec-hint">◆ Configure · run · outputs — click to open</span>', _compositeLoomExplore(c), { wide: true, feature: true }) +
-          // Composites carry {status:'unavailable'} today (4A deferred composite audit): neutral state until it lands.
-          (c.contract_audit ? _pcardSection('contract', 'Contract', _contractBadge(c.contract_audit), _contractPanelBody(c.contract_audit)) : '') +
+          // Contract audit now lives in a header-toggled panel (the "§ Contract"
+          // button + .pcard-contract-view above), not an always-open accordion.
         '</div>' +
       '</div>' +
     '</div>';

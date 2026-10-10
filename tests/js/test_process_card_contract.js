@@ -25,8 +25,14 @@ const count = (needle) => w.split(needle).length - 1;
 assert.ok(w.includes("kindBadge + _regUseBadge(p) + _contractBadge(p.contract_audit)"), 'full-card header');
 assert.ok(w.includes("defaultBadge + _regUseBadge(p) + _contractBadge(p.contract_audit)"), 'grid card head');
 assert.ok(w.includes("_procKindBadge(kind) + _regUseBadge(p) + _contractBadge(p.contract_audit)"), 'loom-body-head');
-assert.ok(w.includes("section('contract', 'Contract', _contractBadge(p.contract_audit), _contractPanelBody(p.contract_audit))"), 'accordion');
-assert.ok(w.includes("p.contract_audit ? section('contract'"), 'accordion guarded');
-assert.strictEqual(count('_contractBadge(p.contract_audit)'), 4);
+// The contract now lives behind a header "§ Contract" button that toggles a
+// pre-rendered panel — not an always-open accordion section.
+assert.ok(!w.includes("section('contract'"), 'no contract accordion section');
+assert.ok(w.includes("p.contract_audit ? _processContractBtn()"), 'contract button wired in header');
+assert.ok(w.includes('data-role="process-contract"'), 'contract panel present');
+assert.ok(w.includes("_contractPanelBody(p.contract_audit)"), 'panel renders the per-process audit');
+assert.ok(w.includes("function _toggleProcessContract"), 'toggle function defined');
+// Three badges remain (full card, grid card, loom body); the accordion's was removed.
+assert.strictEqual(count('_contractBadge(p.contract_audit)'), 3);
 
 console.log('test_process_card_contract OK');
