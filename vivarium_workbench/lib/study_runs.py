@@ -218,8 +218,7 @@ def _run_post_run_flush(ws_root, study_dir, spec, spec_id, run_id, full_params,
     if run_id:
         try:
             from pathlib import Path
-            from vivarium_workbench.lib.workspace_paths import WorkspacePaths
-            run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
+            from vivarium_workbench.lib.run_viz import write_run_viz
             viz_html: dict[str, str] = {}
             # 1. Static image visualizations, resolved from the study spec.
             for v in (spec.get("visualizations") or []):
@@ -264,10 +263,9 @@ def _run_post_run_flush(ws_root, study_dir, spec, spec_id, run_id, full_params,
                     continue
                 if "Failed to render" not in html:
                     viz_html[key] = html
-            if viz_html:
-                run_dir.mkdir(parents=True, exist_ok=True)
-                (run_dir / "viz.json").write_text(
-                    json.dumps(viz_html, default=str), encoding="utf-8")
+            # Single framework-aligned write path (shared with the canonical
+            # sims/run.py runners) — see lib/run_viz.write_run_viz.
+            write_run_viz(ws_root, run_id, viz_html)
         except Exception:  # noqa: BLE001 — artifact mirror is best-effort
             pass
     # post_run_scripts: study-yaml-declared scripts to invoke after the
