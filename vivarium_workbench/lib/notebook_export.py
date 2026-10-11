@@ -317,7 +317,135 @@ def _acceptance_md(study: dict) -> str:
             passif_s = " ".join(f"{k} {v}" for k, v in passif.items())
         else:
             passif_s = _truthy(passif)
-        lines.append(f"| {_truthy(t.get('name'))} | {measure_s} | {passif_s} |")
+        name = _truthy(t.get("name"))
+        cls = _truthy(t.get("classification"))
+        if cls:
+            name = f"{name} _({cls})_"
+        lines.append(f"| {name} | {measure_s} | {passif_s} |")
+    return "\n".join(lines)
+
+
+def _mechanisms_md(study: dict) -> str:
+    """Proposed mechanisms + models/methods (design intent), from study.yaml."""
+    mechs = study.get("proposed_mechanisms") or []
+    methods = study.get("proposed_models_methods") or []
+    if not mechs and not methods:
+        return ""
+    lines: list[str] = ["### Design"]
+    if mechs:
+        lines += ["", "**Proposed mechanisms**", ""]
+        for m in mechs:
+            lines.append(f"- {_truthy(m)}")
+    if methods:
+        lines += ["", "**Proposed models / methods**", ""]
+        for m in methods:
+            lines.append(f"- {_truthy(m)}")
+    assumptions = study.get("key_assumptions") or []
+    if assumptions:
+        lines += ["", "**Key assumptions**", ""]
+        for a in assumptions:
+            lines.append(f"- {_truthy(a)}")
+    return "\n".join(lines)
+
+
+def _contract_md(study: dict) -> str:
+    """Render the study's declared typed contract (``contract.face`` ports +
+    ``contract.conditions`` predicates) — the design-time interface a built
+    composite must satisfy. Pure markdown from study.yaml; present even when no
+    composite has been built yet."""
+    contract = study.get("contract")
+    if not isinstance(contract, dict):
+        return ""
+    face = contract.get("face") if isinstance(contract.get("face"), dict) else {}
+    conditions = contract.get("conditions") or []
+    if not face and not conditions:
+        return ""
+    lines: list[str] = [
+        "### Typed contract (declared interface)",
+        "",
+        "_The bigraph-schema typed ports + conservation predicates this study's "
+        "composite must satisfy (audited in the workbench §Contract panel). "
+        "Declared design — independent of whether a run exists yet._",
+    ]
+
+    def _port_rows(ports: dict) -> list[str]:
+        rows = ["", "| port | type | units | bounds |", "| --- | --- | --- | --- |"]
+        for pname, pdef in ports.items():
+            if not isinstance(pdef, dict):
+                rows.append(f"| `{pname}` | {_truthy(pdef)} | | |")
+                continue
+            typ = _truthy(pdef.get("_type"))
+            units = _truthy(pdef.get("_units"))
+            lo, hi = pdef.get("_min"), pdef.get("_max")
+            if lo is not None and hi is not None:
+                bounds = f"[{lo}, {hi}]"
+            elif lo is not None:
+                bounds = f">= {lo}"
+            elif hi is not None:
+                bounds = f"<= {hi}"
+            else:
+                bounds = ""
+            rows.append(f"| `{pname}` | {typ} | {units} | {bounds} |")
+        return rows
+
+    inputs = face.get("inputs") if isinstance(face.get("inputs"), dict) else {}
+    outputs = face.get("outputs") if isinstance(face.get("outputs"), dict) else {}
+    if inputs:
+        lines += ["", "**Inputs**"] + _port_rows(inputs)
+    if outputs:
+        lines += ["", "**Outputs**"] + _port_rows(outputs)
+    if conditions:
+        lines += ["", "**Conditions**", ""]
+        for c in conditions:
+            if isinstance(c, dict):
+                name = _truthy(c.get("name"))
+                kind = _truthy(c.get("kind"))
+                expr = _truthy(c.get("expr") or c.get("detail"))
+                tag = f"`{name}`" + (f" ({kind})" if kind else "")
+                lines.append(f"- {tag}: `{expr}`" if expr else f"- {tag}")
+            else:
+                lines.append(f"- {_truthy(c)}")
+    return "\n".join(lines)
+
+
+def _literature_md(study: dict) -> str:
+    """Literature anchors — the published values the study is measured against."""
+    anchors = study.get("literature_anchors") or []
+    if not anchors:
+        return ""
+    lines = [
+        "### Literature anchors",
+        "",
+        "| expectation | model observable | source | status |",
+        "| --- | --- | --- | --- |",
+    ]
+    for a in anchors:
+        if not isinstance(a, dict):
+            lines.append(f"| {_truthy(a)} | | | |")
+            continue
+        lines.append(
+            f"| {_truthy(a.get('expectation'))} | {_truthy(a.get('model_observable'))} "
+            f"| {_truthy(a.get('source'))} | {_truthy(a.get('status_in_workspace'))} |"
+        )
+    return "\n".join(lines)
+
+
+def _frameworks_md(inv: dict) -> str:
+    """Competing frameworks / scenarios from the investigation (context the
+    study is evaluated within)."""
+    if not isinstance(inv, dict):
+        return ""
+    frameworks = inv.get("competing_frameworks") or inv.get("frameworks") or []
+    if not frameworks:
+        return ""
+    lines = ["**Competing frameworks**", ""]
+    for f in frameworks:
+        if isinstance(f, dict):
+            name = _truthy(f.get("name") or f.get("label"))
+            role = _truthy(f.get("role") or f.get("stance") or f.get("kind"))
+            lines.append(f"- **{name}**" + (f" — {role}" if role else ""))
+        else:
+            lines.append(f"- {_truthy(f)}")
     return "\n".join(lines)
 
 
@@ -370,6 +498,31 @@ def _py_ident(name: Any) -> str:
 
 def _spec_var(spec_id: str) -> str:
     return f"spec_{_py_ident(spec_id)}"
+
+
+def _ov_var(spec_id: str) -> str:
+    return f"ov_{_py_ident(spec_id)}"
+
+
+def _generator_inspect_code(spec_id: str, var: str) -> str:
+    """Materialize a @composite_generator into an editable payload + print it."""
+    return (
+        f"{var} = materialize_composite({spec_id!r})\n"
+        f"describe_spec({var})"
+    )
+
+
+def _generator_panel_code(var: str, ov: str) -> str:
+    """Runtime control panel for a generator composite: its tunable parameters
+    as an editable dict (no on-disk spec file to read at export time)."""
+    return (
+        f"# === Edit parameters for this composite, then run the Run cell ===\n"
+        f"# {ov} maps each tunable parameter to its current value (the generator's\n"
+        f"# defaults). Edit any entry; the Run cell rebuilds the composite with it.\n"
+        f"{ov} = dict({var}['_overrides'])\n"
+        f"import json as _json; print(_json.dumps({ov}, indent=2, default=str))\n"
+        f"# e.g.:  {ov}['<parameter>'] = <value>"
+    )
 
 
 def _load_inspect_code(comp_rel: str, var: str) -> str:
@@ -438,8 +591,15 @@ def _control_panel_code(var: str, spec: dict) -> str:
 
 
 def _run_code(slug: str, studies_rel: str, recipes: list[dict],
-              spec_vars: dict[str, str], strat: dict) -> str:
-    """The Run cell: editable runtime/interval knobs + build-and-run per sim."""
+              spec_vars: dict[str, str], ov_vars: dict[str, str],
+              spec_kinds: dict[str, str], strat: dict, had_recorded: bool) -> str:
+    """The Run cell: editable runtime knobs + build-and-run per sim, auto-detect.
+
+    Each sim is built and run inside a ``try``: a composite whose module
+    processes are not implemented yet reports the error rather than crashing the
+    notebook. Generator composites rebuild from their edited ``ov_*`` parameters;
+    file specs use the workspace runner (if any) or the generic build path.
+    """
     lines = [
         f"# === Study: {slug} ===",
         f"STUDY = {slug!r}",
@@ -449,44 +609,65 @@ def _run_code(slug: str, studies_rel: str, recipes: list[dict],
         "",
     ]
     if not recipes:
-        lines.append('print("No recorded runs for this study; nothing to reproduce.")')
+        lines.append('print("No baseline composite declared for this study — nothing to build.")')
         return "\n".join(lines)
 
-    lines += [
-        "# Runtime knobs — edit freely. STEPS = number of composite steps;",
-        "# INTERVAL = global dt filling ${interval} placeholders (a per-process",
-        "# interval pinned in the edit cell above takes precedence).",
-    ]
+    if had_recorded:
+        lines.append("# Reproduce the recorded run(s). STEPS = composite steps.")
+    else:
+        lines += [
+            "# This study has no *recorded* runs yet. RERUN builds its declared",
+            "# composite(s) live and runs them; a composite whose module processes",
+            "# are not implemented yet reports the error instead of crashing.",
+        ]
     for r in recipes:
         sl = _py_ident(r["sim"])
-        lines.append(f"STEPS_{sl} = {int(r['n_steps'])}")
-        lines.append(f"INTERVAL_{sl} = {r['params'].get('interval', 0.1)!r}")
+        steps = int(r["n_steps"]) or 100
+        lines.append(f"STEPS_{sl} = {steps}")
+        lines.append(f"INTERVAL_{sl} = {r['params'].get('interval', 1.0)!r}")
     lines.append("")
     lines.append("if RERUN:")
-    lines.append("    with quiet():  # the sim prints per-step progress; keep it out of the notebook")
-    if strat["run_kind"] == "scripts":
-        for r in recipes:
-            sl = _py_ident(r["sim"])
-            var = spec_vars[r["spec_id"]]
+    lines.append("    from process_bigraph import Composite")
+    for r in recipes:
+        sl = _py_ident(r["sim"])
+        sid = r["spec_id"]
+        var = spec_vars[sid]
+        kind = spec_kinds.get(sid, "generator")
+        lines.append("    try:")
+        lines.append("        with quiet():  # keep per-step stdout out of the notebook")
+        if kind == "generator":
+            ov = ov_vars[sid]
             lines.append(
-                f"        # sim {r['sim']!r} <- edited composite spec {var} ({r['spec_id']!r})"
+                f"            _ov = {ov} if {ov!r} in dir() else None  # edits from the panel cell, if any"
+            )
+            lines.append(f"            {var} = materialize_composite({sid!r}, _ov)")
+            lines.append(
+                f"            _comp = Composite({{'state': {var}['state']}}, core=core)"
+            )
+            lines.append(f"            _comp.run(STEPS_{sl})")
+        elif strat["run_kind"] == "scripts":
+            lines.append(
+                f"            run_study(STUDY, {r['sim']!r}, {var}, STEPS_{sl}, INTERVAL_{sl})"
+            )
+        else:
+            lines.append(
+                "            from viva_superpowers.composite_spec import build_composite_from_spec"
             )
             lines.append(
-                f"        run_study(STUDY, {r['sim']!r}, {var}, STEPS_{sl}, INTERVAL_{sl})"
+                f"            _comp = build_composite_from_spec({var}, "
+                f"{{'interval': INTERVAL_{sl}}}, core=core)"
             )
-    else:
-        lines.append("        # Generic process-bigraph protocol (no workspace runner detected):")
-        lines.append("        from viva_superpowers.composite_spec import build_composite_from_spec")
-        for r in recipes:
-            sl = _py_ident(r["sim"])
-            var = spec_vars[r["spec_id"]]
-            lines.append(
-                f"        comp = build_composite_from_spec({var}, {{'interval': INTERVAL_{sl}}}, core=core)"
-            )
-            lines.append(f"        comp.run(STEPS_{sl})  # writes the composite's declared emitter")
-    lines.append(f"    print(f'ran {len(recipes)} simulation(s) -> {{RUNS_DB}}')")
+            lines.append(f"            _comp.run(STEPS_{sl})")
+        lines.append(
+            f"        print('ran', {r['sim']!r}, f'({sid}) for', STEPS_{sl}, 'steps')"
+        )
+        lines.append("    except Exception as _e:")
+        lines.append(
+            f"        print(f\"{r['sim']} not runnable yet: "
+            f"{{type(_e).__name__}}: {{_e}}\")"
+        )
     lines.append("else:")
-    lines.append('    print("RERUN=False — rendering committed", RUNS_DB)')
+    lines.append('    print("RERUN=False — not re-simulating.")')
     return "\n".join(lines)
 
 
@@ -597,6 +778,50 @@ RERUN = True
         '    print("\\nfull editable spec dict:")\n'
         "    print(_json.dumps(spec, indent=2, default=str))"
     )
+    # Composite materialization (generator-aware) — reuses the exact
+    # process-bigraph registry path the workbench env-worker uses, so a
+    # @composite_generator function (no on-disk .composite.yaml) still becomes
+    # an editable spec payload. Always emitted (needed regardless of render_kind).
+    src += (
+        "\n\ndef materialize_composite(spec_id, overrides=None):\n"
+        '    """Build a composite into an editable payload {name, description,\n'
+        "    parameters, state, _overrides, _id}. Works for @composite_generator\n"
+        "    functions via the process-bigraph registry (the common case); ``state``\n"
+        '    is the built document (process nodes at top level)."""\n'
+        "    import importlib\n"
+        "    from process_bigraph.composite_generator import (\n"
+        "        _REGISTRY, apply_core_extensions, build_generator)\n"
+        "    try:\n"
+        "        from process_bigraph.composite_generator import discover_generators\n"
+        "        discover_generators()\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    entry = _REGISTRY.get(spec_id)\n"
+        "    if entry is None:\n"
+        "        # editable installs are invisible to packages_distributions, so\n"
+        "        # discover alone can miss them — prime the module the id names.\n"
+        "        try:\n"
+        "            importlib.import_module(spec_id.rsplit('.', 1)[0])\n"
+        "            from process_bigraph.composite_generator import discover_generators as _dg\n"
+        "            _dg()\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "        entry = _REGISTRY.get(spec_id)\n"
+        "    if entry is None:\n"
+        "        raise KeyError('composite not registered: ' + repr(spec_id))\n"
+        "    params = dict(entry.parameters or {})\n"
+        "    ov = {k: (v.get('default') if isinstance(v, dict) else None)\n"
+        "          for k, v in params.items()}\n"
+        "    if overrides:\n"
+        "        ov.update({k: val for k, val in overrides.items() if k in params})\n"
+        "    _c = apply_core_extensions(entry, core)\n"
+        "    try:\n"
+        "        doc = build_generator(entry, ov or None, core=_c)\n"
+        "    except TypeError:\n"
+        "        doc = entry.func(_c, **(ov or {}))\n"
+        "    return {'name': entry.name, 'description': entry.description,\n"
+        "            'parameters': params, 'state': doc, '_overrides': ov, '_id': spec_id}"
+    )
     # Generic figure renderer — used when the workspace ships no
     # scripts/render_study_viz.py (so `render_import` is empty and nothing
     # defines _render_one). Resolves an ``image:<relpath>`` visualization to
@@ -605,12 +830,47 @@ RERUN = True
     if strat.get("render_kind") == "generic":
         src += (
             "\n\nimport base64 as _b64, pathlib as _pl\n"
+            "_STATIC_VIZ_SCHEMES = ('image:', 'file:', 'gif:', 'png:', 'svg:', 'jpg:', 'jpeg:')\n"
+            "def _render_viz_process(address, config):\n"
+            '    """Render a Visualization process/step (e.g. ``local:<Class>``) to\n'
+            "    HTML: wrap it as a one-step composite and run it once — the viz writes\n"
+            "    Plotly HTML to its ``html`` output port. Mirrors the workbench's own\n"
+            '    env-worker viz path. Self-running vizes need no run data."""\n'
+            "    from process_bigraph import Composite\n"
+            "    _doc = {\n"
+            "        'inputs_store': {}, 'output_store': '',\n"
+            "        'visualization': {\n"
+            "            '_type': 'step', 'address': address,\n"
+            "            'config': {k: v for k, v in (config or {}).items()\n"
+            "                       if k not in ('inputs_map', 'sources')},\n"
+            "            'inputs': {}, 'outputs': {'html': ['output_store']},\n"
+            "        },\n"
+            "    }\n"
+            "    _comp = Composite({'state': _doc}, core=core)\n"
+            "    _comp.run(1)\n"
+            "    _html = _comp.state.get('output_store')\n"
+            "    if isinstance(_html, dict):\n"
+            "        _html = _html.get('value') or _html.get('_value') or ''\n"
+            "    return _html if isinstance(_html, str) else ''\n"
             "def _render_one(address, config, runs_db, study_yaml):\n"
-            '    """Generic figure renderer (no workspace render_study_viz.py):\n'
-            '    resolve an ``image:<relpath>`` visualization to displayable HTML,\n'
-            '    relative to the study directory."""\n'
+            '    """Generic figure renderer (no workspace render_study_viz.py).\n'
+            "    A static ``image:``/``file:`` (or bare-path) address embeds the file;\n"
+            "    any other address (``local:<VizProcess>``) is run as a Visualization\n"
+            '    and its HTML returned."""\n'
             "    addr = str(address or '')\n"
-            "    for _scheme in ('image:', 'file:', 'gif:', 'png:', 'svg:', 'jpg:', 'jpeg:'):\n"
+            "    _head = addr.split('/', 1)[0]\n"
+            "    _is_static = (not addr) or (':' not in _head) or addr.startswith(_STATIC_VIZ_SCHEMES)\n"
+            "    if not _is_static:\n"
+            "        if core is None:\n"
+            "            return f'<p style=\"color:#b91c1c\">no core to render {address}</p>'\n"
+            "        try:\n"
+            "            _h = _render_viz_process(addr, config)\n"
+            "        except Exception as _e:\n"
+            "            return (f'<p style=\"color:#b91c1c\">visualization {address} not "
+            "renderable yet: '\n"
+            "                    f'{type(_e).__name__}: {_e}</p>')\n"
+            "        return _h or f'<p style=\"color:#6b7280\">{address} produced no HTML</p>'\n"
+            "    for _scheme in _STATIC_VIZ_SCHEMES:\n"
             "        if addr.startswith(_scheme):\n"
             "            addr = addr[len(_scheme):]; break\n"
             "    _p = _pl.Path(addr)\n"
@@ -650,41 +910,63 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
 
     blocks: list[dict] = [_md(_study_header_md(study, slug))]
 
+    # --- design intent (proposed mechanisms / methods / assumptions) ---
+    mech = _mechanisms_md(study)
+    if mech:
+        blocks.append(_md(mech))
+
     # --- parameters (no results) ---
     blocks.append(_md(_parameters_md(study, display_recipes, package)))
 
-    # --- editable spec: one load/inspect + control-panel cell per composite ---
+    # --- editable spec: one load/inspect + control-panel cell per composite.
+    # A composite is materialized from its @composite_generator (the common
+    # case — no on-disk spec file) or loaded from a static .composite.{yaml,json}
+    # file when one exists. spec_kinds routes the Run cell accordingly.
     seen_specs: list[str] = []
     for r in display_recipes:
         if r["spec_id"] not in seen_specs:
             seen_specs.append(r["spec_id"])
     spec_vars = {sid: _spec_var(sid) for sid in seen_specs}
+    ov_vars = {sid: _ov_var(sid) for sid in seen_specs}
+    spec_kinds: dict[str, str] = {}
     composites_dir = ws_root / package / "composites"
     if seen_specs:
         blocks.append(_md(_COMPOSITE_INTRO_MD))
         for spec_id in seen_specs:
             var = spec_vars[spec_id]
             comp_path = _resolve_composite_path(composites_dir, spec_id)
-            blocks.append(_md(f"**Composite `{spec_id}`** — `{var}` (a plain, editable dict)"))
             if comp_path is not None:
+                spec_kinds[spec_id] = "file"
                 comp_rel = comp_path.relative_to(ws_root).as_posix()
+                blocks.append(_md(
+                    f"**Composite `{spec_id}`** — `{var}` (static spec file, editable dict)"))
                 blocks.append(_code(_load_inspect_code(comp_rel, var)))
                 blocks.append(_code(_control_panel_code(var, _load_yaml(comp_path))))
             else:
-                blocks.append(
-                    _md(f"_composite spec file for `{spec_id}` not found under "
-                        f"`{package}/composites/` — skipped._")
-                )
+                spec_kinds[spec_id] = "generator"
+                blocks.append(_md(
+                    f"**Composite `{spec_id}`** — `{var}` "
+                    "(materialized from its `@composite_generator`)"))
+                blocks.append(_code(_generator_inspect_code(spec_id, var)))
+                blocks.append(_code(_generator_panel_code(var, ov_vars[spec_id])))
 
-    # --- run section: editable runtime/interval, build & run the edited spec ---
+    # --- typed contract (declared interface) ---
+    contract = _contract_md(study)
+    if contract:
+        blocks.append(_md(contract))
+
+    # --- run section: editable runtime, build & run the (edited) composite ---
     blocks.append(
         _md(
-            "### Run\n\n_Set the runtime (`STEPS`) and step size (`INTERVAL`), then run. "
-            "Each simulation builds the (edited) spec above and writes `runs.db`; the "
-            "figures below read it. Set `RERUN = False` to skip re-simulating._"
+            "### Run\n\n_Set `STEPS`, then run. Each composite is built live from "
+            "its (edited) spec above and run; a composite whose module processes "
+            "aren't implemented yet reports the error instead of crashing. Set "
+            "`RERUN = False` to skip re-simulating._"
         )
     )
-    blocks.append(_code(_run_code(slug, studies_rel, run_recipes, spec_vars, strat)))
+    blocks.append(_code(_run_code(
+        slug, studies_rel, display_recipes, spec_vars, ov_vars, spec_kinds,
+        strat, bool(run_recipes))))
 
     # --- per-visualization render blocks ---
     # The figures ARE the results — text stays parameter-only, so the authored
@@ -714,6 +996,11 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
     acc = _acceptance_md(study)
     if acc:
         blocks.append(_md(acc))
+
+    # --- literature anchors (published values the study is measured against) ---
+    lit = _literature_md(study)
+    if lit:
+        blocks.append(_md(lit))
 
     return blocks
 
@@ -761,6 +1048,9 @@ def _outro_blocks(inv: dict) -> list[dict]:
 
 def _build_blocks(ws_root: Path, layout: dict, inv: dict, slug: str, strat: dict) -> list[dict]:
     blocks = _intro_blocks(inv, slug)
+    fw = _frameworks_md(inv)
+    if fw:
+        blocks.append(_md(fw))
     blocks += _setup_blocks(ws_root, strat)
     for study_slug in investigation_member_slugs(inv):
         blocks += _study_blocks(ws_root, layout, study_slug, strat)
@@ -789,7 +1079,16 @@ def _study_intro_blocks(study: dict, slug: str, inv_slug: str) -> list[dict]:
 
 def _build_study_blocks(ws_root: Path, layout: dict, study: dict, slug: str, strat: dict) -> list[dict]:
     inv_slug = _truthy(study.get("investigation"))
+    inv: dict = {}
+    if inv_slug:
+        try:
+            inv = _load_investigation(ws_root, layout, inv_slug)
+        except FileNotFoundError:
+            inv = {}
     blocks = _study_intro_blocks(study, slug, inv_slug)
+    fw = _frameworks_md(inv)
+    if fw:
+        blocks.append(_md(fw))
     blocks += _setup_blocks(ws_root, strat)
     blocks += _study_blocks(ws_root, layout, slug, strat)
     return blocks
