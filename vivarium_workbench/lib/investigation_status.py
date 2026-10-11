@@ -274,6 +274,12 @@ def build_iset_summary(
             "name":             spec.get("name", d.name),
             "title":            spec.get("title", spec.get("name", d.name)),
             "status":           spec.get("status", "planning"),
+            # The authored verdict rollup a reviewer lands on first (from the
+            # executive block, falling back to the lifecycle status). Surfaced
+            # here so the investigations list can badge each card without
+            # fetching the full detail.
+            "verdict_status":   (spec.get("executive") or {}).get("verdict_status")
+                                or spec.get("status") or "planning",
             "effective_status": compute_investigation_status(statuses, has_runs=has_runs),
             "description":      spec.get("description", ""),
             "question":         spec.get("question", ""),
@@ -298,6 +304,8 @@ def build_iset_summary(
             "name":             fi["name"],
             "title":            fspec.get("title", fi["name"]),
             "status":           fspec.get("status", "planning"),
+            "verdict_status":   (fspec.get("executive") or {}).get("verdict_status")
+                                or fspec.get("status") or "planning",
             "effective_status": "federated",
             "description":      fspec.get("description", ""),
             "question":         fspec.get("question", ""),

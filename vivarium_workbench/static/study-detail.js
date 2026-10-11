@@ -1262,6 +1262,15 @@
   function _loadModelCards(force) {
     var mount = document.getElementById('model-composite-cards');
     if (!mount) return;
+    // Planned design (Design phase): render the declared contract + proposed
+    // mechanisms/methods at the top of the Model tab, so a study with no built
+    // composite yet still shows its planned model/interface. Idempotent slot.
+    var _pdSpec = window._study || {};
+    var _pdHtml = _pdContractHtml(_pdSpec.contract, '§ Contract — declared interface (planned)') +
+                  _pdListHtml('Proposed mechanisms', _pdSpec.proposed_mechanisms) +
+                  _pdListHtml('Proposed models & methods', _pdSpec.proposed_models_methods);
+    var _pdSlotEl = _pdSlot(document.getElementById('panel-compose'), 'model-planned-design');
+    if (_pdSlotEl) _pdSlotEl.innerHTML = _pdHtml;
     if (_modelCardsLoaded && !force) return;
     _modelCardsLoaded = true;
     var panel = document.getElementById('panel-compose');
@@ -3737,12 +3746,24 @@
   // Reproducibility MOVED here from the Tests panel's old _loadTestsPanel
   // (spec §3.6/§3.7); their loaders are unchanged, just dispatched from here.
   function _loadAudit(spec) {
+    _loadDeclaredContract(spec);
     _loadAuditSufficiency(spec);
     _loadQualityChecks(spec);
     _loadReproducibilityChecks(spec);
     _loadAuditSourcing(spec);
   }
   window._loadAudit = _loadAudit;
+
+  // Declared contract (§Contract) — the study's PLANNED typed interface +
+  // conservation predicates, rendered at the top of the Audit tab so it is
+  // populated at Design time (before any live-run audit exists). Connects the
+  // planning contract to the audit surface.
+  function _loadDeclaredContract(spec) {
+    var slot = _pdSlot(document.getElementById('panel-audit'), 'audit-declared-contract');
+    if (!slot) return;
+    var contract = ((spec || window._study || {}) || {}).contract;
+    slot.innerHTML = _pdContractHtml(contract, 'Declared contract (§Contract) — the study’s planned interface');
+  }
 
   // ── Build tab (Assurance) — model-build loop provenance ──────────────────
   // GET /api/study-loop-state?study=<slug> → viva_superpowers.loop_state
@@ -4682,6 +4703,75 @@
     });
   }
 
+  // ── Planned-design helpers (Design-phase studies) ───────────────────────
+  // A study is authored at Design before any composite is built. Render its
+  // declared bigraph-schema contract (typed-ports face + conservation
+  // predicates), proposed mechanisms, and proposed models/methods so the
+  // Model + Audit tabs show the PLANNED design instead of a blank "no
+  // composite yet" panel. Pure render; all strings escaped.
+  function _pdBounds(sch) {
+    var lo = (sch && sch._min != null) ? sch._min : null;
+    var hi = (sch && sch._max != null) ? sch._max : null;
+    if (lo == null && hi == null) return '—';
+    return (lo == null ? '−∞' : lo) + ' .. ' + (hi == null ? '∞' : hi);
+  }
+  function _pdPortRows(face, dir) {
+    var ports = (face && face[dir]) || {};
+    return Object.keys(ports).map(function (n) {
+      var s = ports[n] || {};
+      return '<tr><td><code>' + _esc(n) + '</code></td><td class="muted">' + _esc(dir) +
+        '</td><td>' + _esc(s._type || '—') + '</td><td>' + _esc(s._units || '—') +
+        '</td><td class="muted">' + _esc(_pdBounds(s)) + '</td></tr>';
+    }).join('');
+  }
+  function _pdContractHtml(contract, title) {
+    contract = contract || {};
+    var face = contract.face || {};
+    var rows = _pdPortRows(face, 'inputs') + _pdPortRows(face, 'outputs');
+    var conds = contract.conditions || [];
+    if (!rows && !conds.length) return '';
+    var h = '<div class="overview-section planned-contract" style="margin-top:14px">' +
+      '<h2 class="overview-label">' + _esc(title || '§ Contract — declared interface') + '</h2>';
+    if (rows) {
+      h += '<table class="planned-contract-table" style="width:100%;border-collapse:collapse;font-size:0.9em">' +
+        '<thead><tr style="text-align:left;color:#475569;border-bottom:1px solid #e2e8f0">' +
+        '<th style="padding:3px 6px">port</th><th style="padding:3px 6px">dir</th>' +
+        '<th style="padding:3px 6px">type</th><th style="padding:3px 6px">units</th>' +
+        '<th style="padding:3px 6px">bounds</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+    if (conds.length) {
+      h += '<div style="margin-top:8px"><strong style="font-size:0.9em">Conservation predicates</strong>' +
+        '<ul style="margin:4px 0 0 0">' + conds.map(function (c) {
+          c = c || {};
+          return '<li><code>' + _esc(c.name || c.kind || 'invariant') + '</code>' +
+            (c.expr ? ' <span class="muted">— ' + _esc(c.expr) + '</span>' : '') + '</li>';
+        }).join('') + '</ul></div>';
+    }
+    if (contract.note) h += '<p class="muted" style="font-size:0.82em;margin-top:6px">' + _esc(contract.note) + '</p>';
+    return h + '</div>';
+  }
+  function _pdListHtml(title, arr) {
+    arr = Array.isArray(arr) ? arr : [];
+    if (!arr.length) return '';
+    return '<div class="overview-section" style="margin-top:14px">' +
+      '<h2 class="overview-label">' + _esc(title) + '</h2>' +
+      '<ul style="margin:4px 0 0 0">' + arr.map(function (x) {
+        return '<li>' + _esc(String(x)) + '</li>';
+      }).join('') + '</ul></div>';
+  }
+  // Ensure a slot div with `id` exists in `parent` (prepended, or appended when
+  // atEnd), so repeated renders reuse it rather than stacking.
+  function _pdSlot(parent, id, atEnd) {
+    if (!parent) return null;
+    var el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      if (atEnd) parent.appendChild(el); else parent.insertBefore(el, parent.firstChild);
+    }
+    return el;
+  }
+
   function _renderFeedbackTrackedPanel() {
     var container = document.getElementById('feedback-tracked-panel');
     if (!container) return;               // anchor missing — template version mismatch
@@ -4908,8 +4998,25 @@
     return !!window._study;
   }
 
+  // Open questions / decisions (Overview) — surface the study's
+  // expert_questions so the reviewer sees what this study needs decided.
+  function _renderPlanningOverview() {
+    var eq = Array.isArray((window._study || {}).expert_questions)
+      ? window._study.expert_questions : [];
+    var slot = _pdSlot(document.getElementById('panel-overview'), 'overview-expert-questions', true);
+    if (!slot) return;
+    slot.innerHTML = eq.length
+      ? '<div class="overview-section" style="margin-top:18px">' +
+          '<h2 class="overview-label">Open questions / decisions</h2>' +
+          '<ul style="margin:4px 0 0 0">' + eq.map(function (x) {
+            return '<li>' + _esc(String(x)) + '</li>';
+          }).join('') + '</ul></div>'
+      : '';
+  }
+
   function _runStudyInit() {
     // All renderers that need window._study to be populated.
+    _renderPlanningOverview();
     _renderFeedbackTrackedPanel();
     _renderReadinessPanel();
     _populateConclusionVerdictBadges();
