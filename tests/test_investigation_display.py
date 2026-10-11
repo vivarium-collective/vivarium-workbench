@@ -64,3 +64,41 @@ def test_iset_summary_carries_verdict_status(tmp_path):
     assert row is not None, "og-demo not in summary"
     assert row.get("verdict_status") == "planning", \
         "verdict_status not surfaced in investigation summary"
+
+
+def test_graph_node_carries_planning_fields(tmp_path):
+    """A member study's graph node must carry proposed_mechanisms,
+    proposed_models_methods, contract and behavior_test_names so the DAG's
+    full-magnification Plan layer can render a Design-phase study's plan."""
+    inv = tmp_path / "investigations" / "og-demo"
+    inv.mkdir(parents=True)
+    (inv / "investigation.yaml").write_text(
+        "schema_version: 2\nname: og-demo\ntitle: Origins demo\nstatus: planning\n"
+        "studies:\n  - og-01-geo\n", encoding="utf-8")
+    study = tmp_path / "studies" / "og-01-geo"
+    study.mkdir(parents=True)
+    (study / "study.yaml").write_text(
+        "schema_version: 4\nname: og-01-geo\nphase: Design\nstatus: planned\n"
+        "question: Which conditions yield sustained net organic-carbon flux?\n"
+        "proposed_mechanisms:\n  - 'C: pH-gradient electrochemistry'\n"
+        "proposed_models_methods:\n  - Nernst-Planck-Poisson on FiPy\n"
+        "contract:\n"
+        "  face:\n"
+        "    inputs: {pH: {_type: float, _units: dimensionless}}\n"
+        "    outputs: {formate: {_type: float, _units: molar}}\n"
+        "  conditions:\n    - {kind: invariant, name: charge_neutrality}\n"
+        "behavior_tests:\n  - {name: co2-reduction-reproduces-preiner}\n"
+        "baseline:\n  - {name: og-01, composite: viva_x.composites.og_01}\n",
+        encoding="utf-8")
+    for c in (["init", "-q"], ["config", "user.email", "t@t"],
+              ["config", "user.name", "t"], ["add", "-A"],
+              ["commit", "-qm", "init"], ["branch", "-M", "main"]):
+        subprocess.run(["git", *c], cwd=tmp_path, check=True)
+
+    detail = build_iset_detail(tmp_path, "og-demo")
+    node = next((s for s in detail["studies"] if s.get("name") == "og-01-geo"), None)
+    assert node is not None, "member study not in graph nodes"
+    assert node["proposed_mechanisms"] == ["C: pH-gradient electrochemistry"]
+    assert node["proposed_models_methods"] == ["Nernst-Planck-Poisson on FiPy"]
+    assert node["contract"]["face"]["inputs"]["pH"]["_units"] == "dimensionless"
+    assert node["behavior_test_names"] == ["co2-reduction-reproduces-preiner"]

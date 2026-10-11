@@ -15,8 +15,14 @@ assert.strictEqual(near.followups, true);
 // near: everything
 assert.strictEqual(near.cls, 'aig-zoom-near');
 assert.ok(near.asks && near.finds && near.chain && near.followups);
-// card width grows far < mid < near
+// asksFull + plan: full-magnification-only (near). Full question text + the
+// declared-design "Plan" layer appear at band 2 only.
+assert.strictEqual(far.asksFull, false); assert.strictEqual(far.plan, false);
+assert.strictEqual(mid.asksFull, false); assert.strictEqual(mid.plan, false);
+assert.strictEqual(near.asksFull, true); assert.strictEqual(near.plan, true);
+// card width grows far < mid < near; near widened to fit the Plan layer.
 assert.ok(far.cardW < mid.cardW && mid.cardW < near.cardW);
+assert.strictEqual(near.cardW, 360);
 // clamp out-of-range to 0..2
 assert.strictEqual(_layoutOptsForBand(-5).cls, 'aig-zoom-far');
 assert.strictEqual(_layoutOptsForBand(9).cls, 'aig-zoom-near');
