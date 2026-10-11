@@ -5339,6 +5339,27 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 .contract-sub { font-weight: 600; opacity: 0.7; margin-top: 6px; }
 .contract-finding.is-error { color: #b91c1c; }
 .contract-finding.is-warning { color: #b45309; }
+.contract-finding.is-info { color: #475569; }
+/* per-process roll-up rows in the composite contract panel */
+.contract-proc { margin-top: 4px; padding: 3px 0 3px 8px; border-left: 2px solid #e5e7eb; font-size: 0.9em; }
+.contract-proc.is-fail { border-left-color: #fecaca; }
+.contract-proc.is-incomplete { border-left-color: #fde68a; }
+.contract-proc.is-pass { border-left-color: #a7f3d0; }
+.contract-proc .contract-finding { margin-left: 4px; opacity: 0.85; }
+/* per-process completeness breakdown (typed ports · predicates) */
+.contract-cmpl { margin: 3px 0 0 4px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.92em; }
+.cmpl-part { padding: 0 6px; border-radius: 3px; }
+.cmpl-part.is-ok { background: #ecfdf5; color: #047857; }
+.cmpl-part.is-gap { background: #fff7ed; color: #b45309; }
+.contract-cmpl-missing { margin: 2px 0 0 4px; font-size: 0.88em; color: #92400e; }
+/* composite-level "to improve" action list */
+.contract-improve { margin-top: 8px; }
+.contract-improve-item { margin: 2px 0 0 4px; font-size: 0.92em; }
+:root[data-theme="dark"] .cmpl-part.is-ok { background: #06281d; color: #6ee7b7; }
+:root[data-theme="dark"] .cmpl-part.is-gap { background: #2a2109; color: #fcd34d; }
+:root[data-theme="dark"] .contract-cmpl-missing { color: #fcd34d; }
+:root[data-theme="dark"] .contract-proc { border-left-color: #374151; }
+:root[data-theme="dark"] .contract-finding.is-info { color: #94a3b8; }
 :root[data-theme="dark"] .contract-pass { background: #06281d; color: #6ee7b7; border-color: #065f46; }
 :root[data-theme="dark"] .contract-fail { background: #2a0f0f; color: #fca5a5; border-color: #7f1d1d; }
 :root[data-theme="dark"] .contract-incomplete { background: #2a2109; color: #fcd34d; border-color: #78350f; }

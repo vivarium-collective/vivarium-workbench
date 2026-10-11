@@ -1229,6 +1229,73 @@ def _resolve_composite_state(params: dict) -> dict:
     return out
 
 
+def _composite_contract_audit(params: dict) -> dict:
+    """Real composite-level contract audit (Phase 1 per-process roll-up + Phase 2
+    wiring/interface audit) for the composite ``ref``/``id``.
+
+    Builds the composite's core + a live ``Composite`` (so ``process_paths``
+    carries resolved port-type schemas and wiring), then delegates to
+    :func:`vivarium_workbench.lib.composite_audit.audit_composite`. Runs here in
+    the warm worker because it needs ``build_core`` / ``apply_core_extensions``.
+
+    Returns the audit dict (``{status, grade, processes, wiring, ...}``) with the
+    ``id`` echoed; degrades to ``{"status": "unavailable", "notice": ...}`` for
+    an unresolvable id or a build failure — never raises."""
+    ref = (params or {}).get("ref") or (params or {}).get("id")
+    raw_ov = (params or {}).get("overrides") or {}
+    if _workspace and _workspace not in sys.path:
+        sys.path.insert(0, _workspace)
+    _import_workspace_package(_workspace)
+
+    def _done(audit: dict) -> dict:
+        audit = dict(audit or {})
+        audit["id"] = ref
+        return audit
+
+    try:
+        from bigraph_schema import allocate_core
+        from process_bigraph import Composite
+        from vivarium_workbench.lib.composite_audit import audit_composite
+    except Exception as e:  # noqa: BLE001 — bigraph-schema too old / import error
+        return _done({"status": "unavailable",
+                      "notice": f"contract-audit machinery unavailable: {e}"})
+
+    core = None
+    comp = None
+    # --- Generator composite (preferred: carries core_extensions) ---
+    try:
+        from process_bigraph.composite_generator import (
+            _REGISTRY, apply_core_extensions, build_generator,
+        )
+        _ensure_generators_discovered()
+        entry = _REGISTRY.get(ref)
+        if entry is not None:
+            overrides = ({k: v for k, v in raw_ov.items() if k in (entry.parameters or {})}
+                         if isinstance(raw_ov, dict) else {})
+            core = apply_core_extensions(entry, allocate_core())
+            comp = Composite({"state": build_generator(entry, overrides or None)}, core=core)
+    except Exception as e:  # noqa: BLE001
+        return _done({"status": "unavailable", "notice": f"composite build failed: {e}"})
+
+    # --- Static composite spec (<pkg>.composites.<stem>) ---
+    if comp is None:
+        try:
+            package_name, _pkgs, _ws = _workspace_meta(_workspace)
+            core = __import__(f"{package_name}.core", fromlist=["build_core"]).build_core()
+            from vivarium_workbench.lib.composite_resolve import resolve_composite
+            from pathlib import Path as _Path
+            resolved = resolve_composite(_Path(_workspace), ref, raw_ov or None)
+            state = (resolved or {}).get("state")
+            if not state:
+                return _done({"status": "unavailable",
+                              "notice": "composite id not resolvable to a built state"})
+            comp = Composite({"state": state}, core=core)
+        except Exception as e:  # noqa: BLE001
+            return _done({"status": "unavailable", "notice": f"composite build failed: {e}"})
+
+    return _done(audit_composite(core, comp))
+
+
 def _resolve_inner_composite_state(params: dict) -> dict:
     """Drill into a Composite Process: return the loom state of the inner
     ``Composite`` embedded at ``hops`` under generator ``ref``.
@@ -4183,6 +4250,8 @@ def _handle(method: str, params: dict) -> dict:
         return _resolve_composite_state(params)
     if method == "config_to_composite":
         return _config_to_composite(params)
+    if method == "composite_contract_audit":
+        return _composite_contract_audit(params)
     if method == "resolve_inner_composite_state":
         return _resolve_inner_composite_state(params)
     if method == "observables":
