@@ -11303,8 +11303,9 @@
     edgesSvg.style.width = canvasW + 'px';
     edgesSvg.style.height = canvasH + 'px';
     // Loom-like viewport: remember the canvas dims and apply the current zoom.
-    // The shell keeps its CSS/user height (resize:vertical) instead of being
-    // forced to fit — content scrolls/zooms inside it.
+    // _applyAigZoom auto-fits the shell height to the content (capped at 88vh)
+    // so the DAG isn't vertically cramped; the user can still drag the
+    // resize:vertical handle to override (double-click the background re-fits).
     var shellSize = document.getElementById('investigation-dag-shell');
     if (shellSize) { shellSize.dataset.canvasW = canvasW; shellSize.dataset.canvasH = canvasH; }
     _applyAigZoom();
@@ -11449,6 +11450,30 @@
     }
     spacer.style.width = (cw * z) + 'px';
     spacer.style.height = (ch * z) + 'px';
+
+    // Auto-fit the shell's HEIGHT to the (scaled) content so every study is
+    // visible without an internal vertical scrollbar — the long study chain
+    // still scrolls horizontally, but the graph is never vertically cramped.
+    // Capped at 88vh; honored until the user manually drags the resize handle
+    // (resize:vertical), after which their height sticks. Double-click the
+    // graph background clears the override and re-fits (see the pan handler).
+    if (!shell.dataset.userResized) {
+      var maxH = Math.round((window.innerHeight || 900) * 0.88);
+      var fitH = Math.min(Math.max(Math.ceil(ch * z) + 20, 260), maxH);
+      shell._aigProgrammaticResize = true;
+      shell.style.height = fitH + 'px';
+      setTimeout(function () { shell._aigProgrammaticResize = false; }, 60);
+    }
+    // One-time: watch for a genuine user resize (drag of the resize handle) so
+    // auto-fit steps aside once they've set a height themselves.
+    if (!shell._aigResizeObserved && typeof ResizeObserver !== 'undefined') {
+      shell._aigResizeObserved = true;
+      try {
+        new ResizeObserver(function () {
+          if (!shell._aigProgrammaticResize) shell.dataset.userResized = '1';
+        }).observe(shell);
+      } catch (_e) { /* ResizeObserver unavailable — auto-fit still works */ }
+    }
   }
   function _aigZoomBy(f) { aigZoom = Math.max(0.3, Math.min(2.2, aigZoom * f)); _applyAigZoom(); }
   function _aigFit() {
@@ -11507,6 +11532,14 @@
     }
     document.addEventListener('pointermove', mv);
     document.addEventListener('pointerup', up);
+  });
+  // Double-click the graph background clears a manual resize and re-fits the
+  // shell height to the content.
+  document.addEventListener('dblclick', function (e) {
+    var shell = e.target.closest && e.target.closest('#investigation-dag-shell');
+    if (!shell || (e.target.closest && e.target.closest('.iset-dag-node'))) return;
+    delete shell.dataset.userResized;
+    _applyAigZoom();
   });
 
   function _setAigBand(b) {
