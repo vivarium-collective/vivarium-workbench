@@ -11,7 +11,11 @@ def _git_ws(tmp):
         "name: demo\n"
         "datasets:\n"
         "  - name: shared\n"
-        "    path: datasets/shared.csv\n",
+        "    path: datasets/shared.csv\n"
+        "expert_docs:\n"
+        "  - name: Campaign Dossier\n"
+        "    path: references/expert/campaign.pdf\n"
+        "    description: Source dossier the whole workspace draws on.\n",
         encoding="utf-8",
     )
     # repo-level dataset file
@@ -70,6 +74,33 @@ def test_inputs_payload_investigation_global_current(tmp_path):
     assert "datasets" in glob and "references" in glob
     glob_ds_names = {d.get("name") for d in glob["datasets"]}
     assert "shared" in glob_ds_names
+
+
+def test_inputs_payload_global_expert_docs(tmp_path):
+    """workspace.yaml top-level `expert_docs` surface in the global block so the
+    Resources page can render a repo-wide "Expert docs" section (not scoped to a
+    single investigation). Each entry keeps its name, path and description."""
+    ws = _git_ws(tmp_path)
+    glob = _inputs_payload(ws)["global"]
+
+    assert "expert_docs" in glob, "global block must carry expert_docs"
+    docs = {d.get("name"): d for d in glob["expert_docs"]}
+    assert "Campaign Dossier" in docs
+    doc = docs["Campaign Dossier"]
+    assert doc["path"] == "references/expert/campaign.pdf"
+    assert doc.get("description")  # dict extras pass through for display
+
+
+def test_inputs_payload_global_expert_docs_empty_when_absent(tmp_path):
+    """A workspace with no top-level expert_docs gets an empty list, never a
+    KeyError — so the frontend's length check hides the section cleanly."""
+    (tmp_path / "workspace.yaml").write_text("name: bare\n", encoding="utf-8")
+    for c in (["init", "-q"], ["config", "user.email", "t@t"],
+              ["config", "user.name", "t"], ["add", "-A"],
+              ["commit", "-qm", "init"], ["branch", "-M", "main"]):
+        subprocess.run(["git", *c], cwd=tmp_path, check=True)
+    glob = _inputs_payload(tmp_path)["global"]
+    assert glob.get("expert_docs") == []
 
 
 def test_inputs_payload_enriches_investigation_references(tmp_path):
