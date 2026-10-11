@@ -1164,7 +1164,11 @@
         var name = _esc(doc.name || doc.path || '(unnamed)');
         var path = doc.path ? ' <small class="muted">' + _esc(doc.path) + '</small>' : '';
         var dl = doc.path ? ' ' + _inputsDownloadLink(doc.path, 'Download') : '';
-        return '<li><strong>' + name + '</strong>' + path + dl + '</li>';
+        var desc = doc.description
+          ? '<div class="muted" style="font-size:0.85em;margin-top:2px">' +
+            _esc(doc.description) + '</div>'
+          : '';
+        return '<li><strong>' + name + '</strong>' + path + dl + desc + '</li>';
       }).join('') + '</ul>';
   }
 
@@ -1402,6 +1406,14 @@
       _inputsDatasetsHtml(glob.datasets);
     html += '<h4 style="margin:12px 0 4px">Repo-wide references</h4>' +
       _inputsRefsHtml(glob.references);
+    // Repo-wide expert docs — workspace.yaml top-level `expert_docs` (source
+    // dossiers / background docs the whole workspace draws on, not scoped to one
+    // investigation). Omit the header entirely when there are none so workspaces
+    // without any see no empty section.
+    if (glob.expert_docs && glob.expert_docs.length) {
+      html += '<h4 style="margin:12px 0 4px">Repo-wide expert docs</h4>' +
+        _inputsExpertDocsHtml(glob.expert_docs);
+    }
     html += '</div>';
 
     el.innerHTML = html;

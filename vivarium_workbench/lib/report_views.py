@@ -568,9 +568,9 @@ def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
 
     Returns the loaded investigation's owned inputs (the investigation whose
     slug matches the current git branch, or ``slug`` when given), the repo-wide
-    global inputs (workspace.yaml ``datasets`` + parsed BibTeX references), and
-    that current slug.  Mirrors the SimulationsDB current-investigation-first
-    layout.
+    global inputs (workspace.yaml ``datasets`` + parsed BibTeX references +
+    top-level ``expert_docs``), and that current slug.  Mirrors the SimulationsDB
+    current-investigation-first layout.
 
     Mirrors ``server._inputs_payload`` parameterised on ``ws_root``; the
     current-branch slug comes from ``lib.investigation_status.current_branch_slug``.
@@ -650,6 +650,13 @@ def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
 
     investigation["datasets"] = [_norm_input(d) for d in (investigation.get("datasets") or [])]
     investigation["expert_docs"] = [_norm_input(d) for d in (investigation.get("expert_docs") or [])]
+
+    # Repo-wide expert docs: workspace.yaml top-level `expert_docs` (the same
+    # list lint counts and `search_expert_docs` reads). Normalized like the
+    # investigation ones (ensure name + path) so the Resources page can render a
+    # repo-wide "Expert docs" block beside datasets + references. Dict extras
+    # (description, contributor, sha256) pass through for display.
+    global_block["expert_docs"] = [_norm_input(d) for d in (ws.get("expert_docs") or [])]
 
     return {"investigation": investigation, "global": global_block, "current": current}
 
