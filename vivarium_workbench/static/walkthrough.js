@@ -9985,6 +9985,17 @@
         '<dl class="inv-brief-glossary">' + glossary.map(function(g) {
           return '<dt>' + _escInv(g.term || g.name || '') + '</dt><dd>' + _escInv(g.definition || g.def || '') + '</dd>';
         }).join('') + '</dl>' });
+    // Competing frameworks — the interpretive lenses this investigation
+    // adjudicates among (each {name, relation}); comparative framing for the
+    // rigor scorecard. Only shown when the investigation declares them.
+    var frameworks = Array.isArray(d.competing_frameworks) ? d.competing_frameworks : [];
+    if (frameworks.length)
+      tabs.push({ id:'frameworks', label:'Competing frameworks', html:
+        '<ul class="inv-brief-frameworks" style="margin:0;padding-left:18px">' + frameworks.map(function(f) {
+          f = f || {};
+          return '<li><strong>' + _escInv(f.name || '') + '</strong>' +
+            (f.relation ? ' <span class="muted">— ' + _escInv(f.relation) + '</span>' : '') + '</li>';
+        }).join('') + '</ul>' });
 
     if (tabs.length) {
       H.push('<div class="inv-brief-tabs" role="tablist">' + tabs.map(function(t, i) {

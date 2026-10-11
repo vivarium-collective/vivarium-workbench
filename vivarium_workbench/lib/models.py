@@ -227,6 +227,9 @@ class InvestigationSummary(BaseModel):
     name: str
     title: Optional[str] = None
     status: Optional[str] = None
+    # Authored verdict rollup (executive.verdict_status, else status) so the
+    # sidebar can badge each card without fetching the full detail.
+    verdict_status: Optional[str] = None
     effective_status: Optional[str] = None
     description: Optional[str] = None
     question: Optional[str] = None

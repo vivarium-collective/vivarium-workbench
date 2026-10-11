@@ -961,6 +961,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         "computed_acceptance": computed_acceptance,
         "executive":           spec.get("executive") or {},
         "scientific_argument": spec.get("scientific_argument") or {},
+        # Comparative framing for the rigor scorecard — the interpretive lenses
+        # this investigation adjudicates among (each {name, relation}). Dropped
+        # before this passthrough, so the investigation page never showed it.
+        "competing_frameworks": spec.get("competing_frameworks") or [],
         "references":          (spec.get("inputs") or {}).get("references") or [],
         "proposed_inputs":     spec.get("proposed_inputs") or {},
         "studies":             studies_out,
