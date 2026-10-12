@@ -19,14 +19,12 @@
 <header class="study-header">
   <div style="display:flex; align-items:baseline; gap:12px; justify-content:space-between;">
   <h1 class="study-title">
-    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" title="{{ name }}">{{ display_name }}</span>
-    {# Task 4: deterministic study kind (biological/computational/theoretical),
-       inferred by lib/study_kind.py and wired into the template context by
-       Task 1. Small pill beside the title, before the phase pill. #}
-    <span class="study-kind-tag study-kind-{{ study.kind }}" data-study-kind="{{ study.kind }}" title="Study kind">{{ study.kind }}</span>
-    {% if study.phase %}
-    <span class="phase-pill phase-{{ study.phase|lower }}" title="Lifecycle: Design → Build → Simulate → Evaluate → Decide">{{ study.phase }}</span>
-    {% endif %}
+    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" data-study-kind="{{ study.kind }}" title="{{ name }}">{{ display_name }}</span>
+    {# The old standalone "kind" + "phase" pills were visual noise next to the
+       title (uniform across a computational investigation; the phase just
+       duplicated the gate ladder below). Kind is kept as a data attribute for
+       any consumer; the lifecycle stage is now shown — and highlighted "you are
+       here" — inside the six-gate status row below (gate-current). #}
   </h1>
   <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0;">
     {# Launch actions only (▶ / ↻). The downloads live where they're used — the
@@ -41,6 +39,11 @@
        independent of this study's own pinned baseline composite. Remote-pinned only, same
        gate as "Run current spec" (see _dispatchRemoteComposite in study-detail.js). #}
     <button type="button" id="study-run-composite" class="btn-mini" title="Dispatch a specific process-bigraph composite_id to the remote compute backend (pbg-native multi_node/mbp, or the Nextflow campaign path) — advanced, independent of this study's own pinned baseline">⚙ Dispatch composite</button>
+    {# Narrative navigation: jump to the next study along this investigation's
+       leads-to chain. Populated/shown by study-detail.js (_wireNextStudy),
+       which asks the parent investigation view for the next slug; hidden on a
+       terminal study or outside an investigation. #}
+    <button type="button" id="study-next" class="btn-mini" style="display:none" title="Go to the next study in this investigation's narrative (leads-to)">Next study →</button>
   </span>
   </div>
   <div class="study-status-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px;">
@@ -91,8 +94,8 @@
         {% endif %}
         <span class="status-stepper">
           {% for _g in gate_ladder %}
-          <span class="status-step gate-step axis-{{ _g.axis }} gate-state-{{ _g.state }}{% if _g.authored_value or _g.computed_value %} set{% endif %}" title="Gate {{ _g.number }} · {{ _g.name }}">
-            <span class="dot"></span>{{ _g.number }}&nbsp;·&nbsp;{{ _g.name }}{% if _g.authored_value %}<span class="step-val">{{ _g.authored_value }}</span>{% endif %}
+          <span class="status-step gate-step axis-{{ _g.axis }} gate-state-{{ _g.state }}{% if _g.authored_value or _g.computed_value %} set{% endif %}{% if _g.current %} gate-current{% endif %}" title="Gate {{ _g.number }} · {{ _g.name }}{% if _g.current %} — current stage{% endif %}">
+            <span class="dot"></span>{{ _g.number }}&nbsp;·&nbsp;{{ _g.name }}{% if _g.authored_value %}<span class="step-val">{{ _g.authored_value }}</span>{% endif %}{% if _g.current %}<span class="gate-current-tag">you are here</span>{% endif %}
           </span>
           {% endfor %}
           {% if study.implementation_status %}
@@ -283,6 +286,11 @@
 .status-step.gate-status-passed .dot{background:#10b981;box-shadow:none}
 .status-step.gate-status-failed .dot{background:#ef4444;box-shadow:none}
 .status-step.gate-status-stale .dot{background:#8b5cf6;box-shadow:none}
+/* "You are here": the current lifecycle stage in the gate ladder (replaces the
+   old standalone phase pill — one clear, design-connected stage indicator). */
+.status-step.gate-current{color:#1e3a5f;font-weight:600;background:#eff6ff;border-radius:9999px;padding:1px 10px;box-shadow:inset 0 0 0 1px #bfdbfe}
+.status-step.gate-current .dot{background:#2563eb;box-shadow:none}
+.gate-current-tag{font-size:0.78em;font-weight:700;color:#2563eb;margin-left:6px;text-transform:uppercase;letter-spacing:0.04em}
 /* Fable G2 (§13.2 gate-state vocab; §9.3 palette: grey/green/amber/red/violet).
    One palette for the gate-ladder stepper dots + detail rows AND (via the
    [data-gate-state] selectors below) the act-rail dots, so "how urgent is
@@ -660,6 +668,43 @@
     {% set _bl = study.baseline or [] %}
     {% set _bt = study.behavior_tests or study.expected_behavior or [] %}
 
+    {# ─── One-stop Overview: Claim → Background → Model → Results (+ metrics &
+       key figure) → Findings. Scoped styles for the new ov-* blocks. ──────── #}
+    <style>
+      .study-overview .ov-metrics{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 4px}
+      .study-overview .ov-metric{flex:1 1 120px;min-width:110px;border:1px solid var(--border,#e5e7eb);
+        border-radius:8px;padding:9px 12px;background:var(--surface-2,#f8fafc)}
+      .study-overview .ov-metric-v{font-size:1.15em;font-weight:700;color:#0f172a;line-height:1.1}
+      .study-overview .ov-metric-k{font-size:0.72em;color:#64748b;margin-top:3px;text-transform:uppercase;letter-spacing:.02em}
+      .study-overview .ov-metric-pass{border-left:3px solid #10b981}
+      .study-overview .ov-metric-warn{border-left:3px solid #d97706}
+      .study-overview .ov-metric-fail{border-left:3px solid #b91c1c}
+      .study-overview .ov-methods{margin:4px 0 0 0;padding-left:18px}
+      .study-overview .ov-methods li{font-size:0.86em;color:#475569;line-height:1.45;margin:3px 0}
+      .study-overview .ov-tablink{font-size:0.8em;font-weight:600;text-decoration:none;color:#2563eb;margin-left:6px}
+      .study-overview .ov-tablink:hover{text-decoration:underline}
+      .study-overview .ov-keyfig{margin:12px 0 0}
+      .study-overview .ov-keyfig iframe{width:100%;height:440px;border:1px solid var(--border,#e5e7eb);border-radius:8px;background:#fff}
+      .study-overview .ov-keyfig-cap{font-size:0.75em;color:#94a3b8;margin:5px 2px 0}
+      /* provenance: citation chips + anchors + sources list */
+      .study-overview .ov-cite{display:inline-flex;align-items:center;font-size:0.7em;font-weight:600;
+        line-height:1.3;padding:1px 7px;border-radius:9999px;background:#eff6ff;color:#1d4ed8;
+        white-space:nowrap;text-decoration:none;border:1px solid transparent;margin:0 2px 2px 0}
+      .study-overview a.ov-cite:hover{border-color:#1d4ed8;text-decoration:none}
+      .study-overview .ov-cite.unknown{background:#f1f5f9;color:#64748b}
+      .study-overview .ov-anchor{padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb);font-size:0.9em}
+      .study-overview .ov-anchor:last-child{border-bottom:none}
+      .study-overview .ov-anchor-exp{color:#0f172a;font-weight:600}
+      .study-overview .ov-anchor-obs{font-family:ui-monospace,Menlo,monospace;font-size:0.82em;color:#475569}
+      .study-overview .ov-anchor-src{color:#64748b;font-size:0.85em;margin-top:2px}
+      .study-overview .ov-anchor-met{color:#065f46;font-weight:600}
+      .study-overview .ov-sources{display:grid;gap:2px;margin-top:8px}
+      .study-overview .ov-src{padding:6px 10px;border-bottom:1px solid var(--border,#f1f5f9);font-size:0.85em;scroll-margin-top:90px}
+      .study-overview .ov-src:target{background:#eff6ff;border-radius:6px}
+      .study-overview .ov-src .ov-src-k{font-family:ui-monospace,Menlo,monospace;font-size:0.82em;color:#94a3b8}
+      .study-overview .ov-src .ov-src-t{color:#334155}
+    </style>
+
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Claim</h2>
       <p class="ctr-text">{{ study.claim or study.question or '' }}</p>
@@ -668,23 +713,90 @@
       {% endif %}
     </div>
 
+    {% if study.question or study.hypothesis %}
     <div class="ctr-block">
-      <h2 class="overview-label ctr-h">Test</h2>
-      <p class="ctr-text">{{ study.experiment or study.objective or '' }}</p>
-      {% if _bl or _bt %}
+      <h2 class="overview-label ctr-h">Background</h2>
       <div class="ctr-meta">
-        {% if _bl %}<div class="ctr-meta-row"><span class="ctr-meta-k">Model</span> {% for b in _bl %}<code>{{ b.name or b.composite }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
-        {% if _bt %}<div class="ctr-meta-row"><span class="ctr-meta-k">Measures</span> {% for tt in _bt %}<span class="ctr-meta-item">{{ (tt.description if (tt is mapping and tt.description) else (tt.name if tt is mapping else tt)) }}</span>{% if not loop.last %}<span class="ctr-dot">·</span>{% endif %}{% endfor %}</div>{% endif %}
+        {% if study.question %}<div class="ctr-meta-row"><span class="ctr-meta-k">Question</span> <span class="ctr-meta-item">{{ study.question }}</span></div>{% endif %}
+        {% if study.hypothesis %}<div class="ctr-meta-row"><span class="ctr-meta-k">Hypothesis</span> <span class="ctr-meta-item">{{ study.hypothesis }}</span></div>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="ctr-block">
+      <h2 class="overview-label ctr-h">Model &amp; approach</h2>
+      <p class="ctr-text">{{ study.experiment or study.objective or '' }}</p>
+      <div class="ctr-meta">
+        {% if _bl %}<div class="ctr-meta-row"><span class="ctr-meta-k">Model</span> {% for b in _bl %}<code>{{ b.name or b.composite }}</code>{% if not loop.last %}, {% endif %}{% endfor %}<a class="ov-tablink" href="#" onclick="_setStudyTab('compose');return false;">model →</a></div>{% endif %}
+        {% if study.implemented_methods %}
+        <ul class="ov-methods">{% for m in study.implemented_methods %}<li>{{ m }}</li>{% endfor %}</ul>
+        {% elif _bt %}
+        <div class="ctr-meta-row"><span class="ctr-meta-k">Measures</span> <span class="ctr-meta-item">{{ _bt|length }} behavior test{{ 's' if _bt|length != 1 else '' }}</span><a class="ov-tablink" href="#" onclick="_setStudyTab('tests');return false;">see Tests →</a></div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# ─── Provenance & sources: every modeling target traced to its paper. The
+       literature anchors (expectation → model observable → source) and a Sources
+       list of each bibkey this study cites, resolved from references/papers.bib.
+       Citation chips elsewhere on the page link to these #sref-<key> anchors so a
+       reader can trace any value back to where it came from. Placed right after
+       the model so the literature basis sits beside the model it justifies.
+       (§2 R2: absent when the study carries no anchors and cites nothing.) #}
+    {% set _refs = references|default({}) %}
+    {% set _scites = study_cites|default([]) %}
+    {% if study.literature_anchors or _scites %}
+    <div class="ctr-block ov-prov">
+      <h2 class="overview-label ctr-h">Provenance &amp; sources</h2>
+      {% if study.literature_anchors %}
+      <div class="ov-anchors">
+      {% for a in study.literature_anchors %}
+        {% set _met = a.status_in_workspace and ('met' in a.status_in_workspace|lower) %}
+        <div class="ov-anchor">
+          <div class="ov-anchor-exp">{{ a.expectation }}</div>
+          {% if a.model_observable %}<div class="ov-anchor-obs">observable: {{ a.model_observable }}</div>{% endif %}
+          <div class="ov-anchor-src">
+            {% if a.source %}source: {{ a.source }}{% endif %}
+            {% if a.cites %}{% for c in a.cites %}<a class="ov-cite{{ '' if c in _refs else ' unknown' }}" href="#sref-{{ c }}"{% if _refs[c] and _refs[c].title %} title="{{ _refs[c].title }}"{% endif %}>{{ _refs[c].label if _refs[c] else c }}</a>{% endfor %}{% endif %}
+          </div>
+          {% if a.status_in_workspace %}<div class="ov-anchor-src {{ 'ov-anchor-met' if _met else '' }}">status: {{ a.status_in_workspace }}</div>{% endif %}
+        </div>
+      {% endfor %}
+      </div>
+      {% endif %}
+      {% if _scites %}
+      <div class="ctr-meta-k" style="margin-top:12px">Sources ({{ _scites|length }})</div>
+      <div class="ov-sources">
+      {% for k in _scites %}
+        {% set r = _refs[k] %}
+        <div class="ov-src" id="sref-{{ k }}">
+          <b class="ov-src-t">{{ r.label if r else k }}</b> <span class="ov-src-k">{{ k }}</span>
+          {% if r and r.title %}<div class="ov-src-t">{{ r.title }}</div>{% endif %}
+          {% if r and (r.author or r.year) %}<div class="ctr-meta-k" style="text-transform:none">{{ r.author }}{% if r.author and r.year %} · {% endif %}{{ r.year }}{% if r.url %} · <a href="{{ r.url if r.url.startswith('http') else 'https://doi.org/' + r.url }}" target="_blank" rel="noopener">source ↗</a>{% endif %}</div>{% endif %}
+        </div>
+      {% endfor %}
       </div>
       {% endif %}
     </div>
+    {% endif %}
 
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Result</h2>
       <p class="ctr-text">{{ study.result or _report.main_insight or (_f0.statement if _f0 else '') or '' }}</p>
+      {% if _report.key_metrics %}
+      <div class="ov-metrics">
+        {% for km in _report.key_metrics %}
+        <div class="ov-metric ov-metric-{{ (km.status or 'info')|lower }}">
+          <div class="ov-metric-v">{{ km.value }}</div>
+          <div class="ov-metric-k">{{ km.label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% if result_figure %}
       <figure class="ctr-figure">{{ result_figure | safe }}</figure>
       {% endif %}
+      <div id="overview-key-figure" class="ov-keyfig" data-study="{{ name }}"></div>
       {% if study.findings %}
     <div class="overview-section findings-section">
       <h2 class="overview-label">🔬 Findings — what this study taught us</h2>
@@ -748,7 +860,7 @@
             <div class="finding-expected">
               {% if f.expected.range %}<strong>expected:</strong> {{ f.expected.range }} · {% endif %}
               {% if f.expected.threshold is defined %}<strong>threshold:</strong> {{ f.expected.threshold | humanize_assertion }} · {% endif %}
-              {% if f.expected.cites %}cites: {% for c in f.expected.cites %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+              {% if f.expected.cites %}cites: {% set _r = references|default({}) %}{% for c in f.expected.cites %}<a class="ov-cite{{ '' if c in _r else ' unknown' }}" href="#sref-{{ c }}"{% if _r[c] and _r[c].title %} title="{{ _r[c].title }}"{% endif %}>{{ _r[c].label if _r[c] else c }}</a>{% endfor %}{% endif %}
             </div>
             {% if f.expected.summary %}<div class="finding-exp-summary"><em>Reference says:</em> {{ f.expected.summary }}</div>{% endif %}
             {% endif %}
@@ -1283,23 +1395,16 @@
     <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
       <h3 class="section-title" style="margin-right:auto">Readouts</h3>
     </div>
-    <p class="muted">The Design-time emit <strong>contract</strong>: what the emitter is
-    configured to persist, which store paths it declares, and the shape of what lands on
-    disk. No observed values here — see Results for what actually came back from a run.</p>
+    <p class="muted">The observables this study records from a run — the composite's
+    store paths with authored names, units and descriptions on top. See
+    <strong>Results</strong> for the values a run returned.</p>
 
-    <h4>Emitter &amp; config</h4>
-    <p class="muted" style="font-size:0.9em">The emitter class, its write-path module, emit
-    interval/buffer, output location, and emit scope — from
-    <code>lib/emitters.py</code> and this study's (or the workspace's)
-    <code>runtime.default_emitter</code>.</p>
-    <div id="readouts-emitter" data-study="{{ name }}">
-      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter configuration…</span></div>
-    </div>
-
-    <h4>Emitted paths</h4>
-    <p class="muted" style="font-size:0.9em">Each row is an emitter <code>store_path</code>
-    the composite will save; authored entries in <code>study.yaml</code> add names,
-    descriptions, and units on top.</p>
+    <details class="readouts-emitter-details" style="margin:4px 0 14px 0">
+      <summary class="muted" style="font-size:0.85em;cursor:pointer">Emitter &amp; config</summary>
+      <div id="readouts-emitter" data-study="{{ name }}" style="margin-top:8px">
+        <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter configuration…</span></div>
+      </div>
+    </details>
 
     {# Points at Simulations' raw-data downloads (Study artifacts strip)
        rather than duplicating them (Task C4, repointed by Task E2 when

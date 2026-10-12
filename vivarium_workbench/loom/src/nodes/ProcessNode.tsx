@@ -43,7 +43,7 @@ function _classifyStep(address: string | undefined, label: string | undefined): 
 const SECTION_HINT = {
   config:   'Configuration — build-time parameters that set how this process behaves. Click for values & types.',
   meta:     'Process type and how many input / output ports it has.',
-  contract: 'Contract — what this process reads, computes, and writes. Click for the full description.',
+  contract: 'Description — what this process reads, computes, and writes. Click for the full description.',
   math:     'Governing equations — how the outputs are computed from the inputs.',
   symbols:  'Symbol legend — what each variable in the equations means.',
 } as const;
@@ -275,6 +275,9 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
         {show.types && info.type && (
           <span className="port-in-sub">
             <span className="port-in-type" title={info.fullType}>{info.type}</span>
+            {info.units && (
+              <span className="port-in-units" title={`unit: ${info.units}`}>{info.units}</span>
+            )}
           </span>
         )}
         {open && (
@@ -291,6 +294,12 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
               <div className="port-popover-row">
                 <span className="port-popover-key">type</span>
                 <span className="port-popover-val mono">{info.fullType}</span>
+              </div>
+            )}
+            {info.units && (
+              <div className="port-popover-row">
+                <span className="port-popover-key">unit</span>
+                <span className="port-popover-val mono">{info.units}</span>
               </div>
             )}
             {semantic && <div className="port-popover-sem">{semantic}</div>}

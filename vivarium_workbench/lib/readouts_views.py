@@ -179,6 +179,31 @@ def _strip_lineage(path: str) -> str:
     return _LINEAGE_RE.sub("", path or "")
 
 
+# Bare node-metadata leaf endings (a Process/Step node's own wiring, never data).
+_NODE_META_RE = re.compile(r"(?:^|\.)(?:address|interval|_type|instance)$")
+
+
+def _observable_leaves(leaves) -> list[str]:
+    """Keep only real observable state leaves; drop Process/Step node internals.
+
+    A Process/Step node surfaces an ``<prefix>.address`` leaf in the structural
+    state walk — so ``<prefix>`` names a node and its WHOLE subtree
+    (``emitter.config.emit.OAA``, ``network.inputs.feed_CO2``, ``emitter.address``,
+    ``network.interval``) is wiring/config, not observable data. Drop those
+    subtrees (inferred from the leaves themselves, no composite doc needed) plus
+    any stray bare node-metadata ending; keep real state stores like ``net.OAA``,
+    ``flux.net_carbon_flux`` — and legitimate ``…config.cache_dir`` state that is
+    NOT under a node prefix.
+    """
+    leaves = [str(l) for l in (leaves or []) if l]
+    node_prefixes = {l[: -len(".address")] for l in leaves if l.endswith(".address")}
+
+    def _under_node(leaf: str) -> bool:
+        return any(leaf == p or leaf.startswith(p + ".") for p in node_prefixes)
+
+    return [l for l in leaves if not _under_node(l) and not _NODE_META_RE.search(l)]
+
+
 def _short_name(leaf: str) -> str:
     """Readable default name from a dotted leaf path."""
     segs = [s for s in (leaf or "").split(".") if s]
@@ -249,7 +274,7 @@ def _compute_excluded(spec: dict, available: dict) -> dict:
     from . import composite_runs as cr
 
     declared = cr.collect_emit_paths_from_spec(spec)
-    available_leaves = list(available.get("leaves") or [])
+    available_leaves = _observable_leaves(available.get("leaves") or [])
     if not declared:
         return {"excluded": [], "excluded_state": "empty", "emit_selection": "total",
                 "emit_is_total": True}
@@ -277,7 +302,7 @@ def _merge_readouts(spec: dict, available: dict, *, plan_available: bool = True,
     leaf (derived / not_in_emit_plan / unverified) carry no shape — there's no
     verified structure to describe.
     """
-    leaves = list(available.get("leaves") or [])
+    leaves = _observable_leaves(available.get("leaves") or [])
     catalogs = dict(available.get("catalogs") or {})
     # Index authored readouts by lineage-stripped store_path for overlay match.
     # Fix 3: honour the legacy ``observables:`` key as an annotation source.
@@ -286,7 +311,9 @@ def _merge_readouts(spec: dict, available: dict, *, plan_available: bool = True,
     for r in authored:
         sp = r.get("store_path")
         if isinstance(sp, str) and sp.strip():
-            overlay[_strip_lineage(sp.strip())] = r
+            # Normalise slash-form authored paths (``net/OAA``) to the dotted
+            # leaf form (``net.OAA``) so units/descriptions actually overlay.
+            overlay[_strip_lineage(sp.strip().replace("/", "."))] = r
 
     rows: list[dict] = []
     matched_ids: set[int] = set()

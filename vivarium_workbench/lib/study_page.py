@@ -737,9 +737,20 @@ def build_gate_ladder(spec: dict, ws_root=None, slug: Optional[str] = None) -> l
             )
             entry["diverges"] = bool(cgv.get("diverges_from_authored"))
         entry["state"] = _worst_gate_state(entry["authored_state"], entry["computed_state"])
+        entry["current"] = False
         gates.append(entry)
     if ws_root is not None and slug is not None:
         _apply_visualization_gap(gates, ws_root, slug)
+    # "You are here": the active frontier is the first gate (lifecycle order)
+    # not yet passed/waived — i.e. the stage currently in progress. When every
+    # gate is done, no gate is current (the study is complete). This gives the
+    # header a single, design-connected stage indicator in place of the old
+    # standalone phase pill.
+    _DONE = {"passed", "waived"}
+    for g in gates:
+        if g["state"] not in _DONE:
+            g["current"] = True
+            break
     return gates
 
 
@@ -901,6 +912,35 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict, *, base_path:
                 )
     except Exception:
         result_figure = ""
+    # Provenance: resolve the bibkeys this study cites (literature_anchors,
+    # behavior-test bands, findings) → {bibkey: label} from references/papers.bib,
+    # plus the ordered list of keys it actually cites, so the Overview can show a
+    # Sources list and render every cite as a chip linking to it. Best-effort.
+    references: dict = {}
+    study_cites: list = []
+    try:
+        from vivarium_workbench.lib.investigation_report import _load_references
+        references = _load_references(ws_root, WorkspacePaths.load(ws_root)) or {}
+    except Exception:
+        references = {}
+    try:
+        _seen = set()
+        def _add(keys):
+            for k in (keys or []):
+                if k and k not in _seen:
+                    _seen.add(k); study_cites.append(k)
+        for a in (spec.get("literature_anchors") or []):
+            if isinstance(a, dict):
+                _add(a.get("cites"))
+        for t in (spec.get("behavior_tests") or []):
+            if isinstance(t, dict):
+                _add(t.get("cites") or ((t.get("pass_if") or {}).get("cites") if isinstance(t.get("pass_if"), dict) else None))
+        for f in (spec.get("findings") or []):
+            if isinstance(f, dict):
+                _add((f.get("expected") or {}).get("cites") if isinstance(f.get("expected"), dict) else None)
+                _add(f.get("cites"))
+    except Exception:
+        study_cites = []
     html = tpl.render(study=spec, name=name, result_figure=result_figure,
                       display_name=spec.get("title") or _hn["title"],
                       name_chip=_hn["chip"],
@@ -909,6 +949,8 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict, *, base_path:
                       gate_ladder=gate_ladder,
                       gate_states=gate_states,
                       report_cards_html=report_cards_html,
+                      references=references,
+                      study_cites=study_cites,
                       base_path=base_path)
     from vivarium_workbench.lib.report import _apply_live_base_path, _normalize_asset_urls
     html = _normalize_asset_urls(html)

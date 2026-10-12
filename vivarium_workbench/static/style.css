@@ -2135,6 +2135,12 @@ body.pcard-sec-resizing{ cursor:ns-resize; user-select:none; }
   font-family:ui-monospace,Menlo,monospace; font-size:0.72em; color:#7c8698;
   background:#f1f5f9; border:1px solid #e6ebf1; border-radius:4px; padding:0 5px; flex:none; white-space:nowrap;
 }
+/* The param/port physical unit, a small accent pill beside the type tag. */
+.cfg-units{
+  font-family:ui-monospace,Menlo,monospace; font-size:0.72em; color:var(--accent,#0f766b);
+  background:var(--accent-soft,rgba(15,118,107,0.1)); border-radius:4px; padding:0 5px; flex:none; white-space:nowrap; margin-left:2px;
+}
+:root[data-theme="dark"] .cfg-units{ background:rgba(63,185,165,0.15); color:var(--accent,#3fb9a5); }
 .cfg-row-input{ min-width:0; }
 .cfg-list .cfg-row-input input[type="text"],
 .cfg-list .cfg-row-input input[type="number"],
@@ -4368,6 +4374,20 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .aig-status-badge:focus-visible { outline: 2px solid #6366f1; outline-offset: 1px; }
 /* Far (overview) band: tighter cards so the whole DAG reads at a glance. */
 #investigation-dag-shell.aig-zoom-far .iset-dag-node { padding: 6px 8px; }
+
+/* The study currently open in the detail panel below — highlighted in the graph
+   so "which node am I looking at" is unambiguous. Set/cleared by _wsOpenStudyTab
+   and re-applied on every _renderInvestigationDag from window._wsStudyTabs.active. */
+.iset-dag-node.aig-node-active {
+  position: relative;
+  box-shadow: 0 0 0 3px #2563eb, 0 6px 18px rgba(37,99,235,0.28) !important;
+  border-color: #2563eb !important;
+}
+.iset-dag-node.aig-node-active::after {
+  content: "open"; position: absolute; top: -9px; right: 10px;
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: #fff; background: #2563eb; padding: 1px 7px; border-radius: 9999px;
+}
 
 /* ── Composites page: compact, informative cards ──────────────────────────── */
 .ccard-grid {

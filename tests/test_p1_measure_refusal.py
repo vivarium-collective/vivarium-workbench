@@ -90,6 +90,46 @@ def test_measure_path_miss_is_a_named_refusal_not_a_dropped_series(tmp_path):
     assert "chemokine_gradient" in entry["present"]
 
 
+def test_refusal_chart_carries_caption_and_validates(tmp_path):
+    """Regression: the refusal chart must carry a ``caption`` — it is a required
+    ChartPayload field, and omitting it made ``StudyChartsPayload.model_validate``
+    raise, 500-ing the whole /api/study-charts payload for any study with a
+    behavior test whose measure.path is not an emitted observable."""
+    from vivarium_workbench.lib.models import ChartPayload
+
+    db = tmp_path / "runs.db"
+    _make_runs_db(db, _STATE)
+    spec = {
+        "schema_version": 4,
+        "tests": [
+            {"name": "occupancy-test", "measure": {"path": "receptor.occupancy"},
+             "pass_if": {}},
+        ],
+    }
+    entry = render_v4_test_charts(spec, db, fallback_db=None)[0]
+    assert entry["status"] == "refused"
+    assert entry.get("caption"), "refusal chart must carry a (required) caption"
+    ChartPayload.model_validate(entry)  # must not raise
+
+
+def test_derived_measure_refusal_is_a_clean_computed_scalar_note(tmp_path):
+    """A ``kind: derived`` measure names a workspace-computed SCALAR, not an
+    emitted series — the refusal says so cleanly rather than implying a data gap."""
+    db = tmp_path / "runs.db"
+    _make_runs_db(db, _STATE)
+    spec = {
+        "schema_version": 4,
+        "tests": [
+            {"name": "settled-t", "measure": {"kind": "derived", "path": "settled_temperature_c"},
+             "pass_if": {"op": "range", "low": 40, "high": 91}},
+        ],
+    }
+    entry = render_v4_test_charts(spec, db, fallback_db=None)[0]
+    assert entry["status"] == "refused"
+    assert "Computed scalar readout" in entry["caption"]
+    assert "settled_temperature_c" in entry["caption"]
+
+
 def test_measure_path_present_still_renders(tmp_path):
     """Regression: a measure whose path IS present in the store renders
     exactly as before — the refusal path must not fire for a hit."""

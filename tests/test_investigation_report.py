@@ -133,7 +133,10 @@ def test_sourcing_data_shape_and_provenance(tmp_path):
     # only known top-level keys — nothing invented
     assert set(d) <= {"slug", "title", "status", "question", "hypothesis", "lead",
                       "executive", "at_a_glance", "acceptance_criteria", "spine",
-                      "catalog", "workspace", "provenance", "studies"}
+                      "catalog", "workspace", "provenance", "studies",
+                      # provenance surfacing: cited top-level argument + resolved bib
+                      "scientific_argument", "key_claims", "competing_frameworks",
+                      "references", "inv_references"}
 
 
 def test_agentic_trajectory_attached(tmp_path):
@@ -403,3 +406,29 @@ def test_report_renders_studies_from_members_only_investigation(tmp_path):
     data = build_report_data(tmp_path, "inv")
     slugs = [s.get("slug") for s in data.get("studies", [])]
     assert slugs == ["only-study"], f"members-only investigation rendered {slugs!r}, expected the member"
+
+
+def test_bib_label_and_reference_parsing(tmp_path):
+    """The provenance feature resolves papers.bib bibkeys → short 'Author Year'
+    labels so citation chips read meaningfully and link to the References list."""
+    from vivarium_workbench.lib.investigation_report import _bib_label, _load_references
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    # _bib_label: first-author surname + year, from a BibTeX author field
+    assert _bib_label("kelley2001offaxis",
+                      {"author": "Kelley, Deborah S. and others", "year": "2001"}) == "Kelley 2001"
+    assert _bib_label("x", {"author": "Russell, Michael J.", "year": "1997"}) == "Russell 1997"
+    assert _bib_label("bare2020", {}) == "bare2020"  # no fields → fall back to key
+    # _load_references: parse a minimal bib under <ws>/references/papers.bib
+    inv_dir = tmp_path / "investigations"
+    inv_dir.mkdir(parents=True)
+    refs_dir = tmp_path / "references"
+    refs_dir.mkdir()
+    (refs_dir / "papers.bib").write_text(
+        "@article{preiner2020hydrogen,\n  author = {Preiner, Martina},\n"
+        "  year = {2020},\n  title = {A hydrogen-dependent geochemistry},\n}\n",
+        encoding="utf-8")
+    wp = WorkspacePaths.load(tmp_path)
+    refs = _load_references(tmp_path, wp)
+    assert "preiner2020hydrogen" in refs
+    assert refs["preiner2020hydrogen"]["label"] == "Preiner 2020"
+    assert "hydrogen-dependent" in refs["preiner2020hydrogen"]["title"]

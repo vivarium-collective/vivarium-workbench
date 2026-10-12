@@ -77,6 +77,7 @@ a:hover{text-decoration:underline}
 .verdict{margin:28px 0 8px;padding:24px 26px 24px 30px;background:var(--surface);border:1px solid var(--line);
   border-left:4px solid var(--pass);border-radius:12px;box-shadow:var(--shadow)}
 .verdict.is-fail{border-left-color:var(--fail)}
+.verdict.is-progress{border-left-color:var(--warn)}
 .verdict .vhead{display:flex;align-items:center;gap:12px;margin-bottom:12px}
 .verdict .vtext{font-family:var(--serif);font-size:20px;line-height:1.4;color:var(--ink);margin:0;max-width:none}
 .verdict .what{color:var(--ink-2);font-size:14.5px;margin-top:14px;max-width:none}
@@ -320,6 +321,51 @@ details.exp .body{font-size:13.5px;color:var(--ink-2);margin-top:8px;max-width:n
 .modal .mfoot{display:flex;justify-content:flex-end;gap:10px;padding:16px 22px}
 .modal .mfoot button{font-family:var(--sans);font-size:13px;font-weight:600;border-radius:9px;padding:9px 16px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
 .modal .mfoot button.primary{background:var(--accent);color:#fff;border-color:transparent}
+/* ---- planned (not-yet-run) study state ---- */
+.status.planned{color:var(--ink-3);background:var(--chip)}
+.chip.planned{color:var(--ink-3);background:var(--chip)}
+.card.is-planned::before{background:var(--line-2)}
+.card.is-planned{border-style:dashed;border-color:var(--line-2)}
+.stats .num.planned{color:var(--ink-3)}
+.glance .chip.planned{background:var(--chip)}
+
+/* ---- hypothesis & evidence (cited top-level claims) ---- */
+.argument{margin:26px 0 8px;position:relative}
+.argument .main-claim{font-family:var(--serif);font-size:17px;line-height:1.5;color:var(--ink);margin:2px 0 16px;max-width:none}
+.claimlist{list-style:none;padding:0;margin:0;display:grid;gap:12px}
+.claimlist li{padding-left:16px;border-left:2px solid var(--line-2);font-size:14.5px;line-height:1.55;color:var(--ink-2)}
+.claimlist li .ctext{color:var(--ink)}
+.claimlist li.counter{border-left-color:var(--warn)}
+.cframes{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.cframe{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line-2);color:var(--ink-2);background:var(--surface)}
+.cframe .rel{color:var(--ink-3);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;margin-left:5px}
+/* ---- citation chips + provenance ---- */
+.refchip{display:inline-flex;align-items:center;font-size:11px;font-weight:600;font-family:var(--sans);
+  line-height:1.3;padding:1px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent);
+  white-space:nowrap;border:1px solid transparent;vertical-align:baseline}
+a.refchip:hover{text-decoration:none;border-color:var(--accent)}
+.refchip.unknown{background:var(--chip);color:var(--ink-3)}
+.citerow{display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;margin-left:4px;vertical-align:baseline}
+.cite-lbl{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin-right:2px}
+.anchors{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+.anchors th{text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-3);padding:6px 10px;border-bottom:1px solid var(--line-2);white-space:nowrap}
+.anchors td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.anchors tr:last-child td{border-bottom:none}
+.anchors .ax-exp{font-weight:600;color:var(--ink)}
+.anchors .ax-obs{font-family:var(--mono);font-size:11.5px;color:var(--ink-2)}
+.anchors .ax-status{color:var(--ink-2);font-size:12.5px}
+.anchors .ax-met{color:var(--pass);font-weight:700}
+.assumptions{margin:10px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px}
+.assumptions li{margin:3px 0}
+/* references section */
+.refs-list{display:grid;gap:2px;margin-top:8px}
+.refentry{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13.5px;scroll-margin-top:120px}
+.refentry:target{background:var(--accent-soft);border-radius:8px}
+.refentry .rk{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.refentry .rt{color:var(--ink)}
+.refentry .rmeta{color:var(--ink-2)}
+.refentry .rcount{float:right;font-size:11px;color:var(--ink-3)}
 footer{border-top:1px solid var(--line);margin-top:48px;padding:24px 0 60px;color:var(--ink-3);font-size:12.5px}
 footer .wrap{display:flex;flex-direction:column;gap:6px}
 .reasoning-step{margin:2px 0}
@@ -546,14 +592,33 @@ const has = v => v!=null && !(Array.isArray(v)&&!v.length) && !(typeof v==='obje
 
 /* ---------- helpers ---------- */
 function statusChip(kind){
-  const map={pass:['pass','Passed'],fail:['fail','Refuted'],warn:['warn','Open']};
+  const map={pass:['pass','Passed'],fail:['fail','Refuted'],warn:['warn','Open'],planned:['planned','Planned']};
   const [c,l]=map[kind]||map.warn; return `<span class="status ${c}"><span class="g"></span>${l}</span>`;
 }
-function gateOf(s){ // pass/fail
+function gateOf(s){ // pass / fail / planned / warn
   const g = (s.sourcing&&s.sourcing.audit&&s.sourcing.audit.gate) || s.gate_status;
   if(g==='pass'||g==='passed') return 'pass';
   if(g==='fail'||g==='failed') return 'fail';
+  // Not yet gated: a study the author marks Planned (or with no run at all) is
+  // DESIGNED-not-run — a distinct state from an evaluated-but-open gate, so the
+  // report never paints a not-yet-run study as if it had passed.
+  const c=(s.confidence||'').toLowerCase();
+  if(c==='planned') return 'planned';
+  if(!s.gate_status && !(s.runs&&s.runs.length)) return 'planned';
   return 'warn';
+}
+/* ---------- citation chips (provenance → References) ---------- */
+let REFS={};
+function refChip(key){
+  if(!key) return '';
+  const r=REFS[key]; const lbl=(r&&r.label)||key;
+  const title=r&&r.title?` title="${esc(r.title)}"`:'';
+  return `<a class="refchip${r?'':' unknown'}" href="#ref-${esc(key)}"${title}>${esc(lbl)}</a>`;
+}
+function citeRow(keys,label){
+  const ks=(keys||[]).filter(Boolean);
+  if(!ks.length) return '';
+  return `<span class="citerow">${label?`<span class="cite-lbl">${esc(label)}</span>`:''}${ks.map(refChip).join('')}</span>`;
 }
 function isControl(s){ return gateOf(s)==='fail' && (s.confidence==='Refuted'||s.confidence==='Accepted') && !!s.conclusion; }
 function loopOutcome(s){
@@ -865,8 +930,8 @@ function studySummary(s, inv){
 }
 
 function renderStudy(s, inv, idx){
-  const gate=gateOf(s), fail=gate==='fail', control=isControl(s), lo=loopOutcome(s);
-  const dchip=fail?'fail':'pass';
+  const gate=gateOf(s), fail=gate==='fail', planned=gate==='planned', control=isControl(s), lo=loopOutcome(s);
+  const dchip=fail?'fail':(planned?'planned':'pass');
 
   // OVERVIEW  (falls back to purpose.* for workspaces that use a `purpose:` block)
   const pq = s.purpose && s.purpose.question, pm = s.purpose && s.purpose.mechanism;
@@ -958,16 +1023,22 @@ function renderStudy(s, inv, idx){
   // pass_if band inlined, divergence surfaced, run_ids as plain code, seeded-study back-link)
   let findingsBody='';
   if(Array.isArray(s.findings) && s.findings.length){
-    const bands={}; (s.behavior_tests||[]).forEach(t=>{ if(t.pass_if) bands[t.name||t.id]=t.pass_if; });
+    const bands={}, tcites={};
+    (s.behavior_tests||[]).forEach(t=>{ const n=t.name||t.id; if(t.pass_if) bands[n]=t.pass_if; if(t.cites) tcites[n]=t.cites; });
     findingsBody=s.findings.map(f=>{
       const ok=(f.status==='passed'||f.status==='pass');
       const ft=f.evidence&&f.evidence.from_test, band=ft&&bands[ft];
       const runIds=(f.provenance&&f.provenance.run_ids)||[];
       const dv=f.divergence_factor;
+      // Provenance: a finding's own cites (expected.cites) plus the cites on the
+      // test it rests on — the literature the quantitative claim is measured against.
+      const fcites=(f.expected&&f.expected.cites)||f.cites||[];
+      const bandCites=(ft&&tcites[ft])||[];
+      const allCites=[...new Set([...fcites,...bandCites])];
       return `<div class="finding-traceability" style="margin:8px 0">
         <span class="chip ${ok?'pass':''}">${esc((f.id?f.id+' · ':'')+(f.status||'finding'))}</span>
-        <div class="kv rationale">${esc(f.statement||'')}</div>
-        ${ft?`<div class="texp">from test: ${_traceLink('test',ft)}${band?` <span class="pass_if-band mono">${esc((band.op||'')+' '+(band.value!=null?band.value:''))}</span>`:''}</div>`:''}
+        <div class="kv rationale">${esc(f.statement||'')}${allCites.length?' '+citeRow(allCites):''}</div>
+        ${ft?`<div class="texp">from test: ${_traceLink('test',ft)}${band?` <span class="pass_if-band mono">${esc((band.op||'')+' '+(band.value!=null?band.value:''))}</span>`:''}${bandCites.length?' '+citeRow(bandCites,'band'):''}</div>`:''}
         ${dv!=null?`<div class="finding-divergence texp">divergence ${esc(dv)}× vs expected</div>`:''}
         ${runIds.length?`<div class="texp">runs: ${runIds.map(r=>`<code>${esc(r)}</code>`).join(' ')}</div>`:''}
         ${f.seeded_study?`<div class="finding-seeded texp">seeded study: ${_traceLink('s',f.seeded_study)}</div>`:''}</div>`;
@@ -989,11 +1060,29 @@ function renderStudy(s, inv, idx){
     if(cg.diverges_from_authored===true || (code && authored && !same))
       gateDiv=`<div class="sp-gate-divergence chip warn" style="margin-top:8px">⚠ gate divergence — code: ${esc(code)} · authored: ${esc(authored)}</div>`;
   }
+  const decVerb=fail?'Gate refused':(planned?'Not yet run':'Gate cleared');
   const decisionBody=`<div class="decbox"><div>${statusChip(dchip)}</div>
-    <div><div class="dverdict"><b>${fail?'Gate refused':'Gate cleared'}</b> · ${esc(s.confidence||'')}${lo?` · <span class="mono">${esc(lo.result)} (${esc(lo.detail||'')})</span>`:''}</div>
+    <div><div class="dverdict"><b>${decVerb}</b> · ${esc(s.confidence||'')}${lo?` · <span class="mono">${esc(lo.result)} (${esc(lo.detail||'')})</span>`:''}</div>
     ${conclusion?`<div class="dnarr">${mdLite(conclusion)}</div>`:''}${gateDiv}</div></div>`;
 
-  return `<section class="card collapsed ${fail?'is-fail':''} ${control?'is-control':''}" id="s-${s.slug}">
+  // PROVENANCE — literature anchors (expectation → observable → source → status,
+  // with citation chips linking to the References section) + key assumptions, so
+  // every quantitative target traces back to the paper it came from.
+  const anchors=s.literature_anchors||[];
+  let anchorsBody='';
+  if(anchors.length){
+    const rows=anchors.map(a=>{
+      const met=/\bmet\b/i.test(a.status_in_workspace||'');
+      return `<tr><td class="ax-exp">${esc(a.expectation||'')}</td>
+        <td class="ax-obs">${esc(a.model_observable||'')}</td>
+        <td>${esc(a.source||'')}${citeRow(a.cites)}</td>
+        <td class="ax-status ${met?'ax-met':''}">${esc(a.status_in_workspace||'')}</td></tr>`;
+    }).join('');
+    anchorsBody=`<table class="anchors"><thead><tr><th>Expectation (literature)</th><th>Model observable</th><th>Source</th><th>Status in workspace</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  if(has(s.key_assumptions)) anchorsBody+=`<div class="kicker" style="margin:14px 0 4px">Key assumptions</div><ul class="assumptions">${s.key_assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
+
+  return `<section class="card collapsed ${fail?'is-fail':''} ${planned?'is-planned':''} ${control?'is-control':''}" id="s-${s.slug}">
     <div class="card-h">
       <span class="ctoggle">▾</span>
       <span class="cnum">${String(idx).padStart(2,'0')}</span>
@@ -1008,6 +1097,7 @@ function renderStudy(s, inv, idx){
       ${part('Visualizations', vizBody, 'study:'+s.slug+'/visualizations', s.title+' · Visualizations')}
       ${part('Tests', testsBody, 'study:'+s.slug+'/tests', s.title+' · Tests')}
       ${part('Findings', findingsBody, 'study:'+s.slug+'/findings', s.title+' · Findings')}
+      ${part('Provenance & anchors', anchorsBody, 'study:'+s.slug+'/provenance', s.title+' · Provenance')}
       ${part('Decision', decisionBody, 'study:'+s.slug+'/decision', s.title+' · Decision')}
       ${feedbackRow('study:'+s.slug, 'this whole study')}
     </div>
@@ -1037,9 +1127,12 @@ function renderExec(inv){
   const MODE=reportMode(inv);
   const gates=studies.map(gateOf);
   const nPass=gates.filter(g=>g==='pass').length, nFail=gates.filter(g=>g==='fail').length;
+  const nPlanned=gates.filter(g=>g==='planned').length;
   const exv=inv.executive||{};
   const verdictText = exv.verdict || inv.question;
-  const status = exv.verdict_status==='passed'?'pass':(inv.status==='in_progress'?'warn':'pass');
+  // Verdict tone: any fail → fail; done + still-planned work → in-progress (amber);
+  // all passed → pass. Honest about a partially-run campaign instead of green.
+  const status = nFail?'fail':((nPass && nPlanned)?'warn':(nPass?'pass':'warn'));
   // stat strip
   let stats='';
   if(MODE==='sourcing'){
@@ -1055,6 +1148,7 @@ function renderExec(inv){
     let nTests=0; studies.forEach(s=>{ nTests+=(s.behavior_tests||[]).length; });
     stats=[[studies.length,'studies'],[nPass,'passed','pass']];
     if(nFail) stats.push([nFail,'failing','fail']);
+    if(nPlanned) stats.push([nPlanned,'planned','planned']);
     stats.push([nTests,'acceptance test'+(nTests===1?'':'s')]);
   }
   const statHtml=stats.map(([n,l,c])=>`<div class="stat"><div class="num ${c||''}">${n}</div><div class="lbl">${l}</div></div>`).join('');
@@ -1064,14 +1158,14 @@ function renderExec(inv){
     return `<tr><td class="idx">${i+1}</td>
       <td><a class="st" href="#s-${s.slug}">${esc(s.title)}</a>${ctrl?'<span class="flag">⚑ control</span>':''}</td>
       <td style="color:var(--ink-2)">${role}</td>
-      <td style="text-align:right">${g==='fail'?'<span class="chip fail">✗ refuted</span>':g==='pass'?'<span class="chip pass">✓ pass</span>':'<span class="chip">open</span>'}</td></tr>`;
+      <td style="text-align:right">${g==='fail'?'<span class="chip fail">✗ refuted</span>':g==='pass'?'<span class="chip pass">✓ pass</span>':g==='planned'?'<span class="chip planned">◦ planned</span>':'<span class="chip">open</span>'}</td></tr>`;
   }).join('');
   const howto = MODE==='sourcing'
     ? `Each study is one <b>sourcing decision</b> — reuse an existing module, compose several, or build a new one. A deterministic audit grades the decision on four axes (<span class="mono">source_fit · reinvention · novelty_justified · survey_recorded</span>) by checking <span class="mono">requires ⊆ provided</span> against the module catalog. A study whose gate <b>fails</b> while it is still marked complete is an <b>adversarial control</b> — a plausible-but-wrong choice the audit is meant to refuse.`
     : MODE==='agentic'
     ? `Each study is a <b>model-building task</b> run twice: an LLM agent and a deterministic worst-margin policy each try to build a real process-bigraph model that passes the same <b>locked</b> acceptance tests. The <b>margin ladder</b> shows each test across build iterations; the <b>timeline</b> shows what the agent edited and why. The contrast is where an agent is genuinely required — where the policy has no move for the real fix and gives up.`
     : `Each study builds and runs a real <b>process-bigraph composite</b> and checks it against declared <b>acceptance tests</b>. Each study section shows its <b>model</b> (the composite's bigraph), how to <b>reproduce the run</b>, its <b>visualizations</b>, the <b>tests</b> and their verdicts, and the <b>decision</b>. Studies are collapsed to a high-level overview — expand any study for the full detail.`;
-  return `<div class="verdict fbsection ${status==='fail'?'is-fail':''}">
+  return `<div class="verdict fbsection ${status==='fail'?'is-fail':status==='warn'?'is-progress':''}">
       ${fbBubble('overview','Investigation overview')}
       <div class="vhead">${statusChip(status)}<span class="kicker">Verdict</span></div>
       <p class="vtext">${esc(verdictText)}</p>
@@ -1080,8 +1174,36 @@ function renderExec(inv){
       <details class="exp"><summary>How to read this report</summary><div class="body">${howto}</div></details>
     </div>
     <div class="stats">${statHtml}</div>
+    ${renderArgument(inv)}
     <div class="sec-h"><h2>At a glance</h2><span class="rule"></span></div>
     <table class="glance"><thead><tr><th></th><th>Study</th><th>${MODE==='sourcing'?'Sourcing decision':MODE==='agentic'?'Agent vs policy':'Evidence'}</th><th style="text-align:right">Gate</th></tr></thead><tbody>${glance}</tbody></table>`;
+}
+// The top-level hypothesis as cited claims: the origin-of-cells thesis broken
+// into the statements the campaign tests, each with citation chips linking to
+// the References section, plus the competing interpretive frameworks. So the
+// investigation's headline reasoning traces to its sources, not just the studies.
+function renderArgument(inv){
+  const sa=inv.scientific_argument||{}; const kc=inv.key_claims||[];
+  if(!sa.main_claim && !kc.length && !(sa.evidence_for||[]).length) return '';
+  let claims='';
+  if(kc.length){
+    claims=kc.map(c=>{
+      const counter=/contest|unfavorab|challenge|less favorab|may be far less/i.test(c.claim||'');
+      return `<li class="${counter?'counter':''}"><span class="ctext">${esc(c.claim||c.text||'')}</span> ${citeRow(c.cites)}</li>`;
+    }).join('');
+  } else {
+    claims=(sa.evidence_for||[]).map(e=>`<li><span class="ctext">${esc(e)}</span></li>`).join('')
+      + (sa.evidence_against||[]).map(e=>`<li class="counter"><span class="ctext">${esc(e)}</span></li>`).join('');
+  }
+  const frames=(inv.competing_frameworks||[]).map(f=>
+    `<span class="cframe">${esc(f.name||'')}${f.relation?`<span class="rel">${esc(f.relation)}</span>`:''}</span>`).join('');
+  return `<div class="argument fbsection" id="hypothesis">${fbBubble('argument','Hypothesis & evidence')}
+    <div class="sec-h"><h2>The hypothesis &amp; its evidence</h2><span class="rule"></span></div>
+    ${sa.main_claim?`<p class="main-claim">${esc(sa.main_claim)}</p>`:''}
+    ${claims?`<ul class="claimlist">${claims}</ul>`:''}
+    ${frames?`<div class="cframes">${frames}</div>`:''}
+    ${has(sa.caveats)?`<details class="exp" style="margin-top:12px"><summary>Caveats</summary><div class="body"><ul style="margin:0;padding-left:18px">${sa.caveats.map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div></details>`:''}
+  </div>`;
 }
 // dedicated place for the FINAL investigation-level visualizations
 function renderInvViz(inv){
@@ -1128,6 +1250,46 @@ function renderAppendix(inv){
   </div>`;
 }
 
+/* ---------- references (provenance targets for the citation chips) ---------- */
+function _collectCites(inv){
+  // Count every bibkey used across the investigation so the References section
+  // lists exactly the sources the studies rest on, most-cited first.
+  const cnt={};
+  const bump=ks=>(ks||[]).forEach(k=>{ if(k) cnt[k]=(cnt[k]||0)+1; });
+  (inv.studies||[]).forEach(s=>{
+    (s.literature_anchors||[]).forEach(a=>bump(a.cites));
+    (s.behavior_tests||[]).forEach(t=>bump(t.cites));
+    (s.findings||[]).forEach(f=>bump((f.expected&&f.expected.cites)||f.cites));
+  });
+  bump(inv.inv_references);
+  return cnt;
+}
+function renderReferences(inv){
+  const cnt=_collectCites(inv);
+  const keys=Object.keys(cnt);
+  if(!keys.length) return '';
+  keys.sort((a,b)=>(cnt[b]-cnt[a])||((REFS[a]&&REFS[a].label||a).localeCompare(REFS[b]&&REFS[b].label||b)));
+  const rows=keys.map(k=>{
+    const r=REFS[k]||{};
+    const label=r.label||k;
+    const meta=[r.author,r.year].filter(Boolean).join(' · ');
+    const link=r.url?` · <a href="${esc(r.url.startsWith('http')?r.url:'https://doi.org/'+r.url)}" target="_blank" rel="noopener">source ↗</a>`:'';
+    const n=cnt[k];
+    return `<div class="refentry" id="ref-${esc(k)}">
+      <span class="rcount">cited ${n}×</span>
+      <b class="rt">${esc(label)}</b> <span class="rk">${esc(k)}</span>
+      ${r.title?`<div class="rmeta">${esc(r.title)}</div>`:''}
+      ${meta?`<div class="rmeta">${esc(meta)}${link}</div>`:(link?`<div class="rmeta">${link}</div>`:'')}
+    </div>`;
+  }).join('');
+  return `<div class="appendix fbsection" id="references">
+    ${fbBubble('references','References')}
+    <div class="sec-h"><h2>References</h2><span class="rule"></span></div>
+    <p style="color:var(--ink-2);font-size:14px;max-width:none">Every source the studies cite — the papers behind each acceptance band, finding and literature anchor. The citation chips throughout the report link here.</p>
+    <div class="refs-list">${rows}</div>
+  </div>`;
+}
+
 /* ---------- feedback ---------- */
 let FB={}, CUR='model-sourcing';
 function fbKeyStore(){ return 'viva-fb-'+CUR; }
@@ -1171,7 +1333,8 @@ function markBubble(key){ document.querySelectorAll('.fbbubble').forEach(b=>{ if
 function toc(inv){
   const items=['<a href="#top" class="exec">Overview</a>','<a href="#inv-viz">Figures</a>']
     .concat(inv.studies.map((s,i)=>`<a href="#s-${s.slug}" title="${esc(s.title)}">${i+1}. ${esc(shortTitle(s.title))}</a>`))
-    .concat(inv.catalog?['<a href="#appendix">Appendix</a>']:[]).join('');
+    .concat(inv.catalog?['<a href="#appendix">Appendix</a>']:[])
+    .concat((inv.references&&Object.keys(inv.references).length)?['<a href="#references">References</a>']:[]).join('');
   return `<div class="subnav"><div class="wrap">${items}</div></div>`;
 }
 function shortTitle(t){ return t.length>22?t.slice(0,21)+'…':t; }
@@ -1181,7 +1344,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('.card,#top,#inv-viz,#appendix').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('.card,#top,#inv-viz,#appendix,#references').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -1385,7 +1548,7 @@ function setupRealLooms(){
 
 /* ---------- one contiguous document ---------- */
 function render(inv){
-  CUR=inv.slug; loadFB();
+  CUR=inv.slug; loadFB(); REFS=inv.references||{};
   document.getElementById('app').innerHTML=
     `<div class="wrap"><div class="masthead" id="top">
       <div class="eyebrow mono">${esc(inv.slug)} · investigation report</div>
@@ -1400,6 +1563,7 @@ function render(inv){
       <p style="color:var(--ink-2);font-size:14px;max-width:none;margin:0 0 8px">Each study is collapsed to a high-level overview — click a study (or a number in the index) to expand its Model, simulation run, visualizations, tests, and decision.</p>
       ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
       ${renderAppendix(inv)}
+      ${renderReferences(inv)}
       <div class="sec-h" id="report-feedback"><h2>Report feedback</h2><span class="rule"></span></div>
       <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes above. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
       ${feedbackRow('overall','the whole report')}

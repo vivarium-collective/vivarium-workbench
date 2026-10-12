@@ -168,13 +168,13 @@ function ProcessDetail(props: { details: ProcessNodeData }) {
           Only for a declared structured contract (else the Description covers it). */}
       {declaredSummary && (
         <div className="insp-contract">
-          <div className="insp-contract-label">Contract</div>
+          <div className="insp-contract-label">Description</div>
           <p className="insp-contract-text">{declaredSummary}</p>
         </div>
       )}
 
       {hasDescription && (
-        <InspectorSection title="Description">
+        <InspectorSection title="Notes">
           <Prose text={rawDescription as string} />
         </InspectorSection>
       )}

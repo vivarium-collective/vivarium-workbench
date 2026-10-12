@@ -104,6 +104,7 @@
     document.querySelectorAll('.study-tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.dataset.kind === kind);
     });
+    if (kind === 'overview') { _loadOverviewKeyFigure(); }
     if (kind === 'tests') { _loadTestsPanel(window._study); }
     if (kind === 'readouts') { _loadReadouts(); _loadReadoutsDownloadPointer(); }
     if (kind === 'visualize') { _loadCharts('viz-charts-panel'); _loadNativeGallery(); _loadRemoteFigures(); }
@@ -799,6 +800,34 @@
       .catch(function () { panel.innerHTML = ''; _remoteFiguresLoaded = false; });
   }
   window._loadRemoteFigures = _loadRemoteFigures;
+  // Overview "key figure": embed this study's first native-gallery panel (the
+  // headline plotly) inline on the Overview, isolated in an iframe so its
+  // bundled plotly doesn't touch the page. Degrades to hidden when no run/panel.
+  var _overviewKeyFigureLoaded = false;
+  function _loadOverviewKeyFigure() {
+    var host = document.getElementById('overview-key-figure');
+    if (!host || _overviewKeyFigureLoaded) return;
+    _overviewKeyFigureLoaded = true;
+    fetch('/api/study-native-gallery/' + encodeURIComponent(studyName()))
+      .then(function (r) { return r.ok ? r.json() : { panels: {} }; })
+      .then(function (d) {
+        var panels = (d && d.panels) || {};
+        var names = Object.keys(panels);
+        if (!names.length) { host.style.display = 'none'; return; }
+        var ifr = document.createElement('iframe');
+        ifr.setAttribute('title', names[0]);
+        ifr.setAttribute('loading', 'lazy');
+        ifr.srcdoc = panels[names[0]];
+        host.innerHTML = '';
+        host.appendChild(ifr);
+        var cap = document.createElement('div');
+        cap.className = 'ov-keyfig-cap';
+        cap.textContent = 'Key figure — ' + names[0] + ' · full set in Visualizations';
+        host.appendChild(cap);
+      })
+      .catch(function () { host.style.display = 'none'; });
+  }
+
   function _loadNativeGallery() {
     var host = document.getElementById('native-gallery-panel');
     if (!host || _nativeGalleryLoaded) return;
@@ -2896,6 +2925,33 @@
       });
   });
 
+  // Narrative navigation: "Next study →" follows this investigation's leads-to
+  // chain. The next slug lives in the parent investigation view (it holds the
+  // full graph + edges); the iframe asks for it and delegates the open, so the
+  // graph highlight and the panel update through one call. Hidden on a terminal
+  // study, or when the study is open standalone (no investigation parent).
+  (function _wireNextStudy() {
+    var btn = document.getElementById('study-next');
+    if (!btn) return;
+    var next = null;
+    try {
+      var p = window.parent;
+      if (p && p !== window && typeof p._nextStudySlug === 'function') {
+        next = p._nextStudySlug(studyName());
+      }
+    } catch (e) { next = null; }
+    if (!next) { btn.style.display = 'none'; return; }
+    btn.style.display = '';
+    btn.title = 'Go to "' + next + '" — the next study in this investigation (leads-to)';
+    btn.onclick = function() {
+      try {
+        if (window.parent && typeof window.parent._openStudyEmbeddedNewTab === 'function') {
+          window.parent._openStudyEmbeddedNewTab(next);
+        }
+      } catch (e) { /* standalone / cross-origin — no-op */ }
+    };
+  })();
+
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.
   // Handler _post_investigation_delete uses body key "name".
   bindAll('.btn-delete', function(btn) {
@@ -4186,18 +4242,27 @@
       ? '<div style="margin-top:6px;font-size:0.92em;color:#334155">' + e(String(test.description)) + '</div>'
       : '';
 
-    // 3. Band + measured.
+    // 3. Band + measured — carry the test's declared UNITS onto both the
+    // expected range and the measured value so the card reads as a quantity
+    // (e.g. "expected within [40, 91] °C · measured: 59 °C"), not a bare number.
     var passIf = test.pass_if || test.expect || null;
+    var units = (test.units != null && String(test.units).trim()) ? String(test.units).trim() : '';
+    var dimless = (units === '' || units === 'dimensionless' || units === '1');
+    var uSuffix = dimless ? '' : (' ' + units);
     var bandText = _humanPassIf(passIf);
+    if (bandText && uSuffix) bandText += uSuffix;
     var mv = outcome ? outcome.measured_value : null;
     var mvText;
     if (mv == null) mvText = '—  (not yet graded)';
-    else if (typeof mv === 'number') mvText = _fmtNum(mv);
+    else if (typeof mv === 'number') mvText = _fmtNum(mv) + uSuffix;
     else if (typeof mv === 'object') { try { mvText = JSON.stringify(mv); } catch (err) { mvText = String(mv); } }
     else mvText = String(mv);
+    var unitTag = (units && dimless)
+      ? ' <span class="muted" style="font-size:0.9em">· ' + e(units) + '</span>' : '';
     var bandLine = '<div style="margin-top:8px;font-size:0.85em;color:#475569">'
       + (bandText ? e(bandText) : '<span class="muted">no pass_if band declared</span>')
       + ' <span style="margin-left:10px"><strong>measured:</strong> ' + e(mvText) + '</span>'
+      + unitTag
       + '</div>';
 
     // 4. Margin bar — fixed: this MUST read axis.meter (check() already
@@ -4217,7 +4282,8 @@
     var cites = (passIf && passIf.cites) || test.cites || [];
     var anchor = (passIf && passIf.calibration_anchor) || test.calibration_anchor || null;
     var evidenceBits = [];
-    if (prov.note) evidenceBits.push('<span class="muted">basis:</span> ' + e(String(prov.note)));
+    var basisNote = prov.note || test.band_basis || null;
+    if (basisNote) evidenceBits.push('<span class="muted">basis:</span> ' + e(String(basisNote)));
     if (Array.isArray(cites) && cites.length) {
       evidenceBits.push('<span class="muted">cites:</span> ' + e(cites.join('; ')));
     }
@@ -5017,6 +5083,7 @@
   function _runStudyInit() {
     // All renderers that need window._study to be populated.
     _renderPlanningOverview();
+    _loadOverviewKeyFigure();   // embed the headline figure on the Overview
     _renderFeedbackTrackedPanel();
     _renderReadinessPanel();
     _populateConclusionVerdictBadges();

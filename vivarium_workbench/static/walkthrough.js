@@ -2118,7 +2118,10 @@
     if (v === null || v === undefined) return '';
     if (typeof v === 'string') return v;
     if (typeof v === 'object') {
-      if (v._type) return String(v._type);
+      // Show the physical unit beside the type ("float · volt") so a port /
+      // config param reads with its units, not a bare "float". _units is the
+      // schema metadata the processes declare.
+      if (v._type) return v._units ? String(v._type) + ' · ' + String(v._units) : String(v._type);
       var keys = Object.keys(v).filter(function (k) { return k.charAt(0) !== '_'; });
       if (keys.length) return '{' + keys.slice(0, 4).join(', ') + (keys.length > 4 ? ', …' : '') + '}';
       return 'store';
@@ -9016,8 +9019,58 @@
         '<span onclick="event.stopPropagation();_wsCloseStudyTab(\'' + _esc(slug) + '\')" ' +
         'title="close" style="color:#94a3b8;font-weight:700">×</span></span>';
     }).join('');
+    _wsHighlightActiveDagNode(st.active);
   }
   window._wsRenderStudyTabs = _wsRenderStudyTabs;
+
+  // Highlight the open study's node in the investigation graph (clearing any
+  // previously-open one), matching on the slug stamped on each node by
+  // _renderInvestigationDag. Called on every tab change AND re-applied after a
+  // graph re-render so the highlight survives. Node slug === the tab slug (both
+  // are s.name, the study slug the open handlers take).
+  function _wsHighlightActiveDagNode(slug) {
+    try {
+      var nodes = document.querySelectorAll('.iset-dag-node[data-study]');
+      for (var i = 0; i < nodes.length; i++) {
+        nodes[i].classList.toggle(
+          'aig-node-active', !!slug && nodes[i].getAttribute('data-study') === slug);
+      }
+    } catch (e) { /* graph not mounted yet — no-op */ }
+  }
+  window._wsHighlightActiveDagNode = _wsHighlightActiveDagNode;
+
+  // The next study along this investigation's leads-to chain, for the study
+  // detail panel's "Next study →" button. Uses the server-computed studyEdges
+  // (source -> target == leads-to) captured in _lastDagArgs, falling back to the
+  // per-study children map. Returns the next slug, or null on a terminal study /
+  // when the graph isn't available. On a branch point, returns the first target.
+  function _nextStudySlug(current) {
+    if (!current) return null;
+    try {
+      var strip = function (n) { return String(n == null ? '' : n).trim(); };
+      var args = _lastDagArgs || [];
+      // Primary: server-computed studyEdges (source -> target == leads-to).
+      var edges = args[2] || [];
+      for (var i = 0; i < edges.length; i++) {
+        var e = edges[i] || {};
+        if (strip(e.source) === current && strip(e.target)) return strip(e.target);
+      }
+      // Fallback: a study whose parent_studies lists `current` is its child
+      // (current leads-to it) — covers investigations with no server edges.
+      var studies = args[0] || [];
+      for (var j = 0; j < studies.length; j++) {
+        var sj = studies[j] || {};
+        var parents = sj.parent_studies || [];
+        for (var k = 0; k < parents.length; k++) {
+          var pk = parents[k];
+          var pname = (pk && typeof pk === 'object') ? (pk.study || pk.name || pk.slug) : pk;
+          if (strip(pname) === current) return strip(sj.name || sj.slug);
+        }
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+  window._nextStudySlug = _nextStudySlug;
 
   function _wsOpenStudyTab(slug, tab) {
     var st = window._wsStudyTabs;
@@ -9985,6 +10038,41 @@
         '<dl class="inv-brief-glossary">' + glossary.map(function(g) {
           return '<dt>' + _escInv(g.term || g.name || '') + '</dt><dd>' + _escInv(g.definition || g.def || '') + '</dd>';
         }).join('') + '</dl>' });
+    // Hypothesis & evidence — the top-level thesis as CITED claims (each
+    // {claim, cites}) plus the main claim, with citation chips resolved from
+    // references/papers.bib. So the investigation's headline reasoning traces to
+    // its sources, the same as the exported report. Only shown when declared.
+    var _refsMap = d.references_resolved || {};
+    function _invCite(keys) {
+      keys = Array.isArray(keys) ? keys : [];
+      if (!keys.length) return '';
+      return ' ' + keys.map(function(k) {
+        var r = _refsMap[k]; var lbl = (r && r.label) || k;
+        var ttl = (r && r.title) ? ' title="' + _escInv(r.title) + '"' : '';
+        return '<span class="inv-cite"' + ttl + ' style="display:inline-block;font-size:11px;' +
+          'font-weight:600;padding:1px 7px;border-radius:9px;margin:0 2px 2px 0;white-space:nowrap;' +
+          'background:' + (r ? '#eff6ff;color:#1d4ed8' : '#f1f5f9;color:#64748b') + '">' +
+          _escInv(lbl) + '</span>';
+      }).join('');
+    }
+    var kclaims = Array.isArray(d.key_claims) ? d.key_claims : [];
+    var sciArg = d.scientific_argument || {};
+    if (kclaims.length || sciArg.main_claim) {
+      var evBody = '';
+      if (sciArg.main_claim)
+        evBody += '<p class="inv-brief-prose" style="font-weight:600;margin:0 0 10px">' +
+          _escInv(sciArg.main_claim) + '</p>';
+      if (kclaims.length)
+        evBody += '<ul style="list-style:none;padding:0;margin:0;display:grid;gap:10px">' +
+          kclaims.map(function(c) {
+            c = c || {};
+            var counter = /contest|unfavorab|challenge|less favorab/i.test(c.claim || '');
+            return '<li style="padding-left:12px;border-left:2px solid ' +
+              (counter ? '#d97706' : '#cbd5e1') + '">' +
+              _escInv(c.claim || c.text || '') + _invCite(c.cites) + '</li>';
+          }).join('') + '</ul>';
+      tabs.push({ id: 'evidence', label: 'Hypothesis & evidence', html: evBody });
+    }
     // Competing frameworks — the interpretive lenses this investigation
     // adjudicates among (each {name, relation}); comparative framing for the
     // rigor scorecard. Only shown when the investigation declares them.
@@ -10771,13 +10859,30 @@
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
-      // Single click opens the full study view directly — no quick-look
-      // side-card, no double-click.
-      node.onclick = function() {
-        _openStudyInsideInvestigation(s.name);
+      // Stamp the slug so _wsHighlightActiveDagNode can mark the node whose
+      // study is open in the detail panel below.
+      node.dataset.study = s.name;
+      // Single click EXPANDS the card in place — interrogate the Asks/Finds and
+      // every finding without leaving the graph. The ↗ control opens the full
+      // study. (Previously a card click navigated straight to the study, which
+      // made the graph un-browsable.)
+      var _toggleExpand = function () {
+        var exp = node.classList.toggle('aig-node-expanded');
+        node.querySelectorAll('.aig-clamp').forEach(function (el) {
+          el.style.webkitLineClamp = exp ? 'unset' : (el.getAttribute('data-clamp') || '');
+          el.style.lineClamp = exp ? 'unset' : (el.getAttribute('data-clamp') || '');
+        });
+        var _more = node.querySelector('.aig-more-findings');
+        var _all = node.querySelector('.aig-all-findings');
+        if (_more) _more.style.display = exp ? 'none' : '';
+        if (_all) _all.style.display = exp ? 'block' : 'none';
+        node.style.zIndex = exp ? '60' : '';
+        node.style.boxShadow = exp ? '0 8px 24px rgba(0,0,0,0.18)' : '';
+        node.style.whiteSpace = '';
       };
-      node.title = s.name + ' — ' + confidence + (claim ? '\n\nFinds: ' + claim : '') +
-        '\n\nClick to open the study';
+      node.onclick = _toggleExpand;
+      node.title = s.name + ' — ' + confidence +
+        '\n\nClick to expand in place · ↗ opens the full study';
       var x = (orient === 'TB')
         ? rowStartX[depth[s.name]] + breadthIndex[s.name] * (CARD_W + BREADTH_GAP)
         : PAD_X + depth[s.name] * (CARD_W + DEPTH_GAP);
@@ -10804,27 +10909,37 @@
         // (no longer squeezed into a thin flex column beside the badge).
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:5px">' +
           '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1;flex:none">' + ss.icon + '</span>' +
-          '<span class="aig-status-badge" role="button" tabindex="0" title="Why: open this study\'s finding & evidence" ' +
-            'style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;cursor:pointer;text-decoration:underline dotted;flex:none">' +
-            _esc(confidence) + '</span>' +
+          '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
+            '<span class="aig-status-badge" role="button" tabindex="0" title="Expand this card in place" ' +
+              'style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;cursor:pointer;text-decoration:underline dotted">' +
+              _esc(confidence) + '</span>' +
+            '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
+              'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
+              'style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;font-size:0.72em;line-height:1;padding:2px 5px;cursor:pointer">↗</button>' +
+          '</span>' +
         '</div>' +
         '<strong style="display:block;font-size:0.85em;line-height:1.3;color:#1e293b">' + _esc(prettyTitle) + '</strong>' +
         (_opts.asks && asks
-          ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
+          ? '<div class="aig-clamp" data-clamp="2" style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
               '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
           : '') +
         (_opts.finds
-          ? '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
+          ? '<div class="aig-clamp" data-clamp="5" style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
               '<span style="font-weight:600;color:#475569">Finds:</span> ' +
               (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
             '</div>'
           : '') +
+        // Collapsed indicator (default) + the full findings list (revealed on
+        // expand). Clicking the card toggles between them.
         (_opts.finds && moreN
-          ? '<div title="' + _esc(findings.slice(1).map(function (f) {
-                return '• ' + ((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim());
-              }).join('\n')) + '" ' +
-            'style="font-size:0.72em;margin-top:2px;color:#94a3b8;cursor:help">+' + moreN +
-            ' more finding' + (moreN === 1 ? '' : 's') + '</div>'
+          ? '<div class="aig-more-findings" style="font-size:0.72em;margin-top:3px;color:#94a3b8;cursor:pointer">+' + moreN +
+              ' more finding' + (moreN === 1 ? '' : 's') + ' — click to show</div>' +
+            '<div class="aig-all-findings" style="display:none;font-size:0.72em;margin-top:4px;line-height:1.4;color:#64748b">' +
+              findings.map(function (f) {
+                return '<div style="margin-top:3px">• ' +
+                  _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
+              }).join('') +
+            '</div>'
           : '') +
         (_opts.followups ? followUpsChip : '') +
         (_opts.chain && chainsBySlug && typeof window._chainBlockHtml === 'function'
@@ -10854,9 +10969,9 @@
       if (_badge) {
         var _openReason = function (ev) {
           ev.stopPropagation();
-          // The quick-look side-card is gone — the verdict badge opens the full
-          // study (its findings/evidence live there).
-          _openStudyInsideInvestigation(s.name);
+          // Interrogate in place — expand the card (its findings/evidence are
+          // right here). The ↗ button opens the full study.
+          _toggleExpand();
         };
         _badge.addEventListener('click', _openReason);
         _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _openReason(ev); } });
@@ -10867,7 +10982,15 @@
           node.querySelectorAll('.aig-claim-row').forEach(function (row) {
             row.addEventListener('click', function (ev) {
               ev.stopPropagation();
-              _openStudyInsideInvestigation(study.name);
+              // Open the claim drawer — it shows the full claim text and each
+              // chain stage labelled (● Finding, ◆ Evidence, ▣ Decision,
+              // ★ Conclusion), with its own "Open full study →" button. This is
+              // what "click to read the evidence" should do, instead of silently
+              // navigating away to the study card.
+              var ci = parseInt(row.getAttribute('data-claim-index'), 10);
+              var claim = claims[ci];
+              if (claim) window._openInvestigationDrawer('claim', { claim: claim, study: study });
+              else _openStudyInsideInvestigation(study.name);
             });
           });
         })(s, chainsBySlug[s.name]);
@@ -11053,6 +11176,8 @@
           _edgeLg('calibrates-threshold') + _edgeLg('refutes-alternative') +
         '</span>';
     }
+    // Re-apply the open-study highlight after a (re-)render so it survives.
+    _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
   }
   window._renderInvestigationDag = _renderInvestigationDag;
 

@@ -38,7 +38,7 @@ _STUDY_KEEP = (
     "title", "confidence", "gate_status", "question", "claim", "biological_summary",
     "requires", "sourcing", "baseline", "behavior_tests", "runs", "conclusion",
     "loop_provenance", "purpose", "findings", "conclusion_logic", "limitations",
-    "parent_studies", "pipeline_gate",
+    "parent_studies", "pipeline_gate", "literature_anchors", "key_assumptions",
 )
 
 # 5-state study verdict (mirrors viva_superpowers roll-up): each maps to a glyph
@@ -524,6 +524,58 @@ def _model_topology(ws_root, spec: dict) -> "dict | None":
         return None
 
 
+# --- references / provenance -------------------------------------------------
+# The studies cite papers by bibkey (literature_anchors[].cites,
+# behavior_tests[].cites, findings[].expected.cites). The report turns each
+# bibkey into a short "Author Year" chip linking to a References section, so a
+# reader can trace any modeling decision back to its source. Resolved from the
+# workspace's references/papers.bib (shared bib the Resources tab reads too).
+
+_BIB_ENTRY_RE = re.compile(r"@\w+\s*\{\s*([^,\s]+)\s*,(.*?)\n\}", re.DOTALL)
+_BIB_FIELD_RE = re.compile(r"(\w+)\s*=\s*[{\"](.*?)[}\"]\s*,?\s*$", re.MULTILINE | re.DOTALL)
+
+
+def _bib_label(key: str, fields: dict) -> str:
+    """A short human label for a citation chip: first-author surname + year."""
+    author = re.sub(r"\s+", " ", fields.get("author", "")).strip()
+    year = fields.get("year", "").strip()
+    surname = ""
+    if author:
+        first = re.split(r"\s+and\s+", author)[0].strip()
+        surname = first.split(",")[0].strip() if "," in first else first.split()[-1]
+    if surname and year:
+        return f"{surname} {year}"
+    if surname:
+        return surname
+    return year or key
+
+
+def _load_references(ws_root: Path, wp) -> dict:
+    """Parse ``references/papers.bib`` → ``{bibkey: {label, author, year, title,
+    url}}``. Best-effort: a missing/garbled bib yields ``{}`` so the report still
+    renders (chips then fall back to the bare bibkey)."""
+    out: dict = {}
+    try:
+        bib = wp.investigations.parent / "references" / "papers.bib"
+        if not bib.is_file():
+            return {}
+        text = bib.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {}
+    for m in _BIB_ENTRY_RE.finditer(text):
+        key = m.group(1).strip()
+        fields = {fk.lower(): re.sub(r"\s+", " ", fv).strip()
+                  for fk, fv in _BIB_FIELD_RE.findall(m.group(2))}
+        out[key] = {
+            "label": _bib_label(key, fields),
+            "author": fields.get("author", ""),
+            "year": fields.get("year", ""),
+            "title": fields.get("title", ""),
+            "url": fields.get("url", "") or fields.get("doi", ""),
+        }
+    return out
+
+
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
     """Assemble the pure report-data dict for one investigation from existing
     files only. Raises FileNotFoundError if the investigation is missing.
@@ -593,6 +645,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         studies.append(s)
 
     spine = _build_spine(ws_root, inv_slug, studies)
+    references = _load_references(ws_root, wp)
 
     return {
         "slug": inv.get("name") or inv_slug,
@@ -602,9 +655,14 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "hypothesis": inv.get("hypothesis"),
         "lead": inv.get("lead"),
         "executive": inv.get("executive"),
+        "scientific_argument": inv.get("scientific_argument"),
+        "key_claims": inv.get("key_claims"),
+        "competing_frameworks": inv.get("competing_frameworks"),
         "at_a_glance": inv.get("at_a_glance"),
         "acceptance_criteria": inv.get("acceptance_criteria"),
         "spine": spine,
+        "references": references,
+        "inv_references": inv.get("inputs", {}).get("references") if isinstance(inv.get("inputs"), dict) else None,
         "catalog": inv.get("catalog"),
         "workspace": ws_root.name,
         "provenance": (
