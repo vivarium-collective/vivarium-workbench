@@ -688,6 +688,17 @@ def _federated_investigation_detail(ws_root: Path, name: str):
     return None
 
 
+def _resolve_bib_references(ws_root: Path) -> dict:
+    """``{bibkey: {label, title, author, year, url}}`` from references/papers.bib,
+    for the investigation page's citation chips. Best-effort → {} on any error so
+    the page still renders (chips then fall back to the bare bibkey)."""
+    try:
+        from vivarium_workbench.lib.investigation_report import _load_references
+        return _load_references(Path(ws_root), WorkspacePaths.load(Path(ws_root))) or {}
+    except Exception:
+        return {}
+
+
 def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     """GET /api/investigation/<name> builder.
 
@@ -965,7 +976,14 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # this investigation adjudicates among (each {name, relation}). Dropped
         # before this passthrough, so the investigation page never showed it.
         "competing_frameworks": spec.get("competing_frameworks") or [],
+        # The origin-of-cells thesis as cited claims (each {claim, cites}); the
+        # investigation page renders these with citation chips so the top-level
+        # argument traces to its sources.
+        "key_claims":          spec.get("key_claims") or [],
         "references":          (spec.get("inputs") or {}).get("references") or [],
+        # Resolved bibkey → {label, title, author, year, url} from references/
+        # papers.bib, so citation chips read "Kelley 2001" and link to a source.
+        "references_resolved": _resolve_bib_references(ws_root),
         "proposed_inputs":     spec.get("proposed_inputs") or {},
         "studies":             studies_out,
         # Investigation-level run length hint (the longest member study's baseline

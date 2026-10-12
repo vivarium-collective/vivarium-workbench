@@ -9985,6 +9985,41 @@
         '<dl class="inv-brief-glossary">' + glossary.map(function(g) {
           return '<dt>' + _escInv(g.term || g.name || '') + '</dt><dd>' + _escInv(g.definition || g.def || '') + '</dd>';
         }).join('') + '</dl>' });
+    // Hypothesis & evidence — the top-level thesis as CITED claims (each
+    // {claim, cites}) plus the main claim, with citation chips resolved from
+    // references/papers.bib. So the investigation's headline reasoning traces to
+    // its sources, the same as the exported report. Only shown when declared.
+    var _refsMap = d.references_resolved || {};
+    function _invCite(keys) {
+      keys = Array.isArray(keys) ? keys : [];
+      if (!keys.length) return '';
+      return ' ' + keys.map(function(k) {
+        var r = _refsMap[k]; var lbl = (r && r.label) || k;
+        var ttl = (r && r.title) ? ' title="' + _escInv(r.title) + '"' : '';
+        return '<span class="inv-cite"' + ttl + ' style="display:inline-block;font-size:11px;' +
+          'font-weight:600;padding:1px 7px;border-radius:9px;margin:0 2px 2px 0;white-space:nowrap;' +
+          'background:' + (r ? '#eff6ff;color:#1d4ed8' : '#f1f5f9;color:#64748b') + '">' +
+          _escInv(lbl) + '</span>';
+      }).join('');
+    }
+    var kclaims = Array.isArray(d.key_claims) ? d.key_claims : [];
+    var sciArg = d.scientific_argument || {};
+    if (kclaims.length || sciArg.main_claim) {
+      var evBody = '';
+      if (sciArg.main_claim)
+        evBody += '<p class="inv-brief-prose" style="font-weight:600;margin:0 0 10px">' +
+          _escInv(sciArg.main_claim) + '</p>';
+      if (kclaims.length)
+        evBody += '<ul style="list-style:none;padding:0;margin:0;display:grid;gap:10px">' +
+          kclaims.map(function(c) {
+            c = c || {};
+            var counter = /contest|unfavorab|challenge|less favorab/i.test(c.claim || '');
+            return '<li style="padding-left:12px;border-left:2px solid ' +
+              (counter ? '#d97706' : '#cbd5e1') + '">' +
+              _escInv(c.claim || c.text || '') + _invCite(c.cites) + '</li>';
+          }).join('') + '</ul>';
+      tabs.push({ id: 'evidence', label: 'Hypothesis & evidence', html: evBody });
+    }
     // Competing frameworks — the interpretive lenses this investigation
     // adjudicates among (each {name, relation}); comparative framing for the
     // rigor scorecard. Only shown when the investigation declares them.
