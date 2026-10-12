@@ -393,8 +393,12 @@ def _study_yaml_run_rows(ws_root: Path, name: str) -> list[dict]:
             "params":        {"seed": r.get("seed")} if r.get("seed") is not None else {},
             "n_steps":       r.get("n_steps"),
             "status":        r.get("status") or "completed",
-            "started_at":    r.get("started_at"),
-            "completed_at":  r.get("completed_at") or r.get("started_at"),
+            # Fall back to `timestamp` (the field bespoke canonical-run scripts
+            # record): without it a study.yaml run sorts as started_at=None, so a
+            # newer canonical run loses newest-first ordering and the native viz
+            # gallery / Results tab resolve a STALE older run.
+            "started_at":    r.get("started_at") or r.get("timestamp"),
+            "completed_at":  r.get("completed_at") or r.get("started_at") or r.get("timestamp"),
             "generation_id": r.get("generation_id"),
             "source":        "study.yaml",
         })
