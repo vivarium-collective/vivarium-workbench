@@ -1,4 +1,33 @@
-from vivarium_workbench.lib.readouts_views import _merge_readouts
+from vivarium_workbench.lib.readouts_views import _merge_readouts, _observable_leaves
+
+
+def test_node_internal_leaves_are_dropped():
+    """Process/Step node wiring (config/inputs/outputs/interval/address) is not
+    observable data — the Readouts panel must not list it."""
+    leaves = [
+        "net.OAA", "flux.net_carbon_flux", "feed.CO2", "global_time",  # real observables
+        "emitter.address", "emitter.config.emit.OAA", "emitter.inputs.OAA",
+        "network.config.k_rtca", "network.inputs.feed_CO2", "network.interval",
+        "network.address",
+    ]
+    kept = _observable_leaves(leaves)
+    assert set(kept) == {"net.OAA", "flux.net_carbon_flux", "feed.CO2", "global_time"}
+
+
+def test_slash_form_authored_store_path_overlays_dotted_leaf():
+    """An authored readout with a slash store_path (`net/OAA`) annotates the
+    dotted emit leaf (`net.OAA`) with its units/description."""
+    spec = {"readouts": [
+        {"name": "OAA", "store_path": "net/OAA", "units": "molar", "description": "oxaloacetate"},
+    ]}
+    rows = _merge_readouts(spec, {"leaves": [
+        "net.OAA", "emitter.address", "emitter.config.emit.OAA"]})
+    assert len(rows) == 1                       # emitter node subtree dropped
+    assert rows[0]["store_path"] == "net.OAA"
+    assert rows[0]["units"] == "molar"
+    assert rows[0]["description"] == "oxaloacetate"
+    assert rows[0]["annotated"] is True
+
 
 
 AVAIL = {"leaves": [

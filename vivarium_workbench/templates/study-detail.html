@@ -1283,23 +1283,16 @@
     <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
       <h3 class="section-title" style="margin-right:auto">Readouts</h3>
     </div>
-    <p class="muted">The Design-time emit <strong>contract</strong>: what the emitter is
-    configured to persist, which store paths it declares, and the shape of what lands on
-    disk. No observed values here — see Results for what actually came back from a run.</p>
+    <p class="muted">The observables this study records from a run — the composite's
+    store paths with authored names, units and descriptions on top. See
+    <strong>Results</strong> for the values a run returned.</p>
 
-    <h4>Emitter &amp; config</h4>
-    <p class="muted" style="font-size:0.9em">The emitter class, its write-path module, emit
-    interval/buffer, output location, and emit scope — from
-    <code>lib/emitters.py</code> and this study's (or the workspace's)
-    <code>runtime.default_emitter</code>.</p>
-    <div id="readouts-emitter" data-study="{{ name }}">
-      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter configuration…</span></div>
-    </div>
-
-    <h4>Emitted paths</h4>
-    <p class="muted" style="font-size:0.9em">Each row is an emitter <code>store_path</code>
-    the composite will save; authored entries in <code>study.yaml</code> add names,
-    descriptions, and units on top.</p>
+    <details class="readouts-emitter-details" style="margin:4px 0 14px 0">
+      <summary class="muted" style="font-size:0.85em;cursor:pointer">Emitter &amp; config</summary>
+      <div id="readouts-emitter" data-study="{{ name }}" style="margin-top:8px">
+        <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter configuration…</span></div>
+      </div>
+    </details>
 
     {# Points at Simulations' raw-data downloads (Study artifacts strip)
        rather than duplicating them (Task C4, repointed by Task E2 when
