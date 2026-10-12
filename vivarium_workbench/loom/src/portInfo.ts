@@ -16,6 +16,10 @@ export interface PortInfo {
   type: string;
   /** Full, unabbreviated type string; '' when none. Goes in a title / expanded row. */
   fullType: string;
+  /** The port's physical unit (`_units` on the schema, e.g. "kelvin", "molar",
+   *  "volt"); '' when the port declares none. Shown beside the type so a port
+   *  reads as "float · molar", not a bare "float". */
+  units: string;
   /** The store the port connects to, for display: the RESOLVED absolute dotted
    *  path when known (the composite root shown as `<root>`), else the raw
    *  authored target. '' when the port is unwired. */
@@ -53,9 +57,19 @@ export function portType(v: unknown): string {
   return '';
 }
 
+/** A port's physical unit from its `_units` schema key, '' when absent. */
+export function portUnits(v: unknown): string {
+  if (v && typeof v === 'object') {
+    const u = (v as { _units?: unknown })._units;
+    if (typeof u === 'string') return u;
+  }
+  return '';
+}
+
 /** Fold a single port's type + wiring into its display shape. */
 export function portInfo(port: string, isOutput: boolean, s: PortSchemas): PortInfo {
   const rawType = s.typeSchema ? portType(s.typeSchema[port]) : '';
+  const units = s.typeSchema ? portUnits(s.typeSchema[port]) : '';
   const rawTarget = s.portsSchema?.[port] ?? '';
   const resolved = s.portsTarget?.[port];
   // The resolved absolute path is unambiguous, so prefer it; '' is the valid
@@ -69,6 +83,7 @@ export function portInfo(port: string, isOutput: boolean, s: PortSchemas): PortI
     direction: isOutput ? 'writes' : 'reads',
     type: abbreviateType(rawType),
     fullType: rawType,
+    units,
     connectsTo,
     rawTarget,
   };

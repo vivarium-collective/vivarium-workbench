@@ -77,3 +77,14 @@ describe('portInfo', () => {
     expect(info.fullType).toBe('');
   });
 });
+
+describe('portInfo units', () => {
+  it('surfaces _units from a schema dict', () => {
+    const info = portInfo('temperature', false, { typeSchema: { temperature: { _type: 'float', _units: 'kelvin' } } });
+    expect(info.type).toBe('float');
+    expect(info.units).toBe('kelvin');
+  });
+  it('is empty when the port declares no units', () => {
+    expect(portInfo('x', false, { typeSchema: { x: 'float' } }).units).toBe('');
+  });
+});

@@ -78,7 +78,7 @@ export default function DetailMenu(props: {
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <button
         onClick={() => setOpen((v) => !v)}
-        title="Card detail — toggle ports / stores / config / contract independently, or follow the zoom (Auto)"
+        title="Card detail — toggle ports / stores / config / description independently, or follow the zoom (Auto)"
         style={{
           height: 28, padding: '0 10px', fontSize: 12, background: (open || anyForced) ? '#ecfdf9' : '#fff',
           display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -103,7 +103,7 @@ export default function DetailMenu(props: {
           <div style={row}><span style={rowLabel}>Ports</span>{seg(PORTS, overrides.ports, (id) => setOverrides({ ...overrides, ports: id as PortsDetail }))}</div>
           <div style={row}><span style={rowLabel}>Stores</span>{seg(STORES, overrides.stores, (id) => setOverrides({ ...overrides, stores: id as StoresDetail }))}</div>
           <div style={row}><span style={rowLabel}>Config</span>{seg(TRI, overrides.config, (id) => setOverrides({ ...overrides, config: id as TriDetail }))}</div>
-          <div style={row}><span style={rowLabel}>Contract</span>{seg(CONTRACT, overrides.contract, (id) => setOverrides({ ...overrides, contract: id as ContractDetail }))}</div>
+          <div style={row}><span style={rowLabel}>Description</span>{seg(CONTRACT, overrides.contract, (id) => setOverrides({ ...overrides, contract: id as ContractDetail }))}</div>
           <div style={row}><span style={rowLabel}>Symbols</span>{seg(TRI, overrides.symbols, (id) => setOverrides({ ...overrides, symbols: id as TriDetail }))}</div>
           <div style={row}><span style={rowLabel}>Figures</span>{seg(TRI, overrides.figures, (id) => setOverrides({ ...overrides, figures: id as TriDetail }))}</div>
           <div style={row}><span style={rowLabel}>Address</span>{seg(TRI, overrides.address, (id) => setOverrides({ ...overrides, address: id as TriDetail }))}</div>

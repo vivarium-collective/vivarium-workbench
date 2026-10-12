@@ -635,6 +635,14 @@ body {
   opacity: 0.9;
   max-width: calc(var(--port-col, 140px) - 13px); overflow: hidden; text-overflow: ellipsis;
 }
+/* The port's physical unit, shown as a small pill beside the raw type so a
+   numeric port reads as "float · molar" rather than a bare "float". */
+.port-in-units {
+  font-family: var(--bk-mono); font-size: 11px; line-height: 1.3;
+  margin-left: 5px; padding: 0 5px; border-radius: 6px;
+  background: var(--bk-accent-soft, rgba(15,118,107,0.12));
+  color: var(--bk-accent, #0f766b); white-space: nowrap;
+}
 /* Contract meaning for a documented port — the book-body gloss that supersedes
    the raw type when present (#2). */
 .port-in-sem {
