@@ -19,14 +19,12 @@
 <header class="study-header">
   <div style="display:flex; align-items:baseline; gap:12px; justify-content:space-between;">
   <h1 class="study-title">
-    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" title="{{ name }}">{{ display_name }}</span>
-    {# Task 4: deterministic study kind (biological/computational/theoretical),
-       inferred by lib/study_kind.py and wired into the template context by
-       Task 1. Small pill beside the title, before the phase pill. #}
-    <span class="study-kind-tag study-kind-{{ study.kind }}" data-study-kind="{{ study.kind }}" title="Study kind">{{ study.kind }}</span>
-    {% if study.phase %}
-    <span class="phase-pill phase-{{ study.phase|lower }}" title="Lifecycle: Design → Build → Simulate → Evaluate → Decide">{{ study.phase }}</span>
-    {% endif %}
+    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" data-study-kind="{{ study.kind }}" title="{{ name }}">{{ display_name }}</span>
+    {# The old standalone "kind" + "phase" pills were visual noise next to the
+       title (uniform across a computational investigation; the phase just
+       duplicated the gate ladder below). Kind is kept as a data attribute for
+       any consumer; the lifecycle stage is now shown — and highlighted "you are
+       here" — inside the six-gate status row below (gate-current). #}
   </h1>
   <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0;">
     {# Launch actions only (▶ / ↻). The downloads live where they're used — the
@@ -41,6 +39,11 @@
        independent of this study's own pinned baseline composite. Remote-pinned only, same
        gate as "Run current spec" (see _dispatchRemoteComposite in study-detail.js). #}
     <button type="button" id="study-run-composite" class="btn-mini" title="Dispatch a specific process-bigraph composite_id to the remote compute backend (pbg-native multi_node/mbp, or the Nextflow campaign path) — advanced, independent of this study's own pinned baseline">⚙ Dispatch composite</button>
+    {# Narrative navigation: jump to the next study along this investigation's
+       leads-to chain. Populated/shown by study-detail.js (_wireNextStudy),
+       which asks the parent investigation view for the next slug; hidden on a
+       terminal study or outside an investigation. #}
+    <button type="button" id="study-next" class="btn-mini" style="display:none" title="Go to the next study in this investigation's narrative (leads-to)">Next study →</button>
   </span>
   </div>
   <div class="study-status-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px;">
@@ -91,8 +94,8 @@
         {% endif %}
         <span class="status-stepper">
           {% for _g in gate_ladder %}
-          <span class="status-step gate-step axis-{{ _g.axis }} gate-state-{{ _g.state }}{% if _g.authored_value or _g.computed_value %} set{% endif %}" title="Gate {{ _g.number }} · {{ _g.name }}">
-            <span class="dot"></span>{{ _g.number }}&nbsp;·&nbsp;{{ _g.name }}{% if _g.authored_value %}<span class="step-val">{{ _g.authored_value }}</span>{% endif %}
+          <span class="status-step gate-step axis-{{ _g.axis }} gate-state-{{ _g.state }}{% if _g.authored_value or _g.computed_value %} set{% endif %}{% if _g.current %} gate-current{% endif %}" title="Gate {{ _g.number }} · {{ _g.name }}{% if _g.current %} — current stage{% endif %}">
+            <span class="dot"></span>{{ _g.number }}&nbsp;·&nbsp;{{ _g.name }}{% if _g.authored_value %}<span class="step-val">{{ _g.authored_value }}</span>{% endif %}{% if _g.current %}<span class="gate-current-tag">you are here</span>{% endif %}
           </span>
           {% endfor %}
           {% if study.implementation_status %}
@@ -283,6 +286,11 @@
 .status-step.gate-status-passed .dot{background:#10b981;box-shadow:none}
 .status-step.gate-status-failed .dot{background:#ef4444;box-shadow:none}
 .status-step.gate-status-stale .dot{background:#8b5cf6;box-shadow:none}
+/* "You are here": the current lifecycle stage in the gate ladder (replaces the
+   old standalone phase pill — one clear, design-connected stage indicator). */
+.status-step.gate-current{color:#1e3a5f;font-weight:600;background:#eff6ff;border-radius:9999px;padding:1px 10px;box-shadow:inset 0 0 0 1px #bfdbfe}
+.status-step.gate-current .dot{background:#2563eb;box-shadow:none}
+.gate-current-tag{font-size:0.78em;font-weight:700;color:#2563eb;margin-left:6px;text-transform:uppercase;letter-spacing:0.04em}
 /* Fable G2 (§13.2 gate-state vocab; §9.3 palette: grey/green/amber/red/violet).
    One palette for the gate-ladder stepper dots + detail rows AND (via the
    [data-gate-state] selectors below) the act-rail dots, so "how urgent is

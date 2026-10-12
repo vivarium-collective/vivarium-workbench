@@ -737,9 +737,20 @@ def build_gate_ladder(spec: dict, ws_root=None, slug: Optional[str] = None) -> l
             )
             entry["diverges"] = bool(cgv.get("diverges_from_authored"))
         entry["state"] = _worst_gate_state(entry["authored_state"], entry["computed_state"])
+        entry["current"] = False
         gates.append(entry)
     if ws_root is not None and slug is not None:
         _apply_visualization_gap(gates, ws_root, slug)
+    # "You are here": the active frontier is the first gate (lifecycle order)
+    # not yet passed/waived — i.e. the stage currently in progress. When every
+    # gate is done, no gate is current (the study is complete). This gives the
+    # header a single, design-connected stage indicator in place of the old
+    # standalone phase pill.
+    _DONE = {"passed", "waived"}
+    for g in gates:
+        if g["state"] not in _DONE:
+            g["current"] = True
+            break
     return gates
 
 

@@ -4375,6 +4375,20 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 /* Far (overview) band: tighter cards so the whole DAG reads at a glance. */
 #investigation-dag-shell.aig-zoom-far .iset-dag-node { padding: 6px 8px; }
 
+/* The study currently open in the detail panel below — highlighted in the graph
+   so "which node am I looking at" is unambiguous. Set/cleared by _wsOpenStudyTab
+   and re-applied on every _renderInvestigationDag from window._wsStudyTabs.active. */
+.iset-dag-node.aig-node-active {
+  position: relative;
+  box-shadow: 0 0 0 3px #2563eb, 0 6px 18px rgba(37,99,235,0.28) !important;
+  border-color: #2563eb !important;
+}
+.iset-dag-node.aig-node-active::after {
+  content: "open"; position: absolute; top: -9px; right: 10px;
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: #fff; background: #2563eb; padding: 1px 7px; border-radius: 9999px;
+}
+
 /* ── Composites page: compact, informative cards ──────────────────────────── */
 .ccard-grid {
   display: grid;

@@ -2925,6 +2925,33 @@
       });
   });
 
+  // Narrative navigation: "Next study →" follows this investigation's leads-to
+  // chain. The next slug lives in the parent investigation view (it holds the
+  // full graph + edges); the iframe asks for it and delegates the open, so the
+  // graph highlight and the panel update through one call. Hidden on a terminal
+  // study, or when the study is open standalone (no investigation parent).
+  (function _wireNextStudy() {
+    var btn = document.getElementById('study-next');
+    if (!btn) return;
+    var next = null;
+    try {
+      var p = window.parent;
+      if (p && p !== window && typeof p._nextStudySlug === 'function') {
+        next = p._nextStudySlug(studyName());
+      }
+    } catch (e) { next = null; }
+    if (!next) { btn.style.display = 'none'; return; }
+    btn.style.display = '';
+    btn.title = 'Go to "' + next + '" — the next study in this investigation (leads-to)';
+    btn.onclick = function() {
+      try {
+        if (window.parent && typeof window.parent._openStudyEmbeddedNewTab === 'function') {
+          window.parent._openStudyEmbeddedNewTab(next);
+        }
+      } catch (e) { /* standalone / cross-origin — no-op */ }
+    };
+  })();
+
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.
   // Handler _post_investigation_delete uses body key "name".
   bindAll('.btn-delete', function(btn) {
