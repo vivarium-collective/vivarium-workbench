@@ -100,6 +100,7 @@ export interface InvestigationSummary {
   name: string;
   title: string | null;
   status: string | null;
+  verdict_status: string | null;
   effective_status: string | null;
   description: string | null;
   question: string | null;

@@ -19,7 +19,10 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_workbench.lib.notebook_export import export_investigation_notebook
+from vivarium_workbench.lib.notebook_export import (
+    export_investigation_notebook,
+    export_study_notebook,
+)
 
 # Distinctive numbers planted in *result* fields — must NOT appear in the text.
 _RESULT_TOKENS = ["9999", "8888", "7777", "6666", "5555"]
@@ -226,6 +229,130 @@ def test_repo_root_resolved_from_notebook_location(tmp_path):
     assert 'os.environ.get("VIVARIUM_REPO")' in code
     # the old fragile primary (bare hardcoded path with cwd fallback) is gone
     assert 'REPO = Path(os.environ.get("VIVARIUM_REPO") or' not in code
+
+
+def _build_generator_workspace(root: Path) -> tuple[str, str]:
+    """A workspace whose study's baseline composite is a @composite_generator
+    (NO on-disk .composite.yaml), with a declared contract, competing
+    frameworks, mechanisms and literature anchors — the 'Planned study' shape.
+    No runs.db. Returns (investigation_slug, study_slug)."""
+    _write(root / "workspace.yaml", {
+        "schema_version": 2,
+        "name": "demo",
+        "package_path": "demo_pkg",
+        "layout": {
+            "studies": "workspace/studies",
+            "investigations": "workspace/investigations",
+            "reports": "workspace/reports",
+        },
+    })
+    _write(root / "workspace" / "investigations" / "gen-inv" / "investigation.yaml", {
+        "schema_version": 2,
+        "name": "gen-inv",
+        "title": "Generator investigation",
+        "question": "Does the generator build?",
+        "competing_frameworks": [
+            {"name": "Framework A", "role": "primary-lens"},
+            "Plain scenario B",
+        ],
+        "studies": ["gen-study"],
+    })
+    _write(root / "workspace" / "studies" / "gen-study" / "study.yaml", {
+        "schema_version": 4,
+        "name": "gen-study",
+        "investigation": "gen-inv",
+        "title": "Generator study",
+        "question": "Does it build and run?",
+        "phase": "Design",
+        "proposed_mechanisms": ["Mechanism M1"],
+        "proposed_models_methods": ["Method1 solver"],
+        "key_assumptions": ["Assumption A1"],
+        "contract": {
+            "face": {
+                "inputs": {"temperature": {"_type": "float", "_units": "kelvin",
+                                           "_min": 273.0, "_max": 673.0}},
+                "outputs": {"flux": {"_type": "float", "_units": "mole/second", "_min": 0.0}},
+            },
+            "conditions": [{"kind": "invariant", "name": "mass_balance", "expr": "abs(r) < tol"}],
+        },
+        "baseline": [
+            {"name": "base", "composite": "demo_pkg.composites.gen.synth", "params": {}},
+        ],
+        "visualizations": [
+            {"name": "ts", "address": "local:SynthViz",
+             "config": {"composite": "demo_pkg.composites.gen.synth", "n_steps": 10}},
+        ],
+        "behavior_tests": [
+            {"name": "t1", "classification": "primary",
+             "measure": {"kind": "last"}, "pass_if": {"op": "gt", "threshold": 0}},
+        ],
+        "literature_anchors": [
+            {"expectation": "E1", "model_observable": "O1", "source": "S1",
+             "status_in_workspace": "Not yet measurable"},
+        ],
+    })
+    return "gen-inv", "gen-study"
+
+
+def test_generator_composite_materialized(tmp_path: Path):
+    """A generator-based composite (no spec file) is materialized from the
+    registry — not reported as 'not found'."""
+    _inv, study = _build_generator_workspace(tmp_path)
+    out = export_study_notebook(tmp_path, study)
+    nb = json.loads(out["ipynb"].read_text())
+    code = _code_text(nb)
+    md = _markdown_text(nb)
+
+    assert "def materialize_composite(" in code          # setup helper emitted
+    assert "def _render_viz_process(" in code            # viz-process renderer emitted
+    assert "materialize_composite('demo_pkg.composites.gen.synth')" in code  # inspect cell
+    assert "@composite_generator" in md                  # labeled as a generator
+    assert "not found" not in md.lower()                 # the old skip note is gone
+    compile(out["py"].read_text(), str(out["py"]), "exec")
+
+
+def test_run_cell_autodetect_for_planned_study(tmp_path: Path):
+    """A study with no runs.db still gets a live build-and-run cell, wrapped so
+    an unbuilt composite reports instead of crashing."""
+    _inv, study = _build_generator_workspace(tmp_path)
+    code = _code_text(json.loads(export_study_notebook(tmp_path, study)["ipynb"].read_text()))
+    assert "No recorded runs for this study" not in code          # old dead-end gone
+    assert "materialize_composite('demo_pkg.composites.gen.synth', _ov)" in code
+    assert "except Exception" in code and "not runnable yet" in code
+
+
+def test_contract_frameworks_mechanisms_literature(tmp_path: Path):
+    """Planned-study design content renders from study.yaml / investigation."""
+    _inv, study = _build_generator_workspace(tmp_path)
+    md = _markdown_text(json.loads(export_study_notebook(tmp_path, study)["ipynb"].read_text()))
+    assert "### Typed contract" in md and "kelvin" in md and "mole/second" in md
+    assert "mass_balance" in md
+    assert "Competing frameworks" in md and "Framework A" in md
+    assert "### Design" in md and "Mechanism M1" in md and "Method1 solver" in md
+    assert "### Literature anchors" in md and "E1" in md
+    assert "_(primary)_" in md                              # behavior-test classification
+
+
+def test_viz_process_render_for_local_address(tmp_path: Path):
+    """A ``local:<VizProcess>`` viz routes through the viz-process renderer, not
+    the static-file path."""
+    _inv, study = _build_generator_workspace(tmp_path)
+    code = _code_text(json.loads(export_study_notebook(tmp_path, study)["ipynb"].read_text()))
+    assert "_is_static" in code
+    assert "show_viz(_render_one('local:SynthViz'" in code
+
+
+def test_viz_passes_edited_params_to_self_running_figure(tmp_path: Path):
+    """A ``local:`` viz whose config names a generator composite gets that
+    composite's editable ``ov_*`` dict passed as ``overrides`` (guarded by
+    ``in dir()``), so edited parameters flow into the self-running figure."""
+    _inv, study = _build_generator_workspace(tmp_path)
+    code = _code_text(json.loads(export_study_notebook(tmp_path, study)["ipynb"].read_text()))
+    ov = "ov_demo_pkg_composites_gen_synth"
+    assert f"overrides=({ov} if {ov!r} in dir() else None)" in code
+    # and the renderer accepts the overrides, trying merged config then base
+    assert "def _render_one(address, config, runs_db, study_yaml, overrides=None):" in code
+    assert "[{**_base, **overrides}] if overrides else []" in code
 
 
 def test_viz_cells_use_iframe_isolation(tmp_path):

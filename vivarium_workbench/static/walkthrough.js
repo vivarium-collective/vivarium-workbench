@@ -11497,13 +11497,6 @@
       _notify('Figures download failed: ' + e, { danger: true });
     });
   };
-  // A study's ↓ notebook is its parent investigation's runnable notebook (there
-  // is no per-study notebook). In the graph the parent is the open investigation.
-  window._vivStudyNotebookFromCard = function (ev, slug) {
-    if (ev) ev.stopPropagation();
-    var inv = window._wsInvestigation || window._currentIset || '';
-    if (inv && window._vivNotebookFromCard) window._vivNotebookFromCard(ev, inv);
-  };
   // ▶ run — launch a study's CURRENT baseline spec as a new run (live only).
   window._vivRunStudyFromRow = function (ev, slug) {
     if (ev) ev.stopPropagation();
