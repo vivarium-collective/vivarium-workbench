@@ -728,11 +728,13 @@
       input = '<input type="text" ' + attr + 'json" value="' + _esc(jv) + '" placeholder="JSON / null">';
     }
     var typeLabel = opts.type || '';
+    var units = opts.units || '';   // physical unit (from the param/port _units)
     var desc = (opts.description || '').trim();
     return '<div class="cfg-row"' + (desc ? ' title="' + _esc(desc) + '"' : '') + '>' +
         '<div class="cfg-row-name">' +
           '<span class="cfg-key">' + _esc(key) + '</span>' +
           (typeLabel ? '<span class="cfg-type">' + _esc(typeLabel) + '</span>' : '') +
+          (units ? '<span class="cfg-units" title="unit: ' + _esc(units) + '">' + _esc(units) + '</span>' : '') +
         '</div>' +
         '<div class="cfg-row-input">' + input + '</div>' +
         (desc ? '<div class="cfg-row-desc">' + _esc(desc) + '</div>' : '') +
@@ -1119,6 +1121,10 @@
   function _renderCompositeCardFull(c) {
     _scheduleRunTargetBadges();
     var params = (c.parameters && typeof c.parameters === 'object') ? c.parameters : {};
+    // The raw config_schema (from the env worker) still carries each param's
+    // _units even when the parameters mapping dropped it — read it as a fallback
+    // so the Registry card shows the unit beside the type.
+    var cfgSchema = (c.config_schema && typeof c.config_schema === 'object') ? c.config_schema : {};
     var pKeys = Object.keys(params), nCfg = pKeys.length;
     var desc = (c.description || '').trim();
     var sel = (window._registrySelected && window._registrySelected === c.id) ? ' reg-selected' : '';
@@ -1135,7 +1141,8 @@
     var cfgFields = nCfg
       ? pKeys.map(function (k) {
           var pv = params[k] || {};
-          return _runField(k, ('default' in pv) ? pv.default : null, { type: pv.type, description: pv.description });
+          var sch = cfgSchema[k] || {};
+          return _runField(k, ('default' in pv) ? pv.default : null, { type: pv.type, units: pv.units || pv._units || sch._units, description: pv.description });
         }).join('')
       : '<p class="muted" style="font-size:0.82em">No parameters.</p>';
 

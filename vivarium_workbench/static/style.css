@@ -2135,6 +2135,12 @@ body.pcard-sec-resizing{ cursor:ns-resize; user-select:none; }
   font-family:ui-monospace,Menlo,monospace; font-size:0.72em; color:#7c8698;
   background:#f1f5f9; border:1px solid #e6ebf1; border-radius:4px; padding:0 5px; flex:none; white-space:nowrap;
 }
+/* The param/port physical unit, a small accent pill beside the type tag. */
+.cfg-units{
+  font-family:ui-monospace,Menlo,monospace; font-size:0.72em; color:var(--accent,#0f766b);
+  background:var(--accent-soft,rgba(15,118,107,0.1)); border-radius:4px; padding:0 5px; flex:none; white-space:nowrap; margin-left:2px;
+}
+:root[data-theme="dark"] .cfg-units{ background:rgba(63,185,165,0.15); color:var(--accent,#3fb9a5); }
 .cfg-row-input{ min-width:0; }
 .cfg-list .cfg-row-input input[type="text"],
 .cfg-list .cfg-row-input input[type="number"],
