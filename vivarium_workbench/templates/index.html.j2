@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="UTF-8"><title>{% if dashboard_name %}{{ dashboard_name }} dashboard{% else %}{{ workspace_name }}{% endif %}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if dashboard_name %}{{ dashboard_name }} dashboard{% else %}{{ workspace_name }}{% endif %}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <link rel="stylesheet" href="assets/chat.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <link rel="stylesheet" href="assets/snapshot-readonly.css">
 <link rel="stylesheet" href="assets/progress-track.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
+<!-- Phone/responsive layer (loaded last so its @media rules win). Ships to the
+     live server and every published read-only bundle via publish.py. -->
+<link rel="stylesheet" href="assets/responsive.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <!-- Apply the saved light/dark theme before first paint (no flash of light). -->
 <script>(function(){try{var t=localStorage.getItem('viv.theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <!-- item 41: when this tab was spawned via ?workspace=/?build= (workspace-picker.js's
@@ -2582,6 +2587,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/loom-embed.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* loom-embed unavailable */"></script>
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/mobile-nav.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile-nav unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
 <!-- chat-core.js already loaded above (shared by panel-dock.js + process-code.js). -->
 <script src="assets/ai-models.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
