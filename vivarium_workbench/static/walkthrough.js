@@ -10926,7 +10926,15 @@
           node.querySelectorAll('.aig-claim-row').forEach(function (row) {
             row.addEventListener('click', function (ev) {
               ev.stopPropagation();
-              _openStudyInsideInvestigation(study.name);
+              // Open the claim drawer — it shows the full claim text and each
+              // chain stage labelled (● Finding, ◆ Evidence, ▣ Decision,
+              // ★ Conclusion), with its own "Open full study →" button. This is
+              // what "click to read the evidence" should do, instead of silently
+              // navigating away to the study card.
+              var ci = parseInt(row.getAttribute('data-claim-index'), 10);
+              var claim = claims[ci];
+              if (claim) window._openInvestigationDrawer('claim', { claim: claim, study: study });
+              else _openStudyInsideInvestigation(study.name);
             });
           });
         })(s, chainsBySlug[s.name]);
