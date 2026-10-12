@@ -51,6 +51,56 @@ def _outcomes_by_test(spec: dict) -> dict:
     return merged
 
 
+def _fmt_num(v) -> str:
+    """Compact human number: ints plain, small/large via sci, else trimmed float."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if f == int(f) and abs(f) < 1e15:
+        return str(int(f))
+    if f != 0 and (abs(f) < 1e-3 or abs(f) >= 1e5):
+        return f"{f:.2e}"
+    return f"{f:.4g}"
+
+
+def _human_pass_if(pass_if) -> str:
+    """Humanize a pre-registered band to an 'expected …' phrase (mirrors the
+    live Tests-tab card's _humanPassIf). '' when no band is declared."""
+    if not isinstance(pass_if, dict):
+        return ""
+    op = str(pass_if.get("op") or pass_if.get("operator") or "").strip()
+    def _n(k):
+        v = pass_if.get(k)
+        return float(v) if isinstance(v, (int, float)) else None
+    lo = _n("low") if _n("low") is not None else _n("lo")
+    hi = _n("high") if _n("high") is not None else _n("hi")
+    if lo is not None and hi is not None:
+        return f"expected within [{_fmt_num(lo)}, {_fmt_num(hi)}]"
+    target = _n("value")
+    if target is None:
+        target = _n("target")
+    if target is None:
+        target = _n("threshold")
+    if target is None:
+        return ""
+    if op in ("<=", "max_le", "at_most", "less-than-or-equal"):
+        return f"expected ≤ {_fmt_num(target)}"
+    if op in ("<", "max_lt", "less-than"):
+        return f"expected < {_fmt_num(target)}"
+    if op in (">=", "min_ge", "at_least", "greater-than-or-equal"):
+        return f"expected ≥ {_fmt_num(target)}"
+    if op in (">", "min_gt", "greater-than"):
+        return f"expected > {_fmt_num(target)}"
+    tol = _n("tolerance")
+    tolf = _n("tolerance_fraction")
+    if tol is not None:
+        return f"expected ≈ {_fmt_num(target)} (±{_fmt_num(tol)})"
+    if tolf is not None:
+        return f"expected ≈ {_fmt_num(target)} (±{_fmt_num(tolf * 100)}%)"
+    return f"expected {_fmt_num(target)}"
+
+
 def build_behavior_tests_verdict(spec: dict) -> dict:
     """Compute the behavior-tests card verdict.json payload. Pure; no I/O."""
     spec = spec if isinstance(spec, dict) else {}
@@ -67,12 +117,22 @@ def build_behavior_tests_verdict(spec: dict) -> dict:
         # attaches to a graded outcome — carry it so the card can draw a margin
         # bar. Absent for agent/needs_rerun/pending buckets.
         ax = o.get("axis") if isinstance(o.get("axis"), dict) else {}
+        pass_if = t.get("pass_if") or t.get("expect") or {}
+        prov = pass_if.get("provenance") if isinstance(pass_if, dict) else None
+        cites = (isinstance(pass_if, dict) and pass_if.get("cites")) or t.get("cites") or []
         rows.append({
             "name": name,
             "en": str(t.get("en") or t.get("description") or "").strip(),
             "result": result,
             "detail": str(o.get("detail") or o.get("note") or "").strip(),
             "measured_value": o.get("measured_value"),
+            # Pre-registered band + units so the persisted card reads as a
+            # quantity (expected range + units) beside the measured value,
+            # matching the live Tests-tab card (not a bare pass/fail).
+            "band": _human_pass_if(pass_if),
+            "units": str(t.get("units") or "").strip(),
+            "band_basis": str((isinstance(prov, dict) and prov.get("note")) or t.get("band_basis") or "").strip(),
+            "cites": [str(c) for c in cites] if isinstance(cites, list) else [],
             "margin": ax.get("margin"),
             "severity": ax.get("severity"),
             "meter": ax.get("meter"),
@@ -219,16 +279,43 @@ def render_behavior_tests_html(verdict: dict, spec: dict) -> str:
 
     body_rows = []
     for r in rows:
-        detail = r.get("detail") or ""
-        mv = r.get("measured_value")
-        meta = detail or (f"measured: {mv}" if mv is not None else "")
-        meta_html = (
-            '<div style="color:#475569;font-size:0.88em;margin-top:2px">'
-            f'{_html.escape(str(meta))}</div>' if meta else ""
-        )
         en_html = (
             '<div style="color:#334155;font-size:0.9em">'
             f'{_html.escape(str(r.get("en") or ""))}</div>' if r.get("en") else ""
+        )
+        # Pre-registered band + measured, both carrying the declared units.
+        units = (r.get("units") or "").strip()
+        dimless = units in ("", "dimensionless", "1")
+        usuf = "" if dimless else f" {units}"
+        band = (r.get("band") or "").strip()
+        mv = r.get("measured_value")
+        mv_txt = (f"{_fmt_num(mv)}{usuf}" if isinstance(mv, (int, float))
+                  else (str(mv) if mv is not None else "— (not yet graded)"))
+        band_parts = []
+        if band:
+            band_parts.append(f"{_html.escape(band)}{_html.escape(usuf)}")
+        band_parts.append(f"<strong>measured:</strong> {_html.escape(mv_txt)}")
+        unit_tag = (f' <span style="color:#94a3b8">· {_html.escape(units)}</span>'
+                    if (units and dimless) else "")
+        band_html = (
+            '<div style="color:#475569;font-size:0.85em;margin-top:3px">'
+            + " · ".join(band_parts) + unit_tag + "</div>"
+        )
+        # Grading detail (only when it adds over the band line).
+        detail = (r.get("detail") or "").strip()
+        detail_html = (
+            '<div style="color:#64748b;font-size:0.8em;margin-top:2px">'
+            f'{_html.escape(detail)}</div>' if detail else ""
+        )
+        # Pre-registration provenance: basis (why the band) + citations.
+        ev = []
+        if r.get("band_basis"):
+            ev.append(f'<span style="color:#94a3b8">basis:</span> {_html.escape(str(r["band_basis"]))}')
+        if r.get("cites"):
+            ev.append(f'<span style="color:#94a3b8">cites:</span> {_html.escape("; ".join(r["cites"]))}')
+        ev_html = (
+            '<div style="color:#64748b;font-size:0.8em;margin-top:2px">'
+            + " · ".join(ev) + "</div>" if ev else ""
         )
         body_rows.append(
             '<div style="padding:8px 0;border-top:1px solid #f1f5f9">'
@@ -237,7 +324,7 @@ def render_behavior_tests_html(verdict: dict, spec: dict) -> str:
             '<span style="font-weight:600;color:#1e293b">'
             f'{_html.escape(str(r.get("name") or ""))}</span>'
             + _gate_class_badge_html(r) +
-            "</div>" + en_html + meta_html + _margin_bar_html(r) + "</div>"
+            "</div>" + en_html + band_html + detail_html + ev_html + _margin_bar_html(r) + "</div>"
         )
 
     if not rows:

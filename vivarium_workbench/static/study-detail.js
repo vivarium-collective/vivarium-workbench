@@ -4215,18 +4215,27 @@
       ? '<div style="margin-top:6px;font-size:0.92em;color:#334155">' + e(String(test.description)) + '</div>'
       : '';
 
-    // 3. Band + measured.
+    // 3. Band + measured — carry the test's declared UNITS onto both the
+    // expected range and the measured value so the card reads as a quantity
+    // (e.g. "expected within [40, 91] °C · measured: 59 °C"), not a bare number.
     var passIf = test.pass_if || test.expect || null;
+    var units = (test.units != null && String(test.units).trim()) ? String(test.units).trim() : '';
+    var dimless = (units === '' || units === 'dimensionless' || units === '1');
+    var uSuffix = dimless ? '' : (' ' + units);
     var bandText = _humanPassIf(passIf);
+    if (bandText && uSuffix) bandText += uSuffix;
     var mv = outcome ? outcome.measured_value : null;
     var mvText;
     if (mv == null) mvText = '—  (not yet graded)';
-    else if (typeof mv === 'number') mvText = _fmtNum(mv);
+    else if (typeof mv === 'number') mvText = _fmtNum(mv) + uSuffix;
     else if (typeof mv === 'object') { try { mvText = JSON.stringify(mv); } catch (err) { mvText = String(mv); } }
     else mvText = String(mv);
+    var unitTag = (units && dimless)
+      ? ' <span class="muted" style="font-size:0.9em">· ' + e(units) + '</span>' : '';
     var bandLine = '<div style="margin-top:8px;font-size:0.85em;color:#475569">'
       + (bandText ? e(bandText) : '<span class="muted">no pass_if band declared</span>')
       + ' <span style="margin-left:10px"><strong>measured:</strong> ' + e(mvText) + '</span>'
+      + unitTag
       + '</div>';
 
     // 4. Margin bar — fixed: this MUST read axis.meter (check() already
@@ -4246,7 +4255,8 @@
     var cites = (passIf && passIf.cites) || test.cites || [];
     var anchor = (passIf && passIf.calibration_anchor) || test.calibration_anchor || null;
     var evidenceBits = [];
-    if (prov.note) evidenceBits.push('<span class="muted">basis:</span> ' + e(String(prov.note)));
+    var basisNote = prov.note || test.band_basis || null;
+    if (basisNote) evidenceBits.push('<span class="muted">basis:</span> ' + e(String(basisNote)));
     if (Array.isArray(cites) && cites.length) {
       evidenceBits.push('<span class="muted">cites:</span> ' + e(cites.join('; ')));
     }
