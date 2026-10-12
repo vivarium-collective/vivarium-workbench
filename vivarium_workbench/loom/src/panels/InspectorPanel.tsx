@@ -50,7 +50,7 @@ export function InspectorPanel(props: InspectorPanelProps) {
         {isProc && (
           <div className="insp-sub">
             {d.processType}
-            {d.interval != null && <> · every {d.interval}</>}
+            {d.interval != null && <span title={`${d.interval} s`}> · every {d.intervalLabel ?? `${d.interval} s`}</span>}
             {' · '}{(d.inputPorts?.length ?? 0)} in / {(d.outputPorts?.length ?? 0)} out
           </div>
         )}

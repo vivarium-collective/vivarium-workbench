@@ -991,6 +991,16 @@ def _attach_process_docs(doc, get_core=None):
                             node["config"] = _pd_config_sanitize(loaded)
                     except Exception:  # noqa: BLE001
                         pass
+                # Human-facing timestep label: the author's declared form
+                # ("1 min") with canonical seconds available for a tooltip.
+                # Guarded so a step (no interval) or an older core is never a crash.
+                if "interval" in node and "interval_label" not in node:
+                    try:
+                        from bigraph_schema.units import format_time_interval
+                        node["interval_label"] = format_time_interval(
+                            float(node["interval"]), node.get("interval_units"))
+                    except Exception:  # noqa: BLE001
+                        pass
                 if "_contract" not in node:
                     try:
                         contract = _pd_contract_for_node(node, parent, key, get_core)
