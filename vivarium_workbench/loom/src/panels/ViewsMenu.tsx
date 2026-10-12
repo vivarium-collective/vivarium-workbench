@@ -31,8 +31,17 @@ export default function ViewsMenu(props: {
     const onDoc = (e: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    // Capture phase: the graph is React Flow, which stops mousedown propagation
+    // on its pane, so a bubble-phase document listener never sees clicks on the
+    // canvas (the bulk of the view). Capturing runs before that, so clicking
+    // anywhere outside the menu — graph included — reliably dismisses it.
+    document.addEventListener('mousedown', onDoc, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc, true);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [open]);
 
   const flash = (msg: string) => {
