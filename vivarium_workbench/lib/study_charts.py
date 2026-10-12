@@ -736,18 +736,29 @@ def render_v4_test_charts(spec: dict,
             # fallback db). A refusal names the missing path and what the
             # store DOES carry, replacing the prior silent `continue`.
             present = _present_leaves()
-            refusal = Refusal(
-                reason=(
+            # A `kind: derived` measure names a workspace-computed SCALAR
+            # (study_evaluator derived-scalar registry), not an emitted series —
+            # so "no image in store" is expected and NOT a data gap. Say so
+            # cleanly instead of a misleading missing-observable refusal.
+            if (measure.get("kind") or "") == "derived":
+                reason = (
+                    f"Computed scalar readout {path!r} (no time series) — graded "
+                    f"from run data via the workspace derived-scalar evaluator."
+                )
+            else:
+                reason = (
                     f"no image for observable path {path!r} in this run's store"
                     + (f" (present: {', '.join(present[:8])}"
                        f"{', …' if len(present) > 8 else ''})" if present else "")
-                ),
-                missing=[path],
-                present=present,
-            )
+                )
+            refusal = Refusal(reason=reason, missing=[path], present=present)
             charts.append({
                 "key": f"v4-{t.get('name','test')}",
                 "title": f"{t.get('name','(unnamed)')}  ({t.get('classification','test')})",
+                # caption is a required ChartPayload field; refusal.to_dict() does
+                # not supply one, so set it explicitly (the reason doubles as the
+                # card subtitle) — omitting it 500s the whole /study-charts payload.
+                "caption": reason,
                 **refusal.to_dict(),
                 "source": "live",
                 "data_source": None,
