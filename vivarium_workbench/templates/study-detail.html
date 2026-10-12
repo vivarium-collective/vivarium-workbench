@@ -660,6 +660,26 @@
     {% set _bl = study.baseline or [] %}
     {% set _bt = study.behavior_tests or study.expected_behavior or [] %}
 
+    {# ─── One-stop Overview: Claim → Background → Model → Results (+ metrics &
+       key figure) → Findings. Scoped styles for the new ov-* blocks. ──────── #}
+    <style>
+      .study-overview .ov-metrics{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 4px}
+      .study-overview .ov-metric{flex:1 1 120px;min-width:110px;border:1px solid var(--border,#e5e7eb);
+        border-radius:8px;padding:9px 12px;background:var(--surface-2,#f8fafc)}
+      .study-overview .ov-metric-v{font-size:1.15em;font-weight:700;color:#0f172a;line-height:1.1}
+      .study-overview .ov-metric-k{font-size:0.72em;color:#64748b;margin-top:3px;text-transform:uppercase;letter-spacing:.02em}
+      .study-overview .ov-metric-pass{border-left:3px solid #10b981}
+      .study-overview .ov-metric-warn{border-left:3px solid #d97706}
+      .study-overview .ov-metric-fail{border-left:3px solid #b91c1c}
+      .study-overview .ov-methods{margin:4px 0 0 0;padding-left:18px}
+      .study-overview .ov-methods li{font-size:0.86em;color:#475569;line-height:1.45;margin:3px 0}
+      .study-overview .ov-tablink{font-size:0.8em;font-weight:600;text-decoration:none;color:#2563eb;margin-left:6px}
+      .study-overview .ov-tablink:hover{text-decoration:underline}
+      .study-overview .ov-keyfig{margin:12px 0 0}
+      .study-overview .ov-keyfig iframe{width:100%;height:440px;border:1px solid var(--border,#e5e7eb);border-radius:8px;background:#fff}
+      .study-overview .ov-keyfig-cap{font-size:0.75em;color:#94a3b8;margin:5px 2px 0}
+    </style>
+
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Claim</h2>
       <p class="ctr-text">{{ study.claim or study.question or '' }}</p>
@@ -668,23 +688,46 @@
       {% endif %}
     </div>
 
+    {% if study.question or study.hypothesis %}
     <div class="ctr-block">
-      <h2 class="overview-label ctr-h">Test</h2>
-      <p class="ctr-text">{{ study.experiment or study.objective or '' }}</p>
-      {% if _bl or _bt %}
+      <h2 class="overview-label ctr-h">Background</h2>
       <div class="ctr-meta">
-        {% if _bl %}<div class="ctr-meta-row"><span class="ctr-meta-k">Model</span> {% for b in _bl %}<code>{{ b.name or b.composite }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
-        {% if _bt %}<div class="ctr-meta-row"><span class="ctr-meta-k">Measures</span> {% for tt in _bt %}<span class="ctr-meta-item">{{ (tt.description if (tt is mapping and tt.description) else (tt.name if tt is mapping else tt)) }}</span>{% if not loop.last %}<span class="ctr-dot">·</span>{% endif %}{% endfor %}</div>{% endif %}
+        {% if study.question %}<div class="ctr-meta-row"><span class="ctr-meta-k">Question</span> <span class="ctr-meta-item">{{ study.question }}</span></div>{% endif %}
+        {% if study.hypothesis %}<div class="ctr-meta-row"><span class="ctr-meta-k">Hypothesis</span> <span class="ctr-meta-item">{{ study.hypothesis }}</span></div>{% endif %}
       </div>
-      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="ctr-block">
+      <h2 class="overview-label ctr-h">Model &amp; approach</h2>
+      <p class="ctr-text">{{ study.experiment or study.objective or '' }}</p>
+      <div class="ctr-meta">
+        {% if _bl %}<div class="ctr-meta-row"><span class="ctr-meta-k">Model</span> {% for b in _bl %}<code>{{ b.name or b.composite }}</code>{% if not loop.last %}, {% endif %}{% endfor %}<a class="ov-tablink" href="#" onclick="_setStudyTab('compose');return false;">model →</a></div>{% endif %}
+        {% if study.implemented_methods %}
+        <ul class="ov-methods">{% for m in study.implemented_methods %}<li>{{ m }}</li>{% endfor %}</ul>
+        {% elif _bt %}
+        <div class="ctr-meta-row"><span class="ctr-meta-k">Measures</span> <span class="ctr-meta-item">{{ _bt|length }} behavior test{{ 's' if _bt|length != 1 else '' }}</span><a class="ov-tablink" href="#" onclick="_setStudyTab('tests');return false;">see Tests →</a></div>
+        {% endif %}
+      </div>
     </div>
 
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Result</h2>
       <p class="ctr-text">{{ study.result or _report.main_insight or (_f0.statement if _f0 else '') or '' }}</p>
+      {% if _report.key_metrics %}
+      <div class="ov-metrics">
+        {% for km in _report.key_metrics %}
+        <div class="ov-metric ov-metric-{{ (km.status or 'info')|lower }}">
+          <div class="ov-metric-v">{{ km.value }}</div>
+          <div class="ov-metric-k">{{ km.label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% if result_figure %}
       <figure class="ctr-figure">{{ result_figure | safe }}</figure>
       {% endif %}
+      <div id="overview-key-figure" class="ov-keyfig" data-study="{{ name }}"></div>
       {% if study.findings %}
     <div class="overview-section findings-section">
       <h2 class="overview-label">🔬 Findings — what this study taught us</h2>

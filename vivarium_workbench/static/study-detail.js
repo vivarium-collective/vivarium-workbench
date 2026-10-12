@@ -104,6 +104,7 @@
     document.querySelectorAll('.study-tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.dataset.kind === kind);
     });
+    if (kind === 'overview') { _loadOverviewKeyFigure(); }
     if (kind === 'tests') { _loadTestsPanel(window._study); }
     if (kind === 'readouts') { _loadReadouts(); _loadReadoutsDownloadPointer(); }
     if (kind === 'visualize') { _loadCharts('viz-charts-panel'); _loadNativeGallery(); _loadRemoteFigures(); }
@@ -799,6 +800,34 @@
       .catch(function () { panel.innerHTML = ''; _remoteFiguresLoaded = false; });
   }
   window._loadRemoteFigures = _loadRemoteFigures;
+  // Overview "key figure": embed this study's first native-gallery panel (the
+  // headline plotly) inline on the Overview, isolated in an iframe so its
+  // bundled plotly doesn't touch the page. Degrades to hidden when no run/panel.
+  var _overviewKeyFigureLoaded = false;
+  function _loadOverviewKeyFigure() {
+    var host = document.getElementById('overview-key-figure');
+    if (!host || _overviewKeyFigureLoaded) return;
+    _overviewKeyFigureLoaded = true;
+    fetch('/api/study-native-gallery/' + encodeURIComponent(studyName()))
+      .then(function (r) { return r.ok ? r.json() : { panels: {} }; })
+      .then(function (d) {
+        var panels = (d && d.panels) || {};
+        var names = Object.keys(panels);
+        if (!names.length) { host.style.display = 'none'; return; }
+        var ifr = document.createElement('iframe');
+        ifr.setAttribute('title', names[0]);
+        ifr.setAttribute('loading', 'lazy');
+        ifr.srcdoc = panels[names[0]];
+        host.innerHTML = '';
+        host.appendChild(ifr);
+        var cap = document.createElement('div');
+        cap.className = 'ov-keyfig-cap';
+        cap.textContent = 'Key figure — ' + names[0] + ' · full set in Visualizations';
+        host.appendChild(cap);
+      })
+      .catch(function () { host.style.display = 'none'; });
+  }
+
   function _loadNativeGallery() {
     var host = document.getElementById('native-gallery-panel');
     if (!host || _nativeGalleryLoaded) return;
@@ -5017,6 +5046,7 @@
   function _runStudyInit() {
     // All renderers that need window._study to be populated.
     _renderPlanningOverview();
+    _loadOverviewKeyFigure();   // embed the headline figure on the Overview
     _renderFeedbackTrackedPanel();
     _renderReadinessPanel();
     _populateConclusionVerdictBadges();
