@@ -342,6 +342,19 @@ def test_viz_process_render_for_local_address(tmp_path: Path):
     assert "show_viz(_render_one('local:SynthViz'" in code
 
 
+def test_viz_passes_edited_params_to_self_running_figure(tmp_path: Path):
+    """A ``local:`` viz whose config names a generator composite gets that
+    composite's editable ``ov_*`` dict passed as ``overrides`` (guarded by
+    ``in dir()``), so edited parameters flow into the self-running figure."""
+    _inv, study = _build_generator_workspace(tmp_path)
+    code = _code_text(json.loads(export_study_notebook(tmp_path, study)["ipynb"].read_text()))
+    ov = "ov_demo_pkg_composites_gen_synth"
+    assert f"overrides=({ov} if {ov!r} in dir() else None)" in code
+    # and the renderer accepts the overrides, trying merged config then base
+    assert "def _render_one(address, config, runs_db, study_yaml, overrides=None):" in code
+    assert "[{**_base, **overrides}] if overrides else []" in code
+
+
 def test_viz_cells_use_iframe_isolation(tmp_path):
     """Viz HTML (which embeds Plotly scripts) is shown via an iframe srcdoc, so
     the scripts execute in JupyterLab instead of rendering blank."""

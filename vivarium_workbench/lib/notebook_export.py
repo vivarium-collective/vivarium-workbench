@@ -852,24 +852,33 @@ RERUN = True
             "    if isinstance(_html, dict):\n"
             "        _html = _html.get('value') or _html.get('_value') or ''\n"
             "    return _html if isinstance(_html, str) else ''\n"
-            "def _render_one(address, config, runs_db, study_yaml):\n"
+            "def _render_one(address, config, runs_db, study_yaml, overrides=None):\n"
             '    """Generic figure renderer (no workspace render_study_viz.py).\n'
             "    A static ``image:``/``file:`` (or bare-path) address embeds the file;\n"
             "    any other address (``local:<VizProcess>``) is run as a Visualization\n"
-            '    and its HTML returned."""\n'
+            "    and its HTML returned. ``overrides`` (the composite's edited parameter\n"
+            "    dict) is merged into the viz config first so a self-running figure\n"
+            "    reflects edited parameters; a viz that does not accept those keys\n"
+            '    falls back to the base config."""\n'
             "    addr = str(address or '')\n"
             "    _head = addr.split('/', 1)[0]\n"
             "    _is_static = (not addr) or (':' not in _head) or addr.startswith(_STATIC_VIZ_SCHEMES)\n"
             "    if not _is_static:\n"
             "        if core is None:\n"
             "            return f'<p style=\"color:#b91c1c\">no core to render {address}</p>'\n"
-            "        try:\n"
-            "            _h = _render_viz_process(addr, config)\n"
-            "        except Exception as _e:\n"
-            "            return (f'<p style=\"color:#b91c1c\">visualization {address} not "
+            "        _base = {k: v for k, v in (config or {}).items()}\n"
+            "        _tries = ([{**_base, **overrides}] if overrides else []) + [_base]\n"
+            "        _err = ''\n"
+            "        for _cfg in _tries:\n"
+            "            try:\n"
+            "                _h = _render_viz_process(addr, _cfg)\n"
+            "            except Exception as _e:\n"
+            "                _err = (f'<p style=\"color:#b91c1c\">visualization {address} not "
             "renderable yet: '\n"
-            "                    f'{type(_e).__name__}: {_e}</p>')\n"
-            "        return _h or f'<p style=\"color:#6b7280\">{address} produced no HTML</p>'\n"
+            "                        f'{type(_e).__name__}: {_e}</p>')\n"
+            "                continue\n"
+            "            return _h or f'<p style=\"color:#6b7280\">{address} produced no HTML</p>'\n"
+            "        return _err\n"
             "    for _scheme in _STATIC_VIZ_SCHEMES:\n"
             "        if addr.startswith(_scheme):\n"
             "            addr = addr[len(_scheme):]; break\n"
@@ -979,6 +988,12 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
             continue
         name = _truthy(v.get("name"))
         config = v.get("config") or {}
+        # If the viz self-runs a generator composite (config.composite), tie it
+        # to that composite's editable `ov_*` dict so edited params flow into the
+        # figure. Only for generator specs (file specs have no ov_* var).
+        viz_comp = config.get("composite") if isinstance(config, dict) else None
+        ov_var = (ov_vars.get(viz_comp)
+                  if viz_comp and spec_kinds.get(viz_comp) == "generator" else None)
         blocks.append(_md(f"**{name}**"))
         blocks.append(
             {
@@ -989,6 +1004,7 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
                 "address": _truthy(v.get("address")),
                 "config": config,
                 "render_kind": strat["render_kind"],
+                "ov_var": ov_var,
             }
         )
 
@@ -1099,10 +1115,27 @@ def _build_study_blocks(ws_root: Path, layout: dict, study: dict, slug: str, str
 # ---------------------------------------------------------------------------
 
 
+def _viz_render_expr(b: dict) -> str:
+    """The ``_render_one(...)`` call for a viz block. When the viz is tied to a
+    generator composite (and the generic renderer is in use), pass that
+    composite's edited parameter dict as ``overrides`` so a self-running figure
+    reflects edits; guarded by ``in dir()`` so it works even if the panel cell
+    wasn't run (and a viz that ignores the keys falls back to the base config)."""
+    ov = b.get("ov_var")
+    if ov and b.get("render_kind") == "generic":
+        ov_arg = f", overrides=({ov} if {ov!r} in dir() else None)"
+    else:
+        ov_arg = ""
+    return (
+        f"_render_one({b['address']!r}, {b['config']!r}, "
+        f"RUNS_DB, STUDY_YAML{ov_arg})"
+    )
+
+
 def _viz_code_for_notebook(b: dict) -> str:
     return (
         f"# {b['name']}\n"
-        f"show_viz(_render_one({b['address']!r}, {b['config']!r}, RUNS_DB, STUDY_YAML))"
+        f"show_viz({_viz_render_expr(b)})"
     )
 
 
@@ -1190,8 +1223,7 @@ def _py(blocks: list[dict], fig_dir_rel: str, script_name: str) -> str:
                 helper_emitted = True
             out.append(
                 f"# {b['name']}\n"
-                f"_save_viz({b['study']!r}, {b['slug']!r}, "
-                f"_render_one({b['address']!r}, {b['config']!r}, RUNS_DB, STUDY_YAML))"
+                f"_save_viz({b['study']!r}, {b['slug']!r}, {_viz_render_expr(b)})"
             )
         else:
             src = b["src"]
