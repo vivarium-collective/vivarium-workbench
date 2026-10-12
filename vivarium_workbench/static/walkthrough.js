@@ -2118,7 +2118,10 @@
     if (v === null || v === undefined) return '';
     if (typeof v === 'string') return v;
     if (typeof v === 'object') {
-      if (v._type) return String(v._type);
+      // Show the physical unit beside the type ("float · volt") so a port /
+      // config param reads with its units, not a bare "float". _units is the
+      // schema metadata the processes declare.
+      if (v._type) return v._units ? String(v._type) + ' · ' + String(v._units) : String(v._type);
       var keys = Object.keys(v).filter(function (k) { return k.charAt(0) !== '_'; });
       if (keys.length) return '{' + keys.slice(0, 4).join(', ') + (keys.length > 4 ? ', …' : '') + '}';
       return 'store';
