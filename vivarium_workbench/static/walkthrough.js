@@ -10771,13 +10771,27 @@
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
-      // Single click opens the full study view directly — no quick-look
-      // side-card, no double-click.
-      node.onclick = function() {
-        _openStudyInsideInvestigation(s.name);
+      // Single click EXPANDS the card in place — interrogate the Asks/Finds and
+      // every finding without leaving the graph. The ↗ control opens the full
+      // study. (Previously a card click navigated straight to the study, which
+      // made the graph un-browsable.)
+      var _toggleExpand = function () {
+        var exp = node.classList.toggle('aig-node-expanded');
+        node.querySelectorAll('.aig-clamp').forEach(function (el) {
+          el.style.webkitLineClamp = exp ? 'unset' : (el.getAttribute('data-clamp') || '');
+          el.style.lineClamp = exp ? 'unset' : (el.getAttribute('data-clamp') || '');
+        });
+        var _more = node.querySelector('.aig-more-findings');
+        var _all = node.querySelector('.aig-all-findings');
+        if (_more) _more.style.display = exp ? 'none' : '';
+        if (_all) _all.style.display = exp ? 'block' : 'none';
+        node.style.zIndex = exp ? '60' : '';
+        node.style.boxShadow = exp ? '0 8px 24px rgba(0,0,0,0.18)' : '';
+        node.style.whiteSpace = '';
       };
-      node.title = s.name + ' — ' + confidence + (claim ? '\n\nFinds: ' + claim : '') +
-        '\n\nClick to open the study';
+      node.onclick = _toggleExpand;
+      node.title = s.name + ' — ' + confidence +
+        '\n\nClick to expand in place · ↗ opens the full study';
       var x = (orient === 'TB')
         ? rowStartX[depth[s.name]] + breadthIndex[s.name] * (CARD_W + BREADTH_GAP)
         : PAD_X + depth[s.name] * (CARD_W + DEPTH_GAP);
@@ -10804,27 +10818,37 @@
         // (no longer squeezed into a thin flex column beside the badge).
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:5px">' +
           '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1;flex:none">' + ss.icon + '</span>' +
-          '<span class="aig-status-badge" role="button" tabindex="0" title="Why: open this study\'s finding & evidence" ' +
-            'style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;cursor:pointer;text-decoration:underline dotted;flex:none">' +
-            _esc(confidence) + '</span>' +
+          '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
+            '<span class="aig-status-badge" role="button" tabindex="0" title="Expand this card in place" ' +
+              'style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;cursor:pointer;text-decoration:underline dotted">' +
+              _esc(confidence) + '</span>' +
+            '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
+              'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
+              'style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;font-size:0.72em;line-height:1;padding:2px 5px;cursor:pointer">↗</button>' +
+          '</span>' +
         '</div>' +
         '<strong style="display:block;font-size:0.85em;line-height:1.3;color:#1e293b">' + _esc(prettyTitle) + '</strong>' +
         (_opts.asks && asks
-          ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
+          ? '<div class="aig-clamp" data-clamp="2" style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
               '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
           : '') +
         (_opts.finds
-          ? '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
+          ? '<div class="aig-clamp" data-clamp="5" style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
               '<span style="font-weight:600;color:#475569">Finds:</span> ' +
               (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
             '</div>'
           : '') +
+        // Collapsed indicator (default) + the full findings list (revealed on
+        // expand). Clicking the card toggles between them.
         (_opts.finds && moreN
-          ? '<div title="' + _esc(findings.slice(1).map(function (f) {
-                return '• ' + ((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim());
-              }).join('\n')) + '" ' +
-            'style="font-size:0.72em;margin-top:2px;color:#94a3b8;cursor:help">+' + moreN +
-            ' more finding' + (moreN === 1 ? '' : 's') + '</div>'
+          ? '<div class="aig-more-findings" style="font-size:0.72em;margin-top:3px;color:#94a3b8;cursor:pointer">+' + moreN +
+              ' more finding' + (moreN === 1 ? '' : 's') + ' — click to show</div>' +
+            '<div class="aig-all-findings" style="display:none;font-size:0.72em;margin-top:4px;line-height:1.4;color:#64748b">' +
+              findings.map(function (f) {
+                return '<div style="margin-top:3px">• ' +
+                  _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
+              }).join('') +
+            '</div>'
           : '') +
         (_opts.followups ? followUpsChip : '') +
         (_opts.chain && chainsBySlug && typeof window._chainBlockHtml === 'function'
@@ -10854,9 +10878,9 @@
       if (_badge) {
         var _openReason = function (ev) {
           ev.stopPropagation();
-          // The quick-look side-card is gone — the verdict badge opens the full
-          // study (its findings/evidence live there).
-          _openStudyInsideInvestigation(s.name);
+          // Interrogate in place — expand the card (its findings/evidence are
+          // right here). The ↗ button opens the full study.
+          _toggleExpand();
         };
         _badge.addEventListener('click', _openReason);
         _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _openReason(ev); } });
