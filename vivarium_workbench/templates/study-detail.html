@@ -678,6 +678,23 @@
       .study-overview .ov-keyfig{margin:12px 0 0}
       .study-overview .ov-keyfig iframe{width:100%;height:440px;border:1px solid var(--border,#e5e7eb);border-radius:8px;background:#fff}
       .study-overview .ov-keyfig-cap{font-size:0.75em;color:#94a3b8;margin:5px 2px 0}
+      /* provenance: citation chips + anchors + sources list */
+      .study-overview .ov-cite{display:inline-flex;align-items:center;font-size:0.7em;font-weight:600;
+        line-height:1.3;padding:1px 7px;border-radius:9999px;background:#eff6ff;color:#1d4ed8;
+        white-space:nowrap;text-decoration:none;border:1px solid transparent;margin:0 2px 2px 0}
+      .study-overview a.ov-cite:hover{border-color:#1d4ed8;text-decoration:none}
+      .study-overview .ov-cite.unknown{background:#f1f5f9;color:#64748b}
+      .study-overview .ov-anchor{padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb);font-size:0.9em}
+      .study-overview .ov-anchor:last-child{border-bottom:none}
+      .study-overview .ov-anchor-exp{color:#0f172a;font-weight:600}
+      .study-overview .ov-anchor-obs{font-family:ui-monospace,Menlo,monospace;font-size:0.82em;color:#475569}
+      .study-overview .ov-anchor-src{color:#64748b;font-size:0.85em;margin-top:2px}
+      .study-overview .ov-anchor-met{color:#065f46;font-weight:600}
+      .study-overview .ov-sources{display:grid;gap:2px;margin-top:8px}
+      .study-overview .ov-src{padding:6px 10px;border-bottom:1px solid var(--border,#f1f5f9);font-size:0.85em;scroll-margin-top:90px}
+      .study-overview .ov-src:target{background:#eff6ff;border-radius:6px}
+      .study-overview .ov-src .ov-src-k{font-family:ui-monospace,Menlo,monospace;font-size:0.82em;color:#94a3b8}
+      .study-overview .ov-src .ov-src-t{color:#334155}
     </style>
 
     <div class="ctr-block">
@@ -791,7 +808,7 @@
             <div class="finding-expected">
               {% if f.expected.range %}<strong>expected:</strong> {{ f.expected.range }} · {% endif %}
               {% if f.expected.threshold is defined %}<strong>threshold:</strong> {{ f.expected.threshold | humanize_assertion }} · {% endif %}
-              {% if f.expected.cites %}cites: {% for c in f.expected.cites %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+              {% if f.expected.cites %}cites: {% set _r = references|default({}) %}{% for c in f.expected.cites %}<a class="ov-cite{{ '' if c in _r else ' unknown' }}" href="#sref-{{ c }}"{% if _r[c] and _r[c].title %} title="{{ _r[c].title }}"{% endif %}>{{ _r[c].label if _r[c] else c }}</a>{% endfor %}{% endif %}
             </div>
             {% if f.expected.summary %}<div class="finding-exp-summary"><em>Reference says:</em> {{ f.expected.summary }}</div>{% endif %}
             {% endif %}
@@ -828,6 +845,49 @@
       </div>
       {% endif %}
     </div>
+
+    {# ─── Provenance & sources: every modeling target traced to its paper. The
+       literature anchors (expectation → model observable → source) and a Sources
+       list of each bibkey this study cites, resolved from references/papers.bib.
+       Citation chips elsewhere on the page link to these #sref-<key> anchors so a
+       reader can trace any value back to where it came from. (§2 R2: absent when
+       the study carries no anchors and cites nothing.) ──────── #}
+    {% set _refs = references|default({}) %}
+    {% set _scites = study_cites|default([]) %}
+    {% if study.literature_anchors or _scites %}
+    <div class="ctr-block ov-prov">
+      <h2 class="overview-label ctr-h">Provenance &amp; sources</h2>
+      {% if study.literature_anchors %}
+      <div class="ov-anchors">
+      {% for a in study.literature_anchors %}
+        {% set _met = a.status_in_workspace and ('met' in a.status_in_workspace|lower) %}
+        <div class="ov-anchor">
+          <div class="ov-anchor-exp">{{ a.expectation }}</div>
+          {% if a.model_observable %}<div class="ov-anchor-obs">observable: {{ a.model_observable }}</div>{% endif %}
+          <div class="ov-anchor-src">
+            {% if a.source %}source: {{ a.source }}{% endif %}
+            {% if a.cites %}{% for c in a.cites %}<a class="ov-cite{{ '' if c in _refs else ' unknown' }}" href="#sref-{{ c }}"{% if _refs[c] and _refs[c].title %} title="{{ _refs[c].title }}"{% endif %}>{{ _refs[c].label if _refs[c] else c }}</a>{% endfor %}{% endif %}
+          </div>
+          {% if a.status_in_workspace %}<div class="ov-anchor-src {{ 'ov-anchor-met' if _met else '' }}">status: {{ a.status_in_workspace }}</div>{% endif %}
+        </div>
+      {% endfor %}
+      </div>
+      {% endif %}
+      {% if _scites %}
+      <div class="ctr-meta-k" style="margin-top:12px">Sources ({{ _scites|length }})</div>
+      <div class="ov-sources">
+      {% for k in _scites %}
+        {% set r = _refs[k] %}
+        <div class="ov-src" id="sref-{{ k }}">
+          <b class="ov-src-t">{{ r.label if r else k }}</b> <span class="ov-src-k">{{ k }}</span>
+          {% if r and r.title %}<div class="ov-src-t">{{ r.title }}</div>{% endif %}
+          {% if r and (r.author or r.year) %}<div class="ctr-meta-k" style="text-transform:none">{{ r.author }}{% if r.author and r.year %} · {% endif %}{{ r.year }}{% if r.url %} · <a href="{{ r.url if r.url.startswith('http') else 'https://doi.org/' + r.url }}" target="_blank" rel="noopener">source ↗</a>{% endif %}</div>{% endif %}
+        </div>
+      {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
 
     <div id="feedback-tracked-panel"></div>
 

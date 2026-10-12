@@ -160,6 +160,25 @@ def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
         if not _REGISTRY:
             discover_generators()
         entry = _REGISTRY.get(req.spec_id)
+        if entry is None and req.pkg:
+            # An editable workspace whose import package isn't auto-discovered
+            # (packages_distributions() misses it — a known uv/hatchling editable
+            # gap, e.g. dist 'genesis' vs import package 'viva_genesis') registers
+            # its @composite_generator composites only as a side effect of
+            # importing the package. discover_generators() can't reach it, so
+            # import it explicitly (then prefer its build_core, which is the
+            # convention's registration hook) and retry the lookup.
+            try:
+                __import__(req.pkg)
+                try:
+                    core_mod = __import__(f"{req.pkg}.core", fromlist=["build_core"])
+                    if hasattr(core_mod, "build_core"):
+                        core_mod.build_core()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            entry = _REGISTRY.get(req.spec_id)
         if entry is not None:
             doc = build_generator(entry, overrides=req.overrides)
             if isinstance(doc, dict) and isinstance(doc.get("state"), dict):
