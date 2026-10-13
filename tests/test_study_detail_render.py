@@ -212,7 +212,7 @@ def test_overview_biological_summary_folds_into_qa_card(tmp_path, dashboard_clie
     ctx_start = html.rindex('class="ctr-context"', 0, summary_idx)
     assert ctx_start != -1
     # it sits under the Claim heading, before the Test heading
-    assert html.index(">Claim</h2>") < summary_idx < html.index(">Test</h2>")
+    assert html.index(">Claim</h2>") < summary_idx < html.index(">Model &amp; approach</h2>")
 
 
 def test_overview_biological_summary_renders_for_legacy_schema_too(tmp_path, dashboard_client):
@@ -902,7 +902,7 @@ def test_overview_deleted_blocks_absent_core_content_kept(tmp_path, dashboard_cl
 
     # Overview is now Claim -> Test -> Result; findings still render, the
     # Conclusion editor moved to the Decide tab.
-    assert '>Claim</h2>' in overview and '>Test</h2>' in overview and '>Result</h2>' in overview
+    assert '>Claim</h2>' in overview and '>Model &amp; approach</h2>' in overview and '>Result</h2>' in overview
     assert 'Findings' in overview
     assert 'Daughter cells hydrate within one tick.' in overview
     assert 'Question &amp; approach' not in overview

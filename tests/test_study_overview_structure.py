@@ -18,7 +18,10 @@ def _overview():
 def test_overview_is_claim_test_result():
     ov = _overview()
     assert '>Claim</h2>' in ov
-    assert '>Test</h2>' in ov
+    # The middle beat is "Model & approach" (the enriched successor to the old
+    # bare "Test" heading — same study.experiment field, now with the model
+    # composite + methods beside it).
+    assert '>Model &amp; approach</h2>' in ov
     assert '>Result</h2>' in ov
     # driven by the study's direct fields
     assert 'study.claim' in ov
