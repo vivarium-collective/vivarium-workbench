@@ -50,8 +50,13 @@ main{padding:20px;margin:0 auto}
 }
 #investigation-study-embed-frame{
   width: 100% !important;
-  height: 85vh !important;
-  min-height: 600px !important;
+  /* Height is set by _fitEmbedToContent (auto-grow to the study's content height,
+     floored at the viewport height) so the embedded study flows into the page's
+     SINGLE scrollbar. Do NOT force a fixed viewport height (e.g. 85vh !important)
+     here — that overrides the JS height and re-introduces the iframe's own inner
+     scrollbar (the double-scrollbar the user saw). */
+  display: block;
+  min-height: 600px;
 }
 main.study-page{max-width:none;padding:12px 16px;width:100%;box-sizing:border-box}
 
