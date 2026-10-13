@@ -736,35 +736,19 @@
       </div>
     </div>
 
-    {# ─── Provenance & sources: every modeling target traced to its paper. The
-       literature anchors (expectation → model observable → source) and a Sources
-       list of each bibkey this study cites, resolved from references/papers.bib.
-       Citation chips elsewhere on the page link to these #sref-<key> anchors so a
-       reader can trace any value back to where it came from. Placed right after
-       the model so the literature basis sits beside the model it justifies.
-       (§2 R2: absent when the study carries no anchors and cites nothing.) #}
+    {# ─── Provenance & sources: the resolved Sources list — each bibkey this
+       study cites, mapped to "Author Year" from references/papers.bib, so a
+       reader can trace any value back to where it came from (citation chips
+       elsewhere link to these #sref-<key> anchors). Placed right after the
+       model so the literature basis sits beside the model it justifies.
+       The per-anchor detail (expectation → observable → source) has ONE home,
+       the Tests panel — it is deliberately NOT duplicated here. (§2 R2:
+       absent when the study cites nothing.) #}
     {% set _refs = references|default({}) %}
     {% set _scites = study_cites|default([]) %}
-    {% if study.literature_anchors or _scites %}
+    {% if _scites %}
     <div class="ctr-block ov-prov">
       <h2 class="overview-label ctr-h">Provenance &amp; sources</h2>
-      {% if study.literature_anchors %}
-      <div class="ov-anchors">
-      {% for a in study.literature_anchors %}
-        {% set _met = a.status_in_workspace and ('met' in a.status_in_workspace|lower) %}
-        <div class="ov-anchor">
-          <div class="ov-anchor-exp">{{ a.expectation }}</div>
-          {% if a.model_observable %}<div class="ov-anchor-obs">observable: {{ a.model_observable }}</div>{% endif %}
-          <div class="ov-anchor-src">
-            {% if a.source %}source: {{ a.source }}{% endif %}
-            {% if a.cites %}{% for c in a.cites %}<a class="ov-cite{{ '' if c in _refs else ' unknown' }}" href="#sref-{{ c }}"{% if _refs[c] and _refs[c].title %} title="{{ _refs[c].title }}"{% endif %}>{{ _refs[c].label if _refs[c] else c }}</a>{% endfor %}{% endif %}
-          </div>
-          {% if a.status_in_workspace %}<div class="ov-anchor-src {{ 'ov-anchor-met' if _met else '' }}">status: {{ a.status_in_workspace }}</div>{% endif %}
-        </div>
-      {% endfor %}
-      </div>
-      {% endif %}
-      {% if _scites %}
       <div class="ctr-meta-k" style="margin-top:12px">Sources ({{ _scites|length }})</div>
       <div class="ov-sources">
       {% for k in _scites %}
@@ -776,7 +760,6 @@
         </div>
       {% endfor %}
       </div>
-      {% endif %}
     </div>
     {% endif %}
 
@@ -1405,6 +1388,11 @@
         <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter configuration…</span></div>
       </div>
     </details>
+
+    <h4>Emitted paths</h4>
+    <p class="muted" style="font-size:0.9em">Each row is an emitter <code>store_path</code>
+    the composite will save; authored entries in <code>study.yaml</code> add names,
+    descriptions, and units on top.</p>
 
     {# Points at Simulations' raw-data downloads (Study artifacts strip)
        rather than duplicating them (Task C4, repointed by Task E2 when

@@ -146,9 +146,9 @@ def test_overview_panel_has_objective_editable(_ws):
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
     html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
-    # Overview is now a Claim -> Test -> Result spine (objective/conclusion editors removed).
+    # Overview is a Claim -> Model & approach -> Result spine (objective/conclusion editors removed).
     assert 'id="objective-text"' not in html
-    assert '>Claim</h2>' in html and '>Test</h2>' in html and '>Result</h2>' in html
+    assert '>Claim</h2>' in html and '>Model &amp; approach</h2>' in html and '>Result</h2>' in html
     assert 'id="conclusion-text"' not in html
     assert 'id="panel-conclusions"' in html
 
