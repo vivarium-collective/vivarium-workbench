@@ -10099,6 +10099,173 @@
     return H.join('');
   }
 
+  // ---------------------------------------------------------------------------
+  // Decision cockpit — the open expert decisions (executive.decisions_needed)
+  // surfaced as a prominent, actionable card high on the investigation page.
+  // Each open decision shows its question + context, a resolution-note field and
+  // a Resolve button (POST /api/investigation-decision-resolve, which moves it
+  // into executive.decisions_resolved). The campaign-plan docs (d.campaign_docs,
+  // incl. the Scientific Enrichment Plan) link at the top; resolved decisions
+  // fold into a log below. Renders nothing when there's nothing to show.
+  // ---------------------------------------------------------------------------
+  function _renderInvDecisionCockpit(d) {
+    var host = document.getElementById('investigation-decision-cockpit');
+    if (!host) return;
+    d = d || {};
+    var ex = d.executive || {};
+    var needed = Array.isArray(ex.decisions_needed) ? ex.decisions_needed : [];
+    var resolved = Array.isArray(ex.decisions_resolved) ? ex.decisions_resolved : [];
+    var docs = Array.isArray(d.campaign_docs) ? d.campaign_docs : [];
+    // Resolving writes to disk — hide the controls in a read-only federated view
+    // or a published snapshot (no live backend); the decisions still display.
+    var readOnly = !!d.read_only || (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
+    var invName = d.name || window._currentIset || '';
+
+    if (!needed.length && !resolved.length && !docs.length) { host.innerHTML = ''; return; }
+
+    var n = needed.length;
+    var accent = n ? '#b45309' : '#16a34a';      // amber when open, green when all clear
+    var headBg = n ? '#fffbeb' : '#f0fdf4';
+    var H = [];
+    H.push('<section class="inv-decision-cockpit" style="margin:4px 0 18px;border:1px solid ' + accent +
+      ';border-left-width:5px;border-radius:8px;background:' + headBg + ';overflow:hidden">');
+
+    // Header with a count badge.
+    H.push('<div style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid ' +
+      (n ? '#fde68a' : '#bbf7d0') + '">');
+    H.push('<span style="font-size:1.05em">⚖</span>');
+    H.push('<strong style="font-size:1.02em;color:#1e293b">Decisions</strong>');
+    if (n) {
+      H.push('<span title="open decisions awaiting your call" style="background:' + accent +
+        ';color:#fff;font-size:0.78em;font-weight:700;padding:1px 9px;border-radius:11px">' +
+        n + ' needed</span>');
+    } else {
+      H.push('<span style="background:#16a34a;color:#fff;font-size:0.78em;font-weight:700;' +
+        'padding:1px 9px;border-radius:11px">all resolved</span>');
+    }
+    H.push('<span class="muted" style="margin-left:auto;font-size:0.82em">Expert decisions steering this campaign</span>');
+    H.push('</div>');
+
+    H.push('<div style="padding:12px 16px 14px">');
+
+    // Campaign-plan docs — the plan the decisions act on (links to e.g. the
+    // Scientific Enrichment Plan). Served at /<path> from the workspace root.
+    if (docs.length) {
+      H.push('<div style="margin:0 0 12px;font-size:0.9em">');
+      H.push('<span class="muted" style="font-weight:600">Campaign plan:</span> ');
+      H.push(docs.map(function (doc) {
+        doc = doc || {};
+        var label = _escInv(doc.name || doc.path || '(unnamed)');
+        if (doc.path) {
+          var href = '/' + String(doc.path).replace(/^\/+/, '');
+          var ttl = doc.description ? ' title="' + _escInv(doc.description) + '"' : '';
+          return '<a href="' + _esc(href) + '" target="_blank" rel="noopener"' + ttl +
+            ' style="display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border-radius:12px;' +
+            'background:#eff6ff;color:#1d4ed8;font-weight:600;text-decoration:none">📄 ' + label + '</a>';
+        }
+        return '<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border-radius:12px;' +
+          'background:#f1f5f9;color:#475569;font-weight:600">📄 ' + label + '</span>';
+      }).join(''));
+      H.push('</div>');
+    }
+
+    // Open decisions — each an actionable card.
+    if (n) {
+      H.push('<div style="display:grid;gap:10px">');
+      needed.forEach(function (dec, i) {
+        dec = dec || {};
+        var question = (typeof dec === 'string') ? dec : (dec.question || dec.title || '');
+        var context = (typeof dec === 'string') ? '' : (dec.context || dec.detail || '');
+        H.push('<div class="inv-decision" data-index="' + i + '" data-investigation="' + _esc(invName) +
+          '" data-question="' + _esc(question) + '"' +
+          ' style="background:#fff;border:1px solid #fde68a;border-radius:7px;padding:10px 12px">');
+        H.push('<div style="display:flex;gap:8px;align-items:flex-start">');
+        H.push('<span style="color:' + accent + ';font-weight:800;font-size:0.95em;line-height:1.5">' + (i + 1) + '.</span>');
+        H.push('<div style="flex:1;min-width:0">');
+        H.push('<div style="font-weight:650;color:#1e293b;line-height:1.4">' + _escInv(question) + '</div>');
+        if (context)
+          H.push('<div class="muted" style="font-size:0.86em;line-height:1.5;margin-top:4px">' +
+            _renderInvLeadMarkdown(context) + '</div>');
+        if (!readOnly) {
+          H.push('<div style="margin-top:8px">');
+          H.push('<textarea rows="2" placeholder="Resolution note — the call you made and why…" ' +
+            'style="width:100%;box-sizing:border-box;font:inherit;font-size:0.86em;padding:6px 8px;' +
+            'border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
+          H.push('<div style="margin-top:6px;text-align:right">');
+          H.push('<button type="button" class="action-btn js-authoring" onclick="_resolveInvDecision(this,' + i + ')" ' +
+            'style="font-size:0.82em;padding:3px 12px;font-weight:600;background:' + accent + ';color:#fff;border:none">' +
+            '✓ Resolve</button>');
+          H.push('</div>');
+          H.push('</div>');
+        }
+        H.push('</div></div></div>');
+      });
+      H.push('</div>');
+    }
+
+    // Resolved-decision log — folded by default.
+    if (resolved.length) {
+      H.push('<details style="margin-top:' + (n ? '12px' : '0') + '">');
+      H.push('<summary style="cursor:pointer;font-size:0.88em;font-weight:600;color:#15803d">' +
+        '✓ Resolved decisions (' + resolved.length + ')</summary>');
+      H.push('<ul style="margin:8px 0 0;padding:0;list-style:none;display:grid;gap:6px">');
+      H.push(resolved.map(function (r) {
+        var txt = (typeof r === 'string') ? r : (r && (r.decision || r.question || r.text) || '');
+        return '<li style="font-size:0.86em;line-height:1.5;color:#334155;padding-left:12px;' +
+          'border-left:2px solid #86efac">' + _escInv(txt) + '</li>';
+      }).join(''));
+      H.push('</ul></details>');
+    }
+
+    H.push('</div></section>');
+    host.innerHTML = H.join('');
+  }
+  window._renderInvDecisionCockpit = _renderInvDecisionCockpit;
+
+  // Resolve one open decision: read the note from the card, POST, then refresh
+  // the investigation detail so the cockpit re-renders with the moved decision.
+  // Passes the question as an optimistic-concurrency guard (the server 409s if
+  // the list shifted under a concurrent resolve). CSRF is handled by the
+  // same-origin guard middleware, like every other mutating POST.
+  function _resolveInvDecision(btn, index) {
+    var card = btn.closest('.inv-decision');
+    if (!card) return;
+    var ta = card.querySelector('textarea');
+    var note = ((ta && ta.value) || '').trim();
+    if (!note) {
+      if (typeof _showToast === 'function') _showToast('Enter a resolution note before resolving.', { danger: true });
+      else alert('Enter a resolution note before resolving.');
+      if (ta) ta.focus();
+      return;
+    }
+    var question = card.getAttribute('data-question') || '';
+    var invName = card.getAttribute('data-investigation') || window._currentIset || '';
+    var prev = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Resolving…';
+    apiFetch('POST', '/api/investigation-decision-resolve', {
+      investigation: invName, index: index, resolution: note, question: question
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j, status: r.status }; }); })
+      .then(function (res) {
+        if (!res.ok || (res.j && res.j.error)) {
+          var msg = 'Could not resolve: ' + ((res.j && res.j.error) || ('HTTP ' + res.status));
+          if (typeof _showToast === 'function') _showToast(msg, { danger: true }); else alert(msg);
+          btn.disabled = false; btn.textContent = prev;
+          return;
+        }
+        var ok = 'Decision resolved — ' + ((res.j && res.j.remaining) || 0) + ' still open';
+        if (typeof _showToast === 'function') _showToast(ok);
+        // Refresh the detail so the cockpit, log and count badge re-render.
+        if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(invName);
+      })
+      .catch(function (err) {
+        var msg = 'Could not resolve: ' + err;
+        if (typeof _showToast === 'function') _showToast(msg, { danger: true }); else alert(msg);
+        btn.disabled = false; btn.textContent = prev;
+      });
+  }
+  window._resolveInvDecision = _resolveInvDecision;
+
   // Flat tab switcher for the inquiry brief (scoped to the clicked brief).
   function _invBriefTab(btn, id) {
     var brief = btn.closest('.inv-brief');
@@ -10163,6 +10330,10 @@
         // The inquiry brief renders the full opening — headline, verdict, meta,
         // and the how-to-read / biology / background / glossary tabs — from `d`.
         leadEl.innerHTML = _renderInvOpening(d);
+
+        // Decision cockpit: the open expert decisions + campaign plan, surfaced
+        // prominently directly under the brief (built from d.executive).
+        try { _renderInvDecisionCockpit(d); } catch (_) { /* best-effort */ }
 
         // Phase B4: render today's study graph (unchanged), then layer each
         // study's typed evidence chain into its card. Falls back to the plain

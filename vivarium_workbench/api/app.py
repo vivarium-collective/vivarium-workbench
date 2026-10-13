@@ -236,6 +236,7 @@ from vivarium_workbench.lib.models import (
     StudyCreateFromRunBody,
     StudyRenameBody,
     ProposedInputDecisionBody,
+    ResolveDecisionBody,
     StudySeedFollowupBody,
     # Batch 21: request-body models for investigation scaffold mutations
     InvestigationCreateRequest,
@@ -4758,6 +4759,30 @@ def create_app() -> FastAPI:
         ``{ok: true, item_id, kind, status, ...}`` on success.
         """
         body, status = _lifecycle_mut.decide_proposed_input(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-decision-resolve",
+        tags=["Investigations"],
+        summary="Resolve an open expert decision",
+    )
+    def investigation_decision_resolve(
+        req: ResolveDecisionBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Move ``executive.decisions_needed[index]`` into
+        ``executive.decisions_resolved`` with the expert's resolution note.
+
+        Body: ``{investigation, index, resolution, question?}``. 400 when
+        required fields are missing/malformed; 404 when the investigation.yaml,
+        the executive block, or the index is not found; 409 when an optional
+        ``question`` no longer matches the entry at ``index`` (the list shifted
+        under a concurrent resolve); 200 ``{ok: true, index, resolved,
+        remaining}`` on success.
+        """
+        body, status = _lifecycle_mut.resolve_decision(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

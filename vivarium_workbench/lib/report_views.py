@@ -949,9 +949,47 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     except Exception:  # noqa: BLE001
         pass
 
+    # Campaign plan docs — the expert dossiers that lay out the investigation's
+    # plan/roadmap. Merge the top-level ``expert_docs`` (repo-level list, often
+    # bare names) with ``inputs.expert_docs`` (the investigation-scoped list,
+    # which carries the path to e.g. the Scientific Enrichment Plan). Normalize
+    # each to ``{name, path?, description?}`` and de-dupe by (name, path) so the
+    # decision cockpit can link the plan directly. Keeps the authored order,
+    # preferring the entry that carries a path.
+    def _norm_doc(item: Any) -> dict:
+        if isinstance(item, str):
+            return {"name": item.rsplit("/", 1)[-1] or item, "path": None}
+        if isinstance(item, dict):
+            out = {"name": item.get("name") or "", "path": item.get("path") or None}
+            if not out["name"]:
+                out["name"] = (str(out["path"]).rsplit("/", 1)[-1] if out["path"] else "(unnamed)")
+            if item.get("description"):
+                out["description"] = item.get("description")
+            return out
+        return {"name": str(item), "path": None}
+
+    _inputs_block = spec.get("inputs")
+    if not isinstance(_inputs_block, dict):
+        _inputs_block = {}
+    _campaign_raw = list(spec.get("expert_docs") or []) + list(_inputs_block.get("expert_docs") or [])
+    campaign_docs: list[dict] = []
+    _seen_docs: dict = {}
+    for _d in _campaign_raw:
+        nd = _norm_doc(_d)
+        key = nd["name"]
+        prev = _seen_docs.get(key)
+        if prev is None:
+            _seen_docs[key] = nd
+            campaign_docs.append(nd)
+        elif nd.get("path") and not prev.get("path"):
+            # A later entry carries a path the earlier bare-name one lacked —
+            # upgrade in place so the doc links instead of rendering flat.
+            prev.update({k: v for k, v in nd.items() if v})
+
     return {
         "name":                spec.get("name", name),
         "title":               spec.get("title", spec.get("name", name)),
+        "campaign_docs":       campaign_docs,
         "description":         spec.get("description", ""),
         "lead":                spec.get("lead", ""),
         "at_a_glance":         spec.get("at_a_glance") or [],

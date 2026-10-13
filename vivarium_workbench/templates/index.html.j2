@@ -1540,6 +1540,12 @@ a.viv-bs-commit:hover { text-decoration: underline; }
            Built entirely by _renderInvOpening(d) from the investigation data. -->
       <div id="investigation-detail-description" class="inv-brief-host"></div>
     </div>
+    <!-- Decision cockpit: the open expert decisions (executive.decisions_needed)
+         surfaced prominently as an actionable card with inline Resolve controls,
+         plus the campaign-plan docs and the resolved-decision log. Built by
+         _renderInvDecisionCockpit(d); renders nothing when there are no
+         decisions and no plan docs. -->
+    <div id="investigation-decision-cockpit"></div>
     <!-- Discourse-graph framing: studies as knowledge-producing operations. -->
     <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
       <strong>Investigation graph</strong>
