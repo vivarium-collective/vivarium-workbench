@@ -839,6 +839,14 @@
   }
   window._setCompositeProcCount = _setCompositeProcCount;
 
+  // ` data-nproc="N"` for a card whose registry record carried a server-counted
+  // process count (env_worker → discover_all_composites → c.n_processes); empty
+  // otherwise, so the card falls back to the lazy composite-resolve count.
+  function _nprocAttr(c) {
+    return (c && typeof c.n_processes === 'number') ? ' data-nproc="' + c.n_processes + '"' : '';
+  }
+  window._nprocAttr = _nprocAttr;
+
   // Resolve the composite ONCE (per card) just to count its processes and fill the
   // face badge. The composites LIST carries no process count (these are live
   // generators with no committed state), and a full resolve is too costly to run
@@ -847,6 +855,12 @@
   function _ensureCompositeProcCount(card) {
     if (!card || card._procCountLoaded) return;
     card._procCountLoaded = true;
+    // Prefer the server-precomputed count (registry's n_processes, baked into the
+    // card as data-nproc at render). It needs no resolve round-trip, so the count
+    // also shows in the published static bundle, where /api/composite-resolve is
+    // absent and the fetch below would simply no-op.
+    var pre = card.getAttribute('data-nproc');
+    if (pre !== null && pre !== '' && !isNaN(+pre)) { _setCompositeProcCount(card, +pre); return; }
     var id = card.getAttribute('data-address'); if (!id) { card._procCountLoaded = false; return; }
     fetch(_api('/api/composite-resolve?id=' + encodeURIComponent(id)))
       .then(function (r) { return r.json(); })
@@ -1079,7 +1093,7 @@
         'title="View / edit this composite\'s source (spec YAML or its generator)" ' +
         'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">&lt;/&gt; Code</button>' +
     '</div>';
-    return '<div class="registry-card' + selCls + '" data-address="' + idA + '" data-kind="composite"' +
+    return '<div class="registry-card' + selCls + '" data-address="' + idA + '" data-kind="composite"' + _nprocAttr(c) +
         ' onclick="_selectRegistryEntry(\'' + idA + '\')" ondblclick="_enterMaxcardMode(\'' + idA + '\',\'composite\')"' +
         ' title="Double-click to Explore (maximized bigraph)">' +
       '<div class="reg-card-row">' +
@@ -1248,7 +1262,7 @@
     var addr = c.module ? (c.module + '.' + c.name) : c.id;
 
     return '<div class="registry-entry registry-entry-full loom-runnable pcard pcard-accordion pcard-composite' + sel +
-        '" data-address="' + _esc(c.id) + '" data-kind="composite">' +
+        '" data-address="' + _esc(c.id) + '" data-kind="composite"' + _nprocAttr(c) + '>' +
       '<div class="loom-card loom-card-stack loom-card-composite">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" ondblclick="event.stopPropagation();_maximizeCardFromHeader(this)" title="Click to pin to top · double-click to maximize">' +

@@ -1580,6 +1580,25 @@ def _discover_composites() -> dict:
         merged = {}
     for gid, entry in merged.items():
         if isinstance(entry, dict) and entry.get("kind") == "generator":
+            # Count the composite's own process/step nodes (excluding the emitter)
+            # by building its doc from the registry spec — the generator just
+            # returns the node dict, so this doesn't instantiate the processes.
+            # Self-contained + guarded: None on any failure.
+            n_proc = None
+            try:
+                from process_bigraph.composite_generator import (
+                    _REGISTRY as _REG, build_generator as _bg,
+                )
+                _spec = _REG.get(gid)
+                if _spec is not None:
+                    doc = _bg(_spec) or {}
+                    n_proc = sum(
+                        1 for v in doc.values()
+                        if isinstance(v, dict) and v.get("_type") in ("process", "step")
+                        and "Emitter" not in str(v.get("address") or "")
+                    )
+            except Exception:  # noqa: BLE001 — never block discovery on the count
+                n_proc = None
             out[gid] = {
                 "name": entry.get("name"),
                 "description": entry.get("description", ""),
@@ -1592,6 +1611,7 @@ def _discover_composites() -> dict:
                 # fidelity without importing @composite_generator modules.
                 "methods": list(entry.get("methods") or []),
                 "fidelity": entry.get("fidelity") or "",
+                "n_processes": n_proc,
             }
     # Belt-and-suspenders: any registry key discover_all missed (mirrors the old
     # known_composite_ids direct-registry union).
