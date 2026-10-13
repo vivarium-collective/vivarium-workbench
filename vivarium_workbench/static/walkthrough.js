@@ -9067,6 +9067,15 @@
           if (strip(pname) === current) return strip(sj.name || sj.slug);
         }
       }
+      // Final fallback: a terminal / off-chain node (e.g. an adversarial control
+      // that refutes rather than leads-to) has no successor in the leads-to chain.
+      // Rather than dead-end the "Next study →" button, follow the investigation's
+      // study order so it keeps advancing through every study. Null only on the
+      // genuinely last study.
+      var order = studies.map(function (s) { return strip((s || {}).name || (s || {}).slug); })
+                         .filter(function (n) { return n; });
+      var idx = order.indexOf(current);
+      if (idx !== -1 && idx + 1 < order.length) return order[idx + 1];
       return null;
     } catch (e) { return null; }
   }
