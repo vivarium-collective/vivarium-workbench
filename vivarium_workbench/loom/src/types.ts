@@ -24,6 +24,8 @@ export interface ProcessNodeData {
    *  values; the card reads this to show each parameter's type + default. */
   configSchema?: Record<string, unknown>;
   interval?: number;
+  intervalUnits?: string | null;
+  intervalLabel?: string;
   path: string[];
   inputPorts: string[];
   outputPorts: string[];

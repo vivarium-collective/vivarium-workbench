@@ -336,6 +336,8 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           // every parameter's type + default, overlaying set values where present.
           configSchema: (node as { config_schema?: Record<string, unknown> }).config_schema ?? undefined,
           interval: node.interval,
+          intervalUnits: (node as { interval_units?: string | null }).interval_units ?? null,
+          intervalLabel: (node as { interval_label?: string }).interval_label,
           path,
           inputPorts,
           outputPorts,

@@ -598,7 +598,9 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
               : data.isCompositeProcess
                 ? ((data as any).isDraft ? 'draft composite process' : 'composite process')
                 : ((data as any).isDraft ? `draft ${data.processType}` : data.processType)}
-            {data.interval != null && <span> · every {data.interval}</span>}
+            {data.interval != null && (
+              <span title={`${data.interval} s`}> · every {data.intervalLabel ?? `${data.interval} s`}</span>
+            )}
           </div>
         )}
 

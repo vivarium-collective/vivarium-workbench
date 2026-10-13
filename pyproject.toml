@@ -37,7 +37,7 @@ dependencies = [
     # and `seed: 1.0` are one address — an older pbg computes a DIFFERENT
     # address, which is a silent cache miss, so this floor must not slip.
     # `migrate-artifacts` also needs 1.7.0's `legacy_artifact_id`.
-    "process-bigraph>=1.8.4",
+    "process-bigraph>=1.9.1",
     # SQLiteEmitter (and ParquetEmitter) were extracted from process-bigraph at
     # 1.4.17 into the focused emitters library; pb's `process_bigraph.emitter`
     # only re-exports SQLiteEmitter when the emitters lib is installed. The
@@ -73,7 +73,7 @@ dependencies = [
     # the prior version-split. The [test] extra below uses a bare `zarr`, so
     # >=3.1.6 keeps the runtime + test specifiers aligned (a floor, not a cap).
     "zarr>=3.1.6",
-    "bigraph-schema>=1.7.0",
+    "bigraph-schema>=1.8.1",
     # REBRAND: was `pbg-superpowers>=0.14.0`. The pbg-superpowers repo was renamed
     # to `viva-superpowers` (the git URL redirects; `main` now builds the
     # `viva-superpowers` distribution), and this package's own code imports
