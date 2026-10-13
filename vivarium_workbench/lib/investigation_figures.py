@@ -225,6 +225,21 @@ def build_investigation_figures(ws_root, name: str) -> dict:
                 continue
             files.append({"study": slug, "arcname": f"{slug}/{p.name}", "rel_path": rel})
 
+        # Native Visualizations gallery panels (viz.json) — in-memory HTML, no file
+        # on disk, so they carry an ``inline`` field (rel_path None). Makes the
+        # investigation figure count + zip include modern studies' figures.
+        try:
+            from vivarium_workbench.lib.study_native_gallery import build_study_native_gallery
+            npanels = (build_study_native_gallery(ws_root, slug) or {}).get("panels") or {}
+            for pname, phtml in npanels.items():
+                if not phtml:
+                    continue
+                safe = "".join(c if (c.isalnum() or c in "-_.") else "-" for c in str(pname))
+                files.append({"study": slug, "arcname": f"{slug}/{safe}.html",
+                              "rel_path": None, "inline": str(phtml)})
+        except Exception:
+            pass
+
         # Composite(s): figure_<N>.svg (the post-study stitched figure).
         slug_num = _SLUG_NUM_RE.match(slug)
         for csvg in imgs:
@@ -308,6 +323,13 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
 
         # Panels, per study — but NOT the stitched figure_<N> (those go to final/).
         for e in entries:
+            # Inline native-gallery panels (no file on disk) ride as writestr.
+            if e.get("inline") is not None:
+                arc = e["arcname"]
+                if arc not in seen:
+                    seen.add(arc)
+                    zf.writestr(arc, e["inline"])
+                continue
             if _COMPOSITE_RE.match(Path(e["rel_path"]).stem):
                 continue
             _write(ws_root / e["rel_path"], e["arcname"])
@@ -332,9 +354,18 @@ def study_figure_files(ws_root, slug: str) -> list[Path]:
 
 def build_study_figures_zip(ws_root, slug: str) -> Optional[bytes]:
     """Zip a single study's figures (flat, ``<filename>``), or ``None`` when the
-    study has none. Backs ``GET /api/study/<slug>/figures.zip``."""
+    study has none. Backs ``GET /api/study/<slug>/figures.zip``. Includes BOTH the
+    declared image figures and the native Visualizations gallery panels (viz.json),
+    so modern studies (whose figures are native-only) download their real figures —
+    consistent with the ``has_figures`` flag that shows the card's ↓ figures link."""
     imgs = study_figure_files(ws_root, slug)
-    if not imgs:
+    panels: dict = {}
+    try:
+        from vivarium_workbench.lib.study_native_gallery import build_study_native_gallery
+        panels = (build_study_native_gallery(ws_root, slug) or {}).get("panels") or {}
+    except Exception:
+        panels = {}
+    if not imgs and not panels:
         return None
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -347,6 +378,15 @@ def build_study_figures_zip(ws_root, slug: str) -> Optional[bytes]:
                 zf.write(p, p.name)
             except OSError:
                 continue
+        for pname, phtml in panels.items():
+            if not phtml:
+                continue
+            safe = "".join(c if (c.isalnum() or c in "-_.") else "-" for c in str(pname))
+            arc = f"{safe}.html"
+            if arc in seen:
+                continue
+            seen.add(arc)
+            zf.writestr(arc, str(phtml))
     return buf.getvalue()
 
 
@@ -392,6 +432,23 @@ def study_output_files(ws_root, slug: str) -> list[tuple[Path, str]]:
             if arc not in seen:
                 seen.add(arc)
                 out.append((f, arc))
+    # Native Visualizations gallery — the declared Visualization panels rendered
+    # to the latest run's viz.json (the primary figure source for modern studies,
+    # which have no committed viz/ files). These are in-memory HTML strings, not
+    # files on disk, so they ride as inline (str, arcname) entries; the zip
+    # builder writes them with writestr. Makes has_figures true + the download
+    # carry the real figures.
+    try:
+        from vivarium_workbench.lib.study_native_gallery import build_study_native_gallery
+        panels = (build_study_native_gallery(ws_root, slug) or {}).get("panels") or {}
+        for pname, phtml in panels.items():
+            safe = "".join(c if (c.isalnum() or c in "-_.") else "-" for c in str(pname))
+            arc = f"figures/{safe}.html"
+            if phtml and arc not in seen:
+                seen.add(arc)
+                out.append((str(phtml), arc))
+    except Exception:
+        pass  # never block the outputs listing on a gallery read
     return out
 
 
@@ -405,6 +462,10 @@ def build_study_outputs_zip(ws_root, slug: str) -> Optional[bytes]:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for p, arc in items:
+            # Inline HTML (native-gallery panels) ride as str; files as Path.
+            if isinstance(p, str):
+                zf.writestr(arc, p)
+                continue
             if not p.is_file():
                 continue
             try:
