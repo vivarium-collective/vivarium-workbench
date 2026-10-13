@@ -267,7 +267,8 @@ def build_iset_summary(
         try:
             from vivarium_workbench.lib.investigation_figures import build_investigation_figures
             _figs = build_investigation_figures(ws_root, spec.get("name", d.name))
-            n_figures = len(_figs.get("files") or []) or _figs.get("n_composites", 0)
+            n_figures = (len(_figs.get("files") or []) or _figs.get("n_composites", 0)
+                         or _figs.get("n_output_studies", 0))
         except Exception:
             n_figures = 0
         out.append({

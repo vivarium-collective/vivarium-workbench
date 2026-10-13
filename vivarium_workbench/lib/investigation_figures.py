@@ -254,7 +254,12 @@ def build_investigation_figures(ws_root, name: str) -> dict:
         c["stale"] = c["study"] in stale
         if c["stale"]:
             c["stale_reason"] = stale[c["study"]]
+    # Studies with ANY downloadable output (on-disk figures OR native-gallery /
+    # run viz.json panels) — so the investigation ↓ figures button enables even
+    # when a study's figures are interactive HTML rather than static images.
+    n_output_studies = sum(1 for s in slugs if study_has_outputs(ws_root, s))
     return {"composites": composites, "files": files, "n_composites": len(composites),
+            "n_output_studies": n_output_studies,
             "stale": sorted(stale.keys()), "n_stale": len(stale)}
 
 
@@ -291,18 +296,21 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
     figs = build_investigation_figures(ws_root, name)
     entries = figs["files"]
     composites = figs["composites"]
-    if not entries and not composites:
-        return None
+    inv = _load_investigation(ws_root, name) or {}
+    slugs = investigation_member_slugs(inv)
     buf = io.BytesIO()
+    wrote = False
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         seen: set[str] = set()
 
         def _write(src: Path, arc: str) -> None:
+            nonlocal wrote
             if arc in seen or not src.is_file():
                 return
             seen.add(arc)
             try:
                 zf.write(src, arc)
+                wrote = True
             except OSError:
                 pass
 
@@ -317,7 +325,27 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
             for rel in (c.get("svg_rel"), c.get("png_rel")):
                 if rel:
                     _write(ws_root / rel, f"final/{Path(rel).name}")
-    return buf.getvalue()
+
+        # Native-gallery outputs per study (committed viz/ + the latest run's
+        # viz.json panels) — so studies whose figures are interactive HTML, not
+        # static images, are included too. Mirrors build_study_outputs_zip.
+        for slug in slugs:
+            try:
+                for p, arc in study_output_files(ws_root, slug):
+                    _write(p, f"{slug}/{arc}")
+                for pname, html in study_output_html_panels(ws_root, slug).items():
+                    arc = f"{slug}/visualizations/{_safe_panel_name(pname)}"
+                    if arc in seen:
+                        continue
+                    seen.add(arc)
+                    try:
+                        zf.writestr(arc, html)
+                        wrote = True
+                    except (OSError, ValueError):
+                        pass
+            except Exception:  # noqa: BLE001 — one bad study never breaks the zip
+                continue
+    return buf.getvalue() if wrote else None
 
 
 def study_figure_files(ws_root, slug: str) -> list[Path]:
