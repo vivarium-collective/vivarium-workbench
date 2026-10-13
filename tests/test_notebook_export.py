@@ -365,3 +365,32 @@ def test_viz_cells_use_iframe_isolation(tmp_path):
     assert "<iframe srcdoc=" in code
     assert "show_viz(_render_one(" in code   # viz cells route through it
     assert "display(HTML(_render_one(" not in code  # old, blank-rendering form gone
+
+
+def test_setup_scaffold_collapsed_and_output_clean(tmp_path: Path):
+    """Phase-1 cleanup: the setup scaffold is folded away in JupyterLab
+    (source_hidden + hide-input tag) so the science leads; discovery/pydantic
+    warnings are silenced; branding is current; a 'How to use' guide is up
+    front."""
+    inv = _build_workspace(tmp_path)
+    out = export_investigation_notebook(tmp_path, inv)
+    nb = json.loads(out["ipynb"].read_text())
+
+    # the big setup code cell is collapsed in Lab but still a runnable cell
+    setup = next(
+        c for c in nb["cells"]
+        if c["cell_type"] == "code" and "Setup — environment" in "".join(c["source"])
+    )
+    assert setup["metadata"].get("jupyter", {}).get("source_hidden") is True
+    assert "hide-input" in setup["metadata"].get("tags", [])
+    # a plain science/markdown cell stays visible (no accidental global collapse)
+    assert all(
+        not c.get("metadata", {}).get("jupyter", {}).get("source_hidden")
+        for c in nb["cells"] if c["cell_type"] == "markdown"
+    )
+
+    code = _code_text(nb)
+    assert "filterwarnings" in code                 # warning noise suppressed
+    full = "".join("".join(c["source"]) for c in nb["cells"])
+    assert "vivarium-dashboard" not in full         # current product name only
+    assert "How to use this notebook" in _markdown_text(nb)
