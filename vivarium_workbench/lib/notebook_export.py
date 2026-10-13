@@ -247,8 +247,12 @@ def _md(text: str) -> dict:
     return {"kind": "md", "text": text.rstrip() + "\n"}
 
 
-def _code(src: str) -> dict:
-    return {"kind": "code", "src": src.rstrip()}
+def _code(src: str, collapsed: bool = False) -> dict:
+    # ``collapsed`` marks a cell as scaffolding: its input is folded away in
+    # JupyterLab (metadata.jupyter.source_hidden) so the science stays in front,
+    # while the cell still runs on "Run All" and keeps a hide-input tag for
+    # nbconvert-based exports.
+    return {"kind": "code", "src": src.rstrip(), "collapsed": bool(collapsed)}
 
 
 def _viz_slug(name: str) -> str:
@@ -331,7 +335,17 @@ def _mechanisms_md(study: dict) -> str:
     methods = study.get("proposed_models_methods") or []
     if not mechs and not methods:
         return ""
-    lines: list[str] = ["### Design"]
+    # These are the design-time wishlist (study.yaml `proposed_*`), which can
+    # name tools/mechanisms that the realized composite does NOT use. Label the
+    # section as proposed and point at the built model below, so it never reads
+    # as a description of what actually runs (proposed-vs-built honesty).
+    lines: list[str] = [
+        "### Design — originally proposed",
+        "",
+        "_The mechanisms and methods proposed when this study was designed; the "
+        "model **actually built** (and the tools it uses) is shown below. These "
+        "may differ as the design was realized._",
+    ]
     if mechs:
         lines += ["", "**Proposed mechanisms**", ""]
         for m in mechs:
@@ -475,14 +489,12 @@ def _parameters_md(study: dict, recipes: list[dict], package: str) -> str:
 
 
 _COMPOSITE_INTRO_MD = (
-    "### Specification (process-bigraph) — load, inspect, edit\n\n"
-    "Each composite is a process-bigraph *document*: named processes "
-    "(`_type: process`) bound to an `address`, wired by `inputs`/`outputs` "
-    "ports over shared stores. For every composite below the first cell loads "
-    "the spec into a plain **editable Python dict** and prints its structure; "
-    "the second cell is a **control panel** listing every configuration value "
-    "and per-process `interval` so you can tweak any of them. Your edits are "
-    "read when the composite is built and run, in the **Run** section."
+    "### The model & its parameters\n\n"
+    "Each composite is a process-bigraph *document* — named processes wired by "
+    "`inputs`/`outputs` ports over shared stores. Below, each composite shows "
+    "what it does, then a **parameter cell** with its tunable knobs (the current "
+    "default and what each one means). Edit any value, then re-run the **Run** "
+    "section to rebuild and re-simulate with your changes."
 )
 
 
@@ -523,6 +535,70 @@ def _generator_panel_code(var: str, ov: str) -> str:
         f"import json as _json; print(_json.dumps({ov}, indent=2, default=str))\n"
         f"# e.g.:  {ov}['<parameter>'] = <value>"
     )
+
+
+def _introspect_generator(ws_root: Path, spec_id: str) -> dict | None:
+    """Best-effort, export-time introspection of a ``@composite_generator``.
+
+    Returns the composite-level ``description`` and its per-knob ``parameters``
+    (each ``{type, default, description}``) so the notebook can surface the
+    science and a guided, editable parameter cell with each knob's meaning +
+    units. Returns ``None`` if the workspace package can't be imported here — the
+    notebook then falls back to runtime materialization (``_generator_panel_code``).
+    """
+    import importlib
+    import sys
+    import warnings
+
+    try:
+        ws_s = str(ws_root)
+        if ws_s not in sys.path:
+            sys.path.insert(0, ws_s)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from process_bigraph.composite_generator import (  # type: ignore
+                _REGISTRY, discover_generators)
+            try:
+                importlib.import_module(spec_id.rsplit(".", 1)[0])
+            except Exception:
+                pass
+            try:
+                discover_generators()
+            except Exception:
+                pass
+            entry = _REGISTRY.get(spec_id)
+        if entry is None:
+            return None
+        return {
+            "description": str(getattr(entry, "description", "") or "").strip(),
+            "parameters": dict(getattr(entry, "parameters", {}) or {}),
+        }
+    except Exception:
+        return None
+
+
+def _generator_param_cell(ov: str, params: dict) -> str:
+    """A guided, editable override dict — one knob per line with its description
+    (which carries units + the control semantics). Generator declaration order
+    is preserved, so the headline/arm knob leads."""
+    header = [
+        "# === Parameters — edit any value, then re-run from the Run cell below ===",
+        "# Each entry is the composite's current default; the comment explains it.",
+    ]
+    keys = list(params.keys())
+    if not keys:
+        return "\n".join(header + [f"{ov} = {{}}"])
+    kw = max(len(repr(k)) for k in keys)
+    body = [f"{ov} = {{"]
+    for name, pdef in params.items():
+        default = pdef.get("default") if isinstance(pdef, dict) else pdef
+        desc = (pdef.get("description") if isinstance(pdef, dict) else "") or ""
+        line = f"    {repr(name):<{kw}}: {default!r},"
+        if desc:
+            line += f"   # {desc}"
+        body.append(line)
+    body.append("}")
+    return "\n".join(header + body)
 
 
 def _load_inspect_code(comp_rel: str, var: str) -> str:
@@ -678,11 +754,12 @@ def _run_code(slug: str, studies_rel: str, recipes: list[dict],
 
 def _setup_blocks(ws_root: Path, strat: dict) -> list[dict]:
     repo = str(ws_root)
-    src = f'''"""Self-contained reproduction of this investigation.
+    src = f'''"""Setup — environment & helpers (runs automatically; open only to inspect).
 
-Generated by vivarium-dashboard (notebook_export). Each study below is re-run
-live with the workspace's own process-bigraph protocol and its figures are
-rendered from the resulting runs.db.
+Generated by vivarium-workbench (notebook_export). This cell resolves the repo,
+registers the workspace Core, and defines the render helpers; the science lives
+in the sections below. Each study is re-run live with the workspace's own
+process-bigraph protocol and its figures rendered from the resulting runs.db.
 """
 import os
 import sys
@@ -719,6 +796,14 @@ os.chdir(REPO)
 
 # Re-simulate from scratch? Set False to render the committed runs.db (fast).
 RERUN = True
+
+# Keep the output clean: composite discovery and the pydantic models emit
+# benign UserWarnings (optional packages it skips, a field-name shadow) and the
+# simulators emit DeprecationWarnings — none are actionable from a reproduction
+# notebook, so silence those two categories. Remove this to see them.
+import warnings as _warnings
+_warnings.filterwarnings("ignore", category=UserWarning)
+_warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # --- standard process-bigraph protocol: register the workspace's Core ---
 {strat["setup"]}
@@ -898,7 +983,7 @@ RERUN = True
             "        return _p.read_text(encoding='utf-8', errors='replace')\n"
             "    return f'<p style=\"color:#6b7280\">unsupported figure type: {address}</p>'"
         )
-    return [_code(src)]
+    return [_code(src, collapsed=True)]
 
 
 def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[dict]:
@@ -953,11 +1038,24 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
                 blocks.append(_code(_control_panel_code(var, _load_yaml(comp_path))))
             else:
                 spec_kinds[spec_id] = "generator"
-                blocks.append(_md(
-                    f"**Composite `{spec_id}`** — `{var}` "
-                    "(materialized from its `@composite_generator`)"))
-                blocks.append(_code(_generator_inspect_code(spec_id, var)))
-                blocks.append(_code(_generator_panel_code(var, ov_vars[spec_id])))
+                # Prefer export-time introspection: surface the composite's own
+                # science (its description) + a guided, editable parameter cell
+                # (each knob with its meaning + units). Fall back to the runtime
+                # materialize + dump when the package can't be imported here.
+                meta = _introspect_generator(ws_root, spec_id)
+                if meta and meta.get("parameters"):
+                    hdr = f"**The model — `{spec_id}`**"
+                    if meta["description"]:
+                        hdr += "\n\n" + meta["description"]
+                    blocks.append(_md(hdr))
+                    blocks.append(_code(
+                        _generator_param_cell(ov_vars[spec_id], meta["parameters"])))
+                else:
+                    blocks.append(_md(
+                        f"**Composite `{spec_id}`** — `{var}` "
+                        "(materialized from its `@composite_generator`)"))
+                    blocks.append(_code(_generator_inspect_code(spec_id, var)))
+                    blocks.append(_code(_generator_panel_code(var, ov_vars[spec_id])))
 
     # --- typed contract (declared interface) ---
     contract = _contract_md(study)
@@ -1038,11 +1136,17 @@ def _intro_blocks(inv: dict, slug: str) -> list[dict]:
         "",
         "---",
         "",
-        "This notebook re-runs each study with the workspace's own process-bigraph "
-        "protocol and renders its figures. The text states the **question and "
-        "parameters** only — the figures produced by each run are the results. "
-        "Set `RERUN = False` in the setup cell to render the committed `runs.db` "
-        "without re-simulating.",
+        "**How to use this notebook**",
+        "",
+        "1. **Run ▸ Run All Cells** to reproduce every study end to end.",
+        "2. To explore, edit a study's **Parameters** cell, then re-run from its "
+        "**Run** section — the figures regenerate with your values.",
+        "3. The **Setup** cell at the top is collapsed scaffolding (environment + "
+        "render helpers); expand it only to inspect. Set `RERUN = False` there to "
+        "render the committed `runs.db` without re-simulating.",
+        "",
+        "The prose states the **question and parameters**; the figures each run "
+        "produces are the results.",
     ]
     return [_md("\n".join(lines))]
 
@@ -1085,10 +1189,17 @@ def _study_intro_blocks(study: dict, slug: str, inv_slug: str) -> list[dict]:
         "",
         "---",
         "",
-        "This notebook reproduces a **single study**: it loads the study's "
-        "composite(s), exposes their parameters as editable cells, then renders "
-        "the study's figures. Set `RERUN = False` in the setup cell to render the "
-        "committed results without re-simulating.",
+        "**How to use this notebook**",
+        "",
+        "1. **Run ▸ Run All Cells** to reproduce the study end to end.",
+        "2. To explore, edit the **Parameters** cell below, then re-run from the "
+        "**Run** section — the figures regenerate with your values.",
+        "3. The **Setup** cell at the top is collapsed scaffolding (environment + "
+        "render helpers); expand it only to inspect. Set `RERUN = False` there to "
+        "render the committed results without re-simulating.",
+        "",
+        "The prose states the **question and parameters**; the figures each run "
+        "produces are the results.",
     ]
     return [_md("\n".join(lines))]
 
@@ -1155,11 +1266,16 @@ def _ipynb(blocks: list[dict]) -> dict:
                 src = _viz_code_for_notebook(b)
             else:
                 src = b["src"]
+            meta: dict = {}
+            if b.get("collapsed"):
+                # Fold the input in JupyterLab (source_hidden) and tag it for
+                # nbconvert exports; the cell still executes on Run All.
+                meta = {"jupyter": {"source_hidden": True}, "tags": ["hide-input"]}
             cells.append(
                 {
                     "cell_type": "code",
                     "execution_count": None,
-                    "metadata": {},
+                    "metadata": meta,
                     "outputs": [],
                     "source": _split_keepends(src),
                 }
