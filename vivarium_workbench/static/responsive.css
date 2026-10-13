@@ -91,9 +91,27 @@
   }
   body.viv-mobile-rail-open .viv-rail { transform: translateX(0); }
   /* A collapsed-on-desktop rail must still open as a full drawer on a phone. */
+  /* A desktop session may have left the rail collapsed (icon-only, its label
+     spans set to display:none). In drawer mode the rail is full-width, so fully
+     UN-collapse it — otherwise the open drawer shows only icons with no
+     "Resources"/"Registry"/... text. Re-show the nav labels, section headers,
+     workspace name, badges, and the studies list; !important beats the equal-
+     specificity collapsed rules in style.css. */
   .viv-rail.viv-rail-collapsed { width: min(86vw, 320px) !important; }
+  .viv-rail.viv-rail-collapsed .viv-rail-link-label,
+  .viv-rail.viv-rail-collapsed .viv-rail-section-label,
+  .viv-rail.viv-rail-collapsed .viv-ws-text,
+  .viv-rail.viv-rail-collapsed .viv-rail-link-badge,
+  .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-name,
+  .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-count,
+  .viv-rail.viv-rail-collapsed .viv-rail-footer-text { display: revert !important; }
+  .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-items,
   .viv-rail.viv-rail-collapsed .viv-rail-section:has(#viv-rail-investigations),
-  .viv-rail.viv-rail-collapsed #viv-rail-investigations { display: block; }
+  .viv-rail.viv-rail-collapsed #viv-rail-investigations { display: block !important; }
+  /* Left-align the bits the collapsed rail centered. */
+  .viv-rail.viv-rail-collapsed .viv-workspace-name,
+  .viv-rail.viv-rail-collapsed .viv-rail-footer,
+  .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-header { justify-content: flex-start !important; }
   /* The right-edge drag-resize handle is meaningless for a drawer. */
   .viv-rail-resize-handle { display: none; }
 
