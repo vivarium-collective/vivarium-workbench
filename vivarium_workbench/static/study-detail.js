@@ -828,6 +828,41 @@
       .catch(function () { host.style.display = 'none'; });
   }
 
+  // Grow each native figure iframe to its full content height so the figure
+  // shows in full instead of scrolling inside a fixed-height window. srcdoc
+  // iframes are same-origin, so we can read the rendered height; Plotly lays out
+  // asynchronously, so we re-measure on load, after a few delays, and via a
+  // ResizeObserver on the iframe body.
+  function _autosizeNativeFrames(host) {
+    var frames = host.querySelectorAll('iframe.figure-media-frame--native');
+    Array.prototype.forEach.call(frames, function (ifr) {
+      function fit() {
+        try {
+          var doc = ifr.contentDocument || (ifr.contentWindow && ifr.contentWindow.document);
+          if (!doc || !doc.body) return;
+          var h = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
+          if (h > 40) ifr.style.height = (h + 6) + 'px';
+        } catch (e) { /* cross-origin shouldn't happen for srcdoc */ }
+      }
+      ifr.addEventListener('load', function () {
+        fit();
+        [150, 450, 1000, 2000].forEach(function (ms) { setTimeout(fit, ms); });
+        try {
+          var doc = ifr.contentDocument;
+          if (doc && doc.body && window.ResizeObserver) {
+            new ResizeObserver(fit).observe(doc.body);
+          }
+        } catch (e) { /* no-op */ }
+      });
+      // Already-complete (e.g. cached) frames never fire a fresh load event.
+      try {
+        if (ifr.contentDocument && ifr.contentDocument.readyState === 'complete') {
+          fit(); [150, 450, 1000].forEach(function (ms) { setTimeout(fit, ms); });
+        }
+      } catch (e) { /* no-op */ }
+    });
+  }
+
   function _loadNativeGallery() {
     var host = document.getElementById('native-gallery-panel');
     if (!host || _nativeGalleryLoaded) return;
@@ -878,6 +913,7 @@
             + '</div>';
         }).join('');
         _wireFigureRunLinks(host);
+        _autosizeNativeFrames(host);
         _figuresSourceState.native = true;
         _updateFiguresEmptyState();
         _nativeGalleryRunId = runId || null;  // Task E3: settled
@@ -2926,30 +2962,70 @@
   });
 
   // Narrative navigation: "Next study →" follows this investigation's leads-to
-  // chain. The next slug lives in the parent investigation view (it holds the
-  // full graph + edges); the iframe asks for it and delegates the open, so the
-  // graph highlight and the panel update through one call. Hidden on a terminal
-  // study, or when the study is open standalone (no investigation parent).
+  // chain. Works in BOTH contexts: embedded in the investigation graph view (it
+  // delegates to the parent so the graph highlight + embedded tab stay in sync),
+  // AND standalone (opened from the Studies sidebar) — where it computes "next"
+  // from the investigation itself and navigates directly. Hidden only on a
+  // genuinely terminal study or outside any investigation.
   (function _wireNextStudy() {
     var btn = document.getElementById('study-next');
     if (!btn) return;
-    var next = null;
+    var current = studyName();
+    function show(next, go) {
+      btn.style.display = '';
+      btn.textContent = 'Next study →';
+      btn.title = 'Go to "' + next + '" — the next study in this investigation';
+      btn.onclick = go;
+    }
+
+    // 1) Embedded in the investigation graph view — delegate to the parent.
     try {
       var p = window.parent;
       if (p && p !== window && typeof p._nextStudySlug === 'function') {
-        next = p._nextStudySlug(studyName());
-      }
-    } catch (e) { next = null; }
-    if (!next) { btn.style.display = 'none'; return; }
-    btn.style.display = '';
-    btn.title = 'Go to "' + next + '" — the next study in this investigation (leads-to)';
-    btn.onclick = function() {
-      try {
-        if (window.parent && typeof window.parent._openStudyEmbeddedNewTab === 'function') {
-          window.parent._openStudyEmbeddedNewTab(next);
+        var pn = p._nextStudySlug(current);
+        if (pn) {
+          show(pn, function () {
+            try { window.parent._openStudyEmbeddedNewTab(pn); } catch (e) { /* no-op */ }
+          });
+        } else {
+          btn.style.display = 'none';  // terminal within the graph view
         }
-      } catch (e) { /* standalone / cross-origin — no-op */ }
-    };
+        return;
+      }
+    } catch (e) { /* fall through to standalone */ }
+
+    // 2) Standalone study page — compute "next" from the investigation. The
+    //    investigation slug is stamped on the button server-side (data-investigation)
+    //    so it's available synchronously, before the async study spec loads.
+    var inv = btn.getAttribute('data-investigation') || (window._study && window._study.investigation);
+    if (!inv) { btn.style.display = 'none'; return; }
+    var base = (window.__BASE_PATH__ || '');
+    fetch(base + '/api/investigation/' + encodeURIComponent(inv))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) { btn.style.display = 'none'; return; }
+        var studies = d.studies || d.members || [];
+        var slug = function (s) { return (typeof s === 'string') ? s : (s && (s.name || s.slug || s.study)); };
+        var next = null;
+        // Prefer a leads-to child: a study whose parent_studies lists current.
+        for (var i = 0; i < studies.length && !next; i++) {
+          var parents = (studies[i] && studies[i].parent_studies) || [];
+          for (var j = 0; j < parents.length; j++) {
+            var pk = parents[j];
+            var pname = (pk && typeof pk === 'object') ? (pk.study || pk.name || pk.slug) : pk;
+            if (String(pname).trim() === current) { next = slug(studies[i]); break; }
+          }
+        }
+        // Fallback: the next study in the investigation's declared order.
+        if (!next) {
+          var order = studies.map(slug).filter(Boolean);
+          var idx = order.indexOf(current);
+          if (idx >= 0 && idx < order.length - 1) next = order[idx + 1];
+        }
+        if (!next) { btn.style.display = 'none'; return; }
+        show(next, function () { window.location = base + '/studies/' + encodeURIComponent(next); });
+      })
+      .catch(function () { btn.style.display = 'none'; });
   })();
 
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.

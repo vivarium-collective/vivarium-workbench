@@ -43,7 +43,7 @@
        leads-to chain. Populated/shown by study-detail.js (_wireNextStudy),
        which asks the parent investigation view for the next slug; hidden on a
        terminal study or outside an investigation. #}
-    <button type="button" id="study-next" class="btn-mini" style="display:none" title="Go to the next study in this investigation's narrative (leads-to)">Next study →</button>
+    <button type="button" id="study-next" class="btn-mini" style="display:none" data-investigation="{{ study.investigation }}" title="Go to the next study in this investigation's narrative (leads-to)">Next study →</button>
   </span>
   </div>
   <div class="study-status-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px;">
@@ -365,7 +365,7 @@
 .charts-panel{display:flex;flex-direction:column;gap:16px}
 .figure-card{border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;background:#fff}
 .figure-media-frame{display:block;width:100%;border:0;background:#fff}
-.figure-media-frame--native{height:480px}
+.figure-media-frame--native{height:auto;min-height:320px}  /* JS (_autosizeNativeFrames) grows this to the figure's full content height */
 .figure-media-frame--embed{min-height:200px}
 /* SVGs/PNGs scale to fit their card; preserves aspect ratio so a 1400×484
    chart shrinks instead of overflowing horizontally + clipping. */
