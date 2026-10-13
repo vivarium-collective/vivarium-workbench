@@ -25,7 +25,50 @@
 .viv-mobile-topbar,
 .viv-mobile-backdrop { display: none; }
 
+/* The short snapshot-banner message is phone-only (see the breakpoint below). */
+#snapshot-banner .snap-msg-short { display: none; }
+
 @media (max-width: 640px) {
+
+  /* ---- Read-only snapshot banner: compact so it stops eating the viewport --- *
+   * The full sentence wraps to ~5 lines on a phone; show a terse version at a
+   * smaller size, and let the "Get it on GitHub" link wrap rather than force a
+   * narrow column. */
+  body.snapshot #snapshot-banner {
+    gap: 8px;
+    padding: 5px 12px;
+    font-size: 0.72em;
+    line-height: 1.35;
+    flex-wrap: wrap;
+  }
+  #snapshot-banner .snap-msg-full { display: none; }
+  #snapshot-banner .snap-msg-short { display: inline; font-weight: 600; }
+  body.snapshot #snapshot-banner a { white-space: normal; }
+
+  /* ---- Market / Registry controls: keep them to one scrollable row each, so
+   * the toolbar doesn't stack into a tall block that squashes the cards. ---- */
+  /* The column-count slider is meaningless on a phone (always one column). */
+  .cols-ctl-slot { display: none !important; }
+  /* Facet tabs (Repositories / Processes / …) scroll sideways, not wrap. */
+  .market-facets {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 16px;
+    margin: 6px 0 10px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .market-facets::-webkit-scrollbar { display: none; }
+  .market-facet { white-space: nowrap; }
+  /* Source/provenance chips: one scrollable row, tighter margins. */
+  .market-facets-row { margin-bottom: 6px; overflow-x: auto; scrollbar-width: none; }
+  .market-facets-row::-webkit-scrollbar { display: none; }
+  .market-origin-filter { flex-wrap: nowrap; }
+  .market-origin-chip { white-space: nowrap; }
+  /* Trim the card toolbars' vertical footprint. */
+  .market-toolbar,
+  .registry-view-toolbar,
+  .card-browse-toolbar { gap: 8px; margin-bottom: 6px; }
 
   /* ---- Slim mobile topbar (hamburger + context title) ------------------- */
   .viv-mobile-topbar {
