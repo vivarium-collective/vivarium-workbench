@@ -10085,10 +10085,22 @@
             (f.relation ? ' <span class="muted">— ' + _escInv(f.relation) + '</span>' : '') + '</li>';
         }).join('') + '</ul>' });
 
+    // Decisions — the open expert decisions as their own tab, HIGHLIGHTED to draw
+    // attention when any are open (rather than a space-consuming always-open card).
+    var _decHtml = _invDecisionTabHtml(d);
+    if (_decHtml) {
+      var _nDec = (((d.executive || {}).decisions_needed) || []).length;
+      tabs.push({ id: 'decisions', label: 'Decisions', html: _decHtml,
+        badge: _nDec ? (_nDec + ' needed') : 'all clear', attention: _nDec > 0 });
+    }
+
     if (tabs.length) {
       H.push('<div class="inv-brief-tabs" role="tablist">' + tabs.map(function(t, i) {
-        return '<button type="button" class="inv-brief-tab' + (i === 0 ? ' active' : '') +
-          '" onclick="_invBriefTab(this,\'' + t.id + '\')">' + _esc(t.label) + '</button>';
+        var _cls = 'inv-brief-tab' + (i === 0 ? ' active' : '') + (t.attention ? ' inv-brief-tab-attn' : '');
+        var _badge = t.badge ? '<span class="inv-brief-tab-badge' + (t.attention ? ' attn' : '') +
+          '">' + _esc(t.badge) + '</span>' : '';
+        return '<button type="button" class="' + _cls +
+          '" onclick="_invBriefTab(this,\'' + t.id + '\')">' + _esc(t.label) + _badge + '</button>';
       }).join('') + '</div>');
       H.push('<div class="inv-brief-panels">' + tabs.map(function(t, i) {
         return '<div class="inv-brief-panel" data-panel="' + t.id + '"' + (i === 0 ? '' : ' style="display:none"') + '>' + t.html + '</div>';
@@ -10108,9 +10120,10 @@
   // incl. the Scientific Enrichment Plan) link at the top; resolved decisions
   // fold into a log below. Renders nothing when there's nothing to show.
   // ---------------------------------------------------------------------------
-  function _renderInvDecisionCockpit(d) {
-    var host = document.getElementById('investigation-decision-cockpit');
-    if (!host) return;
+  // The open expert decisions, rendered as the body of the "Decisions" brief tab
+  // (added to the tabs[] array below), not a space-consuming always-open card.
+  // Returns '' when there is nothing to show.
+  function _invDecisionTabHtml(d) {
     d = d || {};
     var ex = d.executive || {};
     var needed = Array.isArray(ex.decisions_needed) ? ex.decisions_needed : [];
@@ -10121,32 +10134,13 @@
     var readOnly = !!d.read_only || (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
     var invName = d.name || window._currentIset || '';
 
-    if (!needed.length && !resolved.length && !docs.length) { host.innerHTML = ''; return; }
+    if (!needed.length && !resolved.length && !docs.length) return '';
 
     var n = needed.length;
     var accent = n ? '#b45309' : '#16a34a';      // amber when open, green when all clear
-    var headBg = n ? '#fffbeb' : '#f0fdf4';
     var H = [];
-    H.push('<section class="inv-decision-cockpit" style="margin:4px 0 18px;border:1px solid ' + accent +
-      ';border-left-width:5px;border-radius:8px;background:' + headBg + ';overflow:hidden">');
-
-    // Header with a count badge.
-    H.push('<div style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid ' +
-      (n ? '#fde68a' : '#bbf7d0') + '">');
-    H.push('<span style="font-size:1.05em">⚖</span>');
-    H.push('<strong style="font-size:1.02em;color:#1e293b">Decisions</strong>');
-    if (n) {
-      H.push('<span title="open decisions awaiting your call" style="background:' + accent +
-        ';color:#fff;font-size:0.78em;font-weight:700;padding:1px 9px;border-radius:11px">' +
-        n + ' needed</span>');
-    } else {
-      H.push('<span style="background:#16a34a;color:#fff;font-size:0.78em;font-weight:700;' +
-        'padding:1px 9px;border-radius:11px">all resolved</span>');
-    }
-    H.push('<span class="muted" style="margin-left:auto;font-size:0.82em">Expert decisions steering this campaign</span>');
-    H.push('</div>');
-
-    H.push('<div style="padding:12px 16px 14px">');
+    H.push('<div style="padding:2px 0 4px">');
+    H.push('<div class="muted" style="font-size:0.84em;margin:0 0 12px">Expert decisions steering this campaign</div>');
 
     // Campaign-plan docs — the plan the decisions act on (links to e.g. the
     // Scientific Enrichment Plan). Served at /<path> from the workspace root.
@@ -10217,10 +10211,17 @@
       H.push('</ul></details>');
     }
 
-    H.push('</div></section>');
-    host.innerHTML = H.join('');
+    H.push('</div>');
+    return H.join('');
+  }
+  // Back-compat: the cockpit moved into the "Decisions" brief tab; clear any
+  // legacy standalone host so nothing double-renders below the tabs.
+  function _renderInvDecisionCockpit(d) {
+    var host = document.getElementById('investigation-decision-cockpit');
+    if (host) host.innerHTML = '';
   }
   window._renderInvDecisionCockpit = _renderInvDecisionCockpit;
+  window._invDecisionTabHtml = _invDecisionTabHtml;
 
   // Resolve one open decision: read the note from the card, POST, then refresh
   // the investigation detail so the cockpit re-renders with the moved decision.
