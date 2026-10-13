@@ -11395,9 +11395,33 @@
     if (document.fullscreenElement) { document.exitFullscreen(); }
     else if (shell.requestFullscreen) { shell.requestFullscreen().then(function () { setTimeout(_aigFit, 150); }); }
   }
+  // Expand (snap-to-top): grow the graph pane to nearly the full viewport height
+  // and scroll it to the top of the screen, WITHOUT going fullscreen — so the whole
+  // workbench interface (rail, tabs) stays available. Toggles back to the normal
+  // pane height. A taller alternative to the browser-fullscreen (⛶) button.
+  function _aigExpand() {
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell) return;
+    var expanded = shell.classList.toggle('aig-expanded');
+    var btn = document.getElementById('aig-expand-btn');
+    if (btn) {
+      btn.textContent = expanded ? '⤓' : '⤒';
+      btn.title = expanded ? 'Collapse graph to the normal pane height'
+                           : 'Expand graph — snap to top and grow it tall (workbench stays)';
+    }
+    if (expanded) {
+      // Snap the graph to the top of the viewport, then fit it to the taller area.
+      try { shell.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+      catch (_) { shell.scrollIntoView(true); }
+      setTimeout(_aigFit, 220);
+    } else {
+      setTimeout(_aigFit, 60);
+    }
+  }
   window._aigZoomBy = _aigZoomBy;
   window._aigFit = _aigFit;
   window._aigFullscreen = _aigFullscreen;
+  window._aigExpand = _aigExpand;
   // Drag anywhere on the shell background to pan (card clicks still work).
   document.addEventListener('pointerdown', function (e) {
     var shell = e.target.closest && e.target.closest('#investigation-dag-shell');

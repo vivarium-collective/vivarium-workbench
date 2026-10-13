@@ -28,6 +28,13 @@ main{padding:20px;margin:0 auto}
   box-sizing:border-box;
 }
 #investigation-dag-shell{ width: 100% !important; }
+/* Expand (snap-to-top) mode: grow the graph pane to nearly the full viewport so the
+   whole graph is easy to read, without going browser-fullscreen. Overrides the
+   inline height; the workbench rail/tabs stay available above/around it. */
+#investigation-dag-shell.aig-expanded{
+  height: 90vh !important; max-height: 90vh !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28); scroll-margin-top: 8px;
+}
 #investigation-study-embed-panel{
   width: 100% !important; max-width: none !important;
   margin-top: 16px !important;
