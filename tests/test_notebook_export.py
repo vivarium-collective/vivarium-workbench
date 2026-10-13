@@ -145,7 +145,7 @@ def test_text_states_parameters_not_results(tmp_path: Path):
     # design intent + structure sections are present
     assert "Can parameter K drive the widget count?" in md
     assert "### Parameters" in md
-    assert "Specification (process-bigraph) — load, inspect, edit" in md
+    assert "The model & its parameters" in md
     assert "### Acceptance criteria" in md
 
     # parameters and pre-registered thresholds are kept
@@ -394,3 +394,28 @@ def test_setup_scaffold_collapsed_and_output_clean(tmp_path: Path):
     full = "".join("".join(c["source"]) for c in nb["cells"])
     assert "vivarium-dashboard" not in full         # current product name only
     assert "How to use this notebook" in _markdown_text(nb)
+
+
+def test_generator_param_cell_is_guided_and_ordered():
+    """Phase-2: a generator's parameter cell is a plain editable dict literal —
+    knobs in declaration order (arm knob first), each with its description (units
+    + control semantics) inline; it evaluates to the defaults."""
+    from vivarium_workbench.lib.notebook_export import _generator_param_cell
+
+    params = {
+        "gradient_efficiency": {"type": "float", "default": 1.0,
+                                "description": "arm knob (1.0 favorable; 0 control)"},
+        "h2": {"type": "float", "default": 0.005, "description": "Dissolved H2 (M)"},
+    }
+    cell = _generator_param_cell("ov_x", params)
+
+    assert "ov_x = {" in cell and cell.rstrip().endswith("}")
+    # declaration order preserved -> the arm knob leads
+    assert cell.index("gradient_efficiency") < cell.index("h2")
+    # each knob carries its meaning inline
+    assert "# arm knob (1.0 favorable; 0 control)" in cell
+    assert "# Dissolved H2 (M)" in cell
+    # it is valid Python and evaluates to the declared defaults
+    ns: dict = {}
+    exec(cell, ns)
+    assert ns["ov_x"] == {"gradient_efficiency": 1.0, "h2": 0.005}

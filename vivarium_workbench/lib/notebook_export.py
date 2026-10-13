@@ -479,14 +479,12 @@ def _parameters_md(study: dict, recipes: list[dict], package: str) -> str:
 
 
 _COMPOSITE_INTRO_MD = (
-    "### Specification (process-bigraph) — load, inspect, edit\n\n"
-    "Each composite is a process-bigraph *document*: named processes "
-    "(`_type: process`) bound to an `address`, wired by `inputs`/`outputs` "
-    "ports over shared stores. For every composite below the first cell loads "
-    "the spec into a plain **editable Python dict** and prints its structure; "
-    "the second cell is a **control panel** listing every configuration value "
-    "and per-process `interval` so you can tweak any of them. Your edits are "
-    "read when the composite is built and run, in the **Run** section."
+    "### The model & its parameters\n\n"
+    "Each composite is a process-bigraph *document* — named processes wired by "
+    "`inputs`/`outputs` ports over shared stores. Below, each composite shows "
+    "what it does, then a **parameter cell** with its tunable knobs (the current "
+    "default and what each one means). Edit any value, then re-run the **Run** "
+    "section to rebuild and re-simulate with your changes."
 )
 
 
@@ -527,6 +525,70 @@ def _generator_panel_code(var: str, ov: str) -> str:
         f"import json as _json; print(_json.dumps({ov}, indent=2, default=str))\n"
         f"# e.g.:  {ov}['<parameter>'] = <value>"
     )
+
+
+def _introspect_generator(ws_root: Path, spec_id: str) -> dict | None:
+    """Best-effort, export-time introspection of a ``@composite_generator``.
+
+    Returns the composite-level ``description`` and its per-knob ``parameters``
+    (each ``{type, default, description}``) so the notebook can surface the
+    science and a guided, editable parameter cell with each knob's meaning +
+    units. Returns ``None`` if the workspace package can't be imported here — the
+    notebook then falls back to runtime materialization (``_generator_panel_code``).
+    """
+    import importlib
+    import sys
+    import warnings
+
+    try:
+        ws_s = str(ws_root)
+        if ws_s not in sys.path:
+            sys.path.insert(0, ws_s)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from process_bigraph.composite_generator import (  # type: ignore
+                _REGISTRY, discover_generators)
+            try:
+                importlib.import_module(spec_id.rsplit(".", 1)[0])
+            except Exception:
+                pass
+            try:
+                discover_generators()
+            except Exception:
+                pass
+            entry = _REGISTRY.get(spec_id)
+        if entry is None:
+            return None
+        return {
+            "description": str(getattr(entry, "description", "") or "").strip(),
+            "parameters": dict(getattr(entry, "parameters", {}) or {}),
+        }
+    except Exception:
+        return None
+
+
+def _generator_param_cell(ov: str, params: dict) -> str:
+    """A guided, editable override dict — one knob per line with its description
+    (which carries units + the control semantics). Generator declaration order
+    is preserved, so the headline/arm knob leads."""
+    header = [
+        "# === Parameters — edit any value, then re-run from the Run cell below ===",
+        "# Each entry is the composite's current default; the comment explains it.",
+    ]
+    keys = list(params.keys())
+    if not keys:
+        return "\n".join(header + [f"{ov} = {{}}"])
+    kw = max(len(repr(k)) for k in keys)
+    body = [f"{ov} = {{"]
+    for name, pdef in params.items():
+        default = pdef.get("default") if isinstance(pdef, dict) else pdef
+        desc = (pdef.get("description") if isinstance(pdef, dict) else "") or ""
+        line = f"    {repr(name):<{kw}}: {default!r},"
+        if desc:
+            line += f"   # {desc}"
+        body.append(line)
+    body.append("}")
+    return "\n".join(header + body)
 
 
 def _load_inspect_code(comp_rel: str, var: str) -> str:
@@ -966,11 +1028,24 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
                 blocks.append(_code(_control_panel_code(var, _load_yaml(comp_path))))
             else:
                 spec_kinds[spec_id] = "generator"
-                blocks.append(_md(
-                    f"**Composite `{spec_id}`** — `{var}` "
-                    "(materialized from its `@composite_generator`)"))
-                blocks.append(_code(_generator_inspect_code(spec_id, var)))
-                blocks.append(_code(_generator_panel_code(var, ov_vars[spec_id])))
+                # Prefer export-time introspection: surface the composite's own
+                # science (its description) + a guided, editable parameter cell
+                # (each knob with its meaning + units). Fall back to the runtime
+                # materialize + dump when the package can't be imported here.
+                meta = _introspect_generator(ws_root, spec_id)
+                if meta and meta.get("parameters"):
+                    hdr = f"**The model — `{spec_id}`**"
+                    if meta["description"]:
+                        hdr += "\n\n" + meta["description"]
+                    blocks.append(_md(hdr))
+                    blocks.append(_code(
+                        _generator_param_cell(ov_vars[spec_id], meta["parameters"])))
+                else:
+                    blocks.append(_md(
+                        f"**Composite `{spec_id}`** — `{var}` "
+                        "(materialized from its `@composite_generator`)"))
+                    blocks.append(_code(_generator_inspect_code(spec_id, var)))
+                    blocks.append(_code(_generator_panel_code(var, ov_vars[spec_id])))
 
     # --- typed contract (declared interface) ---
     contract = _contract_md(study)
