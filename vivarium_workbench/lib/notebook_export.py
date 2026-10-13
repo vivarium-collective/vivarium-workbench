@@ -335,7 +335,17 @@ def _mechanisms_md(study: dict) -> str:
     methods = study.get("proposed_models_methods") or []
     if not mechs and not methods:
         return ""
-    lines: list[str] = ["### Design"]
+    # These are the design-time wishlist (study.yaml `proposed_*`), which can
+    # name tools/mechanisms that the realized composite does NOT use. Label the
+    # section as proposed and point at the built model below, so it never reads
+    # as a description of what actually runs (proposed-vs-built honesty).
+    lines: list[str] = [
+        "### Design — originally proposed",
+        "",
+        "_The mechanisms and methods proposed when this study was designed; the "
+        "model **actually built** (and the tools it uses) is shown below. These "
+        "may differ as the design was realized._",
+    ]
     if mechs:
         lines += ["", "**Proposed mechanisms**", ""]
         for m in mechs:
