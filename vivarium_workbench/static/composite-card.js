@@ -803,6 +803,39 @@
   }
   window._syncOutEmitter = _syncOutEmitter;
 
+  // Count the PROCESS/STEP instances inside a resolved composite state (the
+  // bigraph the Explore graph renders). Emitters are excluded — the registry
+  // treats them as a separate kind (their own tab), not model processes. A
+  // process/step node is counted as a unit (we don't descend into its ports/
+  // config). The count is read off the RESOLVED state, so it reflects the
+  // applied config (a config that structurally adds/removes a process updates it).
+  function _countCompositeProcs(state) {
+    var n = 0;
+    (function walk(node) {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      var t = node._type;
+      if (t === 'process' || t === 'step') {
+        if (!/emitter/i.test(String(node.address || node.instance || ''))) n++;
+        return;   // count the process as one unit; its children are ports/config
+      }
+      for (var k in node) {
+        if (!Object.prototype.hasOwnProperty.call(node, k) || k.charAt(0) === '_') continue;
+        walk(node[k]);
+      }
+    })(state);
+    return n;
+  }
+  window._countCompositeProcs = _countCompositeProcs;
+
+  // Fill/update a composite card's "· N processes" meta from a process count.
+  function _setCompositeProcCount(card, n) {
+    if (!card || typeof n !== 'number') return;
+    var span = card.querySelector('[data-role="proc-count"]');
+    if (span) span.innerHTML = n ? ' · <strong>' + n + '</strong> process' + (n === 1 ? '' : 'es') : '';
+  }
+  window._setCompositeProcCount = _setCompositeProcCount;
+
   // Lazy-fill the Outputs observables checklist from the composite's DECLARED
   // emit paths (composite-resolve → state._declared_emit_paths). All checked by
   // default; global_time is always emitted (time axis) so it's shown pinned/
@@ -816,6 +849,8 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         var st = (d && d.state) ? d.state : d;
+        // Fill the card's "· N processes" meta from the resolved bigraph (initial load).
+        try { _setCompositeProcCount(card, _countCompositeProcs(st)); } catch (e) {}
         var paths = (st && Array.isArray(st._declared_emit_paths)) ? st._declared_emit_paths : [];
         var toggles = paths.filter(function (p) { return p && p !== 'global_time'; });
         if (!toggles.length) {
@@ -1196,7 +1231,7 @@
           '<button class="pcard-hdr-restore" type="button" onclick="_toggleCardHeader(this)" title="Show the composite bar">▸ ' + _esc(c.name) + '</button>' +
           '<div class="pcard-summary">' +
             '<div class="pcard-desc-col">' +
-              '<div class="pcard-contract-meta" data-role="contract-meta">composite · <strong>' + nCfg + '</strong> param' + (nCfg === 1 ? '' : 's') + '</div>' +
+              '<div class="pcard-contract-meta" data-role="contract-meta">composite · <strong>' + nCfg + '</strong> param' + (nCfg === 1 ? '' : 's') + '<span data-role="proc-count"></span></div>' +
               (function () { var s = _regStatsHtml(c); return s ? '<div class="reg-card-stats pcard-usage">' + s + '</div>' : ''; })() +
               (desc ? '<p class="loom-desc pcard-desc-clamp" onclick="_pcardToggleDesc(this)" title="Click to expand / collapse">' + _esc(desc) + '</p>' : '') +
               // Same copy-pasteable "how to run this" chip as the grid card, so
