@@ -245,6 +245,9 @@ def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]
         # keys and degrade gracefully.
         rec["methods"] = list(entry.get("methods") or [])
         rec["fidelity"] = entry.get("fidelity") or ""
+        # Number of process/step nodes in the composite (emitter excluded),
+        # counted by the env worker when it built the doc. None when unavailable.
+        rec["n_processes"] = entry.get("n_processes")
         out[gid] = rec
 
     # Tag origin: own/installed/generator composites get origin_repo None
