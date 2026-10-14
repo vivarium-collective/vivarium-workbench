@@ -2992,6 +2992,36 @@
       });
   });
 
+  // Gate "↻ Reproduce" on whether the latest run is actually replayable. It
+  // replays a run's recorded manifest via /api/study-reproduce → cli_runs.find_run,
+  // which only scans study runs.db + the workspace composite-runs.db. A study whose
+  // runs come from the canonical runner (store_path under canonical-runs/, db_path
+  // null — the norm for a bench workspace like this one) is NOT in those DBs, so
+  // reproduce 404s "run not found". Rather than offer a button that always errors,
+  // hide it unless the latest run is reproducible (db_path set, e.g. dashboard-
+  // managed runs in v2ecoli). "Run current spec" (re-derive + launch) stays as the
+  // reliable action. Default-hidden; revealed only once a replayable run is seen.
+  (function _gateReproduce() {
+    var rbtn = document.getElementById('study-reproduce');
+    if (!rbtn) return;
+    rbtn.style.display = 'none';
+    if (typeof _isSnapshot === 'function' && _isSnapshot()) return;
+    var slug = studyName();
+    var _ds = window.DataSource;
+    var url = (_ds && _ds.simulationsUrl) ? _ds.apiUrl(_ds.simulationsUrl(slug))
+      : '/api/simulations?study=' + encodeURIComponent(slug);
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var sims = (_ds && _ds.simulationsFilter) ? _ds.simulationsFilter((d && d.simulations) || [], slug) : ((d && d.simulations) || []);
+        var latest = sims.length ? sims[0] : null;
+        // Replayable iff find_run can locate it: a study/composite runs.db row
+        // (db_path set), not a canonical-runs-only output.
+        if (latest && latest.run_id && latest.db_path) rbtn.style.display = '';
+      })
+      .catch(function () { /* leave hidden — err on the side of not offering a broken action */ });
+  })();
+
   // Narrative navigation: "Next study →" follows this investigation's leads-to
   // chain. Works in BOTH contexts: embedded in the investigation graph view (it
   // delegates to the parent so the graph highlight + embedded tab stay in sync),
