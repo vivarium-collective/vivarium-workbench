@@ -77,7 +77,7 @@ dependencies = [
     # REBRAND: was `pbg-superpowers>=0.14.0`. The pbg-superpowers repo was renamed
     # to `viva-superpowers` (the git URL redirects; `main` now builds the
     # `viva-superpowers` distribution), and this package's own code imports
-    # `viva_superpowers.*` (30+ call sites), so the declared dist must be
+    # `viva_superpowers.*` (100+ import statements), so the declared dist must be
     # viva-superpowers. Crucially, viva-superpowers `main` migrated its emitter
     # dependency from `pbg-emitters` to `viva-emitters>=0.2.3` — so sourcing it
     # from `main` (below) is what keeps the stale standalone `pbg-emitters` out of
@@ -95,6 +95,18 @@ dependencies = [
     # `polars` is absent and discover_generators skips study_evaluator,
     # readout_resolver, readout_migration, and readout_validation
     # (ModuleNotFoundError: No module named 'polars').
+    #
+    # CORE — do NOT move this to the `chat` extra. The library (not the /viva-*
+    # skills it also ships) is the workbench's deterministic domain layer, not an
+    # AI dependency: no LLM SDK, and tests/test_no_ai_deps.py allows importing it.
+    # As of v0.4.1, 14 `lib/` modules import it unguarded at module scope and
+    # `api/app.py` cannot be imported without `lib/workspaces_mutations.py` and
+    # `lib/workspaces_process_views.py` resolving it. Even with those two made
+    # lazy the server would boot but degrade: study detail silently loses its
+    # verdict/derived-status fields and the catalog/linkage/lint views come back
+    # empty (still HTTP 200), while other routes (e.g. /api/workspaces) fail with
+    # 500. The hosted image is currently built without `[chat]` (Dockerfile).
+    # Background: docs/ARCHITECTURE.md, "Coupling note".
     "viva-superpowers[evaluator]>=0.23.0",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]

@@ -435,19 +435,28 @@ model assumes a trusted-localhost deployment. See the deep-dive §10.
 | Bigraph **type system** + JSON (de)serialization | **bigraph-schema** | `BigraphJSONEncoder` / `bigraph_json_hook` when persisting/transporting state. |
 | Interactive **state-tree (bigraph) explorer** | **bigraph-loom** | Embedded viewer; the dashboard feeds it composite-state JSON. Assets copied into the publish bundle. |
 | Workspace **scaffold** + `.pbg/schemas/` validators | **viva-template** | Read-only here. Schemas are loaded at save time (`lib/workspace_yaml.py` → `Draft7Validator`); invalid YAML is rejected with HTTP 400 *before* any commit. viva-template owns the schema versions. |
-| **AI-assisted authoring** + many runtime computations | **pbg-superpowers** | A *runtime library*, not just a plugin. Provides `workspace_catalog` (multi-dashboard discovery via `~/.pbg/servers/`), `composite_generator`, visualization discovery, and the verdict/status/rigor rollups the dashboard computes on read. Its `/pbg-*` Claude Code skills write the **same** workspace files the dashboard does. |
+| **AI-assisted authoring** + many runtime computations | **viva-superpowers** (formerly pbg-superpowers) | A *runtime library*, not just a plugin. Provides `workspace_catalog` (multi-dashboard discovery via `~/.pbg/servers/`), `composite_generator`, visualization discovery, and the verdict/status/rigor rollups the dashboard computes on read. Its `/viva-*` (formerly `/pbg-*`) Claude Code skills write the **same** workspace files the dashboard does. |
 
 > **⚠ Coupling note:** this is the deepest and leakiest dependency in the repo —
-> **~170 references across 57 of ~151 `lib/` modules**, imported symbol-by-symbol
-> with no facade, and (in ≥6 modules) reaching into the private
-> `composite_generator._REGISTRY`. Calls are defensively guarded (they degrade if
-> the package is absent), so the dashboard *runs* without pbg-superpowers — but
-> the entire gate/verdict/derived-status layer then silently vanishes, and
-> `pbg-superpowers>=0.14.0` is in fact a **hard** dependency. A single upstream
-> version bump can affect dozens of unrelated modules at once. (`composite_lookup.py`
-> even carries a docstring claiming it is "self-contained: no dependency on
-> pbg-superpowers" while importing that private registry.) By contrast,
-> `investigation_contracts` and the bigraph-loom asset seam are narrow and clean.
+> **101 import statements across 47 modules** (as of v0.4.1), imported
+> symbol-by-symbol with no facade (the single-adapter seam planned in
+> [REFACTOR-PLAN](REFACTOR-PLAN.md) F.1, `lib/superpowers_api.py`, was never
+> built) and still reaching for underscore-private helpers (e.g.
+> `feedback_import._feedback_files`, `study_evaluator._resolve_run_store`). It is a
+> **hard** dependency: `viva-superpowers[evaluator]>=0.23.0` sits in
+> `[project].dependencies`, not the `chat` extra, because 14 `lib/` modules import
+> it unguarded at module scope and `api/app.py` cannot be imported without
+> `lib/workspaces_mutations.py` and `lib/workspaces_process_views.py` resolving
+> it. The other module-level importers are outside `api/app.py`'s import-time
+> closure, so only those two imports stop the server from booting — but
+> booting is not working: without the package the entire
+> gate/verdict/derived-status layer silently vanishes (study detail just omits
+> those fields, still HTTP 200) and the catalog, linkage and report-lint views
+> come back empty, while other routes (e.g. `/api/workspaces`,
+> `/api/study-charts/{slug}`) fail with 500. The hosted image is currently built
+> without `[chat]`. A single upstream version bump can affect dozens of unrelated
+> modules at once. By contrast, `investigation_contracts` and the bigraph-loom
+> asset seam are narrow and clean.
 
 ### Dual authoring (dashboard ⇄ /pbg-* skills)
 

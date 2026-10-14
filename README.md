@@ -195,7 +195,7 @@ These three planes — and the round-trip between them — are specified in
 
 ## Companion repos
 
-- **[pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)** — the Claude Code plugin whose `/pbg-*` skills drive this dashboard's HTTP API. Use it for AI-assisted authoring.
+- **[viva-superpowers](https://github.com/vivarium-collective/viva-superpowers)** (formerly pbg-superpowers) — the Claude Code plugin whose `/viva-*` skills drive this dashboard's HTTP API. Use it for AI-assisted authoring. Its Python library is also a **core dependency** of this package (the deterministic, AI-free domain layer), so it is installed with the workbench whether or not you use the skills.
 - **[viva-template](https://github.com/vivarium-collective/viva-template)** — the workspace scaffold this dashboard serves. Includes the canonical `.pbg/schemas/` validators.
 - **investigation-contracts** — event-log contracts shared by both spines. Not yet on PyPI; install editable from the repo: `pip install -e /path/to/investigation-contracts`.
 
