@@ -855,6 +855,37 @@
   }
   window._ensureCompositeProcCount = _ensureCompositeProcCount;
 
+  // Auto-fill each composite card's "· N processes" (next to the param count) as
+  // soon as the card is on screen — without needing to open a section. An
+  // IntersectionObserver resolves only cards that actually become visible (so the
+  // whole composite list is never mass-resolved), and a MutationObserver picks up
+  // cards from every render path (full card, popout, re-render). _ensureCompositeProcCount
+  // is idempotent (its own _procCountLoaded guard), so this never double-resolves.
+  (function _autoCompositeProcCount() {
+    if (typeof IntersectionObserver === 'undefined' || typeof MutationObserver === 'undefined') return;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { io.unobserve(e.target); _ensureCompositeProcCount(e.target); }
+      });
+    }, { rootMargin: '150px' });
+    // Both the full card (.pcard-composite) and the grid card (.registry-card,
+    // data-kind=composite) carry data-address; resolve the count for either.
+    var SEL = '.pcard-composite[data-address], .registry-card[data-kind="composite"][data-address]';
+    function observe(card) { if (card && !card._procCountObserved) { card._procCountObserved = true; io.observe(card); } }
+    function scan(root) {
+      if (!root || root.nodeType !== 1) return;
+      if (root.matches && root.matches(SEL)) observe(root);
+      if (root.querySelectorAll) root.querySelectorAll(SEL).forEach(observe);
+    }
+    function start() {
+      scan(document.body);
+      new MutationObserver(function (muts) {
+        muts.forEach(function (m) { m.addedNodes.forEach(scan); });
+      }).observe(document.body, { childList: true, subtree: true });
+    }
+    if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+  })();
+
   // Lazy-fill the Outputs observables checklist from the composite's DECLARED
   // emit paths (composite-resolve → state._declared_emit_paths). All checked by
   // default; global_time is always emitted (time axis) so it's shown pinned/
@@ -1023,14 +1054,13 @@
     var stats = _regStatsHtml(c);
     var selCls = (window._registrySelected && window._registrySelected === c.id) ? ' reg-selected' : '';
     var idA = _esc(c.id);
-    // A little more info on the card: process + parameter counts, and tags.
+    // Param count + the live process count next to it. c.requires.processes is empty
+    // for generators, so the real count is filled from the resolved bigraph by the
+    // IntersectionObserver (data-role="proc-count") when the card is visible.
     var np = (c.parameters && typeof c.parameters === 'object') ? Object.keys(c.parameters).length : 0;
-    var nproc = (c.requires && c.requires.processes) ? c.requires.processes.length : 0;
-    var metaBits = [];
-    if (nproc) metaBits.push(nproc + ' process' + (nproc === 1 ? '' : 'es'));
-    if (np) metaBits.push(np + ' param' + (np === 1 ? '' : 's'));
-    var meta = metaBits.length
-      ? '<div class="reg-card-meta" style="font-size:11px;color:#6b7280;margin:2px 0 4px">' + metaBits.join(' · ') + '</div>' : '';
+    var meta = '<div class="reg-card-meta" style="font-size:11px;color:#6b7280;margin:2px 0 4px">' +
+      (np ? '<strong>' + np + '</strong> param' + (np === 1 ? '' : 's') : 'composite') +
+      '<span data-role="proc-count"></span></div>';
     var tags = Array.isArray(c.tags) ? c.tags.slice(0, 3) : [];
     var tagHtml = tags.length
       ? '<div class="reg-card-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">' +
@@ -1055,10 +1085,10 @@
         ' title="Double-click to Explore (maximized bigraph)">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
-          '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong>' + _compositeBadge() + _compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + '</div>' +
+          '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong></div>' +
           '<code class="reg-card-addr">' + _esc(addr) + '</code>' +
           meta +
-          (short ? '<p class="reg-card-desc">' + _esc(short) + '</p>' : '') +
+          (desc ? '<p class="reg-card-desc pcard-desc-clamp" onclick="event.stopPropagation();_pcardToggleDesc(this)" title="Click to read the full description">' + _esc(desc) + '</p>' : '') +
           tagHtml +
           _runCmdChip(c.run_command) +
           actions +

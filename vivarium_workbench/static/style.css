@@ -1920,7 +1920,10 @@ textarea.loom-in-field{
 .pcard-header .pcard-json-btn + .pcard-popout{ margin-left:6px; }   /* sit side by side */
 .pcard-json-view{
   margin-top:8px; border:1px solid #eef2f7; border-radius:9px; background:#fbfcfe;
-  max-height:340px; overflow:auto; padding:8px 10px;
+  /* Drag the bottom edge to extend the JSON view to see the whole thing; defaults
+     to a comfortable height, resizable up to most of the viewport. */
+  height:340px; min-height:140px; max-height:88vh; overflow:auto; padding:8px 10px;
+  resize:vertical;
 }
 .pcard-json-toolbar{ display:flex; gap:8px; margin:0 0 6px; position:sticky; top:-8px; }
 :root[data-theme="dark"] .pcard-json-btn{ border-color:var(--border-2); color:var(--text-muted); }
