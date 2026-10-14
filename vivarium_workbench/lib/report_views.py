@@ -943,6 +943,16 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             "runs":                  _runs_summary,
             "parent_studies":        _normalize_parents(study_spec),
             "n_behaviors":           len(beh_tests),
+            # Planning fields for the graph node's full-magnification "Plan"
+            # layer (semantic zoom band 2): the design a study declares before
+            # any composite is built.
+            "proposed_mechanisms":   study_spec.get("proposed_mechanisms") or [],
+            "proposed_models_methods": study_spec.get("proposed_models_methods") or [],
+            "contract":              study_spec.get("contract") or {},
+            "behavior_test_names":   [
+                t.get("name") for t in beh_tests
+                if isinstance(t, dict) and t.get("name")
+            ],
             "n_readouts":            len(readouts),
             "n_requirements":        len(_normalize_requirements(
                 study_spec.get("implementation_requirements")

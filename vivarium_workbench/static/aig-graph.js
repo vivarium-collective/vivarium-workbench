@@ -187,10 +187,13 @@
 
   function _layoutOptsForBand(band) {
     var b = Math.max(0, Math.min(2, band | 0));
+    // asksFull + plan turn ON only at the nearest band (full magnification):
+    // the card then shows the FULL question text and a "Plan" layer (declared
+    // contract, proposed mechanisms / models & methods, success criteria).
     var BANDS = [
-      { band: 0, cls: 'aig-zoom-far',  cardW: 150, xGap: 40, asks: false, finds: false, chain: false, followups: false },
-      { band: 1, cls: 'aig-zoom-mid',  cardW: 210, xGap: 64, asks: true,  finds: true,  chain: false, followups: false },
-      { band: 2, cls: 'aig-zoom-near', cardW: 320, xGap: 72, asks: true,  finds: true,  chain: true,  followups: true, methods: true },
+      { band: 0, cls: 'aig-zoom-far',  cardW: 150, xGap: 40, asks: false, finds: false, chain: false, followups: false, asksFull: false, plan: false },
+      { band: 1, cls: 'aig-zoom-mid',  cardW: 210, xGap: 64, asks: true,  finds: true,  chain: false, followups: false, asksFull: false, plan: false },
+      { band: 2, cls: 'aig-zoom-near', cardW: 360, xGap: 72, asks: true,  finds: true,  chain: true,  followups: true,  methods: true, asksFull: true, plan: true },
     ];
     return BANDS[b];
   }

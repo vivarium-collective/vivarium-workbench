@@ -10771,6 +10771,53 @@
   // with the node as target. The buttons carry class `js-authoring` so they
   // hide automatically in the published snapshot and live read-only modes.
 
+  // Full-magnification "Plan" layer (semantic-zoom band 2 / _opts.plan): the
+  // design a study DECLARES before any composite is built — declared contract
+  // (typed-ports summary + conservation predicates), proposed mechanisms,
+  // proposed models & methods, and the success criteria. Each sub-block is
+  // omitted when empty; lists are capped (+ "…") so a node can't explode.
+  function _dagPlanHtml(s) {
+    var _cl = function (n) {
+      return 'display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:' + n +
+        ';line-clamp:' + n + ';overflow:hidden;';
+    };
+    var mech = Array.isArray(s.proposed_mechanisms) ? s.proposed_mechanisms : [];
+    var meth = Array.isArray(s.proposed_models_methods) ? s.proposed_models_methods : [];
+    var tests = Array.isArray(s.behavior_test_names) ? s.behavior_test_names : [];
+    var contract = s.contract || {};
+    var face = contract.face || {};
+    var ins = face.inputs || {}, outs = face.outputs || {};
+    var nIn = Object.keys(ins).length, nOut = Object.keys(outs).length;
+    var conds = Array.isArray(contract.conditions) ? contract.conditions : [];
+    var parts = [];
+    if (nIn || nOut || conds.length) {
+      var portBits = [];
+      Object.keys(ins).concat(Object.keys(outs)).forEach(function (n) {
+        var ports = ins[n] ? ins : outs;
+        var u = (ports[n] || {})._units;
+        portBits.push(n + (u ? ' (' + u + ')' : ''));
+      });
+      var portStr = portBits.slice(0, 5).map(_esc).join(', ') + (portBits.length > 5 ? ', …' : '');
+      var summary = nIn + ' in → ' + nOut + ' out · ' + conds.length +
+        ' predicate' + (conds.length === 1 ? '' : 's');
+      parts.push('<div><span style="font-weight:600;color:#475569">Contract:</span> ' + _esc(summary) +
+        (portStr ? '<div class="muted" style="' + _cl(2) + '">' + portStr + '</div>' : '') + '</div>');
+    }
+    var listBlock = function (label, arr, cap) {
+      if (!arr.length) return '';
+      var shown = arr.slice(0, cap).map(function (x) { return _esc(String(x)); }).join('; ');
+      return '<div style="margin-top:3px;' + _cl(3) + '"><span style="font-weight:600;color:#475569">' +
+        label + ':</span> ' + shown + (arr.length > cap ? ' …' : '') + '</div>';
+    };
+    parts.push(listBlock('Mechanisms', mech, 4));
+    parts.push(listBlock('Models &amp; methods', meth, 4));
+    parts.push(listBlock('Success criteria', tests, 5));
+    var body = parts.filter(Boolean).join('');
+    if (!body) return '';
+    return '<div class="dag-plan-layer" style="font-size:0.7em;margin-top:7px;padding-top:6px;' +
+      'border-top:1px dashed #e2e8f0;color:#64748b;line-height:1.35">' + body + '</div>';
+  }
+
   function _dagCacheBadgeHtml(slug) {
     var st = _dagTriggerBySlug[slug];
     if (!st) return '';
@@ -11030,7 +11077,10 @@
       // paragraph (e.g. pdmp-01), which blows the card up to fill the canvas —
       // so it's CSS line-clamped to a few lines below; the full text lives one
       // click away on the study page (and on hover via the node title).
-      var asks = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
+      // At full magnification (_opts.asksFull) show the WHOLE question; at
+      // lower bands keep the first-sentence teaser so cards stay compact.
+      var _qFull = (s.question || '').replace(/\s+/g, ' ').trim();
+      var asks = _opts.asksFull ? _qFull : _qFull.split(/[.?]/)[0].trim();
       var findings = _asFindings(s.findings);
       var claim = (s.claim ||
         (findings[0] && (findings[0].summary || findings[0].statement || findings[0].id)) || ''
@@ -11106,7 +11156,7 @@
         '</div>' +
         '<strong style="display:block;font-size:0.85em;line-height:1.3;color:#1e293b">' + _esc(prettyTitle) + '</strong>' +
         (_opts.asks && asks
-          ? '<div class="aig-clamp" data-clamp="2" style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
+          ? '<div class="aig-clamp" data-clamp="' + (_opts.asksFull ? 10 : 2) + '" style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(_opts.asksFull ? 10 : 2) + '">' +
               '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
           : '') +
         (_opts.finds
@@ -11127,6 +11177,9 @@
               }).join('') +
             '</div>'
           : '') +
+        // Full-magnification Plan layer: declared contract + mechanisms +
+        // models/methods + success criteria (semantic-zoom band 2 only).
+        (_opts.plan ? _dagPlanHtml(s) : '') +
         (_opts.followups ? followUpsChip : '') +
         (_opts.chain && chainsBySlug && typeof window._chainBlockHtml === 'function'
           ? window._chainBlockHtml(chainsBySlug[s.name]) : '') +
@@ -11250,8 +11303,9 @@
     edgesSvg.style.width = canvasW + 'px';
     edgesSvg.style.height = canvasH + 'px';
     // Loom-like viewport: remember the canvas dims and apply the current zoom.
-    // The shell keeps its CSS/user height (resize:vertical) instead of being
-    // forced to fit — content scrolls/zooms inside it.
+    // _applyAigZoom auto-fits the shell height to the content (capped at 88vh)
+    // so the DAG isn't vertically cramped; the user can still drag the
+    // resize:vertical handle to override (double-click the background re-fits).
     var shellSize = document.getElementById('investigation-dag-shell');
     if (shellSize) { shellSize.dataset.canvasW = canvasW; shellSize.dataset.canvasH = canvasH; }
     _applyAigZoom();
@@ -11396,6 +11450,30 @@
     }
     spacer.style.width = (cw * z) + 'px';
     spacer.style.height = (ch * z) + 'px';
+
+    // Auto-fit the shell's HEIGHT to the (scaled) content so every study is
+    // visible without an internal vertical scrollbar — the long study chain
+    // still scrolls horizontally, but the graph is never vertically cramped.
+    // Capped at 88vh; honored until the user manually drags the resize handle
+    // (resize:vertical), after which their height sticks. Double-click the
+    // graph background clears the override and re-fits (see the pan handler).
+    if (!shell.dataset.userResized) {
+      var maxH = Math.round((window.innerHeight || 900) * 0.88);
+      var fitH = Math.min(Math.max(Math.ceil(ch * z) + 20, 260), maxH);
+      shell._aigProgrammaticResize = true;
+      shell.style.height = fitH + 'px';
+      setTimeout(function () { shell._aigProgrammaticResize = false; }, 60);
+    }
+    // One-time: watch for a genuine user resize (drag of the resize handle) so
+    // auto-fit steps aside once they've set a height themselves.
+    if (!shell._aigResizeObserved && typeof ResizeObserver !== 'undefined') {
+      shell._aigResizeObserved = true;
+      try {
+        new ResizeObserver(function () {
+          if (!shell._aigProgrammaticResize) shell.dataset.userResized = '1';
+        }).observe(shell);
+      } catch (_e) { /* ResizeObserver unavailable — auto-fit still works */ }
+    }
   }
   function _aigZoomBy(f) { aigZoom = Math.max(0.3, Math.min(2.2, aigZoom * f)); _applyAigZoom(); }
   function _aigFit() {
@@ -11454,6 +11532,14 @@
     }
     document.addEventListener('pointermove', mv);
     document.addEventListener('pointerup', up);
+  });
+  // Double-click the graph background clears a manual resize and re-fits the
+  // shell height to the content.
+  document.addEventListener('dblclick', function (e) {
+    var shell = e.target.closest && e.target.closest('#investigation-dag-shell');
+    if (!shell || (e.target.closest && e.target.closest('.iset-dag-node'))) return;
+    delete shell.dataset.userResized;
+    _applyAigZoom();
   });
 
   function _setAigBand(b) {
