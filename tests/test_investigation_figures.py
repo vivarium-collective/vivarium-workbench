@@ -229,7 +229,8 @@ def test_resolve_figure_file(tmp_path):
 def test_missing_investigation_is_empty(tmp_path):
     _make_ws(tmp_path)
     assert figs.build_investigation_figures(tmp_path, "nope") == {
-        "composites": [], "files": [], "n_composites": 0, "stale": [], "n_stale": 0,
+        "composites": [], "files": [], "n_composites": 0, "n_output_studies": 0,
+        "stale": [], "n_stale": 0,
     }
 
 

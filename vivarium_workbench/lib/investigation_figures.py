@@ -302,6 +302,7 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
     wrote = False
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         seen: set[str] = set()
+        written_src: set[Path] = set()   # resolved disk paths already in the zip
 
         def _write(src: Path, arc: str) -> None:
             nonlocal wrote
@@ -311,6 +312,10 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
             try:
                 zf.write(src, arc)
                 wrote = True
+                try:
+                    written_src.add(src.resolve())
+                except OSError:
+                    pass
             except OSError:
                 pass
 
@@ -332,6 +337,13 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
         for slug in slugs:
             try:
                 for p, arc in study_output_files(ws_root, slug):
+                    # Skip a file already in the zip via a DECLARED figure (same file,
+                    # different arcname) so declared-html studies aren't double-added.
+                    try:
+                        if p.resolve() in written_src:
+                            continue
+                    except OSError:
+                        pass
                     _write(p, f"{slug}/{arc}")
                 for pname, html in study_output_html_panels(ws_root, slug).items():
                     arc = f"{slug}/visualizations/{_safe_panel_name(pname)}"
