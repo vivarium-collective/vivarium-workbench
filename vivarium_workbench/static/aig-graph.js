@@ -105,7 +105,7 @@
   function _mRow(label, valueHtml) {
     return '<div class="aig-methods-row" style="display:flex;gap:6px;align-items:flex-start;margin:2px 0">' +
       '<span class="aig-methods-label" style="flex:none;color:#64748b">' + _esc(label) + '</span>' +
-      '<span class="aig-methods-value" style="flex:1;color:#334155">' + valueHtml + '</span></div>';
+      '<span class="aig-methods-val" style="flex:1;color:#334155">' + valueHtml + '</span></div>';
   }
 
   // "Methods · Simulations" study-card block (band-2 semantic zoom). Pure string
@@ -180,7 +180,7 @@
     if (!rows.length) return '';
     return '<div class="aig-methods-block" style="margin-top:8px;padding-top:7px;' +
       'border-top:1px dashed #e5e7eb;font-size:0.7em;line-height:1.4">' +
-      '<div class="aig-methods-header" style="font-weight:600;color:#475569;' +
+      '<div class="aig-methods-head" style="font-weight:600;color:#475569;' +
       'margin-bottom:2px">Methods · Simulations</div>' +
       rows.join('') + '</div>';
   }

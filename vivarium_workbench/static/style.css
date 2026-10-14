@@ -4772,7 +4772,7 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
    the evidence-chain block; these classes carry the fidelity chip styling and
    give the dark overrides below a handle. */
 .aig-methods-block{ /* container look set inline (matches evidence-chain) */ }
-.aig-methods-value{ word-break:break-word; }
+.aig-methods-val{ word-break:break-word; }
 .aig-fidelity-chip{
   display:inline-block; padding:0 7px; border-radius:9999px;
   font-size:0.92em; font-weight:600; line-height:1.5; white-space:nowrap;
@@ -4791,9 +4791,9 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 /* "Methods · Simulations" block — dark. Inline base colours are overridden with
    theme tokens (mirrors the .iset-dag-node / .aig-claim-row dark handling). */
 :root[data-theme="dark"] .aig-methods-block{ border-top-color:var(--border) !important; }
-:root[data-theme="dark"] .aig-methods-header{ color:var(--text) !important; }
+:root[data-theme="dark"] .aig-methods-head{ color:var(--text) !important; }
 :root[data-theme="dark"] .aig-methods-label{ color:var(--text-muted) !important; }
-:root[data-theme="dark"] .aig-methods-value{ color:var(--text) !important; }
+:root[data-theme="dark"] .aig-methods-val{ color:var(--text) !important; }
 :root[data-theme="dark"] .aig-fidelity-chip.aig-fidelity-real{ background:#124b43 !important; color:#5eead4 !important; }
 :root[data-theme="dark"] .aig-fidelity-chip.aig-fidelity-repro{ background:#3f2d12 !important; color:#fcd34d !important; }
 :root[data-theme="dark"] #investigation-dag-lead{ color:var(--text-muted) !important; }
