@@ -2689,6 +2689,14 @@
   // fill instead of popping between polls.
   var _chainProgressStart = null;
 
+  // Whether THIS workspace has a remote compute backend (viva-api/sms-api)
+  // configured. A local-only workspace (a bench process-bigraph workspace) has
+  // none — so the remote-dispatch affordances (⚙ Dispatch composite + the remote
+  // chain-progress poller below) must stay hidden and the UI must not even mention
+  // sms-api. Resolved once from /api/source/remote-health by _gateRemoteDispatch();
+  // default false so a local workspace is never coupled to a remote it lacks.
+  var _remoteConfigured = false;
+
   function _chainProgressEl() {
     var el = document.getElementById('study-chain-progress');
     if (!el) {
@@ -2812,6 +2820,10 @@
   }
 
   function _pollChainProgress(runId) {
+    // Local-only workspace: there is no remote backend to report chain progress,
+    // so never poll /api/remote-run-chain-progress (it would surface a spurious
+    // "sms-api unreachable"). Local runs track progress via the Runs tab refresh.
+    if (!_remoteConfigured) return;
     if (_chainProgressTimer) { clearTimeout(_chainProgressTimer); _chainProgressTimer = null; }
     // A legacy run is an integer simulation id; a /viva/v1 run (serve --backend-base-url)
     // carries the backend's opaque string id, asked for as run_id.
@@ -2880,6 +2892,25 @@
     if (!panel) return;
     panel.style.display = (panel.style.display === 'none') ? '' : 'none';
   });
+
+  // Gate the remote-dispatch affordances on whether this workspace actually has a
+  // remote compute backend configured. ⚙ Dispatch composite targets viva-api/AWS
+  // Batch/Nextflow; a local-only workspace has no such backend, so the button (and
+  // the sms-api progress poller) must not appear — the study view must not even
+  // know about sms-api. Default-hidden; revealed only once /api/source/remote-health
+  // confirms `configured:true`. In a published snapshot the fetch simply fails →
+  // stays hidden, matching the snapshot-mode run-button hide.
+  (function _gateRemoteDispatch() {
+    var dispatchBtn = document.getElementById('study-run-composite');
+    if (dispatchBtn) dispatchBtn.style.display = 'none';
+    if (typeof _isSnapshot === 'function' && _isSnapshot()) return;
+    api('GET', '/api/source/remote-health')
+      .then(function (r) {
+        _remoteConfigured = !!(r && r.status === 200 && r.body && r.body.configured);
+        if (_remoteConfigured && dispatchBtn) dispatchBtn.style.display = '';
+      })
+      .catch(function () { _remoteConfigured = false; });
+  })();
 
   // #cp-dispatch's own click (rendered dynamically inside _compositePanelEl,
   // so bound here via delegation rather than at panel-creation time) with the
