@@ -254,7 +254,12 @@ def build_investigation_figures(ws_root, name: str) -> dict:
         c["stale"] = c["study"] in stale
         if c["stale"]:
             c["stale_reason"] = stale[c["study"]]
+    # Studies with ANY downloadable output (on-disk figures OR native-gallery /
+    # run viz.json panels) — so the investigation ↓ figures button enables even
+    # when a study's figures are interactive HTML rather than static images.
+    n_output_studies = sum(1 for s in slugs if study_has_outputs(ws_root, s))
     return {"composites": composites, "files": files, "n_composites": len(composites),
+            "n_output_studies": n_output_studies,
             "stale": sorted(stale.keys()), "n_stale": len(stale)}
 
 
@@ -291,18 +296,26 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
     figs = build_investigation_figures(ws_root, name)
     entries = figs["files"]
     composites = figs["composites"]
-    if not entries and not composites:
-        return None
+    inv = _load_investigation(ws_root, name) or {}
+    slugs = investigation_member_slugs(inv)
     buf = io.BytesIO()
+    wrote = False
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         seen: set[str] = set()
+        written_src: set[Path] = set()   # resolved disk paths already in the zip
 
         def _write(src: Path, arc: str) -> None:
+            nonlocal wrote
             if arc in seen or not src.is_file():
                 return
             seen.add(arc)
             try:
                 zf.write(src, arc)
+                wrote = True
+                try:
+                    written_src.add(src.resolve())
+                except OSError:
+                    pass
             except OSError:
                 pass
 
@@ -317,7 +330,34 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
             for rel in (c.get("svg_rel"), c.get("png_rel")):
                 if rel:
                     _write(ws_root / rel, f"final/{Path(rel).name}")
-    return buf.getvalue()
+
+        # Native-gallery outputs per study (committed viz/ + the latest run's
+        # viz.json panels) — so studies whose figures are interactive HTML, not
+        # static images, are included too. Mirrors build_study_outputs_zip.
+        for slug in slugs:
+            try:
+                for p, arc in study_output_files(ws_root, slug):
+                    # Skip a file already in the zip via a DECLARED figure (same file,
+                    # different arcname) so declared-html studies aren't double-added.
+                    try:
+                        if p.resolve() in written_src:
+                            continue
+                    except OSError:
+                        pass
+                    _write(p, f"{slug}/{arc}")
+                for pname, html in study_output_html_panels(ws_root, slug).items():
+                    arc = f"{slug}/visualizations/{_safe_panel_name(pname)}"
+                    if arc in seen:
+                        continue
+                    seen.add(arc)
+                    try:
+                        zf.writestr(arc, html)
+                        wrote = True
+                    except (OSError, ValueError):
+                        pass
+            except Exception:  # noqa: BLE001 — one bad study never breaks the zip
+                continue
+    return buf.getvalue() if wrote else None
 
 
 def study_figure_files(ws_root, slug: str) -> list[Path]:
@@ -351,26 +391,42 @@ def build_study_figures_zip(ws_root, slug: str) -> Optional[bytes]:
 
 
 def study_output_files(ws_root, slug: str) -> list[tuple[Path, str]]:
-    """``(abs_path, arcname)`` for a study's downloadable OUTPUTS: image figures
-    (under ``figures/``) plus its embedded HTML report pages and the sibling
-    assets in their ``viz/`` directory (under ``viz/…``). Backs the study-scoped
+    """``(abs_path, arcname)`` for a study's downloadable OUTPUT FILES ON DISK:
+    image figures (under ``figures/``), embedded HTML report pages + their sibling
+    ``viz/`` assets, and every committed native-gallery panel under the study's
+    ``viz/`` directory (under ``viz/…``). Backs the study-scoped ``↓ figures`` /
     ``↓ outputs`` — a superset of ``study_figure_files``.
 
-    HTML outputs come from the study's ``embed_visualizations[].url`` entries
-    that point at this study's own ``/studies/<slug>/viz/…`` (a self-contained
-    dashboard is just its ``index.html``; an asset-referencing viewer travels
-    with the other files in its ``viz/`` directory). Never raises."""
+    Three disk sources, deduped by arcname:
+
+    * ``figures/<file>`` — declared static-image ``visualizations[]``.
+    * ``viz/…`` from ``embed_visualizations[].url`` entries pointing at this
+      study's own ``/studies/<slug>/viz/…`` (a self-contained dashboard is just
+      its ``index.html``; an asset-referencing viewer travels with the other files
+      in its ``viz/`` directory).
+    * ``viz/…`` — ANY file committed under the study's ``viz/`` directory. The
+      declared ``visualizations[]`` are commonly interactive Visualization CLASSES
+      (``address: local:<Class>``) whose rendered panels land here, not as a
+      static image the resolver can see — so a study whose Visualizations tab
+      clearly renders still has downloadable outputs. This is the future-proof
+      catch-all: whatever the gallery shows on disk, the zip carries.
+
+    In-memory panels rendered into a run's ``viz.json`` (never committed to disk)
+    are added separately by :func:`study_output_html_panels`. Never raises."""
     ws_root = Path(ws_root).resolve()
     sdir, spec = _load_study(ws_root, slug)
     if sdir is None:
         return []
     out: list[tuple[Path, str]] = []
     seen: set[str] = set()
-    for p in _image_files(sdir, spec):
-        arc = f"figures/{p.name}"
+
+    def _add(p: Path, arc: str) -> None:
         if arc not in seen and p.is_file():
             seen.add(arc)
             out.append((p, arc))
+
+    for p in _image_files(sdir, spec):
+        _add(p, f"figures/{p.name}")
     prefix = f"/studies/{slug}/"
     for entry in (spec.get("embed_visualizations") or []):
         if not isinstance(entry, dict):
@@ -386,29 +442,84 @@ def study_output_files(ws_root, slug: str) -> list[tuple[Path, str]]:
         if not html_path.is_file():
             continue
         for f in sorted(html_path.parent.iterdir()):
-            if not f.is_file():
-                continue
-            arc = str(f.relative_to(sdir))
-            if arc not in seen:
-                seen.add(arc)
-                out.append((f, arc))
+            if f.is_file():
+                _add(f, str(f.relative_to(sdir)))
+    # Committed native-gallery panels: every file under the study's own viz/ dir.
+    viz_dir = sdir / "viz"
+    if viz_dir.is_dir():
+        for f in sorted(viz_dir.rglob("*")):
+            if f.is_file():
+                _add(f, str(f.relative_to(sdir)))
     return out
 
 
+def study_output_html_panels(ws_root, slug: str) -> dict:
+    """``{panel_name: html}`` for the study's latest completed run — the exact
+    native-gallery panels the Visualizations/Results tab renders from that run's
+    ``.pbg/runs/<run_id>/viz.json``. These are rendered HTML strings that are NOT
+    committed to disk, so they complement the on-disk files in
+    :func:`study_output_files`. Returns ``{}`` when there is no completed run,
+    no ``viz.json``, or on any error (never raises)."""
+    try:
+        from vivarium_workbench.lib.study_native_gallery import (
+            build_study_native_gallery,
+        )
+        gallery = build_study_native_gallery(Path(ws_root), slug)
+        panels = gallery.get("panels") or {}
+        return {str(k): v for k, v in panels.items()
+                if isinstance(v, str) and v.strip()}
+    except Exception:  # noqa: BLE001 — a download helper must never raise
+        return {}
+
+
+def study_has_outputs(ws_root, slug: str) -> bool:
+    """Whether a study has ANY downloadable visualization output — on-disk figures
+    / viz panels OR rendered run ``viz.json`` panels. The single predicate shared by
+    the ``↓ figures`` card gate (``has_figures``) and ``build_study_outputs_zip``, so
+    the link shows exactly when the zip would have content. Never raises."""
+    try:
+        if study_output_files(ws_root, slug):
+            return True
+        return bool(study_output_html_panels(ws_root, slug))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _safe_panel_name(name: str) -> str:
+    """A filesystem-safe ``<name>.html`` arcname for a rendered viz.json panel."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", str(name)).strip("-_") or "panel"
+    return stem if stem.lower().endswith(".html") else stem + ".html"
+
+
 def build_study_outputs_zip(ws_root, slug: str) -> Optional[bytes]:
-    """Zip a single study's downloadable outputs (image figures under
-    ``figures/`` + embedded HTML reports and their ``viz/`` assets), or ``None``
-    when the study has none. Backs ``GET /api/study/<slug>/outputs.zip``."""
+    """Zip a single study's downloadable outputs, or ``None`` when it has none.
+    Backs ``GET /api/study/<slug>/outputs.zip``. Includes the on-disk files
+    (image figures under ``figures/``, embedded HTML reports + their ``viz/``
+    assets, and committed native-gallery panels under ``viz/``) PLUS the latest
+    run's rendered native-gallery panels under ``visualizations/<name>.html`` —
+    so whatever the study's Visualizations tab shows is downloadable."""
     items = study_output_files(ws_root, slug)
-    if not items:
+    panels = study_output_html_panels(ws_root, slug)
+    if not items and not panels:
         return None
+    seen_arc: set[str] = set()
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for p, arc in items:
-            if not p.is_file():
+            if arc in seen_arc or not p.is_file():
                 continue
             try:
                 zf.write(p, arc)
+                seen_arc.add(arc)
             except OSError:
+                continue
+        for name, html in panels.items():
+            arc = f"visualizations/{_safe_panel_name(name)}"
+            if arc in seen_arc:
+                continue
+            try:
+                zf.writestr(arc, html)
+                seen_arc.add(arc)
+            except (OSError, ValueError):
                 continue
     return buf.getvalue()

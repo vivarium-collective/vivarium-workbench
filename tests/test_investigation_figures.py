@@ -170,6 +170,54 @@ def test_study_outputs_zip_includes_figures_too(tmp_path):
     assert {"figures/panel-a.svg", "figures/figure_7.svg"} <= names
 
 
+def test_outputs_include_committed_native_gallery_panel(tmp_path):
+    # The common case: a study declares visualizations[] as interactive
+    # Visualization CLASSES (address: local:<Class>) — NOT static image files the
+    # figure resolver can see — whose rendered panel is committed under viz/. The
+    # study's Visualizations tab clearly renders, so its outputs must be
+    # downloadable (previously reported "no downloadable outputs").
+    _write(tmp_path / "studies" / "cls-01" / "study.yaml", yaml.safe_dump({
+        "name": "cls-01", "title": "Class-viz study",
+        "visualizations": [{"name": "vent", "address": "local:VentReactorTimeseries"}],
+    }))
+    _write(tmp_path / "studies" / "cls-01" / "viz" / "vent.html", "<html>vent</html>")
+    assert figs.study_has_outputs(tmp_path, "cls-01") is True
+    names = {arc for _, arc in figs.study_output_files(tmp_path, "cls-01")}
+    assert "viz/vent.html" in names
+    blob = figs.build_study_outputs_zip(tmp_path, "cls-01")
+    assert blob is not None
+    assert "viz/vent.html" in set(zipfile.ZipFile(io.BytesIO(blob)).namelist())
+
+
+def test_outputs_include_rendered_run_viz_json_panels(tmp_path):
+    # A study with NO committed figures/viz on disk, but whose latest completed run
+    # rendered native-gallery panels into .pbg/runs/<id>/viz.json (what the
+    # Visualizations tab actually shows). Those panels must be downloadable too.
+    run_id = "pkg.mod.gen__123__abc"
+    _write(tmp_path / "studies" / "run-01" / "study.yaml", yaml.safe_dump({
+        "name": "run-01", "title": "Run-panel study",
+        "visualizations": [{"name": "decision", "address": "local:DecisionMap"}],
+        "runs": [{"name": run_id, "status": "completed", "canonical": True}],
+    }))
+    _write(tmp_path / ".pbg" / "runs" / run_id / "viz.json",
+           '{"decision-map": "<div>a real rendered plotly panel</div>"}')
+    panels = figs.study_output_html_panels(tmp_path, "run-01")
+    assert "decision-map" in panels
+    assert figs.study_has_outputs(tmp_path, "run-01") is True
+    blob = figs.build_study_outputs_zip(tmp_path, "run-01")
+    assert blob is not None
+    assert "visualizations/decision-map.html" in set(
+        zipfile.ZipFile(io.BytesIO(blob)).namelist())
+
+
+def test_study_truly_without_outputs_has_none(tmp_path):
+    # A study with no figures, no committed viz, and no rendered run → no download.
+    _write(tmp_path / "studies" / "bare-01" / "study.yaml",
+           yaml.safe_dump({"name": "bare-01", "title": "Bare"}))
+    assert figs.study_has_outputs(tmp_path, "bare-01") is False
+    assert figs.build_study_outputs_zip(tmp_path, "bare-01") is None
+
+
 def test_resolve_figure_file(tmp_path):
     ws = _make_ws(tmp_path)
     assert figs.resolve_figure_file(ws, "inv", 7, "svg").name == "figure_7.svg"
@@ -181,7 +229,8 @@ def test_resolve_figure_file(tmp_path):
 def test_missing_investigation_is_empty(tmp_path):
     _make_ws(tmp_path)
     assert figs.build_investigation_figures(tmp_path, "nope") == {
-        "composites": [], "files": [], "n_composites": 0, "stale": [], "n_stale": 0,
+        "composites": [], "files": [], "n_composites": 0, "n_output_studies": 0,
+        "stale": [], "n_stale": 0,
     }
 
 
