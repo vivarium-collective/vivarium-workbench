@@ -1050,7 +1050,6 @@
   function _renderCompositeCardGrid(c) {
     var addr = c.module ? (c.module + '.' + c.name) : c.id;
     var desc = (c.description || '').trim(), short = desc ? desc.split('\n')[0] : '';
-    var wsPill = c.workspace_local ? '<span class="composite-ws-tag">📦 workspace</span>' : '';
     var stats = _regStatsHtml(c);
     var selCls = (window._registrySelected && window._registrySelected === c.id) ? ' reg-selected' : '';
     var idA = _esc(c.id);
@@ -1212,7 +1211,6 @@
     var pKeys = Object.keys(params), nCfg = pKeys.length;
     var desc = (c.description || '').trim();
     var sel = (window._registrySelected && window._registrySelected === c.id) ? ' reg-selected' : '';
-    var wsPill = c.workspace_local ? '<span class="composite-ws-tag">📦 workspace</span>' : '';
     var roPill = c.read_only ? '<span class="tag-pill" style="background:#fef2f2;color:#b91c1c;margin-left:6px">read-only</span>' : '';
 
     var chip = function (k) { return '<code class="pcard-chip">' + _esc(k) + '</code>'; };
