@@ -369,6 +369,105 @@ a.refchip:hover{text-decoration:none;border-color:var(--accent)}
 footer{border-top:1px solid var(--line);margin-top:48px;padding:24px 0 60px;color:var(--ink-3);font-size:12.5px}
 footer .wrap{display:flex;flex-direction:column;gap:6px}
 .reasoning-step{margin:2px 0}
+
+/* ======================================================================
+   PUBLISHED-REPORT FRONT MATTER + SCIENTIFIC FRAMING
+   A reading measure (~68ch) for prose; the opening reads like a paper —
+   question → abstract → the simulated world → thesis → findings.
+   ====================================================================== */
+.prose{max-width:68ch}
+.prose p{margin:0 0 14px}
+.prose p:last-child{margin-bottom:0}
+.measure{max-width:68ch}
+/* hero scientific question — the FIRST thing the report states */
+.hero-q{margin:30px 0 6px}
+.hero-q .qlabel{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+.hero-q .qtext{font-family:var(--serif);font-size:25px;line-height:1.38;color:var(--ink);margin:0;max-width:30ch;text-wrap:pretty;font-weight:500}
+@media(max-width:640px){.hero-q .qtext{font-size:20px}}
+/* abstract — larger, lighter, set at a reading measure */
+.abstract{margin:22px 0 8px;max-width:68ch}
+.abstract p{font-family:var(--serif);font-size:18px;line-height:1.62;color:var(--ink-2);margin:0 0 12px}
+.abstract p:first-child::first-letter{font-size:1.05em}
+.abstract .main-claim{color:var(--ink);font-style:normal}
+/* a labelled prose section (Background / The simulated world) */
+.narr{margin:8px 0}
+.narr .prose{color:var(--ink-2);font-size:15.5px;line-height:1.78}
+.narr .prose b{color:var(--ink)}
+/* "the simulated world" standing callout */
+.world{margin:16px 0;padding:20px 22px;background:var(--sunken);border:1px solid var(--line);border-radius:12px}
+.world .wlabel{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+.world .prose{color:var(--ink-2);font-size:14.5px;line-height:1.75}
+/* "what counts as evidence" principled note */
+.evnote{margin:16px 0;padding:16px 20px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0}
+.evnote .prose{color:var(--ink);font-size:14px;line-height:1.7;max-width:70ch}
+.evnote b{color:var(--ink)}
+
+/* evidentiary-status tiers: Observed / Plausible / Hypothetical */
+.etier{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;letter-spacing:.02em;
+  padding:2px 9px;border-radius:999px;white-space:nowrap;vertical-align:baseline;border:1px solid transparent}
+.etier .d{width:7px;height:7px;border-radius:2px;background:currentColor;flex:none}
+.etier.observed{color:var(--pass);background:var(--pass-soft)}
+.etier.plausible{color:var(--cal);background:color-mix(in srgb,var(--cal) 12%,transparent)}
+.etier.hypothetical{color:var(--warn);background:var(--warn-soft);border-style:dashed;border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.etier-legend{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 2px;font-size:12.5px;color:var(--ink-2);align-items:center}
+.etier-legend .li{display:flex;align-items:center;gap:7px}
+.etier-legend .li .def{color:var(--ink-3);font-size:11.5px}
+
+/* four-part scientific unit (study card primary structure) */
+.sci-unit{margin:12px 0 4px;display:grid;gap:12px}
+.sci-part{display:grid;grid-template-columns:132px 1fr;gap:14px;align-items:start}
+.sci-part .sp-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding-top:2px}
+.sci-part .sp-v{font-size:15px;line-height:1.6;color:var(--ink);max-width:66ch}
+.sci-part.q .sp-v{font-family:var(--serif);font-size:16.5px;color:var(--ink);line-height:1.5}
+.sci-part .sp-v .muted{color:var(--ink-2)}
+.sci-part .sp-v .mono{color:var(--ink-2)}
+@media(max-width:640px){.sci-part{grid-template-columns:1fr;gap:3px}.sci-part .sp-k{padding-top:0}}
+
+/* Genesis Ladder — ordered rungs along the stage progression */
+.ladder{display:grid;gap:10px;margin-top:10px;counter-reset:rung}
+.rung{position:relative;display:grid;grid-template-columns:40px 1fr auto;gap:16px;align-items:center;
+  padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);
+  border-left:4px solid var(--line-2)}
+.rung:hover{border-color:var(--accent)}
+.rung.v-accepted{border-left-color:#16a34a}.rung.v-investigating{border-left-color:#ca8a04}
+.rung.v-planned{border-left-color:#2563eb}.rung.v-blocked{border-left-color:#64748b}.rung.v-refuted{border-left-color:#dc2626}
+.rung .rstep{font-family:var(--serif);font-size:22px;color:var(--ink-3);text-align:center;line-height:1}
+.rung .rbody{min-width:0}
+.rung .rstage{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin-bottom:3px}
+.rung .rq{font-family:var(--serif);font-size:16px;color:var(--ink);line-height:1.35;font-weight:600}
+.rung a.rq:hover{color:var(--accent);text-decoration:none}
+.rung .rmeta{color:var(--ink-2);font-size:13px;margin-top:5px;line-height:1.5}
+.rung .rmeta .ek{color:var(--ink-3);font-weight:600}
+.rung .rright{display:flex;flex-direction:column;align-items:flex-end;gap:6px;text-align:right}
+@media(max-width:640px){.rung{grid-template-columns:28px 1fr;gap:10px}.rung .rright{grid-column:1/-1;flex-direction:row;align-items:center}}
+
+/* ======================================================================
+   WORKBENCH-CONSISTENT INVESTIGATION GRAPH (ported from walkthrough.js
+   _renderInvestigationDag): same depth-BFS layout, same node-card markup,
+   same Bezier edge routing + arrowheads. Static: no drag/zoom; each node
+   badged with the SAME _studyStatusMeta the workbench uses. Adapted to the
+   report's theme tokens (surface/line) so it works in light + dark.
+   ====================================================================== */
+.wdag-shell{position:relative;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--sunken);
+  padding:4px;max-height:620px;margin-top:6px}
+.wdag-canvas{position:relative}
+.wdag-edges{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+.wdag-node{position:absolute;background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--line-2);
+  border-radius:8px;padding:10px 12px;box-sizing:border-box;box-shadow:0 1px 2px rgba(0,0,0,0.05);font-size:13px}
+.wdag-node .wn-meta{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:5px}
+.wdag-node .wn-icon{font-size:1.05em;line-height:1;flex:none}
+.wdag-node .wn-badge{font-size:.62em;font-weight:700;white-space:nowrap}
+.wdag-node .wn-title{display:block;font-size:.85em;line-height:1.3;color:var(--ink);font-weight:700}
+.wdag-node a.wn-title:hover{color:var(--accent);text-decoration:none}
+.wdag-node .wn-row{font-size:.72em;margin-top:6px;line-height:1.35;color:var(--ink-2);
+  display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
+.wdag-node .wn-row .wn-lbl{font-weight:600;color:var(--ink)}
+.wdag-node .wn-etier{margin-top:7px}
+.wdag-legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;font-size:12px;color:var(--ink-2);
+  padding:10px 2px 0;margin-top:2px}
+.wdag-legend .lg{display:inline-flex;align-items:center;gap:5px}
+.wdag-legend .lg .i{font-size:1em}
+
 @media(max-width:640px){
   .masthead h1{font-size:30px}.verdict .vtext{font-size:17px}
   .card{padding:20px}.wrap{padding:0 16px}
@@ -906,6 +1005,23 @@ function outcomeRows(outcomes){
   }).join('');
 }
 
+// The four-part scientific unit — the PRIMARY structure of a study:
+// question → model experiment → observable → what we learn. Each part no-ops
+// when its field is absent, so a minimal study still renders cleanly.
+function sciUnit(s){
+  const q=s.question||(s.purpose&&s.purpose.question)||s.claim||'';
+  const exp=_experimentOf(s);
+  const obs=_observableOf(s);
+  const learn=_whatWeLearn(s);
+  const tier=(Array.isArray(s.findings)&&s.findings.length)?evidenceTier(s.findings[0],s):null;
+  const row=(k,v,isQ,extra)=> v?`<div class="sci-part ${isQ?'q':''}"><div class="sp-k">${esc(k)}</div><div class="sp-v">${v}${extra||''}</div></div>`:'';
+  const body=row('Scientific question', q?esc(q):'', true)
+    + row('Model experiment', exp?mdLite(exp):'')
+    + row('Observable', obs?`<span class="mono">${esc(obs)}</span>`:'')
+    + row('What we learn', learn?mdLite(learn):'', false, tier?` ${etierBadge(tier)}`:'');
+  return body?`<div class="sci-unit">${body}</div>`:'';
+}
+
 // high-level overview shown when a study is COLLAPSED
 function studySummary(s, inv){
   const chips=[];
@@ -920,25 +1036,32 @@ function studySummary(s, inv){
     if(p) chips.push(`<span class="chip ${p.state==='DONE'?'pass':'fail'}">policy ${p.state==='DONE'?'✓':'✗ give-up'}</span>`);
     const it=s.agent_trajectory&&lastIt(s); if(it) chips.push(`<span class="chip">tests ${it.n_pass}/${it.n_hard}</span>`);
   }
+  // evidence tier of the study's headline finding — so the collapsed card already
+  // distinguishes an observed result from a hypothetical one.
+  const tier=(Array.isArray(s.findings)&&s.findings.length)?evidenceTier(s.findings[0],s):null;
   const runN=(s.runs||[]).length; if(runN) chips.push(`<span class="chip">${runN} run${runN>1?'s':''}</span>`);
   const nfig=(s.figures_embedded||[]).filter(f=>f.data_uri||f.html).length; if(nfig) chips.push(`<span class="chip">${nfig} figure${nfig>1?'s':''}</span>`);
   const nfind=Array.isArray(s.findings)?s.findings.length:0; if(nfind) chips.push(`<span class="chip">${nfind} finding${nfind>1?'s':''}</span>`);
-  let concl=(s.conclusion||'').replace(/##\s*Final model[\s\S]*?(?=\n##|$)/i,'').replace(/##\s*Result/i,'').trim();
-  if(!concl && s.purpose && s.purpose.question) concl=s.purpose.question;
-  const snip=concl.split(/(?<=[.!?])\s/).slice(0,2).join(' ');
-  return `<div class="summary-chips">${chips.join('')}</div>${snip?`<div class="summary-snip">${esc(snip)}</div>`:''}`;
+  if(tier) chips.push(etierBadge(tier));
+  // the collapsed snippet is "what we learn" (claim / top finding), since the
+  // scientific QUESTION is already the card's serif lead above.
+  let learn=_whatWeLearn(s);
+  const snip=String(learn).split(/(?<=[.!?])\s/).slice(0,2).join(' ');
+  return `<div class="summary-chips">${chips.join('')}</div>${snip?`<div class="summary-snip"><span class="ek" style="color:var(--ink-3);font-weight:600">What we learn — </span>${esc(snip)}</div>`:''}`;
 }
 
 function renderStudy(s, inv, idx){
   const gate=gateOf(s), fail=gate==='fail', planned=gate==='planned', control=isControl(s), lo=loopOutcome(s);
   const dchip=fail?'fail':(planned?'planned':'pass');
 
-  // OVERVIEW  (falls back to purpose.* for workspaces that use a `purpose:` block)
+  // LEAD WITH THE QUESTION — the scientific question is the study's headline,
+  // before any model / implementation detail (falls back to purpose.question,
+  // then the claim, so a question-less study still leads with something).
   const pq = s.purpose && s.purpose.question, pm = s.purpose && s.purpose.mechanism;
-  const headline = s.claim || s.question || pq;
-  const claimLine = s.claim? `<div class="claim">“${esc(s.claim)}”</div>` : (headline? `<div class="claim">${esc(headline)}</div>`:'');
+  const question = s.question || pq || s.claim;
+  const claimLine = question? `<div class="claim">${esc(question)}</div>` : '';
   const bioText = s.biological_summary || pm;
-  const overview = (bioText && headline)?`<div class="biology">${esc(bioText)}</div>`:'';
+  const overview = bioText?`<div class="biology">${esc(bioText)}</div>`:'';
 
   // MODEL — prefer a pre-rendered bigraph-loom image (offline-safe, config
   // loaded, from `vivarium-workbench render-loom`); else the live loom iframe;
@@ -1035,8 +1158,9 @@ function renderStudy(s, inv, idx){
       const fcites=(f.expected&&f.expected.cites)||f.cites||[];
       const bandCites=(ft&&tcites[ft])||[];
       const allCites=[...new Set([...fcites,...bandCites])];
+      const tier=evidenceTier(f,s);
       return `<div class="finding-traceability" style="margin:8px 0">
-        <span class="chip ${ok?'pass':''}">${esc((f.id?f.id+' · ':'')+(f.status||'finding'))}</span>
+        <span class="chip ${ok?'pass':''}">${esc((f.id?f.id+' · ':'')+(f.status||'finding'))}</span>${tier?' '+etierBadge(tier):''}
         <div class="kv rationale">${esc(f.statement||'')}${allCites.length?' '+citeRow(allCites):''}</div>
         ${ft?`<div class="texp">from test: ${_traceLink('test',ft)}${band?` <span class="pass_if-band mono">${esc((band.op||'')+' '+(band.value!=null?band.value:''))}</span>`:''}${bandCites.length?' '+citeRow(bandCites,'band'):''}</div>`:''}
         ${dv!=null?`<div class="finding-divergence texp">divergence ${esc(dv)}× vs expected</div>`:''}
@@ -1082,17 +1206,32 @@ function renderStudy(s, inv, idx){
   }
   if(has(s.key_assumptions)) anchorsBody+=`<div class="kicker" style="margin:14px 0 4px">Key assumptions</div><ul class="assumptions">${s.key_assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
 
+  // card badge uses the SAME status derivation as the graph + ladder (workbench
+  // _studyStatusMeta), so a running study reads "Investigating" everywhere.
+  const sm=studyStatusMeta(s);
+  const wbChip=`<span class="status" style="color:${sm.color};background:color-mix(in srgb,${sm.color} 14%,transparent)"><span class="g" style="background:${sm.color}"></span>${esc(sm.label)}</span>`;
   return `<section class="card collapsed ${fail?'is-fail':''} ${planned?'is-planned':''} ${control?'is-control':''}" id="s-${s.slug}">
     <div class="card-h">
       <span class="ctoggle">▾</span>
       <span class="cnum">${String(idx).padStart(2,'0')}</span>
       <h3 class="ctitle">${esc(s.title)}</h3>
-      <div class="cright">${control?'<span class="control-kick">⚑ Adversarial control</span>':''}${statusChip(dchip)}</div>
+      <div class="cright">${control?'<span class="control-kick">⚑ Adversarial control</span>':''}${wbChip}</div>
     </div>
     ${claimLine}${overview}
     <div class="study-summary">${studySummary(s,inv)}</div>
     <div class="study-detail">
-      ${part('Model', modelBody, 'study:'+s.slug+'/model', s.title+' · Model')}
+      ${sciUnit(s)}
+      <!-- ============================ SEAM ============================
+           A richer "methods + simulations" node/detail block — model/composite
+           + its modeling methods + sim/run count & status + behavior-test
+           pass/fail — will slot in HERE once the shared node-card spec is
+           locked (for 1:1 consistency with the live workbench graph). Until the
+           coordinator hands over that spec, DO NOT invent a method/sim field set
+           or chip vocabulary — it would diverge from the locked spec. The study
+           keeps the four-part scientific unit (above) + verdict + the existing
+           detail parts (below) for now.
+           ============================================================= -->
+      ${part('Model — composite internals', modelBody, 'study:'+s.slug+'/model', s.title+' · Model')}
       ${part('Simulation run', runBody, 'study:'+s.slug+'/simulation', s.title+' · Simulation run')}
       ${part('Visualizations', vizBody, 'study:'+s.slug+'/visualizations', s.title+' · Visualizations')}
       ${part('Tests', testsBody, 'study:'+s.slug+'/tests', s.title+' · Tests')}
@@ -1122,62 +1261,10 @@ function reportMode(inv){
   if(ss.some(s=>s.sourcing&&s.sourcing.audit)) return 'sourcing';
   return 'generic';
 }
-function renderExec(inv){
-  const studies=inv.studies;
-  const MODE=reportMode(inv);
-  const gates=studies.map(gateOf);
-  const nPass=gates.filter(g=>g==='pass').length, nFail=gates.filter(g=>g==='fail').length;
-  const nPlanned=gates.filter(g=>g==='planned').length;
-  const exv=inv.executive||{};
-  const verdictText = exv.verdict || inv.question;
-  // Verdict tone: any fail → fail; done + still-planned work → in-progress (amber);
-  // all passed → pass. Honest about a partially-run campaign instead of green.
-  const status = nFail?'fail':((nPass && nPlanned)?'warn':(nPass?'pass':'warn'));
-  // stat strip
-  let stats='';
-  if(MODE==='sourcing'){
-    const dec={};studies.forEach(s=>{const d=s.sourcing&&s.sourcing.decision;if(d)dec[d]=(dec[d]||0)+1;});
-    stats=[[studies.length,'studies'],[dec['reuse']||0,'reuse'],[dec['compose']||0,'compose'],[dec['build-new']||0,'build-new'],[nFail,'trap refused ✗','fail']];
-  }else if(MODE==='agentic'){
-    let aDone=0,pDone=0,pTot=0;
-    studies.forEach(s=>{ if(s.agent_trajectory&&s.agent_trajectory.result&&s.agent_trajectory.result.state==='DONE')aDone++;
-      if(s.policy_trajectory){pTot++; if(s.policy_trajectory.result&&s.policy_trajectory.result.state==='DONE')pDone++;} });
-    stats=[[studies.length,'tasks'],[aDone+'/'+studies.length,'agent solved','pass'],[pDone+'/'+pTot,'policy solved'],[studies.length-pDone,'need an agent']];
-  }else{
-    // generic: describe the evidence base — studies, gate outcomes, acceptance tests
-    let nTests=0; studies.forEach(s=>{ nTests+=(s.behavior_tests||[]).length; });
-    stats=[[studies.length,'studies'],[nPass,'passed','pass']];
-    if(nFail) stats.push([nFail,'failing','fail']);
-    if(nPlanned) stats.push([nPlanned,'planned','planned']);
-    stats.push([nTests,'acceptance test'+(nTests===1?'':'s')]);
-  }
-  const statHtml=stats.map(([n,l,c])=>`<div class="stat"><div class="num ${c||''}">${n}</div><div class="lbl">${l}</div></div>`).join('');
-  // glance table
-  const glance=studies.map((s,i)=>{
-    const g=gateOf(s), role=roleLine(s,inv), ctrl=isControl(s);
-    return `<tr><td class="idx">${i+1}</td>
-      <td><a class="st" href="#s-${s.slug}">${esc(s.title)}</a>${ctrl?'<span class="flag">⚑ control</span>':''}</td>
-      <td style="color:var(--ink-2)">${role}</td>
-      <td style="text-align:right">${g==='fail'?'<span class="chip fail">✗ refuted</span>':g==='pass'?'<span class="chip pass">✓ pass</span>':g==='planned'?'<span class="chip planned">◦ planned</span>':'<span class="chip">open</span>'}</td></tr>`;
-  }).join('');
-  const howto = MODE==='sourcing'
-    ? `Each study is one <b>sourcing decision</b> — reuse an existing module, compose several, or build a new one. A deterministic audit grades the decision on four axes (<span class="mono">source_fit · reinvention · novelty_justified · survey_recorded</span>) by checking <span class="mono">requires ⊆ provided</span> against the module catalog. A study whose gate <b>fails</b> while it is still marked complete is an <b>adversarial control</b> — a plausible-but-wrong choice the audit is meant to refuse.`
-    : MODE==='agentic'
-    ? `Each study is a <b>model-building task</b> run twice: an LLM agent and a deterministic worst-margin policy each try to build a real process-bigraph model that passes the same <b>locked</b> acceptance tests. The <b>margin ladder</b> shows each test across build iterations; the <b>timeline</b> shows what the agent edited and why. The contrast is where an agent is genuinely required — where the policy has no move for the real fix and gives up.`
-    : `Each study builds and runs a real <b>process-bigraph composite</b> and checks it against declared <b>acceptance tests</b>. Each study section shows its <b>model</b> (the composite's bigraph), how to <b>reproduce the run</b>, its <b>visualizations</b>, the <b>tests</b> and their verdicts, and the <b>decision</b>. Studies are collapsed to a high-level overview — expand any study for the full detail.`;
-  return `<div class="verdict fbsection ${status==='fail'?'is-fail':status==='warn'?'is-progress':''}">
-      ${fbBubble('overview','Investigation overview')}
-      <div class="vhead">${statusChip(status)}<span class="kicker">Verdict</span></div>
-      <p class="vtext">${esc(verdictText)}</p>
-      ${exv.what_is_this?`<div class="what">${esc(exv.what_is_this)}</div>`:(inv.hypothesis?`<div class="what">${esc(inv.hypothesis)}</div>`:'')}
-      ${inv.lead?`<div class="what" style="margin-top:8px">${esc(inv.lead)}</div>`:''}
-      <details class="exp"><summary>How to read this report</summary><div class="body">${howto}</div></details>
-    </div>
-    <div class="stats">${statHtml}</div>
-    ${renderArgument(inv)}
-    <div class="sec-h"><h2>At a glance</h2><span class="rule"></span></div>
-    <table class="glance"><thead><tr><th></th><th>Study</th><th>${MODE==='sourcing'?'Sourcing decision':MODE==='agentic'?'Agent vs policy':'Evidence'}</th><th style="text-align:right">Gate</th></tr></thead><tbody>${glance}</tbody></table>`;
-}
+// (The executive band was split: the scientific front matter now opens the
+//  report — heroQuestion / abstractBlock / simulatedWorld / evidenceFraming /
+//  renderArgument — and the verdict + stats + ladder moved BELOW it into
+//  renderFindings(). reportMode() below still classifies the investigation.)
 // The top-level hypothesis as cited claims: the origin-of-cells thesis broken
 // into the statements the campaign tests, each with citation chips linking to
 // the References section, plus the competing interpretive frameworks. So the
@@ -1197,9 +1284,9 @@ function renderArgument(inv){
   }
   const frames=(inv.competing_frameworks||[]).map(f=>
     `<span class="cframe">${esc(f.name||'')}${f.relation?`<span class="rel">${esc(f.relation)}</span>`:''}</span>`).join('');
-  return `<div class="argument fbsection" id="hypothesis">${fbBubble('argument','Hypothesis & evidence')}
-    <div class="sec-h"><h2>The hypothesis &amp; its evidence</h2><span class="rule"></span></div>
-    ${sa.main_claim?`<p class="main-claim">${esc(sa.main_claim)}</p>`:''}
+  return `<div class="argument fbsection measure" id="hypothesis">${fbBubble('argument','The thesis & its evidence')}
+    <div class="sec-h"><h2>The thesis &amp; its evidence</h2><span class="rule"></span></div>
+    ${sa.main_claim?`<p class="main-claim">${mdLite(sa.main_claim)}</p>`:''}
     ${claims?`<ul class="claimlist">${claims}</ul>`:''}
     ${frames?`<div class="cframes">${frames}</div>`:''}
     ${has(sa.caveats)?`<details class="exp" style="margin-top:12px"><summary>Caveats</summary><div class="body"><ul style="margin:0;padding-left:18px">${sa.caveats.map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div></details>`:''}
@@ -1211,10 +1298,11 @@ function renderInvViz(inv){
   const MODE=reportMode(inv);
   if(MODE==='sourcing'){ figs.push(['Sourcing decision map', vizDecisionMap(inv)]); }
   else if(MODE==='agentic'){ figs.push(['Agent vs policy — outcomes', vizOutcomeBar(inv)]); figs.push(['Final test outcomes', vizGateMatrix(inv)]); }
-  else { figs.push(['Test outcomes across studies', vizGateMatrix(inv)]); }
+  else { figs.push(['Where the transitions are viable — passing vs failing regions', vizGateMatrix(inv)]); }
   const live=figs.filter(f=>f[1]); if(!live.length) return '';
-  return `<div id="inv-viz" class="fbsection">${fbBubble('figures','Investigation visualizations')}<div class="sec-h"><h2>Investigation visualizations</h2><span class="rule"></span></div>
-    <p style="color:var(--ink-2);font-size:14px;max-width:none;margin:0 0 6px">The whole investigation in a few figures — the synthesis across all ${inv.studies.length} studies.</p>
+  const generic=MODE!=='sourcing'&&MODE!=='agentic';
+  return `<div id="inv-viz" class="fbsection">${fbBubble('figures','The viability landscape')}<div class="sec-h"><h2>${generic?'The viability landscape':'Investigation visualizations'}</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 6px">${generic?`A <b>map</b> of where the campaign's transitions are jointly possible — passing regions and <b>failure boundaries in the same visual language</b>, across all ${inv.studies.length} studies. The product is this landscape, not a single successful rock→cell trajectory.`:`The whole investigation in a few figures — the synthesis across all ${inv.studies.length} studies.`}</p>
     ${live.map(([t,svg])=>`<div style="margin:20px 0"><div class="kicker" style="margin-bottom:8px">${esc(t)}</div>${svg}</div>`).join('')}</div>`;
 }
 function roleLine(s,inv){
@@ -1237,15 +1325,18 @@ function roleLine(s,inv){
   return bits.join(' · ')||'—';
 }
 
-/* ---------- appendix ---------- */
+/* ---------- computational architecture (appendix, demoted to the END) ----------
+   The implementation inventory — reusable modules + declared capabilities — is
+   the Process-Bigraph plumbing, not the scientific narrative. It lives in a
+   clearly-labelled appendix at the end of the report, out of the main flow. */
 function renderAppendix(inv){
   if(!inv.catalog) return '';
   const rows=Object.entries(inv.catalog).map(([m,caps])=>
     `<tr><td class="m">${esc(m)}</td><td>${caps.map(c=>`<span class="chip mod" style="margin:2px">${esc(c)}</span>`).join('')}</td></tr>`).join('');
   return `<div class="appendix fbsection" id="appendix">
-    ${fbBubble('appendix','Module catalog')}
-    <div class="sec-h"><h2>Module catalog</h2><span class="rule"></span></div>
-    <p style="color:var(--ink-2);font-size:14px;max-width:none">The reusable modules and the capabilities each declares — the ground truth the sourcing audit checks every <span class="mono">requires ⊆ provided</span> claim against.</p>
+    ${fbBubble('appendix','Computational architecture (appendix)')}
+    <div class="sec-h"><h2>Appendix — computational architecture</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px">The implementation substrate: the reusable Process-Bigraph modules and the capabilities each declares. This is the machinery the studies are built from; the science is in the sections above.</p>
     <table class="cat-table"><thead><tr><th>Module</th><th>Declared capabilities</th></tr></thead><tbody>${rows}</tbody></table>
   </div>`;
 }
@@ -1331,10 +1422,17 @@ function markBubble(key){ document.querySelectorAll('.fbbubble').forEach(b=>{ if
 
 /* ---------- TOC + scroll spy ---------- */
 function toc(inv){
-  const items=['<a href="#top" class="exec">Overview</a>','<a href="#inv-viz">Figures</a>']
+  const exv=inv.executive||{};
+  const front=[`<a href="#top" class="exec">${esc(inv.question?'Question':'Overview')}</a>`];
+  if(inv.biological_story || exv.what_is_this || inv.hypothesis) front.push('<a href="#background">The world</a>');
+  front.push('<a href="#findings">Findings</a>');
+  if(inv.spine) front.push('<a href="#spine-presentation">Graph</a>');
+  front.push('<a href="#inv-viz">Landscape</a>');
+  const items=front
     .concat(inv.studies.map((s,i)=>`<a href="#s-${s.slug}" title="${esc(s.title)}">${i+1}. ${esc(shortTitle(s.title))}</a>`))
-    .concat(inv.catalog?['<a href="#appendix">Appendix</a>']:[])
-    .concat((inv.references&&Object.keys(inv.references).length)?['<a href="#references">References</a>']:[]).join('');
+    .concat(inv.glossary?['<a href="#glossary">Glossary</a>']:[])
+    .concat((inv.references&&Object.keys(inv.references).length)?['<a href="#references">References</a>']:[])
+    .concat(inv.catalog?['<a href="#appendix">Appendix</a>']:[]).join('');
   return `<div class="subnav"><div class="wrap">${items}</div></div>`;
 }
 function shortTitle(t){ return t.length>22?t.slice(0,21)+'…':t; }
@@ -1344,7 +1442,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('.card,#top,#inv-viz,#appendix,#references').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('.card,#top,#background,#findings,#spine-presentation,#inv-viz,#glossary,#appendix,#references').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -1399,12 +1497,19 @@ function _acGatingMatrixHtml(sp){
     <table class="ttable"><thead><tr><th>Criterion</th><th>Gating study</th><th class="tv">Result</th></tr></thead><tbody>${rows}</tbody></table>${foot}</div>`;
 }
 function renderSpine(inv){
-  const sp=inv.spine; if(!sp) return '';
-  const dag=_verdictDagHtml(sp), acc=_acceptanceRollupHtml(sp), mx=_acGatingMatrixHtml(sp);
-  if(!dag && !acc && !mx) return '';
-  return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Spine — verdicts & acceptance')}
-    <div class="sec-h"><h2>Verdicts &amp; acceptance</h2><span class="rule"></span></div>
-    ${dag}${acc?`<div style="margin-top:16px">${acc}</div>`:''}${mx?`<div style="margin-top:16px">${mx}</div>`:''}</div>`;
+  const sp=inv.spine;
+  // The graph REUSES the workbench's investigation-DAG rendering (ported), so
+  // the report's graph matches the SPA the user drives. The spine's acceptance
+  // roll-up + AC gating matrix stay beneath it.
+  const graph=workbenchDag(inv);
+  const acc=sp?_acceptanceRollupHtml(sp):'', mx=sp?_acGatingMatrixHtml(sp):'';
+  const strip=autonomyStrip(inv);
+  if(!graph && !acc && !mx && !strip) return '';
+  return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Investigation graph & acceptance')}
+    <div class="sec-h"><h2>The investigation graph</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">The campaign as a dependency graph — each study a node badged with its code-computed status, wired to the studies it builds on. This is the same graph as the workbench's Investigation view, transformed for a static report.</p>
+    ${graph}${strip}
+    ${acc?`<div style="margin-top:22px">${acc}</div>`:''}${mx?`<div style="margin-top:16px">${mx}</div>`:''}</div>`;
 }
 
 /* ---------- interactive (Plotly) figures — LAZY, visibility-driven ----------
@@ -1546,29 +1651,436 @@ function setupRealLooms(){
   } else { frames.forEach(mount); }
 }
 
+/* ======================================================================
+   WORKBENCH-CONSISTENT STATUS META (ported verbatim from walkthrough.js
+   _STATUS_META / _studyStatusState so the report's graph + ladder badge a
+   study with the SAME colour/icon/label the workbench SPA shows — never a
+   second, divergent derivation). The COMPUTED gate_status verdict wins,
+   then a definitive lifecycle, then the hand-set confidence.
+   ====================================================================== */
+const WSTATUS={
+  Accepted:{color:'#16a34a',icon:'✓',label:'Accepted',k:'accepted'},
+  Investigating:{color:'#ca8a04',icon:'◐',label:'Investigating',k:'investigating'},
+  Planned:{color:'#2563eb',icon:'○',label:'Planned',k:'planned'},
+  Blocked:{color:'#64748b',icon:'⊘',label:'Blocked',k:'blocked'},
+  Refuted:{color:'#dc2626',icon:'✗',label:'Refuted',k:'refuted'},
+};
+function studyStatusState(s){
+  s=s||{};
+  const gate=String(s.gate_status||'').trim().toLowerCase();
+  if(gate==='passed'||gate==='pass'||gate==='accepted') return 'Accepted';
+  if(gate==='failed'||gate==='failed_evaluation'||gate==='refuted') return 'Refuted';
+  if(gate==='blocked') return 'Blocked';
+  if(gate==='partial'||gate==='needs_calibration'||gate==='in_progress') return 'Investigating';
+  const life=String(s.effective_status||s.status||'').trim().toLowerCase();
+  if(life.indexOf('blocked')!==-1) return 'Blocked';
+  if(life.indexOf('fail')!==-1||life==='invalid'||life==='refuted') return 'Refuted';
+  const conf=String(s.confidence||'').trim();
+  if(WSTATUS[conf]) return conf;
+  if(['complete','completed','ran','passed','evaluated','decided'].indexOf(life)>=0) return 'Accepted';
+  if(['running','analyzing','in_progress'].indexOf(life)>=0) return 'Investigating';
+  return 'Planned';
+}
+function studyStatusMeta(s){ return WSTATUS[studyStatusState(s)]||WSTATUS.Planned; }
+// dependency edges — same precedence as the workbench's _dagEdges: canonical
+// pipeline_gate.prerequisites first, else the legacy parent_studies.
+function dagEdges(s){
+  const pg=s&&s.pipeline_gate;
+  const raw=(pg&&pg.prerequisites&&pg.prerequisites.length)?pg.prerequisites:((s&&s.parent_studies)||[]);
+  return (raw||[]).map(e=> typeof e==='string'
+    ? {study:e,relation:'leads-to'}
+    : (e&&e.study?{study:e.study,relation:e.relation||((e.outputs_used&&e.outputs_used.length)?'model-input':'leads-to'),outputs_used:e.outputs_used}:null)).filter(Boolean);
+}
+const DAG_REL={'leads-to':{color:'#94a3b8',dash:null,label:'leads to'},
+  'model-input':{color:'#2563eb',dash:null,label:'model input'},
+  'evidence':{color:'#0d9488',dash:'5 3',label:'evidence'},
+  'calibrates-threshold':{color:'#ca8a04',dash:'2 3',label:'calibrates threshold'},
+  'refutes-alternative':{color:'#dc2626',dash:'5 3',label:'refutes alternative'}};
+function dagRelStyle(r){ return DAG_REL[r]||DAG_REL['leads-to']; }
+// leading study-id chip ("og-02") + humanized rest, mirroring _humanizeStudyName.
+function studyChip(slug){ const m=/^([a-z]+-\d+[a-z]*)-(.+)$/.exec(String(slug||'')); return m?m[1]:''; }
+
+/* ---------- evidentiary-status tiers (Observed / Plausible / Hypothetical) ----------
+   Distinguishes levels of scientific claim so a hypothetical bridging mechanism
+   (e.g. a competing heredity module) never reads as established as measured
+   chemistry. An explicit authored tier wins; otherwise it is derived from the
+   finding's status and the study's maturity — a finding on a not-yet-accepted
+   study is Hypothetical; on an accepted study, a confirmation of a known result
+   is Observed and a new computational result is Plausible. Data-safe: returns
+   null when there is nothing to tier. */
+const ETIERS={
+  observed:{k:'observed',label:'Observed',def:'reproduces a measured / established result'},
+  plausible:{k:'plausible',label:'Plausible',def:'demonstrated feasible in the model under stated assumptions'},
+  hypothetical:{k:'hypothetical',label:'Hypothetical',def:'a proposed mechanism, not yet established; competing alternatives'},
+};
+function evidenceTier(f,s){
+  const raw=String((f&&(f.evidence_tier||f.tier||f.evidence_status))||'').toLowerCase();
+  if(/observ|measur|empiric|establish/.test(raw)) return ETIERS.observed;
+  if(/hypoth|specul|propos|candidate|alternativ|conject/.test(raw)) return ETIERS.hypothetical;
+  if(/plausib|model|predict|feasib|demonstr/.test(raw)) return ETIERS.plausible;
+  const accepted=studyStatusState(s)==='Accepted';
+  if(!accepted) return ETIERS.hypothetical;
+  const st=String((f&&f.status)||'').toLowerCase();
+  if(st==='confirms'||st==='confirmed'||st==='passed'||st==='pass') return ETIERS.observed;
+  return ETIERS.plausible;
+}
+function etierBadge(t){ if(!t) return ''; return `<span class="etier ${t.k}" title="${esc(t.def)}"><span class="d"></span>${esc(t.label)}</span>`; }
+function etierLegend(){
+  return `<div class="etier-legend">${Object.values(ETIERS).map(t=>
+    `<span class="li">${etierBadge(t)}<span class="def">${esc(t.def)}</span></span>`).join('')}</div>`;
+}
+
+/* ---------- prose: split authored narrative into paragraphs via mdLite ---------- */
+function proseHtml(text){
+  if(text==null) return '';
+  const parts=String(text).split(/\n\s*\n+/).map(p=>p.trim()).filter(Boolean);
+  if(!parts.length) return '';
+  return parts.map(p=>`<p>${mdLite(p)}</p>`).join('');
+}
+
+/* ====================== PUBLISHED-REPORT FRONT MATTER ====================== */
+// The report OPENS like a paper: the scientific question first, an abstract,
+// the simulated world (Background), what counts as evidence, then the thesis —
+// before any verdict / dashboard. Each block degrades gracefully when its
+// authored field is absent.
+function heroQuestion(inv){
+  const exv=inv.executive||{}, sa=inv.scientific_argument||{};
+  const q=inv.question||exv.architecture_thesis||sa.main_claim;
+  if(!q) return '';
+  return `<div class="hero-q measure"><div class="qlabel">The question</div>
+    <p class="qtext">${esc(q)}</p></div>`;
+}
+function abstractBlock(inv){
+  const exv=inv.executive||{}, sa=inv.scientific_argument||{};
+  // lead paragraph(s), then the thesis sentence (main_claim / what_is_this).
+  const lead=inv.lead;
+  const claim=sa.main_claim||exv.what_is_this;
+  if(!lead && !claim) return '';
+  let body='';
+  if(lead) body+=proseHtml(lead);
+  // only add the thesis sentence if it isn't already the lead's opening
+  if(claim && (!lead || String(lead).slice(0,60)!==String(claim).slice(0,60)))
+    body+=`<p class="main-claim">${mdLite(claim)}</p>`;
+  return `<div class="abstract">${body}</div>`;
+}
+function simulatedWorld(inv){
+  const exv=inv.executive||{};
+  // Prefer the authored biological_story (the single biggest win — real prose).
+  if(inv.biological_story){
+    return `<div class="narr fbsection" id="background">${fbBubble('background','The simulated world')}
+      <div class="sec-h"><h2>The simulated world</h2><span class="rule"></span></div>
+      <div class="prose">${proseHtml(inv.biological_story)}</div></div>`;
+  }
+  // Graceful fallback: what_is_this + hypothesis as Background — only if present.
+  const bits=[exv.what_is_this, inv.hypothesis].filter(Boolean);
+  if(!bits.length) return '';
+  return `<div class="narr fbsection" id="background">${fbBubble('background','Background')}
+    <div class="sec-h"><h2>Background</h2><span class="rule"></span></div>
+    <div class="prose">${bits.map(b=>`<p>${mdLite(b)}</p>`).join('')}</div></div>`;
+}
+function evidenceFraming(inv){
+  // What counts as evidence: a passed gate means the modeled mechanism works
+  // under stated assumptions — NOT that the historical transition occurred.
+  const anyTier=(inv.studies||[]).some(s=>Array.isArray(s.findings)&&s.findings.length);
+  return `<div class="narr" id="evidence-basis">
+    <div class="sec-h"><h2>What counts as evidence</h2><span class="rule"></span></div>
+    <div class="evnote"><div class="prose">
+      Each stage is an independently falsifiable nonequilibrium transition a simulation can
+      <b>pass or fail</b>. A passed gate means the <b>modeled mechanism works under the stated
+      assumptions</b> — it is <b>not</b> a claim that the historical transition occurred, only that
+      it is physically admissible in the model. The product is a <b>viability landscape</b>:
+      a map of where the transitions are jointly possible, with failure boundaries treated as
+      first-class results.
+    </div></div>
+    ${anyTier?`<p class="measure" style="color:var(--ink-2);font-size:14px;margin:12px 0 2px">Findings and mechanisms carry an evidentiary tier:</p>${etierLegend()}`:''}
+  </div>`;
+}
+
+/* ====================== FINDINGS (moved BELOW the narrative intro) ====================== */
+// The verdict + the results-at-a-glance — present, but no longer the first
+// thing a reader meets. Framed as "Findings", after the question/abstract/
+// background/thesis front matter.
+function renderFindings(inv){
+  const studies=inv.studies;
+  const MODE=reportMode(inv);
+  const gates=studies.map(gateOf);
+  const nPass=gates.filter(g=>g==='pass').length, nFail=gates.filter(g=>g==='fail').length;
+  const nPlanned=gates.filter(g=>g==='planned').length;
+  const exv=inv.executive||{};
+  const verdictText=exv.verdict||inv.question;
+  const status=nFail?'fail':((nPass&&nPlanned)?'warn':(nPass?'pass':'warn'));
+  let stats='';
+  if(MODE==='sourcing'){
+    const dec={};studies.forEach(s=>{const d=s.sourcing&&s.sourcing.decision;if(d)dec[d]=(dec[d]||0)+1;});
+    stats=[[studies.length,'studies'],[dec['reuse']||0,'reuse'],[dec['compose']||0,'compose'],[dec['build-new']||0,'build-new'],[nFail,'trap refused ✗','fail']];
+  }else if(MODE==='agentic'){
+    let aDone=0,pDone=0,pTot=0;
+    studies.forEach(s=>{ if(s.agent_trajectory&&s.agent_trajectory.result&&s.agent_trajectory.result.state==='DONE')aDone++;
+      if(s.policy_trajectory){pTot++; if(s.policy_trajectory.result&&s.policy_trajectory.result.state==='DONE')pDone++;} });
+    stats=[[studies.length,'tasks'],[aDone+'/'+studies.length,'agent solved','pass'],[pDone+'/'+pTot,'policy solved'],[studies.length-pDone,'need an agent']];
+  }else{
+    let nTests=0; studies.forEach(s=>{ nTests+=(s.behavior_tests||[]).length; });
+    stats=[[studies.length,'studies'],[nPass,'passed','pass']];
+    if(nFail) stats.push([nFail,'failing','fail']);
+    if(nPlanned) stats.push([nPlanned,'planned','planned']);
+    stats.push([nTests,'acceptance test'+(nTests===1?'':'s')]);
+  }
+  const statHtml=stats.map(([n,l,c])=>`<div class="stat"><div class="num ${c||''}">${n}</div><div class="lbl">${l}</div></div>`).join('');
+  return `<div id="findings"><div class="sec-h"><h2>Findings</h2><span class="rule"></span></div>
+    <div class="verdict fbsection ${status==='fail'?'is-fail':status==='warn'?'is-progress':''}">
+      ${fbBubble('overview','Investigation verdict')}
+      <div class="vhead">${statusChip(status)}<span class="kicker">Verdict</span></div>
+      <p class="vtext">${esc(verdictText)}</p>
+      ${exv.verdict_detail?`<div class="what">${mdLite(exv.verdict_detail)}</div>`:''}
+    </div>
+    <div class="stats">${statHtml}</div>
+    ${genesisLadder(inv)}</div>`;
+}
+
+/* ====================== GENESIS LADDER ======================
+   The at-a-glance, reframed as an ordered LADDER spanning the stage
+   progression (depth order of the reused investigation DAG) — each rung a
+   scientific unit: stage · question · experiment · evidence-of-transition.
+   Falls back to a flat glance table when there is no dependency ordering
+   (keeps it data-safe for any investigation). */
+function _dagDepthOrder(inv){
+  const studies=inv.studies||[];
+  const byName={}; studies.forEach(s=>byName[s.slug]=s);
+  const children={}; studies.forEach(s=>children[s.slug]=[]);
+  studies.forEach(s=>dagEdges(s).forEach(p=>{ if(children[p.study]) children[p.study].push(s.slug); }));
+  const depth={}; const q=[];
+  studies.forEach(s=>{ const inP=dagEdges(s).filter(p=>byName[p.study]); if(!inP.length){ depth[s.slug]=0; q.push(s.slug); } });
+  let guard=studies.length*4;
+  while(q.length&&guard-->0){ const n=q.shift(); (children[n]||[]).forEach(c=>{ if(depth[c]===undefined||depth[c]<depth[n]+1){ depth[c]=depth[n]+1; q.push(c); } }); }
+  studies.forEach(s=>{ if(depth[s.slug]===undefined) depth[s.slug]=0; });
+  const anyEdge=studies.some(s=>dagEdges(s).some(p=>byName[p.study]));
+  return {depth, anyEdge};
+}
+function _experimentOf(s){
+  // the "model experiment": the objective, else the hypothesis, else the baseline composite.
+  const bl=(s.baseline||[])[0];
+  return s.objective || s.hypothesis || (bl&&bl.composite?('composite '+bl.composite):'') || '';
+}
+function _observableOf(s){
+  const ro=(s.readouts||[]).map(r=>r&&(r.name||r.observable)).filter(Boolean);
+  if(ro.length) return ro.slice(0,5).join(', ')+(ro.length>5?'…':'');
+  const nt=(s.behavior_tests||[]).length;
+  return nt?`${nt} acceptance test${nt===1?'':'s'}`:'';
+}
+function _whatWeLearn(s){
+  let t=s.claim||s.result||(s.findings&&s.findings[0]&&(s.findings[0].statement||s.findings[0].summary))||'';
+  t=String(t).split('\n')[0].trim();
+  return t;
+}
+function genesisLadder(inv){
+  const studies=inv.studies||[];
+  const {depth,anyEdge}=_dagDepthOrder(inv);
+  if(!anyEdge || studies.length<2){
+    // no stage ordering → the original flat glance table
+    const MODE=reportMode(inv);
+    const glance=studies.map((s,i)=>{
+      const g=gateOf(s), role=roleLine(s,inv), ctrl=isControl(s);
+      return `<tr><td class="idx">${i+1}</td>
+        <td><a class="st" href="#s-${s.slug}">${esc(s.title)}</a>${ctrl?'<span class="flag">⚑ control</span>':''}</td>
+        <td style="color:var(--ink-2)">${role}</td>
+        <td style="text-align:right">${g==='fail'?'<span class="chip fail">✗ refuted</span>':g==='pass'?'<span class="chip pass">✓ pass</span>':g==='planned'?'<span class="chip planned">◦ planned</span>':'<span class="chip">open</span>'}</td></tr>`;
+    }).join('');
+    return `<div style="margin-top:14px"><div class="kicker" style="margin-bottom:8px">Results at a glance</div>
+      <table class="glance"><thead><tr><th></th><th>Study</th><th>${MODE==='sourcing'?'Sourcing decision':MODE==='agentic'?'Agent vs policy':'Evidence'}</th><th style="text-align:right">Status</th></tr></thead><tbody>${glance}</tbody></table></div>`;
+  }
+  const ordered=studies.slice().sort((a,b)=>(depth[a.slug]-depth[b.slug])||String(a.slug).localeCompare(String(b.slug)));
+  const rungs=ordered.map((s,i)=>{
+    const m=studyStatusMeta(s), chip=studyChip(s.slug);
+    const q=String(s.question||s.claim||'').replace(/\s+/g,' ').split(/(?<=[.?])\s/)[0].trim();
+    const exp=String(_experimentOf(s)).replace(/\s+/g,' ');
+    const learn=_whatWeLearn(s);
+    const transition=(m.k==='accepted')?'transition demonstrated':(m.k==='refuted')?'transition refuted':(m.k==='planned')?'not yet run':'under investigation';
+    return `<div class="rung v-${m.k}">
+      <div class="rstep">${i+1}</div>
+      <div class="rbody">
+        ${chip?`<div class="rstage">${esc(chip)} · ${esc(s.title)}</div>`:`<div class="rstage">${esc(s.title)}</div>`}
+        <a class="rq" href="#s-${esc(s.slug)}">${esc(q||s.title)}</a>
+        <div class="rmeta">${exp?`<span class="ek">Experiment:</span> ${esc(exp.length>140?exp.slice(0,138)+'…':exp)}`:''}
+        ${learn?`<br><span class="ek">Evidence of transition:</span> ${esc(learn.length>150?learn.slice(0,148)+'…':learn)}`:''}</div>
+      </div>
+      <div class="rright">
+        <span class="etier ${m.k==='accepted'?'observed':m.k==='refuted'?'hypothetical':'plausible'}" style="background:none;border:1px solid ${m.color};color:${m.color}"><span class="d" style="background:${m.color}"></span>${esc(m.label)}</span>
+        <span style="font-size:11.5px;color:var(--ink-3)">${esc(transition)}</span>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div style="margin-top:16px"><div class="kicker" style="margin-bottom:4px">The Genesis Ladder — stage progression</div>
+    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">Each rung is one transition in dependency order: its scientific <b>question</b>, the <b>model experiment</b> that tests it, and the <b>evidence of transition</b> so far. Ordered along the campaign's stage DAG, not a flat list.</p>
+    <div class="ladder">${rungs}</div></div>`;
+}
+
+/* ====================== WORKBENCH-CONSISTENT INVESTIGATION GRAPH ======================
+   The report's graph REUSES the workbench's investigation-DAG layout + node
+   markup + edge routing (ported from walkthrough.js _renderInvestigationDag):
+   the same depth-BFS columns, the same node card (status border-top, icon +
+   badge, Asks/Finds), and the same Bezier edges with arrowheads. Static: no
+   drag/zoom; LR (left→right = the stage progression). Positions are measured
+   and laid out by setupWorkbenchDag() after the HTML is in the DOM — the same
+   two-pass measure the workbench uses, so cards never clip. Data-safe: works
+   for any investigation's parent_studies / pipeline_gate DAG. */
+function workbenchDag(inv){
+  const studies=inv.studies||[];
+  if(!studies.length) return '';
+  const anyEdge=studies.some(s=>dagEdges(s).length);
+  const nodes=studies.map(s=>{
+    const m=studyStatusMeta(s);
+    const chip=studyChip(s.slug);
+    const asks=String(s.question||'').replace(/\s+/g,' ').split(/[.?]/)[0].trim();
+    const finds=String(s.claim||(s.findings&&s.findings[0]&&(s.findings[0].summary||s.findings[0].statement||s.findings[0].id))||'').replace(/\s+/g,' ').trim();
+    const tier=(Array.isArray(s.findings)&&s.findings.length)?evidenceTier(s.findings[0],s):null;
+    return `<div class="wdag-node" data-study="${esc(s.slug)}" style="border-top-color:${m.color};top:0;left:0">
+      <div class="wn-meta"><span class="wn-icon" style="color:${m.color}">${m.icon}</span>
+        <span class="wn-badge" style="color:${m.color}">${esc(m.label)}</span></div>
+      <a class="wn-title" href="#s-${esc(s.slug)}">${esc(s.title)}</a>
+      ${asks?`<div class="wn-row" style="-webkit-line-clamp:2"><span class="wn-lbl">Asks:</span> ${esc(asks)}</div>`:''}
+      ${finds?`<div class="wn-row" style="-webkit-line-clamp:4"><span class="wn-lbl">Finds:</span> ${esc(finds)}</div>`:`<div class="wn-row"><em style="color:var(--ink-3)">pending evidence</em></div>`}
+      ${tier?`<div class="wn-etier">${etierBadge(tier)}</div>`:''}
+      <!-- SEAM: the locked shared node-card spec (model/composite + modeling
+           methods + sim/run count & status + behavior-test pass/fail) slots in
+           here as a follow-up — kept to the four-part unit + verdict for now so
+           the report node never diverges from the live workbench graph. -->
+    </div>`;
+  }).join('');
+  const lg=Object.values(WSTATUS).map(m=>`<span class="lg"><span class="i" style="color:${m.color}">${m.icon}</span>${esc(m.label)}</span>`).join('');
+  const note=anyEdge?'':'<p class="measure" style="color:var(--ink-3);font-size:12.5px;margin:4px 0 0">No declared dependencies — studies shown as independent nodes.</p>';
+  return `<div class="wdag-shell"><div class="wdag-canvas" id="wdag-canvas">
+      <svg class="wdag-edges" id="wdag-edges"></svg>${nodes}</div></div>
+    <div class="wdag-legend"><span style="font-weight:600;color:var(--ink-2)">Status:</span>${lg}</div>${note}`;
+}
+// Two-pass measured layout (mirrors walkthrough.js). LR: depth → column.
+function setupWorkbenchDag(){
+  const canvas=document.getElementById('wdag-canvas'); if(!canvas) return;
+  const svg=document.getElementById('wdag-edges'); if(!svg) return;
+  const nodeEls=[...canvas.querySelectorAll('.wdag-node')];
+  if(!nodeEls.length) return;
+  const studies=INV.studies||[];
+  const byName={}; studies.forEach(s=>byName[s.slug]=s);
+  const children={}; studies.forEach(s=>children[s.slug]=[]);
+  studies.forEach(s=>dagEdges(s).forEach(p=>{ if(children[p.study]) children[p.study].push(s.slug); }));
+  const depth={}, q=[];
+  studies.forEach(s=>{ const inP=dagEdges(s).filter(p=>byName[p.study]); if(!inP.length){ depth[s.slug]=0; q.push(s.slug); } });
+  let guard=studies.length*4;
+  while(q.length&&guard-->0){ const n=q.shift(); (children[n]||[]).forEach(c=>{ if(depth[c]===undefined||depth[c]<depth[n]+1){ depth[c]=depth[n]+1; q.push(c); } }); }
+  studies.forEach(s=>{ if(depth[s.slug]===undefined) depth[s.slug]=0; });
+  const byDepth={}; studies.forEach(s=>{ (byDepth[depth[s.slug]]=byDepth[depth[s.slug]]||[]).push(s.slug); });
+  Object.keys(byDepth).forEach(d=>byDepth[d].sort((a,b)=>String(a).localeCompare(String(b))));
+  const CARD_W=212, DEPTH_GAP=58, BREADTH_GAP=18, PAD_X=20, PAD_Y=16;
+  const el={}; nodeEls.forEach(n=>el[n.dataset.study]=n);
+  const pos={};
+  const depths=Object.keys(byDepth).map(Number).sort((a,b)=>a-b);
+  // Pass 1: x by depth, measure height.
+  nodeEls.forEach(n=>{ n.style.width=CARD_W+'px'; });
+  studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; const x=PAD_X+depth[s.slug]*(CARD_W+DEPTH_GAP);
+    n.style.left=x+'px'; pos[s.slug]={x, node:n, h:n.offsetHeight||120}; });
+  // Pass 2: stack same-depth cards vertically, center each column.
+  const colTot={}; depths.forEach(d=>{ let sum=0; byDepth[d].forEach(sl=>sum+=pos[sl].h); colTot[d]=sum+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
+  const maxCol=Math.max(0,...depths.map(d=>colTot[d]));
+  const canvasH=Math.max(PAD_Y*2+maxCol,160);
+  depths.forEach(d=>{ let yc=PAD_Y+Math.max(0,(canvasH-PAD_Y*2-colTot[d])/2);
+    byDepth[d].forEach(sl=>{ pos[sl].y=yc; pos[sl].node.style.top=yc+'px'; yc+=pos[sl].h+BREADTH_GAP; }); });
+  const canvasW=PAD_X*2+(depths.length?depths[depths.length-1]:0)*(CARD_W+DEPTH_GAP)+CARD_W;
+  canvas.style.width=canvasW+'px'; canvas.style.height=canvasH+'px';
+  svg.setAttribute('width',canvasW); svg.setAttribute('height',canvasH);
+  svg.style.width=canvasW+'px'; svg.style.height=canvasH+'px';
+  // Edges — same Bezier routing + arrowhead as the workbench.
+  const NS='http://www.w3.org/2000/svg';
+  let defs='<defs><marker id="wdag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
+  svg.innerHTML=defs;
+  studies.forEach(s=>{ dagEdges(s).forEach(p=>{ const a=pos[p.study], b=pos[s.slug]; if(!a||!b) return;
+    const x1=a.x+CARD_W, y1=a.y+a.h/2, x2=b.x, y2=b.y+b.h/2, dx=Math.max(28,(x2-x1)/2);
+    const d=`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`;
+    const st=dagRelStyle(p.relation);
+    const path=document.createElementNS(NS,'path');
+    path.setAttribute('d',d); path.setAttribute('fill','none'); path.setAttribute('stroke',st.color);
+    path.setAttribute('stroke-width','1.5'); path.setAttribute('marker-end','url(#wdag-arrow)');
+    if(st.dash) path.setAttribute('stroke-dasharray',st.dash);
+    svg.appendChild(path);
+    if(p.relation&&p.relation!=='leads-to'){ const t=document.createElementNS(NS,'text');
+      t.setAttribute('x',(x1+x2)/2); t.setAttribute('y',(y1+y2)/2-6); t.setAttribute('text-anchor','middle');
+      t.setAttribute('font-size','10'); t.setAttribute('fill',st.color); t.textContent=st.label; svg.appendChild(t); }
+  }); });
+}
+
+/* ---------- ENVIRONMENT → INDIVIDUAL conceptual strip (qualitative) ----------
+   A conceptual axis of capabilities migrating from the vent (environment) into
+   the protocell (individual) across the campaign. This is a QUALITATIVE framing,
+   NOT a measured autonomy metric — no numbers are fabricated. Rendered only when
+   there is a staged ordering; otherwise omitted. */
+function autonomyStrip(inv){
+  const studies=inv.studies||[];
+  const {anyEdge}=_dagDepthOrder(inv);
+  if(!anyEdge || studies.length<3) return '';
+  const caps=['Energy','Reduced carbon','Catalysis','Concentration','Confinement','Bioenergetics','Heredity'];
+  const chips=caps.map((c,i)=>{
+    const frac=i/(caps.length-1);
+    return `<span style="display:inline-flex;flex-direction:column;align-items:center;gap:4px;flex:1;min-width:70px">
+      <span style="font-size:11.5px;color:var(--ink);font-weight:600;text-align:center;line-height:1.2">${esc(c)}</span>
+      <span style="height:6px;width:100%;border-radius:4px;background:linear-gradient(90deg,var(--cal),var(--accent));opacity:${(0.35+0.6*frac).toFixed(2)}"></span></span>`;
+  }).join('');
+  return `<div style="margin-top:22px"><div class="kicker" style="margin-bottom:6px">Environment → individual (conceptual)</div>
+    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Across the campaign, capabilities that begin as <b>services of the vent</b> are progressively <b>internalized by the protocell</b> — an autonomy axis rising from environment toward individual. This is a <b>qualitative framing</b>; a quantitative autonomy index would need an authored metric (e.g. from the bioenergetics / escape stages).</p>
+    <div style="display:flex;align-items:flex-end;gap:10px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)">${chips}</div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3);margin-top:6px;padding:0 4px">
+      <span>ENVIRONMENT (vent supplies)</span><span>INDIVIDUAL (protocell owns)</span></div></div>`;
+}
+
+/* ====================== GLOSSARY (accessibility) ====================== */
+function renderGlossary(inv){
+  const g=inv.glossary;
+  if(!g) return '';
+  let entries=[];
+  if(Array.isArray(g)) entries=g.map(e=>e&&(e.term||e.name)?[e.term||e.name, e.definition||e.def||e.description||'']:null).filter(Boolean);
+  else if(typeof g==='object') entries=Object.entries(g).map(([k,v])=>[k, (v&&typeof v==='object')?(v.definition||v.def||v.description||''):v]);
+  if(!entries.length) return '';
+  const rows=entries.map(([t,d])=>`<div class="refentry"><b class="rt">${esc(t)}</b>${d?`<div class="rmeta">${mdLite(d)}</div>`:''}</div>`).join('');
+  return `<div class="appendix fbsection" id="glossary">${fbBubble('glossary','Glossary')}
+    <div class="sec-h"><h2>Glossary</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px">Key terms used throughout this report.</p>
+    <div class="refs-list">${rows}</div></div>`;
+}
+
 /* ---------- one contiguous document ---------- */
 function render(inv){
   CUR=inv.slug; loadFB(); REFS=inv.references||{};
+  // meta line: status · workspace · N studies · date (calm, not a stat grid)
+  const metaBits=[inv.status?`<span>${esc(String(inv.status).replace(/_/g,' '))}</span>`:'',
+    `<span class="mono">${esc(inv.workspace||'')}</span>`,
+    `<span>${inv.studies.length} ${inv.studies.length===1?'study':'studies'}</span>`,
+    inv.created?`<span>${esc(inv.created)}</span>`:''].filter(Boolean);
   document.getElementById('app').innerHTML=
     `<div class="wrap"><div class="masthead" id="top">
       <div class="eyebrow mono">${esc(inv.slug)} · investigation report</div>
       <h1>${esc(inv.title)}</h1>
-      <div class="provline"><span>${inv.studies.length} studies</span><span class="sep">·</span>
-        <span>generated 2026-08-18</span><span class="sep">·</span><span class="mono">viva-casebook</span></div>
-    </div>${renderExec(inv)}${renderInvViz(inv)}${renderSpine(inv)}</div>`+
+      <div class="provline">${metaBits.join('<span class="sep">·</span>')}</div>
+    </div>
+    ${heroQuestion(inv)}
+    ${abstractBlock(inv)}
+    ${simulatedWorld(inv)}
+    ${evidenceFraming(inv)}
+    ${renderArgument(inv)}
+    ${renderFindings(inv)}
+    ${renderSpine(inv)}
+    ${renderInvViz(inv)}</div>`+
     toc(inv)+
     `<div class="wrap">
       <div class="sec-h"><h2>Studies</h2><span class="rule"></span>
         <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
-      <p style="color:var(--ink-2);font-size:14px;max-width:none;margin:0 0 8px">Each study is collapsed to a high-level overview — click a study (or a number in the index) to expand its Model, simulation run, visualizations, tests, and decision.</p>
+      <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 8px">Each study is one scientific unit — <b>question → model experiment → observable → what we learn</b>. Studies are collapsed to that summary; click a study (or a number in the index) to expand its full model, run, visualizations, tests and decision.</p>
       ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
-      ${renderAppendix(inv)}
+      ${renderGlossary(inv)}
       ${renderReferences(inv)}
+      ${renderAppendix(inv)}
       <div class="sec-h" id="report-feedback"><h2>Report feedback</h2><span class="rule"></span></div>
       <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes above. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
       ${feedbackRow('overall','the whole report')}
     </div>`;
   updateCount(); window.scrollTo(0,0); spy();
+  setupWorkbenchDag();
   setupLazyPlotly();
   setupInteractiveLooms();
   setupRealLooms();

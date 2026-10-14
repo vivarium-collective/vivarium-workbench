@@ -39,6 +39,11 @@ _STUDY_KEEP = (
     "requires", "sourcing", "baseline", "behavior_tests", "runs", "conclusion",
     "loop_provenance", "purpose", "findings", "conclusion_logic", "limitations",
     "parent_studies", "pipeline_gate", "literature_anchors", "key_assumptions",
+    # the four-part scientific framing (question → experiment → observable → learn)
+    # the report leads with: the model experiment, the measured observable, and the
+    # study's lifecycle/phase + maturity. Additive — each is optional per study.
+    "objective", "hypothesis", "result", "phase", "kind", "design_status",
+    "readouts", "discovery_implications", "status",
 )
 
 # 5-state study verdict (mirrors viva_superpowers roll-up): each maps to a glyph
@@ -131,7 +136,15 @@ def _build_spine(ws_root, inv_slug: str, studies: list) -> dict:
         rc = rcmap.get(s["slug"])
         if rc:
             s["run_commands"] = rc
-        for p in (s.get("parent_studies") or []):
+        # Dependency edges mirror the workbench's _dagEdges precedence: prefer
+        # pipeline_gate.prerequisites (the canonical Pass-A field), else the
+        # legacy parent_studies. Reading only parent_studies missed studies that
+        # declare prerequisites via pipeline_gate (og-02 → og-01), collapsing the
+        # chain to a flat depth-0 row.
+        pg = s.get("pipeline_gate") or {}
+        raw_edges = (pg.get("prerequisites") if isinstance(pg, dict) and pg.get("prerequisites")
+                     else s.get("parent_studies")) or []
+        for p in raw_edges:
             src = p.get("study") if isinstance(p, dict) else p
             if src in slugs:
                 edges.append({"from": src, "to": s["slug"]})
@@ -656,6 +669,16 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "lead": inv.get("lead"),
         "executive": inv.get("executive"),
         "scientific_argument": inv.get("scientific_argument"),
+        # Narrative front-matter fields authored in investigation.yaml that the
+        # report previously dropped. Each is optional and renders as a graceful
+        # no-op when absent (other workspaces won't carry them): the Background /
+        # "simulated world" prose, an accessibility glossary, reader guidelines,
+        # and an explicit "how to read" note.
+        "biological_story": inv.get("biological_story"),
+        "glossary": inv.get("glossary"),
+        "guidelines": inv.get("guidelines"),
+        "how_to_read": inv.get("how_to_read"),
+        "created": inv.get("created"),
         "key_claims": inv.get("key_claims"),
         "competing_frameworks": inv.get("competing_frameworks"),
         "at_a_glance": inv.get("at_a_glance"),
