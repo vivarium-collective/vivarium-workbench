@@ -912,7 +912,8 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             _rows = read_runs_db_for_study(ws_root, study_spec["name"])
             if _rows:
                 _latest = _rows[0]
-                _lp = _latest.get("params") if isinstance(_latest.get("params"), dict) else {}
+                _params = _latest.get("params")
+                _lp = _params if isinstance(_params, dict) else {}
                 _emitter = _lp.get("emitter") or _lp.get("emitter_address")
                 if _latest.get("status"):
                     _runs_summary["status"] = _latest.get("status")
