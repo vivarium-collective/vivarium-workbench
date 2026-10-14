@@ -153,6 +153,100 @@ def decide_proposed_input(ws_root: Path, body: dict) -> "tuple[dict, int]":
     return {"ok": True, "item_id": item_id, **result}, 200
 
 
+def resolve_decision(ws_root: Path, body: dict) -> "tuple[dict, int]":
+    """POST /api/investigation-decision-resolve: resolve an open expert decision.
+
+    Moves ``executive.decisions_needed[index]`` into
+    ``executive.decisions_resolved`` in ``investigations/<inv>/investigation.yaml``,
+    recording the expert's resolution note. The resolved entry is a prose string
+    (matching the existing ``decisions_resolved`` shape): the decision question
+    followed by the expert's resolution.
+
+    Body: ``{investigation, index, resolution, question?}``. The optional
+    ``question`` is an optimistic-concurrency guard — when supplied it must still
+    match the entry at ``index`` (the list can shift under a concurrent resolve),
+    else 409 so the caller refreshes rather than resolving the wrong decision.
+
+    Persists with ruamel (round-trip), falling back to safe_dump.
+    Returns (response_dict, status_code).
+    """
+    inv = body.get("investigation") or ""
+    index = body.get("index")
+    resolution = (body.get("resolution") or "").strip()
+    expected_question = (body.get("question") or "").strip()
+
+    if not inv:
+        return {"error": "investigation name required"}, 400
+    if index is None:
+        return {"error": "index required"}, 400
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        return {"error": "index must be an integer"}, 400
+    if not resolution:
+        return {"error": "resolution note required"}, 400
+
+    target = _invstatus.investigation_yaml_path(ws_root, inv)
+    if target is None:
+        return {"error": f"no investigation.yaml for {inv!r}"}, 404
+
+    result: dict = {}
+
+    def _mutate(spec: dict) -> "tuple[Any, tuple | None]":
+        ex = spec.get("executive")
+        if not isinstance(ex, dict):
+            return None, ("executive block missing", 404)
+        needed = ex.get("decisions_needed")
+        if not isinstance(needed, list):
+            return None, ("executive.decisions_needed missing", 404)
+        if index < 0 or index >= len(needed):
+            hi = len(needed) - 1
+            return None, (f"decision index {index} out of range (0..{hi})", 404)
+        entry = needed[index]
+        if isinstance(entry, dict):
+            question = str(entry.get("question") or "").strip()
+        elif isinstance(entry, str):
+            question = entry.strip()
+        else:
+            question = ""
+        # Optimistic-concurrency guard: the list may have shifted under a
+        # concurrent resolve, so if the caller told us which question it saw,
+        # confirm it still sits at `index` before mutating.
+        if expected_question and question and expected_question != question:
+            return None, ("decision at index changed; refresh and retry", 409)
+        resolved_entry = f"{question} — Resolved: {resolution}" if question else resolution
+        resolved = ex.get("decisions_resolved")
+        if not isinstance(resolved, list):
+            resolved = []
+            ex["decisions_resolved"] = resolved
+        resolved.append(resolved_entry)
+        needed.pop(index)
+        result["resolved"] = resolved_entry
+        result["remaining"] = len(needed)
+        return spec, None
+
+    try:
+        from ruamel.yaml import YAML as _RYAML
+
+        _ry = _RYAML()
+        _ry.preserve_quotes = True
+        _ry.width = 4096
+        spec = _ry.load(target.read_text(encoding="utf-8")) or {}
+        mutated, err = _mutate(spec)
+        if err is not None:
+            return {"error": err[0]}, err[1]
+        with target.open("w", encoding="utf-8") as _fh:
+            _ry.dump(mutated, _fh)
+    except ImportError:
+        spec = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        mutated, err = _mutate(spec)
+        if err is not None:
+            return {"error": err[0]}, err[1]
+        target.write_text(yaml.safe_dump(mutated, sort_keys=False), encoding="utf-8")
+
+    return {"ok": True, "index": index, **result}, 200
+
+
 def study_seed_followup(ws_root: Path, body: dict) -> "tuple[dict, int]":
     """POST /api/study-seed-followup: seed a child study from a parent.
 

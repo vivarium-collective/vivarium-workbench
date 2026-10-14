@@ -28,6 +28,13 @@ main{padding:20px;margin:0 auto}
   box-sizing:border-box;
 }
 #investigation-dag-shell{ width: 100% !important; }
+/* Expand (snap-to-top) mode: grow the graph pane to nearly the full viewport so the
+   whole graph is easy to read, without going browser-fullscreen. Overrides the
+   inline height; the workbench rail/tabs stay available above/around it. */
+#investigation-dag-shell.aig-expanded{
+  height: 90vh !important; max-height: 90vh !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28); scroll-margin-top: 8px;
+}
 #investigation-study-embed-panel{
   width: 100% !important; max-width: none !important;
   margin-top: 16px !important;
@@ -43,8 +50,13 @@ main{padding:20px;margin:0 auto}
 }
 #investigation-study-embed-frame{
   width: 100% !important;
-  height: 85vh !important;
-  min-height: 600px !important;
+  /* Height is set by _fitEmbedToContent (auto-grow to the study's content height,
+     floored at the viewport height) so the embedded study flows into the page's
+     SINGLE scrollbar. Do NOT force a fixed viewport height (e.g. 85vh !important)
+     here — that overrides the JS height and re-introduces the iframe's own inner
+     scrollbar (the double-scrollbar the user saw). */
+  display: block;
+  min-height: 600px;
 }
 main.study-page{max-width:none;padding:12px 16px;width:100%;box-sizing:border-box}
 
@@ -2837,6 +2849,21 @@ body.pcard-splitting iframe{ pointer-events:none; }
 }
 .inv-brief-tab:hover { color: #334155; background: #f8fafc; }
 .inv-brief-tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+/* Decisions tab — highlighted (amber) to draw attention when decisions are open. */
+.inv-brief-tab-attn { color: #b45309; }
+.inv-brief-tab-attn:hover { color: #92400e; background: #fffbeb; }
+.inv-brief-tab-attn.active { color: #b45309; border-bottom-color: #b45309; }
+.inv-brief-tab-badge {
+  display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 10px;
+  font-size: 0.78em; font-weight: 700; line-height: 1.6; vertical-align: baseline;
+  background: #e2e8f0; color: #475569;
+}
+.inv-brief-tab-badge.attn { background: #b45309; color: #fff; animation: invDecPulse 1.9s ease-in-out infinite; }
+@keyframes invDecPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(180, 83, 9, 0.5); }
+  50%      { box-shadow: 0 0 0 5px rgba(180, 83, 9, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .inv-brief-tab-badge.attn { animation: none; } }
 .inv-brief-panels { font-family: -apple-system, "Segoe UI", sans-serif; }
 .inv-brief-prose { font-size: 0.95em; line-height: 1.62; color: #334155; }
 .inv-brief-prose p { margin: 0 0 10px; }

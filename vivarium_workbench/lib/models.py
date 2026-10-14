@@ -1892,6 +1892,17 @@ class ProposedInputDecisionBody(BaseModel):
     decision: Optional[str] = None
 
 
+class ResolveDecisionBody(BaseModel):
+    """POST /api/investigation-decision-resolve {investigation, index, resolution, question?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    index: Optional[Any] = None
+    resolution: Optional[str] = None
+    question: Optional[str] = None
+
+
 class StudySeedFollowupBody(BaseModel):
     """POST /api/study-seed-followup {parent, finding_id?, followup_idx?, proposal_id?, proposal_idx?, study_type?}"""
 

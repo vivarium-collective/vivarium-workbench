@@ -10,6 +10,7 @@
 <!-- Phone/responsive layer (loaded last so its @media rules win). Ships to the
      live server and every published read-only bundle via publish.py. -->
 <link rel="stylesheet" href="assets/responsive.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
+<link rel="stylesheet" href="assets/search-palette.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <!-- Apply the saved light/dark theme before first paint (no flash of light). -->
 <script>(function(){try{var t=localStorage.getItem('viv.theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <!-- item 41: when this tab was spawned via ?workspace=/?build= (workspace-picker.js's
@@ -817,9 +818,10 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <small>workbench</small>
         </div>
       </a>
-      <!-- Study search — a magnifier next to the collapse toggle; click to reveal
-           the search field below the nav (see _vivToggleRailSearch). -->
-      <button class="viv-rail-toggle viv-rail-search-btn" id="viv-rail-search-btn" type="button" aria-label="Search studies" title="Search studies" onclick="_vivToggleRailSearch()">
+      <!-- Global search — a magnifier next to the collapse toggle; opens the
+           pop-out search window across studies, catalog, registry, runs and
+           resources (see search-palette.js; ⌘K / Ctrl-K also opens it). -->
+      <button class="viv-rail-toggle viv-rail-search-btn" id="viv-rail-search-btn" type="button" aria-label="Search the workbench" title="Search everything (⌘K)" onclick="(window._vivOpenGlobalSearch||_vivToggleRailSearch)()">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">
           <circle cx="11" cy="11" r="7"/>
           <line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -1538,6 +1540,12 @@ a.viv-bs-commit:hover { text-decoration: underline; }
            Built entirely by _renderInvOpening(d) from the investigation data. -->
       <div id="investigation-detail-description" class="inv-brief-host"></div>
     </div>
+    <!-- Decision cockpit: the open expert decisions (executive.decisions_needed)
+         surfaced prominently as an actionable card with inline Resolve controls,
+         plus the campaign-plan docs and the resolved-decision log. Built by
+         _renderInvDecisionCockpit(d); renders nothing when there are no
+         decisions and no plan docs. -->
+    <div id="investigation-decision-cockpit"></div>
     <!-- Discourse-graph framing: studies as knowledge-producing operations. -->
     <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
       <strong>Investigation graph</strong>
@@ -1553,6 +1561,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <button type="button" title="Zoom out" onclick="window._aigZoomBy(0.8)" style="border:1px solid #e2e8f0;background:transparent;border-radius:5px 0 0 5px;padding:2px 9px;cursor:pointer;font-size:1em;line-height:1.3">−</button>
         <button type="button" title="Zoom in" onclick="window._aigZoomBy(1.25)" style="border:1px solid #e2e8f0;border-left:none;background:transparent;padding:2px 9px;cursor:pointer;font-size:1em;line-height:1.3">+</button>
         <button type="button" title="Fit to view" onclick="window._aigFit()" style="border:1px solid #e2e8f0;border-left:none;background:transparent;padding:2px 7px;cursor:pointer;font-size:0.95em;line-height:1.3">⤢</button>
+        <button id="aig-expand-btn" type="button" title="Expand graph — snap to top and grow it tall (workbench stays)" onclick="window._aigExpand()" style="border:1px solid #e2e8f0;border-left:none;background:transparent;padding:2px 7px;cursor:pointer;font-size:0.95em;line-height:1.3">⤒</button>
         <button type="button" title="Fullscreen" onclick="window._aigFullscreen()" style="border:1px solid #e2e8f0;border-left:none;background:transparent;border-radius:0 5px 5px 0;padding:2px 7px;cursor:pointer;font-size:0.95em;line-height:1.3">⛶</button>
       </span>
       <span class="aig-orient-ctl" style="float:right;display:inline-flex;align-items:center;gap:2px;font-size:0.9em;color:#64748b;margin-right:14px" role="group" aria-label="Graph orientation">
@@ -2589,6 +2598,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/mobile-nav.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile-nav unavailable */"></script>
+<script src="assets/search-palette.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* global search unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
 <!-- chat-core.js already loaded above (shared by panel-dock.js + process-code.js). -->
 <script src="assets/ai-models.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
