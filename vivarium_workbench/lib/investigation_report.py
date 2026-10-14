@@ -39,6 +39,11 @@ _STUDY_KEEP = (
     "requires", "sourcing", "baseline", "behavior_tests", "runs", "conclusion",
     "loop_provenance", "purpose", "findings", "conclusion_logic", "limitations",
     "parent_studies", "pipeline_gate", "literature_anchors", "key_assumptions",
+    # the four-part scientific framing (question → experiment → observable → learn)
+    # the report leads with: the model experiment, the measured observable, and the
+    # study's lifecycle/phase + maturity. Additive — each is optional per study.
+    "objective", "hypothesis", "result", "phase", "kind", "design_status",
+    "readouts", "discovery_implications", "status",
 )
 
 # 5-state study verdict (mirrors viva_superpowers roll-up): each maps to a glyph
@@ -131,7 +136,15 @@ def _build_spine(ws_root, inv_slug: str, studies: list) -> dict:
         rc = rcmap.get(s["slug"])
         if rc:
             s["run_commands"] = rc
-        for p in (s.get("parent_studies") or []):
+        # Dependency edges mirror the workbench's _dagEdges precedence: prefer
+        # pipeline_gate.prerequisites (the canonical Pass-A field), else the
+        # legacy parent_studies. Reading only parent_studies missed studies that
+        # declare prerequisites via pipeline_gate (og-02 → og-01), collapsing the
+        # chain to a flat depth-0 row.
+        pg = s.get("pipeline_gate") or {}
+        raw_edges = (pg.get("prerequisites") if isinstance(pg, dict) and pg.get("prerequisites")
+                     else s.get("parent_studies")) or []
+        for p in raw_edges:
             src = p.get("study") if isinstance(p, dict) else p
             if src in slugs:
                 edges.append({"from": src, "to": s["slug"]})
@@ -500,6 +513,31 @@ def _baseline_composite_id(spec: dict) -> "str | None":
     return None
 
 
+def _composite_methods_fidelity(cid: "str | None") -> "tuple[list | None, str | None]":
+    """Resolve ``(methods, fidelity)`` for a study's baseline composite off its
+    registered ``GeneratorEntry`` — process-bigraph's
+    ``composite_generator(methods=[...], fidelity="real|reproduction")`` fields,
+    which live on the composite, NOT on ``study.yaml``. Fully guarded: an
+    unimportable process-bigraph, an unregistered composite, or an entry without
+    the fields all yield ``(None, None)`` so the Methods row + fidelity chip
+    simply omit (data-safe). The caller checks the study spec's own
+    ``methods``/``fidelity`` keys first, so an explicit study override wins."""
+    if not cid:
+        return None, None
+    try:
+        from vivarium_workbench.lib.investigation_run_one_views import _generator_entry
+        entry = _generator_entry(cid)
+        if entry is None and not cid.startswith("local:"):
+            entry = _generator_entry("local:" + cid)
+        if entry is None:
+            return None, None
+        methods = getattr(entry, "methods", None)
+        fidelity = getattr(entry, "fidelity", None)
+        return (methods or None), (fidelity or None)
+    except Exception:
+        return None, None
+
+
 def _model_topology(ws_root, spec: dict) -> "dict | None":
     """Best-effort bigraph topology for the study's baseline composite, used to
     render the loom view in the Model section. Fully guarded: any
@@ -611,6 +649,28 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         s = {k: spec.get(k) for k in _STUDY_KEEP if spec.get(k) is not None}
         s["slug"] = real_slug
         s["title"] = spec.get("title") or _humanize(real_slug)   # title is optional in some workspaces
+        # "Methods · Simulations" node-card block (locked shared spec, matching the
+        # live workbench graph): the baseline composite id + graded-test counts are
+        # computed here. `methods`/`fidelity` come from process-bigraph's
+        # composite_generator(methods=/fidelity=) field, which lives on the
+        # baseline composite's GeneratorEntry (NOT study.yaml): an explicit study
+        # override wins, otherwise we resolve off the registered composite. Both
+        # absent → the Methods row + fidelity chip omit, data-safe.
+        # runs/n_steps/status come straight off s.runs in the template.
+        s["baseline_composite"] = _baseline_composite_id(spec)
+        s["tests_counts"] = _outcome_counts(spec)
+        methods = spec.get("methods")
+        fidelity = spec.get("fidelity")
+        if methods is None or fidelity is None:
+            c_methods, c_fidelity = _composite_methods_fidelity(s["baseline_composite"])
+            if methods is None:
+                methods = c_methods
+            if fidelity is None:
+                fidelity = c_fidelity
+        if methods is not None:
+            s["methods"] = methods
+        if fidelity is not None:
+            s["fidelity"] = fidelity
         at = _match_traj(trajs, real_slug, "agent")
         pt = _match_traj(trajs, real_slug, "policy")
         if at:
@@ -656,6 +716,16 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "lead": inv.get("lead"),
         "executive": inv.get("executive"),
         "scientific_argument": inv.get("scientific_argument"),
+        # Narrative front-matter fields authored in investigation.yaml that the
+        # report previously dropped. Each is optional and renders as a graceful
+        # no-op when absent (other workspaces won't carry them): the Background /
+        # "simulated world" prose, an accessibility glossary, reader guidelines,
+        # and an explicit "how to read" note.
+        "biological_story": inv.get("biological_story"),
+        "glossary": inv.get("glossary"),
+        "guidelines": inv.get("guidelines"),
+        "how_to_read": inv.get("how_to_read"),
+        "created": inv.get("created"),
         "key_claims": inv.get("key_claims"),
         "competing_frameworks": inv.get("competing_frameworks"),
         "at_a_glance": inv.get("at_a_glance"),

@@ -136,7 +136,12 @@ def test_sourcing_data_shape_and_provenance(tmp_path):
                       "catalog", "workspace", "provenance", "studies",
                       # provenance surfacing: cited top-level argument + resolved bib
                       "scientific_argument", "key_claims", "competing_frameworks",
-                      "references", "inv_references"}
+                      "references", "inv_references",
+                      # narrative front-matter (published-report aesthetic): the
+                      # Background / "simulated world" prose, glossary, guidelines,
+                      # how-to-read, and the creation date for the masthead.
+                      "biological_story", "glossary", "guidelines", "how_to_read",
+                      "created"}
 
 
 def test_agentic_trajectory_attached(tmp_path):
