@@ -830,11 +830,12 @@
   }
   window._countCompositeProcs = _countCompositeProcs;
 
-  // Fill/update a composite card's face process-count badge from a process count.
+  // Fill/update a composite card's process count, in the meta line next to the
+  // param count: "composite · N params · M processes".
   function _setCompositeProcCount(card, n) {
     if (!card || typeof n !== 'number') return;
-    var badge = card.querySelector('[data-role="proc-count-hdr"]');
-    if (badge) { badge.textContent = n + ' process' + (n === 1 ? '' : 'es'); badge.hidden = false; }
+    var span = card.querySelector('[data-role="proc-count"]');
+    if (span) span.innerHTML = ' · <strong>' + n + '</strong> process' + (n === 1 ? '' : 'es');
   }
   window._setCompositeProcCount = _setCompositeProcCount;
 
@@ -1223,12 +1224,11 @@
       '<div class="loom-card loom-card-stack loom-card-composite">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" ondblclick="event.stopPropagation();_maximizeCardFromHeader(this)" title="Click to pin to top · double-click to maximize">' +
-            '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeTierBadge(c) +
-            // Process count on the face (the "Composite" kind badge + inline contract
-            // marker were removed — kind is obvious here and the § Contract button
-            // carries the richer contract info). Filled from the resolved bigraph when
-            // the card's graph mounts, and updated on Apply; hidden until known.
-            '<span class="proc-kind-badge pcard-proc-count" data-role="proc-count-hdr" title="Processes/steps assembled inside this composite (emitters excluded; updates when you Apply config)" hidden></span>' + wsPill + roPill +
+            // Clean face: the title, then only the read-only pill. The "Composite"
+            // kind badge, the composite-tier badge, the inline contract marker, and the
+            // "workspace" tag were removed as redundant/obvious here; the process count
+            // now sits next to the param count in the meta line below.
+            '<span class="loom-name">' + _esc(c.name) + '</span>' + roPill +
             '<span class="pcard-runtarget" data-role="runtarget" title="checking where a Run will execute…" ' +
               'style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
               'background:#eef1f4;color:#8a97a4;vertical-align:middle">Runs: …</span>' +
@@ -1254,7 +1254,7 @@
           '<button class="pcard-hdr-restore" type="button" onclick="_toggleCardHeader(this)" title="Show the composite bar">▸ ' + _esc(c.name) + '</button>' +
           '<div class="pcard-summary">' +
             '<div class="pcard-desc-col">' +
-              '<div class="pcard-contract-meta" data-role="contract-meta">composite · <strong>' + nCfg + '</strong> param' + (nCfg === 1 ? '' : 's') + '</div>' +
+              '<div class="pcard-contract-meta" data-role="contract-meta">composite · <strong>' + nCfg + '</strong> param' + (nCfg === 1 ? '' : 's') + '<span data-role="proc-count"></span></div>' +
               (function () { var s = _regStatsHtml(c); return s ? '<div class="reg-card-stats pcard-usage">' + s + '</div>' : ''; })() +
               (desc ? '<p class="loom-desc pcard-desc-clamp" onclick="_pcardToggleDesc(this)" title="Click to expand / collapse">' + _esc(desc) + '</p>' : '') +
               // Same copy-pasteable "how to run this" chip as the grid card, so
