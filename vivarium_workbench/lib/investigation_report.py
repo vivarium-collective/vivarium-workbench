@@ -513,6 +513,31 @@ def _baseline_composite_id(spec: dict) -> "str | None":
     return None
 
 
+def _composite_methods_fidelity(cid: "str | None") -> "tuple[list | None, str | None]":
+    """Resolve ``(methods, fidelity)`` for a study's baseline composite off its
+    registered ``GeneratorEntry`` — process-bigraph's
+    ``composite_generator(methods=[...], fidelity="real|reproduction")`` fields,
+    which live on the composite, NOT on ``study.yaml``. Fully guarded: an
+    unimportable process-bigraph, an unregistered composite, or an entry without
+    the fields all yield ``(None, None)`` so the Methods row + fidelity chip
+    simply omit (data-safe). The caller checks the study spec's own
+    ``methods``/``fidelity`` keys first, so an explicit study override wins."""
+    if not cid:
+        return None, None
+    try:
+        from vivarium_workbench.lib.investigation_run_one_views import _generator_entry
+        entry = _generator_entry(cid)
+        if entry is None and not cid.startswith("local:"):
+            entry = _generator_entry("local:" + cid)
+        if entry is None:
+            return None, None
+        methods = getattr(entry, "methods", None)
+        fidelity = getattr(entry, "fidelity", None)
+        return (methods or None), (fidelity or None)
+    except Exception:
+        return None, None
+
+
 def _model_topology(ws_root, spec: dict) -> "dict | None":
     """Best-effort bigraph topology for the study's baseline composite, used to
     render the loom view in the Model section. Fully guarded: any
@@ -626,16 +651,26 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         s["title"] = spec.get("title") or _humanize(real_slug)   # title is optional in some workspaces
         # "Methods · Simulations" node-card block (locked shared spec, matching the
         # live workbench graph): the baseline composite id + graded-test counts are
-        # computed here; `methods`/`fidelity` pass through from the study spec when
-        # declared (they arrive via process-bigraph's composite_generator
-        # methods=/fidelity= field — until then the Methods row + fidelity chip
-        # omit, data-safe). runs/n_steps/status come straight off s.runs in the template.
+        # computed here. `methods`/`fidelity` come from process-bigraph's
+        # composite_generator(methods=/fidelity=) field, which lives on the
+        # baseline composite's GeneratorEntry (NOT study.yaml): an explicit study
+        # override wins, otherwise we resolve off the registered composite. Both
+        # absent → the Methods row + fidelity chip omit, data-safe.
+        # runs/n_steps/status come straight off s.runs in the template.
         s["baseline_composite"] = _baseline_composite_id(spec)
         s["tests_counts"] = _outcome_counts(spec)
-        if spec.get("methods") is not None:
-            s["methods"] = spec.get("methods")
-        if spec.get("fidelity") is not None:
-            s["fidelity"] = spec.get("fidelity")
+        methods = spec.get("methods")
+        fidelity = spec.get("fidelity")
+        if methods is None or fidelity is None:
+            c_methods, c_fidelity = _composite_methods_fidelity(s["baseline_composite"])
+            if methods is None:
+                methods = c_methods
+            if fidelity is None:
+                fidelity = c_fidelity
+        if methods is not None:
+            s["methods"] = methods
+        if fidelity is not None:
+            s["fidelity"] = fidelity
         at = _match_traj(trajs, real_slug, "agent")
         pt = _match_traj(trajs, real_slug, "policy")
         if at:
