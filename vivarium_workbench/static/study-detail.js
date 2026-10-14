@@ -2689,6 +2689,14 @@
   // fill instead of popping between polls.
   var _chainProgressStart = null;
 
+  // Whether THIS workspace has a remote compute backend (viva-api/sms-api)
+  // configured. A local-only workspace (a bench process-bigraph workspace) has
+  // none — so the remote-dispatch affordances (⚙ Dispatch composite + the remote
+  // chain-progress poller below) must stay hidden and the UI must not even mention
+  // sms-api. Resolved once from /api/source/remote-health by _gateRemoteDispatch();
+  // default false so a local workspace is never coupled to a remote it lacks.
+  var _remoteConfigured = false;
+
   function _chainProgressEl() {
     var el = document.getElementById('study-chain-progress');
     if (!el) {
@@ -2812,6 +2820,10 @@
   }
 
   function _pollChainProgress(runId) {
+    // Local-only workspace: there is no remote backend to report chain progress,
+    // so never poll /api/remote-run-chain-progress (it would surface a spurious
+    // "sms-api unreachable"). Local runs track progress via the Runs tab refresh.
+    if (!_remoteConfigured) return;
     if (_chainProgressTimer) { clearTimeout(_chainProgressTimer); _chainProgressTimer = null; }
     // A legacy run is an integer simulation id; a /viva/v1 run (serve --backend-base-url)
     // carries the backend's opaque string id, asked for as run_id.
@@ -2880,6 +2892,25 @@
     if (!panel) return;
     panel.style.display = (panel.style.display === 'none') ? '' : 'none';
   });
+
+  // Gate the remote-dispatch affordances on whether this workspace actually has a
+  // remote compute backend configured. ⚙ Dispatch composite targets viva-api/AWS
+  // Batch/Nextflow; a local-only workspace has no such backend, so the button (and
+  // the sms-api progress poller) must not appear — the study view must not even
+  // know about sms-api. Default-hidden; revealed only once /api/source/remote-health
+  // confirms `configured:true`. In a published snapshot the fetch simply fails →
+  // stays hidden, matching the snapshot-mode run-button hide.
+  (function _gateRemoteDispatch() {
+    var dispatchBtn = document.getElementById('study-run-composite');
+    if (dispatchBtn) dispatchBtn.style.display = 'none';
+    if (typeof _isSnapshot === 'function' && _isSnapshot()) return;
+    api('GET', '/api/source/remote-health')
+      .then(function (r) {
+        _remoteConfigured = !!(r && r.status === 200 && r.body && r.body.configured);
+        if (_remoteConfigured && dispatchBtn) dispatchBtn.style.display = '';
+      })
+      .catch(function () { _remoteConfigured = false; });
+  })();
 
   // #cp-dispatch's own click (rendered dynamically inside _compositePanelEl,
   // so bound here via delegation rather than at panel-creation time) with the
@@ -2960,6 +2991,36 @@
         alert('Reproduce failed: ' + (err && err.message ? err.message : err));
       });
   });
+
+  // Gate "↻ Reproduce" on whether the latest run is actually replayable. It
+  // replays a run's recorded manifest via /api/study-reproduce → cli_runs.find_run,
+  // which only scans study runs.db + the workspace composite-runs.db. A study whose
+  // runs come from the canonical runner (store_path under canonical-runs/, db_path
+  // null — the norm for a bench workspace like this one) is NOT in those DBs, so
+  // reproduce 404s "run not found". Rather than offer a button that always errors,
+  // hide it unless the latest run is reproducible (db_path set, e.g. dashboard-
+  // managed runs in v2ecoli). "Run current spec" (re-derive + launch) stays as the
+  // reliable action. Default-hidden; revealed only once a replayable run is seen.
+  (function _gateReproduce() {
+    var rbtn = document.getElementById('study-reproduce');
+    if (!rbtn) return;
+    rbtn.style.display = 'none';
+    if (typeof _isSnapshot === 'function' && _isSnapshot()) return;
+    var slug = studyName();
+    var _ds = window.DataSource;
+    var url = (_ds && _ds.simulationsUrl) ? _ds.apiUrl(_ds.simulationsUrl(slug))
+      : '/api/simulations?study=' + encodeURIComponent(slug);
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var sims = (_ds && _ds.simulationsFilter) ? _ds.simulationsFilter((d && d.simulations) || [], slug) : ((d && d.simulations) || []);
+        var latest = sims.length ? sims[0] : null;
+        // Replayable iff find_run can locate it: a study/composite runs.db row
+        // (db_path set), not a canonical-runs-only output.
+        if (latest && latest.run_id && latest.db_path) rbtn.style.display = '';
+      })
+      .catch(function () { /* leave hidden — err on the side of not offering a broken action */ });
+  })();
 
   // Narrative navigation: "Next study →" follows this investigation's leads-to
   // chain. Works in BOTH contexts: embedded in the investigation graph view (it

@@ -10,11 +10,11 @@ import type { ZoomTier, ZoomTierId } from './types';
 
 export const TIERS: ZoomTier[] = [
   { id: 'glyph',    minZoom: 0,    cardWidth: 180, cardHeight: 56 },
-  { id: 'ports',    minZoom: 0.25, cardWidth: 220, cardHeight: 96 },
-  { id: 'types',    minZoom: 0.5,  cardWidth: 300, cardHeight: 150 },
-  { id: 'config',   minZoom: 0.7,  cardWidth: 340, cardHeight: 190 },
-  { id: 'contract', minZoom: 0.9,  cardWidth: 380, cardHeight: 240 },
-  { id: 'full',     minZoom: 1.6,  cardWidth: 620, cardHeight: 320 },
+  { id: 'ports',    minZoom: 0.25, cardWidth: 240, cardHeight: 96 },
+  { id: 'types',    minZoom: 0.5,  cardWidth: 340, cardHeight: 150 },
+  { id: 'config',   minZoom: 0.7,  cardWidth: 390, cardHeight: 190 },
+  { id: 'contract', minZoom: 0.9,  cardWidth: 430, cardHeight: 240 },
+  { id: 'full',     minZoom: 1.6,  cardWidth: 680, cardHeight: 320 },
 ];
 
 /** Zoom overlap a tier keeps once entered, so scrolling across a threshold

@@ -3042,6 +3042,11 @@
         if (host) host.innerHTML = '<div class="loom-run-err" style="padding:10px">✗ ' + _esc(String(msg)) + '</div>';
         return;   // do NOT reload the loom — it would show a stale/default graph
       }
+      // Update the card's "· N processes" meta from the re-resolved bigraph —
+      // if the applied config structurally changed the process set, it reflects it.
+      if (j.state && window._setCompositeProcCount && window._countCompositeProcs) {
+        try { window._setCompositeProcCount(card, window._countCompositeProcs(j.state)); } catch (e) {}
+      }
       if (embed) {
         embed._overrides = JSON.stringify(cfg);
         embed._loomLoaded = false;
@@ -13027,7 +13032,7 @@
            'style="display:flex;align-items:center;gap:6px;padding:4px 14px 4px ' + indent + ';color:' + nameColor + ';text-decoration:none;font-size:' + fontSize + ';">' +
              grip +
              '<span aria-hidden="true" style="flex:none;width:8px;height:8px;border-radius:50%;background:' + color + ';display:inline-block"></span>' +
-             '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
+             '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.title || s.name) + '</span>' +
            '</a>';
   }
 

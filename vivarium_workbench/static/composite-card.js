@@ -638,6 +638,8 @@
     // available on pages that also load walkthrough.js's live-loom glue).
     var embed = sec.querySelector('.ccard-loom-embed');
     if (embed && typeof _openCompositeLoomInline === 'function') _openCompositeLoomInline(embed);
+    // Fill the face process-count badge when a composite card is first expanded.
+    if (card && card.classList.contains('pcard-composite')) _ensureCompositeProcCount(card);
     // Outputs section: lazy-fill the declared-observables checklist on first open.
     if (card && card.classList.contains('pcard-composite') && sec.getAttribute('data-sec') === 'outputs') {
       _loadCompositeObservables(card);
@@ -803,6 +805,87 @@
   }
   window._syncOutEmitter = _syncOutEmitter;
 
+  // Count the PROCESS/STEP instances inside a resolved composite state (the
+  // bigraph the Explore graph renders). Emitters are excluded — the registry
+  // treats them as a separate kind (their own tab), not model processes. A
+  // process/step node is counted as a unit (we don't descend into its ports/
+  // config). The count is read off the RESOLVED state, so it reflects the
+  // applied config (a config that structurally adds/removes a process updates it).
+  function _countCompositeProcs(state) {
+    var n = 0;
+    (function walk(node) {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      var t = node._type;
+      if (t === 'process' || t === 'step') {
+        if (!/emitter/i.test(String(node.address || node.instance || ''))) n++;
+        return;   // count the process as one unit; its children are ports/config
+      }
+      for (var k in node) {
+        if (!Object.prototype.hasOwnProperty.call(node, k) || k.charAt(0) === '_') continue;
+        walk(node[k]);
+      }
+    })(state);
+    return n;
+  }
+  window._countCompositeProcs = _countCompositeProcs;
+
+  // Fill/update a composite card's process count, in the meta line next to the
+  // param count: "composite · N params · M processes".
+  function _setCompositeProcCount(card, n) {
+    if (!card || typeof n !== 'number') return;
+    var span = card.querySelector('[data-role="proc-count"]');
+    if (span) span.innerHTML = ' · <strong>' + n + '</strong> process' + (n === 1 ? '' : 'es');
+  }
+  window._setCompositeProcCount = _setCompositeProcCount;
+
+  // Resolve the composite ONCE (per card) just to count its processes and fill the
+  // face badge. The composites LIST carries no process count (these are live
+  // generators with no committed state), and a full resolve is too costly to run
+  // for every list row — so this fires lazily, when the card's graph is first
+  // shown (and again on Apply via _applyCompositeConfig's re-resolve).
+  function _ensureCompositeProcCount(card) {
+    if (!card || card._procCountLoaded) return;
+    card._procCountLoaded = true;
+    var id = card.getAttribute('data-address'); if (!id) { card._procCountLoaded = false; return; }
+    fetch(_api('/api/composite-resolve?id=' + encodeURIComponent(id)))
+      .then(function (r) { return r.json(); })
+      .then(function (d) { var st = (d && d.state) ? d.state : d; _setCompositeProcCount(card, _countCompositeProcs(st)); })
+      .catch(function () { card._procCountLoaded = false; });   // allow a retry
+  }
+  window._ensureCompositeProcCount = _ensureCompositeProcCount;
+
+  // Auto-fill each composite card's "· N processes" (next to the param count) as
+  // soon as the card is on screen — without needing to open a section. An
+  // IntersectionObserver resolves only cards that actually become visible (so the
+  // whole composite list is never mass-resolved), and a MutationObserver picks up
+  // cards from every render path (full card, popout, re-render). _ensureCompositeProcCount
+  // is idempotent (its own _procCountLoaded guard), so this never double-resolves.
+  (function _autoCompositeProcCount() {
+    if (typeof IntersectionObserver === 'undefined' || typeof MutationObserver === 'undefined') return;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { io.unobserve(e.target); _ensureCompositeProcCount(e.target); }
+      });
+    }, { rootMargin: '150px' });
+    // Both the full card (.pcard-composite) and the grid card (.registry-card,
+    // data-kind=composite) carry data-address; resolve the count for either.
+    var SEL = '.pcard-composite[data-address], .registry-card[data-kind="composite"][data-address]';
+    function observe(card) { if (card && !card._procCountObserved) { card._procCountObserved = true; io.observe(card); } }
+    function scan(root) {
+      if (!root || root.nodeType !== 1) return;
+      if (root.matches && root.matches(SEL)) observe(root);
+      if (root.querySelectorAll) root.querySelectorAll(SEL).forEach(observe);
+    }
+    function start() {
+      scan(document.body);
+      new MutationObserver(function (muts) {
+        muts.forEach(function (m) { m.addedNodes.forEach(scan); });
+      }).observe(document.body, { childList: true, subtree: true });
+    }
+    if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+  })();
+
   // Lazy-fill the Outputs observables checklist from the composite's DECLARED
   // emit paths (composite-resolve → state._declared_emit_paths). All checked by
   // default; global_time is always emitted (time axis) so it's shown pinned/
@@ -816,6 +899,8 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         var st = (d && d.state) ? d.state : d;
+        // Fill the card's "· N processes" meta from the resolved bigraph (initial load).
+        try { _setCompositeProcCount(card, _countCompositeProcs(st)); } catch (e) {}
         var paths = (st && Array.isArray(st._declared_emit_paths)) ? st._declared_emit_paths : [];
         var toggles = paths.filter(function (p) { return p && p !== 'global_time'; });
         if (!toggles.length) {
@@ -965,18 +1050,16 @@
   function _renderCompositeCardGrid(c) {
     var addr = c.module ? (c.module + '.' + c.name) : c.id;
     var desc = (c.description || '').trim(), short = desc ? desc.split('\n')[0] : '';
-    var wsPill = c.workspace_local ? '<span class="composite-ws-tag">📦 workspace</span>' : '';
     var stats = _regStatsHtml(c);
     var selCls = (window._registrySelected && window._registrySelected === c.id) ? ' reg-selected' : '';
     var idA = _esc(c.id);
-    // A little more info on the card: process + parameter counts, and tags.
+    // Param count + the live process count next to it. c.requires.processes is empty
+    // for generators, so the real count is filled from the resolved bigraph by the
+    // IntersectionObserver (data-role="proc-count") when the card is visible.
     var np = (c.parameters && typeof c.parameters === 'object') ? Object.keys(c.parameters).length : 0;
-    var nproc = (c.requires && c.requires.processes) ? c.requires.processes.length : 0;
-    var metaBits = [];
-    if (nproc) metaBits.push(nproc + ' process' + (nproc === 1 ? '' : 'es'));
-    if (np) metaBits.push(np + ' param' + (np === 1 ? '' : 's'));
-    var meta = metaBits.length
-      ? '<div class="reg-card-meta" style="font-size:11px;color:#6b7280;margin:2px 0 4px">' + metaBits.join(' · ') + '</div>' : '';
+    var meta = '<div class="reg-card-meta" style="font-size:11px;color:#6b7280;margin:2px 0 4px">' +
+      (np ? '<strong>' + np + '</strong> param' + (np === 1 ? '' : 's') : 'composite') +
+      '<span data-role="proc-count"></span></div>';
     var tags = Array.isArray(c.tags) ? c.tags.slice(0, 3) : [];
     var tagHtml = tags.length
       ? '<div class="reg-card-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">' +
@@ -1001,10 +1084,10 @@
         ' title="Double-click to Explore (maximized bigraph)">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
-          '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong>' + _compositeBadge() + _compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + '</div>' +
+          '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong></div>' +
           '<code class="reg-card-addr">' + _esc(addr) + '</code>' +
           meta +
-          (short ? '<p class="reg-card-desc">' + _esc(short) + '</p>' : '') +
+          (desc ? '<p class="reg-card-desc pcard-desc-clamp" onclick="event.stopPropagation();_pcardToggleDesc(this)" title="Click to read the full description">' + _esc(desc) + '</p>' : '') +
           tagHtml +
           _runCmdChip(c.run_command) +
           actions +
@@ -1128,7 +1211,6 @@
     var pKeys = Object.keys(params), nCfg = pKeys.length;
     var desc = (c.description || '').trim();
     var sel = (window._registrySelected && window._registrySelected === c.id) ? ' reg-selected' : '';
-    var wsPill = c.workspace_local ? '<span class="composite-ws-tag">📦 workspace</span>' : '';
     var roPill = c.read_only ? '<span class="tag-pill" style="background:#fef2f2;color:#b91c1c;margin-left:6px">read-only</span>' : '';
 
     var chip = function (k) { return '<code class="pcard-chip">' + _esc(k) + '</code>'; };
@@ -1170,7 +1252,11 @@
       '<div class="loom-card loom-card-stack loom-card-composite">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" ondblclick="event.stopPropagation();_maximizeCardFromHeader(this)" title="Click to pin to top · double-click to maximize">' +
-            '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + roPill +
+            // Clean face: the title, then only the read-only pill. The "Composite"
+            // kind badge, the composite-tier badge, the inline contract marker, and the
+            // "workspace" tag were removed as redundant/obvious here; the process count
+            // now sits next to the param count in the meta line below.
+            '<span class="loom-name">' + _esc(c.name) + '</span>' + roPill +
             '<span class="pcard-runtarget" data-role="runtarget" title="checking where a Run will execute…" ' +
               'style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
               'background:#eef1f4;color:#8a97a4;vertical-align:middle">Runs: …</span>' +
@@ -1196,7 +1282,7 @@
           '<button class="pcard-hdr-restore" type="button" onclick="_toggleCardHeader(this)" title="Show the composite bar">▸ ' + _esc(c.name) + '</button>' +
           '<div class="pcard-summary">' +
             '<div class="pcard-desc-col">' +
-              '<div class="pcard-contract-meta" data-role="contract-meta">composite · <strong>' + nCfg + '</strong> param' + (nCfg === 1 ? '' : 's') + '</div>' +
+              '<div class="pcard-contract-meta" data-role="contract-meta">composite · <strong>' + nCfg + '</strong> param' + (nCfg === 1 ? '' : 's') + '<span data-role="proc-count"></span></div>' +
               (function () { var s = _regStatsHtml(c); return s ? '<div class="reg-card-stats pcard-usage">' + s + '</div>' : ''; })() +
               (desc ? '<p class="loom-desc pcard-desc-clamp" onclick="_pcardToggleDesc(this)" title="Click to expand / collapse">' + _esc(desc) + '</p>' : '') +
               // Same copy-pasteable "how to run this" chip as the grid card, so

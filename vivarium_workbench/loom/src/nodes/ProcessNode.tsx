@@ -428,7 +428,7 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   // Auto column caps the widest label so a runaway name can't blow out the card.
   // Raised well past the old 140/150 so ordinary long port names ("mechanical_ext",
   // "nucleic_acids") show in FULL under auto; a hand-set _portCol overrides it.
-  const labelCap = bigPorts ? 320 : 300;
+  const labelCap = bigPorts ? 290 : 270;
   let widestLabel = 0;
   if (show.ports) {
     const measurePort = (p: string, isOut: boolean, types: Record<string, unknown>) => {
@@ -445,8 +445,9 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
     inputPorts.forEach((p) => measurePort(p, false, inTypes));
     outputPorts.forEach((p) => measurePort(p, true, outTypes));
   }
-  // 13px = the .port-in-label left/right offset; +10px clearance from the center.
-  const autoCol = Math.round(13 + Math.min(labelCap, widestLabel) + 10);
+  // 13px = the .port-in-label left/right offset; +6px clearance from the center
+  // (narrowed from 10 so the middle description column gets a bit more room).
+  const autoCol = Math.round(13 + Math.min(labelCap, widestLabel) + 6);
   // _portCol: undefined = auto; 0 = ports COLLAPSED (hidden for this process);
   // >0 = a hand-set width (drag). During a drag, dragCol is the live value.
   const savedPortCol = (data as { _portCol?: number })._portCol;
