@@ -1587,12 +1587,18 @@ def _discover_composites() -> dict:
                 "module": entry.get("module"),
                 "default_n_steps": entry.get("default_n_steps"),
                 "visualizations": list(entry.get("visualizations") or []),
+                # Modeling-provenance metadata (process-bigraph methods/fidelity)
+                # so the HTTP process can report how a composite is built + its
+                # fidelity without importing @composite_generator modules.
+                "methods": list(entry.get("methods") or []),
+                "fidelity": entry.get("fidelity") or "",
             }
     # Belt-and-suspenders: any registry key discover_all missed (mirrors the old
     # known_composite_ids direct-registry union).
     for gid in reg_keys:
         out.setdefault(gid, {"name": None, "description": "", "parameters": {},
-                             "module": None, "default_n_steps": None, "visualizations": []})
+                             "module": None, "default_n_steps": None, "visualizations": [],
+                             "methods": [], "fidelity": ""})
     return {"generators": out}
 
 

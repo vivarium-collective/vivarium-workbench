@@ -755,11 +755,15 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     from vivarium_workbench.lib.run_commands import study_run_commands  # noqa: PLC0415
     from vivarium_workbench.lib.composite_lookup import (  # noqa: PLC0415
         composite_steps_index, baseline_steps_for_study,
+        composite_provenance_index, baseline_provenance_for_study,
     )
 
     # Composite default_n_steps map (best-effort) → a `--steps N` hint on each
     # study's run command, N being its baseline composite's natural run length.
     _steps_index = composite_steps_index(ws_root)
+    # Composite modeling-provenance map (methods/fidelity) → the graph card's
+    # "Methods · Simulations" block. Best-effort ({} on discovery failure).
+    _prov_index = composite_provenance_index(ws_root)
     _study_step_values: list[int] = []
 
     def _normalize_parents(study_spec: dict) -> list:  # type: ignore[return]
@@ -867,6 +871,58 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             _count_split = verdict_count_split(study_spec)
         except Exception:  # noqa: BLE001
             _count_split = None
+
+        # --- "Methods · Simulations" graph-card projection ---------------------
+        # Raw baseline composite id (from study_spec["baseline"][0].composite),
+        # not the `baseline_source` label. Empty string when undeclared.
+        _baseline_list = study_spec.get("baseline") or []
+        _baseline_composite = ""
+        if isinstance(_baseline_list, list) and _baseline_list and isinstance(_baseline_list[0], dict):
+            _baseline_composite = (_baseline_list[0].get("composite") or "").strip()
+        # Methods + fidelity resolved from the baseline composite's GeneratorEntry
+        # (via the composite-lookup provenance index). Degrade to empty.
+        _prov = baseline_provenance_for_study(study_spec, _prov_index) or {}
+        _methods = list(_prov.get("methods") or [])
+        _fidelity = _prov.get("fidelity") or ""
+        # Behavior-tests pass/fail summary from the canonical (pure) verdict
+        # builder — {passed, total} + a small per-test list for the glyph row.
+        _beh_summary: dict = {"passed": 0, "total": 0, "tests": []}
+        try:
+            from vivarium_workbench.lib.behavior_test_card import (  # noqa: PLC0415
+                build_behavior_tests_verdict,
+            )
+            _bv = build_behavior_tests_verdict(study_spec)
+            _beh_summary = {
+                "passed": int(_bv.get("n_pass") or 0),
+                "total": int(_bv.get("n_total") or 0),
+                "tests": [
+                    {"name": str(r.get("name") or ""),
+                     "passed": str(r.get("result") or "").upper() == "PASS"}
+                    for r in (_bv.get("tests") or [])
+                ],
+            }
+        except Exception:  # noqa: BLE001
+            pass
+        # Runs summary: {count, status, n_steps, emitter}. Count from the same
+        # helper as n_runs; latest status/n_steps/emitter from the run registry
+        # (newest row), all best-effort + degrade-gracefully.
+        _runs_summary: dict = {"count": n_runs_for_study}
+        try:
+            from vivarium_workbench.lib.study_spec import read_runs_db_for_study  # noqa: PLC0415
+            _rows = read_runs_db_for_study(ws_root, study_spec["name"])
+            if _rows:
+                _latest = _rows[0]
+                _lp = _latest.get("params") if isinstance(_latest.get("params"), dict) else {}
+                _emitter = _lp.get("emitter") or _lp.get("emitter_address")
+                if _latest.get("status"):
+                    _runs_summary["status"] = _latest.get("status")
+                if _latest.get("n_steps") is not None:
+                    _runs_summary["n_steps"] = _latest.get("n_steps")
+                if isinstance(_emitter, str) and _emitter:
+                    _runs_summary["emitter"] = _emitter
+        except Exception:  # noqa: BLE001
+            pass
+
         studies_out.append({
             "name":                  study_spec["name"],
             "status":                raw_status,
@@ -878,6 +934,12 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             "n_interventions":       len(study_spec.get("interventions") or []),
             "n_runs":                n_runs_for_study,
             "baseline_source":       _format_baseline_source(study_spec),
+            # "Methods · Simulations" graph-card projection (band-2 semantic zoom).
+            "baseline_composite":    _baseline_composite,
+            "methods":               _methods,
+            "fidelity":              _fidelity,
+            "behavior_tests":        _beh_summary,
+            "runs":                  _runs_summary,
             "parent_studies":        _normalize_parents(study_spec),
             "n_behaviors":           len(beh_tests),
             "n_readouts":            len(readouts),

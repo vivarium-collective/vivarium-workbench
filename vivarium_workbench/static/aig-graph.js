@@ -101,12 +101,96 @@
       legend + rows + viol + '</div>';
   }
 
+  // One labeled row of the Methods · Simulations block (label muted → value).
+  function _mRow(label, valueHtml) {
+    return '<div class="aig-methods-row" style="display:flex;gap:6px;align-items:flex-start;margin:2px 0">' +
+      '<span class="aig-methods-label" style="flex:none;color:#64748b">' + _esc(label) + '</span>' +
+      '<span class="aig-methods-value" style="flex:1;color:#334155">' + valueHtml + '</span></div>';
+  }
+
+  // "Methods · Simulations" study-card block (band-2 semantic zoom). Pure string
+  // builder — node-testable. Reads the backend projection fields on the study
+  // node (baseline_composite / baseline_source, methods, fidelity, runs,
+  // behavior_tests). Each row is omitted when its data is absent; the whole
+  // block renders nothing when there is nothing to show (no empty block).
+  function _methodsBlockHtml(study) {
+    study = study || {};
+    var rows = [];
+
+    // 1. Model: baseline composite name + a fidelity chip.
+    var model = study.baseline_source || '';
+    if (!model && study.baseline_composite) {
+      var segs = String(study.baseline_composite).split('.');
+      model = segs[segs.length - 1];
+    }
+    var fid = study.fidelity || '';
+    var chip = '';
+    if (fid === 'real') {
+      chip = ' <span class="aig-fidelity-chip aig-fidelity-real" ' +
+        'title="Wraps a genuine simulator">real tool</span>';
+    } else if (fid === 'reproduction') {
+      chip = ' <span class="aig-fidelity-chip aig-fidelity-repro" ' +
+        'title="Coarse-grained reproduction — not a wrapped engine">reproduction</span>';
+    }
+    if (model || chip) {
+      rows.push(_mRow('Model',
+        '<span class="aig-methods-model">' + _esc(model) + '</span>' + chip));
+    }
+
+    // 2. Methods: the modeling-method tags, joined by " · ".
+    var methods = (study.methods || []).filter(function (m) {
+      return m != null && String(m).length;
+    });
+    if (methods.length) {
+      rows.push(_mRow('Methods', _esc(methods.join(' · '))));
+    }
+
+    // 3. Sims: <count> run(s) · <status> · <n_steps> steps (omit missing pieces).
+    var runs = study.runs || {};
+    var sim = [];
+    var cnt = runs.count;
+    if (cnt != null && cnt !== 0 && cnt !== '') {
+      sim.push(_esc(cnt) + ' run' + (Number(cnt) === 1 ? '' : 's'));
+    }
+    if (runs.status) sim.push(_esc(runs.status));
+    if (runs.n_steps != null && runs.n_steps !== '') sim.push(_esc(runs.n_steps) + ' steps');
+    if (sim.length) {
+      rows.push(_mRow('Sims', sim.join(' · ')));
+    }
+
+    // 4. Tests: stage-style glyphs + "<passed>/<total> passed", colored by
+    // STATUS_COLOR (green all-pass, amber some-pass, red none-pass).
+    var bt = study.behavior_tests || {};
+    var total = Number(bt.total) || 0;
+    if (total > 0) {
+      var passed = Number(bt.passed) || 0;
+      var color = passed >= total ? STATUS_COLOR.accepted
+        : (passed > 0 ? STATUS_COLOR.partial : STATUS_COLOR.refuted);
+      var glyphs = (bt.tests || []).slice(0, 12).map(function (t) {
+        var on = !!(t && t.passed);
+        return '<span title="' + _esc((t && t.name) || '') + (on ? ' — passed' : ' — not passed') +
+          '" style="color:' + (on ? STATUS_COLOR.accepted : STATUS_COLOR.refuted) + '">' +
+          (on ? '●' : '○') + '</span>';
+      }).join('');
+      rows.push(_mRow('Tests',
+        '<span style="letter-spacing:1px">' + glyphs + '</span>' +
+        '<span style="color:' + color + ';font-weight:600"> ' + passed + '/' + total + ' passed</span>'));
+    }
+
+    if (!rows.length) return '';
+    return '<div class="aig-methods-block" style="margin-top:8px;padding-top:7px;' +
+      'border-top:1px dashed #e5e7eb;font-size:0.7em;line-height:1.4">' +
+      '<div class="aig-methods-header" style="font-weight:600;color:#475569;' +
+      'margin-bottom:2px">Methods · Simulations</div>' +
+      rows.join('') + '</div>';
+  }
+
   function _layoutOptsForBand(band) {
     var b = Math.max(0, Math.min(2, band | 0));
     var BANDS = [
       { band: 0, cls: 'aig-zoom-far',  cardW: 150, xGap: 40, asks: false, finds: false, chain: false, followups: false },
       { band: 1, cls: 'aig-zoom-mid',  cardW: 210, xGap: 64, asks: true,  finds: true,  chain: false, followups: false },
-      { band: 2, cls: 'aig-zoom-near', cardW: 320, xGap: 72, asks: true,  finds: true,  chain: true,  followups: true  },
+      { band: 2, cls: 'aig-zoom-near', cardW: 320, xGap: 72, asks: true,  finds: true,  chain: true,  followups: true, methods: true },
     ];
     return BANDS[b];
   }
@@ -143,15 +227,19 @@
   }
 
   global._chainBlockHtml = _chainBlockHtml;
+  global._methodsBlockHtml = _methodsBlockHtml;
   global._groupClaims = _groupClaims;
   global._layoutOptsForBand = _layoutOptsForBand;
   global.chooseGraphOrientation = chooseGraphOrientation;
+  global.STATUS_COLOR = STATUS_COLOR;
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       _chainBlockHtml: _chainBlockHtml,
+      _methodsBlockHtml: _methodsBlockHtml,
       _groupClaims: _groupClaims,
       _layoutOptsForBand: _layoutOptsForBand,
       chooseGraphOrientation: chooseGraphOrientation,
+      STATUS_COLOR: STATUS_COLOR,
     };
   }
 })(typeof window !== 'undefined' ? window : globalThis);

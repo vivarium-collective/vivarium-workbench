@@ -4767,6 +4767,19 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 :root[data-theme="dark"] .loom-out-ports .loom-port{ background:var(--surface-3); border-color:var(--border-2); }
 :root[data-theme="dark"] .loom-port-name{ color:#9db4e6; }
 
+/* "Methods · Simulations" study-card block (aig-graph.js _methodsBlockHtml) —
+   light mode. The block/header/label/value base look is set inline to match
+   the evidence-chain block; these classes carry the fidelity chip styling and
+   give the dark overrides below a handle. */
+.aig-methods-block{ /* container look set inline (matches evidence-chain) */ }
+.aig-methods-value{ word-break:break-word; }
+.aig-fidelity-chip{
+  display:inline-block; padding:0 7px; border-radius:9999px;
+  font-size:0.92em; font-weight:600; line-height:1.5; white-space:nowrap;
+}
+.aig-fidelity-chip.aig-fidelity-real{ background:#ccfbf1; color:#0f766e; }   /* teal — wraps a genuine simulator */
+.aig-fidelity-chip.aig-fidelity-repro{ background:#fef3c7; color:#92400e; }  /* amber — coarse-grained reproduction */
+
 /* Investigation view: biology story, graph canvas, and study-DAG node cards. */
 :root[data-theme="dark"] .inv-bio-story{ background:var(--surface-2) !important; border-color:var(--border) !important; color:var(--text); }
 :root[data-theme="dark"] .aig-zoom-mid,
@@ -4775,6 +4788,14 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 :root[data-theme="dark"] .aig-orient-tb{ background:var(--bg) !important; }
 :root[data-theme="dark"] .iset-dag-node{ background:var(--surface) !important; border-color:var(--border) !important; color:var(--text); }
 :root[data-theme="dark"] .iset-dag-node .aig-claim-row:hover{ background:var(--hover); }
+/* "Methods · Simulations" block — dark. Inline base colours are overridden with
+   theme tokens (mirrors the .iset-dag-node / .aig-claim-row dark handling). */
+:root[data-theme="dark"] .aig-methods-block{ border-top-color:var(--border) !important; }
+:root[data-theme="dark"] .aig-methods-header{ color:var(--text) !important; }
+:root[data-theme="dark"] .aig-methods-label{ color:var(--text-muted) !important; }
+:root[data-theme="dark"] .aig-methods-value{ color:var(--text) !important; }
+:root[data-theme="dark"] .aig-fidelity-chip.aig-fidelity-real{ background:#124b43 !important; color:#5eead4 !important; }
+:root[data-theme="dark"] .aig-fidelity-chip.aig-fidelity-repro{ background:#3f2d12 !important; color:#fcd34d !important; }
 :root[data-theme="dark"] #investigation-dag-lead{ color:var(--text-muted) !important; }
 :root[data-theme="dark"] #investigation-dag-lead strong{ color:var(--text) !important; }
 :root[data-theme="dark"] .inv-lead-details summary{ color:var(--text-muted) !important; }

@@ -11125,6 +11125,10 @@
         (_opts.followups ? followUpsChip : '') +
         (_opts.chain && chainsBySlug && typeof window._chainBlockHtml === 'function'
           ? window._chainBlockHtml(chainsBySlug[s.name]) : '') +
+        // "Methods · Simulations" block (band-2 near zoom only). Reads the
+        // backend projection fields on the study node `s`.
+        (_opts.methods && typeof window._methodsBlockHtml === 'function'
+          ? window._methodsBlockHtml(s) : '') +
         // Layer-4: cached/compute badge + downloads (↓figures/↓notebook, all
         // modes) + run/continue buttons (live only).
         _dagCacheBadgeHtml(s.name) +
