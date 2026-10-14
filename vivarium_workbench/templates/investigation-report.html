@@ -202,6 +202,20 @@ figure img{max-width:100%;height:auto;display:block;border:1px solid var(--line)
 .spine-badge.v-blocked,.spine-badge.v-needs_calibration{color:var(--warn);background:var(--warn-soft)}
 .spine-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
 .spine-legend-item{font-size:11.5px;color:var(--ink-2)}
+/* "Methods · Simulations" block — locked shared node-card spec (1:1 with the live
+   workbench graph). The spec's slate hex is mapped to the report's theme tokens so
+   the block is dark-mode-aware and harmonizes with the report palette; structure,
+   class names and the fidelity-chip vocabulary (real tool / reproduction) are kept
+   exactly as the live graph's. */
+.aig-methods-block{margin-top:8px;padding-top:7px;border-top:1px dashed var(--line);font-size:0.78em}
+.aig-methods-head{font-weight:600;color:var(--ink-2);margin-bottom:3px}
+.aig-methods-row{display:flex;gap:8px;line-height:1.55}
+.aig-methods-label{color:var(--ink-3);flex:0 0 56px}
+.aig-methods-val{color:var(--ink);min-width:0}
+.aig-methods-val.allpass{color:var(--pass)}
+.aig-fidelity-chip{display:inline-block;margin-left:7px;padding:0 7px;border-radius:999px;font-size:0.9em;font-weight:600;vertical-align:baseline}
+.aig-fidelity-real{background:color-mix(in srgb,var(--cal) 15%,var(--surface));color:var(--cal);border:1px solid color-mix(in srgb,var(--cal) 32%,transparent)}
+.aig-fidelity-repro{background:var(--chip);color:var(--ink-2);border:1px solid var(--line-2)}
 .study-verdict-dag,.acceptance-rollup,.ac-gating-matrix{margin-top:4px}
 .ac-gating-matrix .gap,.acceptance-rollup td{font-size:13.5px}
 figcaption{color:var(--ink-2);font-size:12.5px;margin-top:8px;max-width:none}
@@ -1022,6 +1036,42 @@ function sciUnit(s){
   return body?`<div class="sci-unit">${body}</div>`:'';
 }
 
+// "Methods · Simulations" node-card block — matches the locked SHARED spec used by
+// the live workbench graph's study card (same rows + fidelity vocabulary + CSS
+// class hooks), so the live graph and this published report read 1:1. Model / Sims
+// / Tests render off the study's existing data now; the Methods row + fidelity chip
+// populate from s.methods / s.fidelity (process-bigraph composite_generator
+// methods=/fidelity=) once that field lands — until then they omit, data-safe.
+function methodsSimsBlock(s){
+  const comp=s.baseline_composite||'';
+  const compName=comp?String(comp).split('.').pop():'';
+  const methods=Array.isArray(s.methods)?s.methods.filter(Boolean):[];
+  const fid=s.fidelity;
+  const runs=Array.isArray(s.runs)?s.runs:[];
+  const last=runs.length?runs[runs.length-1]:null;
+  const rstatus=last?(last.status||s.simulation_status||''):(s.simulation_status||'');
+  const nsteps=last?(last.n_steps||last.steps||''):'';
+  const tc=s.tests_counts||{}; const pass=tc.passed||0, fail=tc.failed||0, skip=tc.skipped||0; const tot=pass+fail+skip;
+  const rows=[];
+  if(compName){
+    const chip=fid?`<span class="aig-fidelity-chip aig-fidelity-${fid==='real'?'real':'repro'}">${fid==='real'?'real tool':'reproduction'}</span>`:'';
+    rows.push(`<div class="aig-methods-row"><span class="aig-methods-label">Model</span><span class="aig-methods-val"><span class="mono">${esc(compName)}</span>${chip}</span></div>`);
+  }
+  if(methods.length)
+    rows.push(`<div class="aig-methods-row"><span class="aig-methods-label">Methods</span><span class="aig-methods-val">${esc(methods.join(' · '))}</span></div>`);
+  if(runs.length||rstatus||nsteps){
+    const bits=[runs.length+' run'+(runs.length===1?'':'s')];
+    if(rstatus) bits.push(esc(String(rstatus)));
+    if(nsteps) bits.push(esc(String(nsteps))+' steps');
+    rows.push(`<div class="aig-methods-row"><span class="aig-methods-label">Sims</span><span class="aig-methods-val">${bits.join(' · ')}</span></div>`);
+  }
+  if(tot){
+    const glyphs=('✓'.repeat(Math.min(pass,16)))+(fail?('✗'.repeat(Math.min(fail,16))):'');
+    rows.push(`<div class="aig-methods-row"><span class="aig-methods-label">Tests</span><span class="aig-methods-val${fail===0?' allpass':''}">${glyphs} ${pass}/${tot} passed</span></div>`);
+  }
+  return rows.length?`<div class="aig-methods-block"><div class="aig-methods-head">Methods · Simulations</div>${rows.join('')}</div>`:'';
+}
+
 // high-level overview shown when a study is COLLAPSED
 function studySummary(s, inv){
   const chips=[];
@@ -1221,16 +1271,7 @@ function renderStudy(s, inv, idx){
     <div class="study-summary">${studySummary(s,inv)}</div>
     <div class="study-detail">
       ${sciUnit(s)}
-      <!-- ============================ SEAM ============================
-           A richer "methods + simulations" node/detail block — model/composite
-           + its modeling methods + sim/run count & status + behavior-test
-           pass/fail — will slot in HERE once the shared node-card spec is
-           locked (for 1:1 consistency with the live workbench graph). Until the
-           coordinator hands over that spec, DO NOT invent a method/sim field set
-           or chip vocabulary — it would diverge from the locked spec. The study
-           keeps the four-part scientific unit (above) + verdict + the existing
-           detail parts (below) for now.
-           ============================================================= -->
+      ${methodsSimsBlock(s)}
       ${part('Model — composite internals', modelBody, 'study:'+s.slug+'/model', s.title+' · Model')}
       ${part('Simulation run', runBody, 'study:'+s.slug+'/simulation', s.title+' · Simulation run')}
       ${part('Visualizations', vizBody, 'study:'+s.slug+'/visualizations', s.title+' · Visualizations')}

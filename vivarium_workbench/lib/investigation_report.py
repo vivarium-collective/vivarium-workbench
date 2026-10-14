@@ -624,6 +624,18 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         s = {k: spec.get(k) for k in _STUDY_KEEP if spec.get(k) is not None}
         s["slug"] = real_slug
         s["title"] = spec.get("title") or _humanize(real_slug)   # title is optional in some workspaces
+        # "Methods · Simulations" node-card block (locked shared spec, matching the
+        # live workbench graph): the baseline composite id + graded-test counts are
+        # computed here; `methods`/`fidelity` pass through from the study spec when
+        # declared (they arrive via process-bigraph's composite_generator
+        # methods=/fidelity= field — until then the Methods row + fidelity chip
+        # omit, data-safe). runs/n_steps/status come straight off s.runs in the template.
+        s["baseline_composite"] = _baseline_composite_id(spec)
+        s["tests_counts"] = _outcome_counts(spec)
+        if spec.get("methods") is not None:
+            s["methods"] = spec.get("methods")
+        if spec.get("fidelity") is not None:
+            s["fidelity"] = spec.get("fidelity")
         at = _match_traj(trajs, real_slug, "agent")
         pt = _match_traj(trajs, real_slug, "policy")
         if at:
