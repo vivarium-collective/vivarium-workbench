@@ -638,6 +638,8 @@
     // available on pages that also load walkthrough.js's live-loom glue).
     var embed = sec.querySelector('.ccard-loom-embed');
     if (embed && typeof _openCompositeLoomInline === 'function') _openCompositeLoomInline(embed);
+    // Fill the face process-count badge when a composite card is first expanded.
+    if (card && card.classList.contains('pcard-composite')) _ensureCompositeProcCount(card);
     // Outputs section: lazy-fill the declared-observables checklist on first open.
     if (card && card.classList.contains('pcard-composite') && sec.getAttribute('data-sec') === 'outputs') {
       _loadCompositeObservables(card);
@@ -828,13 +830,29 @@
   }
   window._countCompositeProcs = _countCompositeProcs;
 
-  // Fill/update a composite card's "· N processes" meta from a process count.
+  // Fill/update a composite card's face process-count badge from a process count.
   function _setCompositeProcCount(card, n) {
     if (!card || typeof n !== 'number') return;
-    var span = card.querySelector('[data-role="proc-count"]');
-    if (span) span.innerHTML = n ? ' · <strong>' + n + '</strong> process' + (n === 1 ? '' : 'es') : '';
+    var badge = card.querySelector('[data-role="proc-count-hdr"]');
+    if (badge) { badge.textContent = n + ' process' + (n === 1 ? '' : 'es'); badge.hidden = false; }
   }
   window._setCompositeProcCount = _setCompositeProcCount;
+
+  // Resolve the composite ONCE (per card) just to count its processes and fill the
+  // face badge. The composites LIST carries no process count (these are live
+  // generators with no committed state), and a full resolve is too costly to run
+  // for every list row — so this fires lazily, when the card's graph is first
+  // shown (and again on Apply via _applyCompositeConfig's re-resolve).
+  function _ensureCompositeProcCount(card) {
+    if (!card || card._procCountLoaded) return;
+    card._procCountLoaded = true;
+    var id = card.getAttribute('data-address'); if (!id) { card._procCountLoaded = false; return; }
+    fetch(_api('/api/composite-resolve?id=' + encodeURIComponent(id)))
+      .then(function (r) { return r.json(); })
+      .then(function (d) { var st = (d && d.state) ? d.state : d; _setCompositeProcCount(card, _countCompositeProcs(st)); })
+      .catch(function () { card._procCountLoaded = false; });   // allow a retry
+  }
+  window._ensureCompositeProcCount = _ensureCompositeProcCount;
 
   // Lazy-fill the Outputs observables checklist from the composite's DECLARED
   // emit paths (composite-resolve → state._declared_emit_paths). All checked by
@@ -1205,7 +1223,12 @@
       '<div class="loom-card loom-card-stack loom-card-composite">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" ondblclick="event.stopPropagation();_maximizeCardFromHeader(this)" title="Click to pin to top · double-click to maximize">' +
-            '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeBadge() + _compositeTierBadge(c) + _contractBadge(c.contract_audit) + wsPill + roPill +
+            '<span class="loom-name">' + _esc(c.name) + '</span>' + _compositeTierBadge(c) +
+            // Process count on the face (the "Composite" kind badge + inline contract
+            // marker were removed — kind is obvious here and the § Contract button
+            // carries the richer contract info). Filled from the resolved bigraph when
+            // the card's graph mounts, and updated on Apply; hidden until known.
+            '<span class="proc-kind-badge pcard-proc-count" data-role="proc-count-hdr" title="Processes/steps assembled inside this composite (emitters excluded; updates when you Apply config)" hidden></span>' + wsPill + roPill +
             '<span class="pcard-runtarget" data-role="runtarget" title="checking where a Run will execute…" ' +
               'style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
               'background:#eef1f4;color:#8a97a4;vertical-align:middle">Runs: …</span>' +
@@ -1231,7 +1254,7 @@
           '<button class="pcard-hdr-restore" type="button" onclick="_toggleCardHeader(this)" title="Show the composite bar">▸ ' + _esc(c.name) + '</button>' +
           '<div class="pcard-summary">' +
             '<div class="pcard-desc-col">' +
-              '<div class="pcard-contract-meta" data-role="contract-meta">composite · <strong>' + nCfg + '</strong> param' + (nCfg === 1 ? '' : 's') + '<span data-role="proc-count"></span></div>' +
+              '<div class="pcard-contract-meta" data-role="contract-meta">composite · <strong>' + nCfg + '</strong> param' + (nCfg === 1 ? '' : 's') + '</div>' +
               (function () { var s = _regStatsHtml(c); return s ? '<div class="reg-card-stats pcard-usage">' + s + '</div>' : ''; })() +
               (desc ? '<p class="loom-desc pcard-desc-clamp" onclick="_pcardToggleDesc(this)" title="Click to expand / collapse">' + _esc(desc) + '</p>' : '') +
               // Same copy-pasteable "how to run this" chip as the grid card, so
