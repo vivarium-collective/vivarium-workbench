@@ -239,6 +239,12 @@ def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]
         # study-run handlers merge these defaults into the Study's viz list
         # so callers inherit the composite's simulation-report panels.
         rec["visualizations"] = list(entry.get("visualizations") or [])
+        # Modeling-provenance (process-bigraph methods/fidelity). Always present
+        # (empty list / "" when the generator declares none) so callers — e.g.
+        # the investigation-graph "Methods · Simulations" card — can rely on the
+        # keys and degrade gracefully.
+        rec["methods"] = list(entry.get("methods") or [])
+        rec["fidelity"] = entry.get("fidelity") or ""
         out[gid] = rec
 
     # Tag origin: own/installed/generator composites get origin_repo None
@@ -466,6 +472,62 @@ def baseline_steps_for_study(spec: dict, steps_index: dict) -> "int | None":
             n = steps_index.get(key)
             if n:
                 return n
+    return None
+
+
+def composite_provenance_index(
+        ws_root: Path, package_path: str | None = None) -> dict[str, dict]:
+    """Map composite id / trailing-name / ``name`` → modeling-provenance dict.
+
+    The value is ``{"methods": [...], "fidelity": "...", "name": "..."}`` drawn
+    from the process-bigraph ``methods`` / ``fidelity`` fields a composite
+    declares (see :func:`discover_all_composites`). Keyed the same three ways as
+    :func:`composite_steps_index` so a study's short baseline alias, a
+    ``local:``-prefixed ref, or a dotted id all resolve. A composite that
+    declares neither field is still indexed (empty methods, ``""`` fidelity) so
+    callers can tell "declared nothing" from "not found". Best-effort: returns
+    ``{}`` on any discovery failure.
+    """
+    ws_root = Path(ws_root)
+    if package_path is None:
+        try:
+            ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+            package_path = ws_data.get("package_path") or (
+                "pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+        except Exception:  # noqa: BLE001
+            package_path = ""
+    idx: dict[str, dict] = {}
+    try:
+        for cid, rec in discover_all_composites(ws_root, package_path).items():
+            prov = {
+                "methods": list(rec.get("methods") or []),
+                "fidelity": rec.get("fidelity") or "",
+                "name": rec.get("name") or cid.rsplit(".", 1)[-1],
+            }
+            idx[cid] = prov
+            idx.setdefault(cid.split(".")[-1], prov)
+            nm = rec.get("name")
+            if isinstance(nm, str) and nm:
+                idx.setdefault(nm, prov)
+    except Exception:  # noqa: BLE001
+        pass
+    return idx
+
+
+def baseline_provenance_for_study(spec: dict, prov_index: dict) -> "dict | None":
+    """The study baseline composite's ``{methods, fidelity, name}`` (or ``None``).
+
+    Mirrors :func:`baseline_steps_for_study`: matches the study's first declared
+    composite ref (baseline first) against ``prov_index`` by full ref, the part
+    after a ``local:``-style protocol, and the trailing dotted segment.
+    """
+    if not prov_index:
+        return None
+    for ref in _study_composite_refs(spec):
+        for key in (ref, ref.split(":")[-1], ref.split(".")[-1]):
+            p = prov_index.get(key)
+            if p is not None:
+                return p
     return None
 
 
