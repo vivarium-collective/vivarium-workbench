@@ -269,10 +269,15 @@
     // the base-path shim (report.py's _base_path_shim) never sees them — prefix
     // explicitly with window.__BASE_PATH__ (same idiom as branch-source.js).
     var BP = window.__BASE_PATH__ || "";
+    var _snapshot = (window.__DASH_CONFIG__ || {}).mode === "snapshot";
     function _art(name, label, title, download) {
+      // Snapshot mode has no live artifact route; publish.py bakes the viz page
+      // to a static `.html` file at the requested path (static hosts serve
+      // `.html` as HTML — an extensionless file would download instead).
+      var suffix = (_snapshot && name === "viz") ? ".html" : "";
       return '<a class="action-btn js-authoring" title="' + title + '" ' +
         (download ? 'download ' : 'target="_blank" rel="noopener" ') +
-        'href="' + BP + '/api/composite-run/' + runIdEnc + '/artifact/' + name +
+        'href="' + BP + '/api/composite-run/' + runIdEnc + '/artifact/' + name + suffix +
         '" style="text-decoration:none;">' + label + '</a>';
     }
     // A remote run's viz is never landed locally (⬇ Land folds only analyses.json

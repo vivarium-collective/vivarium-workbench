@@ -1130,6 +1130,40 @@ def _do_build(
         pass
     _write_json(api_dir / "simulations.json", sims)
 
+    # api/composite-run/<run_id>/artifact/viz.html — per-run figures for the
+    # Runs-tab "📊 Viz" action on the read-only site. Live, the button links to
+    # GET /api/composite-run/<run_id>/artifact/viz (composite_run_views.
+    # build_run_artifact, reading .pbg/runs/<run_id>/viz.json). A static host
+    # has no such route, so bake each completed run's rendered viz page to the
+    # `.html` path the snapshot SPA requests (static hosts serve .html as HTML;
+    # an extensionless file would download instead of opening). Byte-parity with
+    # the live route — same build_run_artifact. One run's failure never aborts
+    # the publish.
+    try:
+        from vivarium_workbench.lib.composite_run_views import build_run_artifact
+        run_viz_root = api_dir / "composite-run"
+        for row in (sims.get("simulations") or []):
+            run_id = row.get("run_id")
+            if not run_id or str(row.get("status") or "").lower() != "completed":
+                continue
+            try:
+                content, media_type, _download, code = build_run_artifact(
+                    ws_root, run_id, "viz")
+            except Exception:  # noqa: BLE001 — one run never aborts the publish
+                continue
+            if code != 200 or not content:
+                continue
+            # Only the inline HTML viewer page (the simulation case) maps to a
+            # static .html; image-only paper figures (svg/png/zip downloads)
+            # surface via the Visualizations-tab native gallery instead.
+            if "html" not in (media_type or ""):
+                continue
+            out_file = run_viz_root / str(run_id) / "artifact" / "viz.html"
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            out_file.write_bytes(content)
+    except Exception as exc:  # noqa: BLE001 — never abort a publish on run viz
+        print(f"  warn: per-run viz export failed: {exc}")
+
     # api/visualization-classes.json — registered viz/analysis classes
     try:
         viz_classes = list_visualization_classes(ws_root)
