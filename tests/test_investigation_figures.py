@@ -92,10 +92,12 @@ def test_investigation_zip_contents(tmp_path):
     assert blob
     names = set(zipfile.ZipFile(io.BytesIO(blob)).namelist())
     # Panels live under <study>/; the stitched composite figures are grouped under
-    # final/ (svg + png), matching the downloadable bundle layout.
+    # final/ (svg + png), matching the downloadable bundle layout; plus a navigable
+    # index.html gallery at the root.
     assert names == {
         "fig-07/panel-a.svg", "fig-99/only.svg",
         "final/figure_7.svg", "final/figure_7.png",
+        "index.html",
     }
 
 
@@ -138,7 +140,7 @@ def test_html_charts_ride_along_in_zip(tmp_path):
     blob = figs.build_figures_zip(_make_html_ws(tmp_path), "inv")
     assert blob
     names = set(zipfile.ZipFile(io.BytesIO(blob)).namelist())
-    assert names == {"html-01/mass.html", "html-01/flux.html"}
+    assert names == {"html-01/mass.html", "html-01/flux.html", "index.html"}
 
 
 def test_study_outputs_zip_includes_html_report(tmp_path):
@@ -294,4 +296,20 @@ def test_path_field_html_rides_along_in_zip(tmp_path):
     blob = figs.build_figures_zip(_make_path_field_ws(tmp_path), "inv")
     assert blob
     names = set(zipfile.ZipFile(io.BytesIO(blob)).namelist())
-    assert names == {"pf-01/pop.html", "pf-01/spatial.html"}
+    assert names == {"pf-01/pop.html", "pf-01/spatial.html", "index.html"}
+
+
+def test_figures_zip_index_is_navigable_gallery(tmp_path):
+    # The ↓ figures zip carries a navigable index.html: a sidebar entry per study
+    # and a card per figure that links to the in-zip file (iframe for HTML, download).
+    blob = figs.build_figures_zip(_make_html_ws(tmp_path), "inv")
+    zf = zipfile.ZipFile(io.BytesIO(blob))
+    idx = zf.read("index.html").decode()
+    names = set(zf.namelist())
+    assert "<title>inv — figure gallery</title>" in idx
+    # every src/download ref in the index resolves to a real zip member
+    import re
+    refs = set(re.findall(r'src="([^"#]+)"', idx)) | set(re.findall(r'href="([^"#]+)" download', idx))
+    local = {r for r in refs if not r.startswith("http")}
+    assert local and local <= names
+    assert 'href="html-01/mass.html" download' in idx  # per-figure download link
