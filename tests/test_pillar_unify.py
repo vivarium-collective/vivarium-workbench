@@ -141,3 +141,28 @@ def test_chart_card_static_image_path_unchanged():
     # The img branch (PNG/GIF) is still reachable and unconditioned on
     # iframe_url — a static image record still renders <img>, not an iframe.
     assert "'<img class=\"chart-img figure-media\"" in block
+
+
+DS_JS = (ROOT / "vivarium_workbench/static/data-source.js").read_text()
+
+
+def test_native_gallery_fetch_goes_through_datasource_for_snapshot():
+    # Regression: the Visualizations-tab native gallery (and the Overview key
+    # figure) must resolve their URL through DataSource.nativeGalleryUrl(), not a
+    # raw "/api/study-native-gallery/<slug>" fetch. In a published snapshot the
+    # live route is absent and the panels live at <base>/api/study-native-gallery/
+    # <slug>.json — a raw .json-less fetch 404s and the tab shows "No figures yet."
+    # despite published panels (what this guards against).
+    assert "'/api/study-native-gallery/' + encodeURIComponent" not in JS, \
+        "native gallery is fetched raw; route it through DataSource.nativeGalleryUrl()"
+    assert JS.count("DataSource.nativeGalleryUrl(") >= 2, \
+        "both _loadNativeGallery and _loadOverviewKeyFigure must use nativeGalleryUrl()"
+
+    # DataSource exposes the helper, and it appends .json (+ base path) in
+    # snapshot mode — byte-parity with publish.py's api/study-native-gallery/.
+    assert "nativeGalleryUrl:" in DS_JS, "DataSource must export nativeGalleryUrl"
+    i = DS_JS.index("function _nativeGalleryUrl")
+    block = DS_JS[i:i + 400]
+    assert '"snapshot"' in block and '+ ".json"' in block, \
+        "nativeGalleryUrl must map to the baked .json in snapshot mode"
+    assert "_base() +" in block, "nativeGalleryUrl must honour the snapshot base path"

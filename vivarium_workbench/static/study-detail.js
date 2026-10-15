@@ -808,7 +808,7 @@
     var host = document.getElementById('overview-key-figure');
     if (!host || _overviewKeyFigureLoaded) return;
     _overviewKeyFigureLoaded = true;
-    fetch('/api/study-native-gallery/' + encodeURIComponent(studyName()))
+    fetch(window.DataSource.nativeGalleryUrl(studyName()))
       .then(function (r) { return r.ok ? r.json() : { panels: {} }; })
       .then(function (d) {
         var panels = (d && d.panels) || {};
@@ -868,7 +868,7 @@
     if (!host || _nativeGalleryLoaded) return;
     _nativeGalleryLoaded = true;
     var slug = studyName();
-    fetch('/api/study-native-gallery/' + encodeURIComponent(slug))
+    fetch(window.DataSource.nativeGalleryUrl(slug))
       // Check r.ok before r.json(): a non-OK response (404 in a static snapshot
       // where this live-only endpoint is absent, or 5xx from an errored live
       // route) is treated as "no panels" -> the clean empty state below, not the
