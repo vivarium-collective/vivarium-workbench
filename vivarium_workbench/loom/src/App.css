@@ -405,7 +405,7 @@ body {
    side wire-loops don't clip at the canvas edge. */
 .process-node.is-minimal {
   background: #fdfcfa;
-  width: auto; min-width: 176px; max-width: 260px;
+  width: auto; min-width: 208px; max-width: 360px;
   min-height: 120px;
   margin: 0 auto;
   display: flex; flex-direction: column; justify-content: center;
@@ -594,7 +594,14 @@ body {
    rather than reading as a short bar — the layout already reserves the taller
    full-tier footprint, so this just fills it. --proc-min-h lets a specific view
    (compact/minimal) override the floor. */
-.process-node { min-height: max(var(--proc-min-h, 168px), min-content, var(--ports-min-h, 0px)); }
+/* Floor the card height to the taller of the view's base footprint and the
+   per-port reservation (--ports-min-h = (maxPorts+1)·rowH, set inline by
+   ProcessNode). This is a FLOOR only — taller center content (long equations /
+   descriptions) still expands the box via normal flow. NOTE: `min-content`
+   must NOT appear inside this max() — it's a keyword, not a <length>, so
+   Chromium treats the whole max() as invalid and drops it (min-height→0),
+   which collapsed every many-port card onto its absolutely-positioned ports. */
+.process-node { min-height: max(var(--proc-min-h, 168px), var(--ports-min-h, 0px)); }
 /* Border dots sit half-outside the card edge — don't clip them. */
 .process-node { overflow: visible; }
 
@@ -739,14 +746,21 @@ body {
    box for its big centered name). --port-col is the ADAPTIVE column width that
    ProcessNode measures from the longest port label; the px fallback is the old
    fixed reservation for any card that doesn't set it. */
+/* The center ALWAYS gets at least --center-min of its own width (set inline by
+   ProcessNode: 300px when it renders a governing equation / symbol legend, else
+   196px), so the two port-column margins can never squeeze the process NAME into
+   a one-character vertical sliver — the card grows wider instead (shrink-to-fit
+   react-flow node). This is the "make the process wider by default" floor. */
+.process-node-center { min-width: var(--center-min, 196px); box-sizing: border-box; }
 .process-node-contract .process-node-center,
-.process-node-full     .process-node-center { margin: 0 var(--port-col, 122px); }
+.process-node-full     .process-node-center { margin: 0 var(--port-col, 108px); }
 /* No-contract tiers use bigger port labels, so give the center more side
    clearance — otherwise a wide port type ("concentration") overlaps the big
-   centered name. */
+   centered name. The gutter fallback is thinner than before so the name keeps
+   more of the box. */
 .process-node-ports    .process-node-center,
 .process-node-types    .process-node-center,
-.process-node-config   .process-node-center { margin: 0 var(--port-col, 158px); }
+.process-node-config   .process-node-center { margin: 0 var(--port-col, 128px); }
 /* No ports shown → the side columns are gone, so reclaim the port-clearing
    margins: the center content (name / config / contract / math) fills the whole
    card, the config band spans edge-to-edge, and the name grows large. */

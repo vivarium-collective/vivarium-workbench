@@ -155,10 +155,13 @@ describe('force layout on the real v2ecoli baseline', () => {
     // Viewport-like: not a wide sliver, not a tall pillar.
     expect(aspect).toBeGreaterThan(0.4);
     expect(aspect).toBeLessThan(4);
-    // Dense enough that a full-tier card is big at the overview (target ≳0.2,
-    // up from the old grid packing's ~0.088; the wider 620px full-tier card
-    // lowers this a touch from the earlier ~0.28).
-    expect(fitZoom).toBeGreaterThan(0.2);
+    // Dense enough that a full-tier card is big at the overview (≳0.19, up from
+    // the old grid packing's ~0.088). The detail-aware footprint — cards that
+    // render a description / config reserve their real (taller) height, and a
+    // card with a governing equation or symbol legend reserves a wider center
+    // lane — lowers this a touch from the earlier ~0.28, in exchange for no
+    // overlap at full detail (see the NO-OVERLAP case above).
+    expect(fitZoom).toBeGreaterThan(0.19);
   });
 
   it('exports the GRID constant', () => {

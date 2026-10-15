@@ -445,9 +445,10 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
     inputPorts.forEach((p) => measurePort(p, false, inTypes));
     outputPorts.forEach((p) => measurePort(p, true, outTypes));
   }
-  // 13px = the .port-in-label left/right offset; +6px clearance from the center
-  // (narrowed from 10 so the middle description column gets a bit more room).
-  const autoCol = Math.round(13 + Math.min(labelCap, widestLabel) + 6);
+  // 13px = the .port-in-label left/right offset; +4px clearance from the center
+  // (narrowed so the middle name/description column keeps more of the box — the
+  // ports gutter stays as thin as the widest label actually needs).
+  const autoCol = Math.round(13 + Math.min(labelCap, widestLabel) + 4);
   // _portCol: undefined = auto; 0 = ports COLLAPSED (hidden for this process);
   // >0 = a hand-set width (drag). During a drag, dragCol is the live value.
   const savedPortCol = (data as { _portCol?: number })._portCol;
@@ -457,6 +458,30 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
   const portCol = !show.ports ? 14
     : portsCollapsed ? 16
       : (effPortCol != null && effPortCol > 0 ? effPortCol : autoCol);
+  // Horizontal margins on the (in-flow) center do NOT expand a shrink-to-fit
+  // card, so at the contract/full tiers — where the center renders the wide
+  // description + governing equation + symbol legend — the center would
+  // overflow its `margin: 0 var(--port-col)` box and collide with the output
+  // port column on the right. Pin a minWidth that fits BOTH port gutters AND
+  // the center lane (padding is 12px 26px → 52px horizontal). Only the detail
+  // tiers need it; ports/types/config keep their natural, tighter width.
+  // A compact figure pins a deliberately narrow card width (--proc-card-w), so
+  // skip the wide floor there — it would fight the tight packing. Only the
+  // non-wrapping rich center (a governing equation or a symbol legend) needs the
+  // 300px lane; a plain description wraps to the natural box, so plain processes
+  // keep their tighter footprint (and dense composites stay dense).
+  const isCompact = (data as { _compact?: boolean })._compact === true;
+  const richCenter = !!contract
+    && ((contract.math && contract.math.length > 0)
+      || (contract.symbols && Object.keys(contract.symbols).length > 0));
+  // The center's own min-width (the "process wider" floor). A rich center needs
+  // the full 300px equation/legend lane; a plain card only needs enough that the
+  // NAME never collapses to a vertical sliver. Set inline (not per-tier in CSS)
+  // so the rendered width and clusterGrid's reserved width use the SAME gate —
+  // a plain process never renders wider than its (narrower) reserved footprint.
+  const centerMin = richCenter ? 300 : 196;
+  const boxMinW = (show.ports && richCenter && !isCompact)
+    ? (portCol * 2 + 300 + 52) : undefined;
   const commitPortCol = (data as { _commitPortCol?: (id: string, pc: number) => void })._commitPortCol;
   const startColDrag = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -489,12 +514,16 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
       className={`process-node process-node-${stepKind} process-node-${t}${locked ? ' is-locked' : ''}${isLineage ? ' is-lineage' : ''}${isWired ? ' is-wired' : ''}${isDim ? ' is-dim' : ''}${!show.ports ? ' process-node-noports' : ''}${dims ? ' is-sized' : ''}${isMinimal ? ' is-minimal' : ''}`}
       style={{
         ...(dims ? { width: dims.width, height: dims.height, overflow: 'visible' } : {}),
+        // Without a hand-set size, floor the width so both gutters + the center
+        // lane fit (see boxMinW above) — a saved size already fixes the width.
+        ...(!dims && boxMinW ? { minWidth: boxMinW } : {}),
         // A hand-set / saved node height wins: cap the port-driven min-height to
         // it so a committed default view renders at its saved box size instead of
         // being stretched taller by the port rows (ports still show at the edges
         // via overflow:visible). Without a saved size, keep the full ports room.
         ['--ports-min-h' as string]: `${dims ? Math.min(portsMinH, dims.height) : portsMinH}px`,
         ['--port-col' as string]: `${portCol}px`,
+        ['--center-min' as string]: `${centerMin}px`,
       } as React.CSSProperties}
     >
       <NodeResizer
