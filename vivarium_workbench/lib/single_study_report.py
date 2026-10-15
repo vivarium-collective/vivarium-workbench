@@ -2138,14 +2138,21 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     rep = study_spec.get("report") or {}
     # Authored ``report:`` fields win; absent ones are DERIVED from real study
     # content so minimal studies still render the standard structure.
+    _lims = study_spec.get("limitations") or []
     title = rep.get("title") or study_spec.get("title") or study_spec.get("name", "study")
     verdict = rep.get("verdict") or _D.verdict(study_spec)
-    confidence = rep.get("confidence") or ""
+    # Single-source fallbacks (field-redundancy review, tier C): when the compact
+    # ``report:`` block is absent, read the canonical top-level field — confidence
+    # from ``study.confidence``, conclusion from top-level ``conclusion``, caveat
+    # from the first ``limitations`` entry — so a collapsed study (no ``report:``)
+    # still renders these slots. Authored ``report:`` fields still win, so existing
+    # studies are unchanged.
+    confidence = rep.get("confidence") or study_spec.get("confidence") or ""
     evidence_quality = rep.get("evidence_quality") or ""
     objective = rep.get("objective") or study_spec.get("objective") or ""
-    conclusion = rep.get("conclusion") or ""
+    conclusion = rep.get("conclusion") or study_spec.get("conclusion") or ""
     main_insight = rep.get("main_insight") or _D.insight(study_spec)
-    caveat = rep.get("caveat") or ""
+    caveat = rep.get("caveat") or (_lims[0] if _lims and isinstance(_lims[0], str) else "")
     lit_match = rep.get("lit_match") or ""
     key_metrics = rep.get("key_metrics") or _D.key_metrics(study_spec)
 

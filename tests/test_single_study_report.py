@@ -784,3 +784,47 @@ def test_measurement_integrity_sensitivity_via_stub(monkeypatch, _ws):
     assert 'id="measurement-integrity"' in html
     assert "threshold-sensitivity" in html
     assert "div-time" in html
+
+
+# ---------------------------------------------------------------------------
+# Tier-C single-source fallbacks: a study with no compact ``report:`` block
+# renders confidence / conclusion / caveat / metrics from the canonical
+# top-level fields + run outcomes (field-redundancy review).
+# ---------------------------------------------------------------------------
+
+
+def test_collapsed_study_falls_back_to_canonical_fields(_ws):
+    _write_study(
+        _ws, "og-collapsed",
+        title="The Collapsed Vent",
+        confidence="Accepted",
+        gate_status="passed",
+        claim="Habitability is a bounded region of the operating space.",
+        conclusion="Validated geochemical testbed for og-01.",
+        limitations=["Heat-partition fraction calibrated to the observed vent temperature."],
+        findings=[{"statement": "Outlet settles inside the Lost City window.", "status": "confirms"}],
+        runs=[{"name": "r1", "status": "completed",
+               "outcomes": {"vent-ph-in-range": {"result": "PASS", "observed": "9.37"}}}],
+    )
+    html = Path(render_single_study_report(str(_ws), "og-collapsed")).read_text()
+    assert "Accepted" in html                                       # confidence <- study.confidence
+    assert "Heat-partition fraction calibrated" in html             # caveat <- limitations[0]
+    assert "Validated geochemical testbed for og-01" in html        # conclusion <- top-level conclusion
+    assert "9.37" in html                                           # key_metrics derived from run outcomes
+    assert "Outlet settles inside the Lost City window" in html     # main_insight <- first finding
+
+
+def test_authored_report_block_still_wins(_ws):
+    _write_study(
+        _ws, "og-authored",
+        title="Top Title",
+        confidence="Accepted",
+        conclusion="Top-level conclusion that must be overridden.",
+        report={"confidence": "high",
+                "caveat": "Authored caveat wins.",
+                "conclusion": "Authored conclusion wins."},
+    )
+    html = Path(render_single_study_report(str(_ws), "og-authored")).read_text()
+    assert "Authored caveat wins" in html
+    assert "Authored conclusion wins" in html
+    assert "Top-level conclusion that must be overridden" not in html
