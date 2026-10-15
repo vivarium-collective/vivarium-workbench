@@ -220,7 +220,10 @@ def _parse_bib_entries(ws_root: Path) -> list[dict]:
             elif ch == "}" and not in_q:
                 depth -= 1
                 buf.append(ch)
-            elif ch == '"':
+            elif ch == '"' and depth == 0:
+                # Only a top-level '"' delimits a value; a '"' inside {…} is literal
+                # (e.g. the LaTeX umlaut \"o), so it must not toggle the quote state —
+                # otherwise every field after an author like E{\"o}rs bleeds together.
                 in_q = not in_q
                 buf.append(ch)
             elif ch == "," and depth == 0 and not in_q:
@@ -255,6 +258,40 @@ def _parse_bib_entries(ws_root: Path) -> list[dict]:
     return entries
 
 
+# Common BibTeX accent commands → the combining diacritic they apply to the next
+# letter, plus the standalone special letters. Lets the references view show
+# "Wołos" / "Szathmáry" / "Dörr" instead of raw LaTeX ("Wo\los", "Szathm\'ary").
+_LATEX_ACCENTS = {
+    '"': "\u0308", "'": "\u0301", "`": "\u0300", "^": "\u0302", "~": "\u0303",
+    "=": "\u0304", ".": "\u0307", "u": "\u0306", "v": "\u030c", "c": "\u0327",
+    "H": "\u030b", "k": "\u0328", "r": "\u030a", "b": "\u0331", "d": "\u0323",
+}
+_LATEX_SPECIAL = {
+    r"\l": "ł", r"\L": "Ł", r"\o": "ø", r"\O": "Ø", r"\ss": "ß", r"\aa": "å",
+    r"\AA": "Å", r"\ae": "æ", r"\AE": "Æ", r"\oe": "œ", r"\OE": "Œ", r"\i": "ı", r"\j": "ȷ",
+}
+
+
+def _delatex(s: str) -> str:
+    """Convert common BibTeX/LaTeX accent escapes to Unicode for display.
+
+    Handles ``\\"o`` → ö, ``\\'a`` → á, ``\\.Z`` → Ż, ``\\k{a}`` / ``\\k a`` → ą,
+    ``\\l`` → ł, ``\\ss`` → ß, etc. A no-op when there is no backslash; recognised
+    patterns only, so plain text and URLs pass through unchanged."""
+    import re
+    import unicodedata
+    if not s or "\\" not in s:
+        return s
+
+    def _acc(m: "re.Match") -> str:
+        return unicodedata.normalize("NFC", m.group(2) + _LATEX_ACCENTS[m.group(1)])
+
+    s = re.sub(r"\\([\"'`^~=.uvcHkrbd])\s*\{?([A-Za-z])\}?", _acc, s)
+    for cmd in sorted(_LATEX_SPECIAL, key=len, reverse=True):
+        s = s.replace(cmd + "{}", _LATEX_SPECIAL[cmd]).replace(cmd, _LATEX_SPECIAL[cmd])
+    return s
+
+
 def _absorb_kv(chunk: str, fields: dict) -> None:
     """Internal: parse a single 'key = {value}' chunk into the fields dict."""
     if "=" not in chunk:
@@ -267,8 +304,9 @@ def _absorb_kv(chunk: str, fields: dict) -> None:
         v = v[1:-1]
     elif v.startswith('"') and v.endswith('"'):
         v = v[1:-1]
-    # Collapse internal braces (e.g. {DnaA} -> DnaA) and whitespace.
+    # Convert LaTeX accents to Unicode, then collapse internal braces + whitespace.
     import re
+    v = _delatex(v)
     v = re.sub(r"\s+", " ", v.replace("{", "").replace("}", "")).strip()
     if k and v:
         fields[k] = v
