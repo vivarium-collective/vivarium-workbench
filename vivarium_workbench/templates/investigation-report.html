@@ -477,6 +477,21 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
   display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
 .wdag-node .wn-row .wn-lbl{font-weight:600;color:var(--ink)}
 .wdag-node .wn-etier{margin-top:7px}
+/* Click-to-expand: only cards whose Asks/Finds are actually clipped get the
+   affordance (data-clip set by setupWorkbenchDag after measuring). The caret
+   lives in the fixed-height meta row, so toggling it causes no layout shift.
+   Expanding unclamps the rows and floats the card over its neighbours — the
+   same in-place interrogation the live workbench graph offers. */
+.wdag-node .wn-rt{display:inline-flex;align-items:center;gap:6px;flex:none}
+.wdag-node .wn-exp{font-size:.72em;line-height:1;color:var(--ink-3);display:none;
+  transition:transform .12s ease,color .12s ease}
+.wdag-node[data-clip]{cursor:pointer;transition:border-color .12s ease,box-shadow .12s ease}
+.wdag-node[data-clip] .wn-exp{display:inline-block}
+.wdag-node[data-clip]:hover{border-color:var(--accent);box-shadow:0 4px 14px rgba(0,0,0,0.10)}
+.wdag-node[data-clip]:hover .wn-exp{color:var(--accent)}
+.wdag-node.wn-expanded{z-index:40;box-shadow:0 10px 28px rgba(0,0,0,0.20)}
+.wdag-node.wn-expanded .wn-exp{transform:rotate(180deg);color:var(--accent)}
+.wdag-node.wn-expanded .wn-row{-webkit-line-clamp:unset!important;line-clamp:unset!important}
 .wdag-legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;font-size:12px;color:var(--ink-2);
   padding:10px 2px 0;margin-top:2px}
 .wdag-legend .lg{display:inline-flex;align-items:center;gap:5px}
@@ -1976,7 +1991,7 @@ function workbenchDag(inv){
     const tier=(Array.isArray(s.findings)&&s.findings.length)?evidenceTier(s.findings[0],s):null;
     return `<div class="wdag-node" data-study="${esc(s.slug)}" style="border-top-color:${m.color};top:0;left:0">
       <div class="wn-meta"><span class="wn-icon" style="color:${m.color}">${m.icon}</span>
-        <span class="wn-badge" style="color:${m.color}">${esc(m.label)}</span></div>
+        <span class="wn-rt"><span class="wn-badge" style="color:${m.color}">${esc(m.label)}</span><span class="wn-exp" aria-hidden="true">▾</span></span></div>
       <a class="wn-title" href="#s-${esc(s.slug)}">${esc(s.title)}</a>
       ${asks?`<div class="wn-row" style="-webkit-line-clamp:2"><span class="wn-lbl">Asks:</span> ${esc(asks)}</div>`:''}
       ${finds?`<div class="wn-row" style="-webkit-line-clamp:4"><span class="wn-lbl">Finds:</span> ${esc(finds)}</div>`:`<div class="wn-row"><em style="color:var(--ink-3)">pending evidence</em></div>`}
@@ -2045,6 +2060,19 @@ function setupWorkbenchDag(){
       t.setAttribute('x',(x1+x2)/2); t.setAttribute('y',(y1+y2)/2-6); t.setAttribute('text-anchor','middle');
       t.setAttribute('font-size','10'); t.setAttribute('fill',st.color); t.textContent=st.label; svg.appendChild(t); }
   }); });
+  // Click-to-expand: mark only the cards whose Asks/Finds are actually clipped
+  // (so short cards get no misleading affordance), then let a click anywhere on
+  // such a card toggle its in-place expansion. The title link keeps navigating
+  // to the full study, so clicks on it are left alone.
+  nodeEls.forEach(n=>{
+    const clipped=[...n.querySelectorAll('.wn-row')].some(r=>r.scrollHeight-r.clientHeight>2);
+    if(clipped){ n.dataset.clip='1'; n.title='Click to read the full Asks / Finds — the title link opens the study'; }
+  });
+  canvas.addEventListener('click',e=>{
+    if(e.target.closest('a')) return;
+    const n=e.target.closest('.wdag-node[data-clip]');
+    if(n) n.classList.toggle('wn-expanded');
+  });
 }
 
 /* ---------- ENVIRONMENT → INDIVIDUAL conceptual strip (qualitative) ----------
