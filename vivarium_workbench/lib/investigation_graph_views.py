@@ -103,6 +103,12 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
                     _node_status = "evaluated"
             except Exception:  # noqa: BLE001
                 pass
+        # Authored edge relations (parent_relations): parent-slug -> relation,
+        # consulted below so edges carry the real leads-to/alternative-to/refutes/
+        # precedes typing instead of only the synthesized input/prerequisite rel.
+        _rel_by_parent = {r["study"]: r["relation"]
+                          for r in (study_spec.get("parent_relations") or [])
+                          if isinstance(r, dict) and r.get("study") and r.get("relation")}
         _node = {"id": f"study/{slug}", "slug": slug, "type": "study",
                  "label": study_spec.get("title") or study_spec.get("name") or slug,
                  "status": _node_status}
@@ -115,6 +121,11 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             _node["confidence"] = _dc(study_spec)
         except Exception:  # noqa: BLE001 — viva_superpowers optional; frontend falls back
             pass
+        # Two-axis markers (verdict × evidence_tier): authored study fields the
+        # graph renderer reads; optional, so an unmarked study stays unmarked.
+        for _mk in ("verdict", "evidence_tier"):
+            if study_spec.get(_mk):
+                _node[_mk] = study_spec[_mk]
         studies_out.append(_node)
         if use_members:
             # New reference model: edges are derived from this member's
@@ -127,8 +138,11 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
                 for inp in interface["inputs"]:
                     src = inp["from"]
                     if src in member_set:
-                        study_edges.append({"source": f"study/{src}", "target": f"study/{slug}",
-                                           "rel": "input", "artifact": inp["artifact"]})
+                        _e = {"source": f"study/{src}", "target": f"study/{slug}",
+                              "rel": "input", "artifact": inp["artifact"]}
+                        if _rel_by_parent.get(src):
+                            _e["relation"] = _rel_by_parent[src]
+                        study_edges.append(_e)
         else:
             # Legacy path: edges from pipeline_gate.prerequisites.
             # normalize_dag_edges injects a "tests-passed" default condition; the
@@ -140,9 +154,11 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
                         for pr in (prereqs or [])
                         if isinstance(pr, dict) and pr.get("study") and "condition" in pr}
             for pre in normalize_dag_edges(study_spec):
-                study_edges.append({"source": f"study/{pre['study']}", "target": f"study/{slug}",
-                                   "rel": "prerequisite",
-                                   "condition": explicit.get(pre["study"], "")})
+                _e = {"source": f"study/{pre['study']}", "target": f"study/{slug}",
+                      "rel": "prerequisite", "condition": explicit.get(pre["study"], "")}
+                if _rel_by_parent.get(pre["study"]):
+                    _e["relation"] = _rel_by_parent[pre["study"]]
+                study_edges.append(_e)
         nodes = load_study_nodes(ws_root, slug)
         derived = False
         if not nodes:
