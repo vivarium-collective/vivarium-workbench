@@ -91,10 +91,13 @@ def test_iset_response_surfaces_persisted_divergence(tmp_path, dashboard_client)
     assert ca.get("diverges_from_authored") is True
 
 
-def test_report_template_renders_acceptance_rollup():
+def test_report_template_renders_acceptance_gating_matrix():
     # The report (lib.investigation_report + template) renders the per-criterion
-    # roll-up table + a code-vs-authored divergence badge from computed_acceptance.
+    # AC gating matrix + a code-vs-authored divergence badge from
+    # computed_acceptance. The old roll-up table (same rows transposed) was
+    # consolidated into this matrix.
     tpl = (_PKG / "templates" / "investigation-report.html").read_text(encoding="utf-8")
     assert "diverges_from_authored" in tpl
-    assert "acceptance-rollup" in tpl
+    assert "ac-gating-matrix" in tpl
     assert "acceptance-divergence" in tpl
+    assert "acceptance-rollup" not in tpl

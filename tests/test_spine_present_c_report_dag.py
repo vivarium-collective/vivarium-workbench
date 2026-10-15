@@ -32,9 +32,13 @@ def test_report_renders_verdict_annotated_study_dag():
     assert "#s-" in _TPL
 
 
-def test_report_renders_acceptance_rollup():
-    assert "acceptance-rollup" in _TPL
+def test_report_renders_acceptance_gating_matrix():
+    # The per-criterion roll-up and the AC gating matrix were the same rows
+    # transposed; consolidated to the single gating matrix (which also flags
+    # unlinked-criterion gaps). The divergence badge rides on its label.
+    assert "ac-gating-matrix" in _TPL
     assert "acceptance criteria" in _TPL
+    assert "acceptance-rollup" not in _TPL
 
 
 def test_verdict_badge_distinguishes_five_states():
