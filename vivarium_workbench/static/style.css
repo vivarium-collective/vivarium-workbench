@@ -1925,7 +1925,23 @@ textarea.loom-in-field{
   height:340px; min-height:140px; max-height:88vh; overflow:auto; padding:8px 10px;
   resize:vertical;
 }
-.pcard-json-toolbar{ display:flex; gap:8px; margin:0 0 6px; position:sticky; top:-8px; }
+.pcard-json-toolbar{ display:flex; gap:8px; flex-wrap:wrap; margin:0 0 6px; padding:2px 0; position:sticky; top:-8px; z-index:2; background:#fbfcfe; }
+/* "⛶ Fill screen" — expand the JSON panel in place to fill the content area
+   (right of the rail), pinned to the top. The child grows its own iframe to the
+   viewport bottom (see _cfgJsonFillFrame), so inset:0 here fills that area; the
+   workbench rail stays visible beside it. Flex column: toolbar pinned, the tree
+   flex-fills and scrolls — no forced whitespace. */
+.pcard-json-view.pcard-json-max{
+  position:fixed; inset:0; z-index:1000; margin:0;
+  width:auto; height:auto; max-height:none; border-radius:0; resize:none;
+  display:flex; flex-direction:column; overflow:hidden; background:#fbfcfe;
+  box-shadow:0 0 0 1px var(--border, #e1e4e8);
+}
+.pcard-json-view.pcard-json-max .pcard-json-body{ flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.pcard-json-view.pcard-json-max .json-viewer{ flex:1 1 auto; min-height:0; overflow:auto; }
+:root[data-theme="dark"] .pcard-json-view.pcard-json-max{ background:var(--surface-2); }
+body.pcard-json-max-open{ overflow:hidden; }
+:root[data-theme="dark"] .pcard-json-toolbar{ background:var(--surface-2); }
 :root[data-theme="dark"] .pcard-json-btn{ border-color:var(--border-2); color:var(--text-muted); }
 :root[data-theme="dark"] .pcard-json-btn:hover{ background:var(--active); color:#c7d2fe; }
 :root[data-theme="dark"] .pcard-json-view{ background:var(--surface-2); border-color:var(--border); }
@@ -5200,6 +5216,14 @@ body.col-resizing .registry-table.reg-table-fill th, body.col-resizing .registry
   color:var(--text, #1f2328); max-height:420px; overflow-y:auto;
 }
 :root[data-theme="dark"] .model-source-pre{ background:#0f141b; color:#d5dae2; }
+/* Framed container for the structured config view (_configView) that replaced
+   the flat <pre> in a process's "Configuration" block. */
+.model-source-body{
+  border:1px solid var(--border, #e1e4e8); border-radius:8px;
+  background:var(--surface-2, #f6f8fa); padding:10px 12px;
+  max-height:460px; overflow:auto;
+}
+:root[data-theme="dark"] .model-source-body{ background:#0f141b; }
 
 /* ── Right rail: editable process code panel (process-code.js) ─────────────── */
 .viv-code-rail{

@@ -273,10 +273,16 @@ def build_composite_run_zip(ws_root, run_id: str) -> tuple[bytes, str, int]:
 #   analyses→ analyses.json          JSON (download)
 #   verdict → verdict.json           JSON (view/download)
 _RUN_ARTIFACTS = {
-    "viz":      ("viz.json",      "text/html"),
-    "report":   ("report.html",   "text/html"),
-    "analyses": ("analyses.json", "application/json"),
-    "verdict":  ("verdict.json",  "application/json"),
+    "viz":         ("viz.json",         "text/html"),
+    "report":      ("report.html",      "text/html"),
+    "analyses":    ("analyses.json",    "application/json"),
+    "verdict":     ("verdict.json",     "application/json"),
+    # The emitted per-store observables at the run's final step — i.e. the
+    # composite's actual LOADED state once the processes have run (lattice
+    # dims/fields, cell positions/types, immune agents, …), which the declared
+    # document / composite-resolve shows empty at rest. Used by the Model tab's
+    # "Load initial state" action to populate the JSON viewer with real values.
+    "observables": ("observables.json", "application/json"),
 }
 
 

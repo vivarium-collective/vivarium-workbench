@@ -2601,38 +2601,10 @@
     } else { window.prompt('Copy this link:', url); }
   }
   window._shareCompositeFromHeader = _shareCompositeFromHeader;
-  function _toggleCompositeJson(btn) {
-    var card = btn.closest('.registry-entry-full'); if (!card) return;
-    var panel = card.querySelector('[data-role="composite-json"]'); if (!panel) return;
-    var show = panel.hidden;
-    panel.hidden = !show;
-    btn.classList.toggle('active', show);
-    if (!show || panel._loaded) return;
-    panel._loaded = true;
-    var id = card.getAttribute('data-address');
-    var body = panel.querySelector('.pcard-json-body');
-    if (body) body.innerHTML = '<span class="muted" style="font-size:0.85em">Resolving composite JSON…</span>';
-    var url = (typeof _compositeStateUrl === 'function')
-      ? _compositeStateUrl(id)
-      : '/api/composite-resolve?id=' + encodeURIComponent(id);
-    fetch(url).then(function (r) { return r.json(); }).then(function (j) {
-      var doc = (j && j.state) ? j.state : j;
-      if (body) {
-        body.innerHTML =
-          '<div class="pcard-json-toolbar">' +
-            '<button class="btn-mini" type="button" onclick="_copyCompositeJson(this)">⧉ Copy</button>' +
-            '<a class="btn-mini" href="' + _esc(url) + '" target="_blank" rel="noopener">Raw ↗</a>' +
-          '</div>' +
-          (typeof _jsonViewer === 'function' ? _jsonViewer(doc) : '<pre>' + _esc(JSON.stringify(doc, null, 2)) + '</pre>') +
-          '<pre class="pcard-json-raw" hidden>' + _esc(JSON.stringify(doc, null, 2)) + '</pre>';
-      }
-      panel._json = doc;
-    }).catch(function (e) {
-      if (body) body.innerHTML = '<span class="loom-run-err">Failed to load JSON: ' + _esc(String(e)) + '</span>';
-      panel._loaded = false;
-    });
-  }
-  window._toggleCompositeJson = _toggleCompositeJson;
+  // _toggleCompositeJson / _copyCompositeJson now live in composite-card.js
+  // (loaded before this file) so the "{ } JSON" button works on every page the
+  // card mounts on, including the Study Detail Model tab. Bare references below
+  // resolve to those globals.
   // Contract-audit panel toggle — mirrors _toggleCompositeJson. The REAL
   // composite audit is expensive (it builds the composite's core), so it's
   // fetched lazily on first open from /api/composite-contract-audit and the
@@ -2685,16 +2657,6 @@
     btn.classList.toggle('active', show);
   }
   window._toggleProcessContract = _toggleProcessContract;
-  function _copyCompositeJson(btn) {
-    var panel = btn.closest('[data-role="composite-json"]');
-    var pre = panel && panel.querySelector('.pcard-json-raw');
-    if (!pre) return;
-    var txt = pre.textContent || '';
-    var done = function () { var o = btn.textContent; btn.textContent = '✓ Copied'; setTimeout(function () { btn.textContent = o; }, 1200); };
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done).catch(done);
-    else done();
-  }
-  window._copyCompositeJson = _copyCompositeJson;
 
   // In a ?popcard= window: strip the shell to just the single requested card.
   function _enterPopcardMode(address, kind) {
@@ -3764,37 +3726,9 @@
   window._runRegistryProcess = _runRegistryProcess;
 
   // Copy the run output's JSON to the clipboard.
-  // Collapsible JSON viewer — objects/arrays are <details> nodes (top two
-  // levels open); scalars are typed leaves. Big/nested run outputs stay
-  // navigable instead of a wall of pretty-printed text.
-  function _jsonNode(key, val, depth) {
-    var keyHtml = (key !== null) ? '<span class="jt-key">' + _esc(key) + '</span><span class="jt-colon">:</span> ' : '';
-    if (val === null) return '<div class="jt-row">' + keyHtml + '<span class="jt-null">null</span></div>';
-    if (Array.isArray(val)) {
-      if (!val.length) return '<div class="jt-row">' + keyHtml + '<span class="jt-punct">[ ]</span></div>';
-      var ob = depth < 2 ? ' open' : '';
-      var ab = val.map(function (v, i) { return _jsonNode(String(i), v, depth + 1); }).join('');
-      return '<details class="jt-branch"' + ob + '><summary>' + keyHtml +
-        '<span class="jt-punct">[</span><span class="jt-count">' + val.length + '</span><span class="jt-punct">]</span></summary>' +
-        '<div class="jt-children">' + ab + '</div></details>';
-    }
-    if (typeof val === 'object') {
-      var keys = Object.keys(val);
-      if (!keys.length) return '<div class="jt-row">' + keyHtml + '<span class="jt-punct">{ }</span></div>';
-      var oo = depth < 2 ? ' open' : '';
-      var ob2 = keys.map(function (k) { return _jsonNode(k, val[k], depth + 1); }).join('');
-      return '<details class="jt-branch"' + oo + '><summary>' + keyHtml +
-        '<span class="jt-punct">{</span><span class="jt-count">' + keys.length + '</span><span class="jt-punct">}</span></summary>' +
-        '<div class="jt-children">' + ob2 + '</div></details>';
-    }
-    var t = typeof val;
-    var cls = t === 'number' ? 'jt-num' : (t === 'boolean' ? 'jt-bool' : 'jt-str');
-    var disp = t === 'string' ? '"' + _esc(val) + '"' : _esc(String(val));
-    return '<div class="jt-row">' + keyHtml + '<span class="' + cls + '">' + disp + '</span></div>';
-  }
-  function _jsonViewer(value) {
-    return '<div class="json-viewer">' + _jsonNode(null, value, 0) + '</div>';
-  }
+  // _jsonNode / _jsonViewer (the collapsible JSON viewer) now live in
+  // composite-card.js (loaded before this file); _jsonViewer is exported as a
+  // global, so bare references here keep resolving.
 
   function _copyRunOutput(btn) {
     var out = btn.closest('.loom-run-output');
