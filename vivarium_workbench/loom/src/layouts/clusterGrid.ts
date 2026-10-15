@@ -93,6 +93,39 @@ function readProcCardWidth(): number | null {
 /** The full (largest) tier — every node is sized for this regardless of zoom. */
 const FULL = TIERS[TIERS.length - 1];
 
+/** Estimate a process card's port-gutter width (the `--port-col` ProcessNode
+ *  measures from the widest port label) from the label lengths, so the reserved
+ *  footprint matches the rendered card. Mirrors ProcessNode's autoCol cap. */
+function estPortCol(n: Node): number {
+  const d = n.data as { inputPorts?: unknown; outputPorts?: unknown } | undefined;
+  const labels = [
+    ...(Array.isArray(d?.inputPorts) ? (d!.inputPorts as unknown[]) : []),
+    ...(Array.isArray(d?.outputPorts) ? (d!.outputPorts as unknown[]) : []),
+  ].map(String);
+  const longest = labels.reduce((m, s) => Math.max(m, s.length), 0);
+  return Math.round(13 + Math.min(290, longest * 13) + 6);
+}
+
+/** Height of the stacked contract content (description + governing equation(s) +
+ *  symbol legend + config band) the full/contract card renders — reserved so a
+ *  rich card never overflows its box onto the store below. Errs a little high. */
+function detailProcHeight(n: Node): number {
+  const d = n.data as { inputPorts?: unknown; outputPorts?: unknown } | undefined;
+  const c = deriveContract(d as never);
+  if (!c) return 0;
+  const desc = String(c.description || c.summary || '');
+  const descLines = Math.max(1, Math.ceil(desc.length / 42));
+  const nMath = c.math ? c.math.length : 0;
+  const nSym = c.symbols ? Object.keys(c.symbols).length : 0;
+  const nCfg = c.config ? Object.keys(c.config).length : 0;
+  return 56 /* title + meta */
+    + descLines * 22 + 20
+    + (nMath ? 24 + nMath * 20 : 0)
+    + nSym * 30
+    + (nCfg ? 56 : 0)
+    + 36;
+}
+
 /** Full-tier footprint of a node. Process cards grow one row per port (as the
  *  card does from the `types` tier up). Stores are `height:auto` with only a
  *  `min-height` (StoreNode.tsx / App.css), so a content-rich store grows well
@@ -106,7 +139,21 @@ export function fullFootprint(n: Node): { w: number; h: number } {
     const d = n.data as { inputPorts?: unknown; outputPorts?: unknown } | undefined;
     const nPorts = (Array.isArray(d?.inputPorts) ? d!.inputPorts.length : 0)
       + (Array.isArray(d?.outputPorts) ? d!.outputPorts.length : 0);
-    return { w: FULL.cardWidth, h: FULL.cardHeight + nPorts * PORT_ROW_H };
+    const h = Math.max(FULL.cardHeight + nPorts * PORT_ROW_H, detailProcHeight(n));
+    // Width: a compact figure pins a narrow --proc-card-w; otherwise a card with
+    // a non-wrapping rich center (governing equation or symbol legend) is as wide
+    // as its two port gutters plus a 300px center lane (matching ProcessNode
+    // `boxMinW`) — reserve THAT so neighbour stores never land under the wide
+    // card. A plain process (no equation/symbols) keeps the tighter full-tier
+    // width, so dense multi-process composites stay dense.
+    const c = deriveContract(d as never);
+    const richCenter = !!c
+      && ((c.math && c.math.length > 0) || (c.symbols && Object.keys(c.symbols).length > 0));
+    const procW = readProcCardWidth();
+    const w = procW != null ? procW
+      : richCenter ? Math.max(FULL.cardWidth, estPortCol(n) * 2 + 300 + 52)
+        : FULL.cardWidth;
+    return { w, h };
   }
   const d = n.data as {
     label?: unknown; value?: unknown; valueType?: unknown; figure?: unknown;

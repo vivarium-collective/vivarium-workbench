@@ -1317,6 +1317,11 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
         opts = {
             "style": getattr(args, "style", None) or loom_cfg.get("style"),
             "layout": getattr(args, "layout", None) or loom_cfg.get("layout"),
+            # Semantic-detail floor for the process cards (ports / types / config
+            # / contract / full). `contract` surfaces each process's description,
+            # governing equation(s) and symbol legend in the saved figure — the
+            # rich "model card". Unset = the live ports tier (name + typed ports).
+            "detail": getattr(args, "detail", None) or loom_cfg.get("detail"),
             # store_true CLI flags force the option ON for every study; absent,
             # the per-study loom.<key> decides. (There's no CLI way to force OFF
             # a study that opts in — same one-way precedence as --style.)
@@ -1375,6 +1380,12 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
             # process address, keeping names / types / equation / config / wires.
             if opts["figure"]:
                 loom_url += "&figure=1"
+            # Detail floor (--detail / loom.detail): pin how much of each process
+            # card renders. `contract` is the rich model card (description +
+            # governing equations + symbol legend + config). The layout reserves
+            # the card's real footprint at this detail, so stores don't overlap.
+            if opts["detail"]:
+                loom_url += f"&detail={quote(str(opts['detail']))}"
             try:
                 page.goto(loom_url, wait_until="domcontentloaded", timeout=60_000)
                 page.wait_for_selector(".react-flow__node", timeout=40_000)
@@ -1813,6 +1824,13 @@ def main(argv: list[str] | None = None) -> int:
                                     "cards, drop config/symbols/address so name + governing "
                                     "equation lead, and pack the grid tight so the whole figure "
                                     "fits a book page legibly. Best with --layout hierarchy.")
+    p_render_loom.add_argument("--detail", default=None,
+                               choices=["ports", "types", "config", "contract", "full"],
+                               help="Pin the process-card detail floor for ALL studies "
+                                    "(overrides each study.yaml `loom.detail`). 'contract' is the "
+                                    "rich model card: description + governing equation(s) + symbol "
+                                    "legend + config, with the layout reserving the card's real "
+                                    "footprint. Normally set per study via `loom: {detail: contract}`.")
     p_render_loom.add_argument("--style", default=None,
                                help="Force a render style for ALL studies (overrides each "
                                     "study.yaml `loom.style`). 'minimal' = a stripped "

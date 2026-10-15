@@ -1385,6 +1385,7 @@ export default function App() {
           zIndex: L.z,
           data: {
             ...n.data, _tier: effTier, _detailOverrides: detailOverrides, _minimal: minimalStyle,
+            _compact: compactRef.current,
             _dim: L._dim, _lineage: L._lineage, _wired: L._wired,
             // Full-detail ("open") card = explicitly kept-open ONLY. A plain
             // single click just SELECTS (drives the Inspector + wire highlight)
