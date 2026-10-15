@@ -99,13 +99,15 @@
   };
   function _studyVerdict(s) {
     s = s || {};
-    if (_VERDICT_META[s.verdict]) return s.verdict;   // authored field wins
-    var st = _studyStatusState(s);                     // fallback: gate-based state
-    if (st === 'Accepted') return 'supported';
-    if (st === 'Refuted')  return 'refuted';
-    return 'supported';
+    return _VERDICT_META[s.verdict] ? s.verdict : null;  // authored field only; no forced verdict
   }
-  function _verdictMeta(s) { return _VERDICT_META[_studyVerdict(s)] || _VERDICT_META['supported']; }
+  function _verdictMeta(s) {
+    var v = _studyVerdict(s);
+    // An authored verdict drives the two-axis marker; WITHOUT one, keep the
+    // honest gate-based status badge — never collapse a Planned/Investigating/
+    // Blocked study to a confident green "supported".
+    return v ? _VERDICT_META[v] : _studyStatusMeta(s);
+  }
   function _studyTier(s) { s = s || {}; return _TIER_META[s.evidence_tier] ? s.evidence_tier : null; }
   function _tierPipsHtml(s) {
     var t = _studyTier(s); if (!t) return '';
@@ -13082,7 +13084,9 @@
     // Unified status source (see _studyStatusMeta) so the rail dot agrees with the
     // investigation-graph card + legend. Was _railStatusColor(s.status) — a separate
     // 4th color map that showed `blocked` red while the card showed amber.
-    var _sm = _studyStatusMeta(s);
+    // Uses the same verdict-preferring meta as the DAG node, so the rail and the
+    // card can never show different badges for the same study.
+    var _sm = _verdictMeta(s);
     var status = _sm.label;
     var color = _sm.color;
     var indent = opts.indent ? '28px' : '12px';
