@@ -81,6 +81,42 @@
   }
   function _studyStatusMeta(s) { return _STATUS_META[_studyStatusState(s)] || _STATUS_META.Planned; }
 
+  // Two-axis investigation-graph marker: verdict (what the study concluded, an
+  // authored field separate from the gate pass/fail) × evidence_tier (how strong
+  // the evidence is). Both optional; a study missing them falls back to the
+  // gate-based status so nothing breaks mid-migration.
+  var _VERDICT_META = {
+    'supported':       {color: '#16a34a', icon: '◆', label: 'supported'},
+    'qualified':       {color: '#0d9488', icon: '◇', label: 'qualified'},
+    'honest-negative': {color: '#d97706', icon: '⊖', label: 'honest-negative'},
+    'refuted':         {color: '#dc2626', icon: '✗', label: 'refuted'},
+    'mixed':           {color: '#64748b', icon: '◐', label: 'mixed'},
+  };
+  var _TIER_META = {
+    'conceptual_demonstration': {pips: 1, label: 'demonstration'},
+    'mechanistic_prediction':   {pips: 2, label: 'mechanistic'},
+    'calibrated':               {pips: 3, label: 'calibrated'},
+  };
+  function _studyVerdict(s) {
+    s = s || {};
+    return _VERDICT_META[s.verdict] ? s.verdict : null;  // authored field only; no forced verdict
+  }
+  function _verdictMeta(s) {
+    var v = _studyVerdict(s);
+    // An authored verdict drives the two-axis marker; WITHOUT one, keep the
+    // honest gate-based status badge — never collapse a Planned/Investigating/
+    // Blocked study to a confident green "supported".
+    return v ? _VERDICT_META[v] : _studyStatusMeta(s);
+  }
+  function _studyTier(s) { s = s || {}; return _TIER_META[s.evidence_tier] ? s.evidence_tier : null; }
+  function _tierPipsHtml(s) {
+    var t = _studyTier(s); if (!t) return '';
+    var n = _TIER_META[t].pips, lab = _TIER_META[t].label, out = '';
+    for (var i = 0; i < 3; i++) out += '<span style="color:' + (i < n ? '#334155' : '#cbd5e1') + '">●</span>';
+    return '<span class="aig-tier-pips" title="evidence: ' + lab + '" ' +
+      'style="font-size:0.6em;letter-spacing:1px;margin-left:2px">' + out + '</span>';
+  }
+
   function _humanizeStudyName(slug) {
     var m = /^([a-z]+-\d+[a-z]*)-(.+)$/.exec(slug);
     if (!m) return {chip: '', title: String(slug).replace(/-/g, ' ')};
@@ -10675,17 +10711,18 @@
   }
   // W13 — edge-relation vocabulary → stroke styling + legend label.
   var _DAG_REL_STYLE = {
-    'leads-to':             { color: '#94a3b8', dash: null,  label: 'leads to' },
-    'model-input':          { color: '#2563eb', dash: null,  label: 'model input' },
-    'evidence':             { color: '#0d9488', dash: '5 3', label: 'evidence' },
-    'calibrates-threshold': { color: '#ca8a04', dash: '2 3', label: 'calibrates threshold' },
-    'refutes-alternative':  { color: '#dc2626', dash: '5 3', label: 'refutes alternative' },
+    'leads-to':        { color: '#94a3b8', dash: null,  label: 'leads to' },
+    'model-input':     { color: '#2563eb', dash: null,  label: 'model input' },
+    'alternative-to':  { color: '#64748b', dash: '6 3', label: 'alternative to' },
+    'refutes':         { color: '#dc2626', dash: '5 3', label: 'refutes' },
+    'precedes':        { color: '#94a3b8', dash: '2 3', label: 'precedes' },
   };
   function _dagRelStyle(rel) {
     // Map legacy aliases onto the canonical vocabulary.
-    if (rel === 'regulatory') rel = 'calibrates-threshold';
-    if (rel === 'refutes')    rel = 'refutes-alternative';
-    if (rel === 'leads to')   rel = 'leads-to';
+    if (rel === 'regulatory')          rel = 'precedes';
+    if (rel === 'refutes-alternative') rel = 'refutes';
+    if (rel === 'alternative')         rel = 'alternative-to';
+    if (rel === 'leads to')            rel = 'leads-to';
     return _DAG_REL_STYLE[rel] || _DAG_REL_STYLE['leads-to'];
   }
 
@@ -10870,7 +10907,7 @@
       (_edgesByChild[tgt] = _edgesByChild[tgt] || []).push({
         study: src,
         condition: e.condition || 'tests-passed',
-        relation: e.artifact ? 'model-input' : 'leads-to',
+        relation: e.relation || (e.artifact ? 'model-input' : 'leads-to'),
         artifact: e.artifact,
       });
     });
@@ -11000,7 +11037,7 @@
       // with the sidebar. Fixes the prior bug where `s.confidence || derive(...)` let
       // a drift-prone hand-set `confidence: Investigating` mask a `blocked` gate.
       // `Blocked` renders as its own state (slate ⊘), not as Refuted (red ✗).
-      var ss = _studyStatusMeta(s);
+      var ss = _verdictMeta(s);
       var confidence = ss.label;
       var followUps = s.follow_up_studies || [];
 
@@ -11083,6 +11120,7 @@
             '<span class="aig-status-badge" role="button" tabindex="0" title="Expand this card in place" ' +
               'style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;cursor:pointer;text-decoration:underline dotted">' +
               _esc(confidence) + '</span>' +
+            _tierPipsHtml(s) +
             '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
               'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
               'style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;font-size:0.72em;line-height:1;padding:2px 5px;cursor:pointer">↗</button>' +
@@ -11248,7 +11286,7 @@
     edgesSvg.innerHTML =
       '<defs><marker id="dag-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" ' +
       'markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
-      '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
+      '<path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker></defs>';
     studies.forEach(function(s) {
       dagEdgesFor(s).forEach(function(p) {
         var pn = p.study;
@@ -11342,17 +11380,23 @@
           '<span style="width:18px;' + line + ';display:inline-block;line-height:0">&nbsp;</span>' +
           '<span>' + st.label + '</span></span>';
       };
+      // Tier legend swatch: the 3-pip strength grade.
+      var _tierLg = function(tv) {
+        var m = _TIER_META[tv], pips = '';
+        for (var i = 0; i < 3; i++) pips += '<span style="color:' + (i < m.pips ? '#334155' : '#cbd5e1') + '">●</span>';
+        return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
+          '<span style="font-size:0.85em;letter-spacing:1px">' + pips + '</span><span>' + m.label + '</span></span>';
+      };
+      var _br = '<span style="flex-basis:100%;height:0"></span>';
       legendHost.innerHTML =
-        '<span style="font-weight:600;color:#475569;margin-right:10px">Confidence:</span>' +
-        _lg('#16a34a', '✓', 'Accepted') + _lg('#ca8a04', '◐', 'Investigating') +
-        _lg('#64748b', '⊘', 'Blocked') +
-        _lg('#2563eb', '○', 'Planned') + _lg('#dc2626', '✗', 'Refuted') +
-        '<span style="flex-basis:100%;height:0"></span>' +
+        '<span style="font-weight:600;color:#475569;margin-right:10px">Verdict:</span>' +
+        Object.keys(_VERDICT_META).map(function(k){var m=_VERDICT_META[k];return _lg(m.color, m.icon, m.label);}).join('') +
+        _br +
+        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Evidence:</span>' +
+        '<span style="margin-top:6px">' + Object.keys(_TIER_META).map(_tierLg).join('') + '</span>' +
+        _br +
         '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Edges:</span>' +
-        '<span style="margin-top:6px">' +
-          _edgeLg('leads-to') + _edgeLg('model-input') + _edgeLg('evidence') +
-          _edgeLg('calibrates-threshold') + _edgeLg('refutes-alternative') +
-        '</span>';
+        '<span style="margin-top:6px">' + Object.keys(_DAG_REL_STYLE).map(_edgeLg).join('') + '</span>';
     }
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
@@ -13040,7 +13084,9 @@
     // Unified status source (see _studyStatusMeta) so the rail dot agrees with the
     // investigation-graph card + legend. Was _railStatusColor(s.status) — a separate
     // 4th color map that showed `blocked` red while the card showed amber.
-    var _sm = _studyStatusMeta(s);
+    // Uses the same verdict-preferring meta as the DAG node, so the rail and the
+    // card can never show different badges for the same study.
+    var _sm = _verdictMeta(s);
     var status = _sm.label;
     var color = _sm.color;
     var indent = opts.indent ? '28px' : '12px';
