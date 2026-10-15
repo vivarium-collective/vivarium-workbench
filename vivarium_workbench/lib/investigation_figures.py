@@ -32,6 +32,7 @@ from __future__ import annotations
 import io
 import re
 import zipfile
+from html import escape as _escape
 from pathlib import Path
 from typing import Optional
 
@@ -284,13 +285,83 @@ def resolve_figure_file(ws_root, name: str, number: int, ext: str) -> Optional[P
     return None
 
 
+_GALLERY_EXT = {".html", ".svg", ".png", ".gif", ".jpg", ".jpeg", ".webp"}
+
+
+def _fig_label(text: str, fallback: str) -> str:
+    """A figure's display label — the native header-band title (styled
+    ``line-height:1.25``) when present in a rendered HTML panel, else the fallback."""
+    m = re.search(r'line-height:1\.25">([^<]+)<', text or "")
+    return (m.group(1).strip() if m else "") or fallback
+
+
+_GALLERY_CSS = (
+    ":root{--ink:#1e293b;--soft:#475569;--muted:#94a3b8;--line:#e2e8f0;--bg:#f1f5f9;--teal:#0d9488}"
+    "*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;color:var(--ink);background:var(--bg)}"
+    ".wrap{display:flex;align-items:flex-start;max-width:1400px;margin:0 auto}"
+    "nav{position:sticky;top:0;align-self:flex-start;width:300px;height:100vh;overflow:auto;"
+    "padding:20px 14px;border-right:1px solid var(--line);background:#fff;font-size:13px}"
+    "nav h1{font-size:15px;margin:0 0 4px}nav .sub{color:var(--soft);font-size:12px;margin:0 0 14px}"
+    "nav a{display:block;color:var(--soft);text-decoration:none;padding:3px 8px;border-radius:6px;line-height:1.35}"
+    "nav a:hover{background:var(--bg);color:var(--ink)}nav .s{margin-top:10px;font-weight:600;color:var(--ink)}"
+    "nav .f{padding-left:18px;font-size:12px}main{flex:1;min-width:0;padding:22px 26px}"
+    ".grp{scroll-margin-top:14px}.grp>h2{font-size:17px;margin:26px 0 2px}.grp>.role{color:var(--soft);font-size:12.5px;margin:0 0 12px}"
+    ".card{background:#fff;border:1px solid var(--line);border-radius:12px;margin:14px 0;overflow:hidden;scroll-margin-top:14px}"
+    ".card .bar{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);background:#fcfdfe}"
+    ".card .bar .name{font-weight:600;font-size:13px}"
+    ".card .bar .dl{margin-left:auto;font-size:12px;text-decoration:none;color:var(--teal);"
+    "border:1px solid var(--teal);border-radius:999px;padding:3px 11px;white-space:nowrap}"
+    ".card .bar .dl:hover{background:var(--teal);color:#fff}"
+    ".card iframe,.card img{width:100%;border:0;display:block}.card img{padding:14px;background:#fff}"
+    ".hdr{padding:24px 26px 0}.hdr h1{font-size:22px;margin:0 0 4px}.hdr p{color:var(--soft);font-size:13.5px;max-width:860px;margin:0}"
+)
+
+
+def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[str], list[tuple[str, str, bool]]]]) -> str:
+    """One navigable ``index.html`` for a figures export. ``groups`` is an ordered
+    list of ``(heading, subtitle_or_None, [(arcname, label, is_html), …])``. Each
+    figure is shown inline (HTML via a lazy iframe, image via ``<img>``) with its
+    own download link, and the left sidebar jumps to each group. Arcnames are the
+    in-zip relative paths, so the page works wherever the zip is extracted."""
+    n_fig = sum(len(items) for _, _, items in groups)
+    nav, body = [], []
+    for heading, subtitle, items in groups:
+        gid = re.sub(r"[^A-Za-z0-9_-]+", "-", heading).strip("-") or "group"
+        nav.append(f'<div class="s"><a href="#{gid}">{_escape(heading)}</a></div>')
+        body.append(f'<section class="grp" id="{gid}"><h2>{_escape(heading)}</h2>'
+                    + (f'<p class="role">{_escape(subtitle)}</p>' if subtitle else ""))
+        for arc, label, is_html in items:
+            aid = re.sub(r"[^A-Za-z0-9_-]+", "-", arc).strip("-")
+            nav.append(f'<a class="f" href="#{aid}">{_escape(label)}</a>')
+            if is_html:
+                tall = any(k in arc for k in ("three-view", "energy-budget", "internalization", "window", "network"))
+                media = f'<iframe loading="lazy" src="{_escape(arc)}" height="{900 if tall else 640}"></iframe>'
+            else:
+                media = f'<img loading="lazy" src="{_escape(arc)}" alt="{_escape(label)}">'
+            body.append(f'<div class="card" id="{aid}"><div class="bar"><span class="name">{_escape(label)}</span>'
+                        f'<a class="dl" href="{_escape(arc)}" download>&#8595; download</a></div>{media}</div>')
+        body.append("</section>")
+    hdr = (f'<div class="hdr"><h1>{_escape(inv_name)} &mdash; figure gallery</h1>'
+           f'<p>{n_fig} figures across {len(groups)} studies. Use the list on the left to jump to any '
+           f'study; each figure has its own &#8595; download.</p></div>')
+    return (f'<!doctype html><html lang=en><head><meta charset=utf-8>'
+            f'<meta name=viewport content="width=device-width,initial-scale=1">'
+            f'<title>{_escape(inv_name)} — figure gallery</title>'
+            f'<link rel=preconnect href="https://fonts.googleapis.com">'
+            f'<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel=stylesheet>'
+            f'<style>{_GALLERY_CSS}</style></head><body><div class="wrap">'
+            f'<nav><h1>Figures</h1><p class="sub">{n_fig} figures &middot; {len(groups)} studies</p>'
+            + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div></body></html>')
+
+
 def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
-    """Zip EVERY figure file across the investigation's member studies. The
-    per-study PANELS are arranged ``<study>/<filename>``; the post-study stitched
-    figures (``figure_<N>.{svg,png}``) are ALSO collected together into a single
-    top-level ``final/`` folder (``final/figure_1.svg`` …) so the finished figures
-    sit side by side, not buried one-per-study. Returns ``None`` when the
-    investigation has no figure files. Backs
+    """Zip EVERY figure file across the investigation's member studies, with a
+    navigable ``index.html`` at the root (a sidebar table of contents → each figure
+    shown inline with its own download link). The per-study PANELS are arranged
+    ``<study>/<filename>``; the post-study stitched figures (``figure_<N>.{svg,png}``)
+    are ALSO collected together into a single top-level ``final/`` folder so the
+    finished figures sit side by side, not buried one-per-study. Returns ``None``
+    when the investigation has no figure files. Backs
     ``GET /api/investigation/<slug>/figures.zip``."""
     ws_root = Path(ws_root).resolve()  # absolute → relative_to(ws_root) is safe when callers pass '.'
     figs = build_investigation_figures(ws_root, name)
@@ -300,14 +371,17 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
     slugs = investigation_member_slugs(inv)
     buf = io.BytesIO()
     wrote = False
+    # Gallery index: displayable figures grouped by study, in member order.
+    gallery: dict[str, list[tuple[str, str, bool]]] = {}
+    final_items: list[tuple[str, str, bool]] = []
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         seen: set[str] = set()
         written_src: set[Path] = set()   # resolved disk paths already in the zip
 
-        def _write(src: Path, arc: str) -> None:
+        def _write(src: Path, arc: str) -> bool:
             nonlocal wrote
             if arc in seen or not src.is_file():
-                return
+                return False
             seen.add(arc)
             try:
                 zf.write(src, arc)
@@ -316,20 +390,42 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
                     written_src.add(src.resolve())
                 except OSError:
                     pass
+                return True
             except OSError:
-                pass
+                return False
+
+        def _record(bucket: list, arc: str, src: Optional[Path] = None, label: Optional[str] = None) -> None:
+            suf = Path(arc).suffix.lower()
+            if suf not in _GALLERY_EXT:
+                return
+            is_html = suf == ".html"
+            if label is None:
+                stem = Path(arc).stem
+                if is_html and src:
+                    try:
+                        label = _fig_label(src.read_text(errors="replace"), stem)
+                    except OSError:
+                        label = stem
+                elif stem == "model-loom":
+                    label = "Model structure (loom)"
+                else:
+                    label = stem.replace("-", " ").replace("_", " ").strip() or stem
+            bucket.append((arc, label, is_html))
 
         # Panels, per study — but NOT the stitched figure_<N> (those go to final/).
         for e in entries:
             if _COMPOSITE_RE.match(Path(e["rel_path"]).stem):
                 continue
-            _write(ws_root / e["rel_path"], e["arcname"])
+            src = ws_root / e["rel_path"]
+            if _write(src, e["arcname"]):
+                _record(gallery.setdefault(e["study"], []), e["arcname"], src)
 
         # final/: every stitched figure together, figure_<N>.{svg,png}.
         for c in composites:
             for rel in (c.get("svg_rel"), c.get("png_rel")):
-                if rel:
-                    _write(ws_root / rel, f"final/{Path(rel).name}")
+                if rel and _write(ws_root / rel, f"final/{Path(rel).name}"):
+                    _record(final_items, f"final/{Path(rel).name}",
+                            label=f"Figure {c.get('number')} — {c.get('title')}" if rel.endswith(".svg") else Path(rel).stem)
 
         # Native-gallery outputs per study (committed viz/ + the latest run's
         # viz.json panels) — so studies whose figures are interactive HTML, not
@@ -344,7 +440,9 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
                             continue
                     except OSError:
                         pass
-                    _write(p, f"{slug}/{arc}")
+                    zip_arc = f"{slug}/{arc}"
+                    if _write(p, zip_arc):
+                        _record(gallery.setdefault(slug, []), zip_arc, p)
                 for pname, html in study_output_html_panels(ws_root, slug).items():
                     arc = f"{slug}/visualizations/{_safe_panel_name(pname)}"
                     if arc in seen:
@@ -353,10 +451,38 @@ def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
                     try:
                         zf.writestr(arc, html)
                         wrote = True
+                        _record(gallery.setdefault(slug, []), arc, label=_fig_label(html, pname))
                     except (OSError, ValueError):
                         pass
             except Exception:  # noqa: BLE001 — one bad study never breaks the zip
                 continue
+
+        # The navigable index: a sidebar TOC → each figure inline + download.
+        try:
+            groups: list[tuple[str, Optional[str], list[tuple[str, str, bool]]]] = []
+            if final_items:
+                groups.append(("Final figures", None, final_items))
+            for slug in slugs:
+                items = gallery.get(slug)
+                if not items:
+                    continue
+                # Dedup by figure stem: a committed viz/<name>.html and the re-rendered
+                # visualizations/<name>.html run panel are the same figure — keep the first.
+                seen_stems: set[str] = set()
+                deduped = []
+                for arc, label, is_html in items:
+                    st = Path(arc).stem
+                    if st in seen_stems:
+                        continue
+                    seen_stems.add(st)
+                    deduped.append((arc, label, is_html))
+                _, spec = _load_study(ws_root, slug)
+                groups.append((str(spec.get("title") or slug), slug, deduped))
+            if groups:
+                zf.writestr("index.html", figures_gallery_index_html(name, groups))
+                wrote = True
+        except Exception:  # noqa: BLE001 — the index must never break the zip
+            pass
     return buf.getvalue() if wrote else None
 
 
