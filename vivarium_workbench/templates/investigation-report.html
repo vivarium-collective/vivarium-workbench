@@ -69,7 +69,7 @@ a:hover{text-decoration:underline}
 .masthead{padding:44px 0 8px}
 .masthead .eyebrow{color:var(--ink-3);font-size:12.5px;letter-spacing:.04em;margin-bottom:10px}
 .masthead h1{font-family:var(--serif);font-weight:600;font-size:38px;line-height:1.12;margin:0;
-  letter-spacing:-.01em;text-wrap:balance;max-width:20ch}
+  letter-spacing:-.01em;text-wrap:balance;max-width:28ch}
 .provline{color:var(--ink-3);font-size:13px;margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .provline .sep{opacity:.5}
 
@@ -389,17 +389,17 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
    A reading measure (~68ch) for prose; the opening reads like a paper —
    question → abstract → the simulated world → thesis → findings.
    ====================================================================== */
-.prose{max-width:68ch}
+.prose{max-width:92ch}
 .prose p{margin:0 0 14px}
 .prose p:last-child{margin-bottom:0}
-.measure{max-width:68ch}
+.measure{max-width:92ch}
 /* hero scientific question — the FIRST thing the report states */
 .hero-q{margin:30px 0 6px}
 .hero-q .qlabel{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
-.hero-q .qtext{font-family:var(--serif);font-size:25px;line-height:1.38;color:var(--ink);margin:0;max-width:30ch;text-wrap:pretty;font-weight:500}
+.hero-q .qtext{font-family:var(--serif);font-size:25px;line-height:1.38;color:var(--ink);margin:0;max-width:54ch;text-wrap:pretty;font-weight:500}
 @media(max-width:640px){.hero-q .qtext{font-size:20px}}
 /* abstract — larger, lighter, set at a reading measure */
-.abstract{margin:22px 0 8px;max-width:68ch}
+.abstract{margin:22px 0 8px;max-width:92ch}
 .abstract p{font-family:var(--serif);font-size:18px;line-height:1.62;color:var(--ink-2);margin:0 0 12px}
 .abstract p:first-child::first-letter{font-size:1.05em}
 .abstract .main-claim{color:var(--ink);font-style:normal}
@@ -413,7 +413,7 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
 .world .prose{color:var(--ink-2);font-size:14.5px;line-height:1.75}
 /* "what counts as evidence" principled note */
 .evnote{margin:16px 0;padding:16px 20px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0}
-.evnote .prose{color:var(--ink);font-size:14px;line-height:1.7;max-width:70ch}
+.evnote .prose{color:var(--ink);font-size:14px;line-height:1.7;max-width:92ch}
 .evnote b{color:var(--ink)}
 
 /* evidentiary-status tiers: Observed / Plausible / Hypothetical */
@@ -431,29 +431,12 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
 .sci-unit{margin:12px 0 4px;display:grid;gap:12px}
 .sci-part{display:grid;grid-template-columns:132px 1fr;gap:14px;align-items:start}
 .sci-part .sp-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding-top:2px}
-.sci-part .sp-v{font-size:15px;line-height:1.6;color:var(--ink);max-width:66ch}
+.sci-part .sp-v{font-size:15px;line-height:1.6;color:var(--ink);max-width:88ch}
 .sci-part.q .sp-v{font-family:var(--serif);font-size:16.5px;color:var(--ink);line-height:1.5}
 .sci-part .sp-v .muted{color:var(--ink-2)}
 .sci-part .sp-v .mono{color:var(--ink-2)}
 @media(max-width:640px){.sci-part{grid-template-columns:1fr;gap:3px}.sci-part .sp-k{padding-top:0}}
 
-/* Genesis Ladder — ordered rungs along the stage progression */
-.ladder{display:grid;gap:10px;margin-top:10px;counter-reset:rung}
-.rung{position:relative;display:grid;grid-template-columns:40px 1fr auto;gap:16px;align-items:center;
-  padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);
-  border-left:4px solid var(--line-2)}
-.rung:hover{border-color:var(--accent)}
-.rung.v-accepted{border-left-color:#16a34a}.rung.v-investigating{border-left-color:#ca8a04}
-.rung.v-planned{border-left-color:#2563eb}.rung.v-blocked{border-left-color:#64748b}.rung.v-refuted{border-left-color:#dc2626}
-.rung .rstep{font-family:var(--serif);font-size:22px;color:var(--ink-3);text-align:center;line-height:1}
-.rung .rbody{min-width:0}
-.rung .rstage{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin-bottom:3px}
-.rung .rq{font-family:var(--serif);font-size:16px;color:var(--ink);line-height:1.35;font-weight:600}
-.rung a.rq:hover{color:var(--accent);text-decoration:none}
-.rung .rmeta{color:var(--ink-2);font-size:13px;margin-top:5px;line-height:1.5}
-.rung .rmeta .ek{color:var(--ink-3);font-weight:600}
-.rung .rright{display:flex;flex-direction:column;align-items:flex-end;gap:6px;text-align:right}
-@media(max-width:640px){.rung{grid-template-columns:28px 1fr;gap:10px}.rung .rright{grid-column:1/-1;flex-direction:row;align-items:center}}
 
 /* ======================================================================
    WORKBENCH-CONSISTENT INVESTIGATION GRAPH (ported from walkthrough.js
@@ -1893,12 +1876,13 @@ function renderFindings(inv){
     ${genesisLadder(inv)}</div>`;
 }
 
-/* ====================== GENESIS LADDER ======================
-   The at-a-glance, reframed as an ordered LADDER spanning the stage
-   progression (depth order of the reused investigation DAG) — each rung a
-   scientific unit: stage · question · experiment · evidence-of-transition.
-   Falls back to a flat glance table when there is no dependency ordering
-   (keeps it data-safe for any investigation). */
+/* ====================== RESULTS-AT-A-GLANCE (graph-less fallback) ======================
+   For a campaign WITH a dependency ordering, the investigation graph below is the
+   staged progression (same DAG, richer node cards), so genesisLadder() returns
+   nothing — the old stage-progression ladder duplicated the graph and was removed.
+   It still renders a compact flat glance table for investigations that have no
+   dependency edges (where the graph shows only independent nodes), keeping it
+   data-safe for any investigation. _dagDepthOrder stays — the graph layout uses it. */
 function _dagDepthOrder(inv){
   const studies=inv.studies||[];
   const byName={}; studies.forEach(s=>byName[s.slug]=s);
@@ -1930,44 +1914,23 @@ function _whatWeLearn(s){
 }
 function genesisLadder(inv){
   const studies=inv.studies||[];
-  const {depth,anyEdge}=_dagDepthOrder(inv);
-  if(!anyEdge || studies.length<2){
-    // no stage ordering → the original flat glance table
-    const MODE=reportMode(inv);
-    const glance=studies.map((s,i)=>{
-      const g=gateOf(s), role=roleLine(s,inv), ctrl=isControl(s);
-      return `<tr><td class="idx">${i+1}</td>
-        <td><a class="st" href="#s-${s.slug}">${esc(s.title)}</a>${ctrl?'<span class="flag">⚑ control</span>':''}</td>
-        <td style="color:var(--ink-2)">${role}</td>
-        <td style="text-align:right">${g==='fail'?'<span class="chip fail">✗ refuted</span>':g==='pass'?'<span class="chip pass">✓ pass</span>':g==='planned'?'<span class="chip planned">◦ planned</span>':'<span class="chip">open</span>'}</td></tr>`;
-    }).join('');
-    return `<div style="margin-top:14px"><div class="kicker" style="margin-bottom:8px">Results at a glance</div>
-      <table class="glance"><thead><tr><th></th><th>Study</th><th>${MODE==='sourcing'?'Sourcing decision':MODE==='agentic'?'Agent vs policy':'Evidence'}</th><th style="text-align:right">Status</th></tr></thead><tbody>${glance}</tbody></table></div>`;
-  }
-  const ordered=studies.slice().sort((a,b)=>(depth[a.slug]-depth[b.slug])||String(a.slug).localeCompare(String(b.slug)));
-  const rungs=ordered.map((s,i)=>{
-    const m=studyStatusMeta(s), chip=studyChip(s.slug);
-    const q=String(s.question||s.claim||'').replace(/\s+/g,' ').split(/(?<=[.?])\s/)[0].trim();
-    const exp=String(_experimentOf(s)).replace(/\s+/g,' ');
-    const learn=_whatWeLearn(s);
-    const transition=(m.k==='accepted')?'transition demonstrated':(m.k==='refuted')?'transition refuted':(m.k==='planned')?'not yet run':'under investigation';
-    return `<div class="rung v-${m.k}">
-      <div class="rstep">${i+1}</div>
-      <div class="rbody">
-        ${chip?`<div class="rstage">${esc(chip)} · ${esc(s.title)}</div>`:`<div class="rstage">${esc(s.title)}</div>`}
-        <a class="rq" href="#s-${esc(s.slug)}">${esc(q||s.title)}</a>
-        <div class="rmeta">${exp?`<span class="ek">Experiment:</span> ${esc(exp.length>140?exp.slice(0,138)+'…':exp)}`:''}
-        ${learn?`<br><span class="ek">Evidence of transition:</span> ${esc(learn.length>150?learn.slice(0,148)+'…':learn)}`:''}</div>
-      </div>
-      <div class="rright">
-        <span class="etier ${m.k==='accepted'?'observed':m.k==='refuted'?'hypothetical':'plausible'}" style="background:none;border:1px solid ${m.color};color:${m.color}"><span class="d" style="background:${m.color}"></span>${esc(m.label)}</span>
-        <span style="font-size:11.5px;color:var(--ink-3)">${esc(transition)}</span>
-      </div>
-    </div>`;
+  const {anyEdge}=_dagDepthOrder(inv);
+  // When the campaign has a dependency ordering, the investigation graph below
+  // already presents the staged progression (same DAG, with richer node cards),
+  // so the stage-progression ladder duplicated it and is omitted. The compact
+  // glance table is kept only for investigations with no dependency edges, where
+  // the graph shows just independent nodes.
+  if(anyEdge && studies.length>=2) return '';
+  const MODE=reportMode(inv);
+  const glance=studies.map((s,i)=>{
+    const g=gateOf(s), role=roleLine(s,inv), ctrl=isControl(s);
+    return `<tr><td class="idx">${i+1}</td>
+      <td><a class="st" href="#s-${s.slug}">${esc(s.title)}</a>${ctrl?'<span class="flag">⚑ control</span>':''}</td>
+      <td style="color:var(--ink-2)">${role}</td>
+      <td style="text-align:right">${g==='fail'?'<span class="chip fail">✗ refuted</span>':g==='pass'?'<span class="chip pass">✓ pass</span>':g==='planned'?'<span class="chip planned">◦ planned</span>':'<span class="chip">open</span>'}</td></tr>`;
   }).join('');
-  return `<div style="margin-top:16px"><div class="kicker" style="margin-bottom:4px">The Genesis Ladder — stage progression</div>
-    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">Each rung is one transition in dependency order: its scientific <b>question</b>, the <b>model experiment</b> that tests it, and the <b>evidence of transition</b> so far. Ordered along the campaign's stage DAG, not a flat list.</p>
-    <div class="ladder">${rungs}</div></div>`;
+  return `<div style="margin-top:14px"><div class="kicker" style="margin-bottom:8px">Results at a glance</div>
+    <table class="glance"><thead><tr><th></th><th>Study</th><th>${MODE==='sourcing'?'Sourcing decision':MODE==='agentic'?'Agent vs policy':'Evidence'}</th><th style="text-align:right">Status</th></tr></thead><tbody>${glance}</tbody></table></div>`;
 }
 
 /* ====================== WORKBENCH-CONSISTENT INVESTIGATION GRAPH ======================
