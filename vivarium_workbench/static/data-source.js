@@ -121,6 +121,17 @@
       : "/api/study-charts/" + encodeURIComponent(slug);
   }
 
+  // publish.py bakes each study's native figure gallery to
+  // /api/study-native-gallery/<slug>.json — so snapshot callers must read the
+  // static file (and honour the base path). Live keeps the server-side route.
+  // Without this, the raw fetch of the .json-less path 404s in a bundle and the
+  // Visualizations tab shows "No figures yet." despite published panels.
+  function _nativeGalleryUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/study-native-gallery/" + encodeURIComponent(slug) + ".json"
+      : "/api/study-native-gallery/" + encodeURIComponent(slug);
+  }
+
   function _isetUrl(id) {
     return cfg().mode === "snapshot"
       ? _base() + "/api/investigation/" + encodeURIComponent(id) + ".json"
@@ -252,6 +263,9 @@
 
     /** Study Readouts URL (snapshot: baked per-study file; live: ?study=). */
     readoutsUrl: readoutsUrl,
+
+    /** Native figure-gallery URL (snapshot: baked per-study .json; live: route). */
+    nativeGalleryUrl: _nativeGalleryUrl,
 
     /**
      * Return the URL for the saved-visualizations payload (Analyses gallery).
