@@ -12114,6 +12114,11 @@
   // "needs work" verdict pill are wrong for them.
   function _isInformationalStudy(s) {
     if (!s || typeof s !== 'object') return false;
+    // Canonical marker first (study_type / kind), so a study need not carry a
+    // report block to be flagged informational; report.verdict is kept below only
+    // for back-compat with studies authored before the report.* collapse.
+    var kind = String(s.study_type || s.kind || '').trim().toLowerCase();
+    if (kind === 'informational' || kind === 'descriptive' || kind === 'reference') return true;
     var verdict = String(((s.report || {}).verdict) || s.verdict || '').trim().toLowerCase();
     if (verdict === 'informational' || verdict === 'descriptive') return true;
     var gate = String(s.gate_status || '').trim().toLowerCase();
