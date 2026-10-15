@@ -216,8 +216,8 @@ figure img{max-width:100%;height:auto;display:block;border:1px solid var(--line)
 .aig-fidelity-chip{display:inline-block;margin-left:7px;padding:0 7px;border-radius:999px;font-size:0.9em;font-weight:600;vertical-align:baseline}
 .aig-fidelity-real{background:color-mix(in srgb,var(--cal) 15%,var(--surface));color:var(--cal);border:1px solid color-mix(in srgb,var(--cal) 32%,transparent)}
 .aig-fidelity-repro{background:var(--chip);color:var(--ink-2);border:1px solid var(--line-2)}
-.study-verdict-dag,.acceptance-rollup,.ac-gating-matrix{margin-top:4px}
-.ac-gating-matrix .gap,.acceptance-rollup td{font-size:13.5px}
+.study-verdict-dag,.ac-gating-matrix{margin-top:4px}
+.ac-gating-matrix td{font-size:13.5px}
 figcaption{color:var(--ink-2);font-size:12.5px;margin-top:8px;max-width:none}
 .fig-scroll{overflow-x:auto}
 .loom-embed{margin:12px 0 4px}
@@ -1519,14 +1519,6 @@ function _verdictDagHtml(sp){
     <div class="spine-legend">${legend}</div>
     <figcaption>Member studies as a dependency DAG (edges from <span class="mono">parent_studies</span>), each badged with its code-computed gate verdict.</figcaption></div>`;
 }
-function _acceptanceRollupHtml(sp){
-  const a=sp&&sp.acceptance; if(!a||!(a.criteria&&a.criteria.length)) return '';
-  const rows=a.criteria.map(c=>`<tr><td>${c.study?`<a href="#s-${esc(c.study)}">${esc(c.study)}</a>`:'—'}</td><td>${esc(c.behavior||'')}</td><td class="tv">${_acResultBadge(c.result)}</td></tr>`).join('');
-  const div=a.diverges_from_authored?`<span class="acceptance-divergence chip warn">⚠ code differs from authored</span>`:'';
-  return `<div class="acceptance-rollup"><div class="slabel">Acceptance roll-up ${div}</div>
-    <p style="color:var(--ink-2);font-size:13.5px;max-width:none;margin:2px 0 8px">The investigation's acceptance criteria connected to their gating study and code-computed result — the spine roll-up, not a re-computation.</p>
-    <table class="ttable"><tbody>${rows}</tbody></table></div>`;
-}
 function _acGatingMatrixHtml(sp){
   const m=sp&&sp.ac_matrix; if(!m||!(m.criteria&&m.criteria.length)) return '';
   const rows=m.criteria.map(c=> c.gap
@@ -1534,23 +1526,26 @@ function _acGatingMatrixHtml(sp){
     : `<tr><td>${esc(c.behavior||'')}</td><td><a href="#s-${esc(c.study)}">${esc(c.study)}</a></td><td class="tv">${_acResultBadge(c.result)}</td></tr>`).join('');
   const gaps=m.criteria.filter(c=>c.gap).length;
   const foot=gaps?`<div class="texp" style="color:var(--ink-3);margin-top:6px">${gaps} acceptance criteria have no study linked (gaps).</div>`:'';
-  return `<div class="ac-gating-matrix"><div class="slabel">Acceptance-criteria gating matrix</div>
+  // Divergence flag rides on the spine's acceptance roll-up; surface it on the
+  // matrix label (not recomputed here) so the one table carries that signal.
+  const div=(sp.acceptance&&sp.acceptance.diverges_from_authored)?`<span class="acceptance-divergence chip warn">⚠ code differs from authored</span>`:'';
+  return `<div class="ac-gating-matrix"><div class="slabel">Acceptance-criteria gating matrix ${div}</div>
     <table class="ttable"><thead><tr><th>Criterion</th><th>Gating study</th><th class="tv">Result</th></tr></thead><tbody>${rows}</tbody></table>${foot}</div>`;
 }
 function renderSpine(inv){
   const sp=inv.spine;
   // The graph REUSES the workbench's investigation-DAG rendering (ported), so
-  // the report's graph matches the SPA the user drives. The spine's acceptance
-  // roll-up + AC gating matrix stay beneath it.
+  // the report's graph matches the SPA the user drives. The AC gating matrix
+  // stays beneath it.
   const graph=workbenchDag(inv);
-  const acc=sp?_acceptanceRollupHtml(sp):'', mx=sp?_acGatingMatrixHtml(sp):'';
+  const mx=sp?_acGatingMatrixHtml(sp):'';
   const strip=autonomyStrip(inv);
-  if(!graph && !acc && !mx && !strip) return '';
+  if(!graph && !mx && !strip) return '';
   return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Investigation graph & acceptance')}
     <div class="sec-h"><h2>The investigation graph</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">The campaign as a dependency graph — each study a node badged with its code-computed status, wired to the studies it builds on. This is the same graph as the workbench's Investigation view, transformed for a static report.</p>
     ${graph}${strip}
-    ${acc?`<div style="margin-top:22px">${acc}</div>`:''}${mx?`<div style="margin-top:16px">${mx}</div>`:''}</div>`;
+    ${mx?`<div style="margin-top:22px">${mx}</div>`:''}</div>`;
 }
 
 /* ---------- interactive (Plotly) figures — LAZY, visibility-driven ----------
