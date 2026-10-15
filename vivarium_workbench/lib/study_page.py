@@ -941,7 +941,11 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict, *, base_path:
                 _add(f.get("cites"))
     except Exception:
         study_cites = []
+    # Tier-C fallback: metric chips from run outcomes when a study has no
+    # authored ``report.key_metrics`` (collapsed single-source schema).
+    from vivarium_workbench.lib import study_derivations as _D
     html = tpl.render(study=spec, name=name, result_figure=result_figure,
+                      derived_metrics=_D.key_metrics(spec),
                       display_name=spec.get("title") or _hn["title"],
                       name_chip=_hn["chip"],
                       epistemic_debts=epistemic_debts,

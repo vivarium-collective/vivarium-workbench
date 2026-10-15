@@ -766,9 +766,10 @@
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Result</h2>
       <p class="ctr-text">{{ study.result or _report.main_insight or (_f0.statement if _f0 else '') or '' }}</p>
-      {% if _report.key_metrics %}
+      {% set _metrics = _report.key_metrics or derived_metrics %}
+      {% if _metrics %}
       <div class="ov-metrics">
-        {% for km in _report.key_metrics %}
+        {% for km in _metrics %}
         <div class="ov-metric ov-metric-{{ (km.status or 'info')|lower }}">
           <div class="ov-metric-v">{{ km.value }}</div>
           <div class="ov-metric-k">{{ km.label }}</div>
