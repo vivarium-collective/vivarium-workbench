@@ -1425,7 +1425,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <!-- study tabs + porthole -->
     <div id="ws-study-tabs" style="display:none;border-bottom:1px solid #e5e7eb;margin:12px 0 0"></div>
     <div id="ws-study-panel" class="panel" style="display:none;margin-top:0;padding:0;overflow:hidden">
-      <iframe id="ws-study-frame" src="" title="Study detail"
+      <iframe id="ws-study-frame" src="" title="Study detail" allowfullscreen allow="fullscreen"
               style="width:100%;border:0;display:block"></iframe>
     </div>
   </div>
@@ -1599,7 +1599,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <!-- Explicit height = its own scroll context, so `position:sticky` on
            .study-tabs (inside the iframe) actually sticks to the iframe top
            as the user scrolls through Overview → Build → … → Decide. -->
-      <iframe id="investigation-study-embed-frame" src="" title="Study detail"
+      <iframe id="investigation-study-embed-frame" src="" title="Study detail" allowfullscreen allow="fullscreen"
               style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px) - var(--viv-code-bottom, 0px)); min-height:600px;
                      border:0; display:block"></iframe>
     </div>
@@ -1846,7 +1846,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <button class="btn-mini" onclick="_closeStudyEmbedded()" title="Close">&times;</button>
       </div>
     </div>
-    <iframe id="study-detail-frame" src="" title="Study detail"
+    <iframe id="study-detail-frame" src="" title="Study detail" allowfullscreen allow="fullscreen"
             style="width:100%; height:calc(100vh - 220px - var(--viv-ai-bottom, 0px) - var(--viv-code-bottom, 0px)); min-height:560px; border:0; display:block"></iframe>
   </div>
 </section>

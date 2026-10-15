@@ -1265,10 +1265,17 @@
     var html = '<div class="model-source">';
     procs.forEach(function (p) {
       var addr = String(p.address).split(':').pop();
+      // Structured, scannable config view (chip grids for scalar dicts, tables
+      // for uniform-object arrays like a CPM contact matrix, type-colored
+      // values) — falls back to the flat YAML <pre> if composite-card.js's
+      // _configView isn't loaded.
+      var cfgBody = (typeof window._jsonViewer === 'function')
+        ? window._jsonViewer(p.config)
+        : '<pre class="model-source-pre">' + esc(_yamlish(p.config, 0)) + '</pre>';
       html += '<div class="model-source-block">' +
         '<div class="model-source-head"><strong>' + esc(p.name) + '</strong>' +
         (addr ? ' <span class="muted">— ' + esc(addr) + '</span>' : '') + '</div>' +
-        '<pre class="model-source-pre">' + esc(_yamlish(p.config, 0)) + '</pre>' +
+        '<div class="model-source-body">' + cfgBody + '</div>' +
         '</div>';
     });
     html += '</div>';
@@ -1303,8 +1310,8 @@
     wrap.innerHTML =
       '<details class="model-config-used" open style="margin:0">' +
       '<summary class="muted" style="font-size:0.78em;font-weight:600;text-transform:uppercase;letter-spacing:0.02em;cursor:pointer">' +
-      'Config used <span style="font-weight:400;text-transform:none">— source of truth: <code>' + esc(ref) + '</code>, run by both arms</span></summary>' +
-      '<pre class="study-config-pre" style="font-size:0.8em;line-height:1.45;background:var(--surface-2,#f6f8fa);border:1px solid var(--border,#e1e4e8);border-radius:6px;padding:8px 10px;margin:4px 0 0;overflow:auto;max-height:420px">Resolving ' + esc(ref) + ' …</pre></details>';
+      'Run parameters <span style="font-weight:400;text-transform:none">— the knobs this study runs the model with (source of truth: <code>' + esc(ref) + '</code>, run by both arms)</span></summary>' +
+      '<div class="study-config-pre cfgv-host" style="font-size:0.8em;line-height:1.45;background:var(--surface-2,#f6f8fa);border:1px solid var(--border,#e1e4e8);border-radius:6px;padding:8px 10px;margin:4px 0 0;overflow:auto;max-height:420px">Resolving ' + esc(ref) + ' …</div></details>';
     mount.appendChild(wrap);
     var pre = wrap.querySelector('.study-config-pre');
     var api = (window.DataSource && window.DataSource.apiUrl)
@@ -1319,7 +1326,8 @@
         // config itself, the experiment definition a reader cares about.
         var shown = {};
         Object.keys(j.content).forEach(function (k) { if (k[0] !== '_') shown[k] = j.content[k]; });
-        pre.textContent = _yamlish(shown);
+        if (typeof window._jsonViewer === 'function') { pre.innerHTML = window._jsonViewer(shown); }
+        else { pre.style.whiteSpace = 'pre'; pre.textContent = _yamlish(shown); }
       })
       .catch(function () { if (pre) pre.textContent = ref + ' (could not load config)'; });
   }
@@ -1411,13 +1419,30 @@
       // the same thing shown twice (or the confusing run_config vs whole_config
       // split). Only shown for single-model studies with no canonical config.
       if (!_hasStudyCfg && _cfgObj && Object.keys(_cfgObj).length) {
+        var _cfgUsedBody = (typeof window._jsonViewer === 'function')
+          ? window._jsonViewer(_cfgObj)
+          : '<pre style="white-space:pre;margin:0">' + esc(_yamlish(_cfgObj)) + '</pre>';
         _cfgUsedHtml = '<details class="model-config-used" open style="margin:0 0 8px 0">' +
-          '<summary class="muted" style="font-size:0.78em;font-weight:600;text-transform:uppercase;letter-spacing:0.02em;cursor:pointer">Config used</summary>' +
-          '<pre class="model-config-used-pre" style="font-size:0.8em;line-height:1.45;background:var(--surface-2,#f6f8fa);border:1px solid var(--border,#e1e4e8);border-radius:6px;padding:8px 10px;margin:4px 0 0;overflow:auto;max-height:360px">' +
-          esc(_yamlish(_cfgObj)) + '</pre></details>';
+          '<summary class="muted" style="font-size:0.78em;font-weight:600;text-transform:uppercase;letter-spacing:0.02em;cursor:pointer">Run parameters <span style="font-weight:400;text-transform:none">— the knobs this study runs the model with</span></summary>' +
+          '<div class="model-config-used-pre cfgv-host" style="font-size:0.8em;line-height:1.45;background:var(--surface-2,#f6f8fa);border:1px solid var(--border,#e1e4e8);border-radius:6px;padding:8px 10px;margin:4px 0 0;overflow:auto;max-height:360px">' +
+          _cfgUsedBody + '</div></details>';
       }
-      wrap.innerHTML = '<div class="muted" style="font-size:0.78em;font-weight:600;margin:0 0 4px 2px;text-transform:uppercase;letter-spacing:0.02em">' +
-        entry.labels.map(esc).join(' · ') + '</div>' +
+      // Header for this model: the COMPOSITE being configured (its short name),
+      // not the raw uppercased study slug (which read as a cryptic
+      // "REPRO-FIG5-VIRAL-LOAD"). Any arm labels that add real info beyond the
+      // study slug / composite id (e.g. a variant name) are appended.
+      var _studySlug = (typeof studyName === 'function' ? (studyName() || '') : '').toLowerCase();
+      var _shortId = String(entry.id).split('.').pop();
+      var _armExtra = entry.labels.filter(function (l) {
+        var lc = String(l || '').toLowerCase();
+        return lc && lc !== _studySlug && lc !== _shortId.toLowerCase() && lc !== 'baseline';
+      });
+      var _armHdr = '<div class="model-arm-head" style="display:flex;gap:7px;align-items:baseline;margin:0 0 5px 2px">' +
+        '<span style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted,#8a94a0)">Composite</span>' +
+        '<code style="font-size:0.86em;font-weight:600">' + esc(_shortId) + '</code>' +
+        (_armExtra.length ? '<span class="muted" style="font-size:0.8em">· ' + _armExtra.map(esc).join(' · ') + '</span>' : '') +
+        '</div>';
+      wrap.innerHTML = _armHdr +
         _cfgUsedHtml +
         '<p class="muted" style="font-size:0.85em;margin:0">Resolving composite…</p>';
       mount.appendChild(wrap);
@@ -1444,7 +1469,8 @@
             Object.keys(_cfgObj).forEach(function (k) {
               if (k !== 'whole_config' && k !== 'config_file') merged[k] = _cfgObj[k];
             });
-            _preEl.textContent = _yamlish(merged);
+            if (typeof window._jsonViewer === 'function') { _preEl.innerHTML = window._jsonViewer(merged); }
+            else { _preEl.style.whiteSpace = 'pre'; _preEl.textContent = _yamlish(merged); }
           })
           .catch(function () { /* keep the bare-path fallback already rendered */ });
       }
@@ -1501,9 +1527,10 @@
           _renderCompositeSource(cfgHost, body.state, esc);
           if (cfgHost.firstChild) {
             var head = document.createElement('div');
-            head.className = 'muted';
-            head.style.cssText = 'font-size:0.78em;font-weight:600;margin:2px 0 4px 2px;text-transform:uppercase;letter-spacing:0.02em';
-            head.textContent = 'Configuration';
+            head.style.cssText = 'margin:8px 0 4px 2px';
+            head.innerHTML =
+              '<div class="muted" style="font-size:0.78em;font-weight:600;text-transform:uppercase;letter-spacing:0.02em">Model configuration</div>' +
+              '<div class="muted" style="font-size:0.76em;font-weight:400;opacity:0.82;margin-top:1px">The fully resolved composite — each process’s complete config (what the run parameters above expand into).</div>';
             wrap.insertBefore(cfgHost, cardEl);
             wrap.insertBefore(head, cfgHost);
           }
