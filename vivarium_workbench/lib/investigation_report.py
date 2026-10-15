@@ -326,6 +326,49 @@ def _embed_html_figures(study_dir: Path, budget: list, skip_names: set) -> list:
     return out
 
 
+def _embed_native_gallery_panels(ws_root, slug: str, budget: list, skip_names: set) -> list:
+    """Inline a study's NATIVE-gallery visualization panels — the declared
+    ``visualizations[]`` rendered to the latest completed run's
+    ``.pbg/runs/<run>/viz.json`` (in-memory HTML, never committed on disk).
+
+    Modern studies render their RESULT figures here, not to committed
+    ``viz/*.html`` files, so without this they were absent from the downloadable
+    report (only ``image:`` figures + on-disk ``viz/*.html`` came through —
+    ``_embed_visualizations`` / ``_embed_html_figures``). Each Plotly panel is
+    stripped to share the report's single inlined Plotly.js, exactly like
+    :func:`_embed_html_figures`. Fully guarded: a missing run / unreadable
+    gallery yields ``[]`` so the report never breaks.
+    """
+    out: list = []
+    try:
+        from vivarium_workbench.lib.investigation_figures import study_output_html_panels
+        panels = study_output_html_panels(ws_root, slug) or {}
+    except Exception:
+        return out
+    for pname, html in panels.items():
+        name = _humanize_stem(str(pname))
+        if not html or name in skip_names:
+            continue
+        skip_names.add(name)
+        frag, interactive = html, False
+        try:
+            prepared = _prepare_interactive_figure(html)
+            if prepared is not None:
+                frag, interactive = prepared, True
+        except Exception:
+            frag, interactive = html, False
+        fsize = len(frag.encode("utf-8"))
+        if fsize > _HTML_PER_FILE_MAX or budget[0] + fsize > _IMG_TOTAL_MAX:
+            out.append({"name": name, "skipped": True, "reason": "too large to inline"})
+            continue
+        budget[0] += fsize
+        rec = {"name": name, "html": frag}
+        if interactive:
+            rec["interactive"] = True
+        out.append(rec)
+    return out
+
+
 _LOOM_IMG_CANDIDATES = (
     "viz/model-loom.png", "viz/model-loom.svg",
     "visualizations/model-loom.png", "visualizations/model-loom.svg",
@@ -691,6 +734,13 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
             if isinstance(v, dict) and str(v.get("address", "")).startswith("image:")
         }
         figs.extend(_embed_html_figures(study_dir, img_budget, img_basenames))
+        # Native Visualizations gallery — the declared visualizations[] rendered to
+        # the latest run's .pbg/runs/<run>/viz.json (in-memory HTML, not committed
+        # on disk). Modern studies render their RESULT figures here, so without this
+        # they were missing from the report. Deduped against the figures already
+        # embedded above (by display name).
+        embedded_names = {f.get("name") for f in figs if isinstance(f, dict)}
+        figs.extend(_embed_native_gallery_panels(ws_root, real_slug, img_budget, embedded_names))
         if figs:
             s["figures_embedded"] = figs
         # resolve the baseline composite's bigraph topology for the Model loom view

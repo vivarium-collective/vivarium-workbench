@@ -89,6 +89,44 @@ def test_embed_html_figures_empty_when_no_viz_dirs(tmp_path):
     assert _embed_html_figures(tmp_path, [0], set()) == []
 
 
+# --- _embed_native_gallery_panels --------------------------------------------
+
+def test_embed_native_gallery_panels_inlines_run_viz(tmp_path, monkeypatch):
+    """The latest run's native-gallery panels (viz.json, in-memory HTML) are
+    inlined so modern studies' RESULT figures reach the downloadable report."""
+    import vivarium_workbench.lib.investigation_report as mod
+    monkeypatch.setattr(
+        "vivarium_workbench.lib.investigation_figures.study_output_html_panels",
+        lambda ws, slug: {"Vent timeseries": "<div>TS</div>", "Phase map": "<div>PM</div>"},
+    )
+    out = mod._embed_native_gallery_panels(tmp_path, "og-00", [0], set())
+    assert {f["name"] for f in out} == {"Vent timeseries", "Phase map"}
+    assert any("TS" in f.get("html", "") for f in out)
+
+
+def test_embed_native_gallery_panels_dedupes_by_name(tmp_path, monkeypatch):
+    """A panel whose display name is already embedded (e.g. a committed viz/*.html
+    of the same figure) is not duplicated."""
+    import vivarium_workbench.lib.investigation_report as mod
+    monkeypatch.setattr(
+        "vivarium_workbench.lib.investigation_figures.study_output_html_panels",
+        lambda ws, slug: {"Shared": "<div>A</div>"},
+    )
+    assert mod._embed_native_gallery_panels(tmp_path, "og-00", [0], {"Shared"}) == []
+
+
+def test_embed_native_gallery_panels_empty_on_error(tmp_path, monkeypatch):
+    """A missing run / unreadable gallery never breaks the report."""
+    import vivarium_workbench.lib.investigation_report as mod
+
+    def _boom(ws, slug):
+        raise RuntimeError("no completed run")
+
+    monkeypatch.setattr(
+        "vivarium_workbench.lib.investigation_figures.study_output_html_panels", _boom)
+    assert mod._embed_native_gallery_panels(tmp_path, "og-00", [0], set()) == []
+
+
 # --- _model_loom_img: dedicated (higher) per-file cap ------------------------
 
 def test_loom_img_uses_its_own_higher_cap(tmp_path, monkeypatch):
