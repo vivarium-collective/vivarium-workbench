@@ -2864,12 +2864,7 @@ body.pcard-splitting iframe{ pointer-events:none; }
   font-size: 0.78em; font-weight: 700; line-height: 1.6; vertical-align: baseline;
   background: #e2e8f0; color: #475569;
 }
-.inv-brief-tab-badge.attn { background: #b45309; color: #fff; animation: invDecPulse 1.9s ease-in-out infinite; }
-@keyframes invDecPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(180, 83, 9, 0.5); }
-  50%      { box-shadow: 0 0 0 5px rgba(180, 83, 9, 0); }
-}
-@media (prefers-reduced-motion: reduce) { .inv-brief-tab-badge.attn { animation: none; } }
+.inv-brief-tab-badge.attn { background: #b45309; color: #fff; }
 .inv-brief-panels { font-family: -apple-system, "Segoe UI", sans-serif; }
 .inv-brief-prose { font-size: 0.95em; line-height: 1.62; color: #334155; }
 .inv-brief-prose p { margin: 0 0 10px; }
