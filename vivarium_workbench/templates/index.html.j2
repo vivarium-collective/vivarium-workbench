@@ -1553,6 +1553,12 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                oninput="window._setAigBand(parseInt(this.value,10))" style="width:110px" aria-label="Graph zoom / detail level">
         <span title="Zoom in — full detail">🔍+</span>
       </span>
+      <span class="aig-width-ctl" style="float:right;display:inline-flex;align-items:center;gap:6px;font-size:0.9em;color:#64748b;margin-right:14px" title="Card width — widen or narrow the study cards to display the text as needed">
+        <span title="Narrower cards" style="font-size:0.95em">▯</span>
+        <input id="aig-width-slider" type="range" min="0.7" max="1.8" step="0.05" value="1"
+               oninput="window._setAigWidthScale(parseFloat(this.value))" style="width:92px" aria-label="Study card width">
+        <span title="Wider cards" style="font-size:1.1em">▭</span>
+      </span>
       <span class="aig-view-ctl" style="float:right;display:inline-flex;align-items:center;gap:3px;font-size:0.9em;color:#64748b;margin-right:14px" role="group" aria-label="Graph view">
         <button type="button" title="Zoom out" onclick="window._aigZoomBy(0.8)" style="border:1px solid #e2e8f0;background:transparent;border-radius:5px 0 0 5px;padding:2px 9px;cursor:pointer;font-size:1em;line-height:1.3">−</button>
         <button type="button" title="Zoom in" onclick="window._aigZoomBy(1.25)" style="border:1px solid #e2e8f0;border-left:none;background:transparent;padding:2px 9px;cursor:pointer;font-size:1em;line-height:1.3">+</button>

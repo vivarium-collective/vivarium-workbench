@@ -130,6 +130,16 @@
   // Investigation DAG band state
   // -------------------------------------------------------------------------
   var aigBand = 1;                 // 0=far, 1=mid, 2=near (default = current detail)
+  // Card-width scale — independent of the zoom band. Lets the viewer widen or
+  // narrow the study cards to read the Asks/Finds text as needed. Multiplies the
+  // band's cardW; persisted per viewer in localStorage.
+  var AIG_WIDTH_MIN = 0.7, AIG_WIDTH_MAX = 1.8;
+  var aigWidthScale = (function () {
+    try {
+      var v = parseFloat(localStorage.getItem('aig-width-scale'));
+      return (v >= AIG_WIDTH_MIN && v <= AIG_WIDTH_MAX) ? v : 1;
+    } catch (e) { return 1; }
+  })();
   var _lastDagArgs = null;         // [studies, chainsBySlug] for re-render on band change
 
   // Layer-4 pull-or-compute: per-study cached/compute status for the current
@@ -10870,6 +10880,9 @@
     var _opts = window._layoutOptsForBand(aigBand);
     var shellEl = document.getElementById('investigation-dag-shell');
     if (shellEl) { shellEl.classList.remove('aig-zoom-far','aig-zoom-mid','aig-zoom-near'); shellEl.classList.add(_opts.cls); }
+    // Keep the card-width slider showing the persisted scale on (re-)render.
+    var _wsl = document.getElementById('aig-width-slider');
+    if (_wsl && String(_wsl.value) !== String(aigWidthScale)) _wsl.value = String(aigWidthScale);
 
 
     var nodesHost = document.getElementById('investigation-dag-nodes');
@@ -10945,8 +10958,12 @@
     //     dependency-depth axis — horizontal columns in LR, vertical rows in TB.
     //   - BREADTH_GAP (fixed): gap along the same-depth axis — vertical stack in
     //     LR, horizontal row in TB.
-    var CARD_W = _opts.cardW;
-    var DEPTH_GAP = _opts.xGap, BREADTH_GAP = 22;
+    // Card width is the band's cardW scaled by the viewer's width control, so
+    // cards can be widened/narrowed to read the Asks/Finds text independently of
+    // the zoom band. DEPTH_GAP widens a little with the cards so columns don't
+    // crowd; BREADTH_GAP (same-depth stacking) stays fixed.
+    var CARD_W = Math.round(_opts.cardW * aigWidthScale);
+    var DEPTH_GAP = Math.round(_opts.xGap * (1 + (aigWidthScale - 1) * 0.5)), BREADTH_GAP = 22;
     var PAD_X = 24, PAD_Y = 16;
     var svgNS = 'http://www.w3.org/2000/svg';
     var pos = {};
@@ -11605,6 +11622,20 @@
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
   }
   window._setAigBand = _setAigBand;
+
+  // Card-width control (independent of the zoom band). Scales the study cards so
+  // the viewer can widen them to read the Asks/Finds text, or narrow them to fit
+  // more of the graph. Persisted per viewer; re-lays-out the DAG on change.
+  function _setAigWidthScale(scale) {
+    var s = Math.max(AIG_WIDTH_MIN, Math.min(AIG_WIDTH_MAX, Number(scale) || 1));
+    var sl = document.getElementById('aig-width-slider');
+    if (sl && String(sl.value) !== String(s)) sl.value = String(s);
+    if (s === aigWidthScale) return;
+    aigWidthScale = s;
+    try { localStorage.setItem('aig-width-scale', String(s)); } catch (e) {}
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+  }
+  window._setAigWidthScale = _setAigWidthScale;
 
   // Semantic zoom is driven ONLY by the top-right zoom slider (_setAigBand).
   // Scroll-to-zoom-into-a-card was removed intentionally — hijacking the wheel
