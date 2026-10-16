@@ -40,6 +40,11 @@ assert.ok(w.includes('_inputsCitedByHtml(ref.cited_by)'),
   'reference card renders its cited_by chips');
 assert.ok(/_studyHref\(slug\)/.test(w),
   'cited-by chips link to the study page via _studyHref');
+// Clicking a chip opens the study IN the workbench (keeps the left menu), via
+// the shared study router — not a full-window / new-window navigation.
+assert.ok(w.includes('_openStudyEmbeddedNewTab(\\\'') ||
+  w.includes("_openStudyEmbeddedNewTab('"),
+  'cited-by chip click opens the study in-app via _openStudyEmbeddedNewTab');
 
 // The expert-docs renderer still surfaces the description (source dossiers).
 assert.ok(w.includes('doc.description'),

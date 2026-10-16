@@ -1045,7 +1045,13 @@
       var label = c.title || c.slug || slug;
       var href = (typeof _studyHref === 'function')
         ? _studyHref(slug) : ('/studies/' + encodeURIComponent(slug));
-      return '<a href="' + _esc(href) + '" title="Open study: ' + _esc(label) + '" ' +
+      // Open IN the workbench (keeps the left menu + SPA chrome) via the shared
+      // study router, exactly like the Studies rail. The real href is kept as a
+      // graceful fallback (middle-click / router missing / no-JS).
+      return '<a href="' + _esc(href) + '" ' +
+        'onclick="if(window._openStudyEmbeddedNewTab){_openStudyEmbeddedNewTab(\'' +
+        _esc(slug) + '\');return false;}" ' +
+        'title="Open study in workbench: ' + _esc(label) + '" ' +
         'style="display:inline-block;font-size:0.72em;line-height:1.5;padding:1px 9px;' +
         'margin:0 4px 2px 0;border:1px solid #c7d2fe;background:#eef2ff;color:#4338ca;' +
         'border-radius:10px;text-decoration:none">' + _esc(label) + '</a>';
