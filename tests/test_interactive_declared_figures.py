@@ -285,3 +285,47 @@ def test_declared_figure_that_is_also_an_embed_is_deduped(tmp_path):
     declared = {c.get("key") for c in charts if c.get("source") == "declared"}
     assert "shown" not in declared, "an embedded figure must not also be a declared chart"
     assert "extra" in declared, "a declared figure with no embed must still render"
+
+
+def test_local_renderer_surfaces_committed_viz_html(tmp_path):
+    """A live-renderer viz entry (address: local:<Class>) whose rendered output
+    is checked in at viz/<name>.html (the render-viz convention) is surfaced as a
+    declared iframe figure — so the Visualizations tab and report show it with no
+    runs.db. Without this the custom figures appeared nowhere in the live
+    dashboard (the live per-test chart path never renders them)."""
+    ws = tmp_path / "ws"
+    study_dir = ws / "studies" / "demo"
+    (study_dir / "viz").mkdir(parents=True)
+    (study_dir / "viz" / "lineage-map.html").write_text(
+        "<html><body>plotly lineage</body></html>", encoding="utf-8")
+    (study_dir / "study.yaml").write_text(yaml.safe_dump({
+        "name": "demo",
+        "visualizations": [{"name": "lineage-map", "address": "local:LineageViz"}],
+    }), encoding="utf-8")
+
+    payload = build_study_charts_payload(ws, "demo")
+    [rec] = [c for c in payload["charts"] if c.get("source") == "declared"]
+    assert rec["media"] == "html"
+    assert rec["iframe_url"] == "/studies/demo/viz/lineage-map.html"
+    assert rec["key"] == "lineage-map"
+    assert "img" not in rec and "svg" not in rec
+
+    # A study whose ONLY figure is that committed render still reads as having
+    # an interactive visualization.
+    status = viz_gate.study_visualization_status(ws, "demo")
+    assert status["has_interactive"] is True
+    assert status["n_figures"] >= 1
+
+
+def test_local_renderer_without_committed_html_yields_no_declared_chart(tmp_path):
+    """No regression: a local:<Class> entry with NO committed viz/<name>.html
+    stays skipped (the live-render path owns it) — we don't fabricate a figure."""
+    ws = tmp_path / "ws"
+    study_dir = ws / "studies" / "demo"
+    study_dir.mkdir(parents=True)
+    (study_dir / "study.yaml").write_text(yaml.safe_dump({
+        "name": "demo",
+        "visualizations": [{"name": "nope", "address": "local:SomeViz"}],
+    }), encoding="utf-8")
+    charts = build_study_charts_payload(ws, "demo")["charts"]
+    assert not [c for c in charts if c.get("source") == "declared"]

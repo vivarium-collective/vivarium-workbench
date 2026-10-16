@@ -534,6 +534,19 @@ def discover_declared_figure_charts(study_dir: Path,
             continue
         ref, is_iframe, iframe_media = resolve_declared_figure_ref(entry)
         if not ref:
+            # A live-renderer entry (address: local:/dashboard:<Class>) whose
+            # rendered output is checked in at viz/<name>.html — the render-viz
+            # convention (a Visualization Step writes one self-contained HTML per
+            # declared viz, keyed by the entry's ``name``). Surface that committed
+            # figure as an iframe so the Visualizations tab + report show it with
+            # NO runs.db: these custom figures are never produced by the live
+            # per-test chart path, so without this they appeared nowhere in the
+            # live dashboard (only in the downloadable gallery). A fresh run's
+            # charts still render alongside via the live-render path.
+            name = str(entry.get("name") or "").strip()
+            if name and _resolve_figure_path(study_dir, f"{name}.html") is not None:
+                ref, is_iframe, iframe_media = f"{name}.html", True, "html"
+        if not ref:
             continue
         fig = _resolve_figure_path(study_dir, ref)
         if fig is None:
