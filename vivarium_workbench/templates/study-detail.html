@@ -26,12 +26,17 @@
        any consumer; the lifecycle stage is now shown — and highlighted "you are
        here" — inside the six-gate status row below (gate-current). #}
   </h1>
-  <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0;">
-    {# Launch actions only (▶ / ↻). The downloads live where they're used — the
-       ↓ figures button is at the top of the Visualizations tab, and ↓ notebook
-       is in the Model tab; the investigation card carries them too. Keeping the
-       header to the run/reproduce actions declutters it (they need a live
-       backend and are hidden in the snapshot). #}
+  <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0; align-items:center;">
+    {# Easy-access downloads, prominent at the top of the study tab. These moved
+       OFF the investigation-graph study cards (which stay a clean browse surface)
+       to this one consistent place. Unlike the run/reproduce launch actions they
+       do NOT need a live backend, so they are NOT hidden in the published
+       snapshot — shared links can still grab a study's figures + notebook. #}
+    <button type="button" id="study-dl-figures" class="btn-mini study-dl-btn" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')" title="Download this study's figures (figure panels + its composite) as a zip">↓ figures</button>
+    <button type="button" id="study-dl-notebook" class="btn-mini study-dl-btn" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')" title="Download a runnable Jupyter notebook for THIS study — its composite + editable parameters + figures">↓ notebook</button>
+    <span aria-hidden="true" style="width:1px; align-self:stretch; margin:2px 4px; background:#e2e8f0;"></span>
+    {# Launch actions (▶ / ↻). They need a live backend and are hidden in the
+       snapshot (see the snapshot block at the end of this template). #}
     <button type="button" id="study-reproduce" class="btn-mini" title="Replay this study's most recent run's RECORDED manifest verbatim (POST /api/study-reproduce) — ignores any study.yaml edits made since">↻ Reproduce</button>
     <button type="button" id="study-run-current-spec" class="btn-mini" title="Run this study's CURRENT baseline spec (POST /api/study-run-baseline) as a brand-new run">▶ Run current spec</button>
     {# item 110: dispatch ANY registered process-bigraph composite_id (e.g. pbg-native's
@@ -254,6 +259,13 @@
    The 6-axis stepper + gate-status colors below are carried over verbatim from
    the pre-restructure Pass A styling (the <details> markup was repositioned,
    not rebuilt). */
+/* Prominent, easy-access downloads in the study header (moved off the graph
+   cards). Filled accent so they read as the primary "grab this study" CTAs,
+   distinct from the outlined run/reproduce launch buttons beside them. */
+.study-dl-btn{background:#1976d2;color:#fff;border-color:#1976d2;font-weight:600}
+.study-dl-btn:hover{background:#1565c0;border-color:#1565c0}
+:root[data-theme="dark"] .study-dl-btn{background:#3b82f6;border-color:#3b82f6;color:#fff}
+:root[data-theme="dark"] .study-dl-btn:hover{background:#2563eb;border-color:#2563eb}
 .study-kind-tag{display:inline-block;font-size:0.5em;font-weight:600;padding:3px 9px;border-radius:9999px;vertical-align:middle;margin-left:8px;background:#f1f5f9;color:#475569;text-transform:capitalize}
 .study-kind-tag.study-kind-biological{background:#ecfdf5;color:#065f46}
 .study-kind-tag.study-kind-computational{background:#eff6ff;color:#1e40af}

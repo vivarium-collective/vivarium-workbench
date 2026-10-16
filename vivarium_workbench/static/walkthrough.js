@@ -10781,32 +10781,15 @@
     return '';
   }
 
-  // Download affordances for a graph study card: ↓ figures (this study's own
-  // figures) + ↓ notebook (the parent investigation's runnable notebook). Unlike
-  // the run/continue controls these are NOT authoring-gated — they survive into
-  // the read-only snapshot so shared links can still grab figures. Deliberately
-  // no ▶ run here: the small card stays uncluttered; running lives on the full
-  // study tab.
+  // The graph study cards intentionally carry NO download affordances anymore
+  // (↓ figures / ↓ notebook). Downloads now live prominently at the top of the
+  // full study tab (study-detail.html's header: ↓ figures / ↓ notebook) — one
+  // easy-access place instead of one per node, so the investigation graph stays
+  // clean. The run/continue launch actions were likewise moved to the study tab
+  // (see _dagTriggerControlsHtml). Kept as a no-op so existing call sites need
+  // no change.
   function _dagDownloadControlsHtml(slug) {
-    var lnk = 'font-size:0.66em;color:#3b82f6;text-decoration:none;white-space:nowrap';
-    // Show "↓ figures" only when the study actually has downloadable figures.
-    // The per-study status (from /api/investigation-trigger-status) carries
-    // has_figures; hide the link ONLY on an explicit false so that when the
-    // status is unavailable (snapshot bundle / fetch failed → no entry) we keep
-    // showing it rather than hiding a real download. ↓ notebook is always
-    // generatable, so it stays unconditional.
-    var _st = _dagTriggerBySlug[slug];
-    var _figures = (!_st || _st.has_figures !== false)
-      ? '<a href="#" title="Download this study\'s figures (and embedded HTML reports) as a zip" ' +
-          'onclick="window._vivStudyFiguresFromCard(event,\'' + _esc(slug) + '\');return false;" ' +
-          'style="' + lnk + '">↓ figures</a>'
-      : '';
-    return '<div class="dag-download-controls" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">' +
-      _figures +
-      '<a href="#" title="Download this study\'s own runnable notebook (composite + parameters + figures)" ' +
-        'onclick="window._vivStudyNotebookFromCard(event,\'' + _esc(slug) + '\',\'' + _esc(_dagInvSlug || '') + '\');return false;" ' +
-        'style="' + lnk + '">↓ notebook</a>' +
-      '</div>';
+    return '';
   }
 
   function _triggerStudy(slug, onMissing, btnEl) {
