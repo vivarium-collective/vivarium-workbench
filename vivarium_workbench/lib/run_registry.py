@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import psutil
+
 from vivarium_workbench.lib import composite_runs as cr
 
 # Maximum simultaneous in-flight runs. POST returns 429 above this.
@@ -28,19 +30,12 @@ CONCURRENCY_CAP = 4
 # Terminal statuses — a run in any of these is finished; stop_run is a no-op.
 _TERMINAL_STATUSES = {"completed", "failed", "orphaned", "cancelled"}
 
-
+# C.M. 261014: Windows compatible process checking.
 def _pid_alive(pid: int) -> bool:
     """True if a process with this PID currently exists."""
     if not pid:
         return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Exists but owned by another user — still 'alive' for our purposes.
-        return True
-    return True
+    return psutil.pid_exists(pid)
 
 
 def spawn_detached(request_path: Path, *, workspace: Path,

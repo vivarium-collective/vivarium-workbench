@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+
 from vivarium_workbench.lib import emitters
 from vivarium_workbench.lib import env_compat
 
