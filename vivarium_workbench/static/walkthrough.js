@@ -1002,44 +1002,23 @@
   function _loadInputs() {
     var el = document.getElementById('inputs-api-render');
     if (!el) return;
-    el.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading inputs…') : '<p class="muted" style="font-style:italic">Loading inputs…</p>';
-    // Prefer the Sources-page picker selection over the git-branch-current slug.
-    var _slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
+    el.innerHTML = window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading resources…') : '<p class="muted" style="font-style:italic">Loading resources…</p>';
+    // One repo-wide resource set: always load the global inputs (no slug). The
+    // server folds every investigation's declared resources into this block.
     var _pInputs = window.DataSource
-      ? window.DataSource.loadInputs(_slug)
-      : (function() {
-          var _url = '/api/inputs' + (_slug ? ('?investigation=' + encodeURIComponent(_slug)) : '');
-          return fetch(_url).then(function(r) { return r.json(); });
-        })();
-    // Also load the investigation list so the panel can offer a picker when no
-    // investigation is branch-current — the user chooses which investigation to
-    // load sources INTO (its own sources, not the repo-wide shared sources).
-    var _pList = (window.DataSource
-      ? window.DataSource.loadIsetList()
-      : apiFetch('GET', '/api/investigation-summaries').then(function(r) { return r.json(); }))
-      .then(function(d) { return (d && d.investigations) || []; })
-      .catch(function() { return []; });
-    Promise.all([_pInputs, _pList])
-      .then(function (arr) {
-        var data = arr[0] || {};
-        data._investigations = arr[1] || [];
-        _renderInputs(el, data);
+      ? window.DataSource.loadInputs('')
+      : fetch('/api/inputs').then(function(r) { return r.json(); });
+    _pInputs
+      .then(function (data) {
+        _renderInputs(el, data || {});
       })
       .catch(function (err) {
-        el.innerHTML = '<p style="color:#c00">Could not load inputs: ' +
+        el.innerHTML = '<p style="color:#c00">Could not load resources: ' +
           _esc(String(err)) +
           ' <button class="action-btn" onclick="_loadInputs()">Retry</button></p>';
       });
   }
   window._loadInputs = _loadInputs;
-
-  // Sources-page investigation picker: set the selected slug and reload so the
-  // panel shows that investigation's sources + investigation-scoped +Add buttons.
-  function _inputsSelectInvestigation(slug) {
-    window._inputsSelectedSlug = slug || '';
-    _loadInputs();
-  }
-  window._inputsSelectInvestigation = _inputsSelectInvestigation;
 
   // A reference entry is either a bare bib key (investigation.references) or a
   // parsed bib-entry dict (global.references). Normalize to a display label.
@@ -1051,6 +1030,36 @@
 
   function _inputsNone() {
     return '<p class="muted" style="font-style:italic;margin:4px 0">none</p>';
+  }
+
+  // "Cited by" chips: one pill per study that cites this resource, linking to
+  // the study page (snapshot-safe via _studyHref). cited_by is
+  // [{slug, title, investigation}], attached server-side by build_inputs from
+  // the studies' `cites:` fields. Returns '' when nothing cites the resource.
+  function _inputsCitedByHtml(citedBy) {
+    if (!citedBy || !citedBy.length) return '';
+    var chips = citedBy.map(function (c) {
+      c = c || {};
+      var slug = c.slug || c.name || '';
+      if (!slug) return '';
+      var label = c.title || c.slug || slug;
+      var href = (typeof _studyHref === 'function')
+        ? _studyHref(slug) : ('/studies/' + encodeURIComponent(slug));
+      // Open IN the workbench (keeps the left menu + SPA chrome) via the shared
+      // study router, exactly like the Studies rail. The real href is kept as a
+      // graceful fallback (middle-click / router missing / no-JS).
+      return '<a href="' + _esc(href) + '" ' +
+        'onclick="if(window._openStudyEmbeddedNewTab){_openStudyEmbeddedNewTab(\'' +
+        _esc(slug) + '\');return false;}" ' +
+        'title="Open study in workbench: ' + _esc(label) + '" ' +
+        'style="display:inline-block;font-size:0.72em;line-height:1.5;padding:1px 9px;' +
+        'margin:0 4px 2px 0;border:1px solid #c7d2fe;background:#eef2ff;color:#4338ca;' +
+        'border-radius:10px;text-decoration:none">' + _esc(label) + '</a>';
+    }).join('');
+    if (!chips) return '';
+    return '<div style="margin-top:7px;display:flex;flex-wrap:wrap;align-items:baseline">' +
+      '<span class="muted" style="font-size:0.72em;margin-right:5px;letter-spacing:0.02em;' +
+      'text-transform:uppercase">Cited by</span>' + chips + '</div>';
   }
 
   // A download link to a workspace-relative path.
@@ -1163,8 +1172,10 @@
       ? '<div class="muted" style="font-size:0.85em;margin-top:2px;font-style:italic">' + _esc(ref.note) + '</div>'
       : '';
 
+    var citedHtml = _inputsCitedByHtml(ref.cited_by);
+
     return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
-      '<div>' + titleHtml + actions + '</div>' + meta + noteHtml + bibBlock + '</div>';
+      '<div>' + titleHtml + actions + '</div>' + meta + noteHtml + bibBlock + citedHtml + '</div>';
   }
 
   // Copy the text content of a <pre> to the clipboard; flash the button label.
@@ -1226,11 +1237,10 @@
     reader.readAsDataURL(file);
   }
 
-  // POST an investigation-scoped input upload, then refresh the page.
+  // POST a workspace-wide input upload (no `investigation` → the server writes
+  // to the repo-wide store), then refresh the Resources page.
   function _inputsPost(endpoint, body) {
     body = body || {};
-    var slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
-    if (slug) body.investigation = slug;
     apiFetch('POST', endpoint, body)
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
@@ -1259,11 +1269,9 @@
     inp.click();
   }
 
-  // Entry point for the "+ Add" buttons on the investigation inputs panel.
+  // Entry point for the "+ Add" buttons on the Resources panel. Uploads go to
+  // the repo-wide store (no investigation scope).
   function _inputsAdd(category) {
-    var slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
-    if (!slug) { alert('Select an investigation first (Load sources into: …).'); return; }
-
     if (category === 'dataset') {
       var dsName = window.prompt('Dataset name?');
       if (!dsName) return;
@@ -1324,8 +1332,6 @@
   function _inputsDrop(e) {
     e.preventDefault(); e.stopPropagation();
     _inputsDzHi(e.currentTarget, false);
-    var slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
-    if (!slug) { alert('Select an investigation first (Load sources into: …).'); return; }
     var files = (e.dataTransfer && e.dataTransfer.files)
       ? Array.prototype.slice.call(e.dataTransfer.files) : [];
     files.forEach(_inputsUploadDropped);
@@ -1353,103 +1359,65 @@
   window._inputsDrop = _inputsDrop;
   window._inputsUploadDropped = _inputsUploadDropped;
 
+  // Section header with an inline "+ Add" button and a short caption. One
+  // consistent treatment across References / Datasets / Expert docs so the
+  // unified Resources page reads cleanly.
+  function _inputsSection(title, caption, category, body) {
+    return '<section style="margin:0 0 22px">' +
+      '<div style="display:flex;align-items:baseline;gap:8px;' +
+      'border-bottom:1px solid #e2e8f0;padding-bottom:5px;margin-bottom:10px">' +
+      '<h4 style="margin:0;font-size:1.02em">' + _esc(title) + '</h4>' +
+      _inputsAddBtn(category) +
+      (caption ? '<span class="muted" style="font-size:0.78em;margin-left:auto">' +
+        _esc(caption) + '</span>' : '') +
+      '</div>' + body + '</section>';
+  }
+
   function _renderInputs(el, data) {
-    var inv = data.investigation || {};
-    var glob = data.global || {};
-    var current = data.current || null;
-    // Keep the selected-slug in sync with the investigation actually shown, so
-    // the drop zone + "+ Add" buttons resolve the right target even before the
-    // user touches the "Load sources into" dropdown (data.current reflects the
-    // git branch / last selection). Without this, dropping a file falsely
-    // reported "Select an investigation first".
-    if (current) window._inputsSelectedSlug = current;
+    // One repo-wide resource set. The global block already folds in every
+    // investigation's declared datasets + expert_docs (back-compat, done
+    // server-side in build_inputs), so there is no separate per-investigation
+    // section — everything shows together as workspace resources. Defensively
+    // fall back to the investigation block if an older server returns only that.
+    var glob = data.global || data.investigation || {};
+    // Uploads now target the workspace (repo-wide), not an investigation.
+    window._inputsSelectedSlug = '';
 
-    var invList = data._investigations || [];
+    var refs = glob.references || [];
+    var datasets = glob.datasets || [];
+    var experts = glob.expert_docs || [];
 
-    var html = '';
+    var html = '<div>';
+    html += '<h3 style="margin:0 0 2px">Resources</h3>';
+    html += '<p class="muted" style="font-size:0.85em;margin:0 0 14px">' +
+      'Papers, datasets, and expert docs for this workspace. Each reference shows ' +
+      'the studies that cite it — click a study to open it.</p>';
 
-    // --- This investigation's inputs (top) ---
-    var invHeading = 'This investigation’s sources';
-    if (current) invHeading += ' — ' + _esc(current);
-    html += '<div class="panel">';
-    html += '<h3>' + invHeading + '</h3>';
+    // Drag-and-drop upload zone (live/authoring only; category inferred from the
+    // dropped file's extension). Files land in the workspace-wide store.
+    html += '<div id="inputs-dropzone" class="js-authoring" ' +
+      'ondragover="_inputsDragOver(event)" ondragleave="_inputsDragLeave(event)" ondrop="_inputsDrop(event)" ' +
+      'style="border:2px dashed #cbd5e1;border-radius:8px;padding:16px 14px;text-align:center;' +
+      'color:#64748b;font-size:0.9em;margin:0 0 20px;background:#f8fafc;transition:background .12s,border-color .12s">' +
+      '<div style="font-weight:600;color:#475569">⬆ Drag papers, datasets, or expert docs here to upload</div>' +
+      '<div style="font-size:0.78em;color:#94a3b8;margin-top:3px">' +
+        'PDFs → references · .md / .txt / .docx → expert docs · everything else → datasets' +
+      '</div></div>';
 
-    // Investigation picker. One dashboard per repo, but a repo can hold several
-    // investigations and the Sources page isn't always opened from inside one
-    // (git-branch detection may yield no current). Let the user choose which
-    // investigation to view and load sources INTO — its own sources, not the
-    // repo-wide shared sources below.
-    if (invList.length) {
-      var opts = '<option value="">— select an investigation —</option>' +
-        invList.map(function (it) {
-          var slug = it.name || it.slug || '';
-          var label = it.title || slug;
-          var sel = (slug === current) ? ' selected' : '';
-          return '<option value="' + _esc(slug) + '"' + sel + '>' + _esc(label) + '</option>';
-        }).join('');
-      html += '<div style="margin:4px 0 12px;display:flex;align-items:center;gap:6px">' +
-        '<label style="font-size:0.85em;color:#475569">Load sources into:</label>' +
-        '<select onchange="_inputsSelectInvestigation(this.value)" ' +
-        'style="font-size:0.9em;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px">' +
-        opts + '</select></div>';
-    }
+    // References (papers) — the richest section, with cited-by study chips.
+    html += _inputsSection('References', 'papers · BibTeX · PDFs', 'reference',
+      _inputsRefsHtml(refs));
 
-    if (!current) {
-      html += '<p class="muted" style="font-style:italic">' +
-        (invList.length
-          ? 'Select an investigation above to view and add its sources.'
-          : 'No investigation loaded.') + '</p>';
-    } else {
-      if (inv._repo_fallback) {
-        html += '<p class="muted" style="font-style:italic;font-size:0.85em">' +
-          'migrating: showing repo-level inputs</p>';
-      }
-      // Drag-and-drop upload zone: drop files straight in — no name prompt,
-      // no file picker. Category is inferred from the extension and the name
-      // from the filename (the "+ Add" buttons below remain for manual naming).
-      html += '<div id="inputs-dropzone" ' +
-        'ondragover="_inputsDragOver(event)" ondragleave="_inputsDragLeave(event)" ondrop="_inputsDrop(event)" ' +
-        'style="border:2px dashed #cbd5e1;border-radius:8px;padding:16px 14px;text-align:center;' +
-        'color:#64748b;font-size:0.9em;margin:10px 0 6px;background:#f8fafc;transition:background .12s,border-color .12s">' +
-        '<div style="font-weight:600;color:#475569">⬆ Drag datasets or expert docs here to upload</div>' +
-        '<div style="font-size:0.78em;color:#94a3b8;margin-top:3px">' +
-          'PDFs → references · .md / .txt / .docx → expert docs · everything else → datasets' +
-        '</div></div>';
-      html += '<h4 style="margin:12px 0 4px">Datasets ' +
-        _inputsAddBtn('dataset') + '</h4>' +
-        _inputsDatasetsHtml(inv.datasets);
-      html += '<h4 style="margin:12px 0 4px">References ' +
-        _inputsAddBtn('reference') + '</h4>' +
-        _inputsRefsHtml(inv.references);
-      html += '<h4 style="margin:12px 0 4px">Expert docs ' +
-        _inputsAddBtn('expert') + '</h4>' +
-        _inputsExpertDocsHtml(inv.expert_docs);
-    }
-    html += '</div>';
+    // Datasets — provider-backed bundle (if any) renders into this host first,
+    // then the declared datasets.
+    var dsBody = '<div id="data-sources-host" style="display:none;margin-bottom:12px"></div>' +
+      _inputsDatasetsHtml(datasets);
+    html += _inputsSection('Datasets', 'data files', 'dataset', dsBody);
 
-    // --- Repo-wide data sources (below) ---
-    html += '<div class="panel">';
-    html += '<h3>Repo-wide data sources</h3>';
-    // Data-source bundle (workspace.yaml dashboard.data_sources provider).
-    // Populated asynchronously; the host is hidden until sources arrive so
-    // workspaces without a provider see no extra UI. Rendered FIRST (above the
-    // shared datasets/references) as the primary repo-wide source.
-    html += '<div id="data-sources-host" style="display:none;margin-bottom:16px"></div>';
-    // Scope the sub-headers so they stay unambiguous when the panel's own
-    // "Repo-wide data sources" heading scrolls off — otherwise a bare "Datasets"
-    // here reads as a twin of the investigation's "Datasets" table above.
-    html += '<h4 style="margin:12px 0 4px">Repo-wide datasets</h4>' +
-      _inputsDatasetsHtml(glob.datasets);
-    html += '<h4 style="margin:12px 0 4px">Repo-wide references</h4>' +
-      _inputsRefsHtml(glob.references);
-    // Repo-wide expert docs — workspace.yaml top-level `expert_docs` (source
-    // dossiers / background docs the whole workspace draws on, not scoped to one
-    // investigation). Omit the header entirely when there are none so workspaces
-    // without any see no empty section.
-    if (glob.expert_docs && glob.expert_docs.length) {
-      html += '<h4 style="margin:12px 0 4px">Repo-wide expert docs</h4>' +
-        _inputsExpertDocsHtml(glob.expert_docs);
-    }
+    // Expert docs — source dossiers / background the workspace draws on.
+    html += _inputsSection('Expert docs', 'dossiers · notes', 'expert',
+      _inputsExpertDocsHtml(experts));
+
     html += '</div>';
 
     el.innerHTML = html;

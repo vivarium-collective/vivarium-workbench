@@ -34,6 +34,22 @@ def _git_ws(tmp):
         "}\n",
         encoding="utf-8",
     )
+    # A study that cites the shared reference (inline + nested `cites`) — powers
+    # the Resources page "Cited by" chips.
+    study = tmp / "studies" / "oric-counting"
+    study.mkdir(parents=True)
+    (study / "study.yaml").write_text(
+        "schema_version: 4\n"
+        "name: oric-counting\n"
+        "title: oriC counting\n"
+        "investigation: dnaa-replication\n"
+        "cites: [Schmidt2016]\n"
+        "findings:\n"
+        "  - id: f1\n"
+        "    expected:\n"
+        "      cites: [Schmidt2016]\n",
+        encoding="utf-8",
+    )
     inv = tmp / "investigations" / "dnaa-replication"
     (inv / "studies").mkdir(parents=True)
     (inv / "investigation.yaml").write_text(
@@ -121,6 +137,41 @@ def test_inputs_payload_enriches_investigation_references(tmp_path):
     ghost = by_key["GhostKey1999"]
     assert ghost["_unmatched"] is True
     assert ghost["title"] == "GhostKey1999"
+
+
+def test_inputs_payload_references_carry_cited_by(tmp_path):
+    """Each global reference is annotated with the studies that cite it (by bib
+    key, collected from every study.yaml's `cites:` — inline or nested), so the
+    Resources page can render clickable "Cited by" study chips."""
+    ws = _git_ws(tmp_path)
+    glob = _inputs_payload(ws)["global"]
+    by_key = {r.get("key"): r for r in glob["references"] if isinstance(r, dict)}
+
+    schmidt = by_key["Schmidt2016"]
+    cited = schmidt.get("cited_by") or []
+    slugs = {c["slug"] for c in cited}
+    assert "oric-counting" in slugs, "citing study linked to the reference"
+    # De-duplicated even though the study cites the key twice (root + nested).
+    assert len([c for c in cited if c["slug"] == "oric-counting"]) == 1
+    entry = next(c for c in cited if c["slug"] == "oric-counting")
+    assert entry["title"] == "oriC counting"
+
+
+def test_inputs_payload_folds_investigation_resources_into_global(tmp_path):
+    """Repo-wide merge / back-compat: an investigation's declared datasets +
+    expert_docs (scoped under investigations/<slug>/investigation.yaml) are
+    folded into the global block so the unified Resources page shows them all
+    together — not only the workspace.yaml-level ones."""
+    ws = _git_ws(tmp_path)
+    glob = _inputs_payload(ws)["global"]
+
+    ds_names = {d.get("name") for d in glob["datasets"]}
+    assert "shared" in ds_names, "workspace-level dataset present"
+    assert "oric-counts" in ds_names, "investigation-scoped dataset folded in"
+
+    ed_names = {d.get("name") for d in glob["expert_docs"]}
+    assert "Campaign Dossier" in ed_names, "workspace-level expert doc present"
+    assert "oric-notes" in ed_names, "investigation-scoped expert doc folded in"
 
 
 def test_inputs_payload_datasets_and_expert_docs_carry_path(tmp_path):
