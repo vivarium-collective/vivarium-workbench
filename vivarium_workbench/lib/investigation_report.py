@@ -647,6 +647,13 @@ def _load_references(ws_root: Path, wp) -> dict:
         key = m.group(1).strip()
         fields = {fk.lower(): re.sub(r"\s+", " ", fv).strip()
                   for fk, fv in _BIB_FIELD_RE.findall(m.group(2))}
+        # Decode BibTeX/LaTeX accent escapes to Unicode and drop grouping braces
+        # so chips/labels read as the real name (e.g. Segr{\`e} -> Segrè),
+        # matching the References cards (lib.report._absorb_kv). Without this the
+        # raw escape leaks into every citation chip the report + study pages show.
+        from vivarium_workbench.lib.report import _delatex
+        fields = {k: re.sub(r"\s+", " ", _delatex(v).replace("{", "").replace("}", "")).strip()
+                  for k, v in fields.items()}
         out[key] = {
             "label": _bib_label(key, fields),
             "author": fields.get("author", ""),

@@ -432,8 +432,21 @@ def test_bib_label_and_reference_parsing(tmp_path):
         "@article{preiner2020hydrogen,\n  author = {Preiner, Martina},\n"
         "  year = {2020},\n  title = {A hydrogen-dependent geochemistry},\n}\n",
         encoding="utf-8")
+    # A BibTeX/LaTeX accent escape must decode to Unicode in the chip label,
+    # author and title — not leak the raw escape (e.g. Segr{\`e} -> Segrè).
+    (refs_dir / "papers.bib").write_text(
+        "@article{preiner2020hydrogen,\n  author = {Preiner, Martina},\n"
+        "  year = {2020},\n  title = {A hydrogen-dependent geochemistry},\n}\n"
+        "@article{segre2000compositional,\n"
+        "  author = {Segr{\\`e}, Daniel and Ben-Eli, Dafna and Lancet, Doron},\n"
+        "  year = {2000},\n  title = {Compositional genomes},\n}\n",
+        encoding="utf-8")
     wp = WorkspacePaths.load(tmp_path)
     refs = _load_references(tmp_path, wp)
     assert "preiner2020hydrogen" in refs
     assert refs["preiner2020hydrogen"]["label"] == "Preiner 2020"
     assert "hydrogen-dependent" in refs["preiner2020hydrogen"]["title"]
+    seg = refs["segre2000compositional"]
+    assert seg["label"] == "Segrè 2000", seg["label"]
+    assert seg["author"].startswith("Segrè, Daniel")
+    assert "{" not in seg["author"] and "\\" not in seg["author"]
