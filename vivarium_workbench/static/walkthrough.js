@@ -11415,10 +11415,23 @@
     shell.scrollLeft = 0; shell.scrollTop = 0;
   }
   function _aigFullscreen() {
-    var shell = document.getElementById('investigation-dag-shell');
-    if (!shell) return;
-    if (document.fullscreenElement) { document.exitFullscreen(); }
-    else if (shell.requestFullscreen) { shell.requestFullscreen().then(function () { setTimeout(_aigFit, 150); }); }
+    // Fullscreen the WRAPPER (toolbar + shell), not the shell alone, so the
+    // graph controls (semantic zoom, +/− view zoom, fit, orientation, download)
+    // stay on screen in fullscreen. Fall back to the shell if the wrapper is
+    // absent (older markup), and to the webkit-prefixed API (Safari).
+    var fs = document.getElementById('investigation-dag-fs')
+          || document.getElementById('investigation-dag-shell');
+    if (!fs) return;
+    var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl) {
+      (document.exitFullscreen || document.webkitExitFullscreen || function () {}).call(document);
+      return;
+    }
+    var req = fs.requestFullscreen || fs.webkitRequestFullscreen;
+    if (!req) return;
+    var p = req.call(fs);
+    if (p && p.then) p.then(function () { setTimeout(_aigFit, 150); });
+    else setTimeout(_aigFit, 200);
   }
   // Expand (snap-to-top): grow the graph pane to nearly the full viewport height
   // and scroll it to the top of the screen, WITHOUT going fullscreen — so the whole
@@ -11447,6 +11460,117 @@
   window._aigFit = _aigFit;
   window._aigFullscreen = _aigFullscreen;
   window._aigExpand = _aigExpand;
+
+  // ── Download the investigation graph as PNG / PDF ────────────────────────
+  // The DAG is bespoke HTML (positioned cards + an SVG edge layer), not a loom
+  // graph, so we rasterize it with html-to-image. Both that and jsPDF are
+  // lazy-loaded from a CDN only when the user actually downloads — keeping the
+  // page light and not breaking offline use of the rest of the toolbar.
+  function _aigLoadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src; s.async = true;
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error('Could not load ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  var _htiP = null, _jspdfP = null;
+  function _ensureHtmlToImage() {
+    if (window.htmlToImage) return Promise.resolve(window.htmlToImage);
+    if (!_htiP) _htiP = _aigLoadScript('https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js')
+      .then(function () { return window.htmlToImage; });
+    return _htiP;
+  }
+  function _ensureJsPdf() {
+    if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+    if (!_jspdfP) _jspdfP = _aigLoadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+      .then(function () { return window.jspdf.jsPDF; });
+    return _jspdfP;
+  }
+  function _aigNotify(msg) {
+    if (typeof window._notify === 'function') { try { window._notify(msg); return; } catch (_e) {} }
+    try { window.alert(msg); } catch (_e) {}
+  }
+  function _aigExport(fmt) {
+    var shell = document.getElementById('investigation-dag-shell');
+    var nodes = document.getElementById('investigation-dag-nodes');
+    var edges = document.getElementById('investigation-dag-edges');
+    if (!shell || !nodes) { _aigNotify('Investigation graph is not ready to export yet.'); return; }
+    var cw = Math.ceil(parseFloat(shell.dataset.canvasW) || nodes.offsetWidth || shell.scrollWidth || 0);
+    var ch = Math.ceil(parseFloat(shell.dataset.canvasH) || nodes.offsetHeight || shell.scrollHeight || 0);
+    if (!cw || !ch) { _aigNotify('Investigation graph has no measured size yet — try again after it renders.'); return; }
+    // Snapshot live view state, then lay the whole canvas out unscaled so the
+    // export captures the FULL graph (not just the scrolled/zoomed viewport).
+    var prev = {
+      zoom: aigZoom, sl: shell.scrollLeft, st: shell.scrollTop,
+      height: shell.style.height, width: shell.style.width,
+      overflow: shell.style.overflow, maxH: shell.style.maxHeight,
+      resize: shell.style.resize, cursor: shell.style.cursor,
+      userResized: shell.dataset.userResized,
+    };
+    shell.dataset.userResized = '1';            // stop auto-fit from fighting us
+    aigZoom = 1;
+    [nodes, edges].forEach(function (el) { if (el) el.style.transform = 'scale(1)'; });
+    shell.style.overflow = 'visible'; shell.style.maxHeight = 'none';
+    shell.style.height = ch + 'px'; shell.style.width = cw + 'px';
+    shell.style.resize = 'none'; shell.scrollLeft = 0; shell.scrollTop = 0;
+    function _restore() {
+      shell.style.height = prev.height; shell.style.width = prev.width;
+      shell.style.overflow = prev.overflow; shell.style.maxHeight = prev.maxH;
+      shell.style.resize = prev.resize; shell.style.cursor = prev.cursor;
+      if (prev.userResized === undefined) delete shell.dataset.userResized;
+      else shell.dataset.userResized = prev.userResized;
+      aigZoom = prev.zoom; _applyAigZoom();
+      shell.scrollLeft = prev.sl; shell.scrollTop = prev.st;
+    }
+    var base = (typeof _dagInvSlug === 'string' && _dagInvSlug) ? _dagInvSlug : 'investigation';
+    var opts = { backgroundColor: '#ffffff', width: cw, height: ch, pixelRatio: 2, style: { transform: 'none' } };
+    _ensureHtmlToImage().then(function (hti) {
+      return hti.toPng(shell, opts).then(function (dataUrl) {
+        if (fmt === 'pdf') {
+          return _ensureJsPdf().then(function (JsPDF) {
+            var pdf = new JsPDF({ orientation: cw >= ch ? 'landscape' : 'portrait', unit: 'px', format: [cw, ch] });
+            pdf.addImage(dataUrl, 'PNG', 0, 0, cw, ch);
+            pdf.save(base + '-investigation-graph.pdf');
+          });
+        }
+        var a = document.createElement('a');
+        a.href = dataUrl; a.download = base + '-investigation-graph.png';
+        document.body.appendChild(a); a.click(); a.remove();
+      });
+    }).catch(function (e) {
+      _aigNotify('Graph download failed: ' + (e && e.message ? e.message : e));
+    }).then(_restore, _restore);
+  }
+  function _aigCloseDownloadMenu() {
+    var menu = document.getElementById('aig-dl-menu');
+    var btn = document.getElementById('aig-dl-btn');
+    if (menu) menu.style.display = 'none';
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  function _aigToggleDownloadMenu(ev) {
+    if (ev) ev.stopPropagation();
+    var menu = document.getElementById('aig-dl-menu');
+    var btn = document.getElementById('aig-dl-btn');
+    if (!menu) return;
+    var open = menu.style.display !== 'none' && menu.style.display !== '';
+    menu.style.display = open ? 'none' : 'block';
+    if (btn) btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+  }
+  function _aigDownloadMenuPick(fmt) {
+    _aigCloseDownloadMenu();
+    _aigExport(fmt);
+  }
+  // Close the download menu on any outside click (capture so card handlers that
+  // stopPropagation don't swallow it).
+  document.addEventListener('click', function (e) {
+    var ctl = e.target.closest && e.target.closest('.aig-dl-ctl');
+    if (!ctl) _aigCloseDownloadMenu();
+  }, true);
+  window._aigExport = _aigExport;
+  window._aigToggleDownloadMenu = _aigToggleDownloadMenu;
+  window._aigDownloadMenuPick = _aigDownloadMenuPick;
   // Drag anywhere on the shell background to pan (card clicks still work).
   document.addEventListener('pointerdown', function (e) {
     var shell = e.target.closest && e.target.closest('#investigation-dag-shell');

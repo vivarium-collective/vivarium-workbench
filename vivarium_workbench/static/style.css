@@ -35,6 +35,20 @@ main{padding:20px;margin:0 auto}
   height: 90vh !important; max-height: 90vh !important;
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28); scroll-margin-top: 8px;
 }
+/* Browser-fullscreen (⛶): the wrapper (toolbar + shell) fills the screen so the
+   graph controls stay available. The shell flexes to fill the space below the
+   toolbar (its inline/auto-fit height is overridden with !important). */
+#investigation-dag-fs:fullscreen,
+#investigation-dag-fs:-webkit-full-screen{
+  background:#fff; box-sizing:border-box; padding:10px 16px 14px;
+  width:100vw; height:100vh; display:flex; flex-direction:column; overflow:hidden;
+}
+#investigation-dag-fs:fullscreen #investigation-dag-lead,
+#investigation-dag-fs:-webkit-full-screen #investigation-dag-lead{ flex:0 0 auto; }
+#investigation-dag-fs:fullscreen #investigation-dag-shell,
+#investigation-dag-fs:-webkit-full-screen #investigation-dag-shell{
+  flex:1 1 auto; height:auto !important; max-height:none !important; resize:none;
+}
 #investigation-study-embed-panel{
   width: 100% !important; max-width: none !important;
   margin-top: 16px !important;
