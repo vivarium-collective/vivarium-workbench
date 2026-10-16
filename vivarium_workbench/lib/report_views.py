@@ -563,6 +563,115 @@ def build_needs_attention(
         return _empty, 200
 
 
+def _collect_cite_keys(obj: Any, acc: set) -> None:
+    """Recursively collect every bib key under any ``cites`` field of a nested
+    study spec. ``cites`` may be an inline list (``cites: [a, b]``), a block
+    list, or a bare string — and it appears at study root AND nested inside
+    findings / expected / acceptance blocks, so the whole tree is walked."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "cites":
+                if isinstance(v, str):
+                    acc.add(v)
+                elif isinstance(v, (list, tuple)):
+                    acc.update(x for x in v if isinstance(x, str))
+            else:
+                _collect_cite_keys(v, acc)
+    elif isinstance(obj, (list, tuple)):
+        for item in obj:
+            _collect_cite_keys(item, acc)
+
+
+def _study_citation_index(ws_root: Path) -> dict:
+    """Map each cited bib key -> ``[{slug, title, investigation}]`` by scanning
+    every ``study.yaml`` for ``cites:`` fields (recursively; inline or block).
+
+    Powers the Resources page "Cited by" chips that link a reference to the
+    studies that cite it. Best-effort: a malformed or unreadable study is
+    skipped, never raising."""
+    index: dict = {}
+    try:
+        studies_dir = WorkspacePaths.load(ws_root).dir("studies")
+    except Exception:  # noqa: BLE001
+        return index
+    if not studies_dir.is_dir():
+        return index
+    for sy in sorted(studies_dir.rglob("study.yaml")):
+        try:
+            spec = yaml.safe_load(sy.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(spec, dict):
+            continue
+        keys: set = set()
+        _collect_cite_keys(spec, keys)
+        if not keys:
+            continue
+        slug = spec.get("name") or sy.parent.name
+        entry = {
+            "slug": slug,
+            "title": spec.get("title") or slug,
+            "investigation": spec.get("investigation") or "",
+        }
+        for k in keys:
+            index.setdefault(k, []).append(entry)
+    for k in index:
+        # Stable, de-duplicated order (a study could cite a key twice).
+        seen: set = set()
+        uniq = []
+        for e in sorted(index[k], key=lambda e: e["slug"]):
+            if e["slug"] in seen:
+                continue
+            seen.add(e["slug"])
+            uniq.append(e)
+        index[k] = uniq
+    return index
+
+
+def _all_investigation_declared_inputs(ws_root: Path) -> dict:
+    """Union of every investigation's declared ``datasets`` + ``expert_docs``.
+
+    Back-compat: older workspaces scope these under
+    ``investigations/<slug>/investigation.yaml``'s ``inputs:`` block. The repo-wide
+    Resources page folds them in beside the workspace.yaml-level ones so they all
+    show together. Best-effort; a malformed investigation is skipped."""
+    from vivarium_workbench.lib.investigation_inputs import investigation_inputs
+    datasets: list = []
+    expert_docs: list = []
+    try:
+        inv_dir = WorkspacePaths.load(ws_root).dir("investigations")
+    except Exception:  # noqa: BLE001
+        return {"datasets": datasets, "expert_docs": expert_docs}
+    if not inv_dir.is_dir():
+        return {"datasets": datasets, "expert_docs": expert_docs}
+    for d in sorted(p for p in inv_dir.iterdir() if p.is_dir()):
+        if not (d / "investigation.yaml").is_file():
+            continue
+        try:
+            inp = investigation_inputs(ws_root, d.name, repo_fallback=False)
+        except Exception:  # noqa: BLE001
+            continue
+        datasets.extend(inp.get("datasets") or [])
+        expert_docs.extend(inp.get("expert_docs") or [])
+    return {"datasets": datasets, "expert_docs": expert_docs}
+
+
+def _dedupe_named(items: list) -> list:
+    """De-duplicate normalized dataset / expert-doc dicts by (name, path|url),
+    preserving first-seen order (workspace-level entries come before folded-in
+    investigation ones)."""
+    seen: set = set()
+    out: list = []
+    for it in items:
+        it = it if isinstance(it, dict) else {"name": str(it)}
+        key = (it.get("name") or "", it.get("path") or it.get("url") or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return out
+
+
 def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
     """GET /api/inputs builder.
 
@@ -657,6 +766,44 @@ def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
     # repo-wide "Expert docs" block beside datasets + references. Dict extras
     # (description, contributor, sha256) pass through for display.
     global_block["expert_docs"] = [_norm_input(d) for d in (ws.get("expert_docs") or [])]
+
+    # --- Unify into repo-wide resources ---------------------------------------
+    # The Resources page shows ONE repo-wide set (no separate "this
+    # investigation's sources" section). Fold every investigation's declared
+    # datasets + expert_docs into the global block so older workspaces that
+    # scope resources under investigations/<slug>/investigation.yaml still show
+    # them all together (back-compat). References already come from the shared
+    # papers.bib, so they need no folding — only annotation (below).
+    try:
+        folded = _all_investigation_declared_inputs(ws_root)
+    except Exception:  # noqa: BLE001
+        folded = {"datasets": [], "expert_docs": []}
+    global_block["datasets"] = _dedupe_named(
+        list(global_block.get("datasets") or [])
+        + [_norm_input(d) for d in folded.get("datasets") or []]
+    )
+    global_block["expert_docs"] = _dedupe_named(
+        list(global_block.get("expert_docs") or [])
+        + [_norm_input(d) for d in folded.get("expert_docs") or []]
+    )
+
+    # Annotate each reference with the studies that cite it (bib key -> studies),
+    # for the Resources page's clickable "Cited by" chips. Applied to both the
+    # global references and the (back-compat) investigation references.
+    try:
+        cite_index = _study_citation_index(ws_root)
+    except Exception:  # noqa: BLE001
+        cite_index = {}
+
+    def _attach_cited_by(ref: Any) -> Any:
+        if isinstance(ref, dict):
+            k = ref.get("key") or ref.get("bib_key")
+            if k and k in cite_index:
+                ref["cited_by"] = cite_index[k]
+        return ref
+
+    global_block["references"] = [_attach_cited_by(r) for r in (global_block.get("references") or [])]
+    investigation["references"] = [_attach_cited_by(r) for r in (investigation.get("references") or [])]
 
     return {"investigation": investigation, "global": global_block, "current": current}
 
