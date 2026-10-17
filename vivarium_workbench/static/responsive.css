@@ -30,6 +30,19 @@
 
 @media (max-width: 640px) {
 
+  /* ---- Study header: reclaim the vertical space it eats on a phone -------- *
+   * The title wraps to 3 lines, the action buttons overflow sideways, and the
+   * six-gate readiness ladder stacks into a tall block. Shrink the title, let
+   * the actions wrap, and collapse the ladder to just the CURRENT stage chip
+   * (the full ladder stays one tap away in the expandable "status" panel). */
+  .study-header > div:first-child { flex-wrap: wrap; gap: 6px 10px; }
+  .study-title { font-size: 1.28em; line-height: 1.2; }
+  .study-header-actions { flex-wrap: wrap; row-gap: 6px; }
+  .study-status-row { gap: 8px; row-gap: 6px; }
+  /* Inline stepper → show only the "you are here" stage; rest in the details body. */
+  .study-status-row .status-stepper .status-step { display: none; }
+  .study-status-row .status-stepper .status-step.gate-current { display: inline-flex; }
+
   /* ---- Read-only snapshot banner: compact so it stops eating the viewport --- *
    * The full sentence wraps to ~5 lines on a phone; show a terse version at a
    * smaller size, and let the "Get it on GitHub" link wrap rather than force a

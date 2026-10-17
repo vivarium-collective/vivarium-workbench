@@ -673,8 +673,10 @@ def test_tests_merged_single_concept(tmp_path, dashboard_client):
     # The report-cards mount now lives INSIDE the tests panel (one concept).
     tests_panel = html[html.index('id="panel-tests"'):html.index('id="panel-audit"')]
     assert 'id="report-cards-panel"' in tests_panel
-    assert '<h2>Tests</h2>' in tests_panel
-    assert 'The bar.' in tests_panel   # reframed subtitle (was "Audit — …", a collision with the Audit tab)
+    # The redundant "<h2>Tests</h2>" heading was removed (the tab bar names it);
+    # the useful "The bar" subtitle stays as the top-of-panel framing.
+    assert '<h2>Tests</h2>' not in tests_panel
+    assert 'The bar' in tests_panel
 
 
 # ---------------------------------------------------------------------------
@@ -1167,9 +1169,9 @@ def test_readouts_repositioned_to_slot_three(tmp_path, dashboard_client):
 
 
 def test_readouts_panel_renders_three_contract_blocks(tmp_path, dashboard_client):
-    """Task 2 (readouts rebuild, spec §3.1): the Readouts panel markup carries
-    all three emit-contract blocks — Emitter & config, Emitted paths, Outputs
-    & shapes — each with a stable mount point the JS loader targets."""
+    """The streamlined Readouts panel carries the always-visible emitter summary
+    mount + the emitted-paths table mount, in that order. (The old "Outputs &
+    shapes" block was removed as redundant with the emitted-paths table.)"""
     ws = tmp_path / "ws"
     sd = ws / "studies" / "readouts-blocks-study"
     sd.mkdir(parents=True)
@@ -1193,12 +1195,14 @@ def test_readouts_panel_renders_three_contract_blocks(tmp_path, dashboard_client
     ro_end = html.find('class="study-tab-panel"', ro_start + 10)
     panel = html[ro_start: ro_end if ro_end != -1 else len(html)]
 
-    assert "Emitter" in panel and 'id="readouts-emitter"' in panel
-    assert "Emitted paths" in panel and 'id="readouts-table"' in panel
-    assert "Outputs" in panel and "shapes" in panel.lower() and 'id="readouts-shapes"' in panel
-    # Block order: emitter config, then emitted paths, then outputs & shapes.
+    # The emitter summary label is JS-rendered into this mount at runtime.
+    assert 'id="readouts-emitter"' in panel
+    assert 'id="readouts-table"' in panel
+    # The removed shapes block must be gone.
+    assert 'id="readouts-shapes"' not in panel
+    assert "Outputs &amp; shapes" not in panel and "Outputs & shapes" not in panel
+    # Block order: emitter summary, then emitted-paths table.
     assert panel.index('id="readouts-emitter"') < panel.index('id="readouts-table"')
-    assert panel.index('id="readouts-table"') < panel.index('id="readouts-shapes"')
 
 
 # ---------------------------------------------------------------------------
