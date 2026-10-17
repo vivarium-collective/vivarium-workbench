@@ -23,7 +23,10 @@ def test_assurance_subtitles_reframed():
     audit_panel = TPL[TPL.index('id="panel-audit"'):TPL.index('id="panel-build"')]
     assert "Is the bar sound?" in audit_panel
     build_panel = TPL[TPL.index('id="panel-build"'):]
-    assert "Was it earned?" in build_panel
+    # Intro reframed to "How the model was built."; the "was it earned?" verdict
+    # framing now lives in the rendered present-state panel (JS _buildPanelHtml).
+    assert "How the model was built." in build_panel
+    assert "Was it earned?" in JS
 
 
 def test_build_panel_renders_the_trajectory():

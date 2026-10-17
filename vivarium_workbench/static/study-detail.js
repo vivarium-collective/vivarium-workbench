@@ -156,7 +156,6 @@
     _readoutsLoaded = true;
     var host = document.getElementById('readouts-table');
     var emitterHost = document.getElementById('readouts-emitter');
-    var shapesHost = document.getElementById('readouts-shapes');
     if (!host) return;
     var slug = host.getAttribute('data-study') || studyName();
     if (!slug) return;
@@ -170,16 +169,13 @@
         if (emitterHost) emitterHost.innerHTML = _renderEmitterBlock(j && j.emitter);
         if (!j || !Array.isArray(j.rows)) {
           host.innerHTML = '<p class="empty-message">Readouts unavailable.</p>';
-          if (shapesHost) shapesHost.innerHTML = '<p class="empty-message">Output shapes unavailable.</p>';
           return;
         }
         host.innerHTML = _renderReadoutsTable(j);
-        if (shapesHost) shapesHost.innerHTML = _renderReadoutsShapesTable(j.rows);
       })
       .catch(function() {
         host.innerHTML = '<p class="empty-message">Readouts unavailable.</p>';
         if (emitterHost) emitterHost.innerHTML = '<p class="empty-message">Emitter configuration unavailable.</p>';
-        if (shapesHost) shapesHost.innerHTML = '<p class="empty-message">Output shapes unavailable.</p>';
       });
   }
 
@@ -187,56 +183,27 @@
   // emit scope. `em` may be absent/partial (a study spec that failed to
   // parse never reaches the emitter block) — degrade to an empty note rather
   // than throw.
+  // Compact one-line emitter summary: kind · how often · what it emits → output.
+  // Auto-filled from the composite's resolved default emitter (always computable).
   function _renderEmitterBlock(em) {
     var e = escapeHtmlForTests;
-    var dash = '<span class="muted">—</span>';
     if (!em || !em.name) {
-      return '<p class="empty-message">No emitter configuration declared.</p>';
+      return '<p class="muted" style="font-size:0.88em">Emitter: default (unresolved).</p>';
     }
-    var errNote = em.error ? '<p class="muted" style="color:#92400e">' + e(em.error) + '</p>' : '';
-    var rows = [
-      ['Emitter', (em.class_name ? '<code>' + e(em.class_name) + '</code> (' + e(em.name) + ')' : '<code>' + e(em.name) + '</code>')],
-      ['Module', em.module ? '<code style="font-size:0.85em;">' + e(em.module) + '</code>' : dash],
-      ['Output kind', em.output_kind ? e(em.output_kind) : dash],
-      ['Emit interval', (em.interval === null || em.interval === undefined) ? dash : (e(String(em.interval)) + ' tick(s)')],
-      ['Buffer', (em.buffer === null || em.buffer === undefined) ? dash : (e(String(em.buffer)) + ' emits')],
-      ['Output dir', em.output_dir ? '<code style="font-size:0.85em;">' + e(em.output_dir) + '</code>' : dash],
-      ['Emit scope', em.scope ? e(em.scope) : dash],
-    ];
-    var body = rows.map(function (r) {
-      return '<tr style="border-bottom:1px solid #f1f5f9;">'
-        + '<td style="padding:6px; font-weight:600; width:140px; vertical-align:top;">' + r[0] + '</td>'
-        + '<td style="padding:6px; vertical-align:top;">' + r[1] + '</td></tr>';
-    }).join('');
-    return errNote + '<table class="observables-table" style="width:100%; border-collapse: collapse;"><tbody>' + body + '</tbody></table>';
-  }
-
-  // Block 3: Outputs & shapes — store path / dtype / shape / units / bytes,
-  // one row per confirmed emit leaf (rows without a `shape` — derived /
-  // not-in-plan / unverified — are omitted; they have no verified structure
-  // to describe, and already show up flagged in the Emitted paths block).
-  function _renderReadoutsShapesTable(rows) {
-    var e = escapeHtmlForTests;
-    var shaped = (rows || []).filter(function (o) { return o.store_path && Array.isArray(o.shape); });
-    if (!shaped.length) {
-      return '<p class="empty-message">No output shapes available (composite unbuilt, or no emitted paths).</p>';
-    }
-    var head = '<table class="observables-table" style="width:100%; border-collapse: collapse;"><thead><tr>'
-      + ['Store path', 'dtype', 'Shape', 'Units', 'Bytes'].map(function (h) {
-          return '<th style="text-align:left; padding:6px; border-bottom:1px solid #e2e8f0;">' + h + '</th>';
-        }).join('') + '</tr></thead><tbody>';
-    var body = shaped.map(function (o) {
-      var dims = o.shape.map(function (d) { return String(d); });
-      var shapeStr = '(' + dims.join(', ') + (dims.length === 1 ? ',' : '') + ')';
-      return '<tr style="border-bottom:1px solid #f1f5f9;">'
-        + '<td style="padding:6px;"><code style="font-size:0.85em;">' + e(o.store_path) + '</code></td>'
-        + '<td style="padding:6px;">' + e(o.dtype || '') + '</td>'
-        + '<td style="padding:6px;"><code style="font-size:0.85em;">' + e(shapeStr) + '</code></td>'
-        + '<td style="padding:6px;">' + e(o.units || '') + '</td>'
-        + '<td style="padding:6px;">' + (o.bytes != null ? e(_fmtBytes(o.bytes)) : '<span class="muted">—</span>') + '</td>'
-        + '</tr>';
-    }).join('');
-    return head + body + '</tbody></table>';
+    var kind = em.class_name || em.name;
+    var every = (em.interval === 1) ? 'every tick'
+      : (em.interval === null || em.interval === undefined) ? 'default cadence'
+      : ('every ' + e(String(em.interval)) + ' ticks');
+    var scope = (em.scope === 'declared') ? 'declared observables' : e(em.scope || 'declared observables');
+    var out = em.output_dir ? (' <span class="muted">&rarr;</span> <code style="font-size:0.82em">' + e(em.output_dir) + '</code>') : '';
+    var errNote = em.error ? ' <span class="muted" style="color:#92400e">(' + e(em.error) + ')</span>' : '';
+    var sep = '<span class="muted">·</span>';
+    return '<div style="font-size:0.9em;color:#475569;display:flex;align-items:center;gap:7px;flex-wrap:wrap">'
+      + '<span style="font-weight:600;color:#334155">Emitter</span>'
+      + '<code style="font-size:0.82em">' + e(kind) + '</code>'
+      + sep + '<span>' + every + '</span>'
+      + sep + '<span>' + scope + '</span>'
+      + out + errNote + '</div>';
   }
 
   // ── Readouts tab: pointer to the raw-data downloads that live under Results ──
@@ -289,8 +256,9 @@
     var e = escapeHtmlForTests;
     var files = (j && j.files) || [];
     if (!files.length) {
-      return '<p class="empty-message">No result files yet. Analysis steps write '
-        + '<code>.csv</code>/<code>.tsv</code> files here once this study has run.</p>';
+      return '<p class="empty-message">No derived result files. Analysis steps write '
+        + '<code>.csv</code>/<code>.tsv</code> tables here when a study runs them; this study’s '
+        + 'evidence is assessed by its behavior-test report cards — see <strong>Tests</strong>.</p>';
     }
     // Group by parent dir so ptools/ and per-run analysis tables read cleanly.
     var groups = {}, order = [];
@@ -1036,6 +1004,35 @@
   // The per-store PREVIEW of the latest run (sparkline + first/last/min/max)
   // is _loadResultsPreview above; _loadResults triggers both.
   var _rawDataLoaded = false;
+  // Compact run-summary header for the Results tab: run count, completed,
+  // latest run + when, step count, emitter — all from the /api/simulations rows.
+  function _renderResultsSummary(rows, esc) {
+    esc = esc || function (x) { return String(x == null ? '' : x); };
+    if (!rows || !rows.length) {
+      return '<p class="muted" style="font-size:0.88em">No runs yet — launch one from <strong>Simulations</strong>.</p>';
+    }
+    var done = rows.filter(function (r) { return String(r.status || '').toLowerCase() === 'completed'; }).length;
+    var latest = rows.slice().sort(function (a, b) {
+      return (new Date(b.created || b.started || 0)) - (new Date(a.created || a.started || 0));
+    })[0] || rows[rows.length - 1];
+    var emitters = {};
+    rows.forEach(function (r) { if (r.emitter_type) emitters[r.emitter_type] = 1; });
+    var emList = Object.keys(emitters);
+    var chips = [];
+    chips.push('<strong>' + rows.length + '</strong> run' + (rows.length === 1 ? '' : 's'));
+    chips.push('<span style="color:#059669;font-weight:600">' + done + '</span> completed');
+    if (latest) {
+      var lbl = latest.sim_name || latest.label || latest.run_id || '';
+      chips.push('latest <code style="font-size:0.82em">' + esc(lbl) + '</code>');
+      var when = latest.created || latest.started;
+      if (when) chips.push('<span class="muted">' + esc(String(when).slice(0, 16).replace('T', ' ')) + '</span>');
+      if (latest.n_steps != null) chips.push(esc(String(latest.n_steps)) + ' steps');
+    }
+    if (emList.length) chips.push('emitter <code style="font-size:0.82em">' + esc(emList.join(', ')) + '</code>');
+    return '<div style="font-size:0.9em;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      + chips.join('<span class="muted">·</span>') + '</div>';
+  }
+
   function _loadResults(force) {
     _loadResultsPreview(force);
     var mount = document.getElementById('raw-data-list');
@@ -1050,6 +1047,8 @@
     fetch(url).then(function (r) { return r.text(); }).then(function (t) {
       var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {}
       var rows = (DS && DS.simulationsFilter) ? DS.simulationsFilter(d.simulations || [], slug) : (d.simulations || []);
+      var summaryHost = document.getElementById('results-summary');
+      if (summaryHost) summaryHost.innerHTML = _renderResultsSummary(rows, esc);
       if (!rows.length) {
         mount.innerHTML = '<p class="empty-message">No runs with persisted data yet.</p>';
         if (bulkBtn) bulkBtn.style.display = 'none';
@@ -2041,6 +2040,15 @@
       .then(function (data) { return (data && data.classes || []).filter(function (c) { return c.kind === 'analysis'; }); })
       .catch(function () { return []; })
       .then(function (classes) {
+        // No ANALYSIS_REGISTRY entries and nothing declared → the dispatch-time
+        // analysis picker is N/A for this workspace; hide the whole control
+        // rather than show an empty "No analyses registered / Save" block.
+        var section = document.getElementById('study-analyses-section');
+        if (!classes.length && !declared.length) {
+          if (section) section.style.display = 'none';
+          return;
+        }
+        if (section) section.style.display = '';
         var known = {};
         var items = classes.map(function (c) {
           known[c.name] = true;
@@ -4083,9 +4091,17 @@
   function _buildPanelHtml(state) {
     var e = escapeHtmlForTests;
     if (!state || !state.present) {
-      var reason = (state && state.reason)
-        || 'This study was not built via the agentic model-building loop (/viva-model-build).';
-      return '<p class="empty-message">' + e(reason) + '</p>';
+      // Directly-authored studies have no loop artifact (.pbg/loop/<study>.json
+      // is written only by /viva-model-build). Explain that plainly and point to
+      // where the model + its bar actually live, instead of a bare dead-end.
+      return '<div class="empty-message">'
+        + '<p>This model was <strong>authored directly</strong> — wrapped and composed via '
+        + '<code>/viva-expert</code> — not iterated through the <code>/viva-model-build</code> loop '
+        + 'that records a draft → frozen-tests → iteration trajectory. There is no loop '
+        + 'provenance to show here.</p>'
+        + '<p style="margin-top:8px">See <strong>Model</strong> for the composite structure and '
+        + '<strong>Tests</strong> for the behavior tests this model has to clear.</p>'
+        + '</div>';
     }
     var history = state.history || [];
     var sc = _BUILD_STATE_COLORS[state.state] || { bg: '#f1f5f9', fg: '#475569' };
@@ -4115,7 +4131,36 @@
     if (history.length) {
       html += _renderMarginMatrix(history) || _renderIterationLadder(history);
     }
+    // Agent notes + conversation — the loop's running commentary, rendered only
+    // when the loop recorded it (viva_superpowers.loop_state).
+    html += _renderBuildNotes(state);
     return html;
+  }
+
+  // Agent notes (free text / list) + the build conversation (role-tagged turns),
+  // surfaced when the loop artifact carries them. Absent → renders nothing.
+  function _renderBuildNotes(state) {
+    var e = escapeHtmlForTests;
+    var out = '';
+    var notes = state && state.notes;
+    if (notes) {
+      var txt = Array.isArray(notes) ? notes.join('\n') : String(notes);
+      out += '<div style="margin-top:14px"><strong style="font-size:0.9em">Agent notes</strong>'
+        + '<div style="margin-top:4px;font-size:0.86em;white-space:pre-wrap;color:#475569">' + e(txt) + '</div></div>';
+    }
+    var conv = state && state.conversation;
+    if (Array.isArray(conv) && conv.length) {
+      var turns = conv.map(function (m) {
+        var role = (m && m.role) ? m.role : '';
+        var text = (m && (m.text || m.content)) ? (m.text || m.content) : (typeof m === 'string' ? m : '');
+        return '<li style="padding:6px 0;border-top:1px solid #f1f5f9;font-size:0.85em">'
+          + (role ? '<strong>' + e(role) + ':</strong> ' : '') + e(text) + '</li>';
+      }).join('');
+      out += '<details style="margin-top:12px"><summary class="muted" style="cursor:pointer;font-size:0.88em">'
+        + 'Build conversation (' + conv.length + ')</summary>'
+        + '<ul style="list-style:none;padding-left:0;margin:6px 0 0">' + turns + '</ul></details>';
+    }
+    return out;
   }
 
   var _buildLoaded = false;

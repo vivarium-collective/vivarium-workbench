@@ -1325,10 +1325,12 @@
 
 <div class="overview-section" id="results-section">
   <h2>Results</h2>
-  <p class="muted">What came back from this study's runs — a per-store preview of the latest run, plus the raw emitter store (zarr/parquet/runs.db) for every run.</p>
 
-  <h4>Latest run preview</h4>
-  <p class="muted" style="font-size:0.9em">Per-store sparkline + first/last/min/max from the most recent run's emitted trajectory. This is a downsampled PREVIEW, not the full data — use the per-store or Download-all links for the complete arrays. For a cross-engine comparison run, this shows how closely the simulators agree, model by model, instead.</p>
+  {# Compact run summary (N runs · completed · latest run + time · n_steps ·
+     emitter · size) — auto-filled by _loadResultsSummary from the runs list. #}
+  <div id="results-summary" data-study="{{ name }}" style="margin:2px 0 16px"></div>
+
+  <h4>Latest run preview <span class="muted" style="font-size:0.8em;font-weight:normal">— downsampled sparkline + first/last/min/max per store</span></h4>
   <div id="results-preview" data-study="{{ name }}">
     <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading results preview…</span></div>
   </div>
@@ -1372,7 +1374,8 @@
 
 <div class="overview-section" id="analyses-results-section">
   <h2>Analyses</h2>
-  <p class="muted">Result files written by this study's analysis steps.</p>
+  <p class="muted">Derived result files (<code>.csv</code>/<code>.tsv</code>) computed from the runs —
+  distinct from <strong>Results</strong>, which holds the raw emitted arrays.</p>
 
   <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
     <span class="muted" style="margin-right:auto;font-weight:600">Analysis result files</span>
@@ -1391,40 +1394,18 @@
     <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
       <h3 class="section-title" style="margin-right:auto">Readouts</h3>
     </div>
-    <p class="muted">The observables this study records from a run — the composite's
-    store paths with authored names, units and descriptions on top. See
-    <strong>Results</strong> for the values a run returned.</p>
+    {# Emitter summary — always visible, one line (kind · interval · scope →
+       output), auto-filled from the composite's resolved default emitter. #}
+    <div id="readouts-emitter" data-study="{{ name }}" style="margin:2px 0 14px">
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter…</span></div>
+    </div>
 
-    <details class="readouts-emitter-details" style="margin:4px 0 14px 0">
-      <summary class="muted" style="font-size:0.85em;cursor:pointer">Emitter &amp; config</summary>
-      <div id="readouts-emitter" data-study="{{ name }}" style="margin-top:8px">
-        <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter configuration…</span></div>
-      </div>
-    </details>
-
-    <h4>Emitted paths</h4>
-    <p class="muted" style="font-size:0.9em">Each row is an emitter <code>store_path</code>
-    the composite will save; authored entries in <code>study.yaml</code> add names,
-    descriptions, and units on top.</p>
-
-    {# Points at Simulations' raw-data downloads (Study artifacts strip)
-       rather than duplicating them (Task C4, repointed by Task E2 when
-       Exports was folded into Simulations — Simulations is now the single
-       "get the data" tab). Populated by _loadReadoutsDownloadPointer, which
-       only shows the pointer when there's actually data to download (never
-       links to an empty tab). #}
-    <div id="readouts-download" style="margin:0 0 16px 0"></div>
+    {# Points at Simulations' raw-data downloads rather than duplicating them;
+       _loadReadoutsDownloadPointer only shows it when there's data to download. #}
+    <div id="readouts-download" style="margin:0 0 12px 0"></div>
 
     <div id="readouts-table" data-study="{{ name }}">
       <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading readouts from the composite emit plan…</span></div>
-    </div>
-
-    <h4>Outputs &amp; shapes</h4>
-    <p class="muted" style="font-size:0.9em">Store path, dtype, shape
-    <code>(n_steps, …)</code>, units, and a best-effort byte estimate for each emitted
-    leaf.</p>
-    <div id="readouts-shapes" data-study="{{ name }}">
-      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading output shapes…</span></div>
     </div>
 
     {% if study.expected_behavior %}
@@ -1815,7 +1796,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
    never an error. #}
 <section class="study-tab-panel" data-kind="build" id="panel-build" hidden>
   <h2>Build</h2>
-  <p class="muted" style="margin:0 0 12px 0"><strong>Was it earned?</strong> The agentic model-building loop that iterated the model to clear the bar — the draft, the frozen tests, the iteration-by-iteration trajectory, and the result (or an honest give-up).</p>
+  <p class="muted" style="margin:0 0 12px 0"><strong>How the model was built.</strong> When a study is iterated through the <code>/viva-model-build</code> loop, this shows its trajectory — draft, frozen tests, the iteration-by-iteration edits, the earned result (or an honest give-up), and the agent's notes.</p>
 
   <div id="build-loop-state"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading loop provenance…</span></div></div>
 </section>

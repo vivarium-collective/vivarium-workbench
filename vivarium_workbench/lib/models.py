@@ -1082,6 +1082,10 @@ class StudyReadouts(BaseModel):
     composite: str
     rows: list[ReadoutRow]
     note: str = ""
+    # Design-time emitter & config summary (kind, interval, scope, output_dir)
+    # from ``readouts_views._emitter_block`` — the Readouts tab's one-line emitter
+    # summary reads this. Free-form dict (always computable from the spec).
+    emitter: Optional[dict] = None
     # The emit plan could not be built (rows are authored-only, ``unverified``).
     # ``remote_build`` marks the EXPECTED case (a materialized repo@commit with no
     # local ParCa cache) so the UI can show a soft notice instead of a hard error.
