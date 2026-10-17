@@ -80,8 +80,17 @@
   }
 
   function onOpen() {
-    if (graphIntoPanel()) { showEmptyHint(false); setTimeout(relayout, 60); }
-    else showEmptyHint(true);
+    if (graphIntoPanel()) {
+      showEmptyHint(false);
+      // The graph's own toolbar is now the panel's single bar + drag-to-dock
+      // handle (there is no separate header). Bind it once it's in the panel.
+      var g = graphEl();
+      var tb = g && g.querySelector('.aig-toolbar');
+      if (tb && ctl && ctl.addDragHandle) ctl.addDragHandle(tb);
+      setTimeout(relayout, 60);
+    } else {
+      showEmptyHint(true);
+    }
   }
 
   function onClose() {
@@ -108,7 +117,9 @@
       label: 'Graph',
       launcher: null,
       resizeHandle: 'viv-graph-resize-handle',
-      dragHandles: ['.viv-graph-head'],
+      // No header to drag; the hosted graph toolbar is bound as the drag handle
+      // in onOpen (once it's relocated into the panel) via ctl.addDragHandle.
+      dragHandles: [],
       popout: function () { global.VivPanelDock.popout('graph'); },
       defaultDock: 'right', defaultSize: { side: 480, bottom: 340 },
       onOpen: onOpen, onClose: onClose,

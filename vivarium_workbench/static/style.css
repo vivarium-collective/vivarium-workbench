@@ -5465,6 +5465,19 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
   resize:none;
 }
 .viv-graph-empty{ padding:18px 16px; font-size:0.85rem; color:var(--c-muted, #64748b); }
+/* The panel has no separate header — the graph toolbar is the single bar. Its
+   panel controls (dock/pop-out menu + back-to-full) show ONLY while docked, and
+   the "open as panel" button hides once docked. The toolbar is the drag handle. */
+.aig-panel-ctl{ display:none; }
+.viv-graph-body .aig-panel-ctl{ display:inline-flex; }
+.viv-graph-body #aig-dock-panel-btn{ display:none; }
+.viv-graph-body .aig-toolbar{ cursor:grab; }
+.viv-graph-body .aig-toolbar button,
+.viv-graph-body .aig-toolbar input,
+.viv-graph-body .aig-toolbar select,
+.viv-graph-body .aig-toolbar a{ cursor:default; }
+.viv-graph-body .aig-toolbar input[type="range"]{ cursor:pointer; }
+body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 
 /* ── Pop-out window (?popout=<kind>): show only the popped panel, full-window ──
    panel-dock.js adds body.viv-popout + .viv-popout-<kind> and opens that panel.

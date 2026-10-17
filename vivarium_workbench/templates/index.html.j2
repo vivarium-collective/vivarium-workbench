@@ -1608,6 +1608,14 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                out. Hidden once the graph is already inside the panel (CSS). -->
           <button id="aig-dock-panel-btn" type="button" title="Open as a dockable side panel — drag it to any edge or pop it out"
                   aria-label="Open graph as a side panel" onclick="window.GraphPanel&&GraphPanel.open()">◧</button>
+          <!-- Panel controls: shown ONLY while the graph is docked in the panel
+               (CSS: .viv-graph-body .aig-panel-ctl). They replace the old separate
+               panel header — dock/pop-out menu + close (back to the full-page graph).
+               The toolbar itself is the drag-to-dock handle (graph-panel.js). -->
+          <button class="aig-panel-ctl" type="button" title="Move or pop out the graph panel" aria-label="Move or pop out the graph panel"
+                  onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">▭</button>
+          <button class="aig-panel-ctl" type="button" title="Back to the full-page graph" aria-label="Back to the full-page graph"
+                  onclick="window.GraphPanel&&GraphPanel.toFull()">⤢</button>
         </span>
       </span>
       <span class="aig-tb-group aig-tb-right aig-dl-ctl" style="position:relative">
@@ -2287,25 +2295,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <div class="viv-graph-resize-handle" id="viv-graph-resize-handle"
            role="separator" aria-orientation="vertical" aria-label="Resize graph panel"
            title="Drag to resize"></div>
-      <!-- Header doubles as the drag handle; icon controls mirror the chat/code
-           panels (same .vp-head / .vp-icon chrome) so the tool panels read as one. -->
-      <div class="viv-graph-head vp-head" title="Drag to dock left / right / bottom / top">
-        <div class="viv-graph-title"><strong>Graph</strong>
-          <span id="viv-graph-sub" class="viv-graph-sub"></span></div>
-        <span class="vp-spacer"></span>
-        <button class="vp-icon" type="button" title="Show the full-page graph instead" aria-label="Show full-page graph"
-                onclick="window.GraphPanel&&GraphPanel.toFull()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-        </button>
-        <button class="vp-icon" type="button" data-act="dock" title="Move or pop out panel" aria-label="Move or pop out panel"
-                onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
-        </button>
-        <button class="vp-icon" type="button" title="Close" aria-label="Close graph panel"
-                onclick="window.GraphPanel&&GraphPanel.toggle()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-        </button>
-      </div>
+      <!-- No separate panel header: the hosted graph's own toolbar is the single
+           bar, and it carries the dock/close controls (the .aig-panel-ctl group,
+           shown only while docked) + acts as the drag-to-dock handle. -->
       <div class="viv-graph-body" id="viv-graph-body"></div>
     </div>
   </aside>

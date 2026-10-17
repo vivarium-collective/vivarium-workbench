@@ -257,6 +257,9 @@
       getDock: function () { return dock; },
       didDrag: function () { return justDragged; },
       syncVars: syncVars,
+      // Bind drag-to-dock on a handle added AFTER make() (e.g. a toolbar that is
+      // relocated into the panel later). Guards against double-binding.
+      addDragHandle: function (el) { if (el && !el._vpDragBound) { el._vpDragBound = true; initDrag(el); } },
     };
   }
 
