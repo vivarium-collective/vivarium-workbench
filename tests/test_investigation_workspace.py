@@ -75,68 +75,80 @@ def test_study_tabs_manager():
     assert "_setInvestigationContextCollapsed(false)" in _fn_body("_wsOpenStudyTab")
 
 
-def test_sticky_graph_pane_and_graph_bar_navigator():
-    """Persistent-nav-pane feature: opening an embedded study pins the graph
-    context (ws-context-sticky) and surfaces the graph-bar study navigator; a
-    collapse toggle hides/shows the graph shell (persisted)."""
-    # Template: the graph-bar navigator + collapse toggle live in the toolbar.
+def test_dockable_graph_and_graph_bar_navigator():
+    """Dockable-graph feature: while a study is embedded the graph floats as a
+    3-state dock (collapsed / docked / expanded) with one control, and the
+    graph-bar study navigator drives the embedded study."""
+    # Template: the graph-bar navigator + the 3-state dock control.
     assert 'id="aig-study-nav"' in TPL
     assert 'id="aig-study-prev"' in TPL and 'id="aig-study-next"' in TPL
     assert 'id="aig-study-jump-menu"' in TPL
-    assert 'id="aig-collapse-btn"' in TPL and "_aigToggleCollapse()" in TPL
+    assert 'id="aig-dock-ctl"' in TPL
+    for state in ("collapsed", "docked", "expanded"):
+        assert 'data-dock="%s"' % state in TPL
+        assert "_aigSetDockState('%s')" % state in TPL
+    # The old separate collapse toggle is gone (unified into the dock control).
+    assert 'id="aig-collapse-btn"' not in TPL
+    assert "_aigToggleCollapse" not in TPL and "_aigToggleCollapse" not in JS
 
-    # JS: the new functions exist + are exported.
-    for fn in ["_renderGraphBarNav", "_aigToggleCollapse", "_applyAigShellCollapsed"]:
+    # JS: the dock-state functions exist + are exported.
+    for fn in ["_renderGraphBarNav", "_aigSetDockState", "_applyDockState"]:
         assert "function %s" % fn in JS, fn
     assert "window._renderGraphBarNav" in JS
-    assert "window._aigToggleCollapse" in JS
+    assert "window._aigSetDockState" in JS
 
     def _fn_body(name):
         i = JS.index("function %s" % name)
         j = JS.find("\n  function ", i + 1)
         return JS[i:j] if j != -1 else JS[i:]
 
-    # Opening a study pins the pane + refreshes the navigator; it drives the
-    # embedded study via _openStudyEmbeddedNewTab and reads the graph's own data.
+    # Opening a study floats the graph (dock) + refreshes the navigator; it drives
+    # the embedded study via _openStudyEmbeddedNewTab and reads the graph's data.
     openb = _fn_body("_wsOpenStudyTab")
-    assert "ws-context-sticky" in openb
+    assert "_aigEnterDock()" in openb
     assert "_renderGraphBarNav()" in openb
-    # Regression fix: opening a study reduces the investigation detail to
-    # GRAPH-ONLY so the sticky box is compact (prose doesn't pin full-screen).
     assert "_setInvProseForStudy(true)" in openb
+    assert "ws-context-sticky" not in openb        # sticky strip superseded
     resetb = _fn_body("_wsResetStudyTabs")
+    assert "_aigExitDock()" in resetb
     assert "_setInvProseForStudy(false)" in resetb
     navb = _fn_body("_renderGraphBarNav")
     assert "_openStudyEmbeddedNewTab" in navb
-    assert "_lastDagArgs" in navb          # reuses the graph's data, no re-fetch
+    assert "_lastDagArgs" in navb                  # reuses the graph's data, no re-fetch
     assert "fetch(" not in navb
 
-    # Collapse persists in localStorage and hides the graph SHELL only.
-    togb = _fn_body("_aigToggleCollapse")
-    assert "aig-shell-collapsed" in togb or "aig-shell-collapsed" in _fn_body("_aigShellCollapsed")
-    assert "investigation-dag-shell" in _fn_body("_applyAigShellCollapsed")
+    # Dock state persists in localStorage.
+    setb = _fn_body("_aigSetDockState")
+    assert "aig-dock-state" in setb
+    assert "aig-dock-" in setb
 
 
-def test_graph_only_sticky_hides_prose_when_study_open():
-    """Regression: the sticky pane must be GRAPH-ONLY while a study is open — the
-    investigation prose is hidden so it can't pin full-screen and bury the study.
-    """
-    # Helper toggles the .inv-study-open class on the relocated detail view.
+def test_floating_graph_hides_prose_when_study_open():
+    """While a study is open the investigation prose is hidden so only the graph
+    region remains, and that region floats (position:fixed dock) out of flow so
+    the study reclaims the full column."""
     assert "function _setInvProseForStudy" in JS
     i = JS.index("function _setInvProseForStudy")
     body = JS[i: JS.index("\n  function ", i + 1)] if "\n  function " in JS[i:] else JS[i:i + 400]
     assert "inv-study-open" in body
     assert "investigation-detail-view" in body
-    # CSS: .inv-study-open hides every detail-view child but the graph region.
+    # CSS: .inv-study-open hides every detail-view child but the graph region,
+    # and the graph floats via .aig-dock (position:fixed), with 3 state sizes.
     css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
     assert "#investigation-detail-view.inv-study-open > * { display: none" in css
     assert "#investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block" in css
-    # The graph region (#investigation-dag-fs) is a DIRECT child of the detail
-    # view in the template, so "hide all children but dag-fs" leaves graph-only.
+    assert "#investigation-dag-fs.aig-dock" in css
+    assert "position: fixed" in css
+    for state in ("aig-dock-collapsed", "aig-dock-docked", "aig-dock-expanded"):
+        assert "#investigation-dag-fs.%s" % state in css
+    # The retired sticky-strip CSS (sticky pane + 200px shell cap) is gone.
+    assert "ws-context-sticky" not in css
+    assert "height: 200px !important" not in css
+    # #investigation-dag-fs is a DIRECT child of the detail view (so hiding the
+    # other children leaves graph-only); the prose blocks are its siblings.
     dv = TPL.index('id="investigation-detail-view"')
     dv_end = TPL.index('<!-- /#investigation-dag-fs -->', dv)
     detail = TPL[dv:dv_end]
-    # the prose blocks and the graph wrapper are siblings under the detail view
     assert 'id="investigation-intro"' in detail
     assert 'id="investigation-decision-cockpit"' in detail
     assert 'id="investigation-dag-fs"' in detail

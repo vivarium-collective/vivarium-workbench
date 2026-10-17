@@ -1562,6 +1562,14 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <div id="investigation-dag-fs">
     <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
       <strong>Investigation graph</strong>
+      {# Dock state control (shown only while a study is embedded, by
+         _aigSetDockState): collapse ▸ / dock ▭ / expand ⛶ — the single model that
+         switches the floating graph between its three states. Transitions are CSS. #}
+      <span id="aig-dock-ctl" class="aig-dock-ctl" role="group" aria-label="Investigation graph dock state" style="display:none">
+        <button type="button" data-dock="collapsed" title="Collapse to a slim bar" aria-label="Collapse graph" onclick="window._aigSetDockState('collapsed')">▸</button>
+        <button type="button" data-dock="docked" title="Dock as a small window" aria-label="Dock graph" onclick="window._aigSetDockState('docked')">▭</button>
+        <button type="button" data-dock="expanded" title="Expand to full screen" aria-label="Expand graph" onclick="window._aigSetDockState('expanded')">⛶</button>
+      </span>
     </div>
     <div class="aig-toolbar" role="toolbar" aria-label="Investigation graph controls">
       {# Study navigator (graph-level): ← prev / ⇄ jump / next → drives the
@@ -1613,9 +1621,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <button type="button" title="Fit to view" aria-label="Fit to view" onclick="window._aigFit()">⤢</button>
           <button type="button" title="Zoom in" aria-label="Zoom in" onclick="window._aigZoomBy(1.25)">+</button>
         </span>
-        <span class="aig-tb-seg">
-          <button id="aig-collapse-btn" type="button" title="Hide the graph (keeps the toolbar + navigator so you can still navigate and re-expand)"
-                  aria-label="Collapse graph" aria-expanded="true" onclick="window._aigToggleCollapse()">▾ Graph</button>
+        <span class="aig-tb-seg" id="aig-legacy-expand-seg">
           <button id="aig-expand-btn" type="button" title="Expand graph — snap to top and grow it tall (workbench stays)"
                   aria-label="Expand graph" onclick="window._aigExpand()">⤒</button>
           <button type="button" title="Fullscreen" aria-label="Fullscreen" onclick="window._aigFullscreen()">⛶</button>

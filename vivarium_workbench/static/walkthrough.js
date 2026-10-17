@@ -9000,13 +9000,10 @@
     _wsHighlightActiveDagNode(null);
     var panel = document.getElementById('ws-study-panel');
     if (panel) panel.style.display = 'none';
-    // No study open -> restore the full investigation prose, drop the sticky pin
-    // + hide the graph-bar navigator.
+    // No study open -> restore the full inline investigation prose + graph,
+    // un-float the graph, and hide the graph-bar navigator.
     _setInvProseForStudy(false);
-    var _ctx = document.getElementById('ws-context');
-    if (_ctx) _ctx.classList.remove('ws-context-sticky');
-    var _bar = document.getElementById('ws-context-bar');
-    if (_bar) _bar.classList.remove('ws-context-bar-sticky');
+    _aigExitDock();
     _renderGraphBarNav();
     _setInvestigationContextCollapsed(false);   // fresh investigation -> graph expanded
   }
@@ -9074,19 +9071,13 @@
     var st = window._wsStudyTabs;
     st.active = slug;                       // single open study — replaces any prior
     _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
-    // Pin the graph pane so it stays a persistent nav surface while the embedded
-    // study scrolls beneath it, and surface the graph-bar study navigator.
-    // Collapse the investigation PROSE (verdict/question/description + decision
-    // cockpit + tab blocks) to GRAPH-ONLY so the sticky box is compact and the
-    // study below stays reachable — otherwise the full-height prose pins and
-    // covers the viewport (regression fix). _setInvProseForStudy(true) adds the
-    // .inv-study-open class whose CSS hides every detail-view child but the graph.
+    // Hide the investigation PROSE (verdict/question/description + decision
+    // cockpit + tab blocks) and drop the graph to the names-only band, then FLOAT
+    // the graph as a compact dockable window (default: docked, top-right) so the
+    // study below gets the FULL content width/height — no top graph strip.
     _setInvProseForStudy(true);
-    var _ctx = document.getElementById('ws-context');
-    if (_ctx) _ctx.classList.add('ws-context-sticky');
-    var _bar = document.getElementById('ws-context-bar');
-    if (_bar) _bar.classList.add('ws-context-bar-sticky');
     _renderGraphBarNav();
+    _aigEnterDock();
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');
     if (panel) panel.style.display = '';
@@ -10806,27 +10797,61 @@
   // study navigator visible, so the user can still navigate and re-expand.
   // Persisted per viewer in localStorage. Independent of the sticky pinning and
   // of _setInvestigationContextCollapsed (which slims the whole context).
-  function _aigShellCollapsed() {
-    try { return localStorage.getItem('aig-shell-collapsed') === '1'; } catch (e) { return false; }
+  // The investigation graph is a DOCKABLE view with three states while a study
+  // is embedded (CSS classes on #investigation-dag-fs, transitions in style.css):
+  //   collapsed — a slim corner bar (lead + study navigator), graph hidden;
+  //   docked    — a compact floating minimap window, top-right (the default);
+  //   expanded  — a full-screen overlay for deep exploration.
+  // When NO study is open the graph is the normal full-width inline view (no
+  // dock class). The chosen state is remembered in localStorage. This single
+  // model replaces the old separate collapse toggle + ⤒/⛶ while embedded.
+  var _AIG_DOCK_STATES = ['collapsed', 'docked', 'expanded'];
+  function _aigDockStateStored() {
+    try { var v = localStorage.getItem('aig-dock-state'); return _AIG_DOCK_STATES.indexOf(v) >= 0 ? v : null; }
+    catch (e) { return null; }
   }
-  function _applyAigShellCollapsed() {
-    var collapsed = _aigShellCollapsed();
-    var shell = document.getElementById('investigation-dag-shell');
-    var btn = document.getElementById('aig-collapse-btn');
-    if (shell) shell.style.display = collapsed ? 'none' : '';
-    if (btn) {
-      btn.textContent = collapsed ? '▸ Graph' : '▾ Graph';
-      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-      btn.title = collapsed
-        ? 'Show the graph'
-        : 'Hide the graph (keeps the toolbar + navigator so you can still navigate and re-expand)';
+  function _aigStudyOpen() { return !!(window._wsStudyTabs && window._wsStudyTabs.active); }
+  function _aigSetDockState(state, opts) {
+    if (_AIG_DOCK_STATES.indexOf(state) < 0) state = 'docked';
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs || !_aigStudyOpen()) return;   // docking only applies while embedded
+    fs.classList.add('aig-dock');
+    _AIG_DOCK_STATES.forEach(function (s) { fs.classList.toggle('aig-dock-' + s, s === state); });
+    var ctl = document.getElementById('aig-dock-ctl');
+    if (ctl) {
+      ctl.style.display = 'inline-flex';
+      ctl.querySelectorAll('button[data-dock]').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-dock') === state);
+      });
+    }
+    if (!(opts && opts.noPersist)) { try { localStorage.setItem('aig-dock-state', state); } catch (e) { /* ignore */ } }
+    // Re-fit the graph to the new container once the size transition settles
+    // (skip when collapsed — the shell is hidden).
+    if (state !== 'collapsed') {
+      setTimeout(function () { try { if (window._aigFit) window._aigFit(); } catch (e) { /* ignore */ } }, 210);
     }
   }
-  function _aigToggleCollapse() {
-    try { localStorage.setItem('aig-shell-collapsed', _aigShellCollapsed() ? '0' : '1'); } catch (e) { /* ignore */ }
-    _applyAigShellCollapsed();
+  window._aigSetDockState = _aigSetDockState;
+  // Float the graph on study open at the remembered state (default docked).
+  function _aigEnterDock() { _aigSetDockState(_aigDockStateStored() || 'docked', { noPersist: true }); }
+  // Restore the graph to the normal inline view on study close.
+  function _aigExitDock() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (fs) fs.classList.remove('aig-dock', 'aig-dock-collapsed', 'aig-dock-docked', 'aig-dock-expanded');
+    var ctl = document.getElementById('aig-dock-ctl');
+    if (ctl) ctl.style.display = 'none';
   }
-  window._aigToggleCollapse = _aigToggleCollapse;
+  // Re-assert the dock state after a graph (re-)render: keep floating if a study
+  // is open, else ensure it's inline.
+  function _applyDockState() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs) return;
+    if (!_aigStudyOpen()) { _aigExitDock(); return; }
+    var cur = _AIG_DOCK_STATES.filter(function (s) { return fs.classList.contains('aig-dock-' + s); })[0]
+      || _aigDockStateStored() || 'docked';
+    _aigSetDockState(cur, { noPersist: true });
+  }
+  window._applyDockState = _applyDockState;
 
   // Graph-only vs full investigation detail. When a study is open, the relocated
   // #investigation-detail-view is reduced to its graph region (#investigation-dag-fs)
@@ -11587,9 +11612,9 @@
     // Legend moved behind the "?" info-chip popover (no longer an always-visible
     // strip below the graph). Fill + wire it here so it's ready on first render.
     _wireDagLegendPopover();
-    // Restore the persisted graph-shell collapse state + (re)build the graph-bar
-    // study navigator against the freshly-rendered graph data.
-    _applyAigShellCollapsed();
+    // Re-assert the dock state (float while a study is open, inline otherwise) +
+    // (re)build the graph-bar study navigator against the fresh graph data.
+    _applyDockState();
     _renderGraphBarNav();
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
