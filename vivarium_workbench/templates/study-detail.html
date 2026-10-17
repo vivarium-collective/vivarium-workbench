@@ -28,17 +28,12 @@
   </h1>
   <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0; align-items:center;">
     {# Export (figures / notebook) moved OUT of the header into the Overview
-       panel's section toolbar (Phase 4 refinement). The header keeps only the
-       live-backend launch actions + the study navigator. #}
-    {# Launch actions (▶ / ↻). They need a live backend and are hidden in the
-       snapshot (see the snapshot block at the end of this template). #}
-    <button type="button" id="study-reproduce" class="btn-mini" title="Replay this study's most recent run's RECORDED manifest verbatim (POST /api/study-reproduce) — ignores any study.yaml edits made since">↻ Reproduce</button>
-    <button type="button" id="study-run-current-spec" class="btn-mini" title="Run this study's CURRENT baseline spec (POST /api/study-run-baseline) as a brand-new run">▶ Run current spec</button>
-    {# item 110: dispatch ANY registered process-bigraph composite_id (e.g. pbg-native's
-       v2ecoli.composites.lineage_ray_batch, item 101/109) to the remote compute backend --
-       independent of this study's own pinned baseline composite. Remote-pinned only, same
-       gate as "Run current spec" (see _dispatchRemoteComposite in study-detail.js). #}
-    <button type="button" id="study-run-composite" class="btn-mini" title="Dispatch a specific process-bigraph composite_id to the remote compute backend (pbg-native multi_node/mbp, or the Nextflow campaign path) — advanced, independent of this study's own pinned baseline">⚙ Dispatch composite</button>
+       panel's section toolbar (Phase 4 refinement). The launch actions
+       (↻ Reproduce / ▶ Run current spec / ⚙ Dispatch composite) were moved OUT
+       of the header into the Simulations → Runs subtab (see
+       #sim-run-actions below): they belong with the runs they produce, and they
+       were crowding the top-right corner where the docked investigation graph
+       now parks. The header keeps only the study navigator. #}
     {# Narrative navigation: jump to the next study along this investigation's
        leads-to chain. Populated/shown by study-detail.js (_wireNextStudy),
        which asks the parent investigation view for the next slug; hidden on a
@@ -1320,6 +1315,20 @@
   </div>
 
   <div class="sim-subpanel active" data-subpanel="runs" id="sim-subpanel-runs">
+
+{# Launch actions relocated here from the study header (they were crowding the
+   top-right corner where the docked investigation graph parks, and they belong
+   with the runs they produce). All element ids preserved so study-detail.js
+   wires them unchanged; still live-backend only (hidden in the snapshot). #}
+<div id="sim-run-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 16px 0">
+  <button type="button" id="study-run-current-spec" class="action-btn" title="Run this study's CURRENT baseline spec (POST /api/study-run-baseline) as a brand-new run">▶ Run current spec</button>
+  <button type="button" id="study-reproduce" class="btn-mini" title="Replay this study's most recent run's RECORDED manifest verbatim (POST /api/study-reproduce) — ignores any study.yaml edits made since">↻ Reproduce</button>
+  {# item 110: dispatch ANY registered process-bigraph composite_id (e.g. pbg-native's
+     v2ecoli.composites.lineage_ray_batch, item 101/109) to the remote compute backend --
+     independent of this study's own pinned baseline composite. Remote-pinned only, same
+     gate as "Run current spec" (see _dispatchRemoteComposite in study-detail.js). #}
+  <button type="button" id="study-run-composite" class="btn-mini" title="Dispatch a specific process-bigraph composite_id to the remote compute backend (pbg-native multi_node/mbp, or the Nextflow campaign path) — advanced, independent of this study's own pinned baseline">⚙ Dispatch composite</button>
+</div>
 
 <div class="overview-section" id="simulations-section">
   <div id="study-sim-table" style="overflow-x:auto"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading simulations…</span></div></div>

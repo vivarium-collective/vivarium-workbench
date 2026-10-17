@@ -4278,17 +4278,22 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .study-pillar:hover { color: #334155; }
 .study-pillar.active { color: #1e293b; border-bottom-color: #2563eb; }
 
-/* 5-tab study layout (mockup refinement): one centered row of icon+label tabs,
-   no per-act group headers. Each .study-pillar stacks its inline-SVG icon above
-   the label and centers both; the icon inherits currentColor so it tints with
-   the active/inactive text color (active underline + accent unchanged). These
-   override the old act-cluster flex rules on .study-tabs above. */
-.study-tabs { justify-content: center; align-items: flex-end; gap: 10px; }
+/* 5-tab study layout: one LEFT-aligned row of icon+label tabs, no per-act group
+   headers. Each .study-pillar sets its inline-SVG icon beside the label (not
+   stacked) for a tighter, more type-driven bar that matches the page theme; the
+   icon inherits currentColor so it tints with the active/inactive text color.
+   These override the old act-cluster flex rules on .study-tabs above. */
+.study-tabs { justify-content: flex-start; align-items: stretch; gap: 2px; }
 .study-tabs .study-pillar {
-  display: inline-flex; flex-direction: column; align-items: center; gap: 5px;
-  padding: 8px 18px 7px;
+  display: inline-flex; flex-direction: row; align-items: center; gap: 7px;
+  padding: 9px 15px 8px;
+  font-weight: 600; font-size: 0.82rem; letter-spacing: 0.01em;
+  color: #64748b; border-radius: 7px 7px 0 0;
+  transition: color 0.12s ease, background-color 0.12s ease;
 }
-.study-pillar .pillar-icon { display: block; color: currentColor; }
+.study-tabs .study-pillar:hover { color: #334155; background: #f8fafc; }
+.study-tabs .study-pillar.active { color: #1e293b; font-weight: 700; }
+.study-pillar .pillar-icon { display: block; color: currentColor; width: 16px; height: 16px; flex-shrink: 0; }
 .study-pillar .pillar-label { display: block; line-height: 1; }
 .study-pillar.active .pillar-icon { color: #2563eb; }
 

@@ -10970,26 +10970,48 @@
     var fs = document.getElementById('investigation-dag-fs');
     var bar = fs && fs.querySelector('.aig-toolbar');
     if (!fs || !bar) return;
-    var drag = null;
+    // Transform-based drag: translate() is a compositor-only transform, so the
+    // heavy graph panel is NOT re-laid-out or repainted on every mousemove the
+    // way writing left/top each event was (that was the drag lag). We batch the
+    // transform write into one rAF per frame, then commit to left/top on release.
+    var drag = null, raf = 0, pending = null;
+    function flush() {
+      raf = 0;
+      if (drag && pending) { fs.style.transform = 'translate(' + pending.x + 'px,' + pending.y + 'px)'; }
+    }
     bar.addEventListener('mousedown', function (e) {
       if (!fs.classList.contains('aig-dock-docked')) return;      // only docked
       // Ignore the interactive controls — drag only on empty toolbar space.
       if (e.target.closest && e.target.closest('button, input, select, a, .aig-tb-seg, .aig-study-jump-wrap, #aig-dock-ctl, #aig-study-nav')) return;
       var r = fs.getBoundingClientRect();
-      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, h: r.height };
+      // Pin left/top to the current numeric position so the transform offsets
+      // from a known origin (the panel may still be on its CSS right:16px).
+      fs.style.right = 'auto'; fs.style.left = r.left + 'px'; fs.style.top = r.top + 'px';
+      drag = { sx: e.clientX, sy: e.clientY, left: r.left, top: r.top, w: r.width, h: r.height };
+      pending = { x: 0, y: 0 };
       fs.classList.add('aig-dragging');          // suppress transition while dragging
-      fs.style.right = 'auto';
+      fs.style.willChange = 'transform';
       e.preventDefault();
     });
     document.addEventListener('mousemove', function (e) {
       if (!drag) return;
       var vw = window.innerWidth, vh = window.innerHeight;
-      var left = Math.max(8, Math.min(e.clientX - drag.dx, vw - drag.w - 8));
-      var top = Math.max(56, Math.min(e.clientY - drag.dy, vh - drag.h - 8));
-      fs.style.left = left + 'px'; fs.style.top = top + 'px';
+      // Clamp the DESTINATION (base + delta) to the viewport, express as a delta.
+      var destLeft = Math.max(8, Math.min(drag.left + (e.clientX - drag.sx), vw - drag.w - 8));
+      var destTop = Math.max(56, Math.min(drag.top + (e.clientY - drag.sy), vh - drag.h - 8));
+      pending = { x: destLeft - drag.left, y: destTop - drag.top };
+      if (!raf) raf = requestAnimationFrame(flush);
     });
     document.addEventListener('mouseup', function () {
-      if (drag) { drag = null; fs.classList.remove('aig-dragging'); if (fs.classList.contains('aig-dock-docked')) _aigSaveDockRect(fs); }
+      if (!drag) return;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      // Commit the transform offset into left/top, then drop the transform.
+      fs.style.left = (drag.left + pending.x) + 'px';
+      fs.style.top = (drag.top + pending.y) + 'px';
+      fs.style.transform = ''; fs.style.willChange = '';
+      drag = null; pending = null;
+      fs.classList.remove('aig-dragging');
+      if (fs.classList.contains('aig-dock-docked')) _aigSaveDockRect(fs);
     });
   }
 
