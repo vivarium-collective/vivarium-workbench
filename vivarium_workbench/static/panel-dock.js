@@ -41,6 +41,7 @@
     left:   svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),
     right:  svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
     bottom: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14h18"/>'),
+    top:    svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/>'),
   };
   // Pop-out shares the dock dropdown (one "move this panel" menu) instead of a
   // separate header button.
@@ -78,23 +79,26 @@
     var dock = C.validDock(lsGet(K.dock, def)) ? lsGet(K.dock, def) : def;
     var justDragged = false;
 
-    function sizeKey(d) { return d === 'bottom' ? K.h : K.w; }
+    function isVertical(d) { return d === 'bottom' || d === 'top'; }   // height-sized docks
+    function sizeKey(d) { return isVertical(d) ? K.h : K.w; }
     function applySize() {
       var n = parseInt(lsGet(sizeKey(dock), ''), 10);
-      var fallback = dock === 'bottom'
+      var fallback = isVertical(dock)
         ? ((opts.defaultSize && opts.defaultSize.bottom) || 320)
         : ((opts.defaultSize && opts.defaultSize.side) || 440);
       var size = C.clampDock(dock, n || fallback, innerWidth, innerHeight);
-      panel.style.setProperty(dock === 'bottom' ? V('h') : V('w'), size + 'px');
+      panel.style.setProperty(isVertical(dock) ? V('h') : V('w'), size + 'px');
     }
     // Placement in the flex row: left → before <main>, right → end of the row, bottom →
-    // inside <main>'s column (below the content). Two right-docked panels stack by order.
+    // inside <main>'s column below the content, top → inside <main> above the content.
+    // Two right-docked panels stack by order.
     function place(zone) {
       if (!layout || !mainEl) return;
       panel.dataset.dock = zone;
       if (zone === 'left') layout.insertBefore(panel, mainEl);
       else if (zone === 'right') layout.appendChild(panel);
-      else mainEl.appendChild(panel);
+      else if (zone === 'top') mainEl.insertBefore(panel, mainEl.firstChild);
+      else mainEl.appendChild(panel);                                  // bottom
       applySize();
     }
     function isOpen() { return !panel.hidden; }
@@ -107,6 +111,7 @@
       root.setProperty(V('right'),  on && dock === 'right'  ? Math.round(innerWidth - r.left) + 'px' : '0px');
       root.setProperty(V('rw'),     on && dock === 'right'  ? Math.round(r.width) + 'px' : '0px');
       root.setProperty(V('bottom'), on && dock === 'bottom' ? Math.round(r.height) + 'px' : '0px');
+      root.setProperty(V('top'),    on && dock === 'top'    ? Math.round(r.height) + 'px' : '0px');
       window.dispatchEvent(new CustomEvent('viv:panel-layout', { detail: { key: key } }));
       if (opts.layoutEvent) window.dispatchEvent(new CustomEvent(opts.layoutEvent));
     }
@@ -177,7 +182,7 @@
           ghost = document.createElement('div');
           ghost.className = 'vp-ghost'; ghost.innerHTML = (opts.ghostIcon || '') + '<span>' + (opts.label || 'Panel') + '</span>';
           zones = document.createElement('div'); zones.className = 'vp-zones';
-          zones.innerHTML = ['left', 'right', 'bottom'].map(function (z) {
+          zones.innerHTML = ['left', 'right', 'top', 'bottom'].map(function (z) {
             return '<div class="vp-zone vp-zone-' + z + '" data-zone="' + z + '"><span>Dock ' + z + '</span></div>';
           }).join('');
           document.body.appendChild(zones); document.body.appendChild(ghost);
@@ -215,8 +220,11 @@
         ev.preventDefault(); h.classList.add('dragging'); document.body.classList.add('vp-dragging');
         var r0 = panel.getBoundingClientRect();
         function move(m) {
-          var raw = dock === 'left' ? m.clientX - r0.left : dock === 'right' ? r0.right - m.clientX : r0.bottom - m.clientY;
-          panel.style.setProperty(dock === 'bottom' ? V('h') : V('w'), C.clampDock(dock, raw, innerWidth, innerHeight) + 'px');
+          var raw = dock === 'left' ? m.clientX - r0.left
+                  : dock === 'right' ? r0.right - m.clientX
+                  : dock === 'top' ? m.clientY - r0.top
+                  : r0.bottom - m.clientY;                              // bottom
+          panel.style.setProperty(isVertical(dock) ? V('h') : V('w'), C.clampDock(dock, raw, innerWidth, innerHeight) + 'px');
         }
         function up() {
           h.classList.remove('dragging'); document.body.classList.remove('vp-dragging');
@@ -249,6 +257,9 @@
       getDock: function () { return dock; },
       didDrag: function () { return justDragged; },
       syncVars: syncVars,
+      // Bind drag-to-dock on a handle added AFTER make() (e.g. a toolbar that is
+      // relocated into the panel later). Guards against double-binding.
+      addDragHandle: function (el) { if (el && !el._vpDragBound) { el._vpDragBound = true; initDrag(el); } },
     };
   }
 
@@ -284,6 +295,7 @@
     var tries = 0;
     (function openWhenReady() {
       if (kind === 'chat' && typeof window._openAiPanel === 'function') { window._openAiPanel(); return; }
+      if (kind === 'graph' && typeof window._openGraphPanel === 'function') { window._openGraphPanel(); return; }
       if (kind === 'code' && window.ProcessCode) {
         var addr = p.get('address'), comp = p.get('composite');
         if (addr) window.ProcessCode.open(addr);

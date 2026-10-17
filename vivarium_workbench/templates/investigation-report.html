@@ -1987,6 +1987,10 @@ function setupWorkbenchDag(){
   const el={}; nodeEls.forEach(n=>el[n.dataset.study]=n);
   const pos={};
   const depths=Object.keys(byDepth).map(Number).sort((a,b)=>a-b);
+  // Measure + position + draw edges, wrapped so it can RE-RUN once web fonts
+  // settle (an early offsetHeight under-measures a card -> the column stacks too
+  // tight and cards overlap) and whenever a card is expanded in place.
+  const relayout=()=>{
   // Pass 1: x by depth, measure height.
   nodeEls.forEach(n=>{ n.style.width=CARD_W+'px'; });
   studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; const x=PAD_X+depth[s.slug]*(CARD_W+DEPTH_GAP);
@@ -2018,6 +2022,12 @@ function setupWorkbenchDag(){
       t.setAttribute('x',(x1+x2)/2); t.setAttribute('y',(y1+y2)/2-6); t.setAttribute('text-anchor','middle');
       t.setAttribute('font-size','10'); t.setAttribute('fill',st.color); t.textContent=st.label; svg.appendChild(t); }
   }); });
+  };
+  // First pass, then correct once reflow / web-fonts settle (the usual cause of
+  // columns stacking too tight and overlapping).
+  relayout();
+  if(typeof requestAnimationFrame==='function') requestAnimationFrame(relayout);
+  try{ if(document.fonts&&document.fonts.ready&&document.fonts.ready.then) document.fonts.ready.then(relayout); }catch(e){}
   // Click-to-expand: mark only the cards whose Asks/Finds are actually clipped
   // (so short cards get no misleading affordance), then let a click anywhere on
   // such a card toggle its in-place expansion. The title link keeps navigating
@@ -2029,7 +2039,7 @@ function setupWorkbenchDag(){
   canvas.addEventListener('click',e=>{
     if(e.target.closest('a')) return;
     const n=e.target.closest('.wdag-node[data-clip]');
-    if(n) n.classList.toggle('wn-expanded');
+    if(n){ n.classList.toggle('wn-expanded'); relayout(); }
   });
 }
 

@@ -10,7 +10,7 @@
 
 /* .viv-code-rail is included so the process-code panel can reuse the same .vp-head /
    .vp-icon chrome and read as one system with the chat panel. */
-.viv-ai-panel, .vp-pop, .viv-code-rail{
+.viv-graph-panel, .viv-ai-panel, .vp-pop, .viv-code-rail{
   --c-bg:#ffffff; --c-panel:#ffffff; --c-border:#e2e6eb; --c-text:#1f2937; --c-muted:#6b7280;
   --c-chip:#eef1f5; --c-chip-hover:#e3e8ef; --c-code:#f3f4f6; --c-input:#f8fafc;
   --c-accent:#4f46e5; --c-accent-fg:#fff;
@@ -29,7 +29,7 @@
   outline:2px solid var(--c-frame); outline-offset:-2px;
 }
 .viv-ai-panel[hidden]{ display:none; }
-:root[data-theme="dark"] .viv-ai-panel, :root[data-theme="dark"] .vp-pop, :root[data-theme="dark"] .viv-code-rail{
+:root[data-theme="dark"] .viv-ai-panel, :root[data-theme="dark"] .vp-pop, :root[data-theme="dark"] .viv-code-rail, :root[data-theme="dark"] .viv-graph-panel{
   --c-bg:var(--rail, #0f1728); --c-panel:var(--surface, #18233c); --c-border:var(--border, #26324c);
   --c-text:var(--text, #d3ddeb); --c-muted:var(--text-muted, #93a3b6); --c-chip:var(--surface-3, #1c2946);
   --c-chip-hover:var(--active, #20304f); --c-code:var(--surface-2, #12203a); --c-input:var(--field, #0d1526);
@@ -307,9 +307,10 @@ body.vp-dragging iframe{ pointer-events:none; }
   border:2px dashed #6366f1; border-radius:8px; background:rgba(99,102,241,.06); color:#4f46e5;
   font:600 13px/1.4 -apple-system,"Segoe UI",sans-serif; opacity:.75; transition:background .1s, opacity .1s; }
 .vp-zone.on{ background:rgba(99,102,241,.22); opacity:1; }
-.vp-zone-left{ left:0; top:0; bottom:28%; width:33%; }
-.vp-zone-right{ right:0; top:0; bottom:28%; width:33%; }
+.vp-zone-left{ left:0; top:20%; bottom:28%; width:33%; }
+.vp-zone-right{ right:0; top:20%; bottom:28%; width:33%; }
 .vp-zone-bottom{ left:0; right:0; bottom:0; height:28%; }
+.vp-zone-top{ left:0; right:0; top:0; height:20%; }
 :root[data-theme="dark"] .vp-zone{ color:#a5b4fc; border-color:#818cf8; }
 
 /* ── marimo-style model picker: providers → submenu of models → info card ── */

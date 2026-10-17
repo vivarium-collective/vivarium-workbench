@@ -1634,6 +1634,19 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <button id="aig-expand-btn" type="button" title="Expand graph — snap to top and grow it tall (workbench stays)"
                   aria-label="Expand graph" onclick="window._aigExpand()">⤒</button>
           <button type="button" title="Fullscreen" aria-label="Fullscreen" onclick="window._aigFullscreen()">⛶</button>
+          <!-- Open the graph as a dockable side panel (graph-panel.js / VivPanelDock):
+               moves this graph into a panel you can dock left/right/top/bottom or pop
+               out. Hidden once the graph is already inside the panel (CSS). -->
+          <button id="aig-dock-panel-btn" type="button" title="Open as a dockable side panel — drag it to any edge or pop it out"
+                  aria-label="Open graph as a side panel" onclick="window.GraphPanel&&GraphPanel.open()">◧</button>
+          <!-- Panel controls: shown ONLY while the graph is docked in the panel
+               (CSS: .viv-graph-body .aig-panel-ctl). They replace the old separate
+               panel header — dock/pop-out menu + close (back to the full-page graph).
+               The toolbar itself is the drag-to-dock handle (graph-panel.js). -->
+          <button class="aig-panel-ctl" type="button" title="Move or pop out the graph panel" aria-label="Move or pop out the graph panel"
+                  onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">▭</button>
+          <button class="aig-panel-ctl" type="button" title="Back to the full-page graph" aria-label="Back to the full-page graph"
+                  onclick="window.GraphPanel&&GraphPanel.toFull()">⤢</button>
         </span>
       </span>
       {# Legend lives in the toolbar with the other graph utilities. The "?" button
@@ -2316,6 +2329,23 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     </div>
   </aside>
 
+  <!-- Dockable investigation-graph panel. The investigation graph (the
+       #investigation-dag-fs toolbar + shell) is RELOCATED into #viv-graph-body
+       when this panel is open, and moved back inline for the full-page view.
+       Built on VivPanelDock (static/graph-panel.js) exactly like the Chat and
+       Code panels — docks left / right / bottom / top, resizes, pops out. -->
+  <aside id="viv-graph-panel" class="viv-graph-panel" aria-label="Investigation graph" hidden>
+    <div class="viv-graph-panel-inner">
+      <div class="viv-graph-resize-handle" id="viv-graph-resize-handle"
+           role="separator" aria-orientation="vertical" aria-label="Resize graph panel"
+           title="Drag to resize"></div>
+      <!-- No separate panel header: the hosted graph's own toolbar is the single
+           bar, and it carries the dock/close controls (the .aig-panel-ctl group,
+           shown only while docked) + acts as the drag-to-dock handle. -->
+      <div class="viv-graph-body" id="viv-graph-body"></div>
+    </div>
+  </aside>
+
 </div> <!-- /.viv-layout -->
 
 <!-- ============================================================ -->
@@ -2680,6 +2710,9 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/loom-embed.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* loom-embed unavailable */"></script>
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
+<!-- graph-panel.js: the dockable investigation-graph panel (VivPanelDock). Loads
+     AFTER panel-dock.js (the engine) and walkthrough.js (the DAG renderer it hosts). -->
+<script src="assets/graph-panel.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* graph panel unavailable */"></script>
 <script src="assets/mobile-nav.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile-nav unavailable */"></script>
 <script src="assets/search-palette.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* global search unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>

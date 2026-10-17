@@ -13,7 +13,10 @@ def test_dag_card_opens_full_study_not_drawer():
     # node's inline button (guarded with stopPropagation so it doesn't also
     # toggle). The quick-look side-card drawer is no longer wired from the graph.
     js = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text()
-    assert "node.onclick = _toggleExpand" in js
+    # Click expands at higher detail (_toggleExpand) and opens the study at the
+    # lowest detail (names-only, band 0); the ↗ button opens it at higher detail.
+    assert "node.onclick = _namesOnly" in js
+    assert "_toggleExpand" in js
     assert "event.stopPropagation(); _openStudyInsideInvestigation(" in js
     assert "_openInvestigationDrawer('study', s)" not in js
     assert "aig-claim-row" in js            # claim-row rendering still present

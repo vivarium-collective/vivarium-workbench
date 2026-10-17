@@ -11346,6 +11346,9 @@
 
   function _renderInvestigationDag(studies, chainsBySlug, studyEdges) {
     _lastDagArgs = [studies, chainsBySlug, studyEdges];
+    // Assigned to _layoutAndDraw below; each card's expand toggle calls it to
+    // re-measure + re-stack its column after the card grows/shrinks.
+    var _relayoutDag = null;
     // Prefer the server's computed study_edges for dependency layout: in the
     // member-interface model the per-study `parent_studies` / `pipeline_gate`
     // (what _dagEdges reads) is empty because prerequisites are declared as
@@ -11554,23 +11557,20 @@
         node.style.zIndex = exp ? '60' : '';
         node.style.boxShadow = exp ? '0 8px 24px rgba(0,0,0,0.18)' : '';
         node.style.whiteSpace = '';
+        // Re-stack the column so the grown/shrunk card doesn't overlap its
+        // neighbours (keeps the expanded card's elevated z-index/shadow).
+        if (_relayoutDag) _relayoutDag(false);
       };
-      // Whole-node click: in the DOCKED/embedded graph (names-only, where
-      // expand-in-place isn't useful) a click anywhere on the node opens that
-      // study embedded; in the inline full graph it keeps the click-to-expand
-      // behavior. Scoped at click time via the .aig-dock class so the inline
-      // graph is unaffected. The ↗ button keeps working in both.
-      node.onclick = function () {
-        var fs = document.getElementById('investigation-dag-fs');
-        if (fs && fs.classList.contains('aig-dock')) {
-          if (window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(s.name);
-          return;
-        }
-        _toggleExpand();
-      };
-      node.title = s.name + ' — ' + confidence +
-        '\n\nClick to expand in place · ↗ opens the full study' +
-        '\n(in the docked graph, a click opens the study)';
+      // At the lowest detail (names-only, band 0) the card is too small to expand
+      // usefully, so the WHOLE card opens the study and the ↗ button is dropped.
+      // At higher detail a click expands in place and ↗ opens the study.
+      var _namesOnly = (aigBand === 0);
+      node.onclick = _namesOnly
+        ? function () { _openStudyInsideInvestigation(s.name); }
+        : _toggleExpand;
+      node.title = _namesOnly
+        ? (s.name + ' — ' + confidence + '\n\nClick to open this study')
+        : (s.name + ' — ' + confidence + '\n\nClick to expand in place · ↗ opens the full study');
       var x = (orient === 'TB')
         ? rowStartX[depth[s.name]] + breadthIndex[s.name] * (CARD_W + BREADTH_GAP)
         : PAD_X + depth[s.name] * (CARD_W + DEPTH_GAP);
@@ -11604,9 +11604,11 @@
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
             _tierPipsHtml(s) +
-            '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
-              'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
-              'style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;font-size:0.72em;line-height:1;padding:2px 5px;cursor:pointer">↗</button>' +
+            // Names-only (band 0): no ↗ — the whole card opens the study.
+            (_namesOnly ? '' :
+              '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
+                'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
+                'style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;font-size:0.72em;line-height:1;padding:2px 5px;cursor:pointer">↗</button>') +
           '</span>' +
         '</div>' +
         '<strong style="display:block;font-size:0.85em;line-height:1.3;color:#1e293b">' + _esc(prettyTitle) + '</strong>' +
@@ -11696,6 +11698,14 @@
       pos[s.name] = { x: x, node: node, depth: depth[s.name] };
     });
 
+    // Measure + position + draw, wrapped in a closure so it can RE-RUN. The
+    // first offsetHeight read can UNDER-measure a card before web fonts finish
+    // laying out its text; the column then stacks the cards too tightly and they
+    // overlap. Expanding a card in place also changes its height. Re-running
+    // this on the next frame, on document.fonts.ready, and on expand/collapse
+    // re-measures and re-stacks so neighbours never overlap. isInitial is true
+    // only for the first synchronous pass (it alone resets the scroll position).
+    function _layoutAndDraw(isInitial) {
     // Measure now that content is in the DOM (container is already visible).
     studies.forEach(function(s) { pos[s.name].h = pos[s.name].node.offsetHeight || 120; });
 
@@ -11838,9 +11848,10 @@
       });
     });
 
-    // Auto-scroll the shell so the top of the DAG is in view.
+    // Auto-scroll the shell so the top of the DAG is in view (first pass only —
+    // a re-layout from a font-settle or an expand must not yank scroll to top).
     var shell = document.getElementById('investigation-dag-shell');
-    if (shell) shell.scrollTop = 0;
+    if (shell && isInitial) shell.scrollTop = 0;
 
     // Legend moved behind the "?" info-chip popover (no longer an always-visible
     // strip below the graph). Fill + wire it here so it's ready on first render.
@@ -11851,8 +11862,30 @@
     _renderGraphBarNav();
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
+    }
+    // Run once synchronously, then correct once final layout settles: the next
+    // animation frame catches post-innerHTML reflow, and document.fonts.ready
+    // catches web fonts that change text metrics (the usual cause of the
+    // column-overlap). _toggleExpand (above) also calls _layoutAndDraw(false)
+    // so an expanded card re-stacks its column instead of overlapping it.
+    _relayoutDag = _layoutAndDraw;
+    _layoutAndDraw(true);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { _layoutAndDraw(false); });
+    }
+    try {
+      if (document.fonts && document.fonts.ready && document.fonts.ready.then) {
+        document.fonts.ready.then(function () { _layoutAndDraw(false); });
+      }
+    } catch (e) { /* document.fonts unsupported — initial + rAF passes stand */ }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
+  // Re-run the last DAG render (same data) — used after the graph is relocated
+  // into / out of the dockable Graph panel so it re-measures + re-lays-out at the
+  // new container width. No-op if the graph hasn't been rendered yet.
+  window._reflowInvestigationDag = function () {
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+  };
 
   // ── Investigation-graph viewport: continuous zoom / pan / fit / fullscreen ──
   var aigZoom = 1;
