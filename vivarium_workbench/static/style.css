@@ -4493,6 +4493,13 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
    own inline display:none set by _renderInvestigationDetailInto). */
 #investigation-detail-view.inv-study-open > * { display: none !important; }
 #investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block !important; }
+/* …but the "Investigation overview" toggle must still be able to reveal the prose
+   ABOVE the graph while a study is open. When the overview is expanded
+   (not .inv-overview-collapsed), un-hide the intro + decision-cockpit blocks so
+   #inv-overview-toggle actually does something in the study-open state. They
+   precede the graph in the DOM, so they appear above it. */
+#investigation-detail-view.inv-study-open:not(.inv-overview-collapsed) > #investigation-intro,
+#investigation-detail-view.inv-study-open:not(.inv-overview-collapsed) > #investigation-decision-cockpit { display: block !important; }
 
 /* Collapsible "Investigation overview" (inline view, NO study open): the prose
    blocks (#investigation-intro + #investigation-decision-cockpit) are hidden by

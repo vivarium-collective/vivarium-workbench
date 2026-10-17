@@ -10953,8 +10953,16 @@
     }
   }
   function _toggleInvOverview() {
-    try { localStorage.setItem('inv-overview-collapsed', _invOverviewCollapsed() ? '0' : '1'); } catch (e) { /* ignore */ }
+    var willOpen = _invOverviewCollapsed();   // currently collapsed -> this click opens it
+    try { localStorage.setItem('inv-overview-collapsed', willOpen ? '0' : '1'); } catch (e) { /* ignore */ }
     _applyInvOverviewState();
+    // On open, bring the revealed overview (which sits ABOVE the graph in the DOM)
+    // into view — it works whether or not a study is open (the CSS un-hides the
+    // intro/cockpit in the study-open state when expanded).
+    if (willOpen) {
+      var intro = document.getElementById('investigation-intro');
+      if (intro && intro.scrollIntoView) { try { intro.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ } }
+    }
   }
   window._toggleInvOverview = _toggleInvOverview;
   window._applyInvOverviewState = _applyInvOverviewState;
