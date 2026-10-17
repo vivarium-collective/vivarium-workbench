@@ -10833,10 +10833,26 @@
   // via the .inv-study-open class (CSS hides every other direct child) so the
   // sticky pane is compact and the study stays reachable. Restoring removes the
   // class — each child returns to its own inline/default display.
+  var _invStripPrev = null;
   function _setInvProseForStudy(studyOpen) {
     var view = document.getElementById('investigation-detail-view');
     if (!view) return;
     view.classList.toggle('inv-study-open', !!studyOpen);
+    var shell = document.getElementById('investigation-dag-shell');
+    if (studyOpen) {
+      // Compact navigation strip: a short, resizable-up graph at the lowest
+      // semantic-zoom band (just study names), so it reads as a nav menu rather
+      // than a tall section. Save the prior height/band once so we can restore.
+      if (!_invStripPrev && shell) {
+        _invStripPrev = { h: shell.style.height, mh: shell.style.minHeight, band: aigBand };
+      }
+      if (shell) { shell.style.height = '200px'; shell.style.minHeight = '0'; }
+      _setAigBand(0);   // lowest detail — names only
+    } else if (_invStripPrev) {
+      if (shell) { shell.style.height = _invStripPrev.h; shell.style.minHeight = _invStripPrev.mh; }
+      _setAigBand(_invStripPrev.band);
+      _invStripPrev = null;
+    }
   }
   window._setInvProseForStudy = _setInvProseForStudy;
 
