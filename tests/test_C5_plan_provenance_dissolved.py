@@ -111,7 +111,7 @@ def test_decide_panel_renders_gate_assumptions_limitations_and_open_debts(ws_ful
 
 def test_tests_panel_renders_literature_anchors(ws_full):
     html = _render(ws_full, "full-study")
-    tests = _panel(html, "panel-tests", "panel-conclusions")
+    tests = _panel(html, "panel-audit", "panel-conclusions")
     assert ANCHOR in tests
 
 

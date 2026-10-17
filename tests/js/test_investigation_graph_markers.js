@@ -56,9 +56,17 @@ assert(src.includes('_DAG_REL_ALIASES'), 'legacy edge relations folded via _DAG_
 assert(src.includes('if (st.arrow !== false)'), 'edge draw honors arrow:false (no marker-end)');
 
 // --- legend: generated from the objects, Progress + Verdict + Evidence rows ---
-assert(/>Progress:</.test(src), 'legend Progress row');
-assert(/>Verdict:</.test(src), 'legend Verdict row');
-assert(/>Evidence:</.test(src), 'legend Evidence row');
+// Now lives in the "?" info-chip popover (_buildDagLegendHtml), not an
+// always-visible strip; the always-visible #investigation-dag-legend is gone.
+assert(src.includes('function _buildDagLegendHtml'), '_buildDagLegendHtml defined');
+assert(src.includes('function _wireDagLegendPopover'), '_wireDagLegendPopover defined');
+assert(!src.includes("id = 'investigation-dag-legend'"), 'always-visible legend strip removed');
+const legendFn = src.slice(src.indexOf('function _buildDagLegendHtml'),
+                          src.indexOf('function _wireDagLegendPopover'));
+assert(/row\('Progress'/.test(legendFn), 'legend Progress row');
+assert(/row\('Verdict'/.test(legendFn), 'legend Verdict row');
+assert(/row\('Evidence'/.test(legendFn), 'legend Evidence row');
+assert(/row\('Edges'/.test(legendFn), 'legend Edges row');
 assert(!/_lg\('#16a34a', *'✓', *'Accepted'\)/.test(src), 'old hardcoded Accepted legend removed');
 
 if (failed) { console.error(failed + ' assertion(s) failed'); process.exit(1); }

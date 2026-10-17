@@ -85,7 +85,6 @@ tests/test_investigation_page_declutter.py::test_header_export_cluster_and_icon_
 tests/test_spine_present_c_unbury.py::test_discovery_implications_elevated_above_conclusion_text
 tests/test_spine_present_c_unbury.py::test_purpose_is_not_collapsed_by_default
 tests/test_spine_present_c_unbury.py::test_secondary_content_stays_collapsible
-tests/test_study_detail_page.py::test_full_study_renders_all_tabs
-tests/test_study_detail_page.py::test_visualizations_panel_present
-tests/test_study_detail_template.py::test_panel_sections_no_premature_close
-tests/test_study_tabs_structure.py::test_panels_unchanged_all_eleven_present
+# The four below were fixed + un-quarantined by the 5-tab study-layout reorg
+# (feat/study-layout-reorg): their assertions were updated to the new structure
+# and now pass, so they re-join the blocking gate.

@@ -74,7 +74,7 @@ def test_report_card_row_has_inline_expander_not_scroll_link(tmp_path, dashboard
     resp = client.get("/studies/rc-study")
     assert resp.status_code == 200
     html = resp.text
-    tests_panel = _panel(html, "panel-tests", "panel-conclusions")
+    tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 
     # The row: an inline expander (native <details>) mounted at the row,
     # carrying data-card so the JS lazy-fill can find it; the verdict pill
@@ -106,7 +106,7 @@ def test_top_report_cards_panel_present_but_plotly_gated(tmp_path, dashboard_cli
 
     client = dashboard_client(ws)
     html = client.get("/studies/rc-plotly-study").text
-    tests_panel = _panel(html, "panel-tests", "panel-conclusions")
+    tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 
     # The top mount exists (server-gated on comparison_plotly_url being
     # present), ready for the client-side plotly-only fill.
@@ -121,7 +121,7 @@ def test_report_cards_section_absent_when_no_comparison_plotly(tmp_path, dashboa
 
     client = dashboard_client(ws)
     html = client.get("/studies/no-rc-study").text
-    tests_panel = _panel(html, "panel-tests", "panel-conclusions")
+    tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 
     assert 'id="report-cards-panel"' not in tests_panel
     assert 'id="report-cards-section"' not in tests_panel
@@ -177,7 +177,7 @@ def test_expectations_band_renders_heading_and_anchor_fields(tmp_path, dashboard
 
     client = dashboard_client(ws)
     html = client.get("/studies/expect-study").text
-    tests_panel = _panel(html, "panel-tests", "panel-conclusions")
+    tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 
     assert "Expectations" in tests_panel
     assert "Doubling time matches wet-lab range" in tests_panel
@@ -201,6 +201,6 @@ def test_expectations_band_absent_when_no_literature_anchors(tmp_path, dashboard
 
     client = dashboard_client(ws)
     html = client.get("/studies/no-anchors-study").text
-    tests_panel = _panel(html, "panel-tests", "panel-conclusions")
+    tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 
     assert "Expectations" not in tests_panel

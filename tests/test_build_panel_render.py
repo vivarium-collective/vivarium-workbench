@@ -15,17 +15,21 @@ TPL = (ROOT / "templates" / "study-detail.html").read_text(encoding="utf-8")
 
 
 def test_assurance_subtitles_reframed():
-    # narrative framing per tab; the old "Audit — does this study pass its own bar"
-    # collision on the Tests panel is gone.
-    tests_panel = TPL[TPL.index('id="panel-tests"'):TPL.index('id="panel-audit"')]
-    assert "The bar" in tests_panel
-    assert "does this study pass its own bar" not in tests_panel      # collision removed
-    audit_panel = TPL[TPL.index('id="panel-audit"'):TPL.index('id="panel-build"')]
+    # 5-tab layout: Tests folds into Audit (first section) and Build folds into
+    # Model (Advanced). The narrative framing per concept is preserved.
+    assert 'id="panel-tests"' not in TPL
+    assert 'id="panel-build"' not in TPL
+    audit_panel = TPL[TPL.index('id="panel-audit"'):TPL.index('id="panel-conclusions"')]
+    # Tests "The bar" framing is now the first section of Audit; the audit body
+    # keeps its "Is the bar sound?" framing. The old "does this study pass its
+    # own bar" collision stays gone.
+    assert "The bar" in audit_panel
     assert "Is the bar sound?" in audit_panel
-    build_panel = TPL[TPL.index('id="panel-build"'):]
-    # Intro reframed to "How the model was built"; the "was it earned?" verdict
-    # framing now lives in the rendered present-state panel (JS _buildPanelHtml).
-    assert "How the model was built" in build_panel
+    assert "does this study pass its own bar" not in audit_panel
+    # Build intro ("How the model was built") now lives inside the Model panel.
+    compose_panel = TPL[TPL.index('id="panel-compose"'):TPL.index('id="panel-simulate"')]
+    assert "How the model was built" in compose_panel
+    # The "was it earned?" verdict framing lives in the rendered panel (JS).
     assert "Was it earned?" in JS
 
 

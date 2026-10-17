@@ -21,9 +21,12 @@ def test_explore_tab_row_has_counts():
 
 
 def test_workspace_regions_exist():
+    # 5-tab / strip-removal: the accumulating #ws-study-tabs strip was removed;
+    # the embedded study now opens in the single #ws-study-frame porthole.
     for _id in ['iset-explore', 'iset-workspace', 'ws-back', 'ws-title',
-                'ws-context', 'ws-context-bar', 'ws-study-tabs', 'ws-study-frame']:
+                'ws-context', 'ws-context-bar', 'ws-study-frame']:
         assert 'id="%s"' % _id in TPL, _id
+    assert 'id="ws-study-tabs"' not in TPL
 
 
 def test_explore_workspace_toggle_functions():
@@ -53,21 +56,220 @@ def test_context_collapse_function():
 
 
 def test_study_tabs_manager():
-    for fn in ["_wsOpenStudyTab", "_wsCloseStudyTab", "_wsRenderStudyTabs", "_wsResetStudyTabs"]:
+    # Strip removal: the embedded study view is a SINGLE open study now — the
+    # accumulating closeable tabs (_wsRenderStudyTabs + _wsCloseStudyTab) were
+    # removed. _wsOpenStudyTab (replace the open study) + _wsResetStudyTabs
+    # remain, as the entry points the study navigator + router call.
+    for fn in ["_wsOpenStudyTab", "_wsResetStudyTabs"]:
         assert "function %s" % fn in JS, fn
         assert "window.%s" % fn in JS, fn
+    for gone in ["_wsCloseStudyTab", "_wsRenderStudyTabs"]:
+        assert "function %s" % gone not in JS, gone
     # Opening a study keeps the investigation context EXPANDED above it (PR #587,
     # "keep the investigation context expanded above an open study" — a user
-    # request), and closing the last tab returns to graph-only — both call
-    # _setInvestigationContextCollapsed(false). Slice each function body to the
-    # next sibling-function boundary rather than a fixed char window, so unrelated
-    # edits inside the function can't shift the assertion out of range.
+    # request). Slice the function body to the next sibling-function boundary.
     def _fn_body(name):
         i = JS.index("function %s" % name)
         j = JS.find("\n  function ", i + 1)
         return JS[i:j] if j != -1 else JS[i:]
     assert "_setInvestigationContextCollapsed(false)" in _fn_body("_wsOpenStudyTab")
-    assert "_setInvestigationContextCollapsed(false)" in _fn_body("_wsCloseStudyTab")
+
+
+def test_dockable_graph_and_graph_bar_navigator():
+    """Dockable-graph feature: while a study is embedded the graph floats with a
+    draggable/resizable DOCKED window + a COLLAPSED slim bar, full graph controls
+    in the docked panel, and a ⛶ control that EXITS the study back to the inline
+    graph. The graph-bar navigator drives the embedded study."""
+    # Template: the graph-bar navigator + the dock control (collapse/dock are
+    # states; the third button exits the study).
+    assert 'id="aig-study-nav"' in TPL
+    assert 'id="aig-study-prev"' in TPL and 'id="aig-study-next"' in TPL
+    assert 'id="aig-study-jump-menu"' in TPL
+    # The popup has NO title bar: #investigation-dag-lead + the "Investigation
+    # graph" heading are gone, and the dock control is integrated into the toolbar.
+    assert 'id="investigation-dag-lead"' not in TPL
+    assert '<strong>Investigation graph</strong>' not in TPL
+    dvs = TPL.index('id="investigation-dag-fs"')
+    dvs_end = TPL.index('<!-- /#investigation-dag-fs -->', dvs)
+    fsblock = TPL[dvs:dvs_end]
+    assert fsblock.index('id="aig-dock-ctl"') > fsblock.index('class="aig-toolbar"'), \
+        "dock control should sit inside the toolbar row"
+    for state in ("collapsed", "docked"):
+        assert 'data-dock="%s"' % state in TPL
+        assert "_aigSetDockState('%s')" % state in TPL
+    # ⛶ is now an ACTION (exit the study), not an "expanded" dock state.
+    assert 'data-dock="expanded"' not in TPL
+    assert "_aigExitToGraph()" in TPL
+    # The old separate collapse toggle is gone (unified into the dock control).
+    assert 'id="aig-collapse-btn"' not in TPL
+    assert "_aigToggleCollapse" not in TPL and "_aigToggleCollapse" not in JS
+
+    # Full graph controls are present in the toolbar (reused in the docked panel).
+    assert 'id="aig-detail-group"' in TPL and 'id="aig-width-group"' in TPL and 'id="aig-zoom-group"' in TPL
+
+    # JS: the dock-state + drag + resize + exit functions exist + are exported.
+    for fn in ["_renderGraphBarNav", "_aigSetDockState", "_applyDockState",
+               "_aigExitToGraph", "_aigWireDockDrag", "_aigWireDockResize",
+               "_aigApplyDockRect", "_aigSaveDockRect"]:
+        assert "function %s" % fn in JS, fn
+    assert "window._aigSetDockState" in JS
+    assert "window._aigExitToGraph" in JS
+
+    def _fn_body(name):
+        i = JS.index("function %s" % name)
+        j = JS.find("\n  function ", i + 1)
+        return JS[i:j] if j != -1 else JS[i:]
+
+    # Readable docked zoom: dock does NOT fit-all (which shrank names to tiny) —
+    # it sets a readable zoom and lets the panel scroll.
+    assert "function _aigDockReadable" in JS
+    setb = _fn_body("_aigSetDockState")
+    assert "_aigDockReadable()" in setb and "window._aigFit()" not in setb
+    assert "aigZoom = 1" in _fn_body("_aigDockReadable")
+    # Drag handle is the toolbar now (no title bar); it ignores the controls.
+    dragb = _fn_body("_aigWireDockDrag")
+    assert ".aig-toolbar" in dragb
+    assert "button, input, select" in dragb        # drag ignores interactive controls
+
+    # Opening a study floats the graph (dock) + refreshes the navigator; it drives
+    # the embedded study via _openStudyEmbeddedNewTab and reads the graph's data.
+    openb = _fn_body("_wsOpenStudyTab")
+    assert "_aigEnterDock()" in openb
+    assert "_renderGraphBarNav()" in openb
+    assert "_setInvProseForStudy(true)" in openb
+    assert "ws-context-sticky" not in openb        # sticky strip superseded
+    resetb = _fn_body("_wsResetStudyTabs")
+    assert "_aigExitDock()" in resetb
+    assert "_setInvProseForStudy(false)" in resetb
+    navb = _fn_body("_renderGraphBarNav")
+    assert "_openStudyEmbeddedNewTab" in navb
+    assert "_lastDagArgs" in navb                  # reuses the graph's data, no re-fetch
+    assert "fetch(" not in navb
+
+    # Dock state + dragged rect persist in localStorage.
+    setb = _fn_body("_aigSetDockState")
+    assert "aig-dock-state" in setb
+    assert "_aigApplyDockRect" in setb             # restores the dragged/resized rect
+    assert "aig-dock-rect" in _fn_body("_aigSaveDockRect")
+    # ⛶ exits the study back to the inline graph (what closing the study restores).
+    exitb = _fn_body("_aigExitToGraph")
+    assert "_wsResetStudyTabs" in exitb
+
+
+def test_docked_graph_whole_node_click_opens_study():
+    """In the docked/embedded graph, a click anywhere on a study node opens that
+    study (names-only; expand-in-place isn't useful there); the inline full graph
+    keeps click-to-expand. Scoped at click time via the .aig-dock class."""
+    i = JS.index("node.onclick = function")
+    body = JS[i:i + 400]
+    assert "aig-dock" in body
+    assert "_openStudyEmbeddedNewTab(s.name)" in body
+    assert "_toggleExpand()" in body               # inline fallback preserved
+
+
+def test_floating_graph_hides_prose_when_study_open():
+    """While a study is open the investigation prose is hidden so only the graph
+    region remains, and that region floats (position:fixed dock) out of flow so
+    the study reclaims the full column; the docked window is resizable."""
+    assert "function _setInvProseForStudy" in JS
+    i = JS.index("function _setInvProseForStudy")
+    body = JS[i: JS.index("\n  function ", i + 1)] if "\n  function " in JS[i:] else JS[i:i + 400]
+    assert "inv-study-open" in body
+    assert "investigation-detail-view" in body
+    # CSS: .inv-study-open hides every detail-view child but the graph region,
+    # and the graph floats via .aig-dock (position:fixed), with two state sizes.
+    css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
+    assert "#investigation-detail-view.inv-study-open > * { display: none" in css
+    assert "#investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block" in css
+    assert "#investigation-dag-fs.aig-dock" in css
+    assert "position: fixed" in css
+    for state in ("aig-dock-collapsed", "aig-dock-docked"):
+        assert "#investigation-dag-fs.%s" % state in css
+    assert "aig-dock-expanded" not in css          # expanded dock state removed
+    # Resize is now custom JS corner grips (CSS `resize` was unreliable here).
+    assert "resize: both" not in css
+    assert ".aig-dock-grip" in css
+    assert ".aig-resizing" in css
+    assert 'class="aig-dock-grip" data-grip="se"' in TPL
+    assert 'class="aig-dock-grip" data-grip="sw"' in TPL
+    # The retired sticky-strip CSS (sticky pane + 200px shell cap) is gone.
+    assert "ws-context-sticky" not in css
+    assert "height: 200px !important" not in css
+    # #investigation-dag-fs is a DIRECT child of the detail view (so hiding the
+    # other children leaves graph-only); the prose blocks are its siblings.
+    dv = TPL.index('id="investigation-detail-view"')
+    dv_end = TPL.index('<!-- /#investigation-dag-fs -->', dv)
+    detail = TPL[dv:dv_end]
+    assert 'id="investigation-intro"' in detail
+    assert 'id="investigation-decision-cockpit"' in detail
+    assert 'id="investigation-dag-fs"' in detail
+
+
+def test_investigation_overview_collapsed_by_default_graph_prominent():
+    """Inline investigation view (no study open): the prose is collapsed by
+    default behind a "▸ Investigation overview" toggle, and the graph renders
+    prominently right after the title + toggle (title · toggle · graph)."""
+    # Template: the toggle is integrated into the graph toolbar (not a standalone
+    # line); with the prose collapsed by default, the visible order is the toolbar
+    # (toggle) directly above the graph. The prose (#investigation-intro) is a
+    # separate block, hidden by the collapse CSS.
+    assert 'id="inv-overview-toggle"' in TPL
+    assert "_toggleInvOverview()" in TPL
+    dv = TPL.index('id="investigation-detail-view"')
+    dv_end = TPL.index('<!-- /#investigation-dag-fs -->', dv)
+    detail = TPL[dv:dv_end]
+    # The toggle lives inside the graph toolbar (within #investigation-dag-fs).
+    tb = detail.index('class="aig-toolbar"')
+    assert detail.index('id="inv-overview-toggle"') > tb, "overview toggle should be in the toolbar"
+
+    # CSS: collapsed hides the prose blocks (intro + decision cockpit).
+    css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
+    assert "#investigation-detail-view.inv-overview-collapsed > #investigation-intro" in css
+    assert "#investigation-detail-view.inv-overview-collapsed > #investigation-decision-cockpit" in css
+
+    # JS: default collapsed (unset -> collapsed) + applied on investigation render
+    # and on exit-to-graph.
+    assert "function _invOverviewCollapsed" in JS
+    assert "function _applyInvOverviewState" in JS
+    oc = JS[JS.index("function _invOverviewCollapsed"): JS.index("function _applyInvOverviewState")]
+    assert "v === null ? true" in oc            # default collapsed when unset
+    assert "inv-overview-collapsed" in oc
+
+    def _fn_body(name):
+        i = JS.index("function %s" % name)
+        j = JS.find("\n  function ", i + 1)
+        return JS[i:j] if j != -1 else JS[i:]
+    # Landing graph-prominent: the detail render + the exit-to-graph reset both
+    # apply the collapsed overview state.
+    assert "_applyInvOverviewState()" in _fn_body("_renderInvestigationDetailInto")
+    assert "_applyInvOverviewState()" in _fn_body("_wsResetStudyTabs")
+
+
+def test_needs_attention_is_a_compact_toolbar_chip():
+    """The all-clear state is a compact chip in the toolbar, not a big green
+    banner; the needs state is a compact clickable chip that reveals the detail."""
+    assert 'id="aig-needs-attention-chip"' in TPL
+    i = JS.index("function _renderInvNeedsAttention")
+    body = JS[i: JS.index("window._renderInvNeedsAttention", i)]
+    # All-clear renders a small "✓ All clear" chip — not the old full-width green
+    # "✓ Nothing needs attention" banner.
+    assert "aig-na-clear" in body and "All clear" in body
+    assert "Nothing needs attention" not in body     # old big all-clear banner gone
+    # Needs state is a clickable chip that opens the detail list.
+    assert "aig-na-flag" in body
+    assert "_aigShowNeedsAttention" in body
+    css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
+    assert ".aig-na-chip" in css
+
+
+def test_embedded_study_hides_in_iframe_header_nav():
+    """study-detail.js hides the in-header #study-nav when embedded
+    (window.parent !== window); the standalone page keeps it."""
+    sd = (ROOT / "vivarium_workbench/static/study-detail.js").read_text(encoding="utf-8")
+    i = sd.index("function _wireStudyNav")
+    body = sd[i: sd.index("\n  function ", i + 1)]
+    assert "window.parent !== window" in body
+    assert "nav.style.display = 'none'" in body
 
 
 # ── Task 5: consistency router + investigation-workspace render ──────────────

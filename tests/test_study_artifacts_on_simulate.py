@@ -42,68 +42,70 @@ def _panel(html: str, kind: str) -> str:
     return html[i: nxt if nxt != -1 else len(html)]
 
 
+def _sim_subpanel(html: str, sub: str) -> str:
+    # 5-tab layout: Results + Analysis are subpanels of the Simulations panel.
+    i = html.index('id="sim-subpanel-%s"' % sub)
+    # Subpanels are siblings inside #panel-simulate; slice to the next subpanel
+    # or the next top-level tab panel.
+    nxt = html.find('class="sim-subpanel"', i + 10)
+    if nxt == -1:
+        nxt = html.find('class="study-tab-panel"', i + 10)
+    return html[i: nxt if nxt != -1 else len(html)]
+
+
 # ---------------------------------------------------------------------------
-# Template: each group renders under its own Evidence panel, not Simulations.
+# 5-tab layout: the analysis + raw-data groups live in the Simulations panel's
+# Analysis / Results subpanels (ids preserved).
 # ---------------------------------------------------------------------------
 
-def test_analysis_files_group_moved_to_analyses_panel():
+def test_analysis_files_group_in_analysis_subpanel():
     html = _render()
-    analyses_panel = _panel(html, "analyses")
-    assert 'id="data-files"' in analyses_panel
-    assert 'id="data-download-all"' in analyses_panel
-    assert '/api/study-analysis-zip?study=s1' in analyses_panel
-    sim_panel = _panel(html, "simulate")
-    assert 'id="data-files"' not in sim_panel
-    assert 'id="data-download-all"' not in sim_panel
+    analysis_sub = _sim_subpanel(html, "analysis")
+    assert 'id="data-files"' in analysis_sub
+    assert 'id="data-download-all"' in analysis_sub
+    assert '/api/study-analysis-zip?study=s1' in analysis_sub
+    runs_sub = _sim_subpanel(html, "runs")
+    assert 'id="data-files"' not in runs_sub
 
 
-def test_raw_data_bulk_group_moved_to_results_panel():
+def test_raw_data_bulk_group_in_results_subpanel():
     html = _render()
-    results_panel = _panel(html, "results")
-    assert 'id="raw-data-list"' in results_panel
-    assert 'id="exports-downloads"' in results_panel
-    assert 'id="raw-data-download-all"' in results_panel
-    assert 'onclick="_downloadAllRawExports()"' in results_panel
-    sim_panel = _panel(html, "simulate")
-    assert 'id="raw-data-list"' not in sim_panel
-    assert 'id="exports-downloads"' not in sim_panel
+    results_sub = _sim_subpanel(html, "results")
+    assert 'id="raw-data-list"' in results_sub
+    assert 'id="exports-downloads"' in results_sub
+    assert 'id="raw-data-download-all"' in results_sub
+    assert 'onclick="_downloadAllRawExports()"' in results_sub
+    runs_sub = _sim_subpanel(html, "runs")
+    assert 'id="raw-data-list"' not in runs_sub
 
 
 def test_simulate_panel_still_has_runs_table_and_run_detail():
-    """Sanity: relocation is subtractive on Simulations only for the
-    artifacts strip — the existing runs UI is untouched."""
+    """Sanity: the runs table + run-detail mount live in the Runs subpanel."""
+    html = _render()
+    runs_sub = _sim_subpanel(html, "runs")
+    assert 'id="study-sim-table"' in runs_sub
+    assert 'id="study-run-detail"' in runs_sub
+
+
+def test_simulations_subtabs_present():
     html = _render()
     sim_panel = _panel(html, "simulate")
-    assert 'id="study-sim-table"' in sim_panel
-    assert 'id="study-run-detail"' in sim_panel
+    for sub in ("runs", "results", "analysis"):
+        assert "_setSimSubtab('%s')" % sub in sim_panel
+        assert 'id="sim-subpanel-%s"' % sub in sim_panel
 
 
-def test_results_and_analyses_pillars_under_evidence_cluster():
+def test_simulate_is_a_top_level_pillar():
     html = _render()
-    i = html.index('data-act="evidence"')
-    j = html.index('data-act="assurance"', i)
-    evidence = html[i:j]
-    assert 'data-kind="results"' in evidence
-    assert 'data-kind="analyses"' in evidence
-    assert 'data-kind="visualize"' in evidence
-    # Order: Results, Analyses, Visualizations.
-    assert evidence.index('data-kind="results"') < evidence.index('data-kind="analyses"') < evidence.index('data-kind="visualize"')
-
-
-def test_simulate_pillar_moved_under_design_cluster():
-    html = _render()
-    i = html.index('data-act="design"')
-    j = html.index('data-act="evidence"', i)
-    design = html[i:j]
-    assert 'data-kind="simulate"' in design
-    i2 = html.index('data-act="evidence"')
-    j2 = html.index('data-act="assurance"', i2)
-    evidence = html[i2:j2]
-    assert 'data-kind="simulate"' not in evidence
+    assert 'data-kind="simulate"' in html and "_setStudyTab('simulate')" in html
+    # Results/analyses/visualize are no longer top-level pillars.
+    for gone in ("results", "analyses", "visualize"):
+        assert "_setStudyTab('%s')" % gone not in html
 
 
 # ---------------------------------------------------------------------------
-# JS: loader triggers fire on their own tab-activation branches.
+# JS: loaders fire from the Simulations tab activation (all subpanels load so a
+# subtab switch never shows an empty box).
 # ---------------------------------------------------------------------------
 
 def _set_study_tab_body(js: str) -> str:
@@ -112,17 +114,17 @@ def _set_study_tab_body(js: str) -> str:
     return js[i:j]
 
 
-def test_loaders_trigger_on_their_own_tab_activation():
+def test_loaders_trigger_on_simulate_tab_activation():
     js = (_PKG / "static" / "study-detail.js").read_text(encoding="utf-8")
     body = _set_study_tab_body(js)
-    i = body.index("kind === 'analyses'")
-    assert "_loadAnalyses()" in body[i - 10: i + 60]
-    j = body.index("kind === 'results'")
-    assert "_loadResults()" in body[j - 10: j + 60]
     k = body.index("kind === 'simulate'")
-    line = body[k - 10: k + 60]
-    assert "_loadAnalyses()" not in line
-    assert "_loadResults()" not in line
+    block = body[k: k + 220]
+    assert "_loadStudySims()" in block
+    assert "_loadResults()" in block
+    assert "_loadAnalyses()" in block
+    # The removed per-tab branches are gone.
+    assert "kind === 'analyses'" not in body
+    assert "kind === 'results'" not in body
 
 
 def test_loaders_no_longer_trigger_on_data_tab_activation():
@@ -132,18 +134,18 @@ def test_loaders_no_longer_trigger_on_data_tab_activation():
 
 
 # ---------------------------------------------------------------------------
-# The C4 Readouts pointer now targets the results tab.
+# The Readouts pointer now targets the Simulations panel (Results subtab).
 # ---------------------------------------------------------------------------
 
-def test_readouts_pointer_targets_results_tab():
+def test_readouts_pointer_targets_simulations_results():
     js = (_PKG / "static" / "study-detail.js").read_text(encoding="utf-8")
     i = js.index("function _loadReadoutsDownloadPointer(")
     j = js.index("window._loadReadoutsDownloadPointer", i)
     body = js[i:j]
-    assert "_gotoStudyTab(\\'results\\'" in body
+    assert "_gotoStudyTab(\\'simulate\\'" in body
     assert "exports-downloads" in body
     assert "_gotoStudyTab(\\'data\\'" not in body
-    assert "_gotoStudyTab(\\'simulate\\'" not in body
+    assert "_gotoStudyTab(\\'results\\'" not in body
 
 
 def test_no_remaining_jump_targets_data_tab_for_downloads():

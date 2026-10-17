@@ -8988,40 +8988,29 @@
   }
   window._setInvestigationContextCollapsed = _setInvestigationContextCollapsed;
 
-  // Study-tabs manager: accumulating, closeable study tabs inside the
-  // investigation workspace (#ws-study-tabs bar -> #ws-study-panel/#ws-study-frame
-  // porthole). Opening a study collapses the investigation context down to the
-  // slim bar; closing the last open tab returns to graph-only.
-  window._wsStudyTabs = { investigation: null, openTabs: [], active: null };
+  // Embedded study view: a SINGLE study opens inline in the investigation
+  // workspace porthole (#ws-study-panel/#ws-study-frame) — opening another study
+  // REPLACES it. The old accumulating, closeable study-tab strip (#ws-study-tabs
+  // with × chips) was removed; `_wsStudyTabs` is now just {investigation, active}
+  // so `active` still drives the open-node highlight in the graph.
+  window._wsStudyTabs = { investigation: null, active: null };
 
   function _wsResetStudyTabs(investigation) {
-    window._wsStudyTabs = { investigation: investigation, openTabs: [], active: null };
-    _wsRenderStudyTabs();
+    window._wsStudyTabs = { investigation: investigation, active: null };
+    _wsHighlightActiveDagNode(null);
     var panel = document.getElementById('ws-study-panel');
     if (panel) panel.style.display = 'none';
+    // No study open -> restore the inline investigation view, un-float the graph,
+    // hide the graph-bar navigator, and land GRAPH-PROMINENT: the prose collapsed
+    // behind the "▸ Investigation overview" toggle (so ⛶ "back to graph" shows the
+    // graph on top, not a wall of prose).
+    _setInvProseForStudy(false);
+    _aigExitDock();
+    _applyInvOverviewState();
+    _renderGraphBarNav();
     _setInvestigationContextCollapsed(false);   // fresh investigation -> graph expanded
   }
   window._wsResetStudyTabs = _wsResetStudyTabs;
-
-  function _wsRenderStudyTabs() {
-    var bar = document.getElementById('ws-study-tabs');
-    if (!bar) return;
-    var st = window._wsStudyTabs;
-    if (!st.openTabs.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
-    bar.style.display = '';
-    bar.innerHTML = st.openTabs.map(function (slug) {
-      var on = slug === st.active;
-      return '<span class="ws-study-tab" data-ws-tab="' + _esc(slug) + '" ' +
-        'style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;' +
-        'border-bottom:2px solid ' + (on ? '#3b82f6' : 'transparent') + ';' +
-        'color:' + (on ? '#0f172a' : '#64748b') + ';font-weight:' + (on ? '600' : '400') + ';margin-bottom:-1px">' +
-        '<span onclick="_wsOpenStudyTab(\'' + _esc(slug) + '\')">' + _esc(slug) + '</span>' +
-        '<span onclick="event.stopPropagation();_wsCloseStudyTab(\'' + _esc(slug) + '\')" ' +
-        'title="close" style="color:#94a3b8;font-weight:700">×</span></span>';
-    }).join('');
-    _wsHighlightActiveDagNode(st.active);
-  }
-  window._wsRenderStudyTabs = _wsRenderStudyTabs;
 
   // Highlight the open study's node in the investigation graph (clearing any
   // previously-open one), matching on the slug stamped on each node by
@@ -9083,9 +9072,15 @@
 
   function _wsOpenStudyTab(slug, tab) {
     var st = window._wsStudyTabs;
-    if (st.openTabs.indexOf(slug) === -1) st.openTabs.push(slug);
-    st.active = slug;
-    _wsRenderStudyTabs();
+    st.active = slug;                       // single open study — replaces any prior
+    _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
+    // Hide the investigation PROSE (verdict/question/description + decision
+    // cockpit + tab blocks) and drop the graph to the names-only band, then FLOAT
+    // the graph as a compact dockable window (default: docked, top-right) so the
+    // study below gets the FULL content width/height — no top graph strip.
+    _setInvProseForStudy(true);
+    _renderGraphBarNav();
+    _aigEnterDock();
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');
     if (panel) panel.style.display = '';
@@ -9158,24 +9153,6 @@
   }
   window._wsOpenStudyTab = _wsOpenStudyTab;
 
-  function _wsCloseStudyTab(slug) {
-    var st = window._wsStudyTabs;
-    var wasActive = (st.active === slug);
-    var i = st.openTabs.indexOf(slug);
-    if (i !== -1) st.openTabs.splice(i, 1);
-    if (wasActive) st.active = st.openTabs[Math.max(0, i - 1)] || st.openTabs[0] || null;
-    _wsRenderStudyTabs();
-    if (!wasActive) return;                      // background tab closed -> porthole untouched
-    if (st.active) {
-      _wsOpenStudyTab(st.active);                // re-focus nearest remaining tab
-    } else {
-      var panel = document.getElementById('ws-study-panel');
-      if (panel) panel.style.display = 'none';
-      _setInvestigationContextCollapsed(false);  // last tab closed -> graph-only
-    }
-  }
-  window._wsCloseStudyTab = _wsCloseStudyTab;
-
   // Task 5: render an investigation's graph + objective into an arbitrary mount
   // (the workspace #ws-context). Reuses the v3 detail renderer verbatim by
   // relocating the shared #investigation-detail-view subtree (title/objective
@@ -9195,6 +9172,10 @@
       if (back) back.style.display = 'none';
       var titleEl = document.getElementById('investigation-detail-title');
       if (titleEl && titleEl.parentNode) titleEl.parentNode.style.display = 'none';
+      // Graph-prominent inline view: the investigation prose starts collapsed
+      // behind the "▸ Investigation overview" toggle (default), so the graph is
+      // top-aligned right after the title + toggle.
+      _applyInvOverviewState();
     }
     if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(name);
   }
@@ -10404,10 +10385,21 @@
     if (s === 'medium') return { dot: '#f59e0b', bg: '#fffbeb', bd: '#f59e0b', col: '#92400e' };
     return { dot: '#3b82f6', bg: '#eff6ff', bd: '#3b82f6', col: '#1e40af' };  // low / default
   }
+  // Scroll the needs-attention detail block into view + open it (from the chip).
+  function _aigShowNeedsAttention() {
+    var b = document.getElementById('investigation-needs-attention');
+    if (!b) return;
+    var d = b.querySelector('details'); if (d) d.open = true;
+    if (b.scrollIntoView) { try { b.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ } }
+  }
+  window._aigShowNeedsAttention = _aigShowNeedsAttention;
+
   function _renderInvNeedsAttention(name) {
     var container = document.getElementById('investigation-needs-attention');
-    if (!container) return;
-    container.innerHTML = '';
+    var chip = document.getElementById('aig-needs-attention-chip');
+    if (!container && !chip) return;
+    if (container) container.innerHTML = '';
+    if (chip) chip.innerHTML = '';
     var _fetch = fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
                        {headers: {Accept: 'application/json'}})
       .then(function(r) { return r.ok ? r.json() : null; });
@@ -10416,15 +10408,19 @@
       var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the needs-attention scan (deterministic)</span>';
       var total = (d.summary.total) || 0;
       if (!total) {
-        // Quiet "nothing needs attention" state — not an empty dropdown.
-        container.innerHTML =
-          '<div class="needs-attention-banner" style="margin:10px 0 14px 0;padding:10px 14px;'
-          + 'background:#f0fdf4;border:1px solid #16a34a;border-left-width:5px;border-radius:6px;color:#166534">'
-          + '<strong>✓ Nothing needs attention</strong> ' + lbl + '</div>';
+        // All-clear: a compact green chip in the toolbar — no big banner.
+        if (chip) chip.innerHTML =
+          '<span class="aig-na-chip aig-na-clear" title="code-computed by the needs-attention scan (deterministic)">✓ All clear</span>';
         return;
       }
       var bySev = d.summary.by_severity || {};
       var high = bySev.high || 0;
+      // Compact clickable chip in the toolbar; the full list stays in the block.
+      if (chip) chip.innerHTML =
+        '<button type="button" class="aig-na-chip aig-na-flag' + (high ? ' aig-na-high' : '') + '" '
+        + 'onclick="window._aigShowNeedsAttention()" '
+        + 'title="' + high + ' high · ' + total + ' total — click for details">⚠ ' + total
+        + ' need' + (total === 1 ? 's' : '') + ' attention</button>';
       var head = '⚠ Needs attention — ' + high + ' high, ' + total + ' total';
       // Human-readable name + which study tab a click should land on, per kind.
       // These are follow-ups the deterministic scan flags — NOT app updates.
@@ -10758,6 +10754,438 @@
     rel = _DAG_REL_ALIASES[rel] || rel;
     return _DAG_REL_STYLE[rel] || _DAG_REL_STYLE['builds-on'];
   }
+
+  // The investigation-graph legend (Progress / Verdict / Evidence / Edges),
+  // built from the same ontology tables the graph uses. Used to fill the "?"
+  // info-chip popover (it was previously an always-visible strip below the
+  // graph). Static content, so it can be rendered once.
+  function _buildDagLegendHtml() {
+    var _lg = function (color, icon, label) {
+      return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">' +
+        '<span style="color:' + color + ';font-size:1em">' + icon + '</span>' +
+        '<span>' + label + '</span></span>';
+    };
+    var _edgeLg = function (rel) {
+      var st = _dagRelStyle(rel);
+      var line = 'border-bottom:2px ' + (st.dash ? 'dashed' : 'solid') + ' ' + st.color;
+      return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
+        '<span style="width:18px;' + line + ';display:inline-block;line-height:0">&nbsp;</span>' +
+        '<span>' + st.label + '</span></span>';
+    };
+    var _tierLg = function (tv) {
+      var m = _TIER_META[tv], pips = '';
+      for (var i = 0; i < 3; i++) pips += '<span style="color:' + (i < m.pips ? '#334155' : '#cbd5e1') + '">●</span>';
+      return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
+        '<span style="font-size:0.85em;letter-spacing:1px">' + pips + '</span><span>' + m.label + '</span></span>';
+    };
+    var row = function (label, items) {
+      return '<div style="margin-top:8px"><div style="font-weight:600;color:#475569;margin-bottom:3px">' +
+        label + '</div><div style="display:flex;flex-wrap:wrap;align-items:center">' + items + '</div></div>';
+    };
+    return '<div style="font-size:0.78em;color:#64748b;line-height:1.5">' +
+      row('Progress', Object.keys(_EXEC_META).map(function (k) { var m = _EXEC_META[k]; return _lg(m.color, m.icon, m.label); }).join('')) +
+      row('Verdict', Object.keys(_VERDICT_META).map(function (k) { var m = _VERDICT_META[k]; return _lg(m.color, m.icon, m.label); }).join('')) +
+      row('Evidence', Object.keys(_TIER_META).map(_tierLg).join('')) +
+      row('Edges', Object.keys(_DAG_REL_STYLE).map(_edgeLg).join('')) +
+      '</div>';
+  }
+
+  // Fill the "?" info-chip popover with the legend (once) and wire the chip to
+  // toggle it, closing on outside click — same dropdown pattern as the study
+  // navigator's jump menu.
+  function _wireDagLegendPopover() {
+    var chip = document.getElementById('dag-legend-chip');
+    var pop = document.getElementById('dag-legend-popover');
+    if (!chip || !pop) return;
+    if (!pop.dataset.filled) { pop.innerHTML = _buildDagLegendHtml(); pop.dataset.filled = '1'; }
+    if (chip.dataset.wired) return;
+    chip.dataset.wired = '1';
+    chip.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var open = pop.style.display !== 'none' && pop.style.display !== '';
+      pop.style.display = open ? 'none' : 'block';
+      chip.setAttribute('aria-expanded', open ? 'false' : 'true');
+    });
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest || !e.target.closest('.dag-legend-wrap')) {
+        pop.style.display = 'none'; chip.setAttribute('aria-expanded', 'false');
+      }
+    }, true);
+  }
+  window._wireDagLegendPopover = _wireDagLegendPopover;
+
+  // ── Collapse / expand the graph SHELL (persistent nav pane) ───────────────
+  // Hides #investigation-dag-shell (the DAG canvas) while keeping the toolbar +
+  // study navigator visible, so the user can still navigate and re-expand.
+  // Persisted per viewer in localStorage. Independent of the sticky pinning and
+  // of _setInvestigationContextCollapsed (which slims the whole context).
+  // The investigation graph is a DOCKABLE view while a study is embedded (CSS
+  // classes on #investigation-dag-fs, transitions in style.css):
+  //   collapsed — a slim corner bar (lead + study navigator), graph hidden;
+  //   docked    — a draggable/resizable floating window, top-right (the default),
+  //               with the navigator + Zoom/Detail/Width graph controls.
+  // The third control button (⛶) is an ACTION, not a state: it EXITS the study
+  // and returns to the full inline investigation graph. When NO study is open the
+  // graph is the normal full-width inline view (no dock class). The chosen state
+  // + the user's dragged position/size are remembered in localStorage.
+  var _AIG_DOCK_STATES = ['collapsed', 'docked'];
+  function _aigDockStateStored() {
+    try { var v = localStorage.getItem('aig-dock-state'); return _AIG_DOCK_STATES.indexOf(v) >= 0 ? v : null; }
+    catch (e) { return null; }
+  }
+  function _aigStudyOpen() { return !!(window._wsStudyTabs && window._wsStudyTabs.active); }
+
+  // Remembered dragged position + resized size of the docked window.
+  function _aigDockRectStored() {
+    try { return JSON.parse(localStorage.getItem('aig-dock-rect') || 'null'); } catch (e) { return null; }
+  }
+  function _aigSaveDockRect(fs) {
+    if (!fs || !fs.classList.contains('aig-dock-docked')) return;
+    try {
+      var r = fs.getBoundingClientRect();
+      localStorage.setItem('aig-dock-rect', JSON.stringify({
+        left: Math.round(r.left), top: Math.round(r.top),
+        width: Math.round(r.width), height: Math.round(r.height),
+      }));
+    } catch (e) { /* ignore */ }
+  }
+  // Apply the stored rect to the docked window, clamped inside the viewport.
+  function _aigApplyDockRect(fs) {
+    var rect = _aigDockRectStored();
+    if (!rect) return;
+    var vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+    var w = Math.max(260, Math.min(rect.width || 400, vw - 24));
+    var h = Math.max(140, Math.min(rect.height || 360, vh - 80));
+    var left = Math.max(8, Math.min(rect.left, vw - w - 8));
+    var top = Math.max(8, Math.min(rect.top, vh - h - 8));
+    fs.style.right = 'auto';
+    fs.style.left = left + 'px'; fs.style.top = top + 'px';
+    fs.style.width = w + 'px'; fs.style.height = h + 'px';
+  }
+  // Clear the inline rect so a non-docked state falls back to the CSS size/pos.
+  function _aigClearDockRect(fs) {
+    fs.style.left = ''; fs.style.top = ''; fs.style.right = '';
+    fs.style.width = ''; fs.style.height = '';
+  }
+
+  function _aigSetDockState(state, opts) {
+    if (_AIG_DOCK_STATES.indexOf(state) < 0) state = 'docked';
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs || !_aigStudyOpen()) return;   // docking only applies while embedded
+    fs.classList.add('aig-dock');
+    _AIG_DOCK_STATES.forEach(function (s) { fs.classList.toggle('aig-dock-' + s, s === state); });
+    // Docked: honor the user's dragged/resized rect; collapsed: use the CSS size.
+    if (state === 'docked') { _aigApplyDockRect(fs); _aigWireDockDrag(); _aigWireDockResize(); }
+    else { _aigClearDockRect(fs); }
+    var ctl = document.getElementById('aig-dock-ctl');
+    if (ctl) {
+      ctl.style.display = 'inline-flex';
+      ctl.querySelectorAll('button[data-dock]').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-dock') === state);
+      });
+    }
+    if (!(opts && opts.noPersist)) { try { localStorage.setItem('aig-dock-state', state); } catch (e) { /* ignore */ } }
+    // Docked: show the graph at a READABLE zoom (names legible) and let the panel
+    // scroll — do NOT fit-all (which shrinks everything to tiny). A bigger window
+    // then shows more of the graph at the same readable size, rather than shrinking.
+    if (state === 'docked') {
+      setTimeout(function () { _aigDockReadable(); }, 210);
+    }
+  }
+  window._aigSetDockState = _aigSetDockState;
+
+  // Readable docked zoom: keep names legible (zoom = 1, the inline default) and
+  // scroll for the rest, instead of fit-all. The Zoom −/⤢/+ controls still let
+  // the user fit-all or zoom as they choose. (aigZoom / _applyAigZoom are defined
+  // later in this IIFE; this runs at interaction time, so they're available.)
+  function _aigDockReadable() {
+    try { aigZoom = 1; _applyAigZoom(); } catch (e) { /* ignore */ }
+  }
+
+  // Exit the embedded study and return to the full inline investigation graph —
+  // the ⛶ control's action (what closing the study / _wsResetStudyTabs restores).
+  function _aigExitToGraph() {
+    var inv = window._wsInvestigation || window._currentIset
+      || (window._wsStudyTabs && window._wsStudyTabs.investigation) || null;
+    _wsResetStudyTabs(inv);
+  }
+  window._aigExitToGraph = _aigExitToGraph;
+
+  // Float the graph on study open at the remembered state (default docked).
+  function _aigEnterDock() { _aigSetDockState(_aigDockStateStored() || 'docked', { noPersist: true }); }
+  // Restore the graph to the normal inline view on study close.
+  function _aigExitDock() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (fs) { fs.classList.remove('aig-dock', 'aig-dock-collapsed', 'aig-dock-docked'); _aigClearDockRect(fs); }
+    var ctl = document.getElementById('aig-dock-ctl');
+    if (ctl) ctl.style.display = 'none';
+  }
+  // Re-assert the dock state after a graph (re-)render: keep floating if a study
+  // is open, else ensure it's inline.
+  function _applyDockState() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs) return;
+    if (!_aigStudyOpen()) { _aigExitDock(); return; }
+    var cur = _AIG_DOCK_STATES.filter(function (s) { return fs.classList.contains('aig-dock-' + s); })[0]
+      || _aigDockStateStored() || 'docked';
+    _aigSetDockState(cur, { noPersist: true });
+  }
+  window._applyDockState = _applyDockState;
+
+  // Collapsible "Investigation overview" (inline view, no study open). The prose
+  // blocks (#investigation-intro + #investigation-decision-cockpit) hide behind
+  // #inv-overview-toggle so the graph is prominent + top-aligned. DEFAULT
+  // COLLAPSED; the user's choice is remembered. Only governs the inline view —
+  // the study-open state hides the prose regardless.
+  function _invOverviewCollapsed() {
+    try { var v = localStorage.getItem('inv-overview-collapsed'); return v === null ? true : v === '1'; }
+    catch (e) { return true; }
+  }
+  function _applyInvOverviewState() {
+    var view = document.getElementById('investigation-detail-view');
+    if (!view) return;
+    var collapsed = _invOverviewCollapsed();
+    view.classList.toggle('inv-overview-collapsed', collapsed);
+    var btn = document.getElementById('inv-overview-toggle');
+    if (btn) {
+      btn.textContent = (collapsed ? '▸' : '▾') + ' Investigation overview';
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+  }
+  function _toggleInvOverview() {
+    try { localStorage.setItem('inv-overview-collapsed', _invOverviewCollapsed() ? '0' : '1'); } catch (e) { /* ignore */ }
+    _applyInvOverviewState();
+  }
+  window._toggleInvOverview = _toggleInvOverview;
+  window._applyInvOverviewState = _applyInvOverviewState;
+
+  // Drag the docked window by its TOOLBAR (the popup has no title bar now): drag
+  // empty toolbar space, not the buttons/sliders/menus. Persists position/size
+  // (resize uses the corner grips; a document mouseup saves the final rect).
+  // Wired once; only acts in the docked state. Kept inside the viewport.
+  var _aigDockDragWired = false;
+  function _aigWireDockDrag() {
+    if (_aigDockDragWired) return;
+    _aigDockDragWired = true;
+    var fs = document.getElementById('investigation-dag-fs');
+    var bar = fs && fs.querySelector('.aig-toolbar');
+    if (!fs || !bar) return;
+    // Transform-based drag: translate() is a compositor-only transform, so the
+    // heavy graph panel is NOT re-laid-out or repainted on every mousemove the
+    // way writing left/top each event was (that was the drag lag). We batch the
+    // transform write into one rAF per frame, then commit to left/top on release.
+    var drag = null, raf = 0, pending = null;
+    function flush() {
+      raf = 0;
+      if (drag && pending) { fs.style.transform = 'translate(' + pending.x + 'px,' + pending.y + 'px)'; }
+    }
+    bar.addEventListener('mousedown', function (e) {
+      if (!fs.classList.contains('aig-dock-docked')) return;      // only docked
+      // Ignore the interactive controls — drag only on empty toolbar space.
+      if (e.target.closest && e.target.closest('button, input, select, a, .aig-tb-seg, .aig-study-jump-wrap, #aig-dock-ctl, #aig-study-nav')) return;
+      var r = fs.getBoundingClientRect();
+      // Pin left/top to the current numeric position so the transform offsets
+      // from a known origin (the panel may still be on its CSS right:16px).
+      fs.style.right = 'auto'; fs.style.left = r.left + 'px'; fs.style.top = r.top + 'px';
+      drag = { sx: e.clientX, sy: e.clientY, left: r.left, top: r.top, w: r.width, h: r.height };
+      pending = { x: 0, y: 0 };
+      fs.classList.add('aig-dragging');          // suppress transition while dragging
+      fs.style.willChange = 'transform';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!drag) return;
+      var vw = window.innerWidth, vh = window.innerHeight;
+      // Clamp the DESTINATION (base + delta) to the viewport, express as a delta.
+      var destLeft = Math.max(8, Math.min(drag.left + (e.clientX - drag.sx), vw - drag.w - 8));
+      var destTop = Math.max(8, Math.min(drag.top + (e.clientY - drag.sy), vh - drag.h - 8));
+      pending = { x: destLeft - drag.left, y: destTop - drag.top };
+      if (!raf) raf = requestAnimationFrame(flush);
+    });
+    document.addEventListener('mouseup', function () {
+      if (!drag) return;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      // Commit the transform offset into left/top, then drop the transform.
+      fs.style.left = (drag.left + pending.x) + 'px';
+      fs.style.top = (drag.top + pending.y) + 'px';
+      fs.style.transform = ''; fs.style.willChange = '';
+      drag = null; pending = null;
+      fs.classList.remove('aig-dragging');
+      if (fs.classList.contains('aig-dock-docked')) _aigSaveDockRect(fs);
+    });
+  }
+
+  // Resize the docked window by dragging a corner grip (custom, since CSS
+  // `resize` was unreliable on this fixed+transitioned panel and the grip sat
+  // under the graph shell). Sets inline width/height (and left on the SW grip),
+  // clamped to a sane minimum and within the viewport; persists + re-fits on
+  // release. Wired once; only acts in the docked state.
+  var _aigDockResizeWired = false;
+  function _aigWireDockResize() {
+    if (_aigDockResizeWired) return;
+    _aigDockResizeWired = true;
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs) return;
+    var grips = fs.querySelectorAll('.aig-dock-grip');
+    if (!grips.length) return;
+    var rz = null;
+    var MINW = 320, MINH = 240;
+    grips.forEach(function (g) {
+      g.addEventListener('mousedown', function (e) {
+        if (!fs.classList.contains('aig-dock-docked')) return;
+        e.preventDefault(); e.stopPropagation();
+        var r = fs.getBoundingClientRect();
+        rz = { dir: g.getAttribute('data-grip'), x: e.clientX, y: e.clientY, left: r.left, top: r.top, w: r.width, h: r.height };
+        fs.classList.add('aig-resizing');
+        fs.style.right = 'auto';
+      });
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!rz) return;
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var dx = e.clientX - rz.x, dy = e.clientY - rz.y;
+      var w, h = rz.h + dy, left = rz.left;
+      if (rz.dir === 'sw') { w = rz.w - dx; left = rz.left + dx; }
+      else { w = rz.w + dx; }                     // 'se'
+      if (w < MINW) { if (rz.dir === 'sw') left = rz.left + (rz.w - MINW); w = MINW; }
+      if (h < MINH) h = MINH;
+      left = Math.max(8, left);
+      if (left + w > vw - 8) w = vw - 8 - left;
+      var top = Math.max(56, rz.top);
+      if (top + h > vh - 8) h = vh - 8 - top;
+      fs.style.left = left + 'px'; fs.style.top = top + 'px';
+      fs.style.width = w + 'px'; fs.style.height = h + 'px';
+    });
+    document.addEventListener('mouseup', function () {
+      if (!rz) return;
+      rz = null; fs.classList.remove('aig-resizing');
+      if (fs.classList.contains('aig-dock-docked')) _aigSaveDockRect(fs);
+      // Keep the current (readable) zoom — a bigger window just shows MORE graph,
+      // it does not shrink. (No fit-all here.)
+    });
+  }
+
+  // Graph-only vs full investigation detail. When a study is open, the relocated
+  // #investigation-detail-view is reduced to its graph region (#investigation-dag-fs)
+  // via the .inv-study-open class (CSS hides every other direct child) so the
+  // sticky pane is compact and the study stays reachable. Restoring removes the
+  // class — each child returns to its own inline/default display.
+  var _invStripPrevBand = null;
+  function _setInvProseForStudy(studyOpen) {
+    var view = document.getElementById('investigation-detail-view');
+    if (!view) return;
+    view.classList.toggle('inv-study-open', !!studyOpen);
+    // Compact navigation strip when a study is open: the graph shell is capped
+    // to a short height by CSS (.inv-study-open #investigation-dag-shell), which
+    // beats the inline height + the auto-refit. Here we only drop the semantic
+    // zoom to the lowest band (just study names) and restore the prior band on
+    // close, so the strip reads as a nav menu rather than a tall section.
+    if (studyOpen) {
+      if (_invStripPrevBand === null) _invStripPrevBand = aigBand;
+      _setAigBand(0);   // lowest detail — names only
+    } else if (_invStripPrevBand !== null) {
+      _setAigBand(_invStripPrevBand);
+      _invStripPrevBand = null;
+    }
+  }
+  window._setInvProseForStudy = _setInvProseForStudy;
+
+  // ── Graph-bar study navigator ─────────────────────────────────────────────
+  // ← prev / ⇄ jump / next → that navigates the EMBEDDED study, driven from the
+  // graph's OWN data (_lastDagArgs = [studies, chainsBySlug, studyEdges]) — no
+  // re-fetch. Mirrors study-detail.js _wireStudyNav's chain logic (prev/next
+  // along the leads-to chain + a grouped jump menu), but swaps the embedded
+  // study via _openStudyEmbeddedNewTab. Shown only while a study is open.
+  var _aigJumpWired = false;
+  function _renderGraphBarNav() {
+    var nav = document.getElementById('aig-study-nav');
+    if (!nav) return;
+    var current = (window._wsStudyTabs && window._wsStudyTabs.active) || null;
+    var studies = (_lastDagArgs && _lastDagArgs[0]) || [];
+    var edges = (_lastDagArgs && _lastDagArgs[2]) || [];
+    if (!current || !studies.length) { nav.style.display = 'none'; return; }
+
+    var strip = function (n) { return String(n == null ? '' : n).trim(); };
+    var nameOf = function (s) { return (typeof s === 'string') ? s : (s && (s.name || s.slug || s.study)); };
+    var titleOf = function (s) { return (s && typeof s === 'object' && s.title) ? s.title : nameOf(s); };
+    var order = studies.map(nameOf).filter(Boolean);
+    if (!order.length) { nav.style.display = 'none'; return; }
+    var byName = {}; studies.forEach(function (s) { var n = nameOf(s); if (n) byName[n] = s; });
+
+    // Parents/children from the graph edges (source -> target == leads-to),
+    // falling back to each study's parent_studies — same chain the graph draws.
+    var parentsOf = function (n) {
+      var out = [];
+      edges.forEach(function (e) { if (e && strip(e.target) === n && strip(e.source)) out.push(strip(e.source)); });
+      var s = byName[n], ps = (s && s.parent_studies) || [];
+      ps.forEach(function (pk) {
+        var pn = (pk && typeof pk === 'object') ? (pk.study || pk.name || pk.slug) : pk;
+        if (pn && out.indexOf(strip(pn)) === -1) out.push(strip(pn));
+      });
+      return out.filter(function (x) { return byName[x]; });
+    };
+    var childrenOf = function (n) {
+      var out = [];
+      edges.forEach(function (e) { if (e && strip(e.source) === n && strip(e.target) && byName[strip(e.target)]) out.push(strip(e.target)); });
+      order.forEach(function (m) { if (parentsOf(m).indexOf(n) >= 0 && out.indexOf(m) === -1) out.push(m); });
+      return out;
+    };
+
+    var curParents = parentsOf(current);
+    var curChildren = childrenOf(current);
+    var idx = order.indexOf(current);
+    var prev = (idx > 0) ? order[idx - 1] : (curParents[0] || null);
+    var next = curChildren[0] || ((idx >= 0 && idx < order.length - 1) ? order[idx + 1] : null);
+
+    var prevBtn = document.getElementById('aig-study-prev');
+    var nextBtn = document.getElementById('aig-study-next');
+    var jumpBtn = document.getElementById('aig-study-jump-btn');
+    var jumpMenu = document.getElementById('aig-study-jump-menu');
+    nav.style.display = '';
+
+    var go = function (slug) { if (slug && slug !== current && window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(slug); };
+    if (prevBtn) {
+      prevBtn.disabled = !prev; prevBtn.title = prev ? ('Previous: ' + prev) : 'No previous study';
+      prevBtn.onclick = prev ? function () { go(prev); } : null;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = !next; nextBtn.title = next ? ('Next: ' + next) : 'No next study';
+      nextBtn.onclick = next ? function () { go(next); } : null;
+    }
+
+    if (jumpMenu && jumpBtn) {
+      var _item = function (n) {
+        return '<button type="button" class="aig-study-jump-item' + (n === current ? ' current' : '') +
+          '" data-slug="' + _esc(n) + '">' + _esc(titleOf(byName[n]) || n) + '</button>';
+      };
+      var html = '';
+      if (curParents.length) html += '<div class="aig-study-jump-group">Builds on</div>' + curParents.map(_item).join('');
+      if (curChildren.length) html += '<div class="aig-study-jump-group">Leads to</div>' + curChildren.map(_item).join('');
+      html += '<div class="aig-study-jump-group">All studies</div>' + order.map(_item).join('');
+      jumpMenu.innerHTML = html;
+      jumpMenu.querySelectorAll('.aig-study-jump-item').forEach(function (b) {
+        b.addEventListener('click', function () {
+          jumpMenu.style.display = 'none'; jumpBtn.setAttribute('aria-expanded', 'false');
+          go(b.getAttribute('data-slug'));
+        });
+      });
+      jumpBtn.onclick = function (ev) {
+        ev.stopPropagation();
+        var open = jumpMenu.style.display !== 'none' && jumpMenu.style.display !== '';
+        jumpMenu.style.display = open ? 'none' : 'block';
+        jumpBtn.setAttribute('aria-expanded', open ? 'false' : 'true');
+      };
+      if (!_aigJumpWired) {
+        _aigJumpWired = true;
+        document.addEventListener('click', function (e) {
+          if (!e.target.closest || !e.target.closest('.aig-study-jump-wrap')) {
+            jumpMenu.style.display = 'none'; jumpBtn.setAttribute('aria-expanded', 'false');
+          }
+        }, true);
+      }
+    }
+  }
+  window._renderGraphBarNav = _renderGraphBarNav;
 
   // Layout + render the DAG of study nodes for the active investigation.
   // Two orientations, chosen by chooseGraphOrientation() (aig-graph.js) or a
@@ -11119,9 +11547,22 @@
         node.style.boxShadow = exp ? '0 8px 24px rgba(0,0,0,0.18)' : '';
         node.style.whiteSpace = '';
       };
-      node.onclick = _toggleExpand;
+      // Whole-node click: in the DOCKED/embedded graph (names-only, where
+      // expand-in-place isn't useful) a click anywhere on the node opens that
+      // study embedded; in the inline full graph it keeps the click-to-expand
+      // behavior. Scoped at click time via the .aig-dock class so the inline
+      // graph is unaffected. The ↗ button keeps working in both.
+      node.onclick = function () {
+        var fs = document.getElementById('investigation-dag-fs');
+        if (fs && fs.classList.contains('aig-dock')) {
+          if (window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(s.name);
+          return;
+        }
+        _toggleExpand();
+      };
       node.title = s.name + ' — ' + confidence +
-        '\n\nClick to expand in place · ↗ opens the full study';
+        '\n\nClick to expand in place · ↗ opens the full study' +
+        '\n(in the docked graph, a click opens the study)';
       var x = (orient === 'TB')
         ? rowStartX[depth[s.name]] + breadthIndex[s.name] * (CARD_W + BREADTH_GAP)
         : PAD_X + depth[s.name] * (CARD_W + DEPTH_GAP);
@@ -11393,50 +11834,13 @@
     var shell = document.getElementById('investigation-dag-shell');
     if (shell) shell.scrollTop = 0;
 
-    // Legend (status colors + edge types) — created once below the shell.
-    var legendHost = document.getElementById('investigation-dag-legend');
-    if (!legendHost && shell && shell.parentNode) {
-      legendHost = document.createElement('div');
-      legendHost.id = 'investigation-dag-legend';
-      shell.parentNode.insertBefore(legendHost, shell.nextSibling);
-    }
-    if (legendHost) {
-      var _lg = function(color, icon, label) {
-        return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">' +
-          '<span style="color:' + color + ';font-size:1em">' + icon + '</span>' +
-          '<span>' + label + '</span></span>';
-      };
-      legendHost.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;' +
-        'font-size:0.74em;color:#64748b;padding:8px 4px 0;border-top:1px solid #f1f5f9;margin-top:8px';
-      // W13 — edge-relation legend swatches (colored solid/dashed lines).
-      var _edgeLg = function(rel) {
-        var st = _dagRelStyle(rel);
-        var line = 'border-bottom:2px ' + (st.dash ? 'dashed' : 'solid') + ' ' + st.color;
-        return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
-          '<span style="width:18px;' + line + ';display:inline-block;line-height:0">&nbsp;</span>' +
-          '<span>' + st.label + '</span></span>';
-      };
-      // Tier legend swatch: the 3-pip strength grade.
-      var _tierLg = function(tv) {
-        var m = _TIER_META[tv], pips = '';
-        for (var i = 0; i < 3; i++) pips += '<span style="color:' + (i < m.pips ? '#334155' : '#cbd5e1') + '">●</span>';
-        return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
-          '<span style="font-size:0.85em;letter-spacing:1px">' + pips + '</span><span>' + m.label + '</span></span>';
-      };
-      var _br = '<span style="flex-basis:100%;height:0"></span>';
-      legendHost.innerHTML =
-        '<span style="font-weight:600;color:#475569;margin-right:10px">Progress:</span>' +
-        Object.keys(_EXEC_META).map(function(k){var m=_EXEC_META[k];return _lg(m.color, m.icon, m.label);}).join('') +
-        _br +
-        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Verdict:</span>' +
-        '<span style="margin-top:6px">' + Object.keys(_VERDICT_META).map(function(k){var m=_VERDICT_META[k];return _lg(m.color, m.icon, m.label);}).join('') + '</span>' +
-        _br +
-        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Evidence:</span>' +
-        '<span style="margin-top:6px">' + Object.keys(_TIER_META).map(_tierLg).join('') + '</span>' +
-        _br +
-        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Edges:</span>' +
-        '<span style="margin-top:6px">' + Object.keys(_DAG_REL_STYLE).map(_edgeLg).join('') + '</span>';
-    }
+    // Legend moved behind the "?" info-chip popover (no longer an always-visible
+    // strip below the graph). Fill + wire it here so it's ready on first render.
+    _wireDagLegendPopover();
+    // Re-assert the dock state (float while a study is open, inline otherwise) +
+    // (re)build the graph-bar study navigator against the fresh graph data.
+    _applyDockState();
+    _renderGraphBarNav();
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
   }
