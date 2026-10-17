@@ -5450,7 +5450,7 @@
     _renderPlanningOverview();
     _loadOverviewKeyFigure();   // embed the headline figure on the Overview
     _renderFeedbackTrackedPanel();
-    _renderHeaderAuditSummary();
+    _renderStudyAxisMarkers();
     _populateConclusionVerdictBadges();
     _populateBaselineCompositeSelects();
     _loadStudyAnalyses();
@@ -5520,8 +5520,8 @@
   }
 
 
-  // Memoized GET /api/report-lint — sole consumer is the readiness panel
-  // below (fetched once, cached for the page's lifetime).
+  // Memoized GET /api/report-lint — consumed by the Audit tab's readiness panel
+  // (_renderAuditReadiness); fetched once, cached for the page's lifetime.
   var _reportLintPromise = null;
   function _reportLint() {
     if (!_reportLintPromise) {
@@ -5532,47 +5532,159 @@
     return _reportLintPromise;
   }
 
-  // Header audit summary (Phase 4): a single quiet line in the header status
-  // row — "⚠ N readiness gaps → Audit" — that jumps to the Audit tab on click.
-  // Replaces the old expandable readiness dropdown (the full per-check
-  // breakdown now lives inside Audit). Reuses _reportLint (GET /api/report-lint)
-  // filtered to THIS study, counting error+warning findings. AI-free; shows a
-  // quiet "✓ ready" when the study has no findings. Sole consumer of _reportLint.
-  function _renderHeaderAuditSummary() {
-    var container = document.getElementById('header-audit-summary');
-    if (!container || container.dataset.rendered) return;
-    container.dataset.rendered = '1';
-    var slug = container.getAttribute('data-slug') || studyName() || '';
-    _reportLint()
-      .then(function (j) {
-        var findings = (j.findings || []).filter(function (f) {
-          return (f.study || '') === slug;
-        });
-        var sev = { error: 0, warning: 0, info: 0 };
-        findings.forEach(function (f) {
-          var s = f.severity || 'info';
-          if (sev[s] != null) sev[s]++; else sev.info++;
-        });
-        var gaps = sev.error + sev.warning;
-        var head, col;
-        if (!findings.length) { head = '✓ ready'; col = '#166534'; }
-        else if (gaps) { head = '⚠ ' + gaps + ' readiness gap' + (gaps === 1 ? '' : 's') + ' → Audit'; col = '#92400e'; }
-        else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's') + ' → Audit'; col = '#1e40af'; }
+  // ── Two-axis study markers (Progress × Verdict) ──────────────────────────
+  // The study header shows the SAME two-axis ontology as the investigation-graph
+  // study cards, for continuity. The ontology tables are duplicated here (small,
+  // intentional) because walkthrough.js is NOT guaranteed loaded on the
+  // standalone study page. Mirrors walkthrough.js _EXEC_META / _VERDICT_META /
+  // _VERDICT_ALIASES and the client-side derivation. AI-free — reads only the
+  // study's own fields. Unlike the graph cards, each marker is CLICKABLE and
+  // opens a popover that interrogates the underlying signals.
+  var _EXEC_META = {
+    proposed:  { color: '#94a3b8', icon: '○', label: 'Proposed' },
+    planned:   { color: '#2563eb', icon: '◔', label: 'Planned' },
+    running:   { color: '#ca8a04', icon: '◑', label: 'Running' },
+    completed: { color: '#475569', icon: '●', label: 'Completed' },
+    failed:    { color: '#dc2626', icon: '⊘', label: 'Failed' },
+  };
+  var _VERDICT_META = {
+    supported:    { color: '#16a34a', icon: '◆', label: 'Supported' },
+    qualified:    { color: '#0d9488', icon: '◇', label: 'Qualified' },
+    inconclusive: { color: '#64748b', icon: '◐', label: 'Inconclusive' },
+    refuted:      { color: '#dc2626', icon: '✗', label: 'Refuted' },
+  };
+  var _VERDICT_PENDING = { color: '#94a3b8', icon: '·', label: 'Pending' };
+  var _VERDICT_ALIASES = {
+    supported: 'supported', qualified: 'qualified', inconclusive: 'inconclusive',
+    refuted: 'refuted', 'honest-negative': 'refuted', 'honest_negative': 'refuted',
+    mixed: 'inconclusive',
+  };
 
-        // No findings → a quiet non-interactive "✓ ready" marker.
-        if (!findings.length) {
-          container.innerHTML = '<span class="readiness-inline" style="font-size:0.85em;color:' + col + '" '
-            + 'title="code-computed by the report linter (deterministic)">' + head + '</span>';
-          return;
-        }
-        // One compact link; click switches to the Audit tab where the full
-        // per-check readiness breakdown is rendered (#audit-readiness).
-        container.innerHTML = '<a href="#" class="readiness-inline" '
-          + 'style="font-size:0.85em;color:' + col + ';text-decoration:none;cursor:pointer" '
-          + 'title="code-computed by the report linter (deterministic) — open the Audit tab for the full breakdown" '
-          + 'onclick="_gotoStudyTab(\'audit\',\'audit-readiness\');return false;">' + head + '</a>';
-      })
-      .catch(function () { container.dataset.rendered = ''; });
+  function _lc(v) { return String(v == null ? '' : v).trim().toLowerCase(); }
+
+  // Derive the execution (Progress) state — same rules as walkthrough._execState.
+  // An authored window._study.execution_status wins.
+  function _studyExecState(s) {
+    s = s || {};
+    var ex = _lc(s.execution_status);
+    if (_EXEC_META[ex]) return ex;
+    var gate = _lc(s.gate_status), sim = _lc(s.simulation_status),
+        ev = _lc(s.evaluation_status),
+        life = _lc(s.effective_status || s.status);
+    if (sim === 'failed' || life === 'invalid' || life === 'failed') return 'failed';
+    if (['passed', 'failed', 'needs_calibration', 'stale'].indexOf(gate) >= 0) return 'completed';
+    if (sim === 'ran' && (ev === 'evaluated' || ev === 'failed_evaluation')) return 'completed';
+    if (['complete', 'completed', 'ran', 'decided', 'evaluated'].indexOf(life) >= 0) return 'completed';
+    if (sim === 'running' || ['running', 'analyzing', 'in_progress'].indexOf(life) >= 0) return 'running';
+    var conf = _lc(s.confidence);
+    if (conf === 'accepted') return 'completed';
+    if (conf === 'investigating') return 'running';
+    if (life === 'planned' || conf === 'planned') return s.proposed === true ? 'proposed' : 'planned';
+    if (s.proposed === true) return 'proposed';
+    return 'planned';
+  }
+
+  // Derive the Verdict state — authored window._study.verdict wins (through the
+  // legacy aliases: honest-negative→refuted, mixed→inconclusive); else fall back
+  // to report.verdict text. Returns null → the Pending marker.
+  function _studyVerdictState(s) {
+    s = s || {};
+    var raw = _lc(s.verdict);
+    if (_VERDICT_ALIASES[raw]) return _VERDICT_ALIASES[raw];
+    var rv = _lc(s.report && s.report.verdict);
+    if (_VERDICT_ALIASES[rv]) return _VERDICT_ALIASES[rv];
+    return null;
+  }
+
+  // One marker = a clickable pill (glyph + label) that toggles its own popover.
+  // `rows` is [[label, value], …]; missing signals are omitted by the caller.
+  function _axisMarkerHtml(id, meta, axisLabel, rows) {
+    var e = _esc;
+    var body = rows.length
+      ? rows.map(function (r) {
+          return '<div style="display:flex;gap:8px;justify-content:space-between;margin-top:4px">'
+            + '<span class="muted">' + e(r[0]) + '</span>'
+            + '<span style="font-family:ui-monospace,monospace">' + e(r[1]) + '</span></div>';
+        }).join('')
+      : '<div class="muted" style="margin-top:4px">No further signals recorded.</div>';
+    return '<span class="study-axis-wrap" style="position:relative;display:inline-flex">'
+      + '<button type="button" id="' + id + '-btn" class="study-axis-marker" aria-haspopup="true" aria-expanded="false" '
+      + 'style="display:inline-flex;align-items:center;gap:4px;font-size:0.82em;font-weight:700;cursor:pointer;'
+      + 'white-space:nowrap;border-radius:9999px;padding:2px 10px;color:' + meta.color + ';'
+      + 'background:' + meta.color + '14;border:1px solid ' + meta.color + '40" '
+      + 'title="' + e(axisLabel) + ' — click to interrogate">'
+      + '<span style="font-size:1.1em;line-height:1">' + meta.icon + '</span>' + e(meta.label) + '</button>'
+      + '<div id="' + id + '-popover" role="dialog" style="display:none;position:absolute;left:0;top:100%;margin-top:6px;'
+      + 'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);'
+      + 'z-index:70;min-width:230px;max-width:340px;padding:10px 12px;font-size:0.82em;color:#334155;'
+      + 'white-space:normal;text-align:left;font-weight:400">'
+      + '<div style="font-weight:700;color:' + meta.color + '">' + meta.icon + ' ' + e(axisLabel) + ': ' + e(meta.label) + '</div>'
+      + body + '</div></span>';
+  }
+
+  function _wireAxisPopover(id) {
+    var btn = document.getElementById(id + '-btn');
+    var pop = document.getElementById(id + '-popover');
+    if (!btn || !pop) return;
+    btn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var open = pop.style.display !== 'none' && pop.style.display !== '';
+      // Close any sibling popover first.
+      document.querySelectorAll('.study-axis-wrap [role="dialog"]').forEach(function (p) { p.style.display = 'none'; });
+      document.querySelectorAll('.study-axis-marker').forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
+      pop.style.display = open ? 'none' : 'block';
+      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+    });
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest || !e.target.closest('.study-axis-wrap')) {
+        pop.style.display = 'none'; btn.setAttribute('aria-expanded', 'false');
+      }
+    }, true);
+  }
+
+  // Render the Progress + Verdict markers into #study-axis-markers from
+  // window._study, each with an interactive popover.
+  function _renderStudyAxisMarkers() {
+    var container = document.getElementById('study-axis-markers');
+    if (!container || container.dataset.rendered) return;
+    var s = window._study || {};
+    container.dataset.rendered = '1';
+
+    // Progress popover: derived state + the underlying lifecycle signals.
+    var exState = _studyExecState(s);
+    var exMeta = _EXEC_META[exState] || _EXEC_META.planned;
+    var exRows = [];
+    [['status', s.status], ['simulation_status', s.simulation_status],
+     ['evaluation_status', s.evaluation_status], ['gate_status', s.gate_status],
+     ['confidence', s.confidence]].forEach(function (r) {
+      if (r[1] != null && String(r[1]).trim() !== '') exRows.push([r[0], String(r[1])]);
+    });
+
+    // Verdict popover: derived state + what it rests on.
+    var vState = _studyVerdictState(s);
+    var vMeta = vState ? _VERDICT_META[vState] : _VERDICT_PENDING;
+    var vRows = [];
+    if (s.verdict) vRows.push(['verdict', String(s.verdict)]);
+    if (s.report && s.report.verdict) vRows.push(['report.verdict', String(s.report.verdict)]);
+    var cv = s.conclusion_verdicts || {};
+    [['regression_compatibility', 'regression'], ['biological_validation', 'biology'],
+     ['explanatory_gain', 'insight']].forEach(function (t) {
+      var trk = cv[t[0]];
+      if (trk && trk.result) vRows.push([t[1], String(trk.result)]);
+    });
+    if (s.confidence) vRows.push(['confidence', String(s.confidence)]);
+    var findings = Array.isArray(s.findings) ? s.findings : [];
+    findings.slice(0, 2).forEach(function (f, i) {
+      var txt = (f && (f.statement || f.summary)) || '';
+      if (txt) vRows.push(['finding ' + (i + 1), String(txt).slice(0, 80) + (String(txt).length > 80 ? '…' : '')]);
+    });
+
+    container.innerHTML =
+      _axisMarkerHtml('study-progress-marker', exMeta, 'Progress', exRows)
+      + ' '
+      + _axisMarkerHtml('study-verdict-marker', vMeta, 'Verdict', vRows);
+    _wireAxisPopover('study-progress-marker');
+    _wireAxisPopover('study-verdict-marker');
   }
 
   // Entry point: fetch the spec if needed, then run init.

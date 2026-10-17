@@ -10721,6 +10721,65 @@
     return _DAG_REL_STYLE[rel] || _DAG_REL_STYLE['builds-on'];
   }
 
+  // The investigation-graph legend (Progress / Verdict / Evidence / Edges),
+  // built from the same ontology tables the graph uses. Used to fill the "?"
+  // info-chip popover (it was previously an always-visible strip below the
+  // graph). Static content, so it can be rendered once.
+  function _buildDagLegendHtml() {
+    var _lg = function (color, icon, label) {
+      return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">' +
+        '<span style="color:' + color + ';font-size:1em">' + icon + '</span>' +
+        '<span>' + label + '</span></span>';
+    };
+    var _edgeLg = function (rel) {
+      var st = _dagRelStyle(rel);
+      var line = 'border-bottom:2px ' + (st.dash ? 'dashed' : 'solid') + ' ' + st.color;
+      return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
+        '<span style="width:18px;' + line + ';display:inline-block;line-height:0">&nbsp;</span>' +
+        '<span>' + st.label + '</span></span>';
+    };
+    var _tierLg = function (tv) {
+      var m = _TIER_META[tv], pips = '';
+      for (var i = 0; i < 3; i++) pips += '<span style="color:' + (i < m.pips ? '#334155' : '#cbd5e1') + '">●</span>';
+      return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
+        '<span style="font-size:0.85em;letter-spacing:1px">' + pips + '</span><span>' + m.label + '</span></span>';
+    };
+    var row = function (label, items) {
+      return '<div style="margin-top:8px"><div style="font-weight:600;color:#475569;margin-bottom:3px">' +
+        label + '</div><div style="display:flex;flex-wrap:wrap;align-items:center">' + items + '</div></div>';
+    };
+    return '<div style="font-size:0.78em;color:#64748b;line-height:1.5">' +
+      row('Progress', Object.keys(_EXEC_META).map(function (k) { var m = _EXEC_META[k]; return _lg(m.color, m.icon, m.label); }).join('')) +
+      row('Verdict', Object.keys(_VERDICT_META).map(function (k) { var m = _VERDICT_META[k]; return _lg(m.color, m.icon, m.label); }).join('')) +
+      row('Evidence', Object.keys(_TIER_META).map(_tierLg).join('')) +
+      row('Edges', Object.keys(_DAG_REL_STYLE).map(_edgeLg).join('')) +
+      '</div>';
+  }
+
+  // Fill the "?" info-chip popover with the legend (once) and wire the chip to
+  // toggle it, closing on outside click — same dropdown pattern as the study
+  // navigator's jump menu.
+  function _wireDagLegendPopover() {
+    var chip = document.getElementById('dag-legend-chip');
+    var pop = document.getElementById('dag-legend-popover');
+    if (!chip || !pop) return;
+    if (!pop.dataset.filled) { pop.innerHTML = _buildDagLegendHtml(); pop.dataset.filled = '1'; }
+    if (chip.dataset.wired) return;
+    chip.dataset.wired = '1';
+    chip.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var open = pop.style.display !== 'none' && pop.style.display !== '';
+      pop.style.display = open ? 'none' : 'block';
+      chip.setAttribute('aria-expanded', open ? 'false' : 'true');
+    });
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest || !e.target.closest('.dag-legend-wrap')) {
+        pop.style.display = 'none'; chip.setAttribute('aria-expanded', 'false');
+      }
+    }, true);
+  }
+  window._wireDagLegendPopover = _wireDagLegendPopover;
+
   // Layout + render the DAG of study nodes for the active investigation.
   // Two orientations, chosen by chooseGraphOrientation() (aig-graph.js) or a
   // manual per-investigation localStorage override:
@@ -11355,50 +11414,9 @@
     var shell = document.getElementById('investigation-dag-shell');
     if (shell) shell.scrollTop = 0;
 
-    // Legend (status colors + edge types) — created once below the shell.
-    var legendHost = document.getElementById('investigation-dag-legend');
-    if (!legendHost && shell && shell.parentNode) {
-      legendHost = document.createElement('div');
-      legendHost.id = 'investigation-dag-legend';
-      shell.parentNode.insertBefore(legendHost, shell.nextSibling);
-    }
-    if (legendHost) {
-      var _lg = function(color, icon, label) {
-        return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">' +
-          '<span style="color:' + color + ';font-size:1em">' + icon + '</span>' +
-          '<span>' + label + '</span></span>';
-      };
-      legendHost.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;' +
-        'font-size:0.74em;color:#64748b;padding:8px 4px 0;border-top:1px solid #f1f5f9;margin-top:8px';
-      // W13 — edge-relation legend swatches (colored solid/dashed lines).
-      var _edgeLg = function(rel) {
-        var st = _dagRelStyle(rel);
-        var line = 'border-bottom:2px ' + (st.dash ? 'dashed' : 'solid') + ' ' + st.color;
-        return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
-          '<span style="width:18px;' + line + ';display:inline-block;line-height:0">&nbsp;</span>' +
-          '<span>' + st.label + '</span></span>';
-      };
-      // Tier legend swatch: the 3-pip strength grade.
-      var _tierLg = function(tv) {
-        var m = _TIER_META[tv], pips = '';
-        for (var i = 0; i < 3; i++) pips += '<span style="color:' + (i < m.pips ? '#334155' : '#cbd5e1') + '">●</span>';
-        return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
-          '<span style="font-size:0.85em;letter-spacing:1px">' + pips + '</span><span>' + m.label + '</span></span>';
-      };
-      var _br = '<span style="flex-basis:100%;height:0"></span>';
-      legendHost.innerHTML =
-        '<span style="font-weight:600;color:#475569;margin-right:10px">Progress:</span>' +
-        Object.keys(_EXEC_META).map(function(k){var m=_EXEC_META[k];return _lg(m.color, m.icon, m.label);}).join('') +
-        _br +
-        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Verdict:</span>' +
-        '<span style="margin-top:6px">' + Object.keys(_VERDICT_META).map(function(k){var m=_VERDICT_META[k];return _lg(m.color, m.icon, m.label);}).join('') + '</span>' +
-        _br +
-        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Evidence:</span>' +
-        '<span style="margin-top:6px">' + Object.keys(_TIER_META).map(_tierLg).join('') + '</span>' +
-        _br +
-        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Edges:</span>' +
-        '<span style="margin-top:6px">' + Object.keys(_DAG_REL_STYLE).map(_edgeLg).join('') + '</span>';
-    }
+    // Legend moved behind the "?" info-chip popover (no longer an always-visible
+    // strip below the graph). Fill + wire it here so it's ready on first render.
+    _wireDagLegendPopover();
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
   }

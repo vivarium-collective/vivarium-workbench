@@ -32,18 +32,18 @@ def test_behavioral_tests_summary_removed_from_overview():
     assert '<summary class="overview-label">Behavioral tests</summary>' not in _HTML
 
 
-def test_headline_status_pill_visible_by_default():
-    # 5-tab layout (original spec §6): the dense six-gate status ladder strip was
-    # REMOVED from the header. The spine-critical status stays un-buried via the
-    # single always-visible headline status pill (.status-pill) in the status
-    # row, plus the compact "⚠ N gaps → Audit" summary mount.
+def test_headline_status_markers_visible_by_default():
+    # The dense six-gate status ladder strip was removed from the header, and the
+    # gate pill + readiness summary were replaced by the two-axis Progress ×
+    # Verdict markers (continuity with the investigation-graph study cards),
+    # filled client-side into #study-axis-markers.
     assert 'class="status-detail-panel"' not in _HTML
     assert 'class="status-stepper"' not in _HTML
+    assert 'id="header-audit-summary"' not in _HTML
     assert 'class="study-status-row"' in _HTML
     row_i = _HTML.index('class="study-status-row"')
     row = _HTML[row_i:_HTML.index('</header>', row_i)]
-    assert 'status-pill' in row
-    assert 'id="header-audit-summary"' in row
+    assert 'id="study-axis-markers"' in row
 
 
 def test_discovery_implications_elevated_above_conclusion_text():

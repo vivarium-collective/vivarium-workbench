@@ -98,8 +98,10 @@ def test_walkthrough_js_populates_readiness_in_live_dom():
 def test_study_detail_js_renders_readiness_panel():
     js = (_PKG / "static" / "study-detail.js").read_text(encoding="utf-8")
     assert "/api/report-lint" in js
-    # 5-tab layout (Phase 4): the header readiness dropdown became the compact
-    # #header-audit-summary link, filled by _renderHeaderAuditSummary.
-    assert "_renderHeaderAuditSummary" in js
+    # The readiness signal (GET /api/report-lint) now lives inside the Audit tab,
+    # rendered by _renderAuditReadiness into the #audit-readiness mount (the
+    # header no longer carries a readiness summary — it shows Progress × Verdict
+    # markers instead).
+    assert "_renderAuditReadiness" in js
     html = (_PKG / "templates" / "study-detail.html").read_text(encoding="utf-8")
-    assert 'id="header-audit-summary"' in html
+    assert 'id="audit-readiness"' in html

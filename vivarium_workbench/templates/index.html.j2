@@ -1562,7 +1562,14 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <div id="investigation-dag-fs">
     <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
       <strong>Investigation graph</strong>
-      <span class="viv-info-chip" data-tooltip="Each study is a knowledge-producing operation that builds understanding of the mechanism. Each node shows the question it asks and the evidence it produced; edges show what a result leads to.">?</span>
+      {# The "?" chip opens a click popover with the graph legend (Progress /
+         Verdict / Evidence / Edges) — filled + wired by _wireDagLegendPopover
+         in walkthrough.js; outside-click closes. The always-visible legend
+         strip below the graph was removed. #}
+      <span class="dag-legend-wrap" style="position:relative;display:inline-block">
+        <span class="viv-info-chip" id="dag-legend-chip" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" data-tooltip="Legend: node Progress + Verdict markers and edge types. Click for the key.">?</span>
+        <div id="dag-legend-popover" role="dialog" aria-label="Investigation graph legend" style="display:none;position:absolute;left:0;top:100%;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:240px;max-width:360px;padding:10px 12px;text-align:left"></div>
+      </span>
       — nodes are studies; edges show what each result leads to.
     </div>
     <div class="aig-toolbar" role="toolbar" aria-label="Investigation graph controls">

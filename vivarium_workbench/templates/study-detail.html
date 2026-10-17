@@ -57,26 +57,13 @@
   </span>
   </div>
   <div class="study-status-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px;">
-    {# F1: headline pill driven by effective_status() — picks the most-downstream
-       multi-axis field set (gate > evaluation > simulation > implementation > design
-       > expert_review), with legacy `status` as fallback. gate_status keeps its
-       special "gate: X" prefix because it carries the pipeline-gate verdict
-       semantics. #}
-    {% if study.gate_status %}
-    <span class="status-pill gate-status gate-status-{{ study.gate_status }}" title="Pipeline gate verdict (Pass A multi-axis status). Drives downstream unblocking.">gate: {{ study.gate_status }}</span>
-    {% elif study._effective_status %}
-    <span class="status-pill status-{{ study._effective_status }}" title="Headline status derived from the highest-precedence multi-axis field (or legacy `status` as fallback).">{{ study._effective_status }}</span>
-    {% else %}
-    <span class="status-pill status-planned">planned</span>
-    {% endif %}
-
-    {# Compact audit summary (Phase 4) — replaces the old expandable readiness
-       dropdown. One quiet line "⚠ N readiness gaps → Audit" that jumps to the
-       Audit tab on click; filled client-side by _renderHeaderAuditSummary,
-       which reuses _reportLint() to count this study's error+warning findings.
-       Shows nothing (or a quiet "✓ ready") when there are none. #}
-    <span id="header-audit-summary" data-slug="{{ name }}"></span>
-
+    {# Two-axis study markers — Progress (● Completed) × Verdict (◆ Supported) —
+       in the SAME ontology as the investigation-graph study cards, for
+       continuity. Filled + made interactive (click → a popover that interrogates
+       the underlying signals) client-side by _renderStudyAxisMarkers from
+       window._study (study-detail.js). Replaces the old gate pill + readiness
+       summary — gate/readiness no longer live in the study header. #}
+    <span id="study-axis-markers" data-slug="{{ name }}"></span>
   </div>
 </header>
 

@@ -106,13 +106,11 @@ def test_header_has_kind_tag_and_question_and_no_spine(tmp_path, dashboard_clien
 # ---------------------------------------------------------------------------
 
 def test_readiness_is_inline_not_banner(tmp_path, dashboard_client):
-    """5-tab layout (Phase 4): the header readiness dropdown is gone, replaced
-    by a compact `#header-audit-summary` mount filled client-side by
-    _renderHeaderAuditSummary (GET /api/report-lint) with a one-line
-    "⚠ N gaps → Audit" / "✓ ready" link. That text is NOT in served HTML and is
-    not asserted here. Assert the server-side facts: the compact mount exists,
-    the old `#readiness-panel` dropdown mount is gone, and no trace of the
-    retired `#spine-summary` banner/table remains.
+    """The header gate pill + readiness dropdown are gone; the status row now
+    carries the two-axis Progress × Verdict markers (#study-axis-markers, filled
+    client-side). Readiness moved into the Audit tab. Assert the server-side
+    facts: the markers mount exists, the old `#readiness-panel` /
+    `#header-audit-summary` mounts are gone, and no `#spine-summary` remains.
     """
     ws = tmp_path / "ws"
     sd = ws / "studies" / "readiness-inline-study"
@@ -132,8 +130,9 @@ def test_readiness_is_inline_not_banner(tmp_path, dashboard_client):
     assert resp.status_code == 200
     html = resp.text
 
-    assert 'id="header-audit-summary"' in html
-    assert 'id="readiness-panel"' not in html   # old dropdown mount removed
+    assert 'id="study-axis-markers"' in html
+    assert 'id="header-audit-summary"' not in html   # gate/readiness removed from header
+    assert 'id="readiness-panel"' not in html        # old dropdown mount removed
     assert 'id="spine-summary"' not in html
     assert 'spine-summary' not in html
     assert 'spine-row' not in html

@@ -589,7 +589,9 @@ def test_study_detail_renders_epistemic_debts_panel(_ws):
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
     html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
-    # Epistemic debts moved off the Overview; the readiness signal now lives in
-    # the compact header audit summary (populated client-side).
-    assert 'id="header-audit-summary"' in html
+    # Epistemic debts moved off the Overview; readiness now lives inside the
+    # Audit tab (#audit-readiness). The header carries the two-axis Progress ×
+    # Verdict markers instead (populated client-side).
+    assert 'id="study-axis-markers"' in html
+    assert 'id="header-audit-summary"' not in html
     assert 'id="epistemic-debts-panel"' not in html
