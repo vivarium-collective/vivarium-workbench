@@ -9074,13 +9074,21 @@
     var st = window._wsStudyTabs;
     st.active = slug;                       // single open study — replaces any prior
     _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
-    // Hide the investigation PROSE (verdict/question/description + decision
-    // cockpit + tab blocks) and drop the graph to the names-only band, then FLOAT
-    // the graph as a compact dockable window (default: docked, top-right) so the
-    // study below gets the FULL content width/height — no top graph strip.
-    _setInvProseForStudy(true);
-    _renderGraphBarNav();
-    _aigEnterDock();
+    // Graph display mode (user's explicit choice; default INLINE):
+    //  - inline: keep the graph at its full/fill-screen size and load the study
+    //    BELOW it (scroll lands on the study). The graph is NOT shrunk or floated.
+    //  - dock: shrink the graph to the names strip and FLOAT it as a compact
+    //    mini window so the study below gets the full width/height.
+    if (_aigStudyGraphMode() === 'dock') {
+      _setInvProseForStudy(true);
+      _renderGraphBarNav();
+      _aigEnterDock();
+    } else {
+      _aigExitDock();          // ensure the graph is inline, not floating
+      _setInvProseForStudy(false);   // keep the full graph (no strip)
+      _renderGraphBarNav();
+    }
+    _applyGraphModeToggle();
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');
     if (panel) panel.style.display = '';
@@ -10959,6 +10967,10 @@
     var fs = document.getElementById('investigation-dag-fs');
     if (!fs) return;
     if (!_aigStudyOpen()) { _aigExitDock(); return; }
+    // Respect the user's full/mini choice: only float the graph when they opted
+    // into mini. In the default inline mode the graph stays full (study below),
+    // so a re-render must NOT re-dock it.
+    if (_aigStudyGraphMode() !== 'dock') { _aigExitDock(); return; }
     var cur = _AIG_DOCK_STATES.filter(function (s) { return fs.classList.contains('aig-dock-' + s); })[0]
       || _aigDockStateStored() || 'docked';
     _aigSetDockState(cur, { noPersist: true });
@@ -11021,6 +11033,58 @@
   }
   window._aigToggleControls = _aigToggleControls;
   window._applyAigControlsState = _applyAigControlsState;
+
+  // ── Full vs mini graph while a study is open ────────────────────────────────
+  // Opening a study no longer auto-floats the graph. The DEFAULT is "inline":
+  // the graph stays at its full/fill-screen size and the study loads BELOW it,
+  // and the page scrolls down to the study. "dock" is the opt-in floating mini
+  // window. The choice is explicit (toolbar toggle) and persisted per viewer.
+  function _aigStudyGraphMode() {
+    try { return localStorage.getItem('aig-study-graph-mode') === 'dock' ? 'dock' : 'inline'; }
+    catch (e) { return 'inline'; }
+  }
+  function _wsScrollToStudyPanel() {
+    var panel = document.getElementById('ws-study-panel');
+    if (panel && panel.scrollIntoView) {
+      try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ }
+    }
+  }
+  // Apply a mode. In dock mode: shrink the graph to the strip + float it. In
+  // inline mode: un-float, keep the graph full, and land on the study below.
+  function _aigApplyStudyGraphMode(mode, opts) {
+    mode = (mode === 'dock') ? 'dock' : 'inline';
+    if (!(opts && opts.noPersist)) { try { localStorage.setItem('aig-study-graph-mode', mode); } catch (e) { /* ignore */ } }
+    if (_aigStudyOpen()) {
+      if (mode === 'dock') {
+        _setInvProseForStudy(true);
+        _aigEnterDock();
+      } else {
+        _aigExitDock();
+        _setInvProseForStudy(false);   // keep the graph full (no strip)
+        _renderGraphBarNav();
+        _wsScrollToStudyPanel();
+      }
+    }
+    _applyGraphModeToggle();
+  }
+  function _aigToggleGraphMode() {
+    _aigApplyStudyGraphMode(_aigStudyGraphMode() === 'dock' ? 'inline' : 'dock');
+  }
+  // Reflect the current mode on the toolbar toggle (label shows the ACTION it
+  // performs). Hidden unless a study is open.
+  function _applyGraphModeToggle() {
+    var btn = document.getElementById('aig-graphmode-toggle');
+    if (!btn) return;
+    if (!_aigStudyOpen()) { btn.style.display = 'none'; return; }
+    btn.style.display = '';
+    var dock = _aigStudyGraphMode() === 'dock';
+    btn.textContent = dock ? '⤢ Full graph' : '▭ Mini graph';
+    btn.title = dock ? 'Show the full graph with the study below it'
+                     : 'Shrink the graph into a floating mini window (top-right)';
+    btn.setAttribute('aria-pressed', dock ? 'true' : 'false');
+  }
+  window._aigToggleGraphMode = _aigToggleGraphMode;
+  window._applyGraphModeToggle = _applyGraphModeToggle;
 
   // Drag the docked window by its TOOLBAR (the popup has no title bar now): drag
   // empty toolbar space, not the buttons/sliders/menus. Persists position/size
@@ -11922,6 +11986,8 @@
     _renderGraphBarNav();
     // Honor the viewer's collapse choice for the Detail/Width/Zoom cluster.
     _applyAigControlsState();
+    // Reflect the full/mini graph mode on its toolbar toggle.
+    _applyGraphModeToggle();
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
   }

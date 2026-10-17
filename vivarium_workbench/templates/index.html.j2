@@ -1647,6 +1647,13 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <button type="button" title="Fullscreen" aria-label="Fullscreen" onclick="window._aigFullscreen()">⛶</button>
         </span>
       </span>
+      {# Full vs mini graph toggle — shown only while a study is open (by
+         _applyGraphModeToggle). Full = graph stays full-size with the study
+         loaded below it; Mini = float the graph as a compact window. This makes
+         switching an explicit choice instead of auto-docking on study open. #}
+      <button type="button" id="aig-graphmode-toggle" class="aig-tb-btn" style="display:none"
+              aria-pressed="false" title="Shrink the graph into a floating mini window (top-right)"
+              onclick="window._aigToggleGraphMode()">▭ Mini graph</button>
       {# Legend lives in the toolbar with the other graph utilities. The "?" button
          opens a click popover with the key (Progress / Verdict / Evidence / Edges),
          filled + wired by _wireDagLegendPopover (walkthrough.js); outside-click closes. #}
