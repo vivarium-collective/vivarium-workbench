@@ -188,7 +188,7 @@ def _degraded_result(
         "description": "", "parameters": {}, "state": None,
         "schema": {}, "requires": {}, "tags": [], "analyses": [],
         "visualizations": [], "emitters": [], "kind": kind,
-        "module": "", "default_n_steps": None, "svg": None,
+        "module": "", "default_n_steps": None, "preferred_time": None, "svg": None,
         "wiring_status": "unavailable", "run_kind": "unknown",
         "notice": notice if notice is not None else f"composite could not be resolved: {error}",
     }
@@ -351,7 +351,7 @@ def resolve_composite(
                     "requires": spec.requires, "tags": spec.tags,
                     "visualizations": spec.visualizations, "analyses": spec.analyses,
                     "emitters": spec.emitters, "kind": spec.kind, "module": spec.module,
-                    "default_n_steps": spec.default_n_steps, "svg": None,
+                    "default_n_steps": spec.default_n_steps, "preferred_time": getattr(spec, "preferred_time", None), "svg": None,
                     "wiring_status": "error", "run_kind": "unknown",
                     "notice": override_err, "error": override_err,
                 }
@@ -426,7 +426,7 @@ def resolve_composite(
             "requires": spec.requires, "tags": spec.tags,
             "visualizations": spec.visualizations, "analyses": spec.analyses,
             "emitters": spec.emitters, "kind": spec.kind, "module": spec.module,
-            "default_n_steps": spec.default_n_steps, "svg": None,
+            "default_n_steps": spec.default_n_steps, "preferred_time": getattr(spec, "preferred_time", None), "svg": None,
             "wiring_status": wiring_status, "run_kind": classify_run_kind(state),
             "notice": notice,
         }
@@ -479,7 +479,7 @@ def _local_generator_payload(ws_root: Path, spec_id: str) -> "dict | None":
         "visualizations": rec.get("visualizations") or [],
         "analyses": rec.get("analyses") or [], "emitters": rec.get("emitters") or [],
         "kind": "generator", "module": rec.get("module") or "",
-        "default_n_steps": rec.get("default_n_steps"), "svg": None,
+        "default_n_steps": rec.get("default_n_steps"), "preferred_time": rec.get("preferred_time"), "svg": None,
         "wiring_status": "unavailable", "run_kind": "unknown",
         "notice": ("composite wiring preview is not available for remote-pinned "
                    "deployments yet (parameters above are real; the state/SVG "

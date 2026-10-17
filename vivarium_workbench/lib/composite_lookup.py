@@ -234,6 +234,7 @@ def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]
         # Generator entries always carry default_n_steps (int | None); emit it
         # unconditionally so callers can rely on the key being present.
         rec["default_n_steps"] = entry.get("default_n_steps")
+        rec["preferred_time"] = entry.get("preferred_time")
         # Canonical visualizations declared on @composite_generator. Always a
         # list (empty when the generator omits the field). The dashboard's
         # study-run handlers merge these defaults into the Study's viz list
@@ -714,6 +715,8 @@ def composites_data(ws_root: Path) -> dict:
             rec.setdefault("module", "")
             if "default_n_steps" not in rec:
                 rec["default_n_steps"] = None
+            if "preferred_time" not in rec:
+                rec["preferred_time"] = None
             mod = rec.get("module") or ""
             rec["workspace_local"] = bool(mod == pkg or mod.startswith(ws_prefix_dot))
             # Composite contract-audit needs a built core (deferred); specs are discovered coreless.

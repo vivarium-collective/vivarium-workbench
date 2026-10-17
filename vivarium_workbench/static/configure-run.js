@@ -14,11 +14,22 @@
          : "steps";
   }
   function _stepsHint(d) {
+    var pt = d && d.preferred_time;
     return d && d.run_kind === "temporal"
-      ? "Number of simulated timesteps to run (each step ≈ one time unit)."
+      ? ("Number of simulated timesteps to run (each step ≈ one time unit)." +
+         (pt ? " This composite's preferred run timescale is " + pt + "." : ""))
       : d && d.run_kind === "workflow"
         ? "This is a one-shot pipeline — one run computes its full result. The count is not a simulated duration."
         : "How many steps to run.";
+  }
+  // The composite's own run timescale (unit-bearing preferred_time, e.g. "500
+  // years") — typically coarser than its internal processes' intervals. Shown
+  // next to the steps box so the step count reads as a real simulated duration.
+  function _preferredTimeHtml(d) {
+    var pt = d && d.preferred_time;
+    if (!pt) return "";
+    return ' <span class="cfg-pref-time muted" title="This composite\'s preferred run timescale (its internal processes may step faster)" ' +
+           'style="margin-left:6px;font-size:0.9em;white-space:nowrap">≈ ' + esc(String(pt)) + '</span>';
   }
   function _runKindNote(d) {
     var k = d && d.run_kind;
@@ -108,7 +119,7 @@
           _runKindNote(d) +
           '<form class="cfg-form">' + _buildConfigForm(d.parameters) + '</form>' +
           '<label class="cfg-row"><span class="cfg-name">' + _stepsLabel(d) + '</span>' +
-          '<input type="number" class="cfg-steps" title="' + esc(_stepsHint(d)) + '" value="' + esc(d.default_n_steps != null ? d.default_n_steps : 5) + '"></label>' +
+          '<input type="number" class="cfg-steps" title="' + esc(_stepsHint(d)) + '" value="' + esc(d.default_n_steps != null ? d.default_n_steps : 5) + '">' + _preferredTimeHtml(d) + '</label>' +
           (isSnapshot
             ? '<div class="cfg-actions"><button type="button" class="btn-mini" disabled title="Run on a live dashboard">▶ Run</button>' +
               ' <span class="muted">read-only preview — open this composite on a live dashboard to configure &amp; run</span></div>'
