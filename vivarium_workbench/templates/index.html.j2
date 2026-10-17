@@ -1562,15 +1562,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <div id="investigation-dag-fs">
     <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
       <strong>Investigation graph</strong>
-      {# The "?" chip opens a click popover with the graph legend (Progress /
-         Verdict / Evidence / Edges) — filled + wired by _wireDagLegendPopover
-         in walkthrough.js; outside-click closes. The always-visible legend
-         strip below the graph was removed. #}
-      <span class="dag-legend-wrap" style="position:relative;display:inline-block">
-        <span class="viv-info-chip" id="dag-legend-chip" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" data-tooltip="Legend: node Progress + Verdict markers and edge types. Click for the key.">?</span>
-        <div id="dag-legend-popover" role="dialog" aria-label="Investigation graph legend" style="display:none;position:absolute;left:0;top:100%;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:240px;max-width:360px;padding:10px 12px;text-align:left"></div>
-      </span>
-      — nodes are studies; edges show what each result leads to.
     </div>
     <div class="aig-toolbar" role="toolbar" aria-label="Investigation graph controls">
       <span class="aig-tb-group" role="group" aria-label="Graph orientation">
@@ -1612,7 +1603,15 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <button type="button" title="Fullscreen" aria-label="Fullscreen" onclick="window._aigFullscreen()">⛶</button>
         </span>
       </span>
-      <span class="aig-tb-group aig-tb-right aig-dl-ctl" style="position:relative">
+      {# Legend lives in the toolbar with the other graph utilities. The "?" button
+         opens a click popover with the key (Progress / Verdict / Evidence / Edges),
+         filled + wired by _wireDagLegendPopover (walkthrough.js); outside-click closes. #}
+      <span class="aig-tb-group aig-tb-right dag-legend-wrap" style="position:relative">
+        <button id="dag-legend-chip" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false"
+                title="Legend — node Progress/Verdict markers and edge types">? Legend</button>
+        <div id="dag-legend-popover" role="dialog" aria-label="Investigation graph legend" style="display:none;position:absolute;right:0;top:100%;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:240px;max-width:360px;padding:10px 12px;text-align:left"></div>
+      </span>
+      <span class="aig-tb-group aig-dl-ctl" style="position:relative">
         <button id="aig-dl-btn" type="button" class="aig-tb-btn" title="Download the investigation graph as an image (PNG) or PDF"
                 aria-haspopup="true" aria-expanded="false" onclick="window._aigToggleDownloadMenu(event)">⬇ Export</button>
         <div id="aig-dl-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.14);z-index:70;min-width:132px;overflow:hidden">
