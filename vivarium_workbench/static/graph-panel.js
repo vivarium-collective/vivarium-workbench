@@ -21,11 +21,24 @@
   function graphEl() { return el(GRAPH_ID); }
   function bodyEl() { return el(BODY_ID); }
 
-  // Re-measure + re-lay-out the graph at its current container width, then fit.
-  function reflow() {
-    try { if (typeof global._reflowInvestigationDag === 'function') global._reflowInvestigationDag(); } catch (e) { /* ignore */ }
-    try { if (typeof global._aigFit === 'function') global._aigFit(); } catch (e) { /* ignore */ }
+  function fit() { try { if (typeof global._aigFit === 'function') global._aigFit(); } catch (e) { /* ignore */ } }
+  function render() { try { if (typeof global._reflowInvestigationDag === 'function') global._reflowInvestigationDag(); } catch (e) { /* ignore */ } }
+
+  // Orientation follows the dock side: a LEFT/RIGHT (tall, narrow) panel reads best
+  // with a VERTICAL flow (top→bottom), a TOP/BOTTOM (wide, short) panel with a
+  // HORIZONTAL flow (left→right). _setGraphOrientation re-renders the graph.
+  function orientForDock() {
+    if (!ctl || !ctl.getDock) { render(); return; }
+    var d = ctl.getDock();
+    var orient = (d === 'left' || d === 'right') ? 'TB' : 'LR';
+    if (typeof global._setGraphOrientation === 'function') {
+      try { global._setGraphOrientation(orient); return; } catch (e) { /* fall through */ }
+    }
+    render();
   }
+
+  // Re-orient for the current dock, re-render, then fit the graph to the panel.
+  function relayout() { orientForDock(); fit(); }
 
   function showEmptyHint(show) {
     var b = bodyEl(); if (!b) return;
@@ -67,14 +80,17 @@
   }
 
   function onOpen() {
-    if (graphIntoPanel()) { showEmptyHint(false); setTimeout(reflow, 60); }
+    if (graphIntoPanel()) { showEmptyHint(false); setTimeout(relayout, 60); }
     else showEmptyHint(true);
   }
 
   function onClose() {
     graphToInline();
-    // Back inline == the full-page graph; re-fit it in its wider home.
-    setTimeout(function () { try { if (typeof global._aigFit === 'function') global._aigFit(); } catch (e) { /* ignore */ } }, 60);
+    // Back inline == the full-page graph; restore auto orientation + re-fit it.
+    setTimeout(function () {
+      try { if (typeof global._resetGraphOrientation === 'function') global._resetGraphOrientation(); } catch (e) { /* ignore */ }
+      fit();
+    }, 60);
   }
 
   function init() {
@@ -83,27 +99,22 @@
     var mainEl = document.querySelector('.viv-main');
     if (!panel || !layout || !mainEl || !global.VivPanelDock) return;
 
+    // No left-rail launcher: the panel is opened from the "◧ side panel" button on
+    // the inline investigation-graph toolbar (which calls GraphPanel.open), and
+    // closed from the panel header (× / ⤢ Full graph), which returns the graph
+    // inline. So there is no rail tab for it.
     ctl = global.VivPanelDock.make({
       panel: panel, layout: layout, mainEl: mainEl, key: 'graph',
       label: 'Graph',
-      launcher: el('viv-graph-toggle'),
+      launcher: null,
       resizeHandle: 'viv-graph-resize-handle',
       dragHandles: ['.viv-graph-head'],
       popout: function () { global.VivPanelDock.popout('graph'); },
       defaultDock: 'right', defaultSize: { side: 480, bottom: 340 },
       onOpen: onOpen, onClose: onClose,
-      onResize: reflow,
-      onDock: function () { setTimeout(reflow, 60); },
+      onResize: fit,
+      onDock: function () { setTimeout(relayout, 60); },
     });
-
-    var tog = el('viv-graph-toggle');
-    if (tog) {
-      tog.addEventListener('click', function (ev) {
-        ev.preventDefault();
-        if (ctl.didDrag && ctl.didDrag()) return;   // a drag-to-dock isn't a toggle click
-        ctl.toggle();
-      });
-    }
 
     // Public API — mirrors window.ProcessCode.* so the header buttons can call it.
     global.GraphPanel = {

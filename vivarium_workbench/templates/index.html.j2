@@ -1037,18 +1037,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Code</span>
       </a>
-      <!-- Graph: toggles the dockable investigation-graph panel (left/right/bottom/top
-           + pop-out, via panel-dock.js / graph-panel.js), an alternative to the
-           full-page graph. Same conventions as Chat/Code: not a .menu-link, live-only. -->
-      <a href="#" id="viv-graph-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Investigation graph panel">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="12" r="2"/>
-            <path d="M7 6h4a2 2 0 0 1 2 2v0M7 18h4a2 2 0 0 0 2-2v0M13 12h4"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">Graph</span>
-      </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
            #viv-workspace-switcher). Hash route #github kept for back-compat. -->
@@ -1615,6 +1603,11 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <button id="aig-expand-btn" type="button" title="Expand graph — snap to top and grow it tall (workbench stays)"
                   aria-label="Expand graph" onclick="window._aigExpand()">⤒</button>
           <button type="button" title="Fullscreen" aria-label="Fullscreen" onclick="window._aigFullscreen()">⛶</button>
+          <!-- Open the graph as a dockable side panel (graph-panel.js / VivPanelDock):
+               moves this graph into a panel you can dock left/right/top/bottom or pop
+               out. Hidden once the graph is already inside the panel (CSS). -->
+          <button id="aig-dock-panel-btn" type="button" title="Open as a dockable side panel — drag it to any edge or pop it out"
+                  aria-label="Open graph as a side panel" onclick="window.GraphPanel&&GraphPanel.open()">◧</button>
         </span>
       </span>
       <span class="aig-tb-group aig-tb-right aig-dl-ctl" style="position:relative">

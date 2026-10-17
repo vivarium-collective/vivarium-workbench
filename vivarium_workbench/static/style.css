@@ -5450,11 +5450,20 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
 .viv-graph-panel[data-dock="top"] .viv-graph-resize-handle{
   left:0; right:0; top:auto; bottom:0; width:auto; height:6px; cursor:row-resize;
 }
-/* Body hosts the relocated graph; it fills the panel and scrolls as needed. The
-   hosted shell drops its inline height cap so it fills the panel body. */
-.viv-graph-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:auto; position:relative; }
-.viv-graph-body #investigation-dag-fs{ display:block; }
-.viv-graph-body #investigation-dag-shell{ max-height:none !important; }
+/* Body hosts the relocated graph, which FILLS the panel (no fixed-height box that
+   leaves dead space / a cut-off graph). The toolbar takes its natural height and
+   the shell flexes to fill the rest; the graph pans/zooms inside it. */
+.viv-graph-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; position:relative; display:flex; }
+.viv-graph-body #investigation-dag-fs{
+  display:flex; flex-direction:column; flex:1 1 auto; min-height:0; min-width:0;
+}
+/* The inline "Investigation graph" lead is redundant in the panel (its header
+   already says "Graph"); drop it so the graph gets the space. */
+.viv-graph-body #investigation-dag-lead{ display:none; }
+.viv-graph-body #investigation-dag-shell{
+  flex:1 1 auto; height:auto !important; min-height:0 !important; max-height:none !important;
+  resize:none;
+}
 .viv-graph-empty{ padding:18px 16px; font-size:0.85rem; color:var(--c-muted, #64748b); }
 
 /* ── Pop-out window (?popout=<kind>): show only the popped panel, full-window ──
