@@ -1570,7 +1570,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          ⛶ is an action. Integrated into the toolbar row (no separate header). #}
       <span id="aig-dock-ctl" class="aig-dock-ctl aig-tb-group" role="group" aria-label="Investigation graph dock state" style="display:none">
         <button type="button" data-dock="collapsed" title="Collapse to a slim bar" aria-label="Collapse graph" onclick="window._aigSetDockState('collapsed')">▸</button>
-        <button type="button" data-dock="docked" title="Dock as a small window (drag the toolbar to move, drag a corner to resize)" aria-label="Dock graph" onclick="window._aigSetDockState('docked')">▭</button>
+        <button type="button" data-dock="docked" title="Dock as a small window (drag the toolbar to move, drag a corner to resize). Click again to snap back to the top-right default." aria-label="Dock graph" onclick="window._aigSetDockState('docked')">▭</button>
         <button type="button" title="Back to the investigation graph (exit the study)" aria-label="Back to the investigation graph" onclick="window._aigExitToGraph()">⛶</button>
       </span>
       {# Inline view (no study open): the "Investigation overview" collapse toggle
@@ -1609,6 +1609,13 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                 aria-label="Reset to automatic orientation" onclick="window._resetGraphOrientation()"
                 style="visibility:hidden">auto</button>
       </span>
+      {# Collapse toggle for the Detail/Width/Zoom cluster — frees toolbar space,
+         especially in the compact docked inlay. Stays visible so the cluster can
+         be reopened; the choice is persisted (_aigToggleControls). #}
+      <button type="button" id="aig-controls-toggle" class="aig-tb-btn"
+              aria-expanded="true" aria-label="Hide or show the Detail, Width and Zoom controls"
+              title="Hide the Detail / Width / Zoom controls to save space"
+              onclick="window._aigToggleControls()">⚙</button>
       <span id="aig-detail-group" class="aig-tb-group">
         <label class="aig-tb-label" for="aig-zoom-slider">Detail</label>
         <input id="aig-zoom-slider" class="aig-tb-slider" type="range" min="0" max="2" step="1" value="1"

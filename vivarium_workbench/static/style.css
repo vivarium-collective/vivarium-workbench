@@ -4580,6 +4580,13 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 #investigation-dag-fs.aig-dock-docked #aig-layout-group,
 #investigation-dag-fs.aig-dock-docked .dag-legend-wrap,
 #investigation-dag-fs.aig-dock-docked .aig-dl-ctl { display: none; }
+/* User toggle (#aig-controls-toggle): collapse the Detail/Width/Zoom cluster to
+   free toolbar space (applies inline and docked). The toggle button stays
+   visible so the cluster can be reopened. */
+#investigation-dag-fs.aig-controls-collapsed #aig-detail-group,
+#investigation-dag-fs.aig-controls-collapsed #aig-width-group,
+#investigation-dag-fs.aig-controls-collapsed #aig-zoom-group { display: none; }
+#aig-controls-toggle.active { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
 /* Collapsed: show ONLY the dock control + study navigator; graph hidden. */
 #investigation-dag-fs.aig-dock-collapsed .aig-toolbar > *:not(#aig-dock-ctl):not(#aig-study-nav) { display: none; }
 #investigation-dag-fs.aig-dock-collapsed #investigation-dag-shell { display: none !important; }

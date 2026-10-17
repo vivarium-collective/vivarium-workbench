@@ -10850,12 +10850,16 @@
     } catch (e) { /* ignore */ }
   }
   // Apply the stored rect to the docked window, clamped inside the viewport.
+  // Size is capped to the screen so the panel can never grow past the viewport
+  // edges — if it did, the bottom resize grips would sit off-screen and there
+  // would be no way to shrink it again (the "can't control it" bug). The
+  // top-left is then clamped so the whole panel (grips included) stays visible.
   function _aigApplyDockRect(fs) {
     var rect = _aigDockRectStored();
     if (!rect) return;
     var vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
-    var w = Math.max(260, Math.min(rect.width || 400, vw - 24));
-    var h = Math.max(140, Math.min(rect.height || 360, vh - 80));
+    var w = Math.max(260, Math.min(rect.width || 400, Math.round(vw * 0.92)));
+    var h = Math.max(140, Math.min(rect.height || 360, Math.round(vh * 0.85)));
     var left = Math.max(8, Math.min(rect.left, vw - w - 8));
     var top = Math.max(8, Math.min(rect.top, vh - h - 8));
     fs.style.right = 'auto';
@@ -10867,15 +10871,39 @@
     fs.style.left = ''; fs.style.top = ''; fs.style.right = '';
     fs.style.width = ''; fs.style.height = '';
   }
+  // Forget the remembered drag/resize rect so the panel returns to the clean
+  // CSS default (top-right, 400x360). Used by the "snap back" re-click below.
+  function _aigClearSavedDockRect() {
+    try { localStorage.removeItem('aig-dock-rect'); } catch (e) { /* ignore */ }
+  }
+  // Keep a docked panel on-screen when the window resizes (a rect saved at one
+  // viewport size can otherwise strand the panel off the right/bottom edge).
+  var _aigDockResizeClampWired = false;
+  function _aigWireDockResizeClamp() {
+    if (_aigDockResizeClampWired) return;
+    _aigDockResizeClampWired = true;
+    window.addEventListener('resize', function () {
+      var f = document.getElementById('investigation-dag-fs');
+      if (f && f.classList.contains('aig-dock-docked')) _aigApplyDockRect(f);
+    });
+  }
 
   function _aigSetDockState(state, opts) {
     if (_AIG_DOCK_STATES.indexOf(state) < 0) state = 'docked';
     var fs = document.getElementById('investigation-dag-fs');
     if (!fs || !_aigStudyOpen()) return;   // docking only applies while embedded
+    // Explicit re-click of the dock (▭) button while ALREADY docked = snap back
+    // to the clean top-right default. This is the one-click "put it back" that
+    // recovers from a saved rect which stranded the panel. (A re-render calls
+    // this with noPersist, so it never resets what the user positioned.)
+    if (state === 'docked' && !(opts && opts.noPersist) && fs.classList.contains('aig-dock-docked')) {
+      _aigClearSavedDockRect();
+      _aigClearDockRect(fs);
+    }
     fs.classList.add('aig-dock');
     _AIG_DOCK_STATES.forEach(function (s) { fs.classList.toggle('aig-dock-' + s, s === state); });
     // Docked: honor the user's dragged/resized rect; collapsed: use the CSS size.
-    if (state === 'docked') { _aigApplyDockRect(fs); _aigWireDockDrag(); _aigWireDockResize(); }
+    if (state === 'docked') { _aigApplyDockRect(fs); _aigWireDockDrag(); _aigWireDockResize(); _aigWireDockResizeClamp(); }
     else { _aigClearDockRect(fs); }
     var ctl = document.getElementById('aig-dock-ctl');
     if (ctl) {
@@ -10958,6 +10986,36 @@
   }
   window._toggleInvOverview = _toggleInvOverview;
   window._applyInvOverviewState = _applyInvOverviewState;
+
+  // Collapse/expand the Detail · Width · Zoom control cluster in the graph
+  // toolbar so it stops taking space (especially in the compact docked inlay).
+  // The toggle button itself stays visible so the cluster can be reopened. The
+  // choice is a per-viewer preference, persisted; it applies to both the inline
+  // graph and the docked inlay.
+  function _aigControlsCollapsed() {
+    try { return localStorage.getItem('aig-controls-collapsed') === '1'; }
+    catch (e) { return false; }
+  }
+  function _applyAigControlsState() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs) return;
+    var collapsed = _aigControlsCollapsed();
+    fs.classList.toggle('aig-controls-collapsed', collapsed);
+    var btn = document.getElementById('aig-controls-toggle');
+    if (btn) {
+      btn.classList.toggle('active', collapsed);
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.title = collapsed ? 'Show the Detail / Width / Zoom controls'
+                            : 'Hide the Detail / Width / Zoom controls to save space';
+    }
+  }
+  function _aigToggleControls() {
+    try { localStorage.setItem('aig-controls-collapsed', _aigControlsCollapsed() ? '0' : '1'); }
+    catch (e) { /* ignore */ }
+    _applyAigControlsState();
+  }
+  window._aigToggleControls = _aigToggleControls;
+  window._applyAigControlsState = _applyAigControlsState;
 
   // Drag the docked window by its TOOLBAR (the popup has no title bar now): drag
   // empty toolbar space, not the buttons/sliders/menus. Persists position/size
@@ -11841,6 +11899,8 @@
     // (re)build the graph-bar study navigator against the fresh graph data.
     _applyDockState();
     _renderGraphBarNav();
+    // Honor the viewer's collapse choice for the Detail/Width/Zoom cluster.
+    _applyAigControlsState();
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
   }
