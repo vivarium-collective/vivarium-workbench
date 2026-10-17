@@ -4426,6 +4426,120 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
+/* ── Investigation-graph toolbar ───────────────────────────────────────────── */
+/* One grouped control bar under the graph lead: segmented button clusters for
+   orientation / zoom / view, two clearly labeled sliders (Detail = semantic
+   zoom band, Width = study-card width), and an Export menu. Replaces the old
+   row of float:right icon-flanked spans. Orientation button active-state is set
+   inline by _syncGraphOrientToggleUI; the download menu keeps the .aig-dl-ctl
+   hook its outside-click handler relies on. */
+.aig-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 2px 0 10px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  font-size: 0.86em;
+  color: #475569;
+}
+.aig-tb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.aig-tb-group + .aig-tb-group {
+  padding-left: 12px;
+  border-left: 1px solid #e2e8f0;
+}
+.aig-tb-right { margin-left: auto; }
+.aig-tb-group.aig-tb-right { padding-left: 0; border-left: none; }
+.aig-tb-label {
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.aig-tb-seg {
+  display: inline-flex;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+.aig-tb-seg > button {
+  border: none;
+  border-left: 1px solid #e2e8f0;
+  background: transparent;
+  color: #64748b;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-size: 0.98em;
+  line-height: 1.4;
+}
+.aig-tb-seg > button:first-child { border-left: none; }
+.aig-tb-seg > button:hover { background: #eef2ff; color: #3730a3; }
+.aig-tb-seg > button:focus-visible { outline: 2px solid #6366f1; outline-offset: -2px; }
+.aig-tb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #475569;
+  padding: 3px 11px;
+  cursor: pointer;
+  font-size: 0.92em;
+  line-height: 1.4;
+}
+.aig-tb-btn:hover { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+.aig-tb-link {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 0.82em;
+  text-decoration: underline dotted;
+  padding: 0 2px;
+}
+.aig-tb-link:hover { color: #64748b; }
+.aig-tb-slider {
+  width: 104px;
+  cursor: pointer;
+  vertical-align: middle;
+  accent-color: #2563eb;
+}
+.aig-tb-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #2563eb;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.aig-tb-slider::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #2563eb;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+@media (max-width: 640px) {
+  .aig-tb-group + .aig-tb-group { padding-left: 0; border-left: none; }
+  .aig-tb-right { margin-left: 0; }
+  .aig-tb-slider { width: 84px; }
+}
+
 /* Investigation-graph semantic zoom: status-badge click affordance + band tweaks. */
 .aig-status-badge { border-radius: 3px; padding: 0 2px; }
 .aig-status-badge:hover { background: rgba(0,0,0,0.06); }
