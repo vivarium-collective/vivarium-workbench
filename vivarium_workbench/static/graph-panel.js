@@ -125,16 +125,19 @@
       onOpen: onOpen, onClose: onClose,
       onResize: fit,
       onDock: function () { setTimeout(relayout, 60); },
+      onCollapse: function (c) { if (!c) setTimeout(relayout, 60); },   // re-fit on expand
     });
 
-    // Public API — mirrors window.ProcessCode.* so the header buttons can call it.
+    // Public API — mirrors window.ProcessCode.* so the toolbar buttons can call it.
     global.GraphPanel = {
       toggle: function () { if (ctl) ctl.toggle(); },
       open: function () { if (ctl) ctl.open(); },
       close: function () { if (ctl) ctl.close(); },
       dockMenu: function (anchor) { if (ctl) ctl.openDockMenu(anchor); },
-      // "Full graph": close the panel so the graph returns inline (full-page view).
-      toFull: function () { if (ctl) ctl.close(); },
+      // Collapse the panel to a thin edge strip / expand it back.
+      collapse: function () { if (ctl) ctl.collapse(); },
+      expand: function () { if (ctl) ctl.expand(); },
+      toggleCollapsed: function () { if (ctl) ctl.toggleCollapsed(); },
       isOpen: function () { return !!(ctl && ctl.isOpen()); },
     };
     // Used by panel-dock.js initPopout when this page is a ?popout=graph window.

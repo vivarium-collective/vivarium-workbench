@@ -5478,6 +5478,21 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
 .viv-graph-body .aig-toolbar a{ cursor:default; }
 .viv-graph-body .aig-toolbar input[type="range"]{ cursor:pointer; }
 body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
+/* Collapsed: the panel shrinks to a thin edge strip showing only the expand
+   handle (click it, or drag the resize edge back out, to expand). Set by the
+   collapse button or by dragging the resize edge inward past the threshold. */
+.viv-graph-expand{ display:none; }
+.viv-graph-panel.vp-collapsed{ flex:0 0 auto !important; }
+.viv-graph-panel.vp-collapsed[data-dock="left"],
+.viv-graph-panel.vp-collapsed[data-dock="right"]{ width:16px !important; }
+.viv-graph-panel.vp-collapsed[data-dock="top"],
+.viv-graph-panel.vp-collapsed[data-dock="bottom"]{ height:16px !important; min-height:0 !important; }
+.viv-graph-panel.vp-collapsed .viv-graph-body{ display:none !important; }
+.viv-graph-panel.vp-collapsed .viv-graph-expand{
+  display:block; width:100%; height:100%; border:none; background:transparent;
+  cursor:pointer; color:#64748b; font-size:0.95em; line-height:1; padding:0;
+}
+.viv-graph-panel.vp-collapsed .viv-graph-expand:hover{ background:#eef2ff; color:#3730a3; }
 
 /* ── Pop-out window (?popout=<kind>): show only the popped panel, full-window ──
    panel-dock.js adds body.viv-popout + .viv-popout-<kind> and opens that panel.

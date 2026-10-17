@@ -11537,8 +11537,14 @@
         }).observe(shell);
       } catch (_e) { /* ResizeObserver unavailable — auto-fit still works */ }
     }
+    // Keep the Zoom slider in sync when zoom changes programmatically (e.g. fit).
+    var _zs = document.getElementById('aig-view-zoom-slider');
+    if (_zs && document.activeElement !== _zs) _zs.value = String(aigZoom);
   }
   function _aigZoomBy(f) { aigZoom = Math.max(0.3, Math.min(2.2, aigZoom * f)); _applyAigZoom(); }
+  // Absolute zoom from the Zoom slider (same control style as Detail/Width).
+  function _setAigZoom(v) { aigZoom = Math.max(0.3, Math.min(2, Number(v) || 1)); _applyAigZoom(); }
+  window._setAigZoom = _setAigZoom;
   function _aigFit() {
     var shell = document.getElementById('investigation-dag-shell');
     if (!shell) return;
@@ -11705,6 +11711,26 @@
   window._aigExport = _aigExport;
   window._aigToggleDownloadMenu = _aigToggleDownloadMenu;
   window._aigDownloadMenuPick = _aigDownloadMenuPick;
+  // ⚙ Display settings popover (Detail / Width / Zoom sliders), same pattern as
+  // the Export menu — click to toggle, outside-click to close.
+  function _aigCloseSettings() {
+    var m = document.getElementById('aig-settings-menu'), b = document.getElementById('aig-settings-btn');
+    if (m) m.style.display = 'none';
+    if (b) b.setAttribute('aria-expanded', 'false');
+  }
+  function _aigToggleSettings(ev) {
+    if (ev) ev.stopPropagation();
+    var m = document.getElementById('aig-settings-menu'), b = document.getElementById('aig-settings-btn');
+    if (!m) return;
+    var open = m.style.display === 'block';
+    m.style.display = open ? 'none' : 'block';
+    if (b) b.setAttribute('aria-expanded', open ? 'false' : 'true');
+  }
+  window._aigToggleSettings = _aigToggleSettings;
+  document.addEventListener('click', function (e) {
+    var ctl = e.target.closest && e.target.closest('.aig-settings-ctl');
+    if (!ctl) _aigCloseSettings();
+  }, true);
   // Drag anywhere on the shell background to pan (card clicks still work).
   document.addEventListener('pointerdown', function (e) {
     var shell = e.target.closest && e.target.closest('#investigation-dag-shell');

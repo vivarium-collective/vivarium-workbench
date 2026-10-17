@@ -74,10 +74,22 @@
     var panel = opts.panel, layout = opts.layout, mainEl = opts.mainEl;
     var key = opts.key;
     var V = function (suffix) { return '--viv-' + key + '-' + suffix; };
-    var K = { dock: 'viv.' + key + '.dock', open: 'viv.' + key + '.open', w: 'viv.' + key + '.w', h: 'viv.' + key + '.h' };
+    var K = { dock: 'viv.' + key + '.dock', open: 'viv.' + key + '.open', w: 'viv.' + key + '.w', h: 'viv.' + key + '.h', collapsed: 'viv.' + key + '.collapsed' };
     var def = opts.defaultDock || 'right';
     var dock = C.validDock(lsGet(K.dock, def)) ? lsGet(K.dock, def) : def;
     var justDragged = false;
+    var collapsed = lsGet(K.collapsed, '0') === '1';
+    var COLLAPSE_AT = 48;   // drag the resize edge below this (px) to collapse
+
+    // Collapse the panel to a thin edge strip (body hidden, a small expand handle
+    // shown via CSS .vp-collapsed); expand restores it. State is persisted.
+    function setCollapsed(c, persist) {
+      collapsed = !!c;
+      panel.classList.toggle('vp-collapsed', collapsed);
+      if (persist) lsSet(K.collapsed, collapsed ? '1' : '0');
+      syncVars();
+      if (opts.onCollapse) opts.onCollapse(collapsed);
+    }
 
     function isVertical(d) { return d === 'bottom' || d === 'top'; }   // height-sized docks
     function sizeKey(d) { return isVertical(d) ? K.h : K.w; }
@@ -118,6 +130,7 @@
     function setOpen(open) {
       panel.hidden = !open;
       if (open) place(dock);
+      panel.classList.toggle('vp-collapsed', open && collapsed);
       document.body.classList.toggle('viv-' + key + '-open', open);
       lsSet(K.open, open ? '1' : '0');
       if (opts.launcher) {
@@ -224,11 +237,17 @@
                   : dock === 'right' ? r0.right - m.clientX
                   : dock === 'top' ? m.clientY - r0.top
                   : r0.bottom - m.clientY;                              // bottom
+          // Drag the resize edge toward the dock edge, past the threshold, to
+          // collapse to a thin strip; drag back out to expand.
+          if (raw < COLLAPSE_AT) { if (!collapsed) setCollapsed(true); return; }
+          if (collapsed) setCollapsed(false);
           panel.style.setProperty(isVertical(dock) ? V('h') : V('w'), C.clampDock(dock, raw, innerWidth, innerHeight) + 'px');
         }
         function up() {
           h.classList.remove('dragging'); document.body.classList.remove('vp-dragging');
           document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+          if (collapsed) { lsSet(K.collapsed, '1'); syncVars(); if (opts.onResize) opts.onResize(); return; }
+          lsSet(K.collapsed, '0');
           var r = panel.getBoundingClientRect();
           lsSet(sizeKey(dock), String(Math.round(dock === 'bottom' ? r.height : r.width)));
           syncVars(); if (opts.onResize) opts.onResize();
@@ -257,6 +276,10 @@
       getDock: function () { return dock; },
       didDrag: function () { return justDragged; },
       syncVars: syncVars,
+      collapse: function () { setCollapsed(true, true); },
+      expand: function () { setCollapsed(false, true); },
+      toggleCollapsed: function () { setCollapsed(!collapsed, true); },
+      isCollapsed: function () { return collapsed; },
       // Bind drag-to-dock on a handle added AFTER make() (e.g. a toolbar that is
       // relocated into the panel later). Guards against double-binding.
       addDragHandle: function (el) { if (el && !el._vpDragBound) { el._vpDragBound = true; initDrag(el); } },
