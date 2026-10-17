@@ -10385,10 +10385,21 @@
     if (s === 'medium') return { dot: '#f59e0b', bg: '#fffbeb', bd: '#f59e0b', col: '#92400e' };
     return { dot: '#3b82f6', bg: '#eff6ff', bd: '#3b82f6', col: '#1e40af' };  // low / default
   }
+  // Scroll the needs-attention detail block into view + open it (from the chip).
+  function _aigShowNeedsAttention() {
+    var b = document.getElementById('investigation-needs-attention');
+    if (!b) return;
+    var d = b.querySelector('details'); if (d) d.open = true;
+    if (b.scrollIntoView) { try { b.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ } }
+  }
+  window._aigShowNeedsAttention = _aigShowNeedsAttention;
+
   function _renderInvNeedsAttention(name) {
     var container = document.getElementById('investigation-needs-attention');
-    if (!container) return;
-    container.innerHTML = '';
+    var chip = document.getElementById('aig-needs-attention-chip');
+    if (!container && !chip) return;
+    if (container) container.innerHTML = '';
+    if (chip) chip.innerHTML = '';
     var _fetch = fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
                        {headers: {Accept: 'application/json'}})
       .then(function(r) { return r.ok ? r.json() : null; });
@@ -10397,15 +10408,19 @@
       var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the needs-attention scan (deterministic)</span>';
       var total = (d.summary.total) || 0;
       if (!total) {
-        // Quiet "nothing needs attention" state — not an empty dropdown.
-        container.innerHTML =
-          '<div class="needs-attention-banner" style="margin:10px 0 14px 0;padding:10px 14px;'
-          + 'background:#f0fdf4;border:1px solid #16a34a;border-left-width:5px;border-radius:6px;color:#166534">'
-          + '<strong>✓ Nothing needs attention</strong> ' + lbl + '</div>';
+        // All-clear: a compact green chip in the toolbar — no big banner.
+        if (chip) chip.innerHTML =
+          '<span class="aig-na-chip aig-na-clear" title="code-computed by the needs-attention scan (deterministic)">✓ All clear</span>';
         return;
       }
       var bySev = d.summary.by_severity || {};
       var high = bySev.high || 0;
+      // Compact clickable chip in the toolbar; the full list stays in the block.
+      if (chip) chip.innerHTML =
+        '<button type="button" class="aig-na-chip aig-na-flag' + (high ? ' aig-na-high' : '') + '" '
+        + 'onclick="window._aigShowNeedsAttention()" '
+        + 'title="' + high + ' high · ' + total + ' total — click for details">⚠ ' + total
+        + ' need' + (total === 1 ? 's' : '') + ' attention</button>';
       var head = '⚠ Needs attention — ' + high + ' high, ' + total + ' total';
       // Human-readable name + which study tab a click should land on, per kind.
       // These are follow-ups the deterministic scan flags — NOT app updates.
@@ -10870,13 +10885,22 @@
       });
     }
     if (!(opts && opts.noPersist)) { try { localStorage.setItem('aig-dock-state', state); } catch (e) { /* ignore */ } }
-    // Re-fit the graph to the new container once the size transition settles
-    // (skip when collapsed — the shell is hidden).
-    if (state !== 'collapsed') {
-      setTimeout(function () { try { if (window._aigFit) window._aigFit(); } catch (e) { /* ignore */ } }, 210);
+    // Docked: show the graph at a READABLE zoom (names legible) and let the panel
+    // scroll — do NOT fit-all (which shrinks everything to tiny). A bigger window
+    // then shows more of the graph at the same readable size, rather than shrinking.
+    if (state === 'docked') {
+      setTimeout(function () { _aigDockReadable(); }, 210);
     }
   }
   window._aigSetDockState = _aigSetDockState;
+
+  // Readable docked zoom: keep names legible (zoom = 1, the inline default) and
+  // scroll for the rest, instead of fit-all. The Zoom −/⤢/+ controls still let
+  // the user fit-all or zoom as they choose. (aigZoom / _applyAigZoom are defined
+  // later in this IIFE; this runs at interaction time, so they're available.)
+  function _aigDockReadable() {
+    try { aigZoom = 1; _applyAigZoom(); } catch (e) { /* ignore */ }
+  }
 
   // Exit the embedded study and return to the full inline investigation graph —
   // the ⛶ control's action (what closing the study / _wsResetStudyTabs restores).
@@ -10935,22 +10959,22 @@
   window._toggleInvOverview = _toggleInvOverview;
   window._applyInvOverviewState = _applyInvOverviewState;
 
-  // Drag the docked window by its header (#investigation-dag-lead), and persist
-  // the position/size (resize uses the CSS resize grip; a document mouseup saves
-  // the final rect). Wired once; only acts while the window is in the docked
-  // state. Dragging ignores clicks on the dock control buttons. Kept inside the
-  // viewport.
+  // Drag the docked window by its TOOLBAR (the popup has no title bar now): drag
+  // empty toolbar space, not the buttons/sliders/menus. Persists position/size
+  // (resize uses the corner grips; a document mouseup saves the final rect).
+  // Wired once; only acts in the docked state. Kept inside the viewport.
   var _aigDockDragWired = false;
   function _aigWireDockDrag() {
     if (_aigDockDragWired) return;
     _aigDockDragWired = true;
     var fs = document.getElementById('investigation-dag-fs');
-    var lead = document.getElementById('investigation-dag-lead');
-    if (!fs || !lead) return;
+    var bar = fs && fs.querySelector('.aig-toolbar');
+    if (!fs || !bar) return;
     var drag = null;
-    lead.addEventListener('mousedown', function (e) {
+    bar.addEventListener('mousedown', function (e) {
       if (!fs.classList.contains('aig-dock-docked')) return;      // only docked
-      if (e.target.closest && e.target.closest('#aig-dock-ctl')) return;  // not the buttons
+      // Ignore the interactive controls — drag only on empty toolbar space.
+      if (e.target.closest && e.target.closest('button, input, select, a, .aig-tb-seg, .aig-study-jump-wrap, #aig-dock-ctl, #aig-study-nav')) return;
       var r = fs.getBoundingClientRect();
       drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, h: r.height };
       fs.classList.add('aig-dragging');          // suppress transition while dragging
@@ -11014,7 +11038,8 @@
       if (!rz) return;
       rz = null; fs.classList.remove('aig-resizing');
       if (fs.classList.contains('aig-dock-docked')) _aigSaveDockRect(fs);
-      try { if (window._aigFit) window._aigFit(); } catch (e) { /* ignore */ }
+      // Keep the current (readable) zoom — a bigger window just shows MORE graph,
+      // it does not shrink. (No fit-all here.)
     });
   }
 

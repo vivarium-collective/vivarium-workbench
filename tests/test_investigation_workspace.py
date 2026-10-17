@@ -85,7 +85,15 @@ def test_dockable_graph_and_graph_bar_navigator():
     assert 'id="aig-study-nav"' in TPL
     assert 'id="aig-study-prev"' in TPL and 'id="aig-study-next"' in TPL
     assert 'id="aig-study-jump-menu"' in TPL
-    assert 'id="aig-dock-ctl"' in TPL
+    # The popup has NO title bar: #investigation-dag-lead + the "Investigation
+    # graph" heading are gone, and the dock control is integrated into the toolbar.
+    assert 'id="investigation-dag-lead"' not in TPL
+    assert '<strong>Investigation graph</strong>' not in TPL
+    dvs = TPL.index('id="investigation-dag-fs"')
+    dvs_end = TPL.index('<!-- /#investigation-dag-fs -->', dvs)
+    fsblock = TPL[dvs:dvs_end]
+    assert fsblock.index('id="aig-dock-ctl"') > fsblock.index('class="aig-toolbar"'), \
+        "dock control should sit inside the toolbar row"
     for state in ("collapsed", "docked"):
         assert 'data-dock="%s"' % state in TPL
         assert "_aigSetDockState('%s')" % state in TPL
@@ -111,6 +119,17 @@ def test_dockable_graph_and_graph_bar_navigator():
         i = JS.index("function %s" % name)
         j = JS.find("\n  function ", i + 1)
         return JS[i:j] if j != -1 else JS[i:]
+
+    # Readable docked zoom: dock does NOT fit-all (which shrank names to tiny) —
+    # it sets a readable zoom and lets the panel scroll.
+    assert "function _aigDockReadable" in JS
+    setb = _fn_body("_aigSetDockState")
+    assert "_aigDockReadable()" in setb and "window._aigFit()" not in setb
+    assert "aigZoom = 1" in _fn_body("_aigDockReadable")
+    # Drag handle is the toolbar now (no title bar); it ignores the controls.
+    dragb = _fn_body("_aigWireDockDrag")
+    assert ".aig-toolbar" in dragb
+    assert "button, input, select" in dragb        # drag ignores interactive controls
 
     # Opening a study floats the graph (dock) + refreshes the navigator; it drives
     # the embedded study via _openStudyEmbeddedNewTab and reads the graph's data.
@@ -190,16 +209,18 @@ def test_investigation_overview_collapsed_by_default_graph_prominent():
     """Inline investigation view (no study open): the prose is collapsed by
     default behind a "▸ Investigation overview" toggle, and the graph renders
     prominently right after the title + toggle (title · toggle · graph)."""
-    # Template: the toggle sits BEFORE the prose and the graph (so collapsed
-    # shows title · toggle · graph); it's a direct child of the detail view.
+    # Template: the toggle is integrated into the graph toolbar (not a standalone
+    # line); with the prose collapsed by default, the visible order is the toolbar
+    # (toggle) directly above the graph. The prose (#investigation-intro) is a
+    # separate block, hidden by the collapse CSS.
     assert 'id="inv-overview-toggle"' in TPL
     assert "_toggleInvOverview()" in TPL
     dv = TPL.index('id="investigation-detail-view"')
     dv_end = TPL.index('<!-- /#investigation-dag-fs -->', dv)
     detail = TPL[dv:dv_end]
-    # ordering: toggle before the prose (#investigation-intro) which is before the graph.
-    assert detail.index('id="inv-overview-toggle"') < detail.index('id="investigation-intro"')
-    assert detail.index('id="investigation-intro"') < detail.index('id="investigation-dag-fs"')
+    # The toggle lives inside the graph toolbar (within #investigation-dag-fs).
+    tb = detail.index('class="aig-toolbar"')
+    assert detail.index('id="inv-overview-toggle"') > tb, "overview toggle should be in the toolbar"
 
     # CSS: collapsed hides the prose blocks (intro + decision cockpit).
     css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
@@ -222,6 +243,23 @@ def test_investigation_overview_collapsed_by_default_graph_prominent():
     # apply the collapsed overview state.
     assert "_applyInvOverviewState()" in _fn_body("_renderInvestigationDetailInto")
     assert "_applyInvOverviewState()" in _fn_body("_wsResetStudyTabs")
+
+
+def test_needs_attention_is_a_compact_toolbar_chip():
+    """The all-clear state is a compact chip in the toolbar, not a big green
+    banner; the needs state is a compact clickable chip that reveals the detail."""
+    assert 'id="aig-needs-attention-chip"' in TPL
+    i = JS.index("function _renderInvNeedsAttention")
+    body = JS[i: JS.index("window._renderInvNeedsAttention", i)]
+    # All-clear renders a small "✓ All clear" chip — not the old full-width green
+    # "✓ Nothing needs attention" banner.
+    assert "aig-na-clear" in body and "All clear" in body
+    assert "Nothing needs attention" not in body     # old big all-clear banner gone
+    # Needs state is a clickable chip that opens the detail list.
+    assert "aig-na-flag" in body
+    assert "_aigShowNeedsAttention" in body
+    css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
+    assert ".aig-na-chip" in css
 
 
 def test_embedded_study_hides_in_iframe_header_nav():
