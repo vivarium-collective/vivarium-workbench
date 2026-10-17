@@ -10837,9 +10837,15 @@
   // graph is the normal full-width inline view (no dock class). The chosen state
   // + the user's dragged position/size are remembered in localStorage.
   var _AIG_DOCK_STATES = ['collapsed', 'docked'];
-  // Minimum px of the docked panel kept on-screen so a drag can never strand it
-  // (and never collapses the drag range to one axis — the "locked" feel).
-  var AIG_DOCK_MIN_VIS = 140;
+  // Cap the docked panel to a fraction of the viewport. This is what keeps it
+  // controllable: the panel always stays fully on-screen (both resize grips
+  // reachable) AND there is always ample room to drag it in BOTH axes (a panel
+  // allowed to fill the viewport collapsed the drag travel to ~nothing, which
+  // felt locked to one direction). A bigger view belongs in Full mode.
+  function _aigDockMaxSize() {
+    var vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+    return { w: Math.max(320, Math.round(vw * 0.7)), h: Math.max(240, Math.round(vh * 0.7)) };
+  }
   function _aigDockStateStored() {
     try { var v = localStorage.getItem('aig-dock-state'); return _AIG_DOCK_STATES.indexOf(v) >= 0 ? v : null; }
     catch (e) { return null; }
@@ -10869,12 +10875,13 @@
     var rect = _aigDockRectStored();
     if (!rect) return;
     var vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
-    var w = Math.max(260, Math.min(rect.width || 400, Math.round(vw * 0.92)));
-    var h = Math.max(140, Math.min(rect.height || 360, Math.round(vh * 0.85)));
-    // Soft clamp (matches the drag): keep the panel on-screen without snapping it
-    // fully inside, so a position dragged near an edge is preserved on reopen.
-    var left = Math.max(AIG_DOCK_MIN_VIS - w, Math.min(rect.left, vw - AIG_DOCK_MIN_VIS));
-    var top = Math.max(8, Math.min(rect.top, vh - 44));
+    var max = _aigDockMaxSize();
+    var w = Math.max(320, Math.min(rect.width || 400, max.w));
+    var h = Math.max(240, Math.min(rect.height || 360, max.h));
+    // HARD clamp fully inside the viewport (8px margin) so both resize grips stay
+    // on-screen; the size cap above guarantees the drag never locks to one axis.
+    var left = Math.max(8, Math.min(rect.left, vw - w - 8));
+    var top = Math.max(8, Math.min(rect.top, vh - h - 8));
     fs.style.right = 'auto';
     fs.style.left = left + 'px'; fs.style.top = top + 'px';
     fs.style.width = w + 'px'; fs.style.height = h + 'px';
@@ -11123,17 +11130,12 @@
     document.addEventListener('mousemove', function (e) {
       if (!drag) return;
       var vw = window.innerWidth, vh = window.innerHeight;
-      // SOFT clamp: let the panel move freely in BOTH axes and only keep enough
-      // of it on-screen to grab back. A hard "fit fully inside the viewport"
-      // clamp collapses the travel range to ~nothing once a panel nears an edge
-      // (which felt like being locked to one axis) and snaps at the boundary
-      // (the jump). Here each axis stays independent and never collapses:
-      // horizontally keep at least AIG_DOCK_MIN_VIS px visible; vertically keep
-      // the top (toolbar) between the top edge and just above the bottom.
-      var destLeft = Math.max(AIG_DOCK_MIN_VIS - drag.w,
-        Math.min(drag.left + (e.clientX - drag.sx), vw - AIG_DOCK_MIN_VIS));
-      var destTop = Math.max(8,
-        Math.min(drag.top + (e.clientY - drag.sy), vh - 44));
+      // HARD clamp fully inside the viewport (8px margin) so the panel — and both
+      // bottom resize grips — never leave the screen. The panel is size-capped
+      // (_aigDockMaxSize) so this clamp still leaves ample travel in BOTH axes
+      // and never collapses to one direction.
+      var destLeft = Math.max(8, Math.min(drag.left + (e.clientX - drag.sx), vw - drag.w - 8));
+      var destTop = Math.max(8, Math.min(drag.top + (e.clientY - drag.sy), vh - drag.h - 8));
       pending = { x: destLeft - drag.left, y: destTop - drag.top };
       if (!raf) raf = requestAnimationFrame(flush);
     });
@@ -11183,18 +11185,19 @@
       // top = max(56, top) on every move, which yanked a top-docked panel down
       // (the "jumps to a new size"). Height grows/shrinks from the bottom edge,
       // clamped between MINH and the viewport bottom (it just stops, no snap).
+      var max = _aigDockMaxSize();
       var left = rz.left;
-      var h = Math.max(MINH, Math.min(rz.h + dy, vh - rz.top - 8));
+      var h = Math.max(MINH, Math.min(rz.h + dy, Math.min(vh - rz.top - 8, max.h)));
       var w;
       if (rz.dir === 'sw') {
         // SW grip: the RIGHT edge stays put, the left edge follows the cursor.
-        // Clamp left to [8, right - MINW] and derive width — monotonic, so it
-        // reaches the limit smoothly instead of snapping.
+        // Clamp left to [right - maxW .. right - MINW] (and >=8) and derive width
+        // — monotonic, so it reaches the limit smoothly instead of snapping.
         var right = rz.left + rz.w;
-        left = Math.max(8, Math.min(rz.left + dx, right - MINW));
+        left = Math.max(Math.max(8, right - max.w), Math.min(rz.left + dx, right - MINW));
         w = right - left;
       } else {                                    // 'se'
-        w = Math.max(MINW, Math.min(rz.w + dx, vw - rz.left - 8));
+        w = Math.max(MINW, Math.min(rz.w + dx, Math.min(vw - rz.left - 8, max.w)));
       }
       fs.style.left = left + 'px'; fs.style.top = rz.top + 'px';
       fs.style.width = w + 'px'; fs.style.height = h + 'px';
