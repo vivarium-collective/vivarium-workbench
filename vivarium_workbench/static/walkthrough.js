@@ -10833,25 +10833,22 @@
   // via the .inv-study-open class (CSS hides every other direct child) so the
   // sticky pane is compact and the study stays reachable. Restoring removes the
   // class — each child returns to its own inline/default display.
-  var _invStripPrev = null;
+  var _invStripPrevBand = null;
   function _setInvProseForStudy(studyOpen) {
     var view = document.getElementById('investigation-detail-view');
     if (!view) return;
     view.classList.toggle('inv-study-open', !!studyOpen);
-    var shell = document.getElementById('investigation-dag-shell');
+    // Compact navigation strip when a study is open: the graph shell is capped
+    // to a short height by CSS (.inv-study-open #investigation-dag-shell), which
+    // beats the inline height + the auto-refit. Here we only drop the semantic
+    // zoom to the lowest band (just study names) and restore the prior band on
+    // close, so the strip reads as a nav menu rather than a tall section.
     if (studyOpen) {
-      // Compact navigation strip: a short, resizable-up graph at the lowest
-      // semantic-zoom band (just study names), so it reads as a nav menu rather
-      // than a tall section. Save the prior height/band once so we can restore.
-      if (!_invStripPrev && shell) {
-        _invStripPrev = { h: shell.style.height, mh: shell.style.minHeight, band: aigBand };
-      }
-      if (shell) { shell.style.height = '200px'; shell.style.minHeight = '0'; }
+      if (_invStripPrevBand === null) _invStripPrevBand = aigBand;
       _setAigBand(0);   // lowest detail — names only
-    } else if (_invStripPrev) {
-      if (shell) { shell.style.height = _invStripPrev.h; shell.style.minHeight = _invStripPrev.mh; }
-      _setAigBand(_invStripPrev.band);
-      _invStripPrev = null;
+    } else if (_invStripPrevBand !== null) {
+      _setAigBand(_invStripPrevBand);
+      _invStripPrevBand = null;
     }
   }
   window._setInvProseForStudy = _setInvProseForStudy;

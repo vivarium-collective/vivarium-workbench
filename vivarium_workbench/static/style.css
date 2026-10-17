@@ -4503,6 +4503,19 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
    inline display:none set by _renderInvestigationDetailInto). */
 #investigation-detail-view.inv-study-open > * { display: none !important; }
 #investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block !important; }
+/* Compact navigation strip: when a study is open, cap the graph shell to a short
+   height so it reads as a nav menu, not a tall section that buries the study.
+   !important beats the inline height + the auto-refit that grows it to fit the
+   full DAG. Paired with the lowest zoom band (names only) set in JS. */
+#investigation-detail-view.inv-study-open #investigation-dag-shell {
+  height: 200px !important;
+  min-height: 0 !important;
+  max-height: 200px !important;
+}
+#investigation-detail-view.inv-study-open #investigation-dag-shell.aig-expanded {
+  height: 200px !important;
+  max-height: 200px !important;
+}
 /* Graph-bar study navigator jump menu items (reuses the study-nav look). */
 .aig-study-jump-item {
   display: block; width: 100%; text-align: left; border: none; background: transparent;
