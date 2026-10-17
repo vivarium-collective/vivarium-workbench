@@ -1785,6 +1785,31 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       </div>
     </div>
 
+    {# ── Computed gate verdict (the evaluation the conclusion rests on) ──
+       The coded gate_evaluator's result from the behavior-test outcomes, with a
+       code-vs-authored divergence chip when study.computed_gate_verdict.diverges_from_authored
+       — surfaced here in Decide (its appropriate home) rather than the header. #}
+    {% if study.computed_gate_verdict %}
+    {% set _cgv = study.computed_gate_verdict %}
+    <div class="decide-section" style="margin-top:18px">
+      <h3 class="overview-label">Computed gate verdict</h3>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">The coded gate
+        evaluator's result from the behavior-test outcomes — the evaluation the
+        conclusion rests on.</p>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="gate-status-{{ _cgv.result }}" style="padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em">{{ _cgv.result or 'pending' }}</span>
+        {% if _cgv.evaluated_by %}<span class="muted small">evaluated by {{ _cgv.evaluated_by }}</span>{% endif %}
+        {% if _cgv.counts %}<span class="muted small">{{ _cgv.counts.pass }}/{{ _cgv.counts.total }} passed{% if _cgv.counts.fail %} · {{ _cgv.counts.fail }} failed{% endif %}{% if _cgv.counts.skip %} · {{ _cgv.counts.skip }} skipped{% endif %}</span>{% endif %}
+      </div>
+      {% if _cgv.diverges_from_authored %}
+      <div class="gate-divergence-chip" title="The coded gate evaluator disagrees with the authored gate_status — an audit signal worth never hiding."
+           style="margin-top:8px;display:inline-block;padding:4px 12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;color:#92400e;font-size:0.85em;font-weight:600">
+        ⚠ gate drift — code: <code>{{ _cgv.result }}</code> · authored: <code>{{ study.gate_status or '—' }}</code>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if _is_v3 %}
     {# ── Conclusion logic (gate decision) ───────────────────────────── #}
     {% if study.conclusion_logic %}
