@@ -10896,15 +10896,34 @@
   function _aigClearSavedDockRect() {
     try { localStorage.removeItem('aig-dock-rect'); } catch (e) { /* ignore */ }
   }
-  // Keep a docked panel on-screen when the window resizes (a rect saved at one
-  // viewport size can otherwise strand the panel off the right/bottom edge).
+  // Force the docked panel to fit the viewport RIGHT NOW: cap its rendered size to
+  // _aigDockMaxSize and clamp its position fully on-screen. Runs on dock-enter and
+  // on window resize so the panel always has ample drag travel in BOTH axes and
+  // its resize grips stay reachable — even with no saved rect, or if something
+  // left an oversized height on it (which collapsed vertical dragging to zero:
+  // the "can move left/right but not up/down" bug).
+  function _aigClampDockIntoView(fs) {
+    if (!fs) return;
+    var vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+    var max = _aigDockMaxSize();
+    var r = fs.getBoundingClientRect();
+    var w = Math.max(260, Math.min(Math.round(r.width), max.w));
+    var h = Math.max(140, Math.min(Math.round(r.height), max.h));
+    var left = Math.max(8, Math.min(Math.round(r.left), vw - w - 8));
+    var top = Math.max(8, Math.min(Math.round(r.top), vh - h - 8));
+    fs.style.right = 'auto';
+    fs.style.left = left + 'px'; fs.style.top = top + 'px';
+    fs.style.width = w + 'px'; fs.style.height = h + 'px';
+  }
+  // Keep a docked panel on-screen + sized-to-fit when the window resizes (a rect
+  // saved at one viewport size can otherwise strand it off an edge or oversize it).
   var _aigDockResizeClampWired = false;
   function _aigWireDockResizeClamp() {
     if (_aigDockResizeClampWired) return;
     _aigDockResizeClampWired = true;
     window.addEventListener('resize', function () {
       var f = document.getElementById('investigation-dag-fs');
-      if (f && f.classList.contains('aig-dock-docked')) _aigApplyDockRect(f);
+      if (f && f.classList.contains('aig-dock-docked')) _aigClampDockIntoView(f);
     });
   }
 
@@ -10923,7 +10942,7 @@
     fs.classList.add('aig-dock');
     _AIG_DOCK_STATES.forEach(function (s) { fs.classList.toggle('aig-dock-' + s, s === state); });
     // Docked: honor the user's dragged/resized rect; collapsed: use the CSS size.
-    if (state === 'docked') { _aigApplyDockRect(fs); _aigWireDockDrag(); _aigWireDockResize(); _aigWireDockResizeClamp(); }
+    if (state === 'docked') { _aigApplyDockRect(fs); _aigClampDockIntoView(fs); _aigWireDockDrag(); _aigWireDockResize(); _aigWireDockResizeClamp(); }
     else { _aigClearDockRect(fs); }
     var ctl = document.getElementById('aig-dock-ctl');
     if (ctl) {

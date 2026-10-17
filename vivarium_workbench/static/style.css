@@ -4538,8 +4538,14 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 #investigation-dag-fs.aig-dock.aig-resizing { transition: none; }
 #investigation-dag-fs.aig-dock-collapsed { width: 320px; height: 86px; }
 /* Docked default size — NO !important, so the inline width/height the JS resize
-   writes wins over it. Custom corner grips (.aig-dock-grip) do the resizing. */
-#investigation-dag-fs.aig-dock-docked { width: 400px; height: 360px; }
+   writes wins over it. Custom corner grips (.aig-dock-grip) do the resizing.
+   max-width/height cap the RENDERED box to the viewport no matter what width/
+   height (CSS or inline) resolves to, so the panel can never grow taller/wider
+   than the screen — which would otherwise collapse the drag travel to one axis
+   (the "can move left/right but not up/down" bug) and strand the resize grips. */
+#investigation-dag-fs.aig-dock-docked {
+  width: 400px; height: 360px; max-width: 86vw; max-height: 78vh;
+}
 /* Resize grips — only in the docked state, above the graph shell so they get the
    pointer. */
 .aig-dock-grip { display: none; position: absolute; width: 18px; height: 18px; z-index: 10; }
