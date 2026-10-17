@@ -9000,10 +9000,13 @@
     _wsHighlightActiveDagNode(null);
     var panel = document.getElementById('ws-study-panel');
     if (panel) panel.style.display = 'none';
-    // No study open -> restore the full inline investigation prose + graph,
-    // un-float the graph, and hide the graph-bar navigator.
+    // No study open -> restore the inline investigation view, un-float the graph,
+    // hide the graph-bar navigator, and land GRAPH-PROMINENT: the prose collapsed
+    // behind the "▸ Investigation overview" toggle (so ⛶ "back to graph" shows the
+    // graph on top, not a wall of prose).
     _setInvProseForStudy(false);
     _aigExitDock();
+    _applyInvOverviewState();
     _renderGraphBarNav();
     _setInvestigationContextCollapsed(false);   // fresh investigation -> graph expanded
   }
@@ -9169,6 +9172,10 @@
       if (back) back.style.display = 'none';
       var titleEl = document.getElementById('investigation-detail-title');
       if (titleEl && titleEl.parentNode) titleEl.parentNode.style.display = 'none';
+      // Graph-prominent inline view: the investigation prose starts collapsed
+      // behind the "▸ Investigation overview" toggle (default), so the graph is
+      // top-aligned right after the title + toggle.
+      _applyInvOverviewState();
     }
     if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(name);
   }
@@ -10853,7 +10860,7 @@
     fs.classList.add('aig-dock');
     _AIG_DOCK_STATES.forEach(function (s) { fs.classList.toggle('aig-dock-' + s, s === state); });
     // Docked: honor the user's dragged/resized rect; collapsed: use the CSS size.
-    if (state === 'docked') { _aigApplyDockRect(fs); _aigWireDockDrag(); }
+    if (state === 'docked') { _aigApplyDockRect(fs); _aigWireDockDrag(); _aigWireDockResize(); }
     else { _aigClearDockRect(fs); }
     var ctl = document.getElementById('aig-dock-ctl');
     if (ctl) {
@@ -10901,6 +10908,33 @@
   }
   window._applyDockState = _applyDockState;
 
+  // Collapsible "Investigation overview" (inline view, no study open). The prose
+  // blocks (#investigation-intro + #investigation-decision-cockpit) hide behind
+  // #inv-overview-toggle so the graph is prominent + top-aligned. DEFAULT
+  // COLLAPSED; the user's choice is remembered. Only governs the inline view —
+  // the study-open state hides the prose regardless.
+  function _invOverviewCollapsed() {
+    try { var v = localStorage.getItem('inv-overview-collapsed'); return v === null ? true : v === '1'; }
+    catch (e) { return true; }
+  }
+  function _applyInvOverviewState() {
+    var view = document.getElementById('investigation-detail-view');
+    if (!view) return;
+    var collapsed = _invOverviewCollapsed();
+    view.classList.toggle('inv-overview-collapsed', collapsed);
+    var btn = document.getElementById('inv-overview-toggle');
+    if (btn) {
+      btn.textContent = (collapsed ? '▸' : '▾') + ' Investigation overview';
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+  }
+  function _toggleInvOverview() {
+    try { localStorage.setItem('inv-overview-collapsed', _invOverviewCollapsed() ? '0' : '1'); } catch (e) { /* ignore */ }
+    _applyInvOverviewState();
+  }
+  window._toggleInvOverview = _toggleInvOverview;
+  window._applyInvOverviewState = _applyInvOverviewState;
+
   // Drag the docked window by its header (#investigation-dag-lead), and persist
   // the position/size (resize uses the CSS resize grip; a document mouseup saves
   // the final rect). Wired once; only acts while the window is in the docked
@@ -10931,9 +10965,56 @@
       fs.style.left = left + 'px'; fs.style.top = top + 'px';
     });
     document.addEventListener('mouseup', function () {
-      if (drag) { drag = null; fs.classList.remove('aig-dragging'); }
-      // Persist the final rect after any drag OR resize-grip adjustment.
+      if (drag) { drag = null; fs.classList.remove('aig-dragging'); if (fs.classList.contains('aig-dock-docked')) _aigSaveDockRect(fs); }
+    });
+  }
+
+  // Resize the docked window by dragging a corner grip (custom, since CSS
+  // `resize` was unreliable on this fixed+transitioned panel and the grip sat
+  // under the graph shell). Sets inline width/height (and left on the SW grip),
+  // clamped to a sane minimum and within the viewport; persists + re-fits on
+  // release. Wired once; only acts in the docked state.
+  var _aigDockResizeWired = false;
+  function _aigWireDockResize() {
+    if (_aigDockResizeWired) return;
+    _aigDockResizeWired = true;
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs) return;
+    var grips = fs.querySelectorAll('.aig-dock-grip');
+    if (!grips.length) return;
+    var rz = null;
+    var MINW = 320, MINH = 240;
+    grips.forEach(function (g) {
+      g.addEventListener('mousedown', function (e) {
+        if (!fs.classList.contains('aig-dock-docked')) return;
+        e.preventDefault(); e.stopPropagation();
+        var r = fs.getBoundingClientRect();
+        rz = { dir: g.getAttribute('data-grip'), x: e.clientX, y: e.clientY, left: r.left, top: r.top, w: r.width, h: r.height };
+        fs.classList.add('aig-resizing');
+        fs.style.right = 'auto';
+      });
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!rz) return;
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var dx = e.clientX - rz.x, dy = e.clientY - rz.y;
+      var w, h = rz.h + dy, left = rz.left;
+      if (rz.dir === 'sw') { w = rz.w - dx; left = rz.left + dx; }
+      else { w = rz.w + dx; }                     // 'se'
+      if (w < MINW) { if (rz.dir === 'sw') left = rz.left + (rz.w - MINW); w = MINW; }
+      if (h < MINH) h = MINH;
+      left = Math.max(8, left);
+      if (left + w > vw - 8) w = vw - 8 - left;
+      var top = Math.max(56, rz.top);
+      if (top + h > vh - 8) h = vh - 8 - top;
+      fs.style.left = left + 'px'; fs.style.top = top + 'px';
+      fs.style.width = w + 'px'; fs.style.height = h + 'px';
+    });
+    document.addEventListener('mouseup', function () {
+      if (!rz) return;
+      rz = null; fs.classList.remove('aig-resizing');
       if (fs.classList.contains('aig-dock-docked')) _aigSaveDockRect(fs);
+      try { if (window._aigFit) window._aigFit(); } catch (e) { /* ignore */ }
     });
   }
 

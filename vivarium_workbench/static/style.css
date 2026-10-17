@@ -4489,6 +4489,21 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 #investigation-detail-view.inv-study-open > * { display: none !important; }
 #investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block !important; }
 
+/* Collapsible "Investigation overview" (inline view, NO study open): the prose
+   blocks (#investigation-intro + #investigation-decision-cockpit) are hidden by
+   default behind #inv-overview-toggle so the graph renders prominently + top-
+   aligned right after the title + toggle. The study-open state hides everything
+   but the graph anyway (rule above), so this only governs the inline view. */
+#inv-overview-toggle {
+  display: inline-flex; align-items: center; gap: 6px; margin: 2px 0 10px;
+  border: 1px solid var(--border, #e2e8f0); background: var(--surface-2, #f8fafc);
+  color: #475569; font-weight: 600; font-size: 0.86em; padding: 5px 12px;
+  border-radius: 8px; cursor: pointer;
+}
+#inv-overview-toggle:hover { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+#investigation-detail-view.inv-overview-collapsed > #investigation-intro,
+#investigation-detail-view.inv-overview-collapsed > #investigation-decision-cockpit { display: none; }
+
 /* ── Dockable investigation graph (while a study is embedded) ──
    The graph region (#investigation-dag-fs) becomes a position:fixed floating
    panel; the #aig-dock-ctl control switches collapsed ⇄ docked (and ⛶ exits the
@@ -4506,9 +4521,26 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   transition: width .18s ease, height .18s ease, top .18s ease, right .18s ease, left .18s ease, box-shadow .18s ease;
 }
 @media (prefers-reduced-motion: reduce) { #investigation-dag-fs.aig-dock { transition: none; } }
-#investigation-dag-fs.aig-dock.aig-dragging { transition: none; }
+#investigation-dag-fs.aig-dock.aig-dragging,
+#investigation-dag-fs.aig-dock.aig-resizing { transition: none; }
 #investigation-dag-fs.aig-dock-collapsed { width: 320px; height: 86px; }
-#investigation-dag-fs.aig-dock-docked    { width: 400px; height: 360px; min-width: 260px; min-height: 160px; resize: both; }
+/* Docked default size — NO !important, so the inline width/height the JS resize
+   writes wins over it. Custom corner grips (.aig-dock-grip) do the resizing. */
+#investigation-dag-fs.aig-dock-docked { width: 400px; height: 360px; }
+/* Resize grips — only in the docked state, above the graph shell so they get the
+   pointer. */
+.aig-dock-grip { display: none; position: absolute; width: 18px; height: 18px; z-index: 10; }
+#investigation-dag-fs.aig-dock-docked .aig-dock-grip { display: block; }
+.aig-dock-grip[data-grip="se"] { right: 0; bottom: 0; cursor: nwse-resize; }
+.aig-dock-grip[data-grip="sw"] { left: 0; bottom: 0; cursor: nesw-resize; }
+.aig-dock-grip[data-grip="se"]::after {
+  content: ''; position: absolute; right: 3px; bottom: 3px; width: 9px; height: 9px;
+  border-right: 2px solid #94a3b8; border-bottom: 2px solid #94a3b8;
+}
+.aig-dock-grip[data-grip="sw"]::after {
+  content: ''; position: absolute; left: 3px; bottom: 3px; width: 9px; height: 9px;
+  border-left: 2px solid #94a3b8; border-bottom: 2px solid #94a3b8;
+}
 /* Compact the lead + toolbar + shell inside the floating panel. The header is
    the drag handle in the docked state. */
 #investigation-dag-fs.aig-dock #investigation-dag-lead {

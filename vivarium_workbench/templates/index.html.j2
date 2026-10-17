@@ -1541,6 +1541,14 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          header. Populated by JS from /api/needs-attention; renders nothing when empty. -->
     <div id="investigation-needs-attention"></div>
 
+    {# Collapsible "Investigation overview": when NO study is open, the prose
+       blocks below (#investigation-intro + #investigation-decision-cockpit) are
+       hidden behind this toggle and DEFAULT COLLAPSED, so the graph renders
+       prominently right after it (title · ▸ Investigation overview · graph).
+       Toggled by _toggleInvOverview (walkthrough.js); state persisted. Hidden
+       itself while a study is open (.inv-study-open hides everything but graph). #}
+    <button type="button" id="inv-overview-toggle" class="inv-overview-toggle"
+            aria-expanded="false" onclick="window._toggleInvOverview()">▸ Investigation overview</button>
     <div id="investigation-intro" class="inv-intro" style="margin: 0 0 16px 0;">
       <!-- Inquiry brief: the question as headline → verdict answers it as a
            colored status line → thin meta row → one flat level of tabs
@@ -1656,6 +1664,11 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <svg id="investigation-dag-edges" style="position:absolute; top:0; left:0; pointer-events:none;"></svg>
       <div id="investigation-dag-nodes" style="position:relative; top:0; left:0;"></div>
     </div>
+    {# Resize grips for the DOCKED floating window (shown only in the docked state;
+       wired by _aigWireDockResize). Custom JS resize — CSS `resize` was unreliable
+       on this fixed, transitioned panel and was covered by the shell. #}
+    <div class="aig-dock-grip" data-grip="se" aria-hidden="true"></div>
+    <div class="aig-dock-grip" data-grip="sw" aria-hidden="true"></div>
     </div><!-- /#investigation-dag-fs -->
 
     <div id="investigation-detail-drawer" style="display:none; position:fixed; top:96px; right:16px; width:360px; max-height:78vh; overflow:auto; background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.12); padding:14px 16px; z-index:50; font-size:0.92em">

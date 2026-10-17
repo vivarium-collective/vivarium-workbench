@@ -99,9 +99,10 @@ def test_dockable_graph_and_graph_bar_navigator():
     # Full graph controls are present in the toolbar (reused in the docked panel).
     assert 'id="aig-detail-group"' in TPL and 'id="aig-width-group"' in TPL and 'id="aig-zoom-group"' in TPL
 
-    # JS: the dock-state + drag + exit functions exist + are exported.
+    # JS: the dock-state + drag + resize + exit functions exist + are exported.
     for fn in ["_renderGraphBarNav", "_aigSetDockState", "_applyDockState",
-               "_aigExitToGraph", "_aigWireDockDrag", "_aigApplyDockRect", "_aigSaveDockRect"]:
+               "_aigExitToGraph", "_aigWireDockDrag", "_aigWireDockResize",
+               "_aigApplyDockRect", "_aigSaveDockRect"]:
         assert "function %s" % fn in JS, fn
     assert "window._aigSetDockState" in JS
     assert "window._aigExitToGraph" in JS
@@ -166,7 +167,12 @@ def test_floating_graph_hides_prose_when_study_open():
     for state in ("aig-dock-collapsed", "aig-dock-docked"):
         assert "#investigation-dag-fs.%s" % state in css
     assert "aig-dock-expanded" not in css          # expanded dock state removed
-    assert "resize: both" in css                   # docked window is resizable
+    # Resize is now custom JS corner grips (CSS `resize` was unreliable here).
+    assert "resize: both" not in css
+    assert ".aig-dock-grip" in css
+    assert ".aig-resizing" in css
+    assert 'class="aig-dock-grip" data-grip="se"' in TPL
+    assert 'class="aig-dock-grip" data-grip="sw"' in TPL
     # The retired sticky-strip CSS (sticky pane + 200px shell cap) is gone.
     assert "ws-context-sticky" not in css
     assert "height: 200px !important" not in css
@@ -178,6 +184,44 @@ def test_floating_graph_hides_prose_when_study_open():
     assert 'id="investigation-intro"' in detail
     assert 'id="investigation-decision-cockpit"' in detail
     assert 'id="investigation-dag-fs"' in detail
+
+
+def test_investigation_overview_collapsed_by_default_graph_prominent():
+    """Inline investigation view (no study open): the prose is collapsed by
+    default behind a "▸ Investigation overview" toggle, and the graph renders
+    prominently right after the title + toggle (title · toggle · graph)."""
+    # Template: the toggle sits BEFORE the prose and the graph (so collapsed
+    # shows title · toggle · graph); it's a direct child of the detail view.
+    assert 'id="inv-overview-toggle"' in TPL
+    assert "_toggleInvOverview()" in TPL
+    dv = TPL.index('id="investigation-detail-view"')
+    dv_end = TPL.index('<!-- /#investigation-dag-fs -->', dv)
+    detail = TPL[dv:dv_end]
+    # ordering: toggle before the prose (#investigation-intro) which is before the graph.
+    assert detail.index('id="inv-overview-toggle"') < detail.index('id="investigation-intro"')
+    assert detail.index('id="investigation-intro"') < detail.index('id="investigation-dag-fs"')
+
+    # CSS: collapsed hides the prose blocks (intro + decision cockpit).
+    css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
+    assert "#investigation-detail-view.inv-overview-collapsed > #investigation-intro" in css
+    assert "#investigation-detail-view.inv-overview-collapsed > #investigation-decision-cockpit" in css
+
+    # JS: default collapsed (unset -> collapsed) + applied on investigation render
+    # and on exit-to-graph.
+    assert "function _invOverviewCollapsed" in JS
+    assert "function _applyInvOverviewState" in JS
+    oc = JS[JS.index("function _invOverviewCollapsed"): JS.index("function _applyInvOverviewState")]
+    assert "v === null ? true" in oc            # default collapsed when unset
+    assert "inv-overview-collapsed" in oc
+
+    def _fn_body(name):
+        i = JS.index("function %s" % name)
+        j = JS.find("\n  function ", i + 1)
+        return JS[i:j] if j != -1 else JS[i:]
+    # Landing graph-prominent: the detail render + the exit-to-graph reset both
+    # apply the collapsed overview state.
+    assert "_applyInvOverviewState()" in _fn_body("_renderInvestigationDetailInto")
+    assert "_applyInvOverviewState()" in _fn_body("_wsResetStudyTabs")
 
 
 def test_embedded_study_hides_in_iframe_header_nav():
