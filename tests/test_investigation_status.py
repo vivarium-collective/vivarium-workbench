@@ -19,6 +19,27 @@ def test_compute_investigation_status_rules():
     assert c(["planning"], has_runs=[True]) == "in_progress"
 
 
+def test_gate_refuted_study_is_not_a_failure(tmp_path):
+    """A study that RAN and was evaluated but whose pre-registered gate was not
+    met (gate_status == failed, i.e. the hypothesis was refuted) is a valid
+    negative result, not an execution failure. Its rolled-up display status must
+    be a done state ("evaluated"), never "failed" — so one refuted study can't
+    flip the whole investigation to "Failed". The refutation is still carried by
+    the study's verdict, separately (two-axis execution × verdict)."""
+    refuted = {
+        "name": "og-x", "status": "ran", "simulation_status": "ran",
+        "evaluation_status": "evaluated", "gate_status": "failed",
+        "verdict": "refuted",
+    }
+    assert inv._study_display_status(tmp_path, "og-x", refuted) == "evaluated"
+    # A genuine execution failure (no gate verdict, the sim failed) still reads
+    # "failed" and still fails the investigation roll-up.
+    broke = {"name": "og-y", "simulation_status": "failed"}
+    assert inv._study_display_status(tmp_path, "og-y", broke) == "failed"
+    # Roll-up: a refuted study alongside passed ones is complete, not failed.
+    assert inv.compute_investigation_status(["passed", "evaluated"]) == "complete"
+
+
 def _make_ws(tmp_path):
     """A minimal workspace: one investigation referencing one study."""
     (tmp_path / "investigations" / "inv-a").mkdir(parents=True)

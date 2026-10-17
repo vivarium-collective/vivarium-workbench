@@ -34,6 +34,11 @@ _STUDY_STATUS_COMPLETE = frozenset({"complete", "ran", "passed"})
 _STUDY_STATUS_DONE_ROLLUP = _STUDY_STATUS_COMPLETE | frozenset({"evaluated", "decided"})
 _STUDY_STATUS_RUNNING = frozenset({"running", "implementing", "runnable", "analyzing"})
 _STUDY_STATUS_PLANNED = frozenset({"planned", "planning"})
+# `gate_status` is an evaluation VERDICT axis, not an execution axis. These values
+# mean the study RAN and was EVALUATED and its pre-registered gate was NOT met —
+# i.e. the hypothesis was refuted. That is a valid negative result, NOT a run
+# failure, so it must not roll a study (or its investigation) up to "failed".
+_GATE_VERDICT_REFUTED = frozenset({"failed", "failed_evaluation", "refuted"})
 
 # Multi-axis status truth, most-downstream first. The legacy top-level ``status``
 # field is deprecated (and often stale — e.g. a leftover ``status: running`` from
@@ -94,13 +99,25 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
         return "running"
 
     status = None
+    chosen_axis = None
     for axis in _MULTI_AXIS_PRECEDENCE:
         v = spec.get(axis)
         if v:
             status = str(v).strip()
+            chosen_axis = axis
             break
     if not status:
         status = str(spec.get("status") or "planning").strip()
+
+    # A refuted/failed GATE verdict is an evaluation outcome, not an execution
+    # failure: the study ran and was evaluated. Report it as "evaluated" (a done
+    # state) so a refuted hypothesis never makes the study — or, via the roll-up,
+    # its whole investigation — read "failed". The refutation is still surfaced
+    # separately as the study's verdict (the two-axis execution × verdict model).
+    # Genuine failures come from the execution axes (e.g. simulation_status) or an
+    # explicit invalid/error status, which are left untouched.
+    if chosen_axis == "gate_status" and status.lower() in _GATE_VERDICT_REFUTED:
+        status = "evaluated"
 
     if status.lower() in _STUDY_STATUS_RUNNING:
         # No live run → a running-ish headline is stale. Demote to the first
