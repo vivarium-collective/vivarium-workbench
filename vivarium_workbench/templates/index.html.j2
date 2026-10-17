@@ -198,6 +198,23 @@ html:not([data-ws-boot]) #viv-boot-overlay { display: none; }
   vertical-align: middle;
 }
 .btn-mini:hover { background: #bbdefb; }
+/* Study-header download buttons (↓ figures / ↓ notebook): quiet neutral ghost
+   so they read as secondary utilities next to the blue action buttons, grouped
+   tight. */
+.study-dl { display: inline-flex; gap: 4px; }
+.study-dl-btn { background: #fff; border-color: #d1d5db; color: #475569; margin-left: 0; }
+.study-dl-btn:hover { background: #f1f5f9; }
+/* Study navigator (← prev · ⇄ jump · next →): compact segmented group. */
+.study-nav { display: inline-flex; align-items: center; gap: 2px; }
+.study-nav-btn { margin-left: 0; background: #fff; border-color: #d1d5db; color: #334155; }
+.study-nav-btn:hover { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+.study-nav-btn[disabled] { opacity: 0.4; cursor: default; }
+.study-jump-item { display: block; width: 100%; text-align: left; border: none; background: transparent;
+  padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 0.86em; color: #334155; }
+.study-jump-item:hover { background: #eef2ff; }
+.study-jump-item.current { font-weight: 700; color: #1d4ed8; }
+.study-jump-group { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #94a3b8; font-weight: 700; padding: 7px 10px 2px; }
 .section-header {
   margin: 28px 0 6px 0;
   padding-bottom: 6px;

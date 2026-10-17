@@ -1338,7 +1338,7 @@
     // mechanisms/methods at the top of the Model tab, so a study with no built
     // composite yet still shows its planned model/interface. Idempotent slot.
     var _pdSpec = window._study || {};
-    var _pdHtml = _pdContractHtml(_pdSpec.contract, '§ Contract — declared interface (planned)') +
+    var _pdHtml = _pdContractHtml(_pdSpec.contract, 'Typed interface — ports, units, bounds + conservation predicates') +
                   _pdListHtml('Proposed mechanisms', _pdSpec.proposed_mechanisms) +
                   _pdListHtml('Proposed models & methods', _pdSpec.proposed_models_methods);
     var _pdSlotEl = _pdSlot(document.getElementById('panel-compose'), 'model-planned-design');
@@ -3063,65 +3063,90 @@
   // AND standalone (opened from the Studies sidebar) — where it computes "next"
   // from the investigation itself and navigates directly. Hidden only on a
   // genuinely terminal study or outside any investigation.
-  (function _wireNextStudy() {
-    var btn = document.getElementById('study-next');
-    if (!btn) return;
+  // Study navigator: ← prev / next → along the investigation chain, plus a
+  // "⇄ Studies" jump menu to ANY study (grouped: this study's parents it builds
+  // on, what it leads to, and all). Prev/next prefer the typed DAG edges
+  // (parent_studies) and fall back to declared order. Works standalone (full
+  // page nav) and embedded in the graph view (opens a tab in the parent).
+  (function _wireStudyNav() {
+    var nav = document.getElementById('study-nav');
+    if (!nav) return;
+    var prevBtn = document.getElementById('study-prev');
+    var nextBtn = document.getElementById('study-next');
+    var jumpBtn = document.getElementById('study-jump-btn');
+    var jumpMenu = document.getElementById('study-jump-menu');
     var current = studyName();
-    function show(next, go) {
-      btn.style.display = '';
-      btn.textContent = 'Next study →';
-      btn.title = 'Go to "' + next + '" — the next study in this investigation';
-      btn.onclick = go;
+    var base = (window.__BASE_PATH__ || '');
+
+    function _go(slug) {
+      if (!slug) return;
+      try {
+        var p = window.parent;
+        if (p && p !== window && typeof p._openStudyEmbeddedNewTab === 'function') {
+          p._openStudyEmbeddedNewTab(slug); return;
+        }
+      } catch (e) { /* fall through to standalone */ }
+      window.location = base + '/studies/' + encodeURIComponent(slug);
     }
 
-    // 1) Embedded in the investigation graph view — delegate to the parent.
-    try {
-      var p = window.parent;
-      if (p && p !== window && typeof p._nextStudySlug === 'function') {
-        var pn = p._nextStudySlug(current);
-        if (pn) {
-          show(pn, function () {
-            try { window.parent._openStudyEmbeddedNewTab(pn); } catch (e) { /* no-op */ }
-          });
-        } else {
-          btn.style.display = 'none';  // terminal within the graph view
-        }
-        return;
-      }
-    } catch (e) { /* fall through to standalone */ }
+    var inv = nav.getAttribute('data-investigation') || (window._study && window._study.investigation);
+    if (!inv) { nav.style.display = 'none'; return; }
 
-    // 2) Standalone study page — compute "next" from the investigation. The
-    //    investigation slug is stamped on the button server-side (data-investigation)
-    //    so it's available synchronously, before the async study spec loads.
-    var inv = btn.getAttribute('data-investigation') || (window._study && window._study.investigation);
-    if (!inv) { btn.style.display = 'none'; return; }
-    var base = (window.__BASE_PATH__ || '');
     fetch(base + '/api/investigation/' + encodeURIComponent(inv))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
-        if (!d) { btn.style.display = 'none'; return; }
+        if (!d) { nav.style.display = 'none'; return; }
         var studies = d.studies || d.members || [];
-        var slug = function (s) { return (typeof s === 'string') ? s : (s && (s.name || s.slug || s.study)); };
-        var next = null;
-        // Prefer a leads-to child: a study whose parent_studies lists current.
-        for (var i = 0; i < studies.length && !next; i++) {
-          var parents = (studies[i] && studies[i].parent_studies) || [];
-          for (var j = 0; j < parents.length; j++) {
-            var pk = parents[j];
-            var pname = (pk && typeof pk === 'object') ? (pk.study || pk.name || pk.slug) : pk;
-            if (String(pname).trim() === current) { next = slug(studies[i]); break; }
+        var nameOf = function (s) { return (typeof s === 'string') ? s : (s && (s.name || s.slug || s.study)); };
+        var titleOf = function (s) { return (s && typeof s === 'object' && s.title) ? s.title : nameOf(s); };
+        var order = studies.map(nameOf).filter(Boolean);
+        if (!order.length) { nav.style.display = 'none'; return; }
+        var byName = {}; studies.forEach(function (s) { var n = nameOf(s); if (n) byName[n] = s; });
+        var parentsOf = function (n) {
+          var s = byName[n]; var ps = (s && s.parent_studies) || [];
+          return ps.map(function (pk) { return (pk && typeof pk === 'object') ? (pk.study || pk.name || pk.slug) : pk; }).filter(Boolean);
+        };
+        var curParents = parentsOf(current).filter(function (n) { return byName[n]; });
+        var curChildren = order.filter(function (n) { return parentsOf(n).indexOf(current) >= 0; });
+        var idx = order.indexOf(current);
+        var prev = (idx > 0) ? order[idx - 1] : (curParents[0] || null);
+        var next = curChildren[0] || ((idx >= 0 && idx < order.length - 1) ? order[idx + 1] : null);
+
+        nav.style.display = 'inline-flex';
+        if (prev) { prevBtn.disabled = false; prevBtn.title = 'Previous: ' + prev; prevBtn.onclick = function () { _go(prev); }; }
+        else { prevBtn.disabled = true; prevBtn.title = 'No previous study'; }
+        if (next) { nextBtn.disabled = false; nextBtn.title = 'Next: ' + next; nextBtn.onclick = function () { _go(next); }; }
+        else { nextBtn.disabled = true; nextBtn.title = 'No next study'; }
+
+        function _item(n) {
+          return '<button type="button" class="study-jump-item' + (n === current ? ' current' : '')
+            + '" data-slug="' + _esc(n) + '">' + _esc(titleOf(byName[n]) || n) + '</button>';
+        }
+        var html = '';
+        if (curParents.length) html += '<div class="study-jump-group">Builds on</div>' + curParents.map(_item).join('');
+        if (curChildren.length) html += '<div class="study-jump-group">Leads to</div>' + curChildren.map(_item).join('');
+        html += '<div class="study-jump-group">All studies</div>' + order.map(_item).join('');
+        jumpMenu.innerHTML = html;
+        jumpMenu.querySelectorAll('.study-jump-item').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var slug = b.getAttribute('data-slug');
+            jumpMenu.style.display = 'none'; jumpBtn.setAttribute('aria-expanded', 'false');
+            if (slug && slug !== current) _go(slug);
+          });
+        });
+        jumpBtn.onclick = function (ev) {
+          ev.stopPropagation();
+          var open = jumpMenu.style.display !== 'none' && jumpMenu.style.display !== '';
+          jumpMenu.style.display = open ? 'none' : 'block';
+          jumpBtn.setAttribute('aria-expanded', open ? 'false' : 'true');
+        };
+        document.addEventListener('click', function (e) {
+          if (!e.target.closest || !e.target.closest('.study-jump-wrap')) {
+            jumpMenu.style.display = 'none'; jumpBtn.setAttribute('aria-expanded', 'false');
           }
-        }
-        // Fallback: the next study in the investigation's declared order.
-        if (!next) {
-          var order = studies.map(slug).filter(Boolean);
-          var idx = order.indexOf(current);
-          if (idx >= 0 && idx < order.length - 1) next = order[idx + 1];
-        }
-        if (!next) { btn.style.display = 'none'; return; }
-        show(next, function () { window.location = base + '/studies/' + encodeURIComponent(next); });
+        }, true);
       })
-      .catch(function () { btn.style.display = 'none'; });
+      .catch(function () { nav.style.display = 'none'; });
   })();
 
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.

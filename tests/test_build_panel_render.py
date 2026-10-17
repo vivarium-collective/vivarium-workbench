@@ -18,14 +18,14 @@ def test_assurance_subtitles_reframed():
     # narrative framing per tab; the old "Audit — does this study pass its own bar"
     # collision on the Tests panel is gone.
     tests_panel = TPL[TPL.index('id="panel-tests"'):TPL.index('id="panel-audit"')]
-    assert "The bar." in tests_panel
+    assert "The bar" in tests_panel
     assert "does this study pass its own bar" not in tests_panel      # collision removed
     audit_panel = TPL[TPL.index('id="panel-audit"'):TPL.index('id="panel-build"')]
     assert "Is the bar sound?" in audit_panel
     build_panel = TPL[TPL.index('id="panel-build"'):]
-    # Intro reframed to "How the model was built."; the "was it earned?" verdict
+    # Intro reframed to "How the model was built"; the "was it earned?" verdict
     # framing now lives in the rendered present-state panel (JS _buildPanelHtml).
-    assert "How the model was built." in build_panel
+    assert "How the model was built" in build_panel
     assert "Was it earned?" in JS
 
 
