@@ -20,93 +20,14 @@ from investigation_contracts import validate_chain
 # report-card verdicts (mirrors report_views._PRE_EVAL_STATUSES).
 _PRE_EVAL_STATUSES = frozenset({"build", "planned", "implementation", "design", "pending", ""})
 
-# ── Two-axis ontology derivation (execution_status × verdict) + edge typing ──
-# Canonical study fields (viva-template study.schema.json): execution_status ∈
-# {proposed,planned,running,completed,failed}; verdict ∈ {supported,qualified,
-# inconclusive,refuted}; edge relation ∈ {builds-on,tests,motivates,alternative-to}.
-# All optional — derived here from the legacy fields when absent so studies that
-# predate the ontology still render. Authored values always win.
-_EXEC_VALUES = frozenset({"proposed", "planned", "running", "completed", "failed"})
-_VERDICT_ALIASES = {
-    "supported": "supported", "qualified": "qualified",
-    "inconclusive": "inconclusive", "refuted": "refuted",
-    "honest-negative": "refuted", "honest_negative": "refuted",  # folded per ontology decision
-    "mixed": "inconclusive",
-}
-_REL_ALIASES = {
-    "builds-on": "builds-on", "builds on": "builds-on",
-    "leads-to": "builds-on", "leads to": "builds-on",
-    "model-input": "builds-on", "model input": "builds-on",
-    "evidence": "builds-on", "calibrates-threshold": "builds-on", "regulatory": "builds-on",
-    "tests": "tests", "refutes": "tests", "refutes-alternative": "tests",
-    "motivates": "motivates", "precedes": "motivates",
-    "alternative-to": "alternative-to", "alternative": "alternative-to",
-}
-
-
-def _canon_relation(rel):
-    """Map any legacy/alias edge relation to one of the four canonical types."""
-    if not rel:
-        return None
-    return _REL_ALIASES.get(str(rel).strip().lower(), "builds-on")
-
-
-def _derive_execution_status(spec: dict, node_status: str) -> str:
-    """Execution axis (what happened), independent of the scientific verdict."""
-    ex = str(spec.get("execution_status") or "").strip().lower()
-    if ex in _EXEC_VALUES:
-        return ex
-    sim = str(spec.get("simulation_status") or "").strip().lower()
-    evalst = str(spec.get("evaluation_status") or "").strip().lower()
-    gate = str(spec.get("gate_status") or "").strip().lower()
-    life = str(spec.get("status") or "").strip().lower()
-    if sim == "failed" or life in ("invalid", "failed"):
-        return "failed"
-    if gate in ("passed", "failed", "needs_calibration", "stale"):
-        return "completed"  # a gate reached a verdict ⇒ the study ran
-    if sim == "ran" and evalst in ("evaluated", "failed_evaluation"):
-        return "completed"
-    if str(node_status).strip().lower() == "evaluated":
-        return "completed"
-    if life in ("ran", "complete", "completed", "decided"):
-        return "completed"
-    if sim == "running" or life in ("running", "analyzing", "in_progress"):
-        return "running"
-    if life == "planned":
-        return "proposed" if spec.get("proposed") is True else "planned"
-    conf = str(spec.get("confidence") or "").strip().lower()
-    if conf == "accepted":
-        return "completed"
-    if conf == "investigating":
-        return "running"
-    if conf == "planned":
-        return "planned"
-    if spec.get("proposed") is True:
-        return "proposed"
-    return "planned"
-
-
-def _derive_verdict(spec: dict):
-    """Scientific verdict axis (what the evidence supports). Authored wins; else
-    parse the free-text report.verdict / study_card.status. Returns None when
-    nothing supports a verdict (e.g. not yet completed)."""
-    v = str(spec.get("verdict") or "").strip().lower()
-    if v in _VERDICT_ALIASES:
-        return _VERDICT_ALIASES[v]
-    rep = spec.get("report") if isinstance(spec.get("report"), dict) else {}
-    card = spec.get("study_card") if isinstance(spec.get("study_card"), dict) else {}
-    text = str(rep.get("verdict") or card.get("status") or "").strip().lower()
-    if not text:
-        return None
-    if "refut" in text or "contradict" in text or text.startswith("fail") or " fail" in text:
-        return "refuted"
-    if "inconclusive" in text or "mixed" in text or "unresolved" in text:
-        return "inconclusive"
-    if "caveat" in text or "qualified" in text or "warn" in text:
-        return "qualified"
-    if "pass" in text or "support" in text or "reproduc" in text:
-        return "supported"
-    return None
+# Two-axis ontology derivation (execution_status × verdict) + edge-relation
+# typing live in the shared study_ontology module so this graph builder and the
+# study-card detail serializer (report_views) can never drift.
+from vivarium_workbench.lib.study_ontology import (  # noqa: E402
+    canon_relation as _canon_relation,
+    derive_execution_status as _derive_execution_status,
+    derive_verdict as _derive_verdict,
+)
 
 
 def _label(node: dict) -> str:

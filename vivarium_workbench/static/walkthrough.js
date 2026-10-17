@@ -10742,9 +10742,9 @@
   // not a direction). Legacy relations are alias-mapped in _dagRelStyle.
   var _DAG_REL_STYLE = {
     'builds-on':      { color: '#2563eb', dash: null,  label: 'builds on',      arrow: true },
-    'tests':          { color: '#6366f1', dash: null,  label: 'tests',          arrow: true },
-    'motivates':      { color: '#94a3b8', dash: '5 3', label: 'motivates',      arrow: true },
-    'alternative-to': { color: '#64748b', dash: '2 3', label: 'alternative to', arrow: false },
+    'tests':          { color: '#9333ea', dash: '7 3', label: 'tests',          arrow: true },
+    'motivates':      { color: '#d97706', dash: '2 4', label: 'motivates',      arrow: true },
+    'alternative-to': { color: '#64748b', dash: '1 4', label: 'alternative to', arrow: false },
   };
   var _DAG_REL_ALIASES = {
     'leads-to': 'builds-on', 'leads to': 'builds-on',
