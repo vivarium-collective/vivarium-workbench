@@ -1695,6 +1695,33 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 {# ─── Decide tab (Decision): verdict + plan & assumptions + evidence rollup ── #}
 <section class="study-tab-panel" data-kind="conclusions" id="panel-conclusions" hidden>
 
+  {# ── Plan & lifecycle stepper ─────────────────────────────────────────────
+     The study's position along its lifecycle plan — Plan → Execution → Evidence
+     → Quality → Decision → Release → Implementation — with "you are here" on the
+     active gate. Server-rendered from gate_ladder (build_gate_ladder: the six
+     gates relabeled from the design/simulation/evaluation/gate/review axes), each
+     dot colored by its worst (authored-vs-computed) state. This is the plan view
+     the Decide tab leads with; the full per-axis rows live in the Audit tab. #}
+  {% if gate_ladder %}
+  {% set _all_done = (gate_ladder | selectattr('current') | list | length) == 0 %}
+  <div class="overview-section decide-lifecycle">
+    <h2 class="overview-label">Plan &amp; lifecycle</h2>
+    <div class="status-stepper">
+      {% for g in gate_ladder %}
+      <span class="status-step {% if g.state in ['passed','waived'] %}set{% endif %} gate-status-{{ g.state }}{% if g.current %} gate-current{% endif %}">
+        <span class="dot"></span>{{ g.number }} · {{ g.name }}
+        {% if g.authored_value %}<span class="step-val">{{ g.authored_value }}</span>{% endif %}
+        {% if g.current %}<span class="gate-current-tag">you are here</span>{% endif %}
+      </span>
+      {% endfor %}
+      {# Terminal: when every gate is done the study is released → implementation. #}
+      <span class="status-step {% if _all_done %}set{% endif %}">
+        <span class="dot"></span>Implementation{% if _all_done %} <span class="step-val">complete</span>{% endif %}
+      </span>
+    </div>
+  </div>
+  {% endif %}
+
   {# v4 narrative-spine: conclusion_verdicts is a 3-track verdict block
      the dnaa investigation evolved — regression_compatibility (does code
      still build cleanly?), biological_validation (does it match
