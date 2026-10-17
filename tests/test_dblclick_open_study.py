@@ -8,10 +8,12 @@ def test_dag_node_click_expands_and_opens_via_button():
     opened from the node's inline "open" button, which stops propagation so the
     open click doesn't also toggle the node. Still no double-click handler and
     no quick-look side-card drawer (both removed)."""
-    # node click toggles expand/collapse
-    assert "node.onclick = _toggleExpand" in JS
-    # the full study is opened from the inline button, guarded against bubbling
-    # up to the node's expand toggle
+    # node click toggles expand/collapse at higher detail, and opens the study
+    # directly at the lowest detail (names-only, band 0) where expand is useless.
+    assert "node.onclick = _namesOnly" in JS
+    assert "_toggleExpand" in JS
+    # the full study is opened from the inline ↗ button (higher detail) / the whole
+    # card (band 0), guarded against bubbling up to the node's expand toggle
     assert "event.stopPropagation(); _openStudyInsideInvestigation(" in JS
     # no double-click handler
     assert "node.ondblclick" not in JS
