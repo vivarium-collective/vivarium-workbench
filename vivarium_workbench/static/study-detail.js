@@ -4024,7 +4024,6 @@
 
   function _loadAudit(spec) {
     _renderAuditReadiness(spec);
-    _loadDeclaredContract(spec);
     _loadAuditSufficiency(spec);
     _loadQualityChecks(spec);
     _loadReproducibilityChecks(spec);
@@ -4032,16 +4031,8 @@
   }
   window._loadAudit = _loadAudit;
 
-  // Declared contract (§Contract) — the study's PLANNED typed interface +
-  // conservation predicates, rendered at the top of the Audit tab so it is
-  // populated at Design time (before any live-run audit exists). Connects the
-  // planning contract to the audit surface.
-  function _loadDeclaredContract(spec) {
-    var slot = _pdSlot(document.getElementById('panel-audit'), 'audit-declared-contract');
-    if (!slot) return;
-    var contract = ((spec || window._study || {}) || {}).contract;
-    slot.innerHTML = _pdContractHtml(contract, 'Typed interface — ports, units, bounds + conservation predicates');
-  }
+  // (The typed-interface contract table used to render here too; it was a
+  // duplicate of the Model tab's and now lives in Model only.)
 
   // ── Build tab (Assurance) — model-build loop provenance ──────────────────
   // GET /api/study-loop-state?study=<slug> → viva_superpowers.loop_state

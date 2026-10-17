@@ -1,7 +1,7 @@
 // tests/js/test_study_contract_display.js — run: node tests/js/test_study_contract_display.js
 // The study page renders a Design-phase study's PLANNED design across the right
-// tabs (Model: contract + mechanisms + methods; Audit: declared contract;
-// Overview: expert_questions), and the investigation page renders
+// tabs (Model: contract + mechanisms + methods — the single home for the typed
+// interface; Overview: expert_questions), and the investigation page renders
 // competing_frameworks. The render fns live inside IIFEs (not exported), so
 // assert the wiring in source — same approach as test_process_card_contract.js.
 const assert = require('assert');
@@ -27,10 +27,10 @@ assert.ok(sd.includes("_pdListHtml('Proposed models & methods', _pdSpec.proposed
 assert.ok(sd.indexOf("'model-planned-design'") < sd.indexOf('No composite declared for this study yet'),
   'planned design renders even when no composite is declared');
 
-// --- AUDIT tab: declared contract ---
-assert.ok(sd.includes('function _loadDeclaredContract'), 'Audit declared-contract renderer present');
-assert.ok(sd.includes('_loadDeclaredContract(spec);'), '_loadAudit calls _loadDeclaredContract');
-assert.ok(sd.includes("'audit-declared-contract'"), 'Audit tab has a declared-contract slot');
+// --- AUDIT tab: the contract table was removed (it duplicated Model's and now
+//     lives in Model only). ---
+assert.ok(!sd.includes('_loadDeclaredContract(spec);'), '_loadAudit no longer renders the duplicate contract');
+assert.ok(!sd.includes("'audit-declared-contract'"), 'Audit contract slot removed');
 
 // --- OVERVIEW tab: expert_questions ---
 assert.ok(sd.includes('function _renderPlanningOverview'), 'Overview expert-questions renderer present');
