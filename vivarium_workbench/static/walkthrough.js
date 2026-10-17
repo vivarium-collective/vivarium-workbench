@@ -10857,7 +10857,7 @@
     var w = Math.max(260, Math.min(rect.width || 400, vw - 24));
     var h = Math.max(140, Math.min(rect.height || 360, vh - 80));
     var left = Math.max(8, Math.min(rect.left, vw - w - 8));
-    var top = Math.max(56, Math.min(rect.top, vh - h - 8));
+    var top = Math.max(8, Math.min(rect.top, vh - h - 8));
     fs.style.right = 'auto';
     fs.style.left = left + 'px'; fs.style.top = top + 'px';
     fs.style.width = w + 'px'; fs.style.height = h + 'px';
@@ -10998,7 +10998,7 @@
       var vw = window.innerWidth, vh = window.innerHeight;
       // Clamp the DESTINATION (base + delta) to the viewport, express as a delta.
       var destLeft = Math.max(8, Math.min(drag.left + (e.clientX - drag.sx), vw - drag.w - 8));
-      var destTop = Math.max(56, Math.min(drag.top + (e.clientY - drag.sy), vh - drag.h - 8));
+      var destTop = Math.max(8, Math.min(drag.top + (e.clientY - drag.sy), vh - drag.h - 8));
       pending = { x: destLeft - drag.left, y: destTop - drag.top };
       if (!raf) raf = requestAnimationFrame(flush);
     });

@@ -4525,7 +4525,7 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
    dragging also disables it, via .aig-dragging). The docked panel is draggable
    by its header and resizable by the corner grip; its rect is remembered. */
 #investigation-dag-fs.aig-dock {
-  position: fixed; z-index: 60; top: 68px; right: 16px;
+  position: fixed; z-index: 60; top: 10px; right: 10px;
   background: var(--panel, #fff);
   border: 1px solid var(--border, #e2e8f0);
   border-radius: 10px;
