@@ -9000,7 +9000,9 @@
     _wsHighlightActiveDagNode(null);
     var panel = document.getElementById('ws-study-panel');
     if (panel) panel.style.display = 'none';
-    // No study open -> drop the sticky pin + hide the graph-bar navigator.
+    // No study open -> restore the full investigation prose, drop the sticky pin
+    // + hide the graph-bar navigator.
+    _setInvProseForStudy(false);
     var _ctx = document.getElementById('ws-context');
     if (_ctx) _ctx.classList.remove('ws-context-sticky');
     var _bar = document.getElementById('ws-context-bar');
@@ -9074,6 +9076,12 @@
     _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
     // Pin the graph pane so it stays a persistent nav surface while the embedded
     // study scrolls beneath it, and surface the graph-bar study navigator.
+    // Collapse the investigation PROSE (verdict/question/description + decision
+    // cockpit + tab blocks) to GRAPH-ONLY so the sticky box is compact and the
+    // study below stays reachable — otherwise the full-height prose pins and
+    // covers the viewport (regression fix). _setInvProseForStudy(true) adds the
+    // .inv-study-open class whose CSS hides every detail-view child but the graph.
+    _setInvProseForStudy(true);
     var _ctx = document.getElementById('ws-context');
     if (_ctx) _ctx.classList.add('ws-context-sticky');
     var _bar = document.getElementById('ws-context-bar');
@@ -10819,6 +10827,18 @@
     _applyAigShellCollapsed();
   }
   window._aigToggleCollapse = _aigToggleCollapse;
+
+  // Graph-only vs full investigation detail. When a study is open, the relocated
+  // #investigation-detail-view is reduced to its graph region (#investigation-dag-fs)
+  // via the .inv-study-open class (CSS hides every other direct child) so the
+  // sticky pane is compact and the study stays reachable. Restoring removes the
+  // class — each child returns to its own inline/default display.
+  function _setInvProseForStudy(studyOpen) {
+    var view = document.getElementById('investigation-detail-view');
+    if (!view) return;
+    view.classList.toggle('inv-study-open', !!studyOpen);
+  }
+  window._setInvProseForStudy = _setInvProseForStudy;
 
   // ── Graph-bar study navigator ─────────────────────────────────────────────
   // ← prev / ⇄ jump / next → that navigates the EMBEDDED study, driven from the

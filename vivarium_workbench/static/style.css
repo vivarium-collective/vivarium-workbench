@@ -4494,6 +4494,15 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   background: var(--bg, #fafafa);
 }
 .ws-context-sticky { padding-top: 4px; box-shadow: 0 2px 0 0 rgba(0, 0, 0, 0.03); }
+/* While a study is open, the sticky pane must be GRAPH-ONLY — the investigation
+   prose (verdict / question / description / decision cockpit + tab blocks) would
+   otherwise make the sticky box full-height and push the study below the fold.
+   Hide every direct child of the relocated #investigation-detail-view except the
+   graph region (#investigation-dag-fs). Removing the class restores each child to
+   its own inline/default display (the back-link + title row keep their own
+   inline display:none set by _renderInvestigationDetailInto). */
+#investigation-detail-view.inv-study-open > * { display: none !important; }
+#investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block !important; }
 /* Graph-bar study navigator jump menu items (reuses the study-nav look). */
 .aig-study-jump-item {
   display: block; width: 100%; text-align: left; border: none; background: transparent;

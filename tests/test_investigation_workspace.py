@@ -101,6 +101,11 @@ def test_sticky_graph_pane_and_graph_bar_navigator():
     openb = _fn_body("_wsOpenStudyTab")
     assert "ws-context-sticky" in openb
     assert "_renderGraphBarNav()" in openb
+    # Regression fix: opening a study reduces the investigation detail to
+    # GRAPH-ONLY so the sticky box is compact (prose doesn't pin full-screen).
+    assert "_setInvProseForStudy(true)" in openb
+    resetb = _fn_body("_wsResetStudyTabs")
+    assert "_setInvProseForStudy(false)" in resetb
     navb = _fn_body("_renderGraphBarNav")
     assert "_openStudyEmbeddedNewTab" in navb
     assert "_lastDagArgs" in navb          # reuses the graph's data, no re-fetch
@@ -110,6 +115,31 @@ def test_sticky_graph_pane_and_graph_bar_navigator():
     togb = _fn_body("_aigToggleCollapse")
     assert "aig-shell-collapsed" in togb or "aig-shell-collapsed" in _fn_body("_aigShellCollapsed")
     assert "investigation-dag-shell" in _fn_body("_applyAigShellCollapsed")
+
+
+def test_graph_only_sticky_hides_prose_when_study_open():
+    """Regression: the sticky pane must be GRAPH-ONLY while a study is open — the
+    investigation prose is hidden so it can't pin full-screen and bury the study.
+    """
+    # Helper toggles the .inv-study-open class on the relocated detail view.
+    assert "function _setInvProseForStudy" in JS
+    i = JS.index("function _setInvProseForStudy")
+    body = JS[i: JS.index("\n  function ", i + 1)] if "\n  function " in JS[i:] else JS[i:i + 400]
+    assert "inv-study-open" in body
+    assert "investigation-detail-view" in body
+    # CSS: .inv-study-open hides every detail-view child but the graph region.
+    css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
+    assert "#investigation-detail-view.inv-study-open > * { display: none" in css
+    assert "#investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block" in css
+    # The graph region (#investigation-dag-fs) is a DIRECT child of the detail
+    # view in the template, so "hide all children but dag-fs" leaves graph-only.
+    dv = TPL.index('id="investigation-detail-view"')
+    dv_end = TPL.index('<!-- /#investigation-dag-fs -->', dv)
+    detail = TPL[dv:dv_end]
+    # the prose blocks and the graph wrapper are siblings under the detail view
+    assert 'id="investigation-intro"' in detail
+    assert 'id="investigation-decision-cockpit"' in detail
+    assert 'id="investigation-dag-fs"' in detail
 
 
 def test_embedded_study_hides_in_iframe_header_nav():
