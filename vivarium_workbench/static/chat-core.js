@@ -673,22 +673,24 @@
     return k[provider];
   }
 
-  // ── Docking (PyCharm-style: the AI chip can dock left, right or bottom) ──────────────
-  var DOCKS = ['left', 'right', 'bottom'];
+  // ── Docking (PyCharm-style: a panel can dock left, right, bottom or top) ─────────────
+  var DOCKS = ['left', 'right', 'bottom', 'top'];
   function validDock(d) { return DOCKS.indexOf(d) >= 0; }
-  // Which drop zone is the pointer over? Bottom band first, then the left/right thirds; the
-  // middle is "cancel". (Zones are shown as edge overlays while dragging.)
+  // Which drop zone is the pointer over? Bottom/top bands first, then the left/right
+  // thirds; the middle is "cancel". (Zones are shown as edge overlays while dragging.)
   function dropZone(x, y, w, h) {
     if (!(w > 0 && h > 0) || x < 0 || y < 0 || x > w || y > h) return null;
     if (y > h * 0.72) return 'bottom';
+    if (y < h * 0.20) return 'top';
     if (x < w * 0.33) return 'left';
     if (x > w * 0.67) return 'right';
     return null;
   }
-  // Panel thickness (width for left/right, height for bottom), kept usable at any window size.
+  // Panel thickness (width for left/right, height for bottom/top), kept usable at any
+  // window size.
   function clampDock(dock, size, vw, vh) {
     var n = Math.round(+size) || 0;
-    if (dock === 'bottom') return Math.max(160, Math.min(n, Math.max(160, Math.floor(vh * 0.7))));
+    if (dock === 'bottom' || dock === 'top') return Math.max(160, Math.min(n, Math.max(160, Math.floor(vh * 0.7))));
     var cap = Math.floor(vw * 0.6);                              // never more than 60% of the window...
     return Math.max(Math.min(340, cap), Math.min(n, Math.min(720, cap)));   // ...even below 340px on a phone-width window
   }

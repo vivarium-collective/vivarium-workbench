@@ -1037,6 +1037,18 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Code</span>
       </a>
+      <!-- Graph: toggles the dockable investigation-graph panel (left/right/bottom/top
+           + pop-out, via panel-dock.js / graph-panel.js), an alternative to the
+           full-page graph. Same conventions as Chat/Code: not a .menu-link, live-only. -->
+      <a href="#" id="viv-graph-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Investigation graph panel">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="12" r="2"/>
+            <path d="M7 6h4a2 2 0 0 1 2 2v0M7 18h4a2 2 0 0 0 2-2v0M13 12h4"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Graph</span>
+      </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
            #viv-workspace-switcher). Hash route #github kept for back-compat. -->
@@ -2272,6 +2284,39 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     </div>
   </aside>
 
+  <!-- Dockable investigation-graph panel. The investigation graph (the
+       #investigation-dag-fs toolbar + shell) is RELOCATED into #viv-graph-body
+       when this panel is open, and moved back inline for the full-page view.
+       Built on VivPanelDock (static/graph-panel.js) exactly like the Chat and
+       Code panels — docks left / right / bottom / top, resizes, pops out. -->
+  <aside id="viv-graph-panel" class="viv-graph-panel" aria-label="Investigation graph" hidden>
+    <div class="viv-graph-panel-inner">
+      <div class="viv-graph-resize-handle" id="viv-graph-resize-handle"
+           role="separator" aria-orientation="vertical" aria-label="Resize graph panel"
+           title="Drag to resize"></div>
+      <!-- Header doubles as the drag handle; icon controls mirror the chat/code
+           panels (same .vp-head / .vp-icon chrome) so the tool panels read as one. -->
+      <div class="viv-graph-head vp-head" title="Drag to dock left / right / bottom / top">
+        <div class="viv-graph-title"><strong>Graph</strong>
+          <span id="viv-graph-sub" class="viv-graph-sub"></span></div>
+        <span class="vp-spacer"></span>
+        <button class="vp-icon" type="button" title="Show the full-page graph instead" aria-label="Show full-page graph"
+                onclick="window.GraphPanel&&GraphPanel.toFull()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+        </button>
+        <button class="vp-icon" type="button" data-act="dock" title="Move or pop out panel" aria-label="Move or pop out panel"
+                onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+        </button>
+        <button class="vp-icon" type="button" title="Close" aria-label="Close graph panel"
+                onclick="window.GraphPanel&&GraphPanel.toggle()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="viv-graph-body" id="viv-graph-body"></div>
+    </div>
+  </aside>
+
 </div> <!-- /.viv-layout -->
 
 <!-- ============================================================ -->
@@ -2636,6 +2681,9 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/loom-embed.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* loom-embed unavailable */"></script>
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
+<!-- graph-panel.js: the dockable investigation-graph panel (VivPanelDock). Loads
+     AFTER panel-dock.js (the engine) and walkthrough.js (the DAG renderer it hosts). -->
+<script src="assets/graph-panel.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* graph panel unavailable */"></script>
 <script src="assets/mobile-nav.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile-nav unavailable */"></script>
 <script src="assets/search-palette.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* global search unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>

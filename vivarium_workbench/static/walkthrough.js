@@ -11472,6 +11472,12 @@
     } catch (e) { /* document.fonts unsupported — initial + rAF passes stand */ }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
+  // Re-run the last DAG render (same data) — used after the graph is relocated
+  // into / out of the dockable Graph panel so it re-measures + re-lays-out at the
+  // new container width. No-op if the graph hasn't been rendered yet.
+  window._reflowInvestigationDag = function () {
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+  };
 
   // ── Investigation-graph viewport: continuous zoom / pan / fit / fullscreen ──
   var aigZoom = 1;
