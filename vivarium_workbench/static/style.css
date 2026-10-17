@@ -4559,8 +4559,23 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 #investigation-dag-fs.aig-dock .aig-toolbar {
   margin: 0; border: none; border-bottom: 1px solid var(--border, #eef2f7);
   border-radius: 0; background: transparent; padding: 6px 8px;
+  /* Keep the compact docked toolbar on ONE row — otherwise the ⚙ controls
+     toggle wrapped onto a lonely second row that was awkward to use + drag. */
+  flex-wrap: nowrap; gap: 4px; align-items: center; overflow: hidden;
 }
-#investigation-dag-fs.aig-dock-docked .aig-toolbar { cursor: move; }
+/* Dedicated drag handle (shown only while docked): a clear grab target so moving
+   the panel no longer depends on finding empty toolbar space. */
+.aig-dock-handle { display: none; }
+#investigation-dag-fs.aig-dock-docked .aig-dock-handle {
+  display: inline-flex; align-items: center; align-self: stretch;
+  padding: 0 6px; margin-right: 2px; color: #94a3b8; cursor: move;
+  font-size: 1.1em; line-height: 1; user-select: none; flex: none;
+}
+#investigation-dag-fs.aig-dock-docked .aig-dock-handle:hover { color: #475569; }
+/* Compact the study navigator in the docked popup — drop the "Study" label so
+   the window controls + navigator + ⚙ all fit the one row. */
+#investigation-dag-fs.aig-dock-docked #aig-study-nav .aig-tb-label { display: none; }
+#investigation-dag-fs.aig-dock-docked .aig-toolbar { cursor: default; }
 #investigation-dag-fs.aig-dock-docked .aig-toolbar button,
 #investigation-dag-fs.aig-dock-docked .aig-toolbar input,
 #investigation-dag-fs.aig-dock-docked .aig-toolbar select,

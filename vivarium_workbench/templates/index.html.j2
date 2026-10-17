@@ -1564,6 +1564,10 @@ a.viv-bs-commit:hover { text-decoration: underline; }
        single control row for BOTH the inline view and the docked popup; in the
        docked popup it is ALSO the drag handle (drag empty toolbar space). #}
     <div class="aig-toolbar" role="toolbar" aria-label="Investigation graph controls">
+      {# Dedicated drag handle for the docked (floating) graph window — CSS shows
+         it only in the docked state. Dragging anywhere on empty toolbar space
+         still works; this is just a clear, always-present grab target. #}
+      <span id="aig-dock-handle" class="aig-dock-handle" aria-hidden="true" title="Drag to move the graph window">⠿</span>
       {# Dock control (shown only while a study is embedded, by _aigSetDockState):
          ▸ collapse to a slim bar / ▭ dock as a draggable+resizable window /
          ⛶ back to the investigation graph (EXITS the study). First two are states;
