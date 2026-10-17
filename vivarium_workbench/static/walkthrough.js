@@ -11125,9 +11125,16 @@
         // neighbours (keeps the expanded card's elevated z-index/shadow).
         if (_relayoutDag) _relayoutDag(false);
       };
-      node.onclick = _toggleExpand;
-      node.title = s.name + ' — ' + confidence +
-        '\n\nClick to expand in place · ↗ opens the full study';
+      // At the lowest detail (names-only, band 0) the card is too small to expand
+      // usefully, so the WHOLE card opens the study and the ↗ button is dropped.
+      // At higher detail a click expands in place and ↗ opens the study.
+      var _namesOnly = (aigBand === 0);
+      node.onclick = _namesOnly
+        ? function () { _openStudyInsideInvestigation(s.name); }
+        : _toggleExpand;
+      node.title = _namesOnly
+        ? (s.name + ' — ' + confidence + '\n\nClick to open this study')
+        : (s.name + ' — ' + confidence + '\n\nClick to expand in place · ↗ opens the full study');
       var x = (orient === 'TB')
         ? rowStartX[depth[s.name]] + breadthIndex[s.name] * (CARD_W + BREADTH_GAP)
         : PAD_X + depth[s.name] * (CARD_W + DEPTH_GAP);
@@ -11161,9 +11168,11 @@
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
             _tierPipsHtml(s) +
-            '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
-              'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
-              'style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;font-size:0.72em;line-height:1;padding:2px 5px;cursor:pointer">↗</button>' +
+            // Names-only (band 0): no ↗ — the whole card opens the study.
+            (_namesOnly ? '' :
+              '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
+                'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
+                'style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;font-size:0.72em;line-height:1;padding:2px 5px;cursor:pointer">↗</button>') +
           '</span>' +
         '</div>' +
         '<strong style="display:block;font-size:0.85em;line-height:1.3;color:#1e293b">' + _esc(prettyTitle) + '</strong>' +
@@ -11472,6 +11481,12 @@
     } catch (e) { /* document.fonts unsupported — initial + rAF passes stand */ }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
+  // Re-run the last DAG render (same data) — used after the graph is relocated
+  // into / out of the dockable Graph panel so it re-measures + re-lays-out at the
+  // new container width. No-op if the graph hasn't been rendered yet.
+  window._reflowInvestigationDag = function () {
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+  };
 
   // ── Investigation-graph viewport: continuous zoom / pan / fit / fullscreen ──
   var aigZoom = 1;

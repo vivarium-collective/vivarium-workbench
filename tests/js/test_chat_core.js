@@ -369,13 +369,15 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
 
 // ── docking: which zone is the pointer over; sizes stay usable ──
 {
-  assert.deepStrictEqual(C.DOCKS, ['left', 'right', 'bottom']);
-  assert(C.validDock('left') && C.validDock('bottom') && !C.validDock('top') && !C.validDock(undefined));
+  assert.deepStrictEqual(C.DOCKS, ['left', 'right', 'bottom', 'top']);
+  assert(C.validDock('left') && C.validDock('bottom') && C.validDock('top') && !C.validDock(undefined));
   const W = 1000, H = 800;
   assert.strictEqual(C.dropZone(50, 300, W, H), 'left');
   assert.strictEqual(C.dropZone(950, 300, W, H), 'right');
   assert.strictEqual(C.dropZone(500, 700, W, H), 'bottom');
   assert.strictEqual(C.dropZone(50, 700, W, H), 'bottom', 'the bottom band wins over the corners');
+  assert.strictEqual(C.dropZone(500, 60, W, H), 'top', 'the top band (y < 20%)');
+  assert.strictEqual(C.dropZone(50, 60, W, H), 'top', 'the top band wins over the corners');
   assert.strictEqual(C.dropZone(500, 300, W, H), null, 'the middle cancels');
   assert.strictEqual(C.dropZone(-1, 10, W, H), null); assert.strictEqual(C.dropZone(10, 10, 0, 0), null);
   assert.strictEqual(C.clampDock('left', 100, 1400, 900), 340);
@@ -386,6 +388,8 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(C.clampDock('bottom', 50, 1400, 900), 160);
   assert.strictEqual(C.clampDock('bottom', 9999, 1400, 900), 630, 'at most 70% of the height');
   assert.strictEqual(C.clampDock('bottom', 'junk', 1400, 900), 160);
+  assert.strictEqual(C.clampDock('top', 9999, 1400, 900), 630, 'top is height-sized like bottom');
+  assert.strictEqual(C.clampDock('top', 50, 1400, 900), 160);
 }
 
 console.log('test_chat_core: all passed');
