@@ -3998,8 +3998,65 @@
   // Quality, Reproducibility) plus the Sourcing sub-panel. Quality/
   // Reproducibility MOVED here from the Tests panel's old _loadTestsPanel
   // (spec §3.6/§3.7); their loaders are unchanged, just dispatched from here.
+  // Readiness gaps as the actionable TOP of Audit — the same deterministic
+  // report linter the header "⚠ N readiness gaps" dropdown reads (_reportLint),
+  // but expanded and grouped by check, so the exact fixes to make the study
+  // release-ready lead the audit. Re-computes from the live linter (responsive
+  // to the current study state), AI-free.
+  var _auditReadinessLoaded = false;
+  function _renderAuditReadiness(spec) {
+    var host = document.getElementById('audit-readiness');
+    if (!host || _auditReadinessLoaded) return;
+    _auditReadinessLoaded = true;
+    var slug = host.getAttribute('data-slug') || (spec && spec.name) || studyName() || '';
+    _reportLint().then(function (j) {
+      var findings = (j.findings || []).filter(function (f) { return (f.study || '') === slug; });
+      if (!findings.length) {
+        host.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:10px 13px;'
+          + 'border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;font-size:0.9em;color:#166534">'
+          + '<strong>✓ Ready</strong><span style="color:#166534">no readiness gaps — the report '
+          + 'linter finds nothing to fix.</span></div>';
+        return;
+      }
+      var sev = { error: 0, warning: 0, info: 0 };
+      findings.forEach(function (f) { var s = f.severity || 'info'; if (sev[s] != null) sev[s]++; else sev.info++; });
+      var gaps = sev.error + sev.warning;
+      var byCheck = {};
+      findings.forEach(function (f) { var c = f.check || 'other'; (byCheck[c] = byCheck[c] || []).push(f); });
+      var checks = Object.keys(byCheck).sort(function (a, b) { return byCheck[b].length - byCheck[a].length; });
+      var groups = checks.map(function (c) {
+        var items = byCheck[c].map(function (f) {
+          var s = f.severity || 'info';
+          var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
+          var fix = f.fix || f.hint || f.suggestion || '';
+          var loc = f.field_path ? ' <code style="font-size:0.78em;color:#94a3b8">' + _esc(f.field_path) + '</code>' : '';
+          return '<li style="margin-top:5px;line-height:1.4"><span style="color:' + dot + ';font-weight:700">●</span> '
+            + _esc(f.message || '') + loc
+            + (fix ? '<div class="muted" style="margin:2px 0 0 16px;font-size:0.92em">→ ' + _esc(fix) + '</div>' : '')
+            + '</li>';
+        }).join('');
+        return '<div style="margin-top:10px"><code>' + _esc(c) + '</code> '
+          + '<span class="muted" style="font-size:0.82em">(' + byCheck[c].length + ')</span>'
+          + '<ul style="margin:3px 0 0 18px;font-size:0.9em;padding:0;list-style:none">' + items + '</ul></div>';
+      }).join('');
+      var headColor = sev.error ? '#dc2626' : (sev.warning ? '#92400e' : '#1e40af');
+      var counts = [];
+      if (sev.error) counts.push(sev.error + ' error' + (sev.error === 1 ? '' : 's'));
+      if (sev.warning) counts.push(sev.warning + ' warning' + (sev.warning === 1 ? '' : 's'));
+      if (sev.info) counts.push(sev.info + ' note' + (sev.info === 1 ? '' : 's'));
+      host.innerHTML =
+        '<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:12px 14px">'
+        + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">'
+        + '<strong style="color:' + headColor + ';font-size:1.02em">⚠ ' + gaps + ' readiness gap'
+        + (gaps === 1 ? '' : 's') + ' to close</strong>'
+        + '<span class="muted" style="font-size:0.82em">' + _esc(counts.join(' · ')) + '</span>'
+        + '<span class="muted" style="font-size:0.82em;margin-left:auto">code-computed — report linter (deterministic)</span>'
+        + '</div>' + groups + '</div>';
+    }).catch(function () { _auditReadinessLoaded = false; });
+  }
+
   function _loadAudit(spec) {
-    _loadDeclaredContract(spec);
+    _renderAuditReadiness(spec);
     _loadAuditSufficiency(spec);
     _loadQualityChecks(spec);
     _loadReproducibilityChecks(spec);
@@ -4007,16 +4064,8 @@
   }
   window._loadAudit = _loadAudit;
 
-  // Declared contract (§Contract) — the study's PLANNED typed interface +
-  // conservation predicates, rendered at the top of the Audit tab so it is
-  // populated at Design time (before any live-run audit exists). Connects the
-  // planning contract to the audit surface.
-  function _loadDeclaredContract(spec) {
-    var slot = _pdSlot(document.getElementById('panel-audit'), 'audit-declared-contract');
-    if (!slot) return;
-    var contract = ((spec || window._study || {}) || {}).contract;
-    slot.innerHTML = _pdContractHtml(contract, 'Declared contract (§Contract) — the study’s planned interface');
-  }
+  // (The typed-interface contract table used to render here too; it was a
+  // duplicate of the Model tab's and now lives in Model only.)
 
   // ── Build tab (Assurance) — model-build loop provenance ──────────────────
   // GET /api/study-loop-state?study=<slug> → viva_superpowers.loop_state
