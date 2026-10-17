@@ -76,26 +76,35 @@ def test_study_tabs_manager():
 
 
 def test_dockable_graph_and_graph_bar_navigator():
-    """Dockable-graph feature: while a study is embedded the graph floats as a
-    3-state dock (collapsed / docked / expanded) with one control, and the
-    graph-bar study navigator drives the embedded study."""
-    # Template: the graph-bar navigator + the 3-state dock control.
+    """Dockable-graph feature: while a study is embedded the graph floats with a
+    draggable/resizable DOCKED window + a COLLAPSED slim bar, full graph controls
+    in the docked panel, and a ⛶ control that EXITS the study back to the inline
+    graph. The graph-bar navigator drives the embedded study."""
+    # Template: the graph-bar navigator + the dock control (collapse/dock are
+    # states; the third button exits the study).
     assert 'id="aig-study-nav"' in TPL
     assert 'id="aig-study-prev"' in TPL and 'id="aig-study-next"' in TPL
     assert 'id="aig-study-jump-menu"' in TPL
     assert 'id="aig-dock-ctl"' in TPL
-    for state in ("collapsed", "docked", "expanded"):
+    for state in ("collapsed", "docked"):
         assert 'data-dock="%s"' % state in TPL
         assert "_aigSetDockState('%s')" % state in TPL
+    # ⛶ is now an ACTION (exit the study), not an "expanded" dock state.
+    assert 'data-dock="expanded"' not in TPL
+    assert "_aigExitToGraph()" in TPL
     # The old separate collapse toggle is gone (unified into the dock control).
     assert 'id="aig-collapse-btn"' not in TPL
     assert "_aigToggleCollapse" not in TPL and "_aigToggleCollapse" not in JS
 
-    # JS: the dock-state functions exist + are exported.
-    for fn in ["_renderGraphBarNav", "_aigSetDockState", "_applyDockState"]:
+    # Full graph controls are present in the toolbar (reused in the docked panel).
+    assert 'id="aig-detail-group"' in TPL and 'id="aig-width-group"' in TPL and 'id="aig-zoom-group"' in TPL
+
+    # JS: the dock-state + drag + exit functions exist + are exported.
+    for fn in ["_renderGraphBarNav", "_aigSetDockState", "_applyDockState",
+               "_aigExitToGraph", "_aigWireDockDrag", "_aigApplyDockRect", "_aigSaveDockRect"]:
         assert "function %s" % fn in JS, fn
-    assert "window._renderGraphBarNav" in JS
     assert "window._aigSetDockState" in JS
+    assert "window._aigExitToGraph" in JS
 
     def _fn_body(name):
         i = JS.index("function %s" % name)
@@ -117,30 +126,47 @@ def test_dockable_graph_and_graph_bar_navigator():
     assert "_lastDagArgs" in navb                  # reuses the graph's data, no re-fetch
     assert "fetch(" not in navb
 
-    # Dock state persists in localStorage.
+    # Dock state + dragged rect persist in localStorage.
     setb = _fn_body("_aigSetDockState")
     assert "aig-dock-state" in setb
-    assert "aig-dock-" in setb
+    assert "_aigApplyDockRect" in setb             # restores the dragged/resized rect
+    assert "aig-dock-rect" in _fn_body("_aigSaveDockRect")
+    # ⛶ exits the study back to the inline graph (what closing the study restores).
+    exitb = _fn_body("_aigExitToGraph")
+    assert "_wsResetStudyTabs" in exitb
+
+
+def test_docked_graph_whole_node_click_opens_study():
+    """In the docked/embedded graph, a click anywhere on a study node opens that
+    study (names-only; expand-in-place isn't useful there); the inline full graph
+    keeps click-to-expand. Scoped at click time via the .aig-dock class."""
+    i = JS.index("node.onclick = function")
+    body = JS[i:i + 400]
+    assert "aig-dock" in body
+    assert "_openStudyEmbeddedNewTab(s.name)" in body
+    assert "_toggleExpand()" in body               # inline fallback preserved
 
 
 def test_floating_graph_hides_prose_when_study_open():
     """While a study is open the investigation prose is hidden so only the graph
     region remains, and that region floats (position:fixed dock) out of flow so
-    the study reclaims the full column."""
+    the study reclaims the full column; the docked window is resizable."""
     assert "function _setInvProseForStudy" in JS
     i = JS.index("function _setInvProseForStudy")
     body = JS[i: JS.index("\n  function ", i + 1)] if "\n  function " in JS[i:] else JS[i:i + 400]
     assert "inv-study-open" in body
     assert "investigation-detail-view" in body
     # CSS: .inv-study-open hides every detail-view child but the graph region,
-    # and the graph floats via .aig-dock (position:fixed), with 3 state sizes.
+    # and the graph floats via .aig-dock (position:fixed), with two state sizes.
     css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
     assert "#investigation-detail-view.inv-study-open > * { display: none" in css
     assert "#investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block" in css
     assert "#investigation-dag-fs.aig-dock" in css
     assert "position: fixed" in css
-    for state in ("aig-dock-collapsed", "aig-dock-docked", "aig-dock-expanded"):
+    for state in ("aig-dock-collapsed", "aig-dock-docked"):
         assert "#investigation-dag-fs.%s" % state in css
+    assert "aig-dock-expanded" not in css          # expanded dock state removed
+    assert "resize: both" in css                   # docked window is resizable
     # The retired sticky-strip CSS (sticky pane + 200px shell cap) is gone.
     assert "ws-context-sticky" not in css
     assert "height: 200px !important" not in css

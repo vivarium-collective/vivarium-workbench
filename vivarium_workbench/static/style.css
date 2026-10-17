@@ -4489,11 +4489,13 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 #investigation-detail-view.inv-study-open > * { display: none !important; }
 #investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block !important; }
 
-/* ── Dockable investigation graph (three states, while a study is embedded) ──
+/* ── Dockable investigation graph (while a study is embedded) ──
    The graph region (#investigation-dag-fs) becomes a position:fixed floating
-   panel; one control (#aig-dock-ctl) switches between the states. Out of normal
-   flow, so the study beneath gets the full column. Sizes are explicit so the
-   state changes animate (prefers-reduced-motion disables the transition). */
+   panel; the #aig-dock-ctl control switches collapsed ⇄ docked (and ⛶ exits the
+   study). Out of normal flow, so the study beneath gets the full column. Sizes
+   are explicit so the state change animates (prefers-reduced-motion disables it;
+   dragging also disables it, via .aig-dragging). The docked panel is draggable
+   by its header and resizable by the corner grip; its rect is remembered. */
 #investigation-dag-fs.aig-dock {
   position: fixed; z-index: 60; top: 68px; right: 16px;
   background: var(--panel, #fff);
@@ -4501,17 +4503,19 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   border-radius: 10px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
   display: flex; flex-direction: column; overflow: hidden;
-  transition: width .18s ease, height .18s ease, top .18s ease, right .18s ease, box-shadow .18s ease;
+  transition: width .18s ease, height .18s ease, top .18s ease, right .18s ease, left .18s ease, box-shadow .18s ease;
 }
 @media (prefers-reduced-motion: reduce) { #investigation-dag-fs.aig-dock { transition: none; } }
+#investigation-dag-fs.aig-dock.aig-dragging { transition: none; }
 #investigation-dag-fs.aig-dock-collapsed { width: 320px; height: 86px; }
-#investigation-dag-fs.aig-dock-docked    { width: 380px; height: 340px; }
-#investigation-dag-fs.aig-dock-expanded  { width: calc(100vw - 24px); height: calc(100vh - 80px); }
-/* Compact the lead + toolbar + shell inside the floating panel. */
+#investigation-dag-fs.aig-dock-docked    { width: 400px; height: 360px; min-width: 260px; min-height: 160px; resize: both; }
+/* Compact the lead + toolbar + shell inside the floating panel. The header is
+   the drag handle in the docked state. */
 #investigation-dag-fs.aig-dock #investigation-dag-lead {
   margin: 0; padding: 7px 10px; border-bottom: 1px solid var(--border, #eef2f7);
   display: flex; align-items: center; gap: 8px;
 }
+#investigation-dag-fs.aig-dock-docked #investigation-dag-lead { cursor: move; }
 #investigation-dag-fs.aig-dock .aig-toolbar {
   margin: 0; border: none; border-radius: 0; background: transparent; padding: 5px 8px;
 }
@@ -4519,12 +4523,15 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   flex: 1 1 auto; height: auto !important; min-height: 0 !important; max-height: none !important;
   resize: none; border: none; border-radius: 0; margin: 0;
 }
-/* The dock control owns expand/fullscreen while floating — hide the legacy seg. */
+/* The dock control owns the state while floating — hide the legacy expand seg. */
 #investigation-dag-fs.aig-dock #aig-legacy-expand-seg { display: none; }
-/* Collapsed + docked: the toolbar shows ONLY the study navigator. */
-#investigation-dag-fs.aig-dock-collapsed .aig-toolbar > .aig-tb-group:not(#aig-study-nav),
-#investigation-dag-fs.aig-dock-docked    .aig-toolbar > .aig-tb-group:not(#aig-study-nav) { display: none; }
-/* Collapsed: graph hidden entirely — a slim bar of lead + navigator. */
+/* Docked: show the navigator + Zoom/Detail/Width graph controls; hide the
+   heavier Layout/Legend/Export groups to stay compact. */
+#investigation-dag-fs.aig-dock-docked #aig-layout-group,
+#investigation-dag-fs.aig-dock-docked .dag-legend-wrap,
+#investigation-dag-fs.aig-dock-docked .aig-dl-ctl { display: none; }
+/* Collapsed: the toolbar shows ONLY the study navigator; graph hidden. */
+#investigation-dag-fs.aig-dock-collapsed .aig-toolbar > .aig-tb-group:not(#aig-study-nav) { display: none; }
 #investigation-dag-fs.aig-dock-collapsed #investigation-dag-shell { display: none !important; }
 /* Dock state control (three segmented buttons in the panel header). */
 .aig-dock-ctl { margin-left: auto; display: inline-flex; }

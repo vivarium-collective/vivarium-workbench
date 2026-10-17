@@ -10797,26 +10797,64 @@
   // study navigator visible, so the user can still navigate and re-expand.
   // Persisted per viewer in localStorage. Independent of the sticky pinning and
   // of _setInvestigationContextCollapsed (which slims the whole context).
-  // The investigation graph is a DOCKABLE view with three states while a study
-  // is embedded (CSS classes on #investigation-dag-fs, transitions in style.css):
+  // The investigation graph is a DOCKABLE view while a study is embedded (CSS
+  // classes on #investigation-dag-fs, transitions in style.css):
   //   collapsed — a slim corner bar (lead + study navigator), graph hidden;
-  //   docked    — a compact floating minimap window, top-right (the default);
-  //   expanded  — a full-screen overlay for deep exploration.
-  // When NO study is open the graph is the normal full-width inline view (no
-  // dock class). The chosen state is remembered in localStorage. This single
-  // model replaces the old separate collapse toggle + ⤒/⛶ while embedded.
-  var _AIG_DOCK_STATES = ['collapsed', 'docked', 'expanded'];
+  //   docked    — a draggable/resizable floating window, top-right (the default),
+  //               with the navigator + Zoom/Detail/Width graph controls.
+  // The third control button (⛶) is an ACTION, not a state: it EXITS the study
+  // and returns to the full inline investigation graph. When NO study is open the
+  // graph is the normal full-width inline view (no dock class). The chosen state
+  // + the user's dragged position/size are remembered in localStorage.
+  var _AIG_DOCK_STATES = ['collapsed', 'docked'];
   function _aigDockStateStored() {
     try { var v = localStorage.getItem('aig-dock-state'); return _AIG_DOCK_STATES.indexOf(v) >= 0 ? v : null; }
     catch (e) { return null; }
   }
   function _aigStudyOpen() { return !!(window._wsStudyTabs && window._wsStudyTabs.active); }
+
+  // Remembered dragged position + resized size of the docked window.
+  function _aigDockRectStored() {
+    try { return JSON.parse(localStorage.getItem('aig-dock-rect') || 'null'); } catch (e) { return null; }
+  }
+  function _aigSaveDockRect(fs) {
+    if (!fs || !fs.classList.contains('aig-dock-docked')) return;
+    try {
+      var r = fs.getBoundingClientRect();
+      localStorage.setItem('aig-dock-rect', JSON.stringify({
+        left: Math.round(r.left), top: Math.round(r.top),
+        width: Math.round(r.width), height: Math.round(r.height),
+      }));
+    } catch (e) { /* ignore */ }
+  }
+  // Apply the stored rect to the docked window, clamped inside the viewport.
+  function _aigApplyDockRect(fs) {
+    var rect = _aigDockRectStored();
+    if (!rect) return;
+    var vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+    var w = Math.max(260, Math.min(rect.width || 400, vw - 24));
+    var h = Math.max(140, Math.min(rect.height || 360, vh - 80));
+    var left = Math.max(8, Math.min(rect.left, vw - w - 8));
+    var top = Math.max(56, Math.min(rect.top, vh - h - 8));
+    fs.style.right = 'auto';
+    fs.style.left = left + 'px'; fs.style.top = top + 'px';
+    fs.style.width = w + 'px'; fs.style.height = h + 'px';
+  }
+  // Clear the inline rect so a non-docked state falls back to the CSS size/pos.
+  function _aigClearDockRect(fs) {
+    fs.style.left = ''; fs.style.top = ''; fs.style.right = '';
+    fs.style.width = ''; fs.style.height = '';
+  }
+
   function _aigSetDockState(state, opts) {
     if (_AIG_DOCK_STATES.indexOf(state) < 0) state = 'docked';
     var fs = document.getElementById('investigation-dag-fs');
     if (!fs || !_aigStudyOpen()) return;   // docking only applies while embedded
     fs.classList.add('aig-dock');
     _AIG_DOCK_STATES.forEach(function (s) { fs.classList.toggle('aig-dock-' + s, s === state); });
+    // Docked: honor the user's dragged/resized rect; collapsed: use the CSS size.
+    if (state === 'docked') { _aigApplyDockRect(fs); _aigWireDockDrag(); }
+    else { _aigClearDockRect(fs); }
     var ctl = document.getElementById('aig-dock-ctl');
     if (ctl) {
       ctl.style.display = 'inline-flex';
@@ -10832,12 +10870,22 @@
     }
   }
   window._aigSetDockState = _aigSetDockState;
+
+  // Exit the embedded study and return to the full inline investigation graph —
+  // the ⛶ control's action (what closing the study / _wsResetStudyTabs restores).
+  function _aigExitToGraph() {
+    var inv = window._wsInvestigation || window._currentIset
+      || (window._wsStudyTabs && window._wsStudyTabs.investigation) || null;
+    _wsResetStudyTabs(inv);
+  }
+  window._aigExitToGraph = _aigExitToGraph;
+
   // Float the graph on study open at the remembered state (default docked).
   function _aigEnterDock() { _aigSetDockState(_aigDockStateStored() || 'docked', { noPersist: true }); }
   // Restore the graph to the normal inline view on study close.
   function _aigExitDock() {
     var fs = document.getElementById('investigation-dag-fs');
-    if (fs) fs.classList.remove('aig-dock', 'aig-dock-collapsed', 'aig-dock-docked', 'aig-dock-expanded');
+    if (fs) { fs.classList.remove('aig-dock', 'aig-dock-collapsed', 'aig-dock-docked'); _aigClearDockRect(fs); }
     var ctl = document.getElementById('aig-dock-ctl');
     if (ctl) ctl.style.display = 'none';
   }
@@ -10852,6 +10900,42 @@
     _aigSetDockState(cur, { noPersist: true });
   }
   window._applyDockState = _applyDockState;
+
+  // Drag the docked window by its header (#investigation-dag-lead), and persist
+  // the position/size (resize uses the CSS resize grip; a document mouseup saves
+  // the final rect). Wired once; only acts while the window is in the docked
+  // state. Dragging ignores clicks on the dock control buttons. Kept inside the
+  // viewport.
+  var _aigDockDragWired = false;
+  function _aigWireDockDrag() {
+    if (_aigDockDragWired) return;
+    _aigDockDragWired = true;
+    var fs = document.getElementById('investigation-dag-fs');
+    var lead = document.getElementById('investigation-dag-lead');
+    if (!fs || !lead) return;
+    var drag = null;
+    lead.addEventListener('mousedown', function (e) {
+      if (!fs.classList.contains('aig-dock-docked')) return;      // only docked
+      if (e.target.closest && e.target.closest('#aig-dock-ctl')) return;  // not the buttons
+      var r = fs.getBoundingClientRect();
+      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, h: r.height };
+      fs.classList.add('aig-dragging');          // suppress transition while dragging
+      fs.style.right = 'auto';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!drag) return;
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var left = Math.max(8, Math.min(e.clientX - drag.dx, vw - drag.w - 8));
+      var top = Math.max(56, Math.min(e.clientY - drag.dy, vh - drag.h - 8));
+      fs.style.left = left + 'px'; fs.style.top = top + 'px';
+    });
+    document.addEventListener('mouseup', function () {
+      if (drag) { drag = null; fs.classList.remove('aig-dragging'); }
+      // Persist the final rect after any drag OR resize-grip adjustment.
+      if (fs.classList.contains('aig-dock-docked')) _aigSaveDockRect(fs);
+    });
+  }
 
   // Graph-only vs full investigation detail. When a study is open, the relocated
   // #investigation-detail-view is reduced to its graph region (#investigation-dag-fs)
@@ -11335,9 +11419,22 @@
         node.style.boxShadow = exp ? '0 8px 24px rgba(0,0,0,0.18)' : '';
         node.style.whiteSpace = '';
       };
-      node.onclick = _toggleExpand;
+      // Whole-node click: in the DOCKED/embedded graph (names-only, where
+      // expand-in-place isn't useful) a click anywhere on the node opens that
+      // study embedded; in the inline full graph it keeps the click-to-expand
+      // behavior. Scoped at click time via the .aig-dock class so the inline
+      // graph is unaffected. The ↗ button keeps working in both.
+      node.onclick = function () {
+        var fs = document.getElementById('investigation-dag-fs');
+        if (fs && fs.classList.contains('aig-dock')) {
+          if (window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(s.name);
+          return;
+        }
+        _toggleExpand();
+      };
       node.title = s.name + ' — ' + confidence +
-        '\n\nClick to expand in place · ↗ opens the full study';
+        '\n\nClick to expand in place · ↗ opens the full study' +
+        '\n(in the docked graph, a click opens the study)';
       var x = (orient === 'TB')
         ? rowStartX[depth[s.name]] + breadthIndex[s.name] * (CARD_W + BREADTH_GAP)
         : PAD_X + depth[s.name] * (CARD_W + DEPTH_GAP);
