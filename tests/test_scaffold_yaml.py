@@ -72,6 +72,8 @@ class TestV4StudyScaffold:
         assert spec["name"] == "my-study"
         assert spec["schema_version"] == 4
         assert spec["baseline"][0]["composite"] == "pkg.composites.foo"
+        # Two-axis ontology: the scaffold emits the execution axis live.
+        assert spec["execution_status"] == "planned"
 
     def test_parses_as_yaml_without_composite(self):
         text = v4_study_scaffold("my-study")
@@ -217,15 +219,14 @@ class TestV4StudyScaffold:
         assert spec["baseline"][0]["composite"] == "pkg.composites.foo"
 
     def test_prerequisite_item_documents_relation_key(self):
-        """W13 — the commented pipeline_gate.prerequisites template surfaces
-        the optional `relation` key + its vocabulary so authors know an edge
-        can be typed (default leads-to)."""
+        """The commented pipeline_gate.prerequisites template surfaces the
+        optional `relation` key + its four-type vocabulary so authors know an
+        edge can be typed (default builds-on)."""
         text = v4_study_scaffold("s", composite="pkg.composites.foo")
         assert "pipeline_gate:" in text
         assert "prerequisites:" in text
         assert "relation:" in text
-        for rel in ("leads-to", "model-input", "evidence",
-                    "calibrates-threshold", "refutes-alternative"):
+        for rel in ("builds-on", "tests", "motivates", "alternative-to"):
             assert rel in text, f"missing relation vocabulary term: {rel}"
         assert "outputs_used:" in text
 

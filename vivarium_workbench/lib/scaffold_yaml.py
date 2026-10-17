@@ -98,6 +98,8 @@ schema_version: 4
 name: {name}
 created: '{created}'
 status: planned
+execution_status: planned      # two-axis ontology: proposed | planned | running | completed | failed
+# verdict:                     # supported | qualified | inconclusive | refuted — set once completed
 phase: Design
 
 # study_type: standard             # critique #10 — exploratory | confirmatory |
@@ -153,10 +155,9 @@ phase: Design
 #   prerequisites:                    # upstream studies this one depends on
 #     - study: upstream-study-slug
 #       condition: tests-passed       # gate the upstream must satisfy
-#       relation: leads-to            # leads-to (default) | model-input |
-#                                     # evidence | calibrates-threshold |
-#                                     # refutes-alternative
-#       outputs_used: []              # upstream outputs consumed (→ model-input)
+#       relation: builds-on           # graph edge type: builds-on (default) |
+#                                     # tests | motivates | alternative-to
+#       outputs_used: []              # upstream outputs consumed (named on the edge)
 #   enables: []                       # downstream studies unblocked by this one
 #   proceed_condition: ""             # when may the next study start
 #

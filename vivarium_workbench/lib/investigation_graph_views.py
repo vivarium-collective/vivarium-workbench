@@ -20,6 +20,15 @@ from investigation_contracts import validate_chain
 # report-card verdicts (mirrors report_views._PRE_EVAL_STATUSES).
 _PRE_EVAL_STATUSES = frozenset({"build", "planned", "implementation", "design", "pending", ""})
 
+# Two-axis ontology derivation (execution_status × verdict) + edge-relation
+# typing live in the shared study_ontology module so this graph builder and the
+# study-card detail serializer (report_views) can never drift.
+from vivarium_workbench.lib.study_ontology import (  # noqa: E402
+    canon_relation as _canon_relation,
+    derive_execution_status as _derive_execution_status,
+    derive_verdict as _derive_verdict,
+)
+
 
 def _label(node: dict) -> str:
     s = (node.get("statement") or "").strip()
@@ -121,11 +130,17 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             _node["confidence"] = _dc(study_spec)
         except Exception:  # noqa: BLE001 — viva_superpowers optional; frontend falls back
             pass
-        # Two-axis markers (verdict × evidence_tier): authored study fields the
-        # graph renderer reads; optional, so an unmarked study stays unmarked.
-        for _mk in ("verdict", "evidence_tier"):
-            if study_spec.get(_mk):
-                _node[_mk] = study_spec[_mk]
+        # Two-axis ontology (execution_status × verdict) + evidence_tier. The
+        # execution axis (what happened) is always derived so every node has a
+        # Progress pill; the verdict (what the evidence supports) is only set when
+        # authored or derivable, so an unmarked study shows "pending". Authored
+        # fields win over derivation.
+        _node["execution_status"] = _derive_execution_status(study_spec, _node_status)
+        _verdict = _derive_verdict(study_spec)
+        if _verdict:
+            _node["verdict"] = _verdict
+        if study_spec.get("evidence_tier"):
+            _node["evidence_tier"] = study_spec["evidence_tier"]
         studies_out.append(_node)
         if use_members:
             # New reference model: edges are derived from this member's
@@ -140,8 +155,9 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
                     if src in member_set:
                         _e = {"source": f"study/{src}", "target": f"study/{slug}",
                               "rel": "input", "artifact": inp["artifact"]}
-                        if _rel_by_parent.get(src):
-                            _e["relation"] = _rel_by_parent[src]
+                        _canon = _canon_relation(_rel_by_parent.get(src))
+                        if _canon:
+                            _e["relation"] = _canon
                         study_edges.append(_e)
         else:
             # Legacy path: edges from pipeline_gate.prerequisites.
@@ -156,8 +172,9 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             for pre in normalize_dag_edges(study_spec):
                 _e = {"source": f"study/{pre['study']}", "target": f"study/{slug}",
                       "rel": "prerequisite", "condition": explicit.get(pre["study"], "")}
-                if _rel_by_parent.get(pre["study"]):
-                    _e["relation"] = _rel_by_parent[pre["study"]]
+                _canon = _canon_relation(_rel_by_parent.get(pre["study"]))
+                if _canon:
+                    _e["relation"] = _canon
                 study_edges.append(_e)
         nodes = load_study_nodes(ws_root, slug)
         derived = False

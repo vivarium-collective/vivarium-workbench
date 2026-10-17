@@ -39,6 +39,10 @@ from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 from vivarium_workbench.lib import readouts_views as _readouts_views
 from vivarium_workbench.lib import study_derivations as _study_derivations
+from vivarium_workbench.lib.study_ontology import (
+    derive_execution_status as _derive_execution_status,
+    derive_verdict as _derive_verdict,
+)
 
 # ---------------------------------------------------------------------------
 # Module-level TTL cache for the linkage index (mirrors server._LINKAGE_CACHE)
@@ -1118,6 +1122,13 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             "evaluation_status":     study_spec.get("evaluation_status"),
             "gate_status":           study_spec.get("gate_status"),
             "expert_review_status":  study_spec.get("expert_review_status"),
+            # Two-axis ontology — the graph card reads these directly. execution
+            # is always derived (every card gets a Progress pill); verdict is set
+            # only when authored or derivable (else the card shows "pending").
+            # Same derivation as the typed graph builder (shared study_ontology).
+            "execution_status":      _derive_execution_status(study_spec, raw_status),
+            "verdict":               _derive_verdict(study_spec),
+            "evidence_tier":         study_spec.get("evidence_tier"),
             # viva-superpowers #285 — the split verdict ledger (or None).
             "verdict_count_split":   _count_split,
             # Spine A2: persisted coded gate_evaluator.

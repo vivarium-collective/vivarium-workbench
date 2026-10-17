@@ -1,6 +1,6 @@
-// Behavior test for the marker fallback (review finding C1) + rail/card
-// consistency (I2). Extracts the self-contained marker block from walkthrough.js
-// and evaluates it, so we test real behavior, not just source strings.
+// Behavior test for the two-axis ontology derivation + rail/card consistency.
+// Extracts the self-contained ontology block from walkthrough.js and evaluates
+// it, so we test real behavior, not just source strings.
 const fs = require('fs');
 const path = require('path');
 const src = fs.readFileSync(
@@ -9,36 +9,46 @@ const src = fs.readFileSync(
 let failed = 0;
 function assert(cond, msg) { if (!cond) { console.error('FAIL: ' + msg); failed++; } }
 
-// Pull the contiguous marker block (var _STATUS_META ... end of _tierPipsHtml).
-const start = src.indexOf('var _STATUS_META = {');
+// Pull the contiguous ontology block (var _EXEC_META ... end of _studyStatusMeta).
+const start = src.indexOf('var _EXEC_META = {');
 const end = src.indexOf('function _humanizeStudyName');
-assert(start > 0 && end > start, 'marker block located');
+assert(start > 0 && end > start, 'ontology block located');
 const block = src.slice(start, end);
-const api = new Function(block +
-  '\nreturn {_verdictMeta:_verdictMeta,_studyStatusMeta:_studyStatusMeta,_studyVerdict:_studyVerdict};')();
+const api = new Function('var _esc=function(s){return String(s);};\n' + block +
+  '\nreturn {_execMeta:_execMeta,_execState:_execState,_verdictMeta:_verdictMeta,' +
+  '_studyVerdict:_studyVerdict,_studyStatusMeta:_studyStatusMeta};')();
 
-// C1: a study with NO authored verdict must NOT collapse to green "supported".
-// Planned / Investigating / Blocked must keep their honest gate-based badge.
-assert(api._verdictMeta({status: 'planned'}).label === 'Planned',
-  'C1: unmigrated planned study keeps Planned (not forced supported)');
-assert(api._verdictMeta({status: 'running'}).label === 'Investigating',
-  'C1: unmigrated running study keeps Investigating');
-assert(api._verdictMeta({effective_status: 'blocked'}).label === 'Blocked',
-  'C1: unmigrated blocked study keeps Blocked');
+// --- EXECUTION axis: derived from legacy fields when execution_status absent ---
+assert(api._execState({status: 'planned'}) === 'planned', 'planned → planned');
+assert(api._execState({status: 'running'}) === 'running', 'running → running');
+assert(api._execState({gate_status: 'passed'}) === 'completed', 'passed gate → completed');
+assert(api._execState({simulation_status: 'ran', evaluation_status: 'evaluated'}) === 'completed',
+  'ran + evaluated → completed');
+assert(api._execState({simulation_status: 'failed'}) === 'failed', 'sim failed → failed (execution)');
+// explicit execution_status always wins
+assert(api._execState({execution_status: 'proposed', status: 'running'}) === 'proposed',
+  'authored execution_status wins');
+assert(api._execMeta({status: 'planned'}).label === 'Planned', 'execMeta label Planned');
+assert(api._execMeta({gate_status: 'passed'}).label === 'Completed', 'execMeta label Completed');
+
+// --- VERDICT axis: authored-only, legacy values folded ---
 assert(api._studyVerdict({status: 'planned'}) == null,
-  'C1: _studyVerdict is null when no verdict authored (no forced supported)');
+  'no verdict when none authored (pending, not forced supported)');
+assert(api._studyVerdict({verdict: 'supported'}) === 'supported', 'supported honored');
+assert(api._studyVerdict({verdict: 'honest-negative'}) === 'refuted',
+  'legacy honest-negative folds to refuted');
+assert(api._studyVerdict({verdict: 'mixed'}) === 'inconclusive',
+  'legacy mixed folds to inconclusive');
+assert(api._verdictMeta({verdict: 'supported'}).label === 'Supported', 'verdictMeta label Supported');
+assert(api._verdictMeta({status: 'planned'}) == null, 'verdictMeta null when no verdict');
 
-// Authored verdict still wins.
-assert(api._verdictMeta({verdict: 'honest-negative', gate_status: 'failed'}).label === 'honest-negative',
-  'authored verdict wins over gate_status');
-// A failed-gate study with no authored verdict still reads refuted (unchanged).
-assert(api._verdictMeta({gate_status: 'failed'}).label === 'Refuted',
-  'unmigrated failed-gate study still reads Refuted');
+// A negative result is completed + refuted, NOT a failed execution.
+assert(api._execState({gate_status: 'failed'}) === 'completed',
+  'failed gate = completed execution (the verdict carries the negative, not the execution)');
 
-// I2: the investigation-graph rail must use the same verdict-preferring meta as
-// the card, so they can never show different badges for the same study.
-assert(/investigation-graph card \+ legend[\s\S]{0,500}var _sm = _verdictMeta\(s\)/.test(src),
-  'I2: graph rail uses _verdictMeta (agrees with the card)');
+// --- rail/card consistency: rail uses verdict-or-execution, never null ---
+assert(/var _sm = _verdictMeta\(s\) \|\| _execMeta\(s\)/.test(src),
+  'rail uses _verdictMeta || _execMeta (agrees with the card, never null)');
 
 if (failed) { console.error(failed + ' assertion(s) failed'); process.exit(1); }
 console.log('PASS test_investigation_graph_marker_fallback');

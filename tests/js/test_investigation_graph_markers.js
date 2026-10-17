@@ -1,7 +1,7 @@
-// Source-contract test for the two-axis investigation-graph markers.
-// Same style as tests/js/test_composite_card_contract.js: assert the renderer
-// source carries the new verdict x evidence-tier model + the right-sized edge
-// vocabulary, and no longer carries the retired binary badge / edge types.
+// Source-contract test for the two-axis investigation-graph ontology:
+// EXECUTION (execution_status) × VERDICT, plus the four edge relations. Asserts
+// the renderer source carries the new model and no longer carries the retired
+// single-badge / 5-type edge vocabulary.
 const fs = require('fs');
 const path = require('path');
 const src = fs.readFileSync(
@@ -10,29 +10,53 @@ const src = fs.readFileSync(
 let failed = 0;
 function assert(cond, msg) { if (!cond) { console.error('FAIL: ' + msg); failed++; } }
 
-// --- node marker: two-axis model exists ---
-assert(src.includes('_VERDICT_META'), '_VERDICT_META defined');
+// --- two-axis model exists ---
+assert(src.includes('var _EXEC_META'), '_EXEC_META defined (execution axis)');
+assert(src.includes('var _VERDICT_META'), '_VERDICT_META defined (verdict axis)');
+assert(src.includes('function _execState'), '_execState defined');
+assert(src.includes('function _execMeta'), '_execMeta defined');
 assert(src.includes('function _studyVerdict'), '_studyVerdict defined');
+assert(src.includes('function _verdictMeta'), '_verdictMeta defined');
 assert(src.includes('function _studyTier'), '_studyTier defined');
 assert(src.includes('_tierPipsHtml'), '_tierPipsHtml defined');
-['supported', 'qualified', 'honest-negative', 'refuted', 'mixed'].forEach(v =>
+assert(src.includes('function _aigPill'), '_aigPill defined (pill renderer)');
+
+// execution-status vocabulary
+['proposed', 'planned', 'running', 'completed', 'failed'].forEach(v =>
+  assert(new RegExp('\\b' + v + ':').test(src), 'execution status ' + v + ' present'));
+// verdict vocabulary — the four canonical values
+['supported', 'qualified', 'inconclusive', 'refuted'].forEach(v =>
   assert(src.includes("'" + v + "'"), 'verdict ' + v + ' present'));
+// retired verdicts fold into the four via the alias map (not canonical keys)
+assert(src.includes('_VERDICT_ALIASES'), 'legacy verdicts folded via _VERDICT_ALIASES');
+const vmBlock = src.slice(src.indexOf('var _VERDICT_META'), src.indexOf('var _VERDICT_ALIASES'));
+assert(!/honest-negative/.test(vmBlock), 'honest-negative is NOT a canonical verdict');
+assert(!/'mixed'/.test(vmBlock), 'mixed is NOT a canonical verdict');
 ['conceptual_demonstration', 'mechanistic_prediction', 'calibrated'].forEach(t =>
   assert(src.includes(t), 'tier ' + t + ' present'));
+assert(/s\.execution_status/.test(src), 'reads s.execution_status');
 assert(/s\.verdict/.test(src), 'reads s.verdict');
 assert(/s\.evidence_tier/.test(src), 'reads s.evidence_tier');
-assert(src.includes('var ss = _verdictMeta(s)'), 'node marker uses _verdictMeta');
 
-// --- edges: right-sized vocabulary, authored relation read ---
-assert(src.includes("'alternative-to'"), 'alternative-to style present');
-assert(src.includes("'precedes'"), 'precedes style present');
-assert(!/_DAG_REL_STYLE[\s\S]*?'calibrates-threshold'[\s\S]*?\};/.test(src),
-  'calibrates-threshold removed from style map');
-assert(!/_DAG_REL_STYLE[\s\S]*?'evidence':[\s\S]*?\};/.test(src),
-  "'evidence' removed from style map");
-assert(src.includes('e.relation || (e.artifact'), 'edge build prefers authored e.relation');
+// --- node card: both axes rendered as prominent pills ---
+assert(src.includes('var execMeta = _execMeta(s)'), 'card computes execMeta');
+assert(src.includes('_verdictMeta(s)'), 'card computes verdictMeta');
+assert(src.includes('aig-progress-pill'), 'Progress pill present on card');
+assert(src.includes('aig-verdict-pill'), 'Verdict pill present on card');
 
-// --- legend: generated from the objects, three rows ---
+// --- edges: four canonical relations; directed vs undirected ---
+['builds-on', 'tests', 'motivates', 'alternative-to'].forEach(r =>
+  assert(src.includes("'" + r + "'"), 'edge relation ' + r + ' present'));
+const relBlock = src.slice(src.indexOf('var _DAG_REL_STYLE'), src.indexOf('var _DAG_REL_ALIASES'));
+assert(!/'precedes'/.test(relBlock), 'precedes removed from style map (aliased)');
+assert(!/'leads-to'/.test(relBlock), 'leads-to removed from style map (aliased)');
+assert(!/'model-input'/.test(relBlock), 'model-input removed from style map (aliased)');
+assert(/'alternative-to':[\s\S]*?arrow: false/.test(relBlock), 'alternative-to is undirected (arrow:false)');
+assert(src.includes('_DAG_REL_ALIASES'), 'legacy edge relations folded via _DAG_REL_ALIASES');
+assert(src.includes('if (st.arrow !== false)'), 'edge draw honors arrow:false (no marker-end)');
+
+// --- legend: generated from the objects, Progress + Verdict + Evidence rows ---
+assert(/>Progress:</.test(src), 'legend Progress row');
 assert(/>Verdict:</.test(src), 'legend Verdict row');
 assert(/>Evidence:</.test(src), 'legend Evidence row');
 assert(!/_lg\('#16a34a', *'✓', *'Accepted'\)/.test(src), 'old hardcoded Accepted legend removed');

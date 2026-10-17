@@ -49,49 +49,61 @@
   // the card code's own stated intent: the COMPUTED gate_status verdict wins, then
   // the hand-set confidence, then the lifecycle status. `Blocked` is its own state —
   // a study that could not run — distinct from `Refuted` (a hypothesis disproven).
-  var _STATUS_META = {
-    Accepted:      {color: '#16a34a', icon: '✓', label: 'Accepted'},      // ✓
-    Investigating: {color: '#ca8a04', icon: '◐', label: 'Investigating'}, // ◐
-    Planned:       {color: '#2563eb', icon: '○', label: 'Planned'},       // ○
-    Blocked:       {color: '#64748b', icon: '⊘', label: 'Blocked'},       // ⊘
-    Refuted:       {color: '#dc2626', icon: '✗', label: 'Refuted'},       // ✗
+  // Two-axis investigation-graph ontology — EXECUTION (what happened) is kept
+  // separate from VERDICT (what the evidence supports); both render as prominent
+  // pills on the card. Replaces the old single _STATUS_META badge that conflated
+  // workflow progress with scientific interpretation ("Accepted"/"Refuted").
+  // The server (investigation_graph_views) derives execution_status for every
+  // node and verdict when authored/derivable; the fallbacks below cover study
+  // objects (e.g. the rail) that don't carry the derived fields.
+  var _EXEC_META = {
+    proposed:  {color: '#94a3b8', icon: '○', label: 'Proposed'},
+    planned:   {color: '#2563eb', icon: '◔', label: 'Planned'},
+    running:   {color: '#ca8a04', icon: '◑', label: 'Running'},
+    completed: {color: '#475569', icon: '●', label: 'Completed'},
+    failed:    {color: '#dc2626', icon: '⊘', label: 'Failed'},
   };
-  function _studyStatusState(s) {
+  function _execState(s) {
     s = s || {};
-    // 1. The COMPUTED gate_status verdict is the top authority.
+    var ex = String(s.execution_status || '').trim().toLowerCase();
+    if (_EXEC_META[ex]) return ex;
+    // Client fallback (server normally sets execution_status): derive from the
+    // legacy multi-axis fields. A gate/evaluation that reached a result means the
+    // study RAN — that's `completed`; a negative verdict is NOT a failed execution.
     var gate = String(s.gate_status || '').trim().toLowerCase();
-    if (gate === 'passed' || gate === 'pass' || gate === 'accepted') return 'Accepted';
-    if (gate === 'failed' || gate === 'failed_evaluation' || gate === 'refuted') return 'Refuted';
-    if (gate === 'blocked') return 'Blocked';
-    if (gate === 'partial' || gate === 'needs_calibration' || gate === 'in_progress') return 'Investigating';
-    // 2. A DEFINITIVE lifecycle state (server-computed effective_status/status folds
-    //    gate_status in) outranks the drift-prone hand-set confidence: a `blocked`
-    //    study must never read as its stale `confidence: Investigating`. This is what
-    //    lets the gate-less rail study objects agree with the gate-bearing graph cards.
+    var sim = String(s.simulation_status || '').trim().toLowerCase();
+    var ev = String(s.evaluation_status || '').trim().toLowerCase();
     var life = String(s.effective_status || s.status || '').trim().toLowerCase();
-    if (life.indexOf('blocked') !== -1) return 'Blocked';
-    if (life.indexOf('fail') !== -1 || life === 'invalid' || life === 'refuted') return 'Refuted';
-    // 3. Hand-set confidence, when no gate verdict and no definitive lifecycle.
-    var conf = String(s.confidence || '').trim();
-    if (_STATUS_META[conf]) return conf;
-    // 4. Remaining lifecycle states.
-    if (['complete', 'completed', 'ran', 'passed', 'evaluated', 'decided'].indexOf(life) >= 0) return 'Accepted';
-    if (['running', 'analyzing', 'in_progress'].indexOf(life) >= 0) return 'Investigating';
-    return 'Planned';
+    if (sim === 'failed' || life === 'invalid' || life === 'failed') return 'failed';
+    if (['passed', 'failed', 'needs_calibration', 'stale'].indexOf(gate) >= 0) return 'completed';
+    if (sim === 'ran' && (ev === 'evaluated' || ev === 'failed_evaluation')) return 'completed';
+    if (['complete', 'completed', 'ran', 'decided', 'evaluated'].indexOf(life) >= 0) return 'completed';
+    if (sim === 'running' || ['running', 'analyzing', 'in_progress'].indexOf(life) >= 0) return 'running';
+    var conf = String(s.confidence || '').trim().toLowerCase();
+    if (conf === 'accepted') return 'completed';
+    if (conf === 'investigating') return 'running';
+    if (life === 'planned' || conf === 'planned') return s.proposed === true ? 'proposed' : 'planned';
+    if (s.proposed === true) return 'proposed';
+    return 'planned';
   }
-  function _studyStatusMeta(s) { return _STATUS_META[_studyStatusState(s)] || _STATUS_META.Planned; }
+  function _execMeta(s) { return _EXEC_META[_execState(s)] || _EXEC_META.planned; }
 
-  // Two-axis investigation-graph marker: verdict (what the study concluded, an
-  // authored field separate from the gate pass/fail) × evidence_tier (how strong
-  // the evidence is). Both optional; a study missing them falls back to the
-  // gate-based status so nothing breaks mid-migration.
+  // Scientific verdict — what the evidence supports, shown only once meaningful.
   var _VERDICT_META = {
-    'supported':       {color: '#16a34a', icon: '◆', label: 'supported'},
-    'qualified':       {color: '#0d9488', icon: '◇', label: 'qualified'},
-    'honest-negative': {color: '#d97706', icon: '⊖', label: 'honest-negative'},
-    'refuted':         {color: '#dc2626', icon: '✗', label: 'refuted'},
-    'mixed':           {color: '#64748b', icon: '◐', label: 'mixed'},
+    'supported':    {color: '#16a34a', icon: '◆', label: 'Supported'},
+    'qualified':    {color: '#0d9488', icon: '◇', label: 'Qualified'},
+    'inconclusive': {color: '#64748b', icon: '◐', label: 'Inconclusive'},
+    'refuted':      {color: '#dc2626', icon: '✗', label: 'Refuted'},
   };
+  // Legacy verdict values fold into the four canonical ones (ontology decision:
+  // an honest negative is a refuted verdict, mixed is inconclusive).
+  var _VERDICT_ALIASES = {
+    'supported': 'supported', 'qualified': 'qualified',
+    'inconclusive': 'inconclusive', 'refuted': 'refuted',
+    'honest-negative': 'refuted', 'honest_negative': 'refuted', 'mixed': 'inconclusive',
+  };
+  // Shown in the Verdict pill when a study carries no (derivable) verdict yet.
+  var _VERDICT_PENDING = {color: '#94a3b8', icon: '·', label: 'pending'};
   var _TIER_META = {
     'conceptual_demonstration': {pips: 1, label: 'demonstration'},
     'mechanistic_prediction':   {pips: 2, label: 'mechanistic'},
@@ -99,15 +111,50 @@
   };
   function _studyVerdict(s) {
     s = s || {};
-    return _VERDICT_META[s.verdict] ? s.verdict : null;  // authored field only; no forced verdict
+    return _VERDICT_ALIASES[String(s.verdict || '').trim().toLowerCase()] || null;
   }
   function _verdictMeta(s) {
     var v = _studyVerdict(s);
-    // An authored verdict drives the two-axis marker; WITHOUT one, keep the
-    // honest gate-based status badge — never collapse a Planned/Investigating/
-    // Blocked study to a confident green "supported".
-    return v ? _VERDICT_META[v] : _studyStatusMeta(s);
+    return v ? _VERDICT_META[v] : null;  // null → render the pending pill
   }
+  // A rounded two-axis pill: glyph + (optionally) label, tinted by the axis color.
+  function _aigPill(meta, title, cls, compact) {
+    return '<span class="' + cls + '" title="' + title + '" ' +
+      'style="display:inline-flex;align-items:center;gap:3px;font-size:0.6em;font-weight:700;' +
+      'white-space:nowrap;border-radius:9999px;padding:1px 7px;color:' + meta.color + ';' +
+      'background:' + meta.color + '14;border:1px solid ' + meta.color + '40">' +
+      '<span style="font-size:1.1em;line-height:1">' + meta.icon + '</span>' +
+      (compact ? '' : _esc(meta.label)) + '</span>';
+  }
+
+  // Legacy single-axis status model — still used by the rail dot, the sidebar,
+  // and the iset summary table (surfaces outside the investigation graph). The
+  // graph itself now uses the two-axis _EXEC_META × _VERDICT_META above. Kept so
+  // those surfaces render unchanged; a later pass can migrate them too.
+  var _STATUS_META = {
+    Accepted:      {color: '#16a34a', icon: '✓', label: 'Accepted'},
+    Investigating: {color: '#ca8a04', icon: '◐', label: 'Investigating'},
+    Planned:       {color: '#2563eb', icon: '○', label: 'Planned'},
+    Blocked:       {color: '#64748b', icon: '⊘', label: 'Blocked'},
+    Refuted:       {color: '#dc2626', icon: '✗', label: 'Refuted'},
+  };
+  function _studyStatusState(s) {
+    s = s || {};
+    var gate = String(s.gate_status || '').trim().toLowerCase();
+    if (gate === 'passed' || gate === 'pass' || gate === 'accepted') return 'Accepted';
+    if (gate === 'failed' || gate === 'failed_evaluation' || gate === 'refuted') return 'Refuted';
+    if (gate === 'blocked') return 'Blocked';
+    if (gate === 'partial' || gate === 'needs_calibration' || gate === 'in_progress') return 'Investigating';
+    var life = String(s.effective_status || s.status || '').trim().toLowerCase();
+    if (life.indexOf('blocked') !== -1) return 'Blocked';
+    if (life.indexOf('fail') !== -1 || life === 'invalid' || life === 'refuted') return 'Refuted';
+    var conf = String(s.confidence || '').trim();
+    if (_STATUS_META[conf]) return conf;
+    if (['complete', 'completed', 'ran', 'passed', 'evaluated', 'decided'].indexOf(life) >= 0) return 'Accepted';
+    if (['running', 'analyzing', 'in_progress'].indexOf(life) >= 0) return 'Investigating';
+    return 'Planned';
+  }
+  function _studyStatusMeta(s) { return _STATUS_META[_studyStatusState(s)] || _STATUS_META.Planned; }
   function _studyTier(s) { s = s || {}; return _TIER_META[s.evidence_tier] ? s.evidence_tier : null; }
   function _tierPipsHtml(s) {
     var t = _studyTier(s); if (!t) return '';
@@ -10680,28 +10727,36 @@
         for (var k in entry) { if (entry.hasOwnProperty(k)) e[k] = entry[k]; }
         if (!e.condition) e.condition = 'tests-passed';
         if (!e.relation) {
-          e.relation = (e.outputs_used && e.outputs_used.length) ? 'model-input' : 'leads-to';
+          // A synthesized dependency edge (interface input / prerequisite) is a
+          // "builds on" relation by default; an authored parent_relations entry
+          // can retype it to tests / motivates / alternative-to.
+          e.relation = 'builds-on';
         }
         out.push(e);
       }
     });
     return out;
   }
-  // W13 — edge-relation vocabulary → stroke styling + legend label.
+  // Four canonical edge relations → stroke styling + legend label. `arrow:false`
+  // renders undirected (alternative-to is a symmetric "competing approaches" tie,
+  // not a direction). Legacy relations are alias-mapped in _dagRelStyle.
   var _DAG_REL_STYLE = {
-    'leads-to':        { color: '#94a3b8', dash: null,  label: 'leads to' },
-    'model-input':     { color: '#2563eb', dash: null,  label: 'model input' },
-    'alternative-to':  { color: '#64748b', dash: '6 3', label: 'alternative to' },
-    'refutes':         { color: '#dc2626', dash: '5 3', label: 'refutes' },
-    'precedes':        { color: '#94a3b8', dash: '2 3', label: 'precedes' },
+    'builds-on':      { color: '#2563eb', dash: null,  label: 'builds on',      arrow: true },
+    'tests':          { color: '#9333ea', dash: '7 3', label: 'tests',          arrow: true },
+    'motivates':      { color: '#d97706', dash: '2 4', label: 'motivates',      arrow: true },
+    'alternative-to': { color: '#64748b', dash: '1 4', label: 'alternative to', arrow: false },
+  };
+  var _DAG_REL_ALIASES = {
+    'leads-to': 'builds-on', 'leads to': 'builds-on',
+    'model-input': 'builds-on', 'model input': 'builds-on',
+    'evidence': 'builds-on', 'calibrates-threshold': 'builds-on', 'regulatory': 'builds-on',
+    'refutes': 'tests', 'refutes-alternative': 'tests',
+    'precedes': 'motivates', 'alternative': 'alternative-to',
   };
   function _dagRelStyle(rel) {
-    // Map legacy aliases onto the canonical vocabulary.
-    if (rel === 'regulatory')          rel = 'precedes';
-    if (rel === 'refutes-alternative') rel = 'refutes';
-    if (rel === 'alternative')         rel = 'alternative-to';
-    if (rel === 'leads to')            rel = 'leads-to';
-    return _DAG_REL_STYLE[rel] || _DAG_REL_STYLE['leads-to'];
+    rel = String(rel || '').trim().toLowerCase();
+    rel = _DAG_REL_ALIASES[rel] || rel;
+    return _DAG_REL_STYLE[rel] || _DAG_REL_STYLE['builds-on'];
   }
 
   // Layout + render the DAG of study nodes for the active investigation.
@@ -11005,8 +11060,17 @@
       // with the sidebar. Fixes the prior bug where `s.confidence || derive(...)` let
       // a drift-prone hand-set `confidence: Investigating` mask a `blocked` gate.
       // `Blocked` renders as its own state (slate ⊘), not as Refuted (red ✗).
-      var ss = _verdictMeta(s);
-      var confidence = ss.label;
+      // Two-axis ontology: PROGRESS (execution) and VERDICT (what the evidence
+      // supports) are shown as two prominent pills. The card color/border is the
+      // verdict color once the study is completed (the finding is the headline),
+      // else the execution-progress color.
+      var execMeta = _execMeta(s);
+      var isCompleted = _execState(s) === 'completed';
+      var verdictMeta = _verdictMeta(s);              // null → pending
+      var headColor = (isCompleted && verdictMeta) ? verdictMeta.color : execMeta.color;
+      var confidence = execMeta.label + (verdictMeta ? ' · ' + verdictMeta.label : '');
+      // Overview (far) band collapses the pills to glyphs only to stay readable.
+      var _pillCompact = !_opts.asks;
       var followUps = s.follow_up_studies || [];
 
       // Single display name everywhere: authored title:, else the shared
@@ -11064,7 +11128,7 @@
       node.style.cssText =
         'position:absolute;left:' + x + 'px;top:0px;' +
         'width:' + CARD_W + 'px;' +
-        'background:#fff;border:1px solid #e5e7eb;border-top:3px solid ' + ss.color + ';' +
+        'background:#fff;border:1px solid #e5e7eb;border-top:3px solid ' + headColor + ';' +
         'border-radius:8px;padding:10px 12px;cursor:pointer;box-sizing:border-box;' +
         'box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:box-shadow 0.1s,border-color 0.1s;';
 
@@ -11078,16 +11142,18 @@
           '</button>';
       }
       node.innerHTML =
-        // Meta row: icon (left) + status badge (right). The badge is alone on
-        // this row with space-between, so a nowrap label can never overflow the
-        // card. The title then spans the FULL card width on its own line below
-        // (no longer squeezed into a thin flex column beside the badge).
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:5px">' +
-          '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1;flex:none">' + ss.icon + '</span>' +
+        // Meta row — two prominent, equally-weighted pills on the left (PROGRESS
+        // = execution status, VERDICT = what the evidence supports), evidence pips
+        // + open-study ↗ on the right. Two parallel facts: how far it got, and
+        // what it found. The pills wrap under each other on a narrow card.
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px">' +
+          '<span style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
+            _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact) +
+            _aigPill(verdictMeta || _VERDICT_PENDING,
+                     verdictMeta ? ('Verdict: ' + verdictMeta.label) : 'Verdict: pending — not yet concluded',
+                     'aig-verdict-pill', _pillCompact) +
+          '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
-            '<span class="aig-status-badge" role="button" tabindex="0" title="Expand this card in place" ' +
-              'style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;cursor:pointer;text-decoration:underline dotted">' +
-              _esc(confidence) + '</span>' +
             _tierPipsHtml(s) +
             '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
               'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
@@ -11286,19 +11352,21 @@
                    ', ' + (x2 - dx) + ' ' + y2 +
                    ', ' + x2 + ' ' + y2;
         }
-        var rel = p.relation || 'leads-to';
+        var rel = p.relation || 'builds-on';
         var st = _dagRelStyle(rel);
         var path = document.createElementNS(svgNS, 'path');
         path.setAttribute('d', path_d);
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', st.color);
         path.setAttribute('stroke-width', '1.5');
-        path.setAttribute('marker-end', 'url(#dag-arrowhead)');
+        // Directed relations get an arrowhead; alternative-to is symmetric and
+        // rendered as a plain connector (no direction implied).
+        if (st.arrow !== false) path.setAttribute('marker-end', 'url(#dag-arrowhead)');
         if (st.dash) path.setAttribute('stroke-dasharray', st.dash);
         edgesSvg.appendChild(path);
         var labelText = st.label;
-        // model-input edges name the consumed upstream outputs when present.
-        if (rel === 'model-input' && p.outputs_used && p.outputs_used.length) {
+        // A builds-on edge names the consumed upstream outputs when present.
+        if (p.outputs_used && p.outputs_used.length) {
           labelText += ' (' + p.outputs_used.join(', ') + ')';
         }
         var label = document.createElementNS(svgNS, 'text');
@@ -11357,8 +11425,11 @@
       };
       var _br = '<span style="flex-basis:100%;height:0"></span>';
       legendHost.innerHTML =
-        '<span style="font-weight:600;color:#475569;margin-right:10px">Verdict:</span>' +
-        Object.keys(_VERDICT_META).map(function(k){var m=_VERDICT_META[k];return _lg(m.color, m.icon, m.label);}).join('') +
+        '<span style="font-weight:600;color:#475569;margin-right:10px">Progress:</span>' +
+        Object.keys(_EXEC_META).map(function(k){var m=_EXEC_META[k];return _lg(m.color, m.icon, m.label);}).join('') +
+        _br +
+        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Verdict:</span>' +
+        '<span style="margin-top:6px">' + Object.keys(_VERDICT_META).map(function(k){var m=_VERDICT_META[k];return _lg(m.color, m.icon, m.label);}).join('') + '</span>' +
         _br +
         '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Evidence:</span>' +
         '<span style="margin-top:6px">' + Object.keys(_TIER_META).map(_tierLg).join('') + '</span>' +
@@ -13187,12 +13258,10 @@
   // Used by the grouped and ungrouped layouts.
   function _railStudyItem(s, opts) {
     opts = opts || {};
-    // Unified status source (see _studyStatusMeta) so the rail dot agrees with the
-    // investigation-graph card + legend. Was _railStatusColor(s.status) — a separate
-    // 4th color map that showed `blocked` red while the card showed amber.
-    // Uses the same verdict-preferring meta as the DAG node, so the rail and the
-    // card can never show different badges for the same study.
-    var _sm = _verdictMeta(s);
+    // Two-axis source so the rail dot agrees with the investigation-graph card:
+    // the verdict when the study has one, otherwise the execution-progress color.
+    // Never null (the graph card uses the same _verdictMeta || _execMeta pair).
+    var _sm = _verdictMeta(s) || _execMeta(s);
     var status = _sm.label;
     var color = _sm.color;
     var indent = opts.indent ? '28px' : '12px';
