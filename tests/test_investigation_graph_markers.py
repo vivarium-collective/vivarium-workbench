@@ -35,8 +35,11 @@ def test_node_carries_verdict_and_tier(tmp_path):
     payload, code = build_investigation_graph(_ws(tmp_path), "inv1")
     assert code == 200
     child = next(n for n in payload["studies"] if n["slug"] == "s-child")
-    assert child["verdict"] == "honest-negative"
+    # Legacy authored verdict "honest-negative" folds to the canonical "refuted".
+    assert child["verdict"] == "refuted"
     assert child["evidence_tier"] == "conceptual_demonstration"
+    # Every node carries a derived execution_status (the Progress axis).
+    assert child["execution_status"] in {"proposed", "planned", "running", "completed", "failed"}
 
 
 def test_node_omits_absent_fields(tmp_path):

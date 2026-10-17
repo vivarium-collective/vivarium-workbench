@@ -20,6 +20,94 @@ from investigation_contracts import validate_chain
 # report-card verdicts (mirrors report_views._PRE_EVAL_STATUSES).
 _PRE_EVAL_STATUSES = frozenset({"build", "planned", "implementation", "design", "pending", ""})
 
+# ── Two-axis ontology derivation (execution_status × verdict) + edge typing ──
+# Canonical study fields (viva-template study.schema.json): execution_status ∈
+# {proposed,planned,running,completed,failed}; verdict ∈ {supported,qualified,
+# inconclusive,refuted}; edge relation ∈ {builds-on,tests,motivates,alternative-to}.
+# All optional — derived here from the legacy fields when absent so studies that
+# predate the ontology still render. Authored values always win.
+_EXEC_VALUES = frozenset({"proposed", "planned", "running", "completed", "failed"})
+_VERDICT_ALIASES = {
+    "supported": "supported", "qualified": "qualified",
+    "inconclusive": "inconclusive", "refuted": "refuted",
+    "honest-negative": "refuted", "honest_negative": "refuted",  # folded per ontology decision
+    "mixed": "inconclusive",
+}
+_REL_ALIASES = {
+    "builds-on": "builds-on", "builds on": "builds-on",
+    "leads-to": "builds-on", "leads to": "builds-on",
+    "model-input": "builds-on", "model input": "builds-on",
+    "evidence": "builds-on", "calibrates-threshold": "builds-on", "regulatory": "builds-on",
+    "tests": "tests", "refutes": "tests", "refutes-alternative": "tests",
+    "motivates": "motivates", "precedes": "motivates",
+    "alternative-to": "alternative-to", "alternative": "alternative-to",
+}
+
+
+def _canon_relation(rel):
+    """Map any legacy/alias edge relation to one of the four canonical types."""
+    if not rel:
+        return None
+    return _REL_ALIASES.get(str(rel).strip().lower(), "builds-on")
+
+
+def _derive_execution_status(spec: dict, node_status: str) -> str:
+    """Execution axis (what happened), independent of the scientific verdict."""
+    ex = str(spec.get("execution_status") or "").strip().lower()
+    if ex in _EXEC_VALUES:
+        return ex
+    sim = str(spec.get("simulation_status") or "").strip().lower()
+    evalst = str(spec.get("evaluation_status") or "").strip().lower()
+    gate = str(spec.get("gate_status") or "").strip().lower()
+    life = str(spec.get("status") or "").strip().lower()
+    if sim == "failed" or life in ("invalid", "failed"):
+        return "failed"
+    if gate in ("passed", "failed", "needs_calibration", "stale"):
+        return "completed"  # a gate reached a verdict ⇒ the study ran
+    if sim == "ran" and evalst in ("evaluated", "failed_evaluation"):
+        return "completed"
+    if str(node_status).strip().lower() == "evaluated":
+        return "completed"
+    if life in ("ran", "complete", "completed", "decided"):
+        return "completed"
+    if sim == "running" or life in ("running", "analyzing", "in_progress"):
+        return "running"
+    if life == "planned":
+        return "proposed" if spec.get("proposed") is True else "planned"
+    conf = str(spec.get("confidence") or "").strip().lower()
+    if conf == "accepted":
+        return "completed"
+    if conf == "investigating":
+        return "running"
+    if conf == "planned":
+        return "planned"
+    if spec.get("proposed") is True:
+        return "proposed"
+    return "planned"
+
+
+def _derive_verdict(spec: dict):
+    """Scientific verdict axis (what the evidence supports). Authored wins; else
+    parse the free-text report.verdict / study_card.status. Returns None when
+    nothing supports a verdict (e.g. not yet completed)."""
+    v = str(spec.get("verdict") or "").strip().lower()
+    if v in _VERDICT_ALIASES:
+        return _VERDICT_ALIASES[v]
+    rep = spec.get("report") if isinstance(spec.get("report"), dict) else {}
+    card = spec.get("study_card") if isinstance(spec.get("study_card"), dict) else {}
+    text = str(rep.get("verdict") or card.get("status") or "").strip().lower()
+    if not text:
+        return None
+    if "refut" in text or "contradict" in text or text.startswith("fail") or " fail" in text:
+        return "refuted"
+    if "inconclusive" in text or "mixed" in text or "unresolved" in text:
+        return "inconclusive"
+    if "caveat" in text or "qualified" in text or "warn" in text:
+        return "qualified"
+    if "pass" in text or "support" in text or "reproduc" in text:
+        return "supported"
+    return None
+
 
 def _label(node: dict) -> str:
     s = (node.get("statement") or "").strip()
@@ -121,11 +209,17 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             _node["confidence"] = _dc(study_spec)
         except Exception:  # noqa: BLE001 — viva_superpowers optional; frontend falls back
             pass
-        # Two-axis markers (verdict × evidence_tier): authored study fields the
-        # graph renderer reads; optional, so an unmarked study stays unmarked.
-        for _mk in ("verdict", "evidence_tier"):
-            if study_spec.get(_mk):
-                _node[_mk] = study_spec[_mk]
+        # Two-axis ontology (execution_status × verdict) + evidence_tier. The
+        # execution axis (what happened) is always derived so every node has a
+        # Progress pill; the verdict (what the evidence supports) is only set when
+        # authored or derivable, so an unmarked study shows "pending". Authored
+        # fields win over derivation.
+        _node["execution_status"] = _derive_execution_status(study_spec, _node_status)
+        _verdict = _derive_verdict(study_spec)
+        if _verdict:
+            _node["verdict"] = _verdict
+        if study_spec.get("evidence_tier"):
+            _node["evidence_tier"] = study_spec["evidence_tier"]
         studies_out.append(_node)
         if use_members:
             # New reference model: edges are derived from this member's
@@ -140,8 +234,9 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
                     if src in member_set:
                         _e = {"source": f"study/{src}", "target": f"study/{slug}",
                               "rel": "input", "artifact": inp["artifact"]}
-                        if _rel_by_parent.get(src):
-                            _e["relation"] = _rel_by_parent[src]
+                        _canon = _canon_relation(_rel_by_parent.get(src))
+                        if _canon:
+                            _e["relation"] = _canon
                         study_edges.append(_e)
         else:
             # Legacy path: edges from pipeline_gate.prerequisites.
@@ -156,8 +251,9 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             for pre in normalize_dag_edges(study_spec):
                 _e = {"source": f"study/{pre['study']}", "target": f"study/{slug}",
                       "rel": "prerequisite", "condition": explicit.get(pre["study"], "")}
-                if _rel_by_parent.get(pre["study"]):
-                    _e["relation"] = _rel_by_parent[pre["study"]]
+                _canon = _canon_relation(_rel_by_parent.get(pre["study"]))
+                if _canon:
+                    _e["relation"] = _canon
                 study_edges.append(_e)
         nodes = load_study_nodes(ws_root, slug)
         derived = False
