@@ -137,7 +137,8 @@ def test_findings_ledger_preserves_every_existing_detail():
 
 def test_findings_ledger_evidence_link_still_wired_to_gotostudytab():
     html = _render([_RICH_FINDING])
-    assert "_gotoStudyTab('tests'," in html
+    # 5-tab layout: the cited test row lives in the Audit tab (Tests folded in).
+    assert "_gotoStudyTab('audit'," in html
 
 
 def test_findings_ledger_pass_if_band_still_present():

@@ -8988,40 +8988,21 @@
   }
   window._setInvestigationContextCollapsed = _setInvestigationContextCollapsed;
 
-  // Study-tabs manager: accumulating, closeable study tabs inside the
-  // investigation workspace (#ws-study-tabs bar -> #ws-study-panel/#ws-study-frame
-  // porthole). Opening a study collapses the investigation context down to the
-  // slim bar; closing the last open tab returns to graph-only.
-  window._wsStudyTabs = { investigation: null, openTabs: [], active: null };
+  // Embedded study view: a SINGLE study opens inline in the investigation
+  // workspace porthole (#ws-study-panel/#ws-study-frame) — opening another study
+  // REPLACES it. The old accumulating, closeable study-tab strip (#ws-study-tabs
+  // with × chips) was removed; `_wsStudyTabs` is now just {investigation, active}
+  // so `active` still drives the open-node highlight in the graph.
+  window._wsStudyTabs = { investigation: null, active: null };
 
   function _wsResetStudyTabs(investigation) {
-    window._wsStudyTabs = { investigation: investigation, openTabs: [], active: null };
-    _wsRenderStudyTabs();
+    window._wsStudyTabs = { investigation: investigation, active: null };
+    _wsHighlightActiveDagNode(null);
     var panel = document.getElementById('ws-study-panel');
     if (panel) panel.style.display = 'none';
     _setInvestigationContextCollapsed(false);   // fresh investigation -> graph expanded
   }
   window._wsResetStudyTabs = _wsResetStudyTabs;
-
-  function _wsRenderStudyTabs() {
-    var bar = document.getElementById('ws-study-tabs');
-    if (!bar) return;
-    var st = window._wsStudyTabs;
-    if (!st.openTabs.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
-    bar.style.display = '';
-    bar.innerHTML = st.openTabs.map(function (slug) {
-      var on = slug === st.active;
-      return '<span class="ws-study-tab" data-ws-tab="' + _esc(slug) + '" ' +
-        'style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;' +
-        'border-bottom:2px solid ' + (on ? '#3b82f6' : 'transparent') + ';' +
-        'color:' + (on ? '#0f172a' : '#64748b') + ';font-weight:' + (on ? '600' : '400') + ';margin-bottom:-1px">' +
-        '<span onclick="_wsOpenStudyTab(\'' + _esc(slug) + '\')">' + _esc(slug) + '</span>' +
-        '<span onclick="event.stopPropagation();_wsCloseStudyTab(\'' + _esc(slug) + '\')" ' +
-        'title="close" style="color:#94a3b8;font-weight:700">×</span></span>';
-    }).join('');
-    _wsHighlightActiveDagNode(st.active);
-  }
-  window._wsRenderStudyTabs = _wsRenderStudyTabs;
 
   // Highlight the open study's node in the investigation graph (clearing any
   // previously-open one), matching on the slug stamped on each node by
@@ -9083,9 +9064,8 @@
 
   function _wsOpenStudyTab(slug, tab) {
     var st = window._wsStudyTabs;
-    if (st.openTabs.indexOf(slug) === -1) st.openTabs.push(slug);
-    st.active = slug;
-    _wsRenderStudyTabs();
+    st.active = slug;                       // single open study — replaces any prior
+    _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');
     if (panel) panel.style.display = '';
@@ -9157,24 +9137,6 @@
     }
   }
   window._wsOpenStudyTab = _wsOpenStudyTab;
-
-  function _wsCloseStudyTab(slug) {
-    var st = window._wsStudyTabs;
-    var wasActive = (st.active === slug);
-    var i = st.openTabs.indexOf(slug);
-    if (i !== -1) st.openTabs.splice(i, 1);
-    if (wasActive) st.active = st.openTabs[Math.max(0, i - 1)] || st.openTabs[0] || null;
-    _wsRenderStudyTabs();
-    if (!wasActive) return;                      // background tab closed -> porthole untouched
-    if (st.active) {
-      _wsOpenStudyTab(st.active);                // re-focus nearest remaining tab
-    } else {
-      var panel = document.getElementById('ws-study-panel');
-      if (panel) panel.style.display = 'none';
-      _setInvestigationContextCollapsed(false);  // last tab closed -> graph-only
-    }
-  }
-  window._wsCloseStudyTab = _wsCloseStudyTab;
 
   // Task 5: render an investigation's graph + objective into an arbitrary mount
   // (the workspace #ws-context). Reuses the v3 detail renderer verbatim by

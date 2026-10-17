@@ -4277,6 +4277,35 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 }
 .study-pillar:hover { color: #334155; }
 .study-pillar.active { color: #1e293b; border-bottom-color: #2563eb; }
+
+/* 5-tab study layout (mockup refinement): one centered row of icon+label tabs,
+   no per-act group headers. Each .study-pillar stacks its inline-SVG icon above
+   the label and centers both; the icon inherits currentColor so it tints with
+   the active/inactive text color (active underline + accent unchanged). These
+   override the old act-cluster flex rules on .study-tabs above. */
+.study-tabs { justify-content: center; align-items: flex-end; gap: 10px; }
+.study-tabs .study-pillar {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 8px 18px 7px;
+}
+.study-pillar .pillar-icon { display: block; color: currentColor; }
+.study-pillar .pillar-label { display: block; line-height: 1; }
+.study-pillar.active .pillar-icon { color: #2563eb; }
+
+/* Simulations secondary subtabs (Runs | Results | Analysis) — lightweight,
+   matching the page's existing tab style at a smaller scale. */
+.sim-subtab {
+  border: 0; background: none; cursor: pointer; padding: 6px 14px;
+  font-weight: 600; font-size: 0.9rem; color: #64748b;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.sim-subtab:hover { color: #334155; }
+.sim-subtab.active { color: #1e293b; border-bottom-color: #2563eb; }
+.sim-subpanel[hidden] { display: none; }
+
+/* Model tab: collapsed "Advanced — build provenance" section */
+.model-advanced { border-top: 1px solid #e5e7eb; padding-top: 12px; }
+.model-advanced > summary { color: #475569; }
 .study-subnav { display: flex; gap: 2px; flex-wrap: wrap; margin: 0 0 10px; padding: 4px 0 0; }
 .study-subnav .study-tab {
   border: 0; background: none; cursor: pointer; padding: 4px 11px; border-radius: 9999px;
@@ -5044,6 +5073,11 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 :root[data-theme="dark"] .finding-title,
 :root[data-theme="dark"] .overview-section h2,
 :root[data-theme="dark"] .overview-section h3{ color:var(--heading) !important; }
+/* 5-tab icon row + Simulations subtabs: active accent in dark mode. */
+:root[data-theme="dark"] .study-pillar.active .pillar-icon{ color:#3b82f6; }
+:root[data-theme="dark"] .sim-subtab{ color:var(--text-muted); }
+:root[data-theme="dark"] .sim-subtab.active{ color:var(--heading); border-bottom-color:#3b82f6; }
+:root[data-theme="dark"] .model-advanced{ border-top-color:var(--border); }
 :root[data-theme="dark"] .status-detail-axis,
 :root[data-theme="dark"] .narrative-label,
 :root[data-theme="dark"] .finding-evidence,

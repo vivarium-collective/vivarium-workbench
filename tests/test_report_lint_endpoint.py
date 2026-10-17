@@ -98,6 +98,8 @@ def test_walkthrough_js_populates_readiness_in_live_dom():
 def test_study_detail_js_renders_readiness_panel():
     js = (_PKG / "static" / "study-detail.js").read_text(encoding="utf-8")
     assert "/api/report-lint" in js
-    assert "_renderReadinessPanel" in js
+    # 5-tab layout (Phase 4): the header readiness dropdown became the compact
+    # #header-audit-summary link, filled by _renderHeaderAuditSummary.
+    assert "_renderHeaderAuditSummary" in js
     html = (_PKG / "templates" / "study-detail.html").read_text(encoding="utf-8")
-    assert 'id="readiness-panel"' in html
+    assert 'id="header-audit-summary"' in html

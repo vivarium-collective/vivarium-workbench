@@ -21,9 +21,12 @@ def test_explore_tab_row_has_counts():
 
 
 def test_workspace_regions_exist():
+    # 5-tab / strip-removal: the accumulating #ws-study-tabs strip was removed;
+    # the embedded study now opens in the single #ws-study-frame porthole.
     for _id in ['iset-explore', 'iset-workspace', 'ws-back', 'ws-title',
-                'ws-context', 'ws-context-bar', 'ws-study-tabs', 'ws-study-frame']:
+                'ws-context', 'ws-context-bar', 'ws-study-frame']:
         assert 'id="%s"' % _id in TPL, _id
+    assert 'id="ws-study-tabs"' not in TPL
 
 
 def test_explore_workspace_toggle_functions():
@@ -53,21 +56,23 @@ def test_context_collapse_function():
 
 
 def test_study_tabs_manager():
-    for fn in ["_wsOpenStudyTab", "_wsCloseStudyTab", "_wsRenderStudyTabs", "_wsResetStudyTabs"]:
+    # Strip removal: the embedded study view is a SINGLE open study now — the
+    # accumulating closeable tabs (_wsRenderStudyTabs + _wsCloseStudyTab) were
+    # removed. _wsOpenStudyTab (replace the open study) + _wsResetStudyTabs
+    # remain, as the entry points the study navigator + router call.
+    for fn in ["_wsOpenStudyTab", "_wsResetStudyTabs"]:
         assert "function %s" % fn in JS, fn
         assert "window.%s" % fn in JS, fn
+    for gone in ["_wsCloseStudyTab", "_wsRenderStudyTabs"]:
+        assert "function %s" % gone not in JS, gone
     # Opening a study keeps the investigation context EXPANDED above it (PR #587,
     # "keep the investigation context expanded above an open study" — a user
-    # request), and closing the last tab returns to graph-only — both call
-    # _setInvestigationContextCollapsed(false). Slice each function body to the
-    # next sibling-function boundary rather than a fixed char window, so unrelated
-    # edits inside the function can't shift the assertion out of range.
+    # request). Slice the function body to the next sibling-function boundary.
     def _fn_body(name):
         i = JS.index("function %s" % name)
         j = JS.find("\n  function ", i + 1)
         return JS[i:j] if j != -1 else JS[i:]
     assert "_setInvestigationContextCollapsed(false)" in _fn_body("_wsOpenStudyTab")
-    assert "_setInvestigationContextCollapsed(false)" in _fn_body("_wsCloseStudyTab")
 
 
 # ── Task 5: consistency router + investigation-workspace render ──────────────

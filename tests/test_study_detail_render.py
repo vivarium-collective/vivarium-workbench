@@ -106,12 +106,13 @@ def test_header_has_kind_tag_and_question_and_no_spine(tmp_path, dashboard_clien
 # ---------------------------------------------------------------------------
 
 def test_readiness_is_inline_not_banner(tmp_path, dashboard_client):
-    """The readiness mount is still server-rendered as an empty container
-    (its content is filled client-side by _renderReadinessPanel after
-    GET /api/report-lint, so the "⚠ N gaps" / "✓ ready" text itself is NOT
-    visible in served HTML and must not be asserted here). Only assert the
-    server-side facts: the `#readiness-panel` mount exists and no trace of
-    the retired `#spine-summary` banner/table remains.
+    """5-tab layout (Phase 4): the header readiness dropdown is gone, replaced
+    by a compact `#header-audit-summary` mount filled client-side by
+    _renderHeaderAuditSummary (GET /api/report-lint) with a one-line
+    "⚠ N gaps → Audit" / "✓ ready" link. That text is NOT in served HTML and is
+    not asserted here. Assert the server-side facts: the compact mount exists,
+    the old `#readiness-panel` dropdown mount is gone, and no trace of the
+    retired `#spine-summary` banner/table remains.
     """
     ws = tmp_path / "ws"
     sd = ws / "studies" / "readiness-inline-study"
@@ -131,7 +132,8 @@ def test_readiness_is_inline_not_banner(tmp_path, dashboard_client):
     assert resp.status_code == 200
     html = resp.text
 
-    assert 'id="readiness-panel"' in html
+    assert 'id="header-audit-summary"' in html
+    assert 'id="readiness-panel"' not in html   # old dropdown mount removed
     assert 'id="spine-summary"' not in html
     assert 'spine-summary' not in html
     assert 'spine-row' not in html
@@ -350,10 +352,11 @@ def test_simulations_is_readonly_table(tmp_path, dashboard_client):
 
 
 def test_visualizations_stripped_to_gallery(tmp_path, dashboard_client):
-    """Task 9: Visualizations tab is one figure gallery — no explanatory
-    prose and no per-mount section chrome (headings), just the three mounts
-    (native gallery, embedded-viz iframes, latest-run charts) under a single
-    `study-figures` wrapper + `<h2>Figures</h2>`."""
+    """5-tab layout (Phase 1): the Visualizations tab is gone — its figure
+    gallery is re-homed into the Overview panel as a "Figures" section. It stays
+    one gallery with no explanatory prose and no per-mount section chrome, just
+    the three mounts (native gallery, embedded-viz iframes, latest-run charts)
+    under the preserved `study-figures` / `#visualize-section` wrapper."""
     ws = tmp_path / "ws"
     sd = ws / "studies" / "viz-gallery-study"
     sd.mkdir(parents=True)
@@ -373,10 +376,15 @@ def test_visualizations_stripped_to_gallery(tmp_path, dashboard_client):
     assert resp.status_code == 200
     html = resp.text
 
-    assert 'id="panel-visualize"' in html
-    assert 'study-figures' in html
-    assert 'id="native-gallery-panel"' in html
-    assert 'id="viz-charts-panel"' in html
+    # No standalone Visualizations tab/panel any more — the gallery lives in
+    # Overview (its #visualize-section wrapper is preserved).
+    assert 'id="panel-visualize"' not in html
+    assert 'data-kind="visualize"' not in html
+    overview = html[html.index('id="panel-overview"'):html.index('id="panel-compose"')]
+    assert 'id="visualize-section"' in overview
+    assert 'study-figures' in overview
+    assert 'id="native-gallery-panel"' in overview
+    assert 'id="viz-charts-panel"' in overview
 
     assert 'Figures for this study' not in html
     assert 'native-gallery-section' not in html
@@ -670,11 +678,16 @@ def test_tests_merged_single_concept(tmp_path, dashboard_client):
     assert 'data-kind="report-cards"' not in html
     assert 'id="panel-report-cards"' not in html
     assert '_setStudyTab(\'report-cards\')' not in html
-    # The report-cards mount now lives INSIDE the tests panel (one concept).
-    tests_panel = html[html.index('id="panel-tests"'):html.index('id="panel-audit"')]
+    # 5-tab layout (Phase 1): Tests is no longer its own tab — its content is
+    # the FIRST section inside the Audit panel ("Tests — the bar"). Scope to the
+    # Audit panel; the report-cards mount + "The bar" framing live there now.
+    assert 'id="panel-tests"' not in html
+    assert 'data-kind="tests"' not in html
+    tests_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
     assert 'id="report-cards-panel"' in tests_panel
+    assert '<h3>Tests — the bar</h3>' in tests_panel
     # The redundant "<h2>Tests</h2>" heading was removed (the tab bar names it);
-    # the useful "The bar" subtitle stays as the top-of-panel framing.
+    # the useful "The bar" subtitle stays as the top-of-section framing.
     assert '<h2>Tests</h2>' not in tests_panel
     assert 'The bar' in tests_panel
 
@@ -720,7 +733,8 @@ def test_tests_gate_summary_not_duplicated_by_behavioral_list(tmp_path, dashboar
     assert resp.status_code == 200
     html = resp.text
 
-    tests_panel = html[html.index('id="panel-tests"'):html.index('id="panel-audit"')]
+    # 5-tab layout: Tests content is the first section of the Audit panel now.
+    tests_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
 
     # Exactly one score-line mount and one per-gate detail list in the
     # server-rendered markup — no second copy of either.
@@ -948,22 +962,19 @@ def test_pillars_drive_tabs_directly_no_subnav(tmp_path, dashboard_client):
     assert 'id="study-subnav"' not in html
     assert 'study-subnav' not in html
 
-    # All 11 pillar buttons present, each carrying data-kind and calling
-    # _setStudyTab(kind) directly (pillar name == kind, except
-    # "decide" -> "conclusions"). Exports/data pillar was deleted (Task E4);
-    # Results + Analyses added by the study-spine reorg (spec §1/§3.3/§3.4);
-    # Audit + Build added by the same reorg (spec §3.7/§3.8).
-    pillar_to_kind = {
-        "understand": "overview", "compose": "compose", "readouts": "readouts",
-        "simulate": "simulate", "results": "results", "analyses": "analyses",
-        "visualize": "visualize", "tests": "tests", "audit": "audit",
-        "build": "build", "decide": "conclusions",
-    }
-    for pillar, kind in pillar_to_kind.items():
+    # 5-tab study layout (Phase 1): exactly FIVE pillars remain — Overview,
+    # Model (compose), Simulations (simulate), Audit, Decide (conclusions) —
+    # each carrying data-kind and calling _setStudyTab(kind) directly. The six
+    # folded-away kinds (readouts/results/analyses/visualize/tests/build) are no
+    # longer pillars.
+    five_kinds = ["overview", "compose", "simulate", "audit", "conclusions"]
+    for kind in five_kinds:
         assert f'data-kind="{kind}"' in html and f"_setStudyTab('{kind}')" in html, \
-            f"pillar {pillar!r} not wired to _setStudyTab('{kind}')"
+            f"pillar kind {kind!r} not wired to _setStudyTab('{kind}')"
+    for gone in ("readouts", "results", "analyses", "visualize", "tests", "build"):
+        assert f"_setStudyTab('{gone}')" not in html, f"stale pillar for {gone!r}"
     import re
-    assert len(re.findall(r'<button class="study-pillar[^"]*"', html)) == 11
+    assert len(re.findall(r'<button class="study-pillar[^"]*"', html)) == 5
     assert 'data-kind="data"' not in html
 
     # No pillar/member indirection left anywhere (grep-proven, both served
@@ -984,17 +995,11 @@ def test_pillars_drive_tabs_directly_no_subnav(tmp_path, dashboard_client):
 # ---------------------------------------------------------------------------
 
 def test_act_rail_renders_above_tab_nav(tmp_path, dashboard_client):
-    """The five act labels render inside `<nav class="study-tabs">`, each
-    with a gate-dot element carrying a stable `data-gate` hook (state wiring
-    is Task G2's job — here it must be present but neutral/not-assessed).
-
-    ACTRAIL fix: the act rail is no longer a standalone `.act-rail` row
-    sitting above an independent `.study-pillars` row (those two sibling
-    rows never lined up — no shared columns). Each act's label and its tabs
-    now live together in one `.act-cluster` column, so this test asserts
-    against the whole `<nav>` rather than a `.act-rail`/`.study-pillars`
-    split. See test_act_clusters_group_label_with_own_tabs below for the
-    per-cluster grouping assertion."""
+    """5-tab study layout (mockup refinement): the per-act group-label headers
+    (THE STUDY / DESIGN / EVIDENCE / ASSURANCE / DECISION) and their gate dots
+    were removed — with only five tabs they were clutter. The nav is now ONE
+    centered row (`study-tabs study-tabs-row`) of five icon+label pillars; no
+    `.act-cluster` / `.act-label` / `.act-gate-dot` markup remains."""
     ws = tmp_path / "ws"
     sd = ws / "studies" / "act-rail-study"
     sd.mkdir(parents=True)
@@ -1018,35 +1023,28 @@ def test_act_rail_renders_above_tab_nav(tmp_path, dashboard_client):
     nav_end = html.index('</nav>', nav_i)
     nav = html[nav_i:nav_end]
 
-    # The old standalone containers are gone — labels and tabs are grouped
-    # into `.act-cluster` columns instead.
-    assert 'class="act-rail"' not in nav
-    assert 'class="study-pillars"' not in nav
-
-    # Five act labels, in order. Task E4 removed the sixth (Record-drawer
-    # "Exports") cluster — the rail is now exactly these five.
+    # Single clean row — no act clusters, no group labels, no gate dots.
+    assert 'class="act-cluster' not in nav
+    assert 'act-gate-dot' not in nav
+    assert 'class="act-label"' not in nav
     for label in ("The Study", "Design", "Evidence", "Assurance", "Decision"):
-        assert label in nav, f"act label {label!r} missing from act rail"
-    order = [nav.index(label) for label in
-             ("The Study", "Design", "Evidence", "Assurance", "Decision")]
-    assert order == sorted(order), "act labels out of order"
-    assert "Exports" not in nav
+        assert label not in nav, f"group label {label!r} should be removed"
 
-    # Each of the five acts carries a gate-dot hook: a stable class +
-    # data-gate attribute, neutral state — G2 recolors it, doesn't need to
-    # touch this markup.
+    # Five icon+label pillars, in order, each with an inline-SVG icon.
     import re
-    dots = re.findall(r'<span class="act-gate-dot" data-gate="([a-z]+)"[^>]*>', nav)
-    assert dots == ["study", "design", "evidence", "assurance", "decision"], dots
-    assert 'data-gate-state="not-assessed"' in nav
+    kinds = re.findall(r'<button class="study-pillar[^"]*" data-kind="([a-z]+)"', nav)
+    assert kinds == ["overview", "compose", "simulate", "audit", "conclusions"], kinds
+    assert nav.count('class="pillar-icon"') == 5
+    assert nav.count('<svg') == 5
+    assert nav.count('class="pillar-label"') == 5
 
 
 def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
-    """ACTRAIL fix (user-selected: "grouped clusters, aligned"): each act's
-    label and its own tabs live in ONE `.act-cluster[data-act=...]` column,
-    so alignment is structural rather than hand-tuned spacing. This is the
-    crux assertion — every `.act-cluster` must contain both its `.act-label`
-    text and its own `data-kind` buttons, not just sit near them."""
+    """5-tab study layout (mockup refinement): the `.act-cluster` grouping was
+    dropped — each pillar is a direct child of the single `study-tabs-row` nav
+    and pairs its own inline-SVG icon with its own label. This asserts the
+    icon↔label pairing per pillar and that no cluster/group-label markup
+    remains."""
     import re
 
     ws = tmp_path / "ws"
@@ -1072,62 +1070,35 @@ def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
     nav_end = html.index('</nav>', nav_i)
     nav = html[nav_i:nav_end]
 
-    # Split into per-cluster segments on the `.act-cluster` opening-tag
-    # marker — each segment holds exactly one cluster's content (label +
-    # its tabs) up to the next cluster (or the end of <nav>).
-    segments = nav.split('<div class="act-cluster')
-    clusters = {}
-    for seg in segments[1:]:
-        m = re.match(r'[^>]*data-act="([a-z]+)"', seg)
-        assert m, f"act-cluster segment missing data-act: {seg[:80]!r}"
-        clusters[m.group(1)] = seg
+    # No act-cluster grouping / group labels / gate dots.
+    assert 'act-cluster' not in nav
+    assert 'act-label' not in nav
+    assert 'act-gate-dot' not in nav
 
-    # Task E4 deleted the sixth "record" cluster (Exports) — five narrative
-    # acts remain, each with a gate dot. Study-spine reorg (spec §1): the
-    # `simulate` pillar moved Evidence -> Design (after readouts), Evidence
-    # gained `results` + `analyses` ahead of `visualize`, and Assurance
-    # gained `audit` + `build` alongside `tests` (spec §3.7/§3.8).
-    expected = {
-        "study": {"label": "The Study", "kinds": ["overview"]},
-        "design": {"label": "Design", "kinds": ["compose", "readouts", "simulate"]},
-        "evidence": {"label": "Evidence", "kinds": ["results", "analyses", "visualize"]},
-        "assurance": {"label": "Assurance", "kinds": ["tests", "audit", "build"]},
-        "decision": {"label": "Decision", "kinds": ["conclusions"]},
-    }
-    assert set(clusters) == set(expected), clusters.keys()
-    assert "record" not in clusters
-
-    for act, spec in expected.items():
-        seg = clusters[act]
-        assert spec["label"] in seg, f"{act} cluster missing label {spec['label']!r}"
-        for kind in spec["kinds"]:
-            assert f'data-kind="{kind}"' in seg, f"{act} cluster missing data-kind={kind!r}"
-            assert f"_setStudyTab('{kind}')" in seg, f"{act} cluster's {kind!r} button missing onclick"
-
-        assert re.search(r'<span class="act-gate-dot" data-gate="%s" data-gate-state="[a-z-]+">' % act, seg), \
-            f"{act} cluster missing its act-gate-dot with data-gate-state"
-
-    # All 11 `.study-pillar` buttons are present in the nav (Exports/data
-    # pillar was deleted — Task E4; Results + Analyses, then Audit + Build,
-    # added by the study-spine reorg).
-    all_kinds = ["overview", "compose", "readouts", "simulate", "results",
-                 "analyses", "visualize", "tests", "audit", "build", "conclusions"]
-    btns = re.findall(r'<button class="study-pillar[^"]*"[^>]*>', nav)
-    assert len(btns) == 11, f"expected 11 pillar buttons, got {len(btns)}"
-    for kind in all_kinds:
-        assert f'data-kind="{kind}"' in nav and f"_setStudyTab('{kind}')" in nav
+    # Each pillar = one <button> with an inline <svg class="pillar-icon"> and a
+    # <span class="pillar-label">LABEL</span>, in order.
+    expected = [
+        ("overview", "Overview"),
+        ("compose", "Model"),
+        ("simulate", "Simulations"),
+        ("audit", "Audit"),
+        ("conclusions", "Decide"),
+    ]
+    btns = re.findall(
+        r'<button class="study-pillar[^"]*" data-kind="([a-z]+)"[^>]*>(.*?)</button>',
+        nav, re.DOTALL)
+    assert [b[0] for b in btns] == [k for k, _ in expected], [b[0] for b in btns]
+    for (kind, label), (got_kind, body) in zip(expected, btns):
+        assert 'class="pillar-icon"' in body and '<svg' in body, f"{kind} missing icon"
+        assert f'<span class="pillar-label">{label}</span>' in body, f"{kind} label != {label!r}"
     assert 'data-kind="data"' not in nav
 
 
 def test_readouts_repositioned_to_slot_three(tmp_path, dashboard_client):
-    """Tab order is now Overview, Model, Readouts, Simulations, Results,
-    Analyses, Visualizations, Tests, Audit, Build, Decide — Readouts moves
-    so Design (Model+Readouts+Simulations) and Evidence (Results+Analyses+
-    Visualizations) each group contiguously per act. Panel switching is
-    unaffected (`_setStudyTab` selects by `data-kind`, not position). Task
-    E4 later dropped the trailing Exports tab; the study-spine reorg moved
-    Simulations into Design, added Results + Analyses to Evidence, and added
-    Audit + Build to Assurance."""
+    """5-tab study layout (Phase 1): the pillar row is exactly Overview, Model,
+    Simulations, Audit, Decide — in that order. Readouts is no longer its own
+    pillar (it folds into Model); panel switching is unaffected
+    (`_setStudyTab` selects by `data-kind`)."""
     ws = tmp_path / "ws"
     sd = ws / "studies" / "readouts-order-study"
     sd.mkdir(parents=True)
@@ -1147,31 +1118,23 @@ def test_readouts_repositioned_to_slot_three(tmp_path, dashboard_client):
     assert resp.status_code == 200
     html = resp.text
 
-    kinds_in_order = [
-        "overview", "compose", "readouts", "simulate", "results",
-        "analyses", "visualize", "tests", "audit", "build", "conclusions",
-    ]
+    kinds_in_order = ["overview", "compose", "simulate", "audit", "conclusions"]
     positions = [html.index(f'data-kind="{k}"') for k in kinds_in_order]
     assert positions == sorted(positions), (
         f"expected pillar order {kinds_in_order}, got positions {positions}"
     )
-    # Readouts now precedes Simulations in the pillar row.
-    assert html.index('data-kind="readouts"') < html.index('data-kind="simulate"')
-    # Simulations (Design) still precedes Results (Evidence).
-    assert html.index('data-kind="simulate"') < html.index('data-kind="results"')
-
-    # All 11 pillars still present and wired to _setStudyTab (Exports/data
-    # pillar was deleted — Task E4; Results + Analyses, then Audit + Build,
-    # added by the study-spine reorg).
     for kind in kinds_in_order:
         assert f'data-kind="{kind}"' in html and f"_setStudyTab('{kind}')" in html
+    # Readouts is folded into Model — no readouts pillar any more.
+    assert "_setStudyTab('readouts')" not in html
     assert 'data-kind="data"' not in html
 
 
 def test_readouts_panel_renders_three_contract_blocks(tmp_path, dashboard_client):
-    """The streamlined Readouts panel carries the always-visible emitter summary
-    mount + the emitted-paths table mount, in that order. (The old "Outputs &
-    shapes" block was removed as redundant with the emitted-paths table.)"""
+    """5-tab study layout (Phase 1): the Readouts contract (emitter summary +
+    emitted-paths table) is re-homed into the Model (compose) panel under a
+    "Readouts" sub-section, with its element ids preserved. The old "Outputs &
+    shapes" block stays removed."""
     ws = tmp_path / "ws"
     sd = ws / "studies" / "readouts-blocks-study"
     sd.mkdir(parents=True)
@@ -1191,10 +1154,10 @@ def test_readouts_panel_renders_three_contract_blocks(tmp_path, dashboard_client
     assert resp.status_code == 200
     html = resp.text
 
-    ro_start = html.index('id="panel-readouts"')
-    ro_end = html.find('class="study-tab-panel"', ro_start + 10)
-    panel = html[ro_start: ro_end if ro_end != -1 else len(html)]
-
+    # No standalone Readouts panel; the mounts live inside the Model panel.
+    assert 'id="panel-readouts"' not in html
+    panel = html[html.index('id="panel-compose"'):html.index('id="panel-simulate"')]
+    assert '<h3>Readouts</h3>' in panel
     # The emitter summary label is JS-rendered into this mount at runtime.
     assert 'id="readouts-emitter"' in panel
     assert 'id="readouts-table"' in panel
@@ -1227,73 +1190,65 @@ def _write_g2_study(ws, slug, extra_spec):
     (sd / "study.yaml").write_text(yaml.safe_dump(spec))
 
 
-def test_status_ladder_shows_six_gate_names(tmp_path, dashboard_client):
-    """`status ▾` relabels the six axes as the six gates (§13's table):
-    Plan / Execution / Evidence / Quality / Decision / Release — not the old
-    axis words (Design/Implementation/Simulation/Evaluation/Gate/Expert
-    review)."""
+# 5-tab layout: the six-gate `status ▾` ladder and the act-rail gate dots were
+# both removed from the UI (original spec §6 drops the header ladder; the mockup
+# refinement drops the per-act group-label dots). The server-side gate
+# computation (`build_gate_ladder` / `act_gate_states`) is unchanged and still
+# feeds other consumers, so these tests now exercise it DIRECTLY against the
+# loaded+enriched spec rather than scraping removed markup.
+
+def _g2_gates(ws, slug):
+    from vivarium_workbench.lib._root import set_workspace_root
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
+    from vivarium_workbench.lib.study_page import build_gate_ladder
+    set_workspace_root(ws)
+    spec = load_study_detail_spec(ws, slug)
+    assert spec is not None, f"spec for {slug} failed to load"
+    return build_gate_ladder(spec, ws_root=ws, slug=slug)
+
+
+def test_status_ladder_shows_six_gate_names(tmp_path):
+    """build_gate_ladder relabels the six axes as the six gates (§13's table):
+    Plan / Execution / Evidence / Quality / Decision / Release."""
     ws = tmp_path / "ws"
     _write_g2_study(ws, "gate-names-study", {"design_status": "designed"})
-    client = dashboard_client(ws)
-    resp = client.get("/studies/gate-names-study")
-    assert resp.status_code == 200
-    html = resp.text
-
-    panel_i = html.index('class="status-detail-panel"')
-    panel_end = html.index("</details>", panel_i)
-    seg = html[panel_i:panel_end]
+    names = [g["name"] for g in _g2_gates(ws, "gate-names-study")]
     for gate_name in ("Plan", "Execution", "Evidence", "Quality", "Decision", "Release"):
-        assert gate_name in seg, f"gate name {gate_name!r} missing from status ladder"
+        assert gate_name in names, f"gate name {gate_name!r} missing from gate ladder"
 
 
-def test_status_ladder_shows_authored_axis_state(tmp_path, dashboard_client):
-    """A study with an authored axis (design_status) shows that gate's
-    (Plan's) authored value in the ladder."""
+def test_status_ladder_shows_authored_axis_state(tmp_path):
+    """A study with an authored axis (design_status) carries that gate's
+    (Plan's) authored value + passed state in the ladder."""
     ws = tmp_path / "ws"
     _write_g2_study(ws, "authored-axis-study", {"design_status": "designed"})
-    client = dashboard_client(ws)
-    resp = client.get("/studies/authored-axis-study")
-    assert resp.status_code == 200
-    html = resp.text
-
-    panel_i = html.index('class="status-detail-panel"')
-    panel_end = html.index("</details>", panel_i)
-    seg = html[panel_i:panel_end]
-    assert "1 · Plan" in seg
-    assert "designed" in seg
-    assert 'gate-state-passed' in seg
+    gates = _g2_gates(ws, "authored-axis-study")
+    plan = next(g for g in gates if g["name"] == "Plan")
+    assert plan["authored_value"] == "designed"
+    assert plan["authored_state"] == "passed"
 
 
-def test_status_ladder_shows_computed_vs_authored_indicator(tmp_path, dashboard_client):
-    """Where a computed value exists for a gate (Execution/Evidence, sourced
-    from viva_superpowers.study_status.derive_status, already attached to the
-    spec as `derived_status` by load_study_detail_spec) a `◆ computed:`
-    indicator renders in the gate ladder body."""
+def test_status_ladder_shows_computed_vs_authored_indicator(tmp_path):
+    """Where a computed value exists for a gate (Execution, sourced from
+    viva_superpowers.study_status.derive_status, attached to the spec as
+    `derived_status` by load_study_detail_spec) the ladder carries a computed
+    value for that gate."""
     ws = tmp_path / "ws"
     _write_g2_study(ws, "computed-axis-study", {
         "behavior_tests": [{"name": "t1"}],
         "runs": [{"name": "r1", "status": "completed",
                    "outcomes": {"t1": {"result": "PASS"}}}],
     })
-    client = dashboard_client(ws)
-    resp = client.get("/studies/computed-axis-study")
-    assert resp.status_code == 200
-    html = resp.text
-
-    panel_i = html.index('class="status-detail-panel"')
-    panel_end = html.index("</details>", panel_i)
-    seg = html[panel_i:panel_end]
-    assert "gate-computed-chip" in seg
-    assert "◆ computed:" in seg
-    # Execution's computed value is sourced from run history (derived_status).
-    assert "2 · Execution" in seg
+    gates = _g2_gates(ws, "computed-axis-study")
+    execution = next(g for g in gates if g["name"] == "Execution")
+    assert execution["computed_value"] is not None, execution
+    assert execution["computed_source"], execution
 
 
-def test_act_rail_dots_reflect_gate_states(tmp_path, dashboard_client):
-    """A study with real gate data does NOT render every act dot as
-    not-assessed — G2 feeds `data-gate-state` from the computed gate ladder
-    (G1 shipped the hooks neutral; this is the wiring)."""
-    import re
+def test_act_rail_dots_reflect_gate_states(tmp_path):
+    """act_gate_states does NOT roll every act up as not-assessed for a study
+    with real gate data — it reads the computed gate ladder."""
+    from vivarium_workbench.lib.study_page import act_gate_states
 
     ws = tmp_path / "ws"
     _write_g2_study(ws, "act-dots-study", {
@@ -1303,82 +1258,36 @@ def test_act_rail_dots_reflect_gate_states(tmp_path, dashboard_client):
         "runs": [{"name": "r1", "status": "completed",
                    "outcomes": {"t1": {"result": "FAIL"}}}],
     })
-    client = dashboard_client(ws)
-    resp = client.get("/studies/act-dots-study")
-    assert resp.status_code == 200
-    html = resp.text
-
-    dots = re.findall(
-        r'<span class="act-gate-dot" data-gate="([a-z]+)" data-gate-state="([a-z-]+)">',
-        html,
-    )
-    assert len(dots) == 5, dots
-    states = {gate: state for gate, state in dots}
-    # design_status: designed -> Plan passes -> the "design" act dot is "passed".
+    states = act_gate_states(_g2_gates(ws, "act-dots-study"))
+    assert set(states) == {"study", "design", "evidence", "assurance", "decision"}
+    # design_status: designed -> Plan passes -> the "design" act is "passed".
     assert states["design"] == "passed"
-    # Not every dot is the G1 placeholder "not-assessed" for a study with data.
     assert set(states.values()) != {"not-assessed"}
 
 
-def test_act_rail_dots_reflect_computed_only_passed_state(tmp_path, dashboard_client):
-    """Fix round 1 (Fable G2): the common real-world study has NO
-    hand-authored axes — only a derived/computed path (a completed run with a
-    PASS outcome + `computed_gate_verdict.result == "passed"`). The act-rail
-    dots and the gate-ladder's own per-gate `state` must NOT collapse to the
-    grey `not-assessed` placeholder just because the AUTHORED side is empty;
-    an empty authored axis must defer to a real computed `passed`, not
-    outrank it. This is the direction `test_act_rail_dots_reflect_gate_states`
-    above does NOT cover (that test only authors a failing/blocked path, so
-    it passed even when `not-assessed` incorrectly outranked `passed` in the
-    combining rank)."""
-    import re
+def test_act_rail_dots_reflect_computed_only_passed_state(tmp_path):
+    """Fix round 1 (Fable G2): a study with NO hand-authored axes — only a
+    derived/computed path (completed run + PASS outcome +
+    `computed_gate_verdict.result == "passed"`) — must NOT collapse its act
+    states to grey `not-assessed`; an empty authored axis defers to a real
+    computed `passed`. Asserted directly against act_gate_states."""
+    from vivarium_workbench.lib.study_page import act_gate_states
 
     ws = tmp_path / "ws"
     _write_g2_study(ws, "computed-passed-study", {
-        # No design_status / simulation_status / evaluation_status /
-        # gate_status / expert_review_status authored at all.
         "behavior_tests": [{"name": "t1"}],
         "runs": [{"name": "r1", "status": "completed",
                    "outcomes": {"t1": {"result": "PASS"}}}],
-        # derive_evaluation_status requires a completed run AND recorded
-        # verdicts/findings (viva_superpowers.study_status._has_recorded_verdicts)
-        # -- without this, evaluation_status derives "not_evaluated", not
-        # "evaluated", which is a correct not-assessed, not the bug under test.
         "findings": [{"statement": "the run behaved as expected"}],
-        # Task V5: Evidence's computed state now also folds in V4's
-        # visualization-readiness bar (lib.viz_gate.study_visualization_status).
-        # This fixture is about the derived_status roll-up, not visualizations,
-        # so give it a qualifying figure (interactive + run-linked) to keep it
-        # out of scope for that signal — see test_visualization_gap_* below
-        # for the downgrade path itself.
+        # Qualifying figure so Evidence's viz-gap signal stays out of scope.
         "embed_visualizations": [{"url": "/studies/computed-passed-study/viz/plot.html",
                                     "run_id": "r1"}],
     })
-    client = dashboard_client(ws)
-    resp = client.get("/studies/computed-passed-study")
-    assert resp.status_code == 200
-    html = resp.text
-
-    dots = re.findall(
-        r'<span class="act-gate-dot" data-gate="([a-z]+)" data-gate-state="([a-z-]+)">',
-        html,
-    )
-    assert len(dots) == 5, dots
-    states = {gate: state for gate, state in dots}
-    # Execution + Evidence (derived_status: simulation ran, evaluation
-    # evaluated) roll up into the "evidence" act dot -> must read "passed",
-    # not grey "not-assessed".
+    states = act_gate_states(_g2_gates(ws, "computed-passed-study"))
     assert states["evidence"] == "passed", states
-    # Quality shares evaluation_status's computed value with Evidence per
-    # §13's table -> the "assurance" act dot must also read "passed".
     assert states["assurance"] == "passed", states
-    # Decision (computed_gate_verdict.result == "passed", no persisted
-    # gate_evaluator so no divergence) -> "decision" act dot reads "passed".
     assert states["decision"] == "passed", states
-    # "design" (Plan) has no computed source wired in at all (only
-    # simulation_status/evaluation_status/gate_status are derivable) and no
-    # authored design_status either -> correctly stays "not-assessed", the
-    # one dot this fixture gives no data for.
+    # Plan has no computed source and no authored value -> stays not-assessed.
     assert states["design"] == "not-assessed", states
 
 
@@ -1389,89 +1298,70 @@ def test_act_rail_dots_reflect_computed_only_passed_state(tmp_path, dashboard_cl
 # never `blocked`) and the existing worst-of rollup.
 # ---------------------------------------------------------------------------
 
-def test_visualization_gap_downgrades_evidence_gate_and_act_dot(tmp_path, dashboard_client):
-    """A study that fails the viz bar (no figures at all) has its Evidence
-    gate's COMPUTED state downgraded from `passed` to the existing
-    `passed-with-conditions` gap tier -- never a hard `blocked`/`failed`.
-    Authored Evidence == `evaluated` (-> `passed`) so the computed-vs-authored
-    divergence marker must render too, and the act-rail Evidence dot must
-    reflect the downgrade (§13's Execution+Evidence -> "evidence" act)."""
-    import re
+def test_visualization_gap_downgrades_evidence_gate_and_act_dot(tmp_path):
+    """5-tab layout: the six-gate ladder + act-rail dots were removed from the
+    UI (original spec §6 drops the header ladder; the mockup refinement drops the
+    group-label gate dots), so the downgrade is asserted directly against the
+    still-live `build_gate_ladder` / `act_gate_states` logic instead of rendered
+    markup. A study that fails the viz bar (no figures) has its Evidence gate's
+    COMPUTED state downgraded from `passed` to the `passed-with-conditions` gap
+    tier (never a hard blocked/failed), diverging from the authored `evaluated`,
+    and the rolled-up "evidence" act state reflects it."""
+    from vivarium_workbench.lib.study_page import build_gate_ladder, act_gate_states
 
     ws = tmp_path / "ws"
-    _write_g2_study(ws, "viz-gap-study", {
-        "evaluation_status": "evaluated",  # authored -> "passed" gate state
-        "behavior_tests": [{"name": "t1"}],
-        "runs": [{"name": "r1", "status": "completed",
-                   "outcomes": {"t1": {"result": "PASS"}}}],
-        "findings": [{"statement": "the run behaved as expected"}],
-        # No visualizations declared anywhere -> viz_gate.study_visualization_status
-        # returns qualifies=False, reason="no figures".
-    })
-    client = dashboard_client(ws)
-    resp = client.get("/studies/viz-gap-study")
-    assert resp.status_code == 200
-    html = resp.text
+    sd = ws / "studies" / "viz-gap-study"
+    sd.mkdir(parents=True)
+    # Completed run but NO visualizations -> study_visualization_status returns
+    # qualifies=False, reason="no figures", gap_severity="warning".
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "name": "viz-gap-study",
+        "runs": [{"name": "r1", "status": "completed"}],
+    }), encoding="utf-8")
 
-    panel_i = html.index('class="status-detail-panel"')
-    panel_end = html.index("</details>", panel_i)
-    seg = html[panel_i:panel_end]
-    # The Evidence row's computed chip must show the gap tier, not `passed`
-    # and not a `blocked` state.
-    # Skip past the stepper SUMMARY (which also mentions "3 · Evidence") to
-    # the detail BODY's per-gate rows, where the computed chip/divergence/gap
-    # note actually render.
-    body_i = seg.index("status-stepper-body")
-    evidence_row_i = seg.index("3 · Evidence", body_i)
-    evidence_row = seg[max(0, evidence_row_i - 200):evidence_row_i + 900]
-    assert "gate-computed-chip gate-state-passed-with-conditions" in evidence_row, evidence_row
-    assert "gate-state-blocked" not in evidence_row, evidence_row
-    # Divergence marker: authored says passed, computed says gap-tier.
-    assert "diverges from authored" in evidence_row, evidence_row
-    # The short reason line.
-    assert "visualization gap: no figures" in evidence_row, evidence_row
-
-    dots = re.findall(
-        r'<span class="act-gate-dot" data-gate="([a-z]+)" data-gate-state="([a-z-]+)">',
-        html,
-    )
-    states = {gate: state for gate, state in dots}
-    assert states["evidence"] == "passed-with-conditions", states
-
-
-def test_visualization_gap_qualifying_study_not_downgraded(tmp_path, dashboard_client):
-    """A study that PASSES the viz bar (an interactive, run-linked figure) is
-    not touched by V5 at all: Evidence's computed state stays whatever it
-    already was (`passed`), no divergence marker, no gap note -- no
-    regression to the pre-V5 Evidence signal."""
-    ws = tmp_path / "ws"
-    _write_g2_study(ws, "viz-pass-study", {
+    spec = {
         "evaluation_status": "evaluated",
-        "behavior_tests": [{"name": "t1"}],
-        "runs": [{"name": "r1", "status": "completed",
-                   "outcomes": {"t1": {"result": "PASS"}}}],
-        "findings": [{"statement": "the run behaved as expected"}],
-        "embed_visualizations": [{"url": "/studies/viz-pass-study/viz/plot.html",
-                                    "run_id": "r1"}],
-    })
-    client = dashboard_client(ws)
-    resp = client.get("/studies/viz-pass-study")
-    assert resp.status_code == 200
-    html = resp.text
+        "derived_status": {
+            "evaluation_status": {"value": "evaluated", "source": "derive_status"},
+        },
+    }
+    gates = build_gate_ladder(spec, ws_root=ws, slug="viz-gap-study")
+    evidence = next(g for g in gates if g["key"] == "evidence")
+    assert evidence["computed_state"] == "passed-with-conditions", evidence
+    assert evidence["state"] != "blocked", evidence
+    assert evidence["diverges"] is True, evidence
+    assert evidence["viz_gap_reason"] == "no figures", evidence
+    assert act_gate_states(gates)["evidence"] == "passed-with-conditions"
 
-    panel_i = html.index('class="status-detail-panel"')
-    panel_end = html.index("</details>", panel_i)
-    seg = html[panel_i:panel_end]
-    # Skip past the stepper SUMMARY (which also mentions "3 · Evidence") to
-    # the detail BODY's per-gate rows, where the computed chip/divergence/gap
-    # note actually render.
-    body_i = seg.index("status-stepper-body")
-    evidence_row_i = seg.index("3 · Evidence", body_i)
-    evidence_row = seg[max(0, evidence_row_i - 200):evidence_row_i + 900]
-    assert "gate-computed-chip gate-state-passed" in evidence_row, evidence_row
-    assert "gate-state-passed-with-conditions" not in evidence_row, evidence_row
-    assert "diverges from authored" not in evidence_row, evidence_row
-    assert "visualization gap" not in evidence_row, evidence_row
+
+def test_visualization_gap_qualifying_study_not_downgraded(tmp_path):
+    """A study that PASSES the viz bar (an interactive, run-linked figure) is
+    not touched: Evidence's computed state stays `passed`, no divergence, no gap
+    note. Asserted directly against `build_gate_ladder` (the ladder/dot UI is
+    gone)."""
+    from vivarium_workbench.lib.study_page import build_gate_ladder
+
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "viz-pass-study"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "name": "viz-pass-study",
+        "runs": [{"name": "r1", "status": "completed"}],
+        "embed_visualizations": [{"url": "/studies/viz-pass-study/viz/plot.html",
+                                   "run_id": "r1"}],
+    }), encoding="utf-8")
+
+    spec = {
+        "evaluation_status": "evaluated",
+        "derived_status": {
+            "evaluation_status": {"value": "evaluated", "source": "derive_status"},
+        },
+    }
+    gates = build_gate_ladder(spec, ws_root=ws, slug="viz-pass-study")
+    evidence = next(g for g in gates if g["key"] == "evidence")
+    assert evidence["computed_state"] == "passed", evidence
+    assert evidence["viz_gap_reason"] is None, evidence
+    assert evidence["diverges"] is False, evidence
 
 
 def test_visualization_gap_unreadable_study_no_downgrade_no_500(monkeypatch):
@@ -1628,7 +1518,9 @@ def test_acceptance_criteria_band_renders_with_spine_acceptance(tmp_path, dashbo
     assert resp.status_code == 200
     html = resp.text
 
-    tests_panel = html[html.index('id="panel-tests"'):html.index('id="panel-audit"')]
+    # 5-tab layout: Tests content (incl. the acceptance band) is the first
+    # section of the Audit panel now.
+    tests_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
 
     # The band renders, ABOVE the existing gate summary (the bar comes before
     # the outcome, per §10.1's ordering).
@@ -1711,10 +1603,13 @@ def test_quality_check_group_mount_renders_in_audit_panel(tmp_path, dashboard_cl
     assert resp.status_code == 200
     html = resp.text
 
-    tests_panel = html[html.index('id="panel-tests"'):html.index('id="panel-audit"')]
-    audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-build"')]
+    # 5-tab layout: the Audit panel now starts with the folded-in Tests section,
+    # then the audit intro ("Is the bar sound?") + its check groups.
+    audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
+    tests_section = audit_panel[:audit_panel.index('Is the bar sound?')]
 
-    assert 'id="check-group-quality"' not in tests_panel
+    # Quality mount is NOT in the Tests section — it lives in the audit body.
+    assert 'id="check-group-quality"' not in tests_section
     assert 'id="check-group-quality"' in audit_panel
     assert 'data-check-group="quality"' in audit_panel
 
@@ -1742,10 +1637,11 @@ def test_reproducibility_check_group_mount_renders_in_audit_panel(tmp_path, dash
     assert resp.status_code == 200
     html = resp.text
 
-    tests_panel = html[html.index('id="panel-tests"'):html.index('id="panel-audit"')]
-    audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-build"')]
+    # 5-tab layout: Audit panel = folded Tests section + audit body.
+    audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
+    tests_section = audit_panel[:audit_panel.index('Is the bar sound?')]
 
-    assert 'id="check-group-reproducibility"' not in tests_panel
+    assert 'id="check-group-reproducibility"' not in tests_section
     assert 'id="check-group-reproducibility"' in audit_panel
     assert 'data-check-group="reproducibility"' in audit_panel
 
@@ -1763,29 +1659,36 @@ def test_reproducibility_check_group_mount_renders_in_audit_panel(tmp_path, dash
 # provenance) are new pillars + panels alongside Tests.
 # ---------------------------------------------------------------------------
 
-def test_audit_and_build_pillars_under_assurance_act(tmp_path):
+def test_audit_is_the_assurance_pillar(tmp_path):
+    """5-tab layout: Assurance collapses to a single Audit pillar; Tests folds
+    into Audit (first section) and Build folds into Model (Advanced). There are
+    no standalone Tests/Build pillars any more."""
     from vivarium_workbench.lib.study_page import render_study_detail_html
     html = render_study_detail_html(tmp_path, "spine-study", {"name": "spine-study"})
 
-    i = html.index('data-act="assurance"')
-    j = html.index('data-act="decision"', i)
-    assurance = html[i:j]
-    assert 'data-kind="tests"' in assurance
-    assert 'data-kind="audit"' in assurance
-    assert 'data-kind="build"' in assurance
-    # Order: Tests, Audit, Build.
-    order = [assurance.index('data-kind="%s"' % k) for k in ("tests", "audit", "build")]
-    assert order == sorted(order)
+    assert 'data-kind="audit"' in html and "_setStudyTab('audit')" in html
+    assert "_setStudyTab('tests')" not in html
+    assert "_setStudyTab('build')" not in html
 
 
-def test_panel_audit_and_panel_build_sections_exist(tmp_path):
+def test_panel_audit_folds_tests_and_build_folds_into_model(tmp_path):
+    """5-tab layout: Audit panel exists (with Tests folded in as its first
+    section); the Build panel is gone and its #build-loop-state mount now lives
+    inside the Model (compose) panel's Advanced section."""
     from vivarium_workbench.lib.study_page import render_study_detail_html
     html = render_study_detail_html(tmp_path, "spine-study", {"name": "spine-study"})
 
     assert 'data-kind="audit" id="panel-audit"' in html
-    assert 'data-kind="build" id="panel-build"' in html
+    assert 'id="panel-build"' not in html
     assert 'id="audit-sufficiency"' in html
-    assert 'id="build-loop-state"' in html
+    # Tests folded into Audit (first section).
+    audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
+    assert '<h3>Tests — the bar</h3>' in audit_panel
+    assert 'id="report-cards-panel"' in audit_panel or 'id="tests-list"' in audit_panel
+    # Build provenance folded into Model.
+    compose = html[html.index('id="panel-compose"'):html.index('id="panel-simulate"')]
+    assert 'id="build-loop-state"' in compose
+    assert 'model-advanced' in compose
 
 
 # ---------------------------------------------------------------------------
@@ -1837,11 +1740,12 @@ def test_tests_panel_renders_every_report_card_from_multi_card_fixture(tmp_path,
     assert resp.status_code == 200
     html = resp.text
 
-    tests_panel = html[html.index('id="panel-tests"'):html.index('id="panel-audit"')]
-    # All three cards appear in the Tests panel, including the two with no
+    # 5-tab layout: the Tests content is the first section of the Audit panel.
+    tests_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
+    # All three cards appear in the Tests section, including the two with no
     # matching behavior_tests entry.
     for card in ("card-alpha", "card-beta", "card-gamma"):
-        assert card in tests_panel, f"report card {card!r} missing from Tests panel"
+        assert card in tests_panel, f"report card {card!r} missing from Tests section"
 
 
 # ---------------------------------------------------------------------------
@@ -1857,32 +1761,43 @@ def _render_minimal(tmp_path, name="spine-study"):
     return render_study_detail_html(tmp_path, name, {"name": name})
 
 
-def test_simulate_pillar_is_under_design_act(tmp_path):
+def test_simulate_is_a_top_level_pillar(tmp_path):
+    """5-tab layout: Simulations is one of the five top-level pillars (no act
+    clusters any more)."""
     html = _render_minimal(tmp_path)
-    i = html.index('data-act="design"')
-    j = html.index('data-act="evidence"', i)
-    design = html[i:j]
-    assert 'data-kind="simulate"' in design
-    k = html.index('data-act="assurance"', j)
-    evidence = html[j:k]
-    assert 'data-kind="simulate"' not in evidence
+    assert 'data-kind="simulate"' in html and "_setStudyTab('simulate')" in html
 
 
-def test_results_and_analyses_pillars_are_under_evidence_act(tmp_path):
+def test_results_and_analyses_are_simulations_subtabs(tmp_path):
+    """5-tab layout: Results + Analyses are no longer top-level pillars — they
+    are secondary subtabs (Runs | Results | Analysis) inside the Simulations
+    panel. Visualizations folds into Overview (no pillar)."""
     html = _render_minimal(tmp_path)
-    i = html.index('data-act="evidence"')
-    j = html.index('data-act="assurance"', i)
-    evidence = html[i:j]
-    assert 'data-kind="results"' in evidence
-    assert 'data-kind="analyses"' in evidence
-    assert 'data-kind="visualize"' in evidence, "Visualizations pillar must still be present"
+    for gone in ("results", "analyses", "visualize"):
+        assert f"_setStudyTab('{gone}')" not in html
+    sim_panel = html[html.index('id="panel-simulate"'):html.index('id="panel-audit"')]
+    assert "_setSimSubtab('runs')" in sim_panel
+    assert "_setSimSubtab('results')" in sim_panel
+    assert "_setSimSubtab('analysis')" in sim_panel
 
 
-def test_panel_results_and_panel_analyses_sections_exist(tmp_path):
+def test_results_and_analyses_subpanels_exist(tmp_path):
+    """5-tab layout: the Results + Analyses content lives in inner subpanels of
+    the Simulations panel (ids preserved); there are no standalone
+    panel-results / panel-analyses / panel-visualize sections."""
     html = _render_minimal(tmp_path)
-    assert 'class="study-tab-panel" data-kind="results" id="panel-results"' in html
-    assert 'class="study-tab-panel" data-kind="analyses" id="panel-analyses"' in html
-    assert 'id="panel-visualize"' in html, "Visualizations panel must still be present"
+    assert 'id="panel-results"' not in html
+    assert 'id="panel-analyses"' not in html
+    assert 'id="panel-visualize"' not in html
+    sim_panel = html[html.index('id="panel-simulate"'):html.index('id="panel-audit"')]
+    assert 'id="sim-subpanel-runs"' in sim_panel
+    assert 'id="sim-subpanel-results"' in sim_panel
+    assert 'id="sim-subpanel-analysis"' in sim_panel
+    assert 'id="results-section"' in sim_panel
+    assert 'id="analyses-results-section"' in sim_panel
+    # Visualizations gallery re-homed to Overview.
+    overview = html[html.index('id="panel-overview"'):html.index('id="panel-compose"')]
+    assert 'id="visualize-section"' in overview
 
 
 # ---------------------------------------------------------------------------
@@ -1892,31 +1807,38 @@ def test_panel_results_and_panel_analyses_sections_exist(tmp_path):
 # downloads-only (Task 1). The existing raw-data download group is untouched.
 # ---------------------------------------------------------------------------
 
-def test_results_panel_has_latest_run_preview_mount(tmp_path):
+def test_results_subpanel_has_latest_run_preview_mount(tmp_path):
+    """5-tab layout: the Results content (latest-run preview + raw-data group)
+    lives in the Simulations panel's Results subpanel, with its element ids
+    preserved."""
     html = _render_minimal(tmp_path)
-    results_panel = html[html.index('id="panel-results"'):html.index('id="panel-analyses"')]
-    assert 'id="results-preview"' in results_panel
-    # The preview mount is not a bare placeholder for downloads-only markup —
-    # it's introduced by its own heading, distinct from the raw-data group.
-    assert 'Latest run preview' in results_panel
-    # Existing downloads group (Task 1) still present, unchanged element ids.
-    assert 'id="raw-data-list"' in results_panel
-    assert 'id="raw-data-download-all"' in results_panel
-    assert 'id="exports-downloads"' in results_panel
+    sim_panel = html[html.index('id="panel-simulate"'):html.index('id="panel-audit"')]
+    results_sub = sim_panel[sim_panel.index('id="sim-subpanel-results"'):
+                            sim_panel.index('id="sim-subpanel-analysis"')]
+    assert 'id="results-preview"' in results_sub
+    assert 'Latest run preview' in results_sub
+    # Existing downloads group still present, unchanged element ids.
+    assert 'id="raw-data-list"' in results_sub
+    assert 'id="raw-data-download-all"' in results_sub
+    assert 'id="exports-downloads"' in results_sub
 
 
-def test_analyses_and_raw_data_markup_no_longer_inside_panel_simulate(tmp_path):
+def test_runs_results_analysis_split_across_sim_subpanels(tmp_path):
+    """5-tab layout: inside the Simulations panel the runs table lives in the
+    Runs subpanel while the Results (raw data) and Analysis (result files)
+    markup live in their own subpanels — all ids preserved."""
     html = _render_minimal(tmp_path)
-    i = html.index('id="panel-simulate"')
-    nxt = html.find('class="study-tab-panel"', i + 10)
-    sim_panel = html[i: nxt if nxt != -1 else len(html)]
-    # Study artifacts strip (analysis result files + raw simulation data)
-    # relocated out; only the runs table + run-detail mount remain.
-    assert 'id="data-files"' not in sim_panel
-    assert 'id="raw-data-list"' not in sim_panel
-    assert 'id="study-artifacts-section"' not in sim_panel
-    assert 'id="study-sim-table"' in sim_panel
-    assert 'id="study-run-detail"' in sim_panel
+    sim_panel = html[html.index('id="panel-simulate"'):html.index('id="panel-audit"')]
+    runs_sub = sim_panel[sim_panel.index('id="sim-subpanel-runs"'):
+                         sim_panel.index('id="sim-subpanel-results"')]
+    assert 'id="study-sim-table"' in runs_sub
+    assert 'id="study-run-detail"' in runs_sub
+    # Raw data / analysis result files are present in the panel (in their own
+    # subpanels), not the Runs subpanel.
+    assert 'id="raw-data-list"' not in runs_sub
+    assert 'id="data-files"' not in runs_sub
+    assert 'id="data-files"' in sim_panel
+    assert 'id="raw-data-list"' in sim_panel
 
 
 # ---------------------------------------------------------------------------

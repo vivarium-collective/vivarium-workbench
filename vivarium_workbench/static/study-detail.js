@@ -104,27 +104,55 @@
     document.querySelectorAll('.study-tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.dataset.kind === kind);
     });
-    if (kind === 'overview') { _loadOverviewKeyFigure(); }
-    if (kind === 'tests') { _loadTestsPanel(window._study); }
-    if (kind === 'readouts') { _loadReadouts(); _loadReadoutsDownloadPointer(); }
-    if (kind === 'visualize') { _loadCharts('viz-charts-panel'); _loadNativeGallery(); _loadRemoteFigures(); }
-    if (kind === 'compose') { _loadModelConfig(); _loadModelCards(); }
-    // Study-spine reorg (spec §1, §3.2/3.3/3.4): Simulations keeps only the
-    // runs table now; the analysis-files zip + raw-data bulk that used to
-    // trigger here moved onto their own Evidence panels (Analyses/Results).
-    if (kind === 'simulate') { _loadStudySims(); }
-    if (kind === 'analyses') { _loadAnalyses(); _loadRemoteAnalyses(); }
-    if (kind === 'results') { _loadResults(); }
-    // Study-spine reorg (spec §1, §3.7/§3.8): Audit + Build complete the
-    // Assurance trio — dispatched the same way as the other lazy-loaded
-    // panels above.
-    if (kind === 'audit') { _loadAudit(window._study); }
-    if (kind === 'build') { _loadBuild(window._study); }
+    // 5-tab study layout (Phase 1): removed tabs' loaders now fire from the tab
+    // that re-homed them, so every re-homed panel's content loads when its new
+    // home opens (and never shows an empty box on a subtab switch).
+    //  • Visualizations gallery  -> Overview (Figures section)
+    //  • Readouts + Build        -> Model (compose)
+    //  • Results + Analyses      -> Simulations subtabs (simulate)
+    //  • Tests                   -> Audit
+    if (kind === 'overview') {
+      _loadOverviewKeyFigure();
+      _loadCharts('viz-charts-panel'); _loadNativeGallery(); _loadRemoteFigures();
+    }
+    if (kind === 'compose') {
+      _loadModelConfig(); _loadModelCards();
+      _loadReadouts(); _loadReadoutsDownloadPointer();
+      _loadBuild(window._study);
+    }
+    if (kind === 'simulate') {
+      _loadStudySims();
+      _loadResults();
+      _loadAnalyses(); _loadRemoteAnalyses();
+    }
+    if (kind === 'audit') {
+      _loadTestsPanel(window._study);
+      _loadAudit(window._study);
+    }
     // Textareas measured 0 while their tab was hidden; re-fit the now-visible
     // panel's auto-grow boxes so they show all content without a scrollbar.
     if (window._autoGrowTextareas) window._autoGrowTextareas();
   }
   window._setStudyTab = _setStudyTab;
+
+  // Simulations secondary subtabs (Runs | Results | Analysis). The three inner
+  // panels all live inside #panel-simulate and their loaders already fire when
+  // the Simulations tab opens (see dispatch above), so this only toggles which
+  // inner panel is visible — vanilla show/hide, matching the top-level pillars.
+  function _setSimSubtab(sub) {
+    document.querySelectorAll('.sim-subtab').forEach(function (b) {
+      var on = b.dataset.subtab === sub;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('.sim-subpanel').forEach(function (p) {
+      var on = p.dataset.subpanel === sub;
+      p.classList.toggle('active', on);
+      p.hidden = !on;
+    });
+    if (window._autoGrowTextareas) window._autoGrowTextareas();
+  }
+  window._setSimSubtab = _setSimSubtab;
 
   // Cross-tab link helper (Fable §6 #15, Task C1): a link on any tab can
   // point at an anchor that lives inside a DIFFERENT, currently-hidden tab
@@ -133,11 +161,19 @@
   // target is inside a display:none panel. Reuses _setStudyTab for the
   // actual show/hide (no duplicated switch logic) and then scrolls once the
   // panel is visible. C2 (findings ledger) wires the primary callers.
+  // 5-tab layout: when the anchor lives inside a Simulations subpanel
+  // (Results/Analysis), also activate that subtab so the scroll target isn't
+  // left inside a hidden subpanel.
   function _gotoStudyTab(kind, anchor) {
     _setStudyTab(kind);
     if (!anchor) return;
     var el = document.getElementById(anchor);
-    if (!el || !el.scrollIntoView) return;
+    if (!el) return;
+    if (kind === 'simulate') {
+      var sp = el.closest && el.closest('.sim-subpanel');
+      if (sp && sp.dataset.subpanel) _setSimSubtab(sp.dataset.subpanel);
+    }
+    if (!el.scrollIntoView) return;
     try { el.scrollIntoView({behavior: 'smooth', block: 'start'}); } catch (e) {}
   }
   window._gotoStudyTab = _gotoStudyTab;
@@ -236,7 +272,7 @@
         var withData = sims.filter(function (s) { return s.run_id && (s.store_path || s.db_path); });
         host.innerHTML = withData.length
           ? '<p class="muted">⬇ Download this study\'s raw run data → '
-            + '<a href="#" onclick="_gotoStudyTab(\'results\',\'exports-downloads\');return false;">Results</a></p>'
+            + '<a href="#" onclick="_gotoStudyTab(\'simulate\',\'exports-downloads\');return false;">Simulations › Results</a></p>'
           : '';
       })
       .catch(function () { host.innerHTML = ''; });
@@ -649,7 +685,7 @@
       _loadCharts('viz-charts-panel');
       return {
         count: 0,
-        html: '<p class="muted" style="margin:0;font-size:0.85em">figures load on the Visualizations tab</p>',
+        html: '<p class="muted" style="margin:0;font-size:0.85em">figures load on the Overview tab</p>',
       };
     }
     return {
@@ -684,7 +720,7 @@
     }
     return '<p class="muted" style="margin:0;font-size:0.85em">' + n + ' report card'
       + (n === 1 ? '' : 's') + ' for this study — '
-      + '<a href="#" onclick="_gotoStudyTab(\'tests\');return false;">view on the Tests tab</a></p>';
+      + '<a href="#" onclick="_gotoStudyTab(\'audit\');return false;">view on the Audit tab</a></p>';
   }
 
   // Task E3: compact results/analysis line — surfaces values already known
@@ -3149,6 +3185,35 @@
       .catch(function () { nav.style.display = 'none'; });
   })();
 
+  // Export menu (Phase 4): the "⬇ Export ▾" button in the Overview panel's
+  // section toolbar opens a small dropdown (Download figures / Download
+  // notebook). The menu items keep the original handlers (wired inline in the
+  // template via _vivStudyFiguresFromCard / _vivStudyNotebookFromCard); this
+  // only toggles the dropdown open/closed with the same outside-click pattern
+  // the study navigator's jump menu uses.
+  (function _wireStudyExportMenu() {
+    var btn = document.getElementById('study-export-btn');
+    var menu = document.getElementById('study-export-menu');
+    if (!btn || !menu) return;
+    btn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var open = menu.style.display !== 'none' && menu.style.display !== '';
+      menu.style.display = open ? 'none' : 'block';
+      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+    });
+    // Close after choosing an item (the item's own onclick runs the download).
+    menu.querySelectorAll('[role="menuitem"]').forEach(function (it) {
+      it.addEventListener('click', function () {
+        menu.style.display = 'none'; btn.setAttribute('aria-expanded', 'false');
+      });
+    });
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest || !e.target.closest('.study-export-wrap')) {
+        menu.style.display = 'none'; btn.setAttribute('aria-expanded', 'false');
+      }
+    }, true);
+  })();
+
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.
   // Handler _post_investigation_delete uses body key "name".
   bindAll('.btn-delete', function(btn) {
@@ -3196,10 +3261,9 @@
 
   // --- Runs ---
   bindAll('.btn-view-run', function(btn) {
-    // Per-run viewer: open the study-level Results view.
-    _setStudyTab('visualize');
-    var panel = document.getElementById('panel-visualize');
-    if (panel && panel.scrollIntoView) { try { panel.scrollIntoView({block: 'start'}); } catch (e) {} }
+    // Per-run viewer: open the study-level Figures view (re-homed from the old
+    // Visualizations tab into Overview; #visualize-section id preserved).
+    _gotoStudyTab('overview', 'visualize-section');
   });
 
   // study-run-delete → _post_investigation_run_delete
@@ -5363,24 +5427,46 @@
       : '';
   }
 
+  // 5-tab layout: a ?tab=<kind> deep-link (or a #hash) naming a tab that was
+  // folded into another now resolves to its new home — and, for Results/
+  // Analyses, to the right Simulations subtab. Returns {tab, sub?}.
+  var _REMOVED_TAB_HOME = {
+    visualize:  { tab: 'overview', anchor: 'visualize-section' },
+    readouts:   { tab: 'compose' },
+    build:      { tab: 'compose' },
+    tests:      { tab: 'audit' },
+    results:    { tab: 'simulate', sub: 'results' },
+    analyses:   { tab: 'simulate', sub: 'analysis' }
+  };
+  function _resolveStudyTab(kind) {
+    if (!kind) return null;
+    if (_REMOVED_TAB_HOME[kind]) return _REMOVED_TAB_HOME[kind];
+    if (document.querySelector('.study-pillar[data-kind="' + kind + '"]')) return { tab: kind };
+    return null;
+  }
+
   function _runStudyInit() {
     // All renderers that need window._study to be populated.
     _renderPlanningOverview();
     _loadOverviewKeyFigure();   // embed the headline figure on the Overview
     _renderFeedbackTrackedPanel();
-    _renderReadinessPanel();
+    _renderHeaderAuditSummary();
     _populateConclusionVerdictBadges();
     _populateBaselineCompositeSelects();
     _loadStudyAnalyses();
     // Open the Overview tab on load — unless a ?tab=<kind> deep-link asks
     // for a specific tab. Needs-attention items link here with
     // ?tab=conclusions so a click lands on the verdict that triggered the alert.
-    var _tab = 'overview';
+    // A deep-link to a now-folded tab (results/analyses/tests/build/readouts/
+    // visualize) redirects to its new home (and subtab).
+    var _resolved = { tab: 'overview' };
     try {
       var _q = new URLSearchParams(window.location.search).get('tab');
-      if (_q && document.querySelector('.study-pillar[data-kind="' + _q + '"]')) _tab = _q;
+      var _r = _resolveStudyTab(_q);
+      if (_r) _resolved = _r;
     } catch (_e) { /* no URLSearchParams — keep overview */ }
-    _setStudyTab(_tab);
+    _setStudyTab(_resolved.tab);
+    if (_resolved.sub) _setSimSubtab(_resolved.sub);
   }
 
   // ── item 69 — baseline composite select: populate from the live registry,
@@ -5446,13 +5532,14 @@
     return _reportLintPromise;
   }
 
-  // Readiness panel: inline "⚠ N readiness gaps" / "✓ ready" link in the
-  // header status row, click-to-expand. Fetches the deterministic report
-  // linter (GET /api/report-lint), filters to THIS study, and buckets by
-  // severity. AI-free — pure deterministic output, connected to its source
-  // (the linter) and labeled as such. Sole consumer of _reportLint.
-  function _renderReadinessPanel() {
-    var container = document.getElementById('readiness-panel');
+  // Header audit summary (Phase 4): a single quiet line in the header status
+  // row — "⚠ N readiness gaps → Audit" — that jumps to the Audit tab on click.
+  // Replaces the old expandable readiness dropdown (the full per-check
+  // breakdown now lives inside Audit). Reuses _reportLint (GET /api/report-lint)
+  // filtered to THIS study, counting error+warning findings. AI-free; shows a
+  // quiet "✓ ready" when the study has no findings. Sole consumer of _reportLint.
+  function _renderHeaderAuditSummary() {
+    var container = document.getElementById('header-audit-summary');
     if (!container || container.dataset.rendered) return;
     container.dataset.rendered = '1';
     var slug = container.getAttribute('data-slug') || studyName() || '';
@@ -5469,38 +5556,21 @@
         var gaps = sev.error + sev.warning;
         var head, col;
         if (!findings.length) { head = '✓ ready'; col = '#166534'; }
-        else if (gaps) { head = '⚠ ' + gaps + ' readiness gap' + (gaps === 1 ? '' : 's'); col = '#92400e'; }
-        else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); col = '#1e40af'; }
+        else if (gaps) { head = '⚠ ' + gaps + ' readiness gap' + (gaps === 1 ? '' : 's') + ' → Audit'; col = '#92400e'; }
+        else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's') + ' → Audit'; col = '#1e40af'; }
 
+        // No findings → a quiet non-interactive "✓ ready" marker.
         if (!findings.length) {
           container.innerHTML = '<span class="readiness-inline" style="font-size:0.85em;color:' + col + '" '
             + 'title="code-computed by the report linter (deterministic)">' + head + '</span>';
           return;
         }
-        // Compact link; click toggles the gap breakdown below the status row.
-        var byCheck = {};
-        findings.forEach(function (f) { var c = f.check || 'other'; (byCheck[c] = byCheck[c] || []).push(f); });
-        var checks = Object.keys(byCheck).sort(function (a, b) { return byCheck[b].length - byCheck[a].length; });
-        var breakdown = checks.map(function (c) { return byCheck[c].length + '× ' + _esc(c); }).join(' &nbsp;·&nbsp; ');
-        var groups = checks.map(function (c) {
-          var items = byCheck[c].map(function (f) {
-            var s = f.severity || 'info';
-            var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
-            return '<li style="margin-top:3px"><span style="color:' + dot + ';font-weight:700">●</span> ' + _esc(f.message || '') + '</li>';
-          }).join('');
-          return '<div style="margin-top:9px"><code>' + _esc(c) + '</code> '
-            + '<span class="muted" style="font-size:0.82em">(' + byCheck[c].length + ')</span>'
-            + '<ul style="margin:3px 0 0 18px;font-size:0.9em;padding:0">' + items + '</ul></div>';
-        }).join('');
-        container.innerHTML =
-          '<details class="readiness-inline">'
-          + '<summary style="font-size:0.85em;color:' + col + ';cursor:pointer;list-style:none;outline:none" '
-          + 'title="code-computed by the report linter (deterministic) — click to expand">' + head + '</summary>'
-          + '<div style="margin-top:6px;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:0.85em" class="readiness-inline-body">'
-          + '<div class="muted" style="font-size:0.9em">' + breakdown + '</div>'
-          + groups
-          + '</div>'
-          + '</details>';
+        // One compact link; click switches to the Audit tab where the full
+        // per-check readiness breakdown is rendered (#audit-readiness).
+        container.innerHTML = '<a href="#" class="readiness-inline" '
+          + 'style="font-size:0.85em;color:' + col + ';text-decoration:none;cursor:pointer" '
+          + 'title="code-computed by the report linter (deterministic) — open the Audit tab for the full breakdown" '
+          + 'onclick="_gotoStudyTab(\'audit\',\'audit-readiness\');return false;">' + head + '</a>';
       })
       .catch(function () { container.dataset.rendered = ''; });
   }
@@ -5526,6 +5596,7 @@
     var h = (window.location.hash || '');
     if (h.indexOf('#run-') === 0 || h === '#runs') {
       _setStudyTab('simulate');
+      _setSimSubtab('runs');   // run rows live in the Runs subpanel
       if (h.indexOf('#run-') === 0) {
         var el = document.getElementById(h.slice(1));  // id="run-<runId>"
         if (el && el.scrollIntoView) { try { el.scrollIntoView({block: 'center'}); el.style.outline = '2px solid #2b6cb0'; } catch (e) {} }
