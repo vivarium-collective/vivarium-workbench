@@ -4040,7 +4040,7 @@
     var slot = _pdSlot(document.getElementById('panel-audit'), 'audit-declared-contract');
     if (!slot) return;
     var contract = ((spec || window._study || {}) || {}).contract;
-    slot.innerHTML = _pdContractHtml(contract, 'Declared contract (§Contract) — the study’s planned interface');
+    slot.innerHTML = _pdContractHtml(contract, 'Typed interface — ports, units, bounds + conservation predicates');
   }
 
   // ── Build tab (Assurance) — model-build loop provenance ──────────────────
