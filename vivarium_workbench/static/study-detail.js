@@ -3107,6 +3107,13 @@
   (function _wireStudyNav() {
     var nav = document.getElementById('study-nav');
     if (!nav) return;
+    // When shown EMBEDDED inside the investigation view (in an iframe), the
+    // graph bar owns study navigation (its own ←/⇄/→ drives this iframe), so the
+    // in-header navigator is redundant — hide it. On the STANDALONE study page
+    // (window.parent === window) there is no graph bar, so keep it.
+    var _embedded = false;
+    try { _embedded = window.parent && window.parent !== window; } catch (e) { _embedded = false; }
+    if (_embedded) { nav.style.display = 'none'; return; }
     var prevBtn = document.getElementById('study-prev');
     var nextBtn = document.getElementById('study-next');
     var jumpBtn = document.getElementById('study-jump-btn');

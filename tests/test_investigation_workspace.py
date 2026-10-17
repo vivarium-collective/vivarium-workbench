@@ -75,6 +75,53 @@ def test_study_tabs_manager():
     assert "_setInvestigationContextCollapsed(false)" in _fn_body("_wsOpenStudyTab")
 
 
+def test_sticky_graph_pane_and_graph_bar_navigator():
+    """Persistent-nav-pane feature: opening an embedded study pins the graph
+    context (ws-context-sticky) and surfaces the graph-bar study navigator; a
+    collapse toggle hides/shows the graph shell (persisted)."""
+    # Template: the graph-bar navigator + collapse toggle live in the toolbar.
+    assert 'id="aig-study-nav"' in TPL
+    assert 'id="aig-study-prev"' in TPL and 'id="aig-study-next"' in TPL
+    assert 'id="aig-study-jump-menu"' in TPL
+    assert 'id="aig-collapse-btn"' in TPL and "_aigToggleCollapse()" in TPL
+
+    # JS: the new functions exist + are exported.
+    for fn in ["_renderGraphBarNav", "_aigToggleCollapse", "_applyAigShellCollapsed"]:
+        assert "function %s" % fn in JS, fn
+    assert "window._renderGraphBarNav" in JS
+    assert "window._aigToggleCollapse" in JS
+
+    def _fn_body(name):
+        i = JS.index("function %s" % name)
+        j = JS.find("\n  function ", i + 1)
+        return JS[i:j] if j != -1 else JS[i:]
+
+    # Opening a study pins the pane + refreshes the navigator; it drives the
+    # embedded study via _openStudyEmbeddedNewTab and reads the graph's own data.
+    openb = _fn_body("_wsOpenStudyTab")
+    assert "ws-context-sticky" in openb
+    assert "_renderGraphBarNav()" in openb
+    navb = _fn_body("_renderGraphBarNav")
+    assert "_openStudyEmbeddedNewTab" in navb
+    assert "_lastDagArgs" in navb          # reuses the graph's data, no re-fetch
+    assert "fetch(" not in navb
+
+    # Collapse persists in localStorage and hides the graph SHELL only.
+    togb = _fn_body("_aigToggleCollapse")
+    assert "aig-shell-collapsed" in togb or "aig-shell-collapsed" in _fn_body("_aigShellCollapsed")
+    assert "investigation-dag-shell" in _fn_body("_applyAigShellCollapsed")
+
+
+def test_embedded_study_hides_in_iframe_header_nav():
+    """study-detail.js hides the in-header #study-nav when embedded
+    (window.parent !== window); the standalone page keeps it."""
+    sd = (ROOT / "vivarium_workbench/static/study-detail.js").read_text(encoding="utf-8")
+    i = sd.index("function _wireStudyNav")
+    body = sd[i: sd.index("\n  function ", i + 1)]
+    assert "window.parent !== window" in body
+    assert "nav.style.display = 'none'" in body
+
+
 # ── Task 5: consistency router + investigation-workspace render ──────────────
 
 def test_router_uses_workspace_not_legacy():

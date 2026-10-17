@@ -9000,6 +9000,12 @@
     _wsHighlightActiveDagNode(null);
     var panel = document.getElementById('ws-study-panel');
     if (panel) panel.style.display = 'none';
+    // No study open -> drop the sticky pin + hide the graph-bar navigator.
+    var _ctx = document.getElementById('ws-context');
+    if (_ctx) _ctx.classList.remove('ws-context-sticky');
+    var _bar = document.getElementById('ws-context-bar');
+    if (_bar) _bar.classList.remove('ws-context-bar-sticky');
+    _renderGraphBarNav();
     _setInvestigationContextCollapsed(false);   // fresh investigation -> graph expanded
   }
   window._wsResetStudyTabs = _wsResetStudyTabs;
@@ -9066,6 +9072,13 @@
     var st = window._wsStudyTabs;
     st.active = slug;                       // single open study — replaces any prior
     _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
+    // Pin the graph pane so it stays a persistent nav surface while the embedded
+    // study scrolls beneath it, and surface the graph-bar study navigator.
+    var _ctx = document.getElementById('ws-context');
+    if (_ctx) _ctx.classList.add('ws-context-sticky');
+    var _bar = document.getElementById('ws-context-bar');
+    if (_bar) _bar.classList.add('ws-context-bar-sticky');
+    _renderGraphBarNav();
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');
     if (panel) panel.style.display = '';
@@ -10780,6 +10793,130 @@
   }
   window._wireDagLegendPopover = _wireDagLegendPopover;
 
+  // ── Collapse / expand the graph SHELL (persistent nav pane) ───────────────
+  // Hides #investigation-dag-shell (the DAG canvas) while keeping the toolbar +
+  // study navigator visible, so the user can still navigate and re-expand.
+  // Persisted per viewer in localStorage. Independent of the sticky pinning and
+  // of _setInvestigationContextCollapsed (which slims the whole context).
+  function _aigShellCollapsed() {
+    try { return localStorage.getItem('aig-shell-collapsed') === '1'; } catch (e) { return false; }
+  }
+  function _applyAigShellCollapsed() {
+    var collapsed = _aigShellCollapsed();
+    var shell = document.getElementById('investigation-dag-shell');
+    var btn = document.getElementById('aig-collapse-btn');
+    if (shell) shell.style.display = collapsed ? 'none' : '';
+    if (btn) {
+      btn.textContent = collapsed ? '▸ Graph' : '▾ Graph';
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.title = collapsed
+        ? 'Show the graph'
+        : 'Hide the graph (keeps the toolbar + navigator so you can still navigate and re-expand)';
+    }
+  }
+  function _aigToggleCollapse() {
+    try { localStorage.setItem('aig-shell-collapsed', _aigShellCollapsed() ? '0' : '1'); } catch (e) { /* ignore */ }
+    _applyAigShellCollapsed();
+  }
+  window._aigToggleCollapse = _aigToggleCollapse;
+
+  // ── Graph-bar study navigator ─────────────────────────────────────────────
+  // ← prev / ⇄ jump / next → that navigates the EMBEDDED study, driven from the
+  // graph's OWN data (_lastDagArgs = [studies, chainsBySlug, studyEdges]) — no
+  // re-fetch. Mirrors study-detail.js _wireStudyNav's chain logic (prev/next
+  // along the leads-to chain + a grouped jump menu), but swaps the embedded
+  // study via _openStudyEmbeddedNewTab. Shown only while a study is open.
+  var _aigJumpWired = false;
+  function _renderGraphBarNav() {
+    var nav = document.getElementById('aig-study-nav');
+    if (!nav) return;
+    var current = (window._wsStudyTabs && window._wsStudyTabs.active) || null;
+    var studies = (_lastDagArgs && _lastDagArgs[0]) || [];
+    var edges = (_lastDagArgs && _lastDagArgs[2]) || [];
+    if (!current || !studies.length) { nav.style.display = 'none'; return; }
+
+    var strip = function (n) { return String(n == null ? '' : n).trim(); };
+    var nameOf = function (s) { return (typeof s === 'string') ? s : (s && (s.name || s.slug || s.study)); };
+    var titleOf = function (s) { return (s && typeof s === 'object' && s.title) ? s.title : nameOf(s); };
+    var order = studies.map(nameOf).filter(Boolean);
+    if (!order.length) { nav.style.display = 'none'; return; }
+    var byName = {}; studies.forEach(function (s) { var n = nameOf(s); if (n) byName[n] = s; });
+
+    // Parents/children from the graph edges (source -> target == leads-to),
+    // falling back to each study's parent_studies — same chain the graph draws.
+    var parentsOf = function (n) {
+      var out = [];
+      edges.forEach(function (e) { if (e && strip(e.target) === n && strip(e.source)) out.push(strip(e.source)); });
+      var s = byName[n], ps = (s && s.parent_studies) || [];
+      ps.forEach(function (pk) {
+        var pn = (pk && typeof pk === 'object') ? (pk.study || pk.name || pk.slug) : pk;
+        if (pn && out.indexOf(strip(pn)) === -1) out.push(strip(pn));
+      });
+      return out.filter(function (x) { return byName[x]; });
+    };
+    var childrenOf = function (n) {
+      var out = [];
+      edges.forEach(function (e) { if (e && strip(e.source) === n && strip(e.target) && byName[strip(e.target)]) out.push(strip(e.target)); });
+      order.forEach(function (m) { if (parentsOf(m).indexOf(n) >= 0 && out.indexOf(m) === -1) out.push(m); });
+      return out;
+    };
+
+    var curParents = parentsOf(current);
+    var curChildren = childrenOf(current);
+    var idx = order.indexOf(current);
+    var prev = (idx > 0) ? order[idx - 1] : (curParents[0] || null);
+    var next = curChildren[0] || ((idx >= 0 && idx < order.length - 1) ? order[idx + 1] : null);
+
+    var prevBtn = document.getElementById('aig-study-prev');
+    var nextBtn = document.getElementById('aig-study-next');
+    var jumpBtn = document.getElementById('aig-study-jump-btn');
+    var jumpMenu = document.getElementById('aig-study-jump-menu');
+    nav.style.display = '';
+
+    var go = function (slug) { if (slug && slug !== current && window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(slug); };
+    if (prevBtn) {
+      prevBtn.disabled = !prev; prevBtn.title = prev ? ('Previous: ' + prev) : 'No previous study';
+      prevBtn.onclick = prev ? function () { go(prev); } : null;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = !next; nextBtn.title = next ? ('Next: ' + next) : 'No next study';
+      nextBtn.onclick = next ? function () { go(next); } : null;
+    }
+
+    if (jumpMenu && jumpBtn) {
+      var _item = function (n) {
+        return '<button type="button" class="aig-study-jump-item' + (n === current ? ' current' : '') +
+          '" data-slug="' + _esc(n) + '">' + _esc(titleOf(byName[n]) || n) + '</button>';
+      };
+      var html = '';
+      if (curParents.length) html += '<div class="aig-study-jump-group">Builds on</div>' + curParents.map(_item).join('');
+      if (curChildren.length) html += '<div class="aig-study-jump-group">Leads to</div>' + curChildren.map(_item).join('');
+      html += '<div class="aig-study-jump-group">All studies</div>' + order.map(_item).join('');
+      jumpMenu.innerHTML = html;
+      jumpMenu.querySelectorAll('.aig-study-jump-item').forEach(function (b) {
+        b.addEventListener('click', function () {
+          jumpMenu.style.display = 'none'; jumpBtn.setAttribute('aria-expanded', 'false');
+          go(b.getAttribute('data-slug'));
+        });
+      });
+      jumpBtn.onclick = function (ev) {
+        ev.stopPropagation();
+        var open = jumpMenu.style.display !== 'none' && jumpMenu.style.display !== '';
+        jumpMenu.style.display = open ? 'none' : 'block';
+        jumpBtn.setAttribute('aria-expanded', open ? 'false' : 'true');
+      };
+      if (!_aigJumpWired) {
+        _aigJumpWired = true;
+        document.addEventListener('click', function (e) {
+          if (!e.target.closest || !e.target.closest('.aig-study-jump-wrap')) {
+            jumpMenu.style.display = 'none'; jumpBtn.setAttribute('aria-expanded', 'false');
+          }
+        }, true);
+      }
+    }
+  }
+  window._renderGraphBarNav = _renderGraphBarNav;
+
   // Layout + render the DAG of study nodes for the active investigation.
   // Two orientations, chosen by chooseGraphOrientation() (aig-graph.js) or a
   // manual per-investigation localStorage override:
@@ -11417,6 +11554,10 @@
     // Legend moved behind the "?" info-chip popover (no longer an always-visible
     // strip below the graph). Fill + wire it here so it's ready on first render.
     _wireDagLegendPopover();
+    // Restore the persisted graph-shell collapse state + (re)build the graph-bar
+    // study navigator against the freshly-rendered graph data.
+    _applyAigShellCollapsed();
+    _renderGraphBarNav();
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
   }

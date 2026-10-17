@@ -1564,6 +1564,22 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <strong>Investigation graph</strong>
     </div>
     <div class="aig-toolbar" role="toolbar" aria-label="Investigation graph controls">
+      {# Study navigator (graph-level): ← prev / ⇄ jump / next → drives the
+         EMBEDDED study below. Shown only while a study is open (toggled by
+         _renderGraphBarNav in walkthrough.js, which reads the graph's own
+         studies + edges — no re-fetch — and calls _openStudyEmbeddedNewTab).
+         This replaces the in-iframe study-header nav when embedded. #}
+      <span id="aig-study-nav" class="aig-tb-group" role="group" aria-label="Navigate the open study" style="display:none">
+        <span class="aig-tb-label">Study</span>
+        <span class="aig-tb-seg">
+          <button id="aig-study-prev" type="button" title="Previous study" aria-label="Previous study">←</button>
+          <button id="aig-study-next" type="button" title="Next study" aria-label="Next study">→</button>
+        </span>
+        <span class="aig-study-jump-wrap" style="position:relative;display:inline-flex">
+          <button id="aig-study-jump-btn" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false" title="Jump to any study in this investigation">⇄ Studies</button>
+          <div id="aig-study-jump-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:240px;max-width:360px;max-height:380px;overflow:auto;padding:4px"></div>
+        </span>
+      </span>
       <span class="aig-tb-group" role="group" aria-label="Graph orientation">
         <span class="aig-tb-label">Layout</span>
         <span class="aig-tb-seg">
@@ -1598,6 +1614,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <button type="button" title="Zoom in" aria-label="Zoom in" onclick="window._aigZoomBy(1.25)">+</button>
         </span>
         <span class="aig-tb-seg">
+          <button id="aig-collapse-btn" type="button" title="Hide the graph (keeps the toolbar + navigator so you can still navigate and re-expand)"
+                  aria-label="Collapse graph" aria-expanded="true" onclick="window._aigToggleCollapse()">▾ Graph</button>
           <button id="aig-expand-btn" type="button" title="Expand graph — snap to top and grow it tall (workbench stays)"
                   aria-label="Expand graph" onclick="window._aigExpand()">⤒</button>
           <button type="button" title="Fullscreen" aria-label="Fullscreen" onclick="window._aigFullscreen()">⛶</button>

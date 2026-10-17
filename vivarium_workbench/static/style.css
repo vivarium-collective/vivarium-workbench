@@ -4480,6 +4480,31 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   align-items: center;
   gap: 7px;
 }
+/* Sticky investigation-graph pane: while an embedded study scrolls beneath it,
+   the graph context (#ws-context) / its slim collapsed bar pins to the top of
+   the investigation view. Engaged only while a study is open (class added by
+   _wsOpenStudyTab). `--bg` matches the page background so scrolled content is
+   cleanly covered. */
+.ws-context-sticky,
+.ws-context-bar-sticky {
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--bg, #fafafa);
+}
+.ws-context-sticky { padding-top: 4px; box-shadow: 0 2px 0 0 rgba(0, 0, 0, 0.03); }
+/* Graph-bar study navigator jump menu items (reuses the study-nav look). */
+.aig-study-jump-item {
+  display: block; width: 100%; text-align: left; border: none; background: transparent;
+  padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 0.92em; color: #334155;
+}
+.aig-study-jump-item:hover { background: #eef2ff; }
+.aig-study-jump-item.current { font-weight: 700; color: #1d4ed8; }
+.aig-study-jump-group {
+  font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #94a3b8; padding: 6px 10px 2px; font-weight: 700;
+}
 .aig-tb-group + .aig-tb-group {
   padding-left: 12px;
   border-left: 1px solid #e2e8f0;
