@@ -1495,17 +1495,16 @@ function markBubble(key){ document.querySelectorAll('.fbbubble').forEach(b=>{ if
 /* ---------- TOC + scroll spy ---------- */
 function toc(inv){
   const exv=inv.executive||{}, syn=inv.synthesis||{};
+  // Lean, evidence-led main TOC. Context/front-matter (how-to-read, design
+  // background, ground rules, the key-figure gallery) now lives in the
+  // Supplement, reached via the single Supplement link.
   const front=['<a href="#exec-summary" class="exec">Summary</a>'];
-  if(inv.how_to_read) front.push('<a href="#how-to-read">How to read</a>');
-  if(inv.biological_story || exv.what_is_this || inv.hypothesis) front.push('<a href="#background">Design</a>');
-  if((inv.guidelines||{}).architecture_principles) front.push('<a href="#ground-rules">Ground rules</a>');
-  if(inv.spine) front.push('<a href="#spine-presentation">Graph</a>');
-  if((syn.stages||[]).length) front.push('<a href="#integrated-findings">Integrated findings</a>');
+  if(inv.spine) front.push('<a href="#spine-presentation">Map</a>');
+  if((syn.stages||[]).length) front.push('<a href="#integrated-findings">Findings</a>');
   if((syn.quantitative||[]).length) front.push('<a href="#quantitative">Quantitative</a>');
-  if((syn.figures_ranked||[]).length) front.push('<a href="#key-figures">Key figures</a>');
   if((syn.contradictions||[]).length) front.push('<a href="#contradictions">Contradictions</a>');
-  if(((syn.validation||{}).items||[]).length!==undefined) front.push('<a href="#validation">Validation</a>');
   if((syn.roadmap||[]).length||Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length) front.push('<a href="#roadmap">Next studies</a>');
+  if(((syn.validation||{}).items||[]).length!==undefined) front.push('<a href="#validation">Validation</a>');
   if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
   if(inv.references&&Object.keys(inv.references).length) front.push('<a href="#references">References</a>');
   front.push('<a href="#supplement">Supplement</a>');
@@ -1518,7 +1517,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('#exec-summary,#how-to-read,#background,#ground-rules,#spine-presentation,#integrated-findings,#quantitative,#key-figures,#contradictions,#validation,#roadmap,#claim-evidence,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('#exec-summary,#spine-presentation,#integrated-findings,#quantitative,#contradictions,#roadmap,#validation,#claim-evidence,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -1657,8 +1656,11 @@ function setupLazyPlotly(){
 // a few frames to draw. Safe no-op if called in a normal browser.
 window.__reportPrintPrep = function(){
   return new Promise(resolve=>{
-    try{ document.querySelectorAll('details').forEach(d=>d.open=true); }catch(e){}   // open the Technical supplement
-    try{ document.querySelectorAll('.card').forEach(c=>c.classList.remove('collapsed')); }catch(e){}
+    // Open main-report details (e.g. the report-readiness block) but LEAVE THE
+    // TECHNICAL SUPPLEMENT COLLAPSED — the PDF is the evidence-led main report
+    // (8–15 pp), not the full 37-study supplement (which inflated it to 150+ pp).
+    try{ document.querySelectorAll('details').forEach(d=>{ if(d.id!=='supplement' && !d.closest('#supplement')) d.open=true; }); }catch(e){}
+    try{ document.querySelectorAll('.card').forEach(c=>{ if(!c.closest('#supplement')) c.classList.remove('collapsed'); }); }catch(e){}
     try{ setupLazyPlotly(); }catch(e){}
     try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
     try{ setupInteractiveLooms(); }catch(e){}
@@ -1998,6 +2000,62 @@ function _gradeChip(g){ const m=_gradeStyle(g);
   return `<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 7px;border-radius:9999px;color:${m[1]};background:${m[2]}">${esc(m[0])}</span>`; }
 function _studyLink(slug,title){ return `<a href="#s-${esc(slug)}" style="color:var(--accent);text-decoration:none" title="${esc(title||slug)}">${esc(title||slug)}</a>`; }
 
+/* ---- Figure-first helpers: bring the real figures UP into the main report.
+   A study's figures live on inv.studies[].figures_embedded[]
+   ({name, data_uri (raster) | html (+interactive=Plotly) | skipped}). We resolve
+   a renderable one and embed it beside the finding it supports — not just name it.
+   An interactive (Plotly) figure also appears in the supplement study card, so we
+   rewrite its plot id on the main copy to avoid a duplicate-id collision. */
+const _FIG_USED=new Set();   // (slug|name) already shown — don't repeat hero in a stage
+let   _FIG_BUDGET=7;         // stage figures beyond the hero; the rest stay in the supplement
+let   _FIG_UID=0;
+function _figResolve(inv, slug, name){
+  const st=(inv.studies||[]).find(x=>x.slug===slug); if(!st) return null;
+  const imgs=(st.figures_embedded||[]).filter(i=>(i.data_uri||i.html) && !i.skipped);
+  let im = name ? imgs.find(i=>i.name===name) : null;
+  if(!im) im = imgs.find(i=>i.data_uri && !_FIG_USED.has(slug+'|'+i.name))
+            || imgs.find(i=>!_FIG_USED.has(slug+'|'+i.name)) || null;
+  return im;
+}
+function _uniquePlotly(html){
+  const m=String(html||'').match(/Plotly\.newPlot\(\s*["']([^"']+)["']/);
+  if(!m) return html; const id=m[1]; if(!id) return html;
+  return String(html).split(id).join(id+'-m'+(_FIG_UID++));   // ids are hashes/UUIDs → safe split
+}
+function _figMarkup(im, slug, caption, hero){
+  if(!im) return ''; _FIG_USED.add(slug+'|'+im.name);
+  let body='', cls='main-fig';
+  if(im.data_uri)
+    body=`<img src="${im.data_uri}" alt="${esc(im.name||'')}" loading="lazy" style="width:100%;display:block;border:1px solid var(--line);border-radius:8px">`;
+  else if(im.html && im.interactive){ cls='main-fig embedded-viz embedded-plotly';
+    body=`<div class="plotly-holder">${_uniquePlotly(im.html)}</div>`; }
+  else if(im.html)
+    body=`<iframe class="viz-frame" srcdoc="${esc(im.html)}" loading="lazy" style="width:100%;border:1px solid var(--line);border-radius:8px;min-height:${hero?'420px':'300px'}" onload="try{this.style.height=(this.contentWindow.document.documentElement.scrollHeight+8)+'px';}catch(e){}"></iframe>`;
+  if(!body) return '';
+  const nm=(im.name)?`<b>${esc(im.name)}.</b> `:'';
+  const cap=(caption||im.name)?`<figcaption class="measure" style="font-size:11.5px;color:var(--ink-2);line-height:1.45;margin-top:5px">${nm}${caption||''}</figcaption>`:'';
+  return `<figure class="${cls}" style="margin:${hero?'12px 0 4px':'8px 0 2px'}">${body}${cap}</figure>`;
+}
+// The hero figure for the opening — the top-ranked figure, embedded in full.
+function heroFigure(inv){
+  const fr=(inv.synthesis||{}).figures_ranked||[]; if(!fr.length) return '';
+  for(const top of fr){ const im=_figResolve(inv, top.slug, top.name); if(im){
+    const cap=`${top.caption?esc(String(top.caption).slice(0,220)):''} <span style="color:var(--ink-3)">— ${_studyLink(top.slug,top.study_title)}</span>`;
+    return _figMarkup(im, top.slug, cap, true);
+  } }
+  return '';
+}
+// Best figure for one finding-cluster/stage, embedded beside its findings.
+// Budgeted: the first few principal stages get a figure in the main report; the
+// rest are a link away in the supplement, keeping the main presentation-sized.
+function stageFigure(inv, st){
+  if(_FIG_BUDGET<=0) return '';
+  for(const m of (st.studies||[])){ const im=_figResolve(inv, m.slug); if(im){
+    _FIG_BUDGET--; return _figMarkup(im, m.slug, `<span style="color:var(--ink-3)">— ${esc(m.title||m.slug)}</span>`, false);
+  } }
+  return '';
+}
+
 // 1. EXECUTIVE SUMMARY — question, current verdict, the honest gate ladder, and
 // the run-status / evidence / claim separation (a passed gate ≠ a proven mechanism).
 function execSummary(inv){
@@ -2017,6 +2075,7 @@ function execSummary(inv){
       <b>${c.refuted||0}</b> refuted, <b>${c.planned||0}</b> planned.
       A supported result means a <b>computational gate passed under the stated model assumptions</b> — it is evidence
       for a mechanism's feasibility, not proof that the historical transition occurred.</p>
+    ${heroFigure(inv)}
   </div>`;
 }
 
@@ -2035,7 +2094,8 @@ function integratedFindings(inv){
     return `<div style="margin:18px 0 0" id="stage-${esc(st.key)}">
       <h3 style="font-size:16px;margin:0 0 2px">${esc(st.label)}</h3>
       <div style="margin:4px 0 2px">${studyChips}</div>${md}
-      ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}</div>`;
+      ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}
+      ${stageFigure(inv, st)}</div>`;
   }).join('');
   return `<div class="narr" id="integrated-findings">
     <div class="sec-h"><h2>Integrated findings</h2><span class="rule"></span></div>
@@ -2399,6 +2459,7 @@ function renderGlossary(inv){
 /* ---------- one contiguous document ---------- */
 function render(inv){
   CUR=inv.slug; loadFB(); REFS=inv.references||{};
+  _FIG_USED.clear(); _FIG_BUDGET=7; _FIG_UID=0;   // figure-first budget, per render
   // meta line: status · workspace · N studies · date (calm, not a stat grid)
   const metaBits=[inv.status?`<span>${esc(String(inv.status).replace(/_/g,' '))}</span>`:'',
     `<span class="mono">${esc(inv.workspace||'')}</span>`,
@@ -2411,25 +2472,25 @@ function render(inv){
       <div class="provline">${metaBits.join('<span class="sep">·</span>')}</div>
     </div>
     ${execSummary(inv)}
-    ${howToReadBlock(inv)}
-    ${simulatedWorld(inv)}
-    ${groundRules(inv)}
-    ${renderArgument(inv)}
     ${renderSpine(inv)}
-    ${evidenceFraming(inv)}
     ${integratedFindings(inv)}
     ${quantitativeSynthesis(inv)}
-    ${keyFigures(inv)}
     ${contradictionsSection(inv)}
-    ${validationSection(inv)}
     ${roadmapSection(inv)}
+    ${validationSection(inv)}
     ${claimEvidenceMap(inv)}
     ${renderReferences(inv)}</div>`+
     toc(inv)+
     `<div class="wrap">
       <details class="supplement" id="supplement">
         <summary style="cursor:pointer;margin:18px 0 2px;font-size:21px;font-weight:700;color:var(--ink)">Technical supplement</summary>
-        <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Full per-study records, figures, methods, run metadata and provenance — kept out of the main narrative so it reads clean, but preserved here in full. Click any study link above to jump in.</p>
+        <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Full context, per-study records, figures, methods, run metadata and provenance — kept out of the main narrative so it reads clean, but preserved here in full. Click any study link above to jump in.</p>
+        ${howToReadBlock(inv)}
+        ${simulatedWorld(inv)}
+        ${renderArgument(inv)}
+        ${groundRules(inv)}
+        ${evidenceFraming(inv)}
+        ${keyFigures(inv)}
         ${studiesInventory(inv)}
         <div class="sec-h"><h3 style="margin:0">Study records</h3><span class="rule"></span>
           <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
