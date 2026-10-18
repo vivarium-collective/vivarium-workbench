@@ -11714,17 +11714,21 @@
     var _storedOrient = _getStoredGraphOrientation(window._currentIset);
     var orient = _storedOrient ||
       (window.chooseGraphOrientation ? window.chooseGraphOrientation(depthCounts) : 'LR');
-    // When the graph is hosted in the dockable side panel, its orientation MUST
-    // follow the dock side and stay put across re-renders (a zoom/band change
-    // re-renders): left/right → vertical (TB), top/bottom → horizontal (LR). Don't
-    // let a stored or auto value flip it back (the "docked on the side, then zoom
-    // → jumps to the top layout" bug).
-    var _fsEl = document.getElementById('investigation-dag-fs');
-    if (_fsEl && _fsEl.closest && _fsEl.closest('#viv-graph-panel')) {
-      var _gp = document.getElementById('viv-graph-panel');
-      var _dock = _gp && _gp.dataset ? _gp.dataset.dock : '';
-      if (_dock === 'left' || _dock === 'right') orient = 'TB';
-      else if (_dock === 'top' || _dock === 'bottom') orient = 'LR';
+    // When the graph is hosted in the dockable side panel, the DOCK SIDE sets the
+    // DEFAULT orientation (left/right → vertical TB, top/bottom → horizontal LR)
+    // and keeps it stable across re-renders (a zoom/band change re-renders, which
+    // must not flip an auto value — the "docked on the side, then zoom → jumps to
+    // the top layout" bug). But a MANUAL choice via the LAYOUT ⇄/↕ buttons
+    // (_storedOrient) still wins, so the toggle keeps working while docked — the
+    // dock side only changes the default, it doesn't lock the orientation.
+    if (!_storedOrient) {
+      var _fsEl = document.getElementById('investigation-dag-fs');
+      if (_fsEl && _fsEl.closest && _fsEl.closest('#viv-graph-panel')) {
+        var _gp = document.getElementById('viv-graph-panel');
+        var _dock = _gp && _gp.dataset ? _gp.dataset.dock : '';
+        if (_dock === 'left' || _dock === 'right') orient = 'TB';
+        else if (_dock === 'top' || _dock === 'bottom') orient = 'LR';
+      }
     }
     if (shellEl) { shellEl.classList.remove('aig-orient-lr', 'aig-orient-tb'); shellEl.classList.add(orient === 'TB' ? 'aig-orient-tb' : 'aig-orient-lr'); }
     _syncGraphOrientToggleUI(orient, !!_storedOrient);
