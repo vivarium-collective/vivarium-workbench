@@ -1500,6 +1500,7 @@ function toc(inv){
   if((syn.quantitative||[]).length) front.push('<a href="#quantitative">Quantitative</a>');
   if((syn.figures_ranked||[]).length) front.push('<a href="#key-figures">Key figures</a>');
   if((syn.contradictions||[]).length) front.push('<a href="#contradictions">Contradictions</a>');
+  if(((syn.validation||{}).items||[]).length!==undefined) front.push('<a href="#validation">Validation</a>');
   if((syn.roadmap||[]).length||Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length) front.push('<a href="#roadmap">Next studies</a>');
   if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
   if(inv.references&&Object.keys(inv.references).length) front.push('<a href="#references">References</a>');
@@ -1513,7 +1514,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('#exec-summary,#how-to-read,#background,#ground-rules,#spine-presentation,#integrated-findings,#quantitative,#key-figures,#contradictions,#roadmap,#claim-evidence,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('#exec-summary,#how-to-read,#background,#ground-rules,#spine-presentation,#integrated-findings,#quantitative,#key-figures,#contradictions,#validation,#roadmap,#claim-evidence,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -2072,6 +2073,27 @@ function contradictionsSection(inv){
     ${items?`<ul style="list-style:none;padding:0;margin:4px 0 0">${items}</ul>`:''}${extBlock}</div>`;
 }
 
+// VALIDATION & REPRODUCIBILITY — reuses the existing deterministic needs-attention
+// scan (invariant/conservation regressions, verdict divergence, reproducibility,
+// param drift, phantom observables, AC coverage). No new checker; code-computed.
+function validationSection(inv){
+  const v=(inv.synthesis||{}).validation||{}; const items=v.items||[];
+  const total=(v.summary&&v.summary.total)||items.length;
+  const KM={diagnostic_branch_needed:'Diagnostic study needed',verdict_divergence:'Verdict divergence (computed ≠ authored)',
+    invariant_regression:'Invariant / conservation regression',phantom_observable:'Phantom observable (declared but absent in the built composite)',
+    env_stale:'Stale run environment',nondeterministic:'Non-reproducible run (fingerprint changed)',param_drift:'Parameter drift (applied ≠ pinned)',
+    stale_finding:'Stale finding',uncovered_ac:'Uncovered acceptance criterion',next_action_ready:'Next action ready'};
+  const sev={high:'#991b1b',medium:'#92400e',low:'#475569'};
+  const rows=items.map(it=>{ const sc=sev[it.severity]||'#475569';
+    return `<li style="margin-top:7px;padding-left:10px;border-left:3px solid ${sc}"><b>${esc(KM[it.kind]||String(it.kind||'').replace(/_/g,' '))}</b>${it.ref?` <span class="mono" style="font-size:11px;color:var(--ink-3)">${esc(it.ref)}</span>`:''}${it.title?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin-top:1px">${esc(it.title)}</div>`:''}</li>`; }).join('');
+  const body=total?`<ul style="list-style:none;padding:0;margin:4px 0 0">${rows}</ul>`
+    :`<p class="measure" style="color:#065f46;font-size:13.5px;margin:2px 0 0">✓ No open validation flags — the deterministic scan found nothing to act on.</p>`;
+  return `<div class="narr" id="validation">
+    <div class="sec-h"><h2>Validation &amp; reproducibility</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Automated, code-computed consistency checks (no AI): conservation/invariant ledgers, computed-vs-authored verdicts, run reproducibility (environment + determinism), parameter drift and acceptance-criterion coverage. Each study's own ledger predicates (e.g. mass/charge balance) are its gating behavior tests, listed in the supplement.</p>
+    ${body}</div>`;
+}
+
 // 5. NEXT STUDIES & PRIORITIES — prioritized roadmap from planned studies, failed
 // gates and authored follow-ups; plus the open expert decisions.
 function roadmapSection(inv){
@@ -2374,6 +2396,7 @@ function render(inv){
     ${quantitativeSynthesis(inv)}
     ${keyFigures(inv)}
     ${contradictionsSection(inv)}
+    ${validationSection(inv)}
     ${roadmapSection(inv)}
     ${claimEvidenceMap(inv)}
     ${renderReferences(inv)}</div>`+

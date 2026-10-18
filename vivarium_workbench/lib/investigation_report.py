@@ -678,25 +678,43 @@ def _load_references(ws_root: Path, wp) -> dict:
 # a passed computational gate is never reported as a proven mechanism.
 # ---------------------------------------------------------------------------
 def _syn_run_status(s):
-    st = str(s.get("status") or "").lower()
-    if st in ("planned", "proposed"):
-        return "planned"
-    if str(s.get("gate_status") or "").lower() in ("not_started", "blocked"):
-        return "planned"
-    return "ran"
+    """Run status — REUSES the canonical two-axis ontology
+    (``study_ontology.derive_execution_status``) rather than re-deriving it. The
+    canonical value (completed/running/failed/planned/proposed) is stashed on the
+    study as ``execution_status`` in build_report_data; collapse it to ran|planned."""
+    es = str(s.get("execution_status") or "").lower()
+    if not es:
+        try:
+            from vivarium_workbench.lib.study_ontology import derive_execution_status
+            es = str(derive_execution_status(s, str(s.get("status") or "")) or "").lower()
+        except Exception:  # noqa: BLE001
+            es = str(s.get("status") or "").lower()
+    return "planned" if es in ("planned", "proposed", "not_started", "designing", "not_run") else "ran"
 
 
 def _syn_grade(s):
-    """Evidence grade — DISTINCT from run status. Maps verdict / gate_status /
-    confidence onto supported | qualified | refuted | pending | inconclusive."""
+    """Evidence grade — DISTINCT from run status. REUSES the canonical scientific
+    verdict (``study_ontology.derive_verdict`` → supported/qualified/refuted/
+    inconclusive, stashed as ``sci_verdict``); only when that is absent does it
+    fall back to a gate_status/confidence mapping. Planned studies → pending."""
     if _syn_run_status(s) == "planned":
         return "pending"
+    sv = str(s.get("sci_verdict") or "").lower()
+    if not sv:
+        try:
+            from vivarium_workbench.lib.study_ontology import derive_verdict
+            sv = str(derive_verdict(s) or "").lower()
+        except Exception:  # noqa: BLE001
+            sv = ""
+    if sv in ("supported", "qualified", "refuted", "inconclusive"):
+        return sv
+    # Fallback (no derivable scientific verdict): the gate/confidence reduction.
     gs = str(s.get("gate_status") or "").lower()
     v = str(s.get("verdict") or "").lower()
     conf = str(s.get("confidence") or "").lower()
     if gs in ("failed", "failing") or v in ("refuted", "failed") or conf == "refuted":
         return "refuted"
-    if gs in ("stale", "needs_calibration") or v in ("qualified", "inconclusive", "needs-calibration") \
+    if gs in ("stale", "needs_calibration") or v in ("qualified", "inconclusive") \
             or conf in ("investigating", "qualified", "mixed"):
         return "qualified"
     if gs == "passed" or v in ("passed", "supported", "met") or conf in ("accepted", "supported"):
@@ -955,6 +973,19 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         s = {k: spec.get(k) for k in _STUDY_KEEP if spec.get(k) is not None}
         s["slug"] = real_slug
         s["title"] = spec.get("title") or _humanize(real_slug)   # title is optional in some workspaces
+        # Canonical two-axis ontology (REUSED, not re-derived): execution status +
+        # scientific verdict from study_ontology — the same functions the live
+        # graph + build_iset_detail use. Stashed here on the raw spec BEFORE
+        # _build_spine sets the gate-state `verdict` for the DAG, so the synthesis
+        # grade reuses the canonical scientific verdict instead of re-mapping.
+        try:
+            from vivarium_workbench.lib import study_ontology as _onto
+            s["execution_status"] = _onto.derive_execution_status(spec, str(spec.get("status") or ""))
+            _sv = _onto.derive_verdict(spec)
+            if _sv:
+                s["sci_verdict"] = _sv
+        except Exception:  # noqa: BLE001
+            pass
         # "Methods · Simulations" node-card block (locked shared spec, matching the
         # live workbench graph): the baseline composite id + graded-test counts are
         # computed here. `methods`/`fidelity` come from process-bigraph's
@@ -1018,6 +1049,18 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         studies.append(s)
 
     spine = _build_spine(ws_root, inv_slug, studies)
+    _synthesis = _build_synthesis(inv, studies, spine)
+    # Reuse the EXISTING deterministic needs-attention scan as the report's
+    # validation/consistency layer (invariant & conservation-invariant
+    # regressions, verdict divergence, reproducibility env-stale/nondeterministic,
+    # param drift, phantom observables, uncovered acceptance criteria). Build-free
+    # + tolerant; empty when the scan is unavailable.
+    try:
+        from vivarium_workbench.lib.report_views import build_needs_attention
+        _na, _ = build_needs_attention(ws_root, investigation=inv_slug)
+        _synthesis["validation"] = _na
+    except Exception:  # noqa: BLE001
+        _synthesis["validation"] = {"items": [], "summary": {"total": 0, "by_kind": {}, "by_severity": {}}}
     references = _load_references(ws_root, wp)
 
     return {
@@ -1047,7 +1090,12 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         # Deterministic cross-study synthesis (claim-evidence map, stage-grouped
         # integrated findings, contradictions, continuity, roadmap, figure ranking,
         # run-status/evidence/claim separation) — the finding-first report layer.
-        "synthesis": _build_synthesis(inv, studies, spine),
+        # Also carries a `validation` block: the EXISTING deterministic
+        # needs-attention scan (invariant/conservation regressions, verdict
+        # divergence, reproducibility env-stale/nondeterministic, param drift,
+        # phantom observables, uncovered ACs) reused from report_views — not a new
+        # checker. Added after the dict literal (see just below).
+        "synthesis": _synthesis,
         "references": references,
         "inv_references": inv.get("inputs", {}).get("references") if isinstance(inv.get("inputs"), dict) else None,
         "catalog": inv.get("catalog"),
