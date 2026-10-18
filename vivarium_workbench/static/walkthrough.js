@@ -904,6 +904,10 @@
     if (pageId === 'visualizations') {
       _loadAnalysesPage();
     }
+    // Resources page: curated structured resources from the workspace manifest.
+    if (pageId === 'resources') {
+      _loadResources();
+    }
     // Branch page: render the Source (Scope Local/Remote, repo, branch) section on
     // every navigation, so it's populated from the first visit instead of relying
     // on the one-time DOMContentLoaded render (which may not have finished — or ran
@@ -964,8 +968,8 @@
     if (focus) {
       var _snapshot = document.body.classList.contains('snapshot');
       var validPages = _snapshot
-        ? ['workspace-inputs', 'simulation-setup', 'modules', 'market', 'investigations', 'simulations', 'visualizations', 'audit', 'composite-explore', 'github', 'about']
-        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'modules', 'market', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
+        ? ['workspace-inputs', 'simulation-setup', 'modules', 'market', 'investigations', 'simulations', 'visualizations', 'resources', 'audit', 'composite-explore', 'github', 'about']
+        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'resources', 'modules', 'market', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -996,8 +1000,8 @@
         var h = (window.location.hash || '').replace(/^#/, '');
         var _snap = document.body.classList.contains('snapshot');
         var validPages = _snap
-          ? ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'audit', 'composite-explore', 'github', 'about']
-          : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
+          ? ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'resources', 'audit', 'composite-explore', 'github', 'about']
+          : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'resources', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
       window.addEventListener('hashchange', fromHash);
@@ -2070,6 +2074,348 @@
       });
   }
   window._loadAnalysesPage = _loadAnalysesPage;
+
+  // ── Resources tab ──────────────────────────────────────────────────────────
+  // Curated structured scientific resources (lipid structures, reaction
+  // pathways, paper references, imported engines) read from a workspace's
+  // structured_resources vg_data manifest (GET /api/structured-resources).
+  // Grouped by `type`; every `references: [id]` cross-links to the matching
+  // paper-reference card via an in-page scroll (NOT a #hash, which would trip
+  // the page router). The whole tab — rail link + page — stays hidden unless the
+  // active workspace ships the manifest, so it's purely additive.
+
+  var _RES_TYPE_LABEL = {
+    'lipid-structure':  'Lipid structures',
+    'reaction-pathway': 'Reaction pathways',
+    'imported-engine':  'Imported engines',
+    'paper-reference':  'Paper references'
+  };
+
+  function _resTypeLabel(t) { return _RES_TYPE_LABEL[t] || String(t || ''); }
+
+  function _resV(v) { return (v === null || v === undefined || v === '') ? '' : String(v); }
+
+  // One "label: value" row, omitted entirely when the value is empty.
+  function _resKV(label, value) {
+    var v = _resV(value);
+    if (!v) return '';
+    return '<div class="res-kv"><span class="res-kv-k">' + _esc(label) +
+      '</span><span class="res-kv-v">' + _esc(v) + '</span></div>';
+  }
+
+  // Scroll to (and briefly flash) a paper-reference card. Used instead of a raw
+  // href="#..." so the SPA hash router doesn't treat the citation jump as a page
+  // switch.
+  function _resScrollToRef(id) {
+    var el = document.getElementById('res-ref-' + id);
+    if (!el) return;
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { el.scrollIntoView(); }
+    el.classList.add('res-ref-flash');
+    setTimeout(function () { el.classList.remove('res-ref-flash'); }, 1600);
+  }
+  window._resScrollToRef = _resScrollToRef;
+
+  // Citation chips for a resource's references:[id] list. A known id links to its
+  // card (cross-link); an unknown id renders as a plain muted chip so a dangling
+  // reference is visible rather than silently dropped.
+  function _resRefChips(ids, refsById) {
+    if (!ids || !ids.length) return '';
+    var chips = ids.map(function (id) {
+      var ref = refsById[id];
+      if (ref) {
+        var label = ref.name || ref.bibtex_key || id;
+        return '<a class="res-cite" data-ref="' + _esc(id) +
+          '" onclick="_resScrollToRef(\'' + _esc(String(id)) + '\');return false;" ' +
+          'title="' + _esc(ref.title || label) + '">' + _esc(label) + '</a>';
+      }
+      return '<span class="res-cite res-cite-missing" title="Unresolved reference">' +
+        _esc(id) + '</span>';
+    }).join('');
+    return '<div class="res-cites"><span class="res-cites-lbl">Cites</span>' + chips + '</div>';
+  }
+
+  function _resCardHead(r) {
+    var badge = r.lipid_class || r.pathway || r.engine || '';
+    var abbr = r.abbreviation ? ' <span class="res-abbr">' + _esc(r.abbreviation) + '</span>' : '';
+    return '<div class="res-card-head">' +
+      '<strong class="res-card-name">' + _esc(r.name || r.id || '') + '</strong>' + abbr +
+      (badge ? '<span class="res-badge">' + _esc(badge) + '</span>' : '') +
+      '</div>' +
+      (r.summary ? '<p class="res-summary muted">' + _esc(r.summary) + '</p>' : '');
+  }
+
+  // lipid-structure → identity, chain/headgroup/charge, and the Martini CG mapping.
+  function _resLipidCard(r, refsById) {
+    var kv = [
+      _resKV('Chemical name', r.chemical_name),
+      _resKV('Class', r.lipid_class),
+      _resKV('Chains', r.n_chains),
+      _resKV('Chain length', r.chain_length),
+      _resKV('Headgroup', r.headgroup),
+      _resKV('Charge', r.charge_state),
+      _resKV('Role', r.role),
+      _resKV('Formula', r.formula),
+      _resKV('SMILES', r.smiles)
+    ].join('');
+    var martini = '';
+    var m = r.martini;
+    if (m && typeof m === 'object') {
+      var beads = (m.bead_mapping && m.bead_mapping.length)
+        ? '<ol class="res-beads">' + m.bead_mapping.map(function (b) {
+            return '<li>' + _esc(_resV(b)) + '</li>'; }).join('') + '</ol>'
+        : '';
+      martini = '<div class="res-martini"><div class="res-sub">Martini coarse-grained mapping</div>' +
+        '<div class="res-kv-grid">' +
+          _resKV('Version', m.version) + _resKV('Model', m.model) +
+          _resKV('Beads/chain', m.n_beads_per_chain) + _resKV('Source ITP', m.source_itp) +
+        '</div>' + beads + '</div>';
+    }
+    return '<div class="res-card res-lipid">' + _resCardHead(r) +
+      '<div class="res-kv-grid">' + kv + '</div>' + martini +
+      (r.notes ? '<p class="res-notes">' + _esc(r.notes) + '</p>' : '') +
+      _resRefChips(r.references, refsById) + '</div>';
+  }
+
+  // reaction-pathway → network_summary from a generated universe + keystone rules
+  // + PROMINENT verbatim honesty caveats + provenance footer. Optional legacy
+  // `reactions` table rendered when present.
+  function _resPathwayCard(r, refsById) {
+    var head = _resCardHead(r);
+    var role = '';
+    if (r.role_in_campaign || r.campaign_tie) {
+      role = '<div class="res-kv-grid">' +
+        _resKV('Role in campaign', r.role_in_campaign) +
+        _resKV('Campaign tie', r.campaign_tie) + '</div>';
+    }
+    if (r.description) head += '<p class="res-desc">' + _esc(r.description) + '</p>';
+
+    // network_summary block
+    var net = '';
+    var ns = r.network_summary;
+    if (ns && typeof ns === 'object') {
+      var span = ns.energetic_span_kj_mol || {};
+      var th = ns.thermo || {};
+      var cc = ns.catalyst_classes || {};
+      var headline = [];
+      if (ns.n_reactions != null) headline.push(_resV(ns.n_reactions) + ' reactions');
+      if (ns.n_species != null) headline.push(_resV(ns.n_species) + ' species');
+      if (ns.max_carbons != null) headline.push('C≤' + _resV(ns.max_carbons));
+      var families = (ns.rule_families && ns.rule_families.length)
+        ? '<table class="res-table"><thead><tr><th>Rule family</th><th>#rxns</th></tr></thead><tbody>' +
+          ns.rule_families.map(function (f) {
+            return '<tr><td>' + _esc(_resV(f.name || f.rule)) + '</td><td>' +
+              _esc(_resV(f.n_reactions)) + '</td></tr>'; }).join('') +
+          '</tbody></table>'
+        : '';
+      var spanLine = (span.min != null || span.max != null || span.mean != null)
+        ? _resKV('ΔG′ span (kJ/mol)',
+            'min ' + _resV(span.min) + ', max ' + _resV(span.max) + ', mean ' + _resV(span.mean))
+        : '';
+      var catLine = (cc.mineral != null || cc.base != null || cc.none != null)
+        ? _resKV('Catalyst classes',
+            'mineral ' + _resV(cc.mineral) + ', base ' + _resV(cc.base) + ', none ' + _resV(cc.none))
+        : '';
+      var thermo = (th.p_h != null || th.ionic_strength_M != null || th.temperature_K != null || th.engine)
+        ? _resKV('Thermo conditions',
+            'pH ' + _resV(th.p_h) + ', I ' + _resV(th.ionic_strength_M) + ' M, T ' +
+            _resV(th.temperature_K) + ' K' + (th.engine ? ' (' + _resV(th.engine) + ')' : ''))
+        : '';
+      net = '<div class="res-network"><div class="res-sub">Generated reaction universe</div>' +
+        (headline.length ? '<div class="res-headline">' + _esc(headline.join(' · ')) + '</div>' : '') +
+        '<div class="res-kv-grid">' + spanLine + catLine + thermo + '</div>' +
+        families + '</div>';
+    }
+
+    // keystone_rules table
+    var keystone = '';
+    if (r.keystone_rules && r.keystone_rules.length) {
+      keystone = '<div class="res-sub">Keystone rules</div>' +
+        '<table class="res-table"><thead><tr><th>Rule</th><th>#rxns</th><th>Catalyst</th>' +
+        '<th>Role</th><th>Note</th></tr></thead><tbody>' +
+        r.keystone_rules.map(function (k) {
+          return '<tr><td>' + _esc(_resV(k.rule)) + '</td><td>' + _esc(_resV(k.n_reactions)) +
+            '</td><td>' + _esc(_resV(k.catalyst)) + '</td><td>' + _esc(_resV(k.role)) +
+            '</td><td>' + _esc(_resV(k.note)) + '</td></tr>'; }).join('') +
+        '</tbody></table>';
+    }
+
+    // honesty_notes — rendered PROMINENTLY and VERBATIM as caveats.
+    var caveats = '';
+    if (r.honesty_notes && r.honesty_notes.length) {
+      caveats = '<div class="res-caveats"><div class="res-caveats-lbl">⚠ Caveats</div><ul>' +
+        r.honesty_notes.map(function (n) { return '<li>' + _esc(_resV(n)) + '</li>'; }).join('') +
+        '</ul></div>';
+    }
+
+    // optional legacy curated reactions table
+    var reactions = '';
+    if (r.reactions && r.reactions.length) {
+      reactions = '<div class="res-sub">Curated reactions</div>' +
+        '<table class="res-table"><thead><tr><th>Name</th><th>Equation</th><th>ΔG (kJ/mol)</th>' +
+        '<th>Note</th></tr></thead><tbody>' +
+        r.reactions.map(function (rx) {
+          var dg = (rx.delta_g_kjmol != null)
+            ? _resV(rx.delta_g_kjmol) + (rx.delta_g_type ? ' (' + _esc(rx.delta_g_type) + ')' : '') : '';
+          return '<tr><td>' + _esc(_resV(rx.name)) + '</td><td class="res-eq">' + _esc(_resV(rx.equation)) +
+            '</td><td>' + dg + '</td><td>' + _esc(_resV(rx.note)) + '</td></tr>'; }).join('') +
+        '</tbody></table>';
+    }
+
+    // provenance footer
+    var prov = '';
+    var ds = r.data_source;
+    if (ds && typeof ds === 'object') {
+      var bits = [];
+      if (ds.package) bits.push(_esc(_resV(ds.package)));
+      if (ds.path) bits.push(_esc(_resV(ds.path)));
+      if (ds.generated_by) bits.push('generated by ' + _esc(_resV(ds.generated_by)));
+      if (bits.length) prov = '<div class="res-prov muted">Source: ' + bits.join(' · ') + '</div>';
+    }
+
+    return '<div class="res-card res-pathway">' + head + role + net + keystone +
+      caveats + reactions + prov + _resRefChips(r.references, refsById) + '</div>';
+  }
+
+  // imported-engine → engine/wraps/viva_package/role/used_by.
+  function _resEngineCard(r, refsById) {
+    var usedBy = (r.used_by && r.used_by.length)
+      ? '<div class="res-kv"><span class="res-kv-k">Used by</span><span class="res-kv-v">' +
+        r.used_by.map(function (u) { return '<span class="res-tag">' + _esc(_resV(u)) + '</span>'; }).join(' ') +
+        '</span></div>'
+      : '';
+    return '<div class="res-card res-engine">' + _resCardHead(r) +
+      '<div class="res-kv-grid">' +
+        _resKV('Engine', r.engine) + _resKV('Wraps', r.wraps) +
+        _resKV('viva package', r.viva_package) + _resKV('Role', r.role) +
+      '</div>' + usedBy +
+      _resRefChips(r.references, refsById) + '</div>';
+  }
+
+  // paper-reference → a citation card, anchored by id so other resources'
+  // Cites chips can cross-link to it.
+  function _resPaperCard(r) {
+    var meta = [];
+    if (r.authors) meta.push(_esc(r.authors));
+    if (r.year) meta.push('(' + _esc(_resV(r.year)) + ')');
+    var line = meta.join(' ');
+    var venue = r.venue ? '<span class="res-venue">' + _esc(r.venue) + '</span>' : '';
+    var links = '';
+    if (r.doi) links += '<a class="res-link" href="https://doi.org/' + encodeURIComponent(r.doi) +
+      '" target="_blank" rel="noopener">doi:' + _esc(r.doi) + '</a>';
+    if (r.url) links += '<a class="res-link" href="' + _esc(r.url) + '" target="_blank" rel="noopener">link</a>';
+    var tags = (r.tags && r.tags.length)
+      ? '<div class="res-tags">' + r.tags.map(function (t) {
+          return '<span class="res-tag">' + _esc(_resV(t)) + '</span>'; }).join('') + '</div>'
+      : '';
+    var flags = '';
+    if (r.in_papers_bib) flags += '<span class="res-flag res-flag-ok">in papers.bib</span>';
+    if (r.needs_verification) flags += '<span class="res-flag res-flag-warn">needs verification</span>';
+    return '<div class="res-card res-paper" id="res-ref-' + _esc(String(r.id || '')) + '">' +
+      '<div class="res-card-head"><strong class="res-card-name">' + _esc(r.name || r.title || r.id || '') +
+      '</strong>' + flags + '</div>' +
+      (line ? '<p class="res-authors">' + line + '</p>' : '') +
+      (r.title ? '<p class="res-title">' + _esc(r.title) + '</p>' : '') +
+      (venue ? '<p>' + venue + '</p>' : '') +
+      (links ? '<div class="res-links">' + links + '</div>' : '') +
+      tags + '</div>';
+  }
+
+  // Generic fallback for an unknown resource type — never drop it silently.
+  function _resGenericCard(r, refsById) {
+    var kv = Object.keys(r).filter(function (k) {
+      return ['id', 'type', 'name', 'summary', 'references'].indexOf(k) < 0 &&
+        (typeof r[k] === 'string' || typeof r[k] === 'number');
+    }).map(function (k) { return _resKV(k, r[k]); }).join('');
+    return '<div class="res-card res-generic">' + _resCardHead(r) +
+      '<div class="res-kv-grid">' + kv + '</div>' +
+      _resRefChips(r.references, refsById) + '</div>';
+  }
+
+  function _resRenderCard(r, refsById) {
+    switch (r.type) {
+      case 'lipid-structure':  return _resLipidCard(r, refsById);
+      case 'reaction-pathway': return _resPathwayCard(r, refsById);
+      case 'imported-engine':  return _resEngineCard(r, refsById);
+      case 'paper-reference':  return _resPaperCard(r);
+      default:                 return _resGenericCard(r, refsById);
+    }
+  }
+
+  function _resRenderPage(container, data) {
+    var order = data.type_order || [];
+    var groups = data.groups || {};
+    var refsById = data.references_by_id || {};
+    var header = '<div class="res-manifest-head">' +
+      '<h2 class="res-manifest-title">' + _esc(data.name || 'Resources') + '</h2>' +
+      (data.version ? '<span class="res-manifest-ver">v' + _esc(data.version) + '</span>' : '') +
+      (data.description ? '<p class="res-manifest-desc muted">' + _esc(data.description) + '</p>' : '') +
+      '</div>';
+    var sections = order.map(function (t) {
+      var items = groups[t] || [];
+      if (!items.length) return '';
+      var cards = items.map(function (r) { return _resRenderCard(r, refsById); }).join('');
+      return '<section class="res-section" data-res-type="' + _esc(t) + '">' +
+        '<h3 class="res-section-title">' + _esc(_resTypeLabel(t)) +
+        ' <span class="res-count">' + items.length + '</span></h3>' +
+        '<div class="res-grid">' + cards + '</div></section>';
+    }).join('');
+    container.innerHTML = header + sections;
+  }
+
+  // Reveal / hide the Resources rail link based on manifest availability.
+  function _resSetRailVisible(visible) {
+    var link = document.getElementById('rail-resources');
+    if (link) link.style.display = visible ? '' : 'none';
+  }
+
+  function _loadResources() {
+    var container = document.getElementById('resources-gallery');
+    if (!container) return;
+    var _base = _analysesBase();
+    var _url = _analysesSnapshot()
+      ? _base + '/api/structured-resources.json'
+      : '/api/structured-resources';
+    fetch(_url)
+      .then(function (r) { return r.text(); })
+      .then(function (t) {
+        var data = {};
+        try { data = t ? JSON.parse(t) : {}; } catch (e) { data = {}; }
+        return data;
+      })
+      .then(function (data) {
+        data = data || {};
+        if (!data.available || !(data.type_order && data.type_order.length)) {
+          _resSetRailVisible(false);
+          container.innerHTML = '<p class="empty-state">This workspace ships no structured-resources manifest.</p>';
+          return;
+        }
+        _resSetRailVisible(true);
+        _resRenderPage(container, data);
+      })
+      .catch(function (err) {
+        container.innerHTML = '<p class="empty-state" style="color:#991b1b">Error loading resources: ' + _esc(String(err)) + '</p>';
+      });
+  }
+  window._loadResources = _loadResources;
+
+  // One-time probe at startup: reveal the Resources rail link iff the active
+  // workspace ships the manifest. Keeps the tab purely additive — hidden
+  // everywhere else — without the user having to navigate to it first.
+  function _initResourcesRail() {
+    var _base = _analysesBase();
+    var _url = _analysesSnapshot()
+      ? _base + '/api/structured-resources.json'
+      : '/api/structured-resources';
+    fetch(_url)
+      .then(function (r) { return r.text(); })
+      .then(function (t) {
+        var data = {};
+        try { data = t ? JSON.parse(t) : {}; } catch (e) { data = {}; }
+        _resSetRailVisible(!!(data && data.available));
+      })
+      .catch(function () { _resSetRailVisible(false); });
+  }
+  window._initResourcesRail = _initResourcesRail;
 
   // Source-rank for picker sort: in_workspace classes are the ones the user
   // can act on directly (they live in this workspace's package or an
@@ -7043,6 +7389,9 @@
 
     // Initialize menu navigation.
     _initMenuNav();
+
+    // Reveal the Resources rail link iff this workspace ships the manifest.
+    try { _initResourcesRail(); } catch (e) {}
 
     // Restore Vivarium left-rail collapsed state (V4).
     _vivRestoreRailState();

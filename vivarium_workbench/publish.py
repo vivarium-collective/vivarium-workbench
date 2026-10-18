@@ -788,6 +788,7 @@ def _do_build(
     )
     from vivarium_workbench.lib.report_views import build_inputs, build_iset_detail
     from vivarium_workbench.lib.catalog import build_catalog
+    from vivarium_workbench.lib.structured_resources import load_structured_resources
     from vivarium_workbench.lib.audit_views import build_audit as _build_audit
     from vivarium_workbench.lib.composite_lookup import composites_data
     from vivarium_workbench.lib.composite_resolve import resolve_composite
@@ -883,6 +884,20 @@ def _do_build(
             _m.pop("out_of_sync", None)
             _m.pop("out_of_sync_reason", None)
     _write_json(api_dir / "catalog.json", catalog)
+
+    # api/structured-resources.json — curated structured resources, if this
+    # workspace ships a structured_resources vg_data manifest (GET
+    # /api/structured-resources). Best-effort: a workspace with no manifest
+    # publishes {"available": false}, so the read-only Resources tab stays
+    # hidden in the bundle exactly as it does live.
+    try:
+        _sr = load_structured_resources(ws_root)
+    except Exception:
+        _sr = None
+    if _sr:
+        _write_json(api_dir / "structured-resources.json", {**_sr, "available": True})
+    else:
+        _write_json(api_dir / "structured-resources.json", {"available": False})
 
     # api/marketplace.json — the FULL viva ecosystem (GET /api/marketplace,
     # build_catalog(full=True)): every module including the ones NOT installed

@@ -199,6 +199,7 @@ from vivarium_workbench.lib.models import (
     SavedVisualizationsPayload,
     SimRow,
     SimulationsPayload,
+    StructuredResourcesPayload,
     RemoteSourceState,
     ProvenanceManifest,
     RemoteHealth,
@@ -390,6 +391,7 @@ from vivarium_workbench.lib.models import (
 )
 from investigation_contracts import FindingCreateBody, EvidenceCreateBody, DecisionCreateBody, ConclusionCreateBody
 from vivarium_workbench.lib.catalog import build_catalog
+from vivarium_workbench.lib.structured_resources import load_structured_resources
 from vivarium_workbench.lib.registry import build_registry
 from vivarium_workbench.lib.visualization_classes import list_visualization_classes
 from vivarium_workbench.lib.study_charts import build_study_charts_payload
@@ -2055,6 +2057,28 @@ def create_app() -> FastAPI:
         implementation the stdlib ``_catalog_data`` now forwards to.
         """
         return CatalogPayload.model_validate(build_catalog(ws))
+
+    @app.get(
+        "/api/structured-resources",
+        response_model=StructuredResourcesPayload,
+        tags=["Registry & catalog"],
+        summary="Curated structured scientific resources for this workspace",
+    )
+    def structured_resources(
+        ws: Path = Depends(get_workspace),
+    ) -> StructuredResourcesPayload:
+        """A workspace's ``structured_resources`` vg_data manifest, grouped by
+        resource ``type`` plus a ``paper-reference`` lookup by id (so the
+        Resources tab cross-links each ``references: [id]`` to its citation card).
+
+        ``available`` is ``False`` when the workspace ships no manifest — the tab
+        stays hidden.  Best-effort via ``lib.structured_resources`` (a missing or
+        malformed file yields an empty/unavailable payload, never a 500).
+        """
+        data = load_structured_resources(ws)
+        if not data:
+            return StructuredResourcesPayload(available=False)
+        return StructuredResourcesPayload.model_validate({**data, "available": True})
 
     @app.get(
         "/api/module-import-diagnostics",

@@ -4275,6 +4275,85 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .tool-row + .tool-row { margin-top: 8px; }
 .viewer-target-list { display: flex; flex-direction: column; gap: 4px; }
 
+/* ===== Resources tab =====================================================
+   Curated structured scientific resources, grouped by type. Cards reuse the
+   generic surface tokens (var(--panel)/var(--border)) so dark mode follows the
+   shared .res-card rule; the sub-blocks below add the bespoke structure
+   (Martini mapping, reaction-universe summary, caveats, citation chips). */
+.resources-gallery { display: flex; flex-direction: column; gap: 22px; }
+.res-manifest-head { margin-bottom: 4px; }
+.res-manifest-title { margin: 0; display: inline; font-size: 1.25em; }
+.res-manifest-ver { margin-left: 8px; font-size: 0.78em; color: var(--gray); }
+.res-manifest-desc { margin: 6px 0 0; max-width: 70ch; }
+.res-section { }
+.res-section-title { font-size: 1.02em; margin: 0 0 10px; padding-bottom: 5px;
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.res-count { font-size: 0.72em; color: var(--gray); font-weight: 600;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 0 7px; }
+.res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px; align-items: start; }
+.res-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+  background: var(--panel); }
+.res-card-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.res-card-name { font-size: 0.98em; }
+.res-abbr { font-family: ui-monospace, Menlo, monospace; font-size: 0.8em; color: var(--gray); }
+.res-badge { margin-left: auto; font-size: 0.68em; text-transform: uppercase;
+  letter-spacing: 0.04em; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1px 8px; color: var(--gray); white-space: nowrap; }
+.res-summary { margin: 6px 0 10px; font-size: 0.86em; }
+.res-desc { font-size: 0.86em; margin: 8px 0; }
+.res-sub { font-size: 0.74em; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--gray); font-weight: 600; margin: 12px 0 6px; }
+.res-kv-grid { display: grid; grid-template-columns: 1fr; gap: 3px 14px; }
+@media (min-width: 420px) { .res-kv-grid { grid-template-columns: 1fr 1fr; } }
+.res-kv { display: flex; gap: 6px; font-size: 0.84em; line-height: 1.4; min-width: 0; }
+.res-kv-k { color: var(--gray); flex: 0 0 auto; }
+.res-kv-v { color: inherit; min-width: 0; word-break: break-word; }
+.res-martini, .res-network { margin-top: 10px; padding: 10px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg); }
+.res-martini .res-sub, .res-network .res-sub { margin-top: 0; }
+.res-beads { margin: 8px 0 0; padding-left: 20px; font-size: 0.82em;
+  font-family: ui-monospace, Menlo, monospace; }
+.res-beads li { margin: 2px 0; }
+.res-headline { font-weight: 600; font-size: 0.9em; margin-bottom: 8px; }
+.res-notes { margin: 10px 0 0; font-size: 0.82em; font-style: italic; color: var(--gray); }
+.res-table { width: 100%; border-collapse: collapse; margin: 6px 0 2px; font-size: 0.82em; }
+.res-table th { text-align: left; font-weight: 600; background: var(--bg);
+  border-bottom: 1px solid var(--border); padding: 4px 7px; }
+.res-table td { border-bottom: 1px solid var(--border); padding: 4px 7px; vertical-align: top; }
+.res-eq { font-family: ui-monospace, Menlo, monospace; }
+/* Honesty caveats — rendered prominently, never hidden. */
+.res-caveats { margin: 12px 0 2px; padding: 10px 12px; border: 1px solid #f59e0b;
+  border-left-width: 4px; border-radius: 6px; background: #fffbeb; }
+.res-caveats-lbl { font-weight: 700; font-size: 0.8em; color: #b45309;
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+.res-caveats ul { margin: 0; padding-left: 18px; font-size: 0.84em; }
+.res-caveats li { margin: 3px 0; }
+.res-prov { margin-top: 10px; font-size: 0.76em; word-break: break-word; }
+/* Citation chips — cross-link to the paper-reference card with the matching id. */
+.res-cites { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.res-cites-lbl { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--gray); font-weight: 600; }
+.res-cite { font-size: 0.78em; padding: 1px 8px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg); color: var(--accent); cursor: pointer;
+  text-decoration: none; }
+.res-cite:hover { border-color: var(--accent); }
+.res-cite-missing { color: var(--gray); cursor: default; font-style: italic; }
+.res-tags { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px; }
+.res-tag { font-size: 0.74em; padding: 1px 7px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg); color: var(--gray); }
+.res-authors { margin: 6px 0 2px; font-size: 0.85em; }
+.res-title { margin: 2px 0; font-size: 0.86em; font-weight: 600; }
+.res-venue { font-size: 0.82em; font-style: italic; color: var(--gray); }
+.res-links { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 10px; }
+.res-link { font-size: 0.8em; color: var(--accent); }
+.res-flag { font-size: 0.68em; text-transform: uppercase; letter-spacing: 0.03em;
+  border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
+.res-flag-ok { background: #ecfdf5; color: #047857; }
+.res-flag-warn { background: #fffbeb; color: #b45309; }
+.res-paper { scroll-margin-top: 80px; }
+.res-ref-flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow 0.2s; }
+
 /* top bar: run picker · view tabs · pop-out */
 .exp-topbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center;
   padding-bottom:8px; border-bottom:1px solid #2a313c; }
@@ -5220,7 +5299,23 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 :root[data-theme="dark"] .loom-card,
 :root[data-theme="dark"] .investigation-card,
 :root[data-theme="dark"] .analyses-card,
+:root[data-theme="dark"] .res-card,
 :root[data-theme="dark"] .tool-card{ background:var(--surface); border-color:var(--border); color:var(--text); }
+/* Resources tab — dark overrides. Cards get the shared surface above; the
+   sub-surfaces (Martini mapping, network summary, provenance), tables and
+   citation chips need their own recede/contrast tokens. */
+:root[data-theme="dark"] .res-martini,
+:root[data-theme="dark"] .res-network{ background:var(--surface-2); border-color:var(--border); }
+:root[data-theme="dark"] .res-cite,
+:root[data-theme="dark"] .res-tag{ background:var(--surface-3); border-color:var(--border); color:var(--link); }
+:root[data-theme="dark"] .res-tag{ color:var(--text-muted); }
+:root[data-theme="dark"] .res-badge{ background:var(--surface-3); border-color:var(--border); color:var(--text-muted); }
+:root[data-theme="dark"] .res-caveats{ background:rgba(180,83,9,0.18); border-color:#b45309; color:#fcd9a8; }
+:root[data-theme="dark"] .res-table th{ background:var(--surface-2); }
+:root[data-theme="dark"] .res-section-title{ color:var(--heading); border-color:var(--border); }
+:root[data-theme="dark"] .res-flag-ok{ background:rgba(16,122,107,0.22); color:#6ee7cf; }
+:root[data-theme="dark"] .res-flag-warn{ background:rgba(180,83,9,0.22); color:#fcd9a8; }
+:root[data-theme="dark"] .res-ref-flash{ box-shadow:0 0 0 2px var(--accent); }
 :root[data-theme="dark"] .loom-config,
 :root[data-theme="dark"] .loom-sec-out,
 :root[data-theme="dark"] .reg-ip,
