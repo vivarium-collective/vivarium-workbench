@@ -158,6 +158,10 @@ def test_report_template_renders_gate_divergence_chip():
 
 
 def test_study_detail_template_renders_gate_divergence_chip():
+    # Post study-layout reorg (#1366): the computed gate verdict is surfaced in
+    # the Decide tab's "Conclusion logic — gate decision" section (its appropriate
+    # home — the evaluation the conclusion rests on), server-rendered from
+    # study.computed_gate_verdict with a code-vs-authored divergence chip.
     html = (_PKG / "templates" / "study-detail.html").read_text(encoding="utf-8")
     assert "computed_gate_verdict" in html
     assert "diverges_from_authored" in html

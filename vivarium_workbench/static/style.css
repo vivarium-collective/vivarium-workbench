@@ -43,8 +43,8 @@ main{padding:20px;margin:0 auto}
   background:#fff; box-sizing:border-box; padding:10px 16px 14px;
   width:100vw; height:100vh; display:flex; flex-direction:column; overflow:hidden;
 }
-#investigation-dag-fs:fullscreen #investigation-dag-lead,
-#investigation-dag-fs:-webkit-full-screen #investigation-dag-lead{ flex:0 0 auto; }
+#investigation-dag-fs:fullscreen .aig-toolbar,
+#investigation-dag-fs:-webkit-full-screen .aig-toolbar{ flex:0 0 auto; }
 #investigation-dag-fs:fullscreen #investigation-dag-shell,
 #investigation-dag-fs:-webkit-full-screen #investigation-dag-shell{
   flex:1 1 auto; height:auto !important; max-height:none !important; resize:none;
@@ -4317,6 +4317,40 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 }
 .study-pillar:hover { color: #334155; }
 .study-pillar.active { color: #1e293b; border-bottom-color: #2563eb; }
+
+/* 5-tab study layout: one LEFT-aligned row of icon+label tabs, no per-act group
+   headers. Each .study-pillar sets its inline-SVG icon beside the label (not
+   stacked) for a tighter, more type-driven bar that matches the page theme; the
+   icon inherits currentColor so it tints with the active/inactive text color.
+   These override the old act-cluster flex rules on .study-tabs above. */
+.study-tabs { justify-content: flex-start; align-items: stretch; gap: 2px; }
+.study-tabs .study-pillar {
+  display: inline-flex; flex-direction: row; align-items: center; gap: 7px;
+  padding: 9px 15px 8px;
+  font-weight: 600; font-size: 0.82rem; letter-spacing: 0.01em;
+  color: #64748b; border-radius: 7px 7px 0 0;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.study-tabs .study-pillar:hover { color: #334155; background: #f8fafc; }
+.study-tabs .study-pillar.active { color: #1e293b; font-weight: 700; }
+.study-pillar .pillar-icon { display: block; color: currentColor; width: 16px; height: 16px; flex-shrink: 0; }
+.study-pillar .pillar-label { display: block; line-height: 1; }
+.study-pillar.active .pillar-icon { color: #2563eb; }
+
+/* Simulations secondary subtabs (Runs | Results | Analysis) — lightweight,
+   matching the page's existing tab style at a smaller scale. */
+.sim-subtab {
+  border: 0; background: none; cursor: pointer; padding: 6px 14px;
+  font-weight: 600; font-size: 0.9rem; color: #64748b;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.sim-subtab:hover { color: #334155; }
+.sim-subtab.active { color: #1e293b; border-bottom-color: #2563eb; }
+.sim-subpanel[hidden] { display: none; }
+
+/* Model tab: collapsed "Advanced — build provenance" section */
+.model-advanced { border-top: 1px solid #e5e7eb; padding-top: 12px; }
+.model-advanced > summary { color: #475569; }
 .study-subnav { display: flex; gap: 2px; flex-wrap: wrap; margin: 0 0 10px; padding: 4px 0 0; }
 .study-subnav .study-tab {
   border: 0; background: none; cursor: pointer; padding: 4px 11px; border-radius: 9999px;
@@ -4490,6 +4524,132 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   display: inline-flex;
   align-items: center;
   gap: 7px;
+}
+/* While a study is open, hide the investigation PROSE (verdict / question /
+   description / decision cockpit + tab blocks) so only the graph region remains;
+   the graph then floats as a dockable window (below), out of normal flow, so the
+   study column reclaims the full width/height. Removing the class restores each
+   child to its own inline/default display (the back-link + title row keep their
+   own inline display:none set by _renderInvestigationDetailInto). */
+#investigation-detail-view.inv-study-open > * { display: none !important; }
+#investigation-detail-view.inv-study-open > #investigation-dag-fs { display: block !important; }
+/* …but the "Investigation overview" toggle must still be able to reveal the prose
+   ABOVE the graph while a study is open. When the overview is expanded
+   (not .inv-overview-collapsed), un-hide the intro + decision-cockpit blocks so
+   #inv-overview-toggle actually does something in the study-open state. They
+   precede the graph in the DOM, so they appear above it. */
+#investigation-detail-view.inv-study-open:not(.inv-overview-collapsed) > #investigation-intro,
+#investigation-detail-view.inv-study-open:not(.inv-overview-collapsed) > #investigation-decision-cockpit { display: block !important; }
+
+/* Collapsible "Investigation overview" (inline view, NO study open): the prose
+   blocks (#investigation-intro + #investigation-decision-cockpit) are hidden by
+   default behind #inv-overview-toggle so the graph renders prominently + top-
+   aligned right after the title + toggle. The study-open state hides everything
+   but the graph anyway (rule above), so this only governs the inline view. */
+/* The toggle is a toolbar button (.aig-tb-btn) — left-most item of the inline
+   graph toolbar. A subtle fill marks it as the overview control. */
+#inv-overview-toggle { font-weight: 600; }
+#investigation-detail-view.inv-overview-collapsed > #investigation-intro,
+#investigation-detail-view.inv-overview-collapsed > #investigation-decision-cockpit { display: none; }
+/* Needs-attention: a compact chip in the toolbar (no big banner). All-clear is a
+   quiet green pill; the needs state is an amber/red clickable pill. */
+.aig-na-chip-host { display: inline-flex; align-items: center; }
+.aig-na-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: 9999px;
+  padding: 2px 10px; font-size: 0.8em; font-weight: 600; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.aig-na-chip.aig-na-clear { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+.aig-na-chip.aig-na-flag { background: #fffbeb; color: #92400e; border-color: #fcd34d; cursor: pointer; }
+.aig-na-chip.aig-na-flag.aig-na-high { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+.aig-na-chip.aig-na-flag:hover { filter: brightness(0.97); }
+
+/* ── Dockable investigation graph (while a study is embedded) ──
+   The graph region (#investigation-dag-fs) becomes a position:fixed floating
+   panel; the #aig-dock-ctl control switches collapsed ⇄ docked (and ⛶ exits the
+   study). Out of normal flow, so the study beneath gets the full column. Sizes
+   are explicit so the state change animates (prefers-reduced-motion disables it;
+   dragging also disables it, via .aig-dragging). The docked panel is draggable
+   by its header and resizable by the corner grip; its rect is remembered. */
+#investigation-dag-fs.aig-dock {
+  position: fixed; z-index: 60; top: 10px; right: 10px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+  display: flex; flex-direction: column; overflow: hidden;
+  transition: width .18s ease, height .18s ease, top .18s ease, right .18s ease, left .18s ease, box-shadow .18s ease;
+}
+@media (prefers-reduced-motion: reduce) { #investigation-dag-fs.aig-dock { transition: none; } }
+#investigation-dag-fs.aig-dock.aig-dragging,
+#investigation-dag-fs.aig-dock.aig-resizing { transition: none; }
+#investigation-dag-fs.aig-dock-collapsed { width: 320px; height: 86px; }
+/* Docked default size — NO !important, so the inline width/height the JS resize
+   writes wins over it. Custom corner grips (.aig-dock-grip) do the resizing. */
+#investigation-dag-fs.aig-dock-docked { width: 400px; height: 360px; }
+/* Resize grips — only in the docked state, above the graph shell so they get the
+   pointer. */
+.aig-dock-grip { display: none; position: absolute; width: 18px; height: 18px; z-index: 10; }
+#investigation-dag-fs.aig-dock-docked .aig-dock-grip { display: block; }
+.aig-dock-grip[data-grip="se"] { right: 0; bottom: 0; cursor: nwse-resize; }
+.aig-dock-grip[data-grip="sw"] { left: 0; bottom: 0; cursor: nesw-resize; }
+.aig-dock-grip[data-grip="se"]::after {
+  content: ''; position: absolute; right: 3px; bottom: 3px; width: 9px; height: 9px;
+  border-right: 2px solid #94a3b8; border-bottom: 2px solid #94a3b8;
+}
+.aig-dock-grip[data-grip="sw"]::after {
+  content: ''; position: absolute; left: 3px; bottom: 3px; width: 9px; height: 9px;
+  border-left: 2px solid #94a3b8; border-bottom: 2px solid #94a3b8;
+}
+/* No title bar in the popup: the toolbar is the top row + the DRAG HANDLE (drag
+   empty toolbar space; interactive controls keep their own cursor). */
+#investigation-dag-fs.aig-dock .aig-toolbar {
+  margin: 0; border: none; border-bottom: 1px solid var(--border, #eef2f7);
+  border-radius: 0; background: transparent; padding: 6px 8px;
+}
+#investigation-dag-fs.aig-dock-docked .aig-toolbar { cursor: move; }
+#investigation-dag-fs.aig-dock-docked .aig-toolbar button,
+#investigation-dag-fs.aig-dock-docked .aig-toolbar input,
+#investigation-dag-fs.aig-dock-docked .aig-toolbar select,
+#investigation-dag-fs.aig-dock-docked .aig-toolbar a { cursor: default; }
+#investigation-dag-fs.aig-dock-docked .aig-toolbar input[type="range"] { cursor: pointer; }
+#investigation-dag-fs.aig-dock #investigation-dag-shell {
+  flex: 1 1 auto; height: auto !important; min-height: 0 !important; max-height: none !important;
+  resize: none; border: none; border-radius: 0; margin: 0;
+}
+/* The dock control owns the state while floating — hide the legacy expand seg. */
+#investigation-dag-fs.aig-dock #aig-legacy-expand-seg { display: none; }
+/* Inline-only controls are hidden in the docked popup (any dock state). */
+#investigation-dag-fs.aig-dock #inv-overview-toggle,
+#investigation-dag-fs.aig-dock #aig-needs-attention-chip { display: none; }
+/* Docked: compact — show dock control + navigator + Zoom/Detail/Width; hide the
+   heavier Layout/Legend/Export groups. */
+#investigation-dag-fs.aig-dock-docked #aig-layout-group,
+#investigation-dag-fs.aig-dock-docked .dag-legend-wrap,
+#investigation-dag-fs.aig-dock-docked .aig-dl-ctl { display: none; }
+/* Collapsed: show ONLY the dock control + study navigator; graph hidden. */
+#investigation-dag-fs.aig-dock-collapsed .aig-toolbar > *:not(#aig-dock-ctl):not(#aig-study-nav) { display: none; }
+#investigation-dag-fs.aig-dock-collapsed #investigation-dag-shell { display: none !important; }
+/* Dock state control (three segmented buttons in the panel header). */
+.aig-dock-ctl { margin-left: auto; display: inline-flex; }
+.aig-dock-ctl > button {
+  border: 1px solid var(--border, #e2e8f0); border-left: none; background: #fff; color: #64748b;
+  cursor: pointer; padding: 2px 8px; font-size: 0.9em; line-height: 1.3;
+}
+.aig-dock-ctl > button:first-child { border-left: 1px solid var(--border, #e2e8f0); border-radius: 6px 0 0 6px; }
+.aig-dock-ctl > button:last-child { border-radius: 0 6px 6px 0; }
+.aig-dock-ctl > button:hover { background: #eef2ff; color: #3730a3; }
+.aig-dock-ctl > button.active { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+/* Graph-bar study navigator jump menu items (reuses the study-nav look). */
+.aig-study-jump-item {
+  display: block; width: 100%; text-align: left; border: none; background: transparent;
+  padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 0.92em; color: #334155;
+}
+.aig-study-jump-item:hover { background: #eef2ff; }
+.aig-study-jump-item.current { font-weight: 700; color: #1d4ed8; }
+.aig-study-jump-group {
+  font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #94a3b8; padding: 6px 10px 2px; font-weight: 700;
 }
 .aig-tb-group + .aig-tb-group {
   padding-left: 12px;
@@ -4981,8 +5141,6 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 :root[data-theme="dark"] .aig-methods-val{ color:var(--text) !important; }
 :root[data-theme="dark"] .aig-fidelity-chip.aig-fidelity-real{ background:#124b43 !important; color:#5eead4 !important; }
 :root[data-theme="dark"] .aig-fidelity-chip.aig-fidelity-repro{ background:#3f2d12 !important; color:#fcd34d !important; }
-:root[data-theme="dark"] #investigation-dag-lead{ color:var(--text-muted) !important; }
-:root[data-theme="dark"] #investigation-dag-lead strong{ color:var(--text) !important; }
 :root[data-theme="dark"] .inv-lead-details summary{ color:var(--text-muted) !important; }
 :root[data-theme="dark"] .viv-info-chip{ background:var(--surface-3) !important; color:var(--text-muted) !important; border-color:var(--border) !important; }
 /* Inquiry brief (investigation opening) — dark. Accent --vs keeps its vivid
@@ -5089,6 +5247,11 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 :root[data-theme="dark"] .finding-title,
 :root[data-theme="dark"] .overview-section h2,
 :root[data-theme="dark"] .overview-section h3{ color:var(--heading) !important; }
+/* 5-tab icon row + Simulations subtabs: active accent in dark mode. */
+:root[data-theme="dark"] .study-pillar.active .pillar-icon{ color:#3b82f6; }
+:root[data-theme="dark"] .sim-subtab{ color:var(--text-muted); }
+:root[data-theme="dark"] .sim-subtab.active{ color:var(--heading); border-bottom-color:#3b82f6; }
+:root[data-theme="dark"] .model-advanced{ border-top-color:var(--border); }
 :root[data-theme="dark"] .status-detail-axis,
 :root[data-theme="dark"] .narrative-label,
 :root[data-theme="dark"] .finding-evidence,

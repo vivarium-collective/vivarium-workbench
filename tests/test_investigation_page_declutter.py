@@ -62,15 +62,12 @@ def test_at_a_glance_removed():
     assert "getElementById('investigation-at-a-glance')" not in JS, "dead at-a-glance JS still present"
 
 
-def test_dag_lead_condensed_with_tooltip():
+def test_dag_header_removed_toolbar_is_self_evident():
+    # The "Investigation graph" title bar / #investigation-dag-lead was removed —
+    # the toolbar + graph are self-evident. The legend lives as a toolbar chip.
     dv = detail_view()
-    i = dv.index('id="investigation-dag-lead"')
-    j = dv.index('</div>', i)
-    block = dv[i:j]
-    # Chip carries the full explanation.
-    assert 'viv-info-chip' in block and 'data-tooltip=' in block, "info chip missing from dag-lead"
-    assert 'knowledge-producing' in block, "full explanation lost"
-    # The verbose explanation is no longer in the *visible* caption (only in the tooltip attr).
-    visible = re.sub(r'<[^>]+>', '', block)
-    assert 'knowledge-producing' not in visible, "verbose phrase still in visible caption"
-    assert 'builds understanding of the mechanism' not in visible, "verbose phrase still visible"
+    assert 'id="investigation-dag-lead"' not in dv, "dag-lead title bar should be gone"
+    assert '<strong>Investigation graph</strong>' not in dv, "redundant graph heading still present"
+    # The graph toolbar (single control row) + the legend chip remain.
+    assert 'class="aig-toolbar"' in dv
+    assert 'id="dag-legend-chip"' in dv

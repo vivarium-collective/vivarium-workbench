@@ -49,11 +49,13 @@ def test_inner_hooks_preserved_in_compose():
 
 
 def test_other_panels_untouched():
-    # Post pillar-unification (Simulate/Visualize merge), the non-compose panels
-    # are overview / simulate / visualize / tests / conclusions; the old split
-    # simulations/observables/runs/visualizations panels were merged away.
-    for k in ["overview", "simulate", "visualize", "tests", "conclusions"]:
+    # 5-tab study layout: the non-compose panels are overview / simulate /
+    # audit / conclusions (Visualizations folded into Overview; Readouts+Build
+    # into Model; Results+Analyses into Simulations subtabs; Tests into Audit).
+    for k in ["overview", "simulate", "audit", "conclusions"]:
         assert f'id="panel-{k}"' in HTML, f"unrelated panel disturbed: panel-{k}"
+    for gone in ["visualize", "tests", "results", "analyses", "build", "readouts"]:
+        assert f'id="panel-{gone}"' not in HTML, f"folded panel still present: panel-{gone}"
 
 
 def test_subnav_and_pillar_indirection_removed():

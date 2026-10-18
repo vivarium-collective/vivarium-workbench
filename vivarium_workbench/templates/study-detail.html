@@ -27,25 +27,13 @@
        here" — inside the six-gate status row below (gate-current). #}
   </h1>
   <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0; align-items:center;">
-    {# Easy-access downloads, prominent at the top of the study tab. These moved
-       OFF the investigation-graph study cards (which stay a clean browse surface)
-       to this one consistent place. Unlike the run/reproduce launch actions they
-       do NOT need a live backend, so they are NOT hidden in the published
-       snapshot — shared links can still grab a study's figures + notebook. #}
-    <span class="study-dl">
-      <button type="button" id="study-dl-figures" class="btn-mini study-dl-btn" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')" title="Download this study's figures (figure panels + its composite) as a zip">↓ figures</button>
-      <button type="button" id="study-dl-notebook" class="btn-mini study-dl-btn" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')" title="Download a runnable Jupyter notebook for THIS study — its composite + editable parameters + figures">↓ notebook</button>
-    </span>
-    <span aria-hidden="true" style="width:1px; align-self:stretch; margin:2px 4px; background:#e2e8f0;"></span>
-    {# Launch actions (▶ / ↻). They need a live backend and are hidden in the
-       snapshot (see the snapshot block at the end of this template). #}
-    <button type="button" id="study-reproduce" class="btn-mini" title="Replay this study's most recent run's RECORDED manifest verbatim (POST /api/study-reproduce) — ignores any study.yaml edits made since">↻ Reproduce</button>
-    <button type="button" id="study-run-current-spec" class="btn-mini" title="Run this study's CURRENT baseline spec (POST /api/study-run-baseline) as a brand-new run">▶ Run current spec</button>
-    {# item 110: dispatch ANY registered process-bigraph composite_id (e.g. pbg-native's
-       v2ecoli.composites.lineage_ray_batch, item 101/109) to the remote compute backend --
-       independent of this study's own pinned baseline composite. Remote-pinned only, same
-       gate as "Run current spec" (see _dispatchRemoteComposite in study-detail.js). #}
-    <button type="button" id="study-run-composite" class="btn-mini" title="Dispatch a specific process-bigraph composite_id to the remote compute backend (pbg-native multi_node/mbp, or the Nextflow campaign path) — advanced, independent of this study's own pinned baseline">⚙ Dispatch composite</button>
+    {# Export (figures / notebook) moved OUT of the header into the Overview
+       panel's section toolbar (Phase 4 refinement). The launch actions
+       (↻ Reproduce / ▶ Run current spec / ⚙ Dispatch composite) were moved OUT
+       of the header into the Simulations → Runs subtab (see
+       #sim-run-actions below): they belong with the runs they produce, and they
+       were crowding the top-right corner where the docked investigation graph
+       now parks. The header keeps only the study navigator. #}
     {# Narrative navigation: jump to the next study along this investigation's
        leads-to chain. Populated/shown by study-detail.js (_wireNextStudy),
        which asks the parent investigation view for the next slug; hidden on a
@@ -64,89 +52,13 @@
   </span>
   </div>
   <div class="study-status-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px;">
-    {# F1: headline pill driven by effective_status() — picks the most-downstream
-       multi-axis field set (gate > evaluation > simulation > implementation > design
-       > expert_review), with legacy `status` as fallback. gate_status keeps its
-       special "gate: X" prefix because it carries the pipeline-gate verdict
-       semantics. #}
-    {% if study.gate_status %}
-    <span class="status-pill gate-status gate-status-{{ study.gate_status }}" title="Pipeline gate verdict (Pass A multi-axis status). Drives downstream unblocking.">gate: {{ study.gate_status }}</span>
-    {% elif study._effective_status %}
-    <span class="status-pill status-{{ study._effective_status }}" title="Headline status derived from the highest-precedence multi-axis field (or legacy `status` as fallback).">{{ study._effective_status }}</span>
-    {% else %}
-    <span class="status-pill status-planned">planned</span>
-    {% endif %}
-
-    {# Spine A3: readiness panel. Populated by study-detail.js from GET
-       /api/report-lint (the deterministic report linter), filtered to this
-       study. Mirrors the param-enforcement banner: surfaced, connected to its
-       source (the linter), labeled code-computed. Empty until populated
-       (AI-free). Repositioned into the status row (Task 4); still just a
-       mount point — Task 5 rewires its populator. #}
-    <div id="readiness-panel" data-slug="{{ name }}"></div>
-
-    {# Fable G2 (§13): "status ▾" is now the six-GATE ladder — Plan / Execution
-       / Evidence / Quality / Decision / Release — relabeling the six status
-       axes per §13's table (`gate_ladder`, built server-side by
-       lib.study_page.build_gate_ladder). Each gate shows its authored state
-       and, where a machine evaluator's value is already attached to the spec
-       (derived_status / computed_gate_verdict — see build_gate_ladder's
-       docstring for exactly which gates have one today), a `◆ computed:`
-       chip + a divergence marker when authored and computed disagree.
-       `implementation_status` maps to no gate in §13's table, so it still
-       renders as a plain (un-gated) axis chip, same as before this task, so
-       no authored data silently disappears from the panel.
-       Hidden entirely when nothing is set anywhere, so legacy v3 studies
-       stay unchanged. #}
-    {% set _ns = namespace(any_set=false) %}
-    {% for _g in gate_ladder %}{% if _g.authored_value or _g.computed_value or _g.viz_gap_reason %}{% set _ns.any_set = true %}{% endif %}{% endfor %}
-    {% if study.implementation_status %}{% set _ns.any_set = true %}{% endif %}
-    {% set _cgv = study.computed_gate_verdict %}
-    {% if _ns.any_set or (_cgv and _cgv.diverges_from_authored) %}
-    <details class="status-detail-panel" aria-label="Six-gate lifecycle status">
-      <summary>
-        <span class="status-stepper-more">status</span>
-        {% if _cgv and _cgv.diverges_from_authored %}
-        <span class="gate-divergence-chip" title="Code-computed verdict (spine study_verdict, not human-authored) disagrees with the authored gate_status." style="display:inline-block;font-size:0.78em;font-weight:700;padding:3px 9px;border-radius:9999px;vertical-align:middle;background:#fffbeb;border:1px solid #f59e0b;color:#92400e">⚠ code: {{ _cgv.result }} · authored: {{ study.gate_status }}</span>
-        {% endif %}
-        <span class="status-stepper">
-          {% for _g in gate_ladder %}
-          <span class="status-step gate-step axis-{{ _g.axis }} gate-state-{{ _g.state }}{% if _g.authored_value or _g.computed_value %} set{% endif %}{% if _g.current %} gate-current{% endif %}" title="Gate {{ _g.number }} · {{ _g.name }}{% if _g.current %} — current stage{% endif %}">
-            <span class="dot"></span>{{ _g.number }}&nbsp;·&nbsp;{{ _g.name }}{% if _g.authored_value %}<span class="step-val">{{ _g.authored_value }}</span>{% endif %}{% if _g.current %}<span class="gate-current-tag">you are here</span>{% endif %}
-          </span>
-          {% endfor %}
-          {% if study.implementation_status %}
-          <span class="status-step axis-implementation_status set">
-            <span class="dot"></span>Implementation<span class="step-val">{{ study.implementation_status }}</span>
-          </span>
-          {% endif %}
-        </span>
-      </summary>
-      <div class="status-stepper-body">
-        {% for _g in gate_ladder %}
-        <div class="status-detail-row gate-row gate-state-{{ _g.state }}">
-          <span class="status-detail-axis">{{ _g.number }} · {{ _g.name }}</span>
-          <span class="status-chip gate-state-{{ _g.authored_state }}">{{ _g.authored_value or 'not set' }}</span>
-          {% if _g.computed_value %}
-          <span class="gate-computed-chip gate-state-{{ _g.computed_state }}" title="{{ _g.computed_source }}">◆ computed: {{ _g.computed_value }}</span>
-          {% if _g.diverges %}
-          <span class="gate-divergence-chip gate-divergence-chip-inline" title="Code-computed state disagrees with the authored axis.">⚠ diverges from authored</span>
-          {% endif %}
-          {% endif %}
-          {% if _g.viz_gap_reason %}
-          <span class="gate-viz-gap-note" style="font-size:0.86em;color:#92400e">visualization gap: {{ _g.viz_gap_reason }}</span>
-          {% endif %}
-        </div>
-        {% endfor %}
-        {% if study.implementation_status %}
-        <div class="status-detail-row">
-          <span class="status-detail-axis">Implementation</span>
-          <span class="status-chip">{{ study.implementation_status }}</span>
-        </div>
-        {% endif %}
-      </div>
-    </details>
-    {% endif %}
+    {# Two-axis study markers — Progress (● Completed) × Verdict (◆ Supported) —
+       in the SAME ontology as the investigation-graph study cards, for
+       continuity. Filled + made interactive (click → a popover that interrogates
+       the underlying signals) client-side by _renderStudyAxisMarkers from
+       window._study (study-detail.js). Replaces the old gate pill + readiness
+       summary — gate/readiness no longer live in the study header. #}
+    <span id="study-axis-markers" data-slug="{{ name }}"></span>
   </div>
 </header>
 
@@ -188,83 +100,34 @@
 {% if _q %}<p id="study-question-headline" class="study-question-headline"><span class="q-glyph">Q</span> {{ _q }}</p>{% endif %}
 
 <nav class="study-tabs" aria-label="Study sections">
-  {# Fable G1 shipped the act rail as two independent sibling rows
-     (`.act-rail` group labels above an unrelated `.study-pillars` tab row)
-     — with no shared columns the labels never lined up over the tabs they
-     group. ACTRAIL fix (user-selected: "grouped clusters, aligned"): each
-     act's label and its own tabs now live together in ONE `.act-cluster`
-     column (label row on top, tabs row below, same flex column), so
-     alignment is structural instead of hand-tuned spacing. Each act still
-     carries a gate dot. Fable G2: the dot state is wired from `gate_states`
-     (built server-side by lib.study_page.act_gate_states from the six-gate
-     ladder below — see §13.1 "act rail dots show each act's gate state at a
-     glance"). Task E4 removed the Exports/Record cluster (its panel was an
-     empty shell after E1–E3 relocated everything it held) — the rail is now
-     five acts, all with gate dots. #}
-  <div class="act-cluster" data-act="study">
-    <div class="act-header">
-      <span class="act-gate-dot" data-gate="study" data-gate-state="{{ gate_states.study }}"></span>
-      <span class="act-label">The Study</span>
-    </div>
-    <div class="act-tabs">
-      <button class="study-pillar active" data-kind="overview" onclick="_setStudyTab('overview')">Overview</button>
-    </div>
-  </div>
-  <div class="act-cluster" data-act="design">
-    <div class="act-header">
-      <span class="act-gate-dot" data-gate="design" data-gate-state="{{ gate_states.design }}"></span>
-      <span class="act-label">Design</span>
-    </div>
-    <div class="act-tabs">
-      <button class="study-pillar" data-kind="compose"  onclick="_setStudyTab('compose')">Model</button>
-      <button class="study-pillar" data-kind="readouts" onclick="_setStudyTab('readouts')">Readouts</button>
-      {# Study-spine reorg (spec §1, §3.2): Simulations moves here from
-         Evidence — Design holds everything you author before a run
-         (model, emit plan, the runs themselves). #}
-      <button class="study-pillar" data-kind="simulate"  onclick="_setStudyTab('simulate')">Simulations</button>
-    </div>
-  </div>
-  <div class="act-cluster" data-act="evidence">
-    <div class="act-header">
-      <span class="act-gate-dot" data-gate="evidence" data-gate-state="{{ gate_states.evidence }}"></span>
-      <span class="act-label">Evidence</span>
-    </div>
-    <div class="act-tabs">
-      {# Study-spine reorg (spec §1, §3.3/3.4): Evidence holds everything
-         that came back — Results (raw run downloads) and Analyses
-         (analysis-step outputs) are new/promoted panels ahead of the
-         existing Visualizations pillar. #}
-      <button class="study-pillar" data-kind="results"   onclick="_setStudyTab('results')">Results</button>
-      <button class="study-pillar" data-kind="analyses"  onclick="_setStudyTab('analyses')">Analyses</button>
-      <button class="study-pillar" data-kind="visualize" onclick="_setStudyTab('visualize')">Visualizations</button>
-    </div>
-  </div>
-  <div class="act-cluster" data-act="assurance">
-    <div class="act-header">
-      <span class="act-gate-dot" data-gate="assurance" data-gate-state="{{ gate_states.assurance }}"></span>
-      <span class="act-label">Assurance</span>
-    </div>
-    <div class="act-tabs">
-      <button class="study-pillar" data-kind="tests" onclick="_setStudyTab('tests')">Tests</button>
-      {# Study-spine reorg (spec §1, §3.7/§3.8): Audit ("is the bar high
-         enough to trust?") and Build ("was the pass earned honestly?") are
-         new pillars completing the Assurance trio. Rigor scorecard + L0-L5
-         reproducibility move here from Tests; sufficiency + loop provenance
-         are new. #}
-      <button class="study-pillar" data-kind="audit" onclick="_setStudyTab('audit')">Audit</button>
-      <button class="study-pillar" data-kind="build" onclick="_setStudyTab('build')">Build</button>
-    </div>
-  </div>
-  <div class="act-cluster" data-act="decision">
-    <div class="act-header">
-      <span class="act-gate-dot" data-gate="decision" data-gate-state="{{ gate_states.decision }}"></span>
-      <span class="act-label">Decision</span>
-    </div>
-    <div class="act-tabs">
-      {# "Decide" pillar's panel kind is "conclusions" (was a sub-tab under Hypotheses). #}
-      <button class="study-pillar" data-kind="conclusions" onclick="_setStudyTab('conclusions')">{{ "Decide" if _is_v3 else "Conclusions" }}</button>
-    </div>
-  </div>
+  {# 5-tab study layout (Phase 1 + mockup refinement): one centered row of
+     icon+label tabs — Overview · Model · Simulations · Audit · Decide. The old
+     per-act group-label headers (THE STUDY / DESIGN / …) and gate dots were
+     dropped (clutter with only five tabs). Removed tabs' content was re-homed
+     into these five (Visualizations→Overview figures; Readouts+Build→Model;
+     Results+Analyses→Simulations subtabs; Tests→Audit). Each button carries a
+     centered inline-SVG icon (20px, stroke=currentColor) above its label, so
+     the glyph colors with the active/inactive state. #}
+  <button class="study-pillar active" data-kind="overview" onclick="_setStudyTab('overview')">
+    <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+    <span class="pillar-label">Overview</span>
+  </button>
+  <button class="study-pillar" data-kind="compose" onclick="_setStudyTab('compose')">
+    <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="17" cy="19" r="2"/><line x1="10.1" y1="10.7" x2="6.4" y2="7.2"/><line x1="14" y1="11.2" x2="17.2" y2="8.4"/><line x1="12.9" y1="13.9" x2="16.1" y2="17.3"/></svg>
+    <span class="pillar-label">Model</span>
+  </button>
+  <button class="study-pillar" data-kind="simulate" onclick="_setStudyTab('simulate')">
+    <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 8.5l5 3.5-5 3.5z"/></svg>
+    <span class="pillar-label">Simulations</span>
+  </button>
+  <button class="study-pillar" data-kind="audit" onclick="_setStudyTab('audit')">
+    <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-5"/></svg>
+    <span class="pillar-label">Audit</span>
+  </button>
+  <button class="study-pillar" data-kind="conclusions" onclick="_setStudyTab('conclusions')">
+    <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6"/><path d="M6 12h6a4 4 0 0 0 4-4V11"/></svg>
+    <span class="pillar-label">{{ "Decide" if _is_v3 else "Conclusions" }}</span>
+  </button>
 </nav>
 <style>
 /* Task 4: header restructure — kind tag, promoted question, tightened status row.
@@ -665,6 +528,21 @@
 :root[data-theme="dark"] .tag-input{border-color:var(--border-2);background:var(--field);color:var(--text)}
 </style>
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
+  {# Overview section toolbar (Phase 4 refinement): the Export menu lives here,
+     top-right of the Overview panel, not in the main page header. Same handlers
+     (_vivStudyFiguresFromCard / _vivStudyNotebookFromCard) and the same
+     outside-click dropdown pattern as the study navigator's jump menu (wired by
+     _wireStudyExportMenu in study-detail.js). #}
+  <div class="overview-toolbar" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
+    <h2 class="overview-label" style="margin:0">Overview</h2>
+    <span class="study-dl study-export-wrap" style="position:relative;display:inline-flex">
+      <button type="button" id="study-export-btn" class="btn-mini study-dl-btn" aria-haspopup="true" aria-expanded="false" title="Download this study's figures or a runnable notebook">⬇ Export ▾</button>
+      <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:200px;padding:4px">
+        <button type="button" id="study-dl-figures" role="menuitem" class="study-jump-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download figures</button>
+        <button type="button" id="study-dl-notebook" role="menuitem" class="study-jump-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download notebook</button>
+      </div>
+    </span>
+  </div>
   <div class="study-overview">
 
     {# ─── v4 narrative spine. Reading order: Question & approach → Findings
@@ -755,7 +633,7 @@
         {% if study.implemented_methods %}
         <ul class="ov-methods">{% for m in study.implemented_methods %}<li>{{ m }}</li>{% endfor %}</ul>
         {% elif _bt %}
-        <div class="ctr-meta-row"><span class="ctr-meta-k">Measures</span> <span class="ctr-meta-item">{{ _bt|length }} behavior test{{ 's' if _bt|length != 1 else '' }}</span><a class="ov-tablink" href="#" onclick="_setStudyTab('tests');return false;">see Tests →</a></div>
+        <div class="ctr-meta-row"><span class="ctr-meta-k">Measures</span> <span class="ctr-meta-item">{{ _bt|length }} behavior test{{ 's' if _bt|length != 1 else '' }}</span><a class="ov-tablink" href="#" onclick="_setStudyTab('audit');return false;">see Tests →</a></div>
         {% endif %}
       </div>
     </div>
@@ -846,7 +724,7 @@
                  hidden) Tests panel — _gotoStudyTab switches to it via the
                  existing _setStudyTab path, then scrolls, instead of a plain
                  href="#anchor" that silently fails on a display:none panel. #}
-              {% if f.evidence.from_test %}via test <a href="#bt-{{ _ftok }}" onclick="_gotoStudyTab('tests','bt-{{ _ftok }}');return false;"><code>{{ f.evidence.from_test }}</code></a> · {% endif %}
+              {% if f.evidence.from_test %}via test <a href="#bt-{{ _ftok }}" onclick="_gotoStudyTab('audit','bt-{{ _ftok }}');return false;"><code>{{ f.evidence.from_test }}</code></a> · {% endif %}
               {% if f.evidence.from_run %}in run <a href="#run-{{ _rtok }}"><code>{{ f.evidence.from_run }}</code></a>{% endif %}
               {% if f.evidence.window %} ({{ f.evidence.window }}){% endif %}
               {% if f.evidence.smoking_gun %}<details style="display:inline-block;margin-left:4px"><summary>smoking gun</summary><pre style="white-space:pre-wrap;margin:4px 0 0 0;padding:6px 8px;background:#fff;border-radius:3px;font-size:0.85em;font-family:inherit">{{ f.evidence.smoking_gun }}</pre></details>{% endif %}
@@ -909,10 +787,88 @@
     <div id="feedback-tracked-panel"></div>
 
   </div>
+
+  {# Figures (Phase 1): the former Visualizations gallery, re-homed to the
+     bottom of Overview. Loaders unchanged (_loadNativeGallery / _loadCharts /
+     _loadRemoteFigures), all element ids preserved (#visualize-section,
+     #native-gallery-panel, #viz-charts-panel, #figures-empty-message). #}
+  <div class="overview-section" id="overview-figures-section">
+    <h2 class="overview-label">Figures</h2>
+
+
+  <div class="overview-section study-figures figure-gallery" id="visualize-section">
+
+    {# Quick download of this study's figures (panels + its stitched composite)
+       as a zip, right where the figures are viewed. Same handler as the
+       investigation card's ↓ figures. #}
+    {% if study.visualizations %}
+    <div class="viz-actions-row" style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+      <button type="button" class="btn-mini" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')" title="Download this study's visualizations (figure panels + its composite) as a zip">↓ visualizations</button>
+    </div>
+    {% endif %}
+
+    <div id="native-gallery-panel" class="figure-mount"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading figures…</span></div></div>
+
+    {# ─── Embedded HTML visualizations (e.g. pre-execution preview pages
+         produced by a runner script). study.embed_visualizations is a list of
+         {name, url, description} entries; each renders as an inline iframe
+         alongside the native gallery / auto-rendered charts, so a biologist
+         gets immediate payoff without waiting for runs.db / Visualization-
+         class plumbing.
+
+         Fable §4.5 (Task V2): same `.figure-card` shell as the other two
+         figure sources — no bordered/backgrounded header bar. The name +
+         "Open in new tab" affordance move into the caption row footer,
+         alongside a muted `embed` source chip. `embed-viz-card` stays as a
+         second class for `_figuresHasEmbeds()` / existing hooks to key on.
+
+         Task V3: `v.run_id` is populated only for the auto-rendered
+         studies/<name>/viz/*.html source (discover_viz_html_files attaches
+         the run whose data the file represents); hand-authored
+         reports/figures/ entries and study.yaml-declared embeds have no
+         run_id key, so `{% if v.run_id %}` omits the link rather than
+         fabricate one. The anchor is server-rendered here (unlike the
+         async native/chart sources) and wired via the SAME delegated
+         `_wireFigureRunLinks` listener, called once at load in
+         study-detail.js since these cards exist in the DOM from page load.
+    #}
+    {% if study.embed_visualizations %}
+    {% for v in study.embed_visualizations %}
+    <div class="figure-card embed-viz-card">
+      <iframe src="{{ v.url }}"
+              class="figure-media-frame figure-media-frame--embed"
+              loading="lazy" title="{{ v.name }}"
+              onload="window.__fitFigureFrame&&window.__fitFigureFrame(this)"
+              ></iframe>
+      {% if v.description %}
+      <p class="figure-desc muted">{{ v.description }}</p>
+      {% endif %}
+      <div class="figure-caption-row">
+        <span class="figure-source-chip">embed</span>
+        <span class="figure-title">{{ v.name }}</span>
+        {% if v.run_id %}
+        <a href="#" class="figure-run-link" data-run-id="{{ v.run_id }}">from run {{ v.run_id }} ↗</a>
+        {% endif %}
+        <a href="{{ v.url }}" target="_blank" class="figure-open-link">Open in new tab ↗</a>
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    <div id="viz-charts-panel" class="charts-panel figure-mount"></div>
+
+    {# Shared empty state for the Figures section (Fable A #3). The native
+       gallery and latest-run charts each resolve async and embeds render
+       synchronously above; JS shows this line only once all three have
+       reported and none produced content — never while any one of them
+       still holds actual figures. #}
+    <p id="figures-empty-message" class="empty-message" style="display:none">No figures yet.</p>
+  </div>
+  </div>
 </section>
 
 
-{# ─── Compose tab: Build + Baseline + Variants + Interventions ── #}
+{# ─── Model tab (Design): composition + Readouts + Advanced build provenance ─ #}
 <section class="study-tab-panel" data-kind="compose" id="panel-compose" hidden>
   <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
     <h2 class="overview-label" style="margin:0">Model composition</h2>
@@ -1296,43 +1252,92 @@
   {% endif %}
 
 
+
+  {# Readouts (Phase 1): the emit CONTRACT, re-homed from its own tab into
+     Model. Loaders _loadReadouts() + _loadReadoutsDownloadPointer() and all
+     ids (#readouts-emitter / #readouts-download / #readouts-table) unchanged. #}
+  <div class="overview-section" id="model-readouts-section">
+    <h3>Readouts</h3>
+
+  <div class="observables-section">
+    {# Emitter summary — always visible, one line (kind · interval · scope →
+       output), auto-filled from the composite's resolved default emitter. #}
+    <div id="readouts-emitter" data-study="{{ name }}" style="margin:0 0 14px">
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter…</span></div>
+    </div>
+
+    {# Points at Simulations' raw-data downloads rather than duplicating them;
+       _loadReadoutsDownloadPointer only shows it when there's data to download. #}
+    <div id="readouts-download" style="margin:0 0 12px 0"></div>
+
+    <div id="readouts-table" data-study="{{ name }}">
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading readouts from the composite emit plan…</span></div>
+    </div>
+
+    {% if study.expected_behavior %}
+    <details style="margin-top: 1.4em;">
+      <summary class="muted">How observables tie to Expected Behavior</summary>
+      <p style="font-size: 0.9em;">Observables can be referenced by name in an
+      <code>expected_behavior[i].measure</code> block (e.g. <code>kind: bulk_count, id:
+      "MONOMER0-160[c]"</code>). When the dashboard validates a study, it cross-checks
+      that every <code>measure</code> resolves to a declared observable, or to a
+      built-in helper.</p>
+    </details>
+    {% endif %}
+  </div>
+  </div>
+
+  {# Advanced — build provenance (Phase 1): the former Build tab, collapsed by
+     default at the bottom of Model. Loader _loadBuild(window._study) +
+     #build-loop-state id unchanged. #}
+  <details class="model-advanced" style="margin-top:18px">
+    <summary style="cursor:pointer;font-weight:600;color:#475569">Advanced — build provenance</summary>
+    <div style="margin-top:12px">
+
+  <p class="muted" style="margin:0 0 12px 0"><strong>How the model was built</strong> — the <code>/viva-model-build</code> loop trajectory (draft, frozen tests, iteration edits, result) and the agent's notes, when it was built that way.</p>
+
+  <div id="build-loop-state"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading loop provenance…</span></div></div>
+    </div>
+  </details>
 </section>
 
 
-{# ─── Simulate tab: read-only runs record ───────────────────────────
-   Launching lives entirely in the header buttons (Reproduce / Run current
-   spec) now — this panel is ONLY the Simulations-DB table (sim-table.js),
-   filtered to this study via /api/simulations?study=<slug>, populated by
-   _loadStudySims(). No reproduce-card, no simulation_set cards, no
-   Configure & Run mount, no remote-run form.
-   Study-spine reorg (spec §1, §3.2): panel `data-kind` stays "simulate"
-   (only its act-cluster membership moved, Evidence→Design) and the old
-   "Study artifacts" strip (analysis result files + raw-data downloads)
-   split out into the new Results/Analyses panels below — see
-   panel-results / panel-analyses. #}
+{# ─── Simulations tab (Evidence): Runs | Results | Analysis subtabs ──────────
+   Phase 1: the former Results + Analyses tabs are re-homed here as secondary
+   subtabs alongside the runs record. _setSimSubtab (study-detail.js) shows/
+   hides the three inner panels; dispatch loads all three on tab entry so a
+   subtab switch never shows an empty box. All element ids preserved. #}
 <section class="study-tab-panel" data-kind="simulate" id="panel-simulate" hidden>
+  <div class="sim-subtabs" role="tablist" style="display:flex;gap:4px;margin:0 0 16px 0;border-bottom:1px solid #e2e8f0">
+    <button type="button" class="sim-subtab active" data-subtab="runs" role="tab" aria-selected="true" onclick="_setSimSubtab('runs')">Runs</button>
+    <button type="button" class="sim-subtab" data-subtab="results" role="tab" aria-selected="false" onclick="_setSimSubtab('results')">Results</button>
+    <button type="button" class="sim-subtab" data-subtab="analysis" role="tab" aria-selected="false" onclick="_setSimSubtab('analysis')">Analysis</button>
+  </div>
+
+  <div class="sim-subpanel active" data-subpanel="runs" id="sim-subpanel-runs">
+
+{# Launch actions relocated here from the study header (they were crowding the
+   top-right corner where the docked investigation graph parks, and they belong
+   with the runs they produce). All element ids preserved so study-detail.js
+   wires them unchanged; still live-backend only (hidden in the snapshot). #}
+<div id="sim-run-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 16px 0">
+  <button type="button" id="study-run-current-spec" class="action-btn" title="Run this study's CURRENT baseline spec (POST /api/study-run-baseline) as a brand-new run">▶ Run current spec</button>
+  <button type="button" id="study-reproduce" class="btn-mini" title="Replay this study's most recent run's RECORDED manifest verbatim (POST /api/study-reproduce) — ignores any study.yaml edits made since">↻ Reproduce</button>
+  {# item 110: dispatch ANY registered process-bigraph composite_id (e.g. pbg-native's
+     v2ecoli.composites.lineage_ray_batch, item 101/109) to the remote compute backend --
+     independent of this study's own pinned baseline composite. Remote-pinned only, same
+     gate as "Run current spec" (see _dispatchRemoteComposite in study-detail.js). #}
+  <button type="button" id="study-run-composite" class="btn-mini" title="Dispatch a specific process-bigraph composite_id to the remote compute backend (pbg-native multi_node/mbp, or the Nextflow campaign path) — advanced, independent of this study's own pinned baseline">⚙ Dispatch composite</button>
+</div>
 
 <div class="overview-section" id="simulations-section">
   <div id="study-sim-table" style="overflow-x:auto"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading simulations…</span></div></div>
   <div id="study-run-detail" style="margin-top:14px"></div>
 </div>
 
-</section>
+  </div>
 
-{# ─── Results tab (Evidence): latest-run preview + raw simulation data
-   downloads ────────────────────────────────────────────────────────────
-   Study-spine reorg (spec §1, §3.3; plan Task 4): relocated out of the
-   Simulations panel's old "Study artifacts" strip (downloads-only, Task 1),
-   then upgraded with a per-store PREVIEW of the study's latest run —
-   sparkline + first/last/min/max per emitted store path, via
-   /api/study-results -> lib/results_views.build_study_results. Full arrays
-   stay in the downloads below (never fetched into this preview).
-   `id="exports-downloads"` stays the jump target for the Readouts tab's
-   pointer link (`_gotoStudyTab('results', 'exports-downloads')`).
-   `#raw-data-download-all` is a client-side sequential-download button
-   (populated/shown by _loadResults, triggered by _downloadAllRawExports) —
-   same element ids as before so those loaders bind unchanged. #}
-<section class="study-tab-panel" data-kind="results" id="panel-results" hidden>
+  <div class="sim-subpanel" data-subpanel="results" id="sim-subpanel-results" hidden>
 
 <div class="overview-section" id="results-section">
   {# Compact run summary (N runs · completed · latest run + time · n_steps ·
@@ -1352,15 +1357,9 @@
   <div id="raw-data-list"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading runs…</span></div></div>
 </div>
 
-</section>
+  </div>
 
-{# ─── Analyses tab (Evidence): analysis-step result files ─────────────────
-   Study-spine reorg (spec §1, §3.4): promoted out of the Simulations
-   panel's old "Study artifacts" strip into its own Evidence panel. Reuses
-   /api/study-analysis-outputs / -file / -zip unchanged — same element ids
-   as before so the existing loader (_loadAnalyses, was
-   _loadAnalysisOutputs) binds unchanged; only the markup + panel moved. #}
-<section class="study-tab-panel" data-kind="analyses" id="panel-analyses" hidden>
+  <div class="sim-subpanel" data-subpanel="analysis" id="sim-subpanel-analysis" hidden>
 
   {# Analyses to run at dispatch time — which post-run analyses this study's
      dispatch should trigger, translated into v2ecoli's analysis_options
@@ -1395,110 +1394,18 @@
   </div>
 </div>
 
-</section>
-
-<section class="study-tab-panel" data-kind="readouts" id="panel-readouts" hidden>
-  <div class="observables-section">
-    {# Emitter summary — always visible, one line (kind · interval · scope →
-       output), auto-filled from the composite's resolved default emitter. #}
-    <div id="readouts-emitter" data-study="{{ name }}" style="margin:0 0 14px">
-      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading emitter…</span></div>
-    </div>
-
-    {# Points at Simulations' raw-data downloads rather than duplicating them;
-       _loadReadoutsDownloadPointer only shows it when there's data to download. #}
-    <div id="readouts-download" style="margin:0 0 12px 0"></div>
-
-    <div id="readouts-table" data-study="{{ name }}">
-      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading readouts from the composite emit plan…</span></div>
-    </div>
-
-    {% if study.expected_behavior %}
-    <details style="margin-top: 1.4em;">
-      <summary class="muted">How observables tie to Expected Behavior</summary>
-      <p style="font-size: 0.9em;">Observables can be referenced by name in an
-      <code>expected_behavior[i].measure</code> block (e.g. <code>kind: bulk_count, id:
-      "MONOMER0-160[c]"</code>). When the dashboard validates a study, it cross-checks
-      that every <code>measure</code> resolves to a declared observable, or to a
-      built-in helper.</p>
-    </details>
-    {% endif %}
   </div>
 </section>
 
-<section class="study-tab-panel" data-kind="visualize" id="panel-visualize" hidden>
 
-  <div class="overview-section study-figures figure-gallery" id="visualize-section">
+{# ─── Audit tab (Assurance): Tests ("the bar") first, then readiness gaps +
+   sufficiency + quality + reproducibility + sourcing. Phase 1 folds the former
+   Tests tab in as the first section; all ids preserved (report-cards-panel,
+   tests-list, bt-<id>, audit-readiness, check-group-*). #}
+<section class="study-tab-panel" data-kind="audit" id="panel-audit" hidden>
+  <div class="overview-section" id="audit-tests-section">
+    <h3>Tests — the bar</h3>
 
-    {# Quick download of this study's figures (panels + its stitched composite)
-       as a zip, right where the figures are viewed. Same handler as the
-       investigation card's ↓ figures. #}
-    {% if study.visualizations %}
-    <div class="viz-actions-row" style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-      <button type="button" class="btn-mini" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')" title="Download this study's visualizations (figure panels + its composite) as a zip">↓ visualizations</button>
-    </div>
-    {% endif %}
-
-    <div id="native-gallery-panel" class="figure-mount"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading figures…</span></div></div>
-
-    {# ─── Embedded HTML visualizations (e.g. pre-execution preview pages
-         produced by a runner script). study.embed_visualizations is a list of
-         {name, url, description} entries; each renders as an inline iframe
-         alongside the native gallery / auto-rendered charts, so a biologist
-         gets immediate payoff without waiting for runs.db / Visualization-
-         class plumbing.
-
-         Fable §4.5 (Task V2): same `.figure-card` shell as the other two
-         figure sources — no bordered/backgrounded header bar. The name +
-         "Open in new tab" affordance move into the caption row footer,
-         alongside a muted `embed` source chip. `embed-viz-card` stays as a
-         second class for `_figuresHasEmbeds()` / existing hooks to key on.
-
-         Task V3: `v.run_id` is populated only for the auto-rendered
-         studies/<name>/viz/*.html source (discover_viz_html_files attaches
-         the run whose data the file represents); hand-authored
-         reports/figures/ entries and study.yaml-declared embeds have no
-         run_id key, so `{% if v.run_id %}` omits the link rather than
-         fabricate one. The anchor is server-rendered here (unlike the
-         async native/chart sources) and wired via the SAME delegated
-         `_wireFigureRunLinks` listener, called once at load in
-         study-detail.js since these cards exist in the DOM from page load.
-    #}
-    {% if study.embed_visualizations %}
-    {% for v in study.embed_visualizations %}
-    <div class="figure-card embed-viz-card">
-      <iframe src="{{ v.url }}"
-              class="figure-media-frame figure-media-frame--embed"
-              loading="lazy" title="{{ v.name }}"
-              onload="window.__fitFigureFrame&&window.__fitFigureFrame(this)"
-              ></iframe>
-      {% if v.description %}
-      <p class="figure-desc muted">{{ v.description }}</p>
-      {% endif %}
-      <div class="figure-caption-row">
-        <span class="figure-source-chip">embed</span>
-        <span class="figure-title">{{ v.name }}</span>
-        {% if v.run_id %}
-        <a href="#" class="figure-run-link" data-run-id="{{ v.run_id }}">from run {{ v.run_id }} ↗</a>
-        {% endif %}
-        <a href="{{ v.url }}" target="_blank" class="figure-open-link">Open in new tab ↗</a>
-      </div>
-    </div>
-    {% endfor %}
-    {% endif %}
-
-    <div id="viz-charts-panel" class="charts-panel figure-mount"></div>
-
-    {# Shared empty state for the Figures section (Fable A #3). The native
-       gallery and latest-run charts each resolve async and embeds render
-       synchronously above; JS shows this line only once all three have
-       reported and none produced content — never while any one of them
-       still holds actual figures. #}
-    <p id="figures-empty-message" class="empty-message" style="display:none">No figures yet.</p>
-  </div>
-</section>
-
-<section class="study-tab-panel" data-kind="tests" id="panel-tests" hidden>
   <p class="muted" style="margin:0 0 12px 0"><strong>The bar</strong> — what must be true for this model to count as correct: the acceptance criteria, their bands, and the report cards that grade them.</p>
 
   {# C5 moved literature_anchors here verbatim from the dissolved Overview
@@ -1749,21 +1656,8 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
   </ul>
   {% endif %}
   </div>
-</section>
+  </div>
 
-{# ─── Audit tab (Assurance) — NEW: "is the bar high enough to trust?" ──────
-   Study-spine reorg (spec §3.7): three groups, all filled client-side by
-   _loadAudit (dispatched from _setStudyTab('audit')) — none are fields
-   already sitting on `study`, all are live computes:
-     1. Sufficiency — viva_superpowers.test_audit.build_audit_report + gate,
-        via GET /api/study-test-audit (lib.audit_panel_views).
-     2. Quality (rigor scorecard) — MOVED here from Tests (Fable G5),
-        unchanged GET /api/study-rigor / _loadQualityChecks.
-     3. Reproducibility (L0-L5) — MOVED here from Tests (Fable G6),
-        unchanged GET /api/study-audit / _loadReproducibilityChecks.
-   Each mount degrades to an explicit unavailable(reason) message rather
-   than an empty box (§2 R2). #}
-<section class="study-tab-panel" data-kind="audit" id="panel-audit" hidden>
   <p class="muted" style="margin:0 0 12px 0"><strong>Is the bar sound?</strong> The concrete readiness gaps to close first, then whether the test set itself is rigorous and matched to the problem — sufficiency, sourcing, and the rigor + reproducibility scorecards.</p>
 
   {# Readiness gaps (the deterministic report linter, GET /api/report-lint)
@@ -1797,21 +1691,36 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
   </div>
 </section>
 
-{# ─── Build tab (Assurance) — NEW: "was the pass earned honestly?" ─────────
-   Study-spine reorg (spec §3.8): model-build loop provenance from
-   `.pbg/loop/<study>.json` (viva_superpowers.loop_state) — locked-tests
-   hash, reopen trail, iteration history, state/outcome. Filled client-side
-   by _loadBuild (dispatched from _setStudyTab('build')) via GET
-   /api/study-loop-state (lib.loop_provenance_views). GRACEFUL empty state
-   when a study was never run through /viva-model-build — a one-line note,
-   never an error. #}
-<section class="study-tab-panel" data-kind="build" id="panel-build" hidden>
-  <p class="muted" style="margin:0 0 12px 0"><strong>How the model was built</strong> — the <code>/viva-model-build</code> loop trajectory (draft, frozen tests, iteration edits, result) and the agent's notes, when it was built that way.</p>
 
-  <div id="build-loop-state"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading loop provenance…</span></div></div>
-</section>
-
+{# ─── Decide tab (Decision): verdict + plan & assumptions + evidence rollup ── #}
 <section class="study-tab-panel" data-kind="conclusions" id="panel-conclusions" hidden>
+
+  {# ── Plan & lifecycle stepper ─────────────────────────────────────────────
+     The study's position along its lifecycle plan — Plan → Execution → Evidence
+     → Quality → Decision → Release → Implementation — with "you are here" on the
+     active gate. Server-rendered from gate_ladder (build_gate_ladder: the six
+     gates relabeled from the design/simulation/evaluation/gate/review axes), each
+     dot colored by its worst (authored-vs-computed) state. This is the plan view
+     the Decide tab leads with; the full per-axis rows live in the Audit tab. #}
+  {% if gate_ladder %}
+  {% set _all_done = (gate_ladder | selectattr('current') | list | length) == 0 %}
+  <div class="overview-section decide-lifecycle">
+    <h2 class="overview-label">Plan &amp; lifecycle</h2>
+    <div class="status-stepper">
+      {% for g in gate_ladder %}
+      <span class="status-step {% if g.state in ['passed','waived'] %}set{% endif %} gate-status-{{ g.state }}{% if g.current %} gate-current{% endif %}">
+        <span class="dot"></span>{{ g.number }} · {{ g.name }}
+        {% if g.authored_value %}<span class="step-val">{{ g.authored_value }}</span>{% endif %}
+        {% if g.current %}<span class="gate-current-tag">you are here</span>{% endif %}
+      </span>
+      {% endfor %}
+      {# Terminal: when every gate is done the study is released → implementation. #}
+      <span class="status-step {% if _all_done %}set{% endif %}">
+        <span class="dot"></span>Implementation{% if _all_done %} <span class="step-val">complete</span>{% endif %}
+      </span>
+    </div>
+  </div>
+  {% endif %}
 
   {# v4 narrative-spine: conclusion_verdicts is a 3-track verdict block
      the dnaa investigation evolved — regression_compatibility (does code
@@ -1902,6 +1811,31 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
         </label>
       </div>
     </div>
+
+    {# ── Computed gate verdict (the evaluation the conclusion rests on) ──
+       The coded gate_evaluator's result from the behavior-test outcomes, with a
+       code-vs-authored divergence chip when study.computed_gate_verdict.diverges_from_authored
+       — surfaced here in Decide (its appropriate home) rather than the header. #}
+    {% if study.computed_gate_verdict %}
+    {% set _cgv = study.computed_gate_verdict %}
+    <div class="decide-section" style="margin-top:18px">
+      <h3 class="overview-label">Computed gate verdict</h3>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">The coded gate
+        evaluator's result from the behavior-test outcomes — the evaluation the
+        conclusion rests on.</p>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="gate-status-{{ _cgv.result }}" style="padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em">{{ _cgv.result or 'pending' }}</span>
+        {% if _cgv.evaluated_by %}<span class="muted small">evaluated by {{ _cgv.evaluated_by }}</span>{% endif %}
+        {% if _cgv.counts %}<span class="muted small">{{ _cgv.counts.pass }}/{{ _cgv.counts.total }} passed{% if _cgv.counts.fail %} · {{ _cgv.counts.fail }} failed{% endif %}{% if _cgv.counts.skip %} · {{ _cgv.counts.skip }} skipped{% endif %}</span>{% endif %}
+      </div>
+      {% if _cgv.diverges_from_authored %}
+      <div class="gate-divergence-chip" title="The coded gate evaluator disagrees with the authored gate_status — an audit signal worth never hiding."
+           style="margin-top:8px;display:inline-block;padding:4px 12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;color:#92400e;font-size:0.85em;font-weight:600">
+        ⚠ gate drift — code: <code>{{ _cgv.result }}</code> · authored: <code>{{ study.gate_status or '—' }}</code>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
 
     {% if _is_v3 %}
     {# ── Conclusion logic (gate decision) ───────────────────────────── #}
@@ -2032,7 +1966,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
         — <span style="color:#065f46;font-weight:600">{{ _roll.PASS }} PASS</span> ·
         <span style="color:#991b1b;font-weight:600">{{ _roll.FAIL }} FAIL</span>{% if _roll.PARTIAL %} · <span style="color:#92400e;font-weight:600">{{ _roll.PARTIAL }} partial</span>{% endif %}.
         Per-test outcomes (measured value · evaluator · band) are canonical on the
-        <a onclick="_setStudyTab('tests')" style="cursor:pointer;color:#3b82f6;text-decoration:underline">Tests tab →</a>.
+        <a onclick="_setStudyTab('audit')" style="cursor:pointer;color:#3b82f6;text-decoration:underline">Tests (in Audit) →</a>.
       </p>
       {% endif %}
     </div>

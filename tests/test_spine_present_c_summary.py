@@ -121,8 +121,11 @@ def test_readiness_panel_replaces_spine_summary():
     js = (_PKG / "static" / "study-detail.js").read_text(encoding="utf-8")
     # The spine populator is fully gone (function + its call site).
     assert "_renderSpineSummary" not in js
-    # Its replacement: an inline readiness link/expander mounted at
-    # #readiness-panel, fed by the same deterministic report-lint fetch.
-    assert "_renderReadinessPanel" in js
-    assert "readiness-panel" in js
+    # The header no longer carries a gate pill / readiness summary — it shows the
+    # two-axis Progress × Verdict markers (_renderStudyAxisMarkers). The
+    # report-lint readiness signal now lives inside the Audit tab
+    # (_renderAuditReadiness), still fed by the same deterministic fetch.
+    assert "_renderStudyAxisMarkers" in js
+    assert "study-axis-markers" in js
     assert "/api/report-lint" in js
+    assert "_renderAuditReadiness" in js

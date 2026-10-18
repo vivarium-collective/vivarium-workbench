@@ -102,7 +102,7 @@ def test_run_detail_figures_html_degrades_when_not_loaded_yet():
     body = _func_body("_runDetailFiguresHtml")
     assert "_loadNativeGallery()" in body
     assert "_loadCharts('viz-charts-panel')" in body
-    assert "figures load on the Visualizations tab" in body
+    assert "figures load on the Overview tab" in body
 
 
 def test_run_detail_figures_html_quiet_line_when_settled_and_empty():
@@ -125,7 +125,8 @@ def test_show_run_detail_mounts_figures_container_and_reuses_helper():
 def test_report_cards_are_study_level_pointer_not_fabricated_per_run():
     body = _func_body("_runDetailReportCardsHtml")
     assert "report_card_urls" in body
-    assert "_gotoStudyTab(\\'tests\\')" in body
+    # 5-tab layout: report cards live in the Audit tab (Tests folded in).
+    assert "_gotoStudyTab(\\'audit\\')" in body
     # Never call the per-card rich renderer from here — that would assert a
     # per-run association report_card_urls doesn't have.
     assert "_renderRichReportCard" not in body

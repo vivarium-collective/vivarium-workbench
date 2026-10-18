@@ -118,7 +118,10 @@ def test_pointer_function_jumps_to_exports_via_gotostudytab():
     # again, onto its own Results panel ('results'), and repointed this
     # pointer to match.
     assert "_gotoStudyTab(" in body
-    assert "gotoStudyTab(\\'results\\'" in body
+    # The 5-tab reorg consolidated Results under the Simulations tab ('simulate'),
+    # so the pointer navigates there (anchoring on exports-downloads) — there is no
+    # standalone 'results' tab any more.
+    assert "gotoStudyTab(\\'simulate\\'" in body
     # Lands on the anchor the Results template now carries.
     assert "exports-downloads" in body
     # Same data source + filter predicate _loadResults (Results) uses, so the

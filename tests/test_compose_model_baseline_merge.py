@@ -18,7 +18,10 @@ def _panel_compose(html: str) -> str:
 
 
 def _panel_analyses(html: str) -> str:
-    i = html.index('id="panel-analyses"')
+    # 5-tab layout: the "Analyses to run" checklist lives in the Simulations
+    # panel's Analysis subpanel (#sim-subpanel-analysis) now, not a standalone
+    # panel-analyses section.
+    i = html.index('id="sim-subpanel-analysis"')
     nxt = html.find('class="study-tab-panel"', i + 10)
     return html[i: nxt if nxt != -1 else len(html)]
 

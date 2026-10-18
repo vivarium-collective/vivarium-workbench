@@ -32,18 +32,22 @@ def test_behavioral_tests_summary_removed_from_overview():
     assert '<summary class="overview-label">Behavioral tests</summary>' not in _HTML
 
 
-def test_multi_axis_status_stepper_visible_by_default():
-    # Overview redesign: the six-axis status is a compact one-line lifecycle
-    # stepper whose <summary> lists every axis (with its value) inline — so the
-    # spine-critical status stays UN-BURIED at a glance — while only the verbose
-    # per-axis rows sit behind the expander. (Supersedes the earlier
-    # "open by default" rule from C1c; the un-bury intent is preserved.)
-    assert 'class="status-detail-panel"' in _HTML
-    idx = _HTML.index('class="status-detail-panel"')
-    seg = _HTML[idx:idx + 400]
-    # the axis stepper lives inside the <summary>, visible without expanding.
-    assert '<summary>' in seg
-    assert 'status-stepper' in seg
+def test_headline_status_markers_visible_by_default():
+    # The dense six-gate status ladder strip was removed from the header, and the
+    # gate pill + readiness summary were replaced by the two-axis Progress ×
+    # Verdict markers (continuity with the investigation-graph study cards),
+    # filled client-side into #study-axis-markers. These absences are HEADER-scoped:
+    # the 5-tab reorg re-added a lifecycle stepper (class="status-stepper") to the
+    # Decide tab (a deliberate, user-requested plan view), so assert the header
+    # itself is free of the old ladder rather than the whole document.
+    header = _HTML[:_HTML.index('</header>')]
+    assert 'class="status-detail-panel"' not in header
+    assert 'class="status-stepper"' not in header
+    assert 'id="header-audit-summary"' not in header
+    assert 'class="study-status-row"' in _HTML
+    row_i = _HTML.index('class="study-status-row"')
+    row = _HTML[row_i:_HTML.index('</header>', row_i)]
+    assert 'id="study-axis-markers"' in row
 
 
 def test_discovery_implications_elevated_above_conclusion_text():

@@ -47,7 +47,8 @@ def test_conclusions_outcomes_defer_to_tests_tab():
     k:v table — it defers to the canonical Tests tab (thread B)."""
     idx = _HTML.index('<h3 class="overview-label">Latest run outcomes')
     region = _HTML[idx:idx + 1500]
-    assert "_setStudyTab('tests')" in region
+    # 5-tab layout: the canonical Tests surface is now inside the Audit tab.
+    assert "_setStudyTab('audit')" in region
     # The raw per-test outcomes table loop is gone from this region.
     assert "_latest.outcomes.items()" not in region
 

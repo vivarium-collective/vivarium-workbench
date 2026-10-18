@@ -73,34 +73,29 @@ def test_study_detail_spec_returns_none_for_missing(_ws):
     assert _study_detail_spec(_ws, "does-not-exist") is None
 
 
-def test_study_detail_page_has_seven_tabs(_ws):
-    """The pillar tabs are present: Overview · Tests · Model (compose) ·
-    Simulations (simulate) · Readouts · Results (visualize) · Decide
-    (conclusions).
-
-    (The contract this test guards is "the required pillar tabs are all
-    present", not "exactly N" — the count check was brittle as tabs accreted.
-    Task 10 merged Report Cards into Tests as one concept, so it is no longer
-    a separate tab/kind. Task E4 removed the Exports (data) tab — it was an
-    empty shell after E1–E3 relocated everything it held.)
+def test_study_detail_page_has_five_tabs(_ws):
+    """5-tab study layout: the pillar tabs are Overview · Model (compose) ·
+    Simulations (simulate) · Audit · Decide (conclusions). The folded-away tabs
+    (Tests/Readouts/Visualizations/Results/Analyses/Build) are no longer their
+    own pillars/kinds.
     """
     from vivarium_workbench.lib.study_page import render_study_detail_html as _render_study_detail_html
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
     html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     # Required pillar buttons
-    for kind in ("overview", "tests", "compose", "simulate", "readouts",
-                 "visualize", "conclusions"):
-        assert f'class="study-tab' in html
+    for kind in ("overview", "compose", "simulate", "audit", "conclusions"):
+        assert 'class="study-pillar' in html
         assert f'data-kind="{kind}"' in html
-    # Report Cards is no longer its own tab — it's a subsection of Tests.
+    # Folded-away tabs are no longer separate kinds.
+    for gone in ("tests", "readouts", "visualize", "results", "analyses", "build"):
+        assert f"_setStudyTab('{gone}')" not in html
     assert 'data-kind="report-cards"' not in html
-    # Exports/data tab was deleted (Task E4).
     assert 'data-kind="data"' not in html
     assert 'id="panel-data"' not in html
-    # At least seven panels
+    # Exactly five panels.
     panels = html.count('class="study-tab-panel')
-    assert panels >= 7, f"expected at least 7 panel elements, got {panels}"
+    assert panels == 5, f"expected 5 panel elements, got {panels}"
     # The Overview tab is active by default — must have both active class and overview kind on a button.
     # (Pre-existing bug fix, unrelated to E4: this checked the pre-Fable-A-#6
     # "study-tab" class name, which the pillar buttons never carried — they're
@@ -192,14 +187,17 @@ def test_simulate_panel_has_sim_table_mount(_ws):
     assert 'id="study-sim-table"' in html
 
 
-def test_visualizations_panel_present(_ws):
-    """Visualizations tab panel is present; the manual registered-viz list +
-    add-viz button were retired (auto latest-run charts only)."""
+def test_visualizations_gallery_present_in_overview(_ws):
+    """5-tab layout: the Visualizations gallery folds into the Overview panel
+    (Figures section); the manual registered-viz list + add-viz button stay
+    retired (auto latest-run charts only)."""
     from vivarium_workbench.lib.study_page import render_study_detail_html as _render_study_detail_html
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
     html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
-    assert 'id="panel-visualize"' in html
+    assert 'id="panel-visualize"' not in html
+    overview = html[html.index('id="panel-overview"'):html.index('id="panel-compose"')]
+    assert 'id="visualize-section"' in overview
     # Registered-visualization-modules section + "+ Add visualization" removed.
     assert 'id="viz-list"' not in html
     assert 'btn-add-viz' not in html
@@ -248,11 +246,12 @@ def test_full_study_renders_all_tabs(_rich_ws):
     spec = _study_detail_spec(_rich_ws, "rich")
     html = _render_study_detail_html(_rich_ws, "rich", spec)
 
-    # Pillar tabs scaffolded (Report Cards merged into Tests — Task 10 — so it
-    # is no longer a separate data-kind; Exports/data was deleted — Task E4).
-    for kind in ("overview", "tests", "compose", "simulate", "readouts",
-                 "visualize", "conclusions"):
+    # 5-tab layout: the five pillars. Tests/Readouts/Visualizations/Results/
+    # Analyses/Build are folded into these and are no longer separate kinds.
+    for kind in ("overview", "compose", "simulate", "audit", "conclusions"):
         assert f'data-kind="{kind}"' in html
+    for gone in ("tests", "readouts", "visualize", "results", "analyses", "build"):
+        assert f"_setStudyTab('{gone}')" not in html
     assert 'data-kind="report-cards"' not in html
     assert 'data-kind="data"' not in html
 
@@ -266,9 +265,10 @@ def test_full_study_renders_all_tabs(_rich_ws):
     # filled client-side from /api/simulations (no server-rendered run rows).
     assert 'id="study-sim-table"' in html
 
-    # Results (visualize): the manual registered-visualization-modules list was
-    # retired; the tab shows auto latest-run charts instead.
-    assert 'id="panel-visualize"' in html
+    # Figures (folded into Overview): the manual registered-visualization-
+    # modules list was retired; the gallery shows auto latest-run charts.
+    assert 'id="panel-visualize"' not in html
+    assert 'id="visualize-section"' in html
     assert 'id="viz-list"' not in html
 
     # Decide (conclusions) panel is present with the derived synthesis (the
@@ -290,23 +290,20 @@ def _section(html: str, start_marker: str, end_marker: str) -> str:
 
 
 def test_simulate_tab_does_not_render_charts_panel(_rich_ws):
-    """The inline 'Latest run — visualizations' panel is not on the Simulations
-    tab. Charts live exclusively in the Results (visualize) tab."""
+    """5-tab layout: the inline 'Latest run — visualizations' charts panel is not
+    on the Simulations tab; the figure charts live in the Overview Figures
+    section (#viz-charts-panel)."""
     from vivarium_workbench.lib.study_page import render_study_detail_html as _render_study_detail_html
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     html = _render_study_detail_html(_rich_ws, "rich", _study_detail_spec(_rich_ws, "rich"))
-    sim_panel = _section(html, 'id="panel-simulate"', 'id="panel-visualize"')
+    sim_panel = _section(html, 'id="panel-simulate"', 'id="panel-audit"')
     assert 'id="charts-panel"' not in sim_panel, (
         "Simulations tab should not contain the inline charts panel — charts "
-        "belong to the Results (visualize) tab."
+        "belong to the Overview Figures section."
     )
-    # Sanity: the Results tab still has its chart panel. (Task 10 removed the
-    # standalone Report Cards panel that used to follow Visualizations in
-    # document order — Report Cards is now a subsection of Tests. Task E4
-    # then deleted the Exports/data panel that used to follow Visualizations,
-    # so the next panel marker is Tests.)
-    viz_panel = _section(html, 'id="panel-visualize"', 'id="panel-tests"')
-    assert 'id="viz-charts-panel"' in viz_panel
+    # Sanity: the Overview Figures section has the chart panel.
+    overview = _section(html, 'id="panel-overview"', 'id="panel-compose"')
+    assert 'id="viz-charts-panel"' in overview
 
 
 # The per-run column set (Composite, Started, Duration, Model changes) now lives
@@ -592,7 +589,9 @@ def test_study_detail_renders_epistemic_debts_panel(_ws):
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
     html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
-    # Epistemic debts moved off the Overview; the readiness signal now lives in the
-    # header readiness panel (populated client-side).
-    assert 'id="readiness-panel"' in html
+    # Epistemic debts moved off the Overview; readiness now lives inside the
+    # Audit tab (#audit-readiness). The header carries the two-axis Progress ×
+    # Verdict markers instead (populated client-side).
+    assert 'id="study-axis-markers"' in html
+    assert 'id="header-audit-summary"' not in html
     assert 'id="epistemic-debts-panel"' not in html
