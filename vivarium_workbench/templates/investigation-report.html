@@ -2147,7 +2147,8 @@ function _figMarkup(im, slug, caption, hero){
   if(!body) return '';
   const nm=(im.name)?`<b>${esc(im.name)}.</b> `:'';
   const cap=(caption||im.name)?`<figcaption class="measure" style="font-size:11.5px;color:var(--ink-2);line-height:1.45;margin-top:5px">${nm}${caption||''}</figcaption>`:'';
-  return `<figure class="${cls}" style="margin:${hero?'12px 0 4px':'8px 0 2px'}">${body}${cap}</figure>`;
+  const fb=(typeof fbBubble==='function')?fbBubble('fig:'+slug+':'+(im.name||''), 'Figure — '+(im.name||slug)):'';
+  return `<figure class="${cls} fbsection" style="margin:${hero?'12px 0 4px':'8px 0 2px'}">${fb}${body}${cap}</figure>`;
 }
 // The hero figure for the opening — the top-ranked figure, embedded in full.
 function heroFigure(inv){
@@ -2178,7 +2179,7 @@ function execSummary(inv){
   const gl=(syn.headline||[]).map(h=>{ const g=(h.status==='met')?'supported':h.status;
     return `<span style="display:inline-flex;gap:5px;align-items:center;margin:0 12px 7px 0;font-size:12.5px">`+
       `<span class="mono" style="font-weight:800">${esc(h.id||'')}</span> ${esc(h.name||'')} ${_gradeChip(g)}</span>`; }).join('');
-  return `<div class="narr" id="exec-summary">
+  return `<div class="narr fbsection" id="exec-summary">${fbBubble('summary','Executive summary')}
     <div class="sec-h"><h2>Executive summary</h2><span class="rule"></span></div>
     ${q?`<p class="prose" style="font-size:16px;margin:2px 0 8px"><b>Question.</b> ${esc(q)}</p>`:''}
     ${verdict?`<div class="prose">${mdLite(verdict)}</div>`:''}
@@ -2204,13 +2205,13 @@ function integratedFindings(inv){
       const sIcon=(String(f.status||'').toLowerCase()==='contradicts'||String(f.status||'').toLowerCase()==='refutes')?'✗ ':(String(f.status||'').toLowerCase()==='confirms'?'✓ ':'');
       return `<li style="margin-top:5px">${sIcon}${esc(f.statement)}${obs} <span style="color:var(--ink-3);font-size:11px">— ${_studyLink(f.study,f.title)}</span></li>`;
     }).join('');
-    return `<div style="margin:18px 0 0" id="stage-${esc(st.key)}">
+    return `<div class="fbsection" style="margin:18px 0 0" id="stage-${esc(st.key)}">${fbBubble('stage:'+st.key, 'Finding — '+(st.label||st.key))}
       <h3 style="font-size:16px;margin:0 0 2px">${esc(st.label)}</h3>
       <div style="margin:4px 0 2px">${studyChips}</div>${md}
       ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}
       ${stageFigure(inv, st)}</div>`;
   }).join('');
-  return `<div class="narr" id="integrated-findings">
+  return `<div class="narr fbsection" id="integrated-findings">${fbBubble('findings','Integrated findings')}
     <div class="sec-h"><h2>Integrated findings</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">The campaign's results organized by scientific stage. Each stage lists its studies (with evidence grade) and their key findings; a stage spanning more than one model class is flagged for model dependence.</p>
     ${blocks}</div>`;
@@ -2225,7 +2226,7 @@ function quantitativeSynthesis(inv){
       <table style="width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed">
         <colgroup><col style="width:22%"><col style="width:44%"><col style="width:34%"></colgroup>${r}</table></div>`;
   }).join('');
-  return `<div class="narr" id="quantitative">
+  return `<div class="narr fbsection" id="quantitative">${fbBubble('quantitative','Quantitative synthesis')}
     <div class="sec-h"><h2>Cross-study quantitative synthesis</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Measured values reported across studies, with units. Values from different feeds/model classes are not directly comparable — read each with its study's conditions.</p>
     ${rows}</div>`;
@@ -2249,7 +2250,7 @@ function contradictionsSection(inv){
   const extBlock=ext.length?`<div style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Causal continuity</div>
     <p class="measure" style="font-size:12.5px;color:var(--ink-2);margin:0 0 4px">These studies take their inputs from outside the chain (a supplied feed or reset state) rather than from an upstream study's output — so their result does not yet rest on a modeled upstream mechanism:</p>
     <div style="font-size:12.5px">${ext.map(e=>_studyLink(e.slug,e.title)).join(' · ')}</div></div>`:'';
-  return `<div class="narr" id="contradictions">
+  return `<div class="narr fbsection" id="contradictions">${fbBubble('contradictions','Contradictions & uncertainty')}
     <div class="sec-h"><h2>Contradictions &amp; uncertainty</h2><span class="rule"></span></div>
     ${items?`<ul style="list-style:none;padding:0;margin:4px 0 0">${items}</ul>`:''}${extBlock}</div>`;
 }
@@ -2287,7 +2288,7 @@ function validationSection(inv){
   const lrows=grouped.map(([k,g])=>{ const sc=lsev[g.sev]||'#475569'; const egs=[...g.studies].slice(0,4);
     return `<li style="margin-top:6px;padding-left:10px;border-left:3px solid ${sc};display:flex;gap:8px;align-items:baseline"><span style="font-variant-numeric:tabular-nums;color:${sc};font-weight:650;min-width:2.2em;text-align:right">${g.n}</span><span><b>${esc(k.replace(/_/g,' '))}</b> <span style="font-size:11px;color:var(--ink-3)">${esc(g.sev)}</span>${egs.length?`<div class="mono" style="font-size:10.5px;color:var(--ink-3);line-height:1.4;margin-top:1px">${egs.map(esc).join(', ')}${g.studies.size>egs.length?` +${g.studies.size-egs.length}`:''}</div>`:''}</span></li>`; }).join('');
   const lintBlock=lint.length?`<details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;font-weight:650;letter-spacing:.02em;color:var(--ink-2);text-transform:uppercase">Report readiness — ${lint.length} findings across ${grouped.length} checks (${nErr} error${nErr===1?'':'s'}, ${nWarn} warning${nWarn===1?'':'s'})</summary><ul style="list-style:none;padding:0;margin:6px 0 0">${lrows}</ul></details>`:'';
-  return `<div class="narr" id="validation">
+  return `<div class="narr fbsection" id="validation">${fbBubble('validation','Validation & reproducibility')}
     <div class="sec-h"><h2>Validation &amp; reproducibility</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Automated, code-computed consistency checks (no AI): conservation/invariant ledgers, computed-vs-authored verdicts, run reproducibility (environment + determinism), parameter drift and acceptance-criterion coverage. Each study's own ledger predicates (e.g. mass/charge balance) are its gating behavior tests, listed in the supplement.</p>
     ${body}
@@ -2306,7 +2307,7 @@ function roadmapSection(inv){
   }).join('');
   const dec=dn.length?`<div style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Open expert decisions (${dn.length})</div>
     <ol style="padding-left:20px;margin:0;font-size:12.5px;color:var(--ink);line-height:1.5">${dn.map(d=>`<li style="margin-top:4px">${esc((typeof d==='string')?d:(d.question||d.title||''))}</li>`).join('')}</ol></div>`:'';
-  return `<div class="narr" id="roadmap">
+  return `<div class="narr fbsection" id="roadmap">${fbBubble('roadmap','Next studies & priorities')}
     <div class="sec-h"><h2>Next studies &amp; priorities</h2><span class="rule"></span></div>
     ${rows?`<ul style="list-style:none;padding:0;margin:4px 0 0">${rows}</ul>`:''}${dec}</div>`;
 }
@@ -2315,7 +2316,7 @@ function roadmapSection(inv){
 function claimEvidenceMap(inv){
   const ce=(inv.synthesis||{}).claim_evidence||[]; if(!ce.length) return '';
   const rows=ce.map(c=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:5px 12px 5px 0;color:var(--ink);font-size:12.5px;line-height:1.4">${esc(c.claim)}</td><td style="padding:5px 10px 5px 0;white-space:nowrap">${_gradeChip(c.status)}</td><td style="padding:5px 0;font-size:12px">${_studyLink(c.study,c.study_title)}</td></tr>`).join('');
-  return `<div class="narr" id="claim-evidence">
+  return `<div class="narr fbsection" id="claim-evidence">${fbBubble('claim-evidence','Claim–evidence map')}
     <div class="sec-h"><h2>Claim–evidence map</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 6px">Each study's central scientific claim, its evidence status, and a link to the study.</p>
     <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:4px 0;font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em">Claim</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Status</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Study</th></tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -2326,7 +2327,7 @@ function claimEvidenceMap(inv){
 function keyFigures(inv){
   const fr=(inv.synthesis||{}).figures_ranked||[]; if(!fr.length) return '';
   const rows=fr.map((f,i)=>`<li style="margin-top:6px"><b>Figure ${i+1}.</b> ${esc(f.name||'(figure)')} <span style="color:var(--ink-3);font-size:12px">— ${_studyLink(f.slug,f.study_title)}</span>${f.caption?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin-top:1px">${esc(String(f.caption).slice(0,240))}</div>`:''}</li>`).join('');
-  return `<div class="narr" id="key-figures"><div class="sec-h"><h2>Key figures</h2><span class="rule"></span></div>
+  return `<div class="narr fbsection" id="key-figures">${fbBubble('key-figures','Key figures')}<div class="sec-h"><h2>Key figures</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 4px">The most evidence-bearing figures, ranked by scientific weight — full renders are in the Technical supplement.</p>
     <ol style="list-style:none;padding:0;margin:4px 0 0;font-size:13px;color:var(--ink)">${rows}</ol></div>`;
 }

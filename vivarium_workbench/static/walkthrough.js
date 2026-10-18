@@ -12826,9 +12826,11 @@
     // No band change → keep the slider synced (above) but skip the re-render.
     if (nb === aigBand) return;
     _aigCloseCardPopout();   // layout changes under it — drop the anchored popout
+    var _anchor = _aigCaptureAnchor();   // keep the selected study fixed on screen (same as zoom)
     aigBand = nb;
     if (!_aigApplyingUnified) _aigSyncZoomUI(aigBand, aigZoom);
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+    _aigRestoreAnchor(_anchor);
   }
   window._setAigBand = _setAigBand;
 
@@ -12840,9 +12842,12 @@
     var sl = document.getElementById('aig-width-slider');
     if (sl && String(sl.value) !== String(s)) sl.value = String(s);
     if (s === aigWidthScale) return;
+    _aigCloseCardPopout();   // cards resize under it — drop the anchored popout
+    var _anchor = _aigCaptureAnchor();   // keep the selected study fixed on screen (same as zoom)
     aigWidthScale = s;
     try { localStorage.setItem('aig-width-scale', String(s)); } catch (e) {}
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+    _aigRestoreAnchor(_anchor);
   }
   window._setAigWidthScale = _setAigWidthScale;
 
