@@ -1210,28 +1210,60 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     from vivarium_workbench.lib.plan_board import build_plan_board  # noqa: PLC0415
     _plan_gates = spec.get("plan_gates") or []
     _board_studies = {s.get("name"): s for s in studies_out if s.get("name")}
+    _gate_member_specs: dict = {}
     _gate_members = {
         m for g in _plan_gates for m in ((g or {}).get("member_studies") or [])
     }
     for _slug in _gate_members:
-        if _slug in _board_studies:
-            continue
         try:
             _sp = study_wp.study_dir(_slug, must_exist=True) / "study.yaml"
         except FileNotFoundError:
-            continue
+            _sp = study_wp.investigations / _slug / "spec.yaml"
         if not _sp.is_file():
             continue
         try:
             _ss = load_spec(_sp)
         except InvestigationSpecError:
             continue
-        _board_studies[_slug] = {
+        _gate_member_specs[_slug] = _ss
+        _board_studies.setdefault(_slug, {
             "name": _ss.get("name") or _slug,
             "gate_status": _ss.get("gate_status"),
             "findings": _ss.get("findings") or [],
-        }
-    plan_board = build_plan_board(_plan_gates, _board_studies)
+        })
+
+    plan_board: list = []
+    if _plan_gates:
+        # Prefer the workspace's OWN authoritative plan-progress derivation when it
+        # ships one — `<package_path>.plan_progress.build_plan_progress(investigation,
+        # studies)` — so the workbench board and the workspace tell exactly the same
+        # story (single source of truth, no duplicate-logic drift). Falls back to the
+        # generic build_plan_board for workspaces without one. Best-effort + guarded:
+        # any import/call failure degrades to the generic board.
+        try:
+            _wsy = ws_root / "workspace.yaml"
+            _pkg = None
+            if _wsy.is_file():
+                _pkg = (yaml.safe_load(_wsy.read_text(encoding="utf-8")) or {}).get("package_path")
+            # Load the derivation module BY FILE PATH (not import_module), so the
+            # workspace package's heavy __init__ (optional sim deps) can't break the
+            # board — the derivation is required to be self-contained pure logic.
+            _pp_path = (ws_root / _pkg.replace(".", "/") / "plan_progress.py") if _pkg else None
+            if _pp_path and _pp_path.is_file():
+                import importlib.util  # noqa: PLC0415
+                _ps = importlib.util.spec_from_file_location(
+                    "_vwb_workspace_plan_progress", _pp_path)
+                _ppmod = importlib.util.module_from_spec(_ps)
+                _ps.loader.exec_module(_ppmod)
+                _ppfn = getattr(_ppmod, "build_plan_progress", None)
+                if callable(_ppfn):
+                    _rows = _ppfn(spec, _gate_member_specs)
+                    if isinstance(_rows, list) and _rows:
+                        plan_board = _rows
+        except Exception:  # noqa: BLE001
+            plan_board = []
+        if not plan_board:
+            plan_board = build_plan_board(_plan_gates, _board_studies)
 
     _inputs_block = spec.get("inputs")
     if not isinstance(_inputs_block, dict):
