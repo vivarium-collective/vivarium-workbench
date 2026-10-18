@@ -9934,28 +9934,40 @@
   function _planBoardHtml(d) {
     var gates = (d && d.plan_board) || [];
     if (!gates.length) return '';
+    // Honest status set: executed gates show their real verdict (met/qualified/
+    // refuted), not a cascaded "blocked". passed==met (clean); qualified = met
+    // with caveats; refuted = a tested-and-refuted (off-spine) branch.
     var meta = {
-      passed:      { cls: 'passed',   label: 'passed' },
-      in_progress: { cls: 'progress', label: 'in progress' },
-      blocked:     { cls: 'blocked',  label: 'blocked' },
-      pending:     { cls: 'pending',  label: 'pending' },
+      passed:      { cls: 'passed',    label: 'passed' },
+      met:         { cls: 'passed',    label: 'met' },
+      qualified:   { cls: 'qualified', label: 'qualified' },
+      refuted:     { cls: 'refuted',   label: 'refuted' },
+      in_progress: { cls: 'progress',  label: 'in progress' },
+      blocked:     { cls: 'blocked',   label: 'blocked' },
+      pending:     { cls: 'pending',   label: 'pending' },
     };
     var H = ['<section class="inv-plan-board">'];
     H.push('<h3 class="inv-plan-board-title">Plan progress · cumulative gates</h3>');
     H.push('<ol class="inv-plan-gates">');
     gates.forEach(function (g) {
       var sm = meta[g.status] || meta.pending;
+      // Off-spine branch (e.g. a tested-and-refuted side-question) — doesn't gate
+      // the spine; marked distinctly so it doesn't read as spine progress.
+      var isBranch = !!(g.off_spine || g.branch);
       var members = g.member_studies || [];
       var pending = g.pending_studies || [];
       var crit = String(g.criterion || '').replace(/\s+/g, ' ').trim();
       var bits = [];
       if (members.length) bits.push(members.length + ' stud' + (members.length === 1 ? 'y' : 'ies'));
       if (pending.length) bits.push(pending.length + ' planned');
-      H.push('<li class="inv-plan-gate inv-gate-' + sm.cls + (g.optional ? ' inv-gate-optional' : '') +
+      H.push('<li class="inv-plan-gate inv-gate-' + sm.cls +
+             (g.optional ? ' inv-gate-optional' : '') +
+             (isBranch ? ' inv-gate-branch' : '') +
              '" title="' + _escInv(crit) + '">');
       H.push('<div class="inv-gate-head">' +
                '<span class="inv-gate-id">' + _escInv(String(g.id || '')) + '</span>' +
                '<span class="inv-gate-name">' + _escInv(g.name || '') + '</span>' +
+               (isBranch ? '<span class="inv-gate-branch-tag">branch</span>' : '') +
                (g.optional ? '<span class="inv-gate-opt">optional</span>' : '') +
              '</div>');
       H.push('<div class="inv-gate-status inv-gate-status-' + sm.cls + '">' + sm.label + '</div>');
