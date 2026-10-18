@@ -371,3 +371,43 @@ def test_alias_join_pbg_and_viva_reference_same_module(tmp_path):
     assert "ketchup" in stats
     assert stats["ketchup"]["n_used"] == 1
     assert stats["ketchup"]["n_composites"] == 1
+
+
+_FAKE_REGISTRY_REEXPORT = {
+    "processes": [
+        # A re-exported imported process: _apply_include flipped its address to the
+        # host workspace (viva_genesis) but preserved the true origin in
+        # reexported_from. It must be credited to the DEFINING repo, not the host.
+        {"kind": "step", "name": "EquilibratorThermoStep",
+         "address": "viva_genesis.EquilibratorThermoStep",
+         "reexported_from": "viva_equilibrator"},
+        # A host-defined process stays with the host.
+        {"kind": "process", "name": "MineralSurfaceDynamicsProcess",
+         "address": "viva_genesis.minerals.MineralSurfaceDynamicsProcess"},
+    ]
+}
+
+
+def test_processes_by_norm_credits_reexported_process_to_true_origin(tmp_path, monkeypatch):
+    """A re-exported imported process (address flipped to the host, origin kept in
+    reexported_from) is credited to the repo that DEFINES it, not the host that
+    re-registered it — so viva-equilibrator shows its Step instead of 0."""
+    import vivarium_workbench.lib.registry as _registry
+    monkeypatch.setattr(_registry, "build_registry", lambda ws_root, **kw: _FAKE_REGISTRY_REEXPORT)
+
+    by_norm = _processes_by_norm(tmp_path)
+    assert "equilibrator" in by_norm            # credited to the true origin
+    assert len(by_norm["equilibrator"]) == 1
+    assert len(by_norm["genesis"]) == 1          # host keeps its own process
+
+
+def test_registry_class_origins_maps_classname_to_true_origin(tmp_path, monkeypatch):
+    """Class-name -> true-origin map lets a bare `local:EquilibratorThermoStep`
+    usage be attributed back to viva-equilibrator."""
+    from vivarium_workbench.lib.module_stats import _registry_class_origins
+    import vivarium_workbench.lib.registry as _registry
+    monkeypatch.setattr(_registry, "build_registry", lambda ws_root, **kw: _FAKE_REGISTRY_REEXPORT)
+
+    origins = _registry_class_origins(tmp_path)
+    assert origins.get("EquilibratorThermoStep") == "equilibrator"
+    assert origins.get("MineralSurfaceDynamicsProcess") == "genesis"
