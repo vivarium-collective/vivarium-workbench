@@ -98,9 +98,10 @@ def test_simulations_subtabs_present():
 def test_simulate_is_a_top_level_pillar():
     html = _render()
     assert 'data-kind="simulate"' in html and "_setStudyTab('simulate')" in html
-    # Results/analyses/visualize are no longer top-level pillars.
-    for gone in ("results", "analyses", "visualize"):
+    # Results/analyses are no longer top-level pillars (Visualizations is a pillar again).
+    for gone in ("results", "analyses"):
         assert "_setStudyTab('%s')" % gone not in html
+    assert "_setStudyTab('visualize')" in html
 
 
 # ---------------------------------------------------------------------------

@@ -49,12 +49,13 @@ def test_inner_hooks_preserved_in_compose():
 
 
 def test_other_panels_untouched():
-    # 5-tab study layout: the non-compose panels are overview / simulate /
-    # audit / conclusions (Visualizations folded into Overview; Readouts+Build
-    # into Model; Results+Analyses into Simulations subtabs; Tests into Audit).
-    for k in ["overview", "simulate", "audit", "conclusions"]:
+    # 6-tab study layout: the non-compose panels are overview / visualize /
+    # simulate / audit / conclusions (Visualizations is its own tab again;
+    # Readouts+Build into Model; Results+Analyses into Simulations subtabs;
+    # Tests into Audit).
+    for k in ["overview", "visualize", "simulate", "audit", "conclusions"]:
         assert f'id="panel-{k}"' in HTML, f"unrelated panel disturbed: panel-{k}"
-    for gone in ["visualize", "tests", "results", "analyses", "build", "readouts"]:
+    for gone in ["tests", "results", "analyses", "build", "readouts"]:
         assert f'id="panel-{gone}"' not in HTML, f"folded panel still present: panel-{gone}"
 
 
