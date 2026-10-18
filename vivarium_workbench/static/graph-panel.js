@@ -116,6 +116,23 @@
       panel: panel, layout: layout, mainEl: mainEl, key: 'graph',
       label: 'Graph',
       launcher: null,
+      // All four edges — the dock menu and the drag drop-zones both offer
+      // left / right / bottom / top (unified). Top docks as a band (default height
+      // from defaultSize.bottom); placeTop keeps it BELOW the investigation menu.
+      docks: ['left', 'right', 'bottom', 'top'],
+      // Top dock: insert the panel just BELOW the investigation menu bar (inside
+      // #iset-workspace), so the "← All investigations / overview / report…" bar
+      // always stays at the very top. Returns false (→ default top placement) when
+      // no investigation workspace is on screen.
+      placeTop: function (panel) {
+        var ws = document.getElementById('iset-workspace');
+        var header = ws && ws.querySelector('.inv-header-bar');
+        if (header && header.parentNode) {
+          header.parentNode.insertBefore(panel, header.nextSibling);
+          return true;
+        }
+        return false;
+      },
       resizeHandle: 'viv-graph-resize-handle',
       // No header to drag; the hosted graph toolbar is bound as the drag handle
       // in onOpen (once it's relocated into the panel) via ctl.addDragHandle.
@@ -125,20 +142,30 @@
       onOpen: onOpen, onClose: onClose,
       onResize: fit,
       onDock: function () { setTimeout(relayout, 60); },
+      onCollapse: function (c) { if (!c) setTimeout(relayout, 60); },   // re-fit on expand
     });
 
-    // Public API — mirrors window.ProcessCode.* so the header buttons can call it.
+    // Public API — mirrors window.ProcessCode.* so the toolbar buttons can call it.
     global.GraphPanel = {
       toggle: function () { if (ctl) ctl.toggle(); },
       open: function () { if (ctl) ctl.open(); },
       close: function () { if (ctl) ctl.close(); },
       dockMenu: function (anchor) { if (ctl) ctl.openDockMenu(anchor); },
-      // "Full graph": close the panel so the graph returns inline (full-page view).
-      toFull: function () { if (ctl) ctl.close(); },
+      // Collapse the panel to a thin edge strip / expand it back.
+      collapse: function () { if (ctl) ctl.collapse(); },
+      expand: function () { if (ctl) ctl.expand(); },
+      toggleCollapsed: function () { if (ctl) ctl.toggleCollapsed(); },
       isOpen: function () { return !!(ctl && ctl.isOpen()); },
     };
     // Used by panel-dock.js initPopout when this page is a ?popout=graph window.
     global._openGraphPanel = function () { if (ctl) ctl.open(); };
+
+    // Default to INLINE on load: the graph lives inline below the investigation
+    // overview, and the panel is opt-in (◧). Don't auto-restore a persisted
+    // open/docked state — except in a ?popout=graph window, which must open it.
+    var isPopout = false;
+    try { isPopout = /(?:^|[?&])popout=graph(?:&|$)/.test(global.location.search || ''); } catch (e) { /* ignore */ }
+    if (!isPopout && ctl.isOpen()) ctl.close();
   }
 
   if (typeof document !== 'undefined') {

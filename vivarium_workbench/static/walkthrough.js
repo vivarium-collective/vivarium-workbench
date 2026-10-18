@@ -7140,9 +7140,18 @@
     rail.style.setProperty('--rail-w', w + 'px');
   }
   function _vivRailResizeStart(ev) {
+    if (ev.button !== undefined && ev.button !== 0) return;   // left button only
     ev.preventDefault();
     var rail = document.getElementById('viv-rail');
     if (!rail) return;
+    // CAPTURE the pointer on the handle so the drag keeps tracking (and ENDS on
+    // release) even while the pointer is over an iframe — the study porthole and
+    // native-viz iframes otherwise swallow the mousemove/mouseup, which left the
+    // rail "following the mouse after you let go" and unable to widen.
+    var handle = (ev.currentTarget && ev.currentTarget.setPointerCapture)
+      ? ev.currentTarget : document.getElementById('viv-rail-resize-handle');
+    var pointerId = (ev.pointerId != null) ? ev.pointerId : null;
+    try { if (handle && handle.setPointerCapture && pointerId != null) handle.setPointerCapture(pointerId); } catch (e) { /* unsupported */ }
     rail.classList.add('viv-rail-resizing');
     document.body.classList.add('viv-rail-resizing-active');
     var railLeft = rail.getBoundingClientRect().left;
@@ -7163,7 +7172,15 @@
     }
     function _move(e) {
       var raw = e.clientX - railLeft;         // desired width: left edge → pointer
-      if (raw < _RAIL_COLLAPSE_AT) {          // snap into the collapsed bar look
+      // HYSTERESIS so the rail doesn't flicker at the threshold and has no dead
+      // zone: when collapsed, keep it collapsed until the pointer is pulled clearly
+      // OUT (past EXPAND_ABOVE); when expanded, keep it expanded until pushed
+      // clearly IN (below COLLAPSE_BELOW). The gap between the two is a stable hold
+      // band, so small jitter near the edge never toggles the state.
+      var EXPAND_ABOVE = 150, COLLAPSE_BELOW = 110;
+      var curCollapsed = rail.classList.contains('viv-rail-collapsed');
+      var collapsed = curCollapsed ? (raw < EXPAND_ABOVE) : (raw < COLLAPSE_BELOW);
+      if (collapsed) {
         _pending = { collapsed: true };
       } else {
         var w = Math.min(_RAIL_MAX, Math.max(_RAIL_MIN, raw));
@@ -7173,8 +7190,16 @@
       }
       if (!_raf) _raf = requestAnimationFrame(_flush);
     }
+    var _ended = false;
     function _up() {
-      document.removeEventListener('mousemove', _move);
+      if (_ended) return; _ended = true;
+      if (handle) {
+        handle.removeEventListener('pointermove', _move);
+        handle.removeEventListener('pointerup', _up);
+        handle.removeEventListener('pointercancel', _up);
+        try { if (handle.releasePointerCapture && pointerId != null) handle.releasePointerCapture(pointerId); } catch (e) { /* ignore */ }
+      }
+      document.removeEventListener('mousemove', _move);   // legacy fallback, if bound
       document.removeEventListener('mouseup', _up);
       if (_raf) { cancelAnimationFrame(_raf); _raf = 0; }
       _flush();                               // apply the final pointer position now
@@ -7187,8 +7212,16 @@
       } catch (e) { /* private mode */ }
       if (typeof _vivSyncRailToggleLabel === 'function') _vivSyncRailToggleLabel(collapsed);
     }
-    document.addEventListener('mousemove', _move);
-    document.addEventListener('mouseup', _up);
+    // Prefer pointer events on the captured handle; fall back to document mouse
+    // events if pointer capture is unavailable.
+    if (handle && handle.setPointerCapture && pointerId != null) {
+      handle.addEventListener('pointermove', _move);
+      handle.addEventListener('pointerup', _up);
+      handle.addEventListener('pointercancel', _up);
+    } else {
+      document.addEventListener('mousemove', _move);
+      document.addEventListener('mouseup', _up);
+    }
   }
   window._vivRailResizeStart = _vivRailResizeStart;
 
@@ -8998,6 +9031,7 @@
   function _wsResetStudyTabs(investigation) {
     window._wsStudyTabs = { investigation: investigation, active: null };
     _wsHighlightActiveDagNode(null);
+    _aigStudyActive = false;   // no study open -> let the pane fill the screen again
     var panel = document.getElementById('ws-study-panel');
     if (panel) panel.style.display = 'none';
     // No study open -> restore the inline investigation view, un-float the graph,
@@ -9009,6 +9043,7 @@
     _applyInvOverviewState();
     _renderGraphBarNav();
     _setInvestigationContextCollapsed(false);   // fresh investigation -> graph expanded
+    try { _applyAigZoom(); _aigAutoFillInline(); } catch (e) { /* ignore */ }  // restore full-height pane
   }
   window._wsResetStudyTabs = _wsResetStudyTabs;
 
@@ -9074,13 +9109,14 @@
     var st = window._wsStudyTabs;
     st.active = slug;                       // single open study — replaces any prior
     _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
-    // Hide the investigation PROSE (verdict/question/description + decision
-    // cockpit + tab blocks) and drop the graph to the names-only band, then FLOAT
-    // the graph as a compact dockable window (default: docked, top-right) so the
-    // study below gets the FULL content width/height — no top graph strip.
-    _setInvProseForStudy(true);
+    // Opening a study collapses the investigation overview by default (it reopens
+    // via the header toggle, and re-opens automatically on return to the overview).
+    // Fully collapses (not just scrolled out of view) — click the toggle to show.
+    try { localStorage.setItem('inv-overview-collapsed', '1'); } catch (e) { /* ignore */ }
+    if (typeof _applyInvOverviewState === 'function') _applyInvOverviewState();
+    // The overview collapse above hides the prose/cockpit; keep the FULL graph in
+    // place (no strip, no float) so studies can be clicked through quickly.
     _renderGraphBarNav();
-    _aigEnterDock();
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');
     if (panel) panel.style.display = '';
@@ -9089,67 +9125,15 @@
       if (tab) href += (href.indexOf('?') >= 0 ? '&' : '?') + 'tab=' + encodeURIComponent(tab);
       frame.src = href;
     }
-    // Keep the investigation context (overview + knowledge graph) EXPANDED above
-    // the study instead of collapsing it to the slim bar, and grow the study
-    // porthole to its content height, so the whole workspace is one continuous
-    // scroll: land on the study, scroll up into the graph and past it to the
-    // overview (user request).
+    // Do NOT scroll the page down to the study. Instead keep the investigation
+    // graph's TOP where it is and SHRINK the graph pane (via _aigStudyActive in
+    // the height block) so the study card below rises into view on its own — the
+    // graph stays clickable above it for quick navigation.
     _setInvestigationContextCollapsed(false);
-    // Open a landing window BEFORE sizing: while active, content-driven refits
-    // skip their scroll-restore so they can't cancel the scroll-to-study below.
-    var _HOLD_MS = 1800;
-    window._embedLandingUntil = Date.now() + _HOLD_MS;
-    // Floor the study porthole at the scroll container's visible height so the
-    // study FILLS the view on open instead of sitting short under the (often
-    // tall) investigation graph. With a full-viewport porthole, landing on the
-    // study scrolls the graph fully off the top — scroll up to bring it back.
-    var _scroller = document.querySelector('.viv-content');
-    var _vh = (_scroller && _scroller.clientHeight) || window.innerHeight || 800;
-    var _floor = Math.max(560, _vh - 8);
-    if (typeof _fitEmbedToContent === 'function') _fitEmbedToContent(frame, _floor);
-    else if (typeof _fitEmbedToViewport === 'function') _fitEmbedToViewport(frame, panel, _floor);
-    // Land on the study AND actively HOLD it there. A one-shot smooth scroll
-    // wasn't enough: the investigation graph / About block re-renders (and the
-    // iframe refits) AFTER the scroll, springing the view back up to the top.
-    // So for a short window we re-land whenever the study gets pushed back down
-    // the page — releasing immediately on the first genuine user scroll so the
-    // user can freely scroll up into the graph.
-    if (panel && panel.scrollIntoView) {
-      var _released = false, _lastAssert = 0, _holdUntil = Date.now() + _HOLD_MS;
-      var _release = function () { _released = true; };
-      window.addEventListener('wheel', _release, { passive: true, once: true });
-      window.addEventListener('touchmove', _release, { passive: true, once: true });
-      window.addEventListener('keydown', function (e) {
-        if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].indexOf(e.key) !== -1) _release();
-      }, { once: true });
-      var _tick = function () {
-        if (_released || !panel.isConnected) return;
-        var now = Date.now();
-        // panel.top well below the viewport top ⇒ the view sprang back up to the
-        // graph; re-land (throttled so smooth animations don't stack).
-        if (panel.getBoundingClientRect().top > 96 && now - _lastAssert > 240) {
-          _lastAssert = now;
-          try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
-        }
-        if (now < _holdUntil) requestAnimationFrame(_tick);
-        else {
-          window.removeEventListener('wheel', _release);
-          window.removeEventListener('touchmove', _release);
-        }
-      };
-      var _landed = false;
-      var _land = function () {
-        if (_landed || !panel.isConnected) return;
-        _landed = true;
-        try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
-        requestAnimationFrame(_tick);   // start the hold once we've landed
-      };
-      if (frame) frame.addEventListener('load', function () { setTimeout(_land, 80); }, { once: true });
-      setTimeout(_land, 600);   // fallback if load already fired or never fires
-      // After the hold window, one final content-fit (suppressed during it) so
-      // the porthole ends at its true height, preserving the landed position.
-      if (frame) setTimeout(function () { if (frame._refit) frame._refit(); }, _HOLD_MS + 150);
-    }
+    _aigStudyActive = true;
+    try { _applyAigZoom(); _aigAutoFillInline(); } catch (e) { /* ignore */ }
+    if (typeof _fitEmbedToContent === 'function') _fitEmbedToContent(frame);
+    else if (typeof _fitEmbedToViewport === 'function') _fitEmbedToViewport(frame, panel, 560);
   }
   window._wsOpenStudyTab = _wsOpenStudyTab;
 
@@ -9241,11 +9225,16 @@
     if (title) title.textContent = 'Investigation: ' + name;
     var status = document.getElementById('ws-status');
     if (status) { status.textContent = ''; status.className = ''; }
+    // Entering an investigation (no study yet): show the overview OPEN at the top,
+    // the graph inline below it (scroll down). Study-open collapses the overview.
+    try { localStorage.setItem('inv-overview-collapsed', '0'); } catch (e) { /* ignore */ }
+    if (window.GraphPanel && GraphPanel.isOpen && GraphPanel.isOpen()) GraphPanel.close();
     // Always the graph + objective detail — NOT the legacy "Study:<inv>" icon view.
     var ctx = document.getElementById('ws-context');
     if (ctx) _renderInvestigationDetailInto(name, ctx);
     _wsResetStudyTabs(name);   // graph expanded, no study open
     _wsSetInvestigationActions();   // Report/Notebook actions in #ws-actions
+    if (typeof _applyInvOverviewState === 'function') _applyInvOverviewState();
   }
   window._showInvestigationWorkspace = _showInvestigationWorkspace;
 
@@ -10435,6 +10424,121 @@
   }
   window._aigShowNeedsAttention = _aigShowNeedsAttention;
 
+  // "All clear" explainer popover: says what the deterministic needs-attention
+  // scan means and lists the checks behind it (all passing when all-clear), so
+  // the user can see there's nothing to act on — or what would be flagged.
+  function _aigCloseAllClearInfo() { var p = document.getElementById('aig-allclear-pop'); if (p) p.remove(); }
+  function _aigShowAllClearInfo(anchor) {
+    if (document.getElementById('aig-allclear-pop')) { _aigCloseAllClearInfo(); return; }   // toggle
+    var d = window._lastNeedsAttention || {};
+    var summary = d.summary || {};
+    var checks = d.checks || [];
+    var memberCount = (summary.member_count != null) ? summary.member_count : null;
+    var total = summary.total || 0;
+    // Group the live items by kind so a flagged check can list its actual refs.
+    var byKindItems = {};
+    (d.items || []).forEach(function (it) {
+      (byKindItems[it.kind] = byKindItems[it.kind] || []).push(it);
+    });
+    // Hover help per check — what the scan actually looks at (so the popover
+    // explains itself without a block of prose).
+    var HELP = {
+      uncovered_ac: 'Every acceptance criterion in the investigation is linked to a study that gates it.',
+      verdict_divergence: 'Each study’s computed verdict matches the gate its author declared (no silent divergence).',
+      hard_gate: 'No study has a failing hard gate in its latest run.',
+      test_regression: 'No behavior test that once passed is now failing.',
+      diagnostic_branch_needed: 'Any failed / needs-calibration verdict has a diagnostic study seeded to investigate why.',
+      invariant_regression: 'No declared invariant (invariant_check) has been invalidated or weakened.',
+      open_feedback: 'No expert feedback is left open (all applied or dismissed).',
+      param_drift: 'A run’s applied parameters still match the study’s enforced/pinned values.',
+      unregistered_confirmatory: 'Confirmatory studies are registered against the claim they confirm.',
+      stale_finding: 'No finding is stale relative to the run it was derived from.',
+      env_stale: 'Run environments (deps/image) are current, not stale.',
+      nondeterministic: 'Runs are reproducible (seeded / deterministic where required).',
+      phantom_observable: 'Every declared observable actually exists in the built composite’s structure.'
+    };
+    // One row per check, driven by the LIVE scan numbers (passing / examined),
+    // not prose. ✓ when nothing is flagged; amber with a drill-in list otherwise.
+    var rows = checks.map(function (c) {
+      var flagged = c.flagged || 0;
+      var examined = c.examined || 0;
+      var help = HELP[c.kind] || '';
+      var metric;
+      if (examined > 0) metric = '<span style="color:#64748b;font-variant-numeric:tabular-nums">' + (c.passing || 0) + ' / ' + examined + '</span>';
+      else metric = '<span class="muted" style="font-size:0.9em">none to check</span>';
+      var sub = '';
+      if (flagged > 0 && byKindItems[c.kind]) {
+        sub = '<ul style="margin:3px 0 0 24px;padding:0;list-style:none">'
+          + byKindItems[c.kind].map(function (it) {
+              var ref = (it.study || it.ref || '').toString();
+              var label = _esc((it.title || it.ref || it.kind || '').toString());
+              return '<li style="margin-top:3px;font-size:0.95em">'
+                + (ref
+                    ? '<a href="#" onclick="_openStudyInsideInvestigation(\'' + _esc(ref) + '\',\'conclusions\');return false;" style="color:#2563eb;text-decoration:none">' + label + ' →</a>'
+                    : label)
+                + '</li>';
+            }).join('')
+          + '</ul>';
+      }
+      return '<li style="margin-top:8px"' + (help ? ' title="' + _esc(help) + '"' : '') + '>'
+        + '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between">'
+          + '<span style="display:flex;gap:8px;align-items:flex-start">'
+            + '<span style="color:' + (flagged ? '#b45309' : '#16a34a') + ';font-weight:700;flex:none">' + (flagged ? '•' : '✓') + '</span>'
+            + '<span style="border-bottom:1px dotted #cbd5e1;cursor:help">' + _esc(c.label || c.kind) + '</span>'
+          + '</span>'
+          + metric
+        + '</div>' + sub
+        + '</li>';
+    }).join('');
+    var clear = total === 0;
+    var pop = document.createElement('div');
+    pop.id = 'aig-allclear-pop';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', 'Needs-attention scan');
+    pop.style.cssText = 'position:absolute;z-index:80;background:#fff;border:1px solid #e2e8f0;border-radius:8px;'
+      + 'box-shadow:0 8px 28px rgba(0,0,0,0.16);padding:12px 14px;min-width:300px;max-width:400px;text-align:left;'
+      + 'font-size:0.85em;color:#334155;line-height:1.45';
+    pop.innerHTML =
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px">'
+        + '<span style="font-weight:700;color:' + (clear ? '#166534' : '#b45309') + '">'
+          + (clear ? '✓ All clear' : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention') + '</span>'
+        + (memberCount != null ? '<span class="muted" style="font-size:0.9em;white-space:nowrap">' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') + ' scanned</span>' : '')
+      + '</div>'
+      + '<ul style="margin:4px 0 0;padding:0;list-style:none">' + rows + '</ul>'
+      + '<div style="margin-top:9px;padding-top:7px;border-top:1px solid #f1f5f9">'
+        + '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" '
+        + 'style="color:#2563eb;text-decoration:none;font-size:0.92em">What are these checks? Open the Decisions tab →</a>'
+      + '</div>';
+    document.body.appendChild(pop);
+    var r = anchor.getBoundingClientRect();
+    var top = Math.round(r.bottom + (window.scrollY || window.pageYOffset || 0) + 6);
+    var left = Math.round(Math.min(r.left + (window.scrollX || window.pageXOffset || 0),
+                                   (window.innerWidth - pop.offsetWidth - 8) + (window.scrollX || 0)));
+    pop.style.top = top + 'px';
+    pop.style.left = Math.max(8, left) + 'px';
+  }
+  window._aigShowAllClearInfo = _aigShowAllClearInfo;
+  // "What are these checks?" -> open the investigation's Decisions tab, where the
+  // needs-attention / decisions items live with their full context. Makes sure the
+  // investigation overview is expanded first so the brief tabs are visible.
+  window._aigOpenDecisionsTab = function () {
+    _aigCloseAllClearInfo();
+    try {
+      if (_invOverviewCollapsed && _invOverviewCollapsed()) _toggleInvOverview();
+    } catch (e) { /* ignore */ }
+    var open = function () {
+      var btn = document.querySelector('.inv-brief-tab[onclick*="decisions"]');
+      if (btn) { btn.click(); if (btn.scrollIntoView) { try { btn.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {} } }
+    };
+    // The brief tabs may need a beat to render after expanding the overview.
+    if (document.querySelector('.inv-brief-tab[onclick*="decisions"]')) open();
+    else setTimeout(open, 60);
+  };
+  document.addEventListener('click', function (e) {
+    if (e.target.closest && (e.target.closest('#aig-allclear-pop') || e.target.closest('.aig-na-clear'))) return;
+    _aigCloseAllClearInfo();
+  }, true);
+
   function _renderInvNeedsAttention(name) {
     var container = document.getElementById('investigation-needs-attention');
     var chip = document.getElementById('aig-needs-attention-chip');
@@ -10446,12 +10550,15 @@
       .then(function(r) { return r.ok ? r.json() : null; });
     _fetch.then(function(d) {
       if (!d || !d.summary) return;
+      window._lastNeedsAttention = d;   // the all-clear popover reads this
       var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the needs-attention scan (deterministic)</span>';
       var total = (d.summary.total) || 0;
       if (!total) {
-        // All-clear: a compact green chip in the toolbar — no big banner.
+        // All-clear: a compact chip — now CLICKABLE to explain what it means and
+        // show the (passing) checks behind it.
         if (chip) chip.innerHTML =
-          '<span class="aig-na-chip aig-na-clear" title="code-computed by the needs-attention scan (deterministic)">✓ All clear</span>';
+          '<button type="button" class="aig-na-chip aig-na-clear" onclick="window._aigShowAllClearInfo(this)" '
+          + 'title="Click to see what the needs-attention scan checked">✓ All clear</button>';
         return;
       }
       var bySev = d.summary.by_severity || {};
@@ -10910,6 +11017,10 @@
   }
 
   function _aigSetDockState(state, opts) {
+    // PREVIEW-ONLY: the bespoke floating inlay is superseded by the VivPanelDock
+    // Graph panel (graph-panel.js). Neuter the old auto-float so the two don't
+    // fight; the graph stays inline and the ◧ side-panel button drives docking.
+    return;
     if (_AIG_DOCK_STATES.indexOf(state) < 0) state = 'docked';
     var fs = document.getElementById('investigation-dag-fs');
     if (!fs || !_aigStudyOpen()) return;   // docking only applies while embedded
@@ -10979,8 +11090,10 @@
   // COLLAPSED; the user's choice is remembered. Only governs the inline view —
   // the study-open state hides the prose regardless.
   function _invOverviewCollapsed() {
-    try { var v = localStorage.getItem('inv-overview-collapsed'); return v === null ? true : v === '1'; }
-    catch (e) { return true; }
+    // Default OPEN: entering an investigation shows the overview at the top; it
+    // collapses when a study is opened.
+    try { var v = localStorage.getItem('inv-overview-collapsed'); return v === null ? false : v === '1'; }
+    catch (e) { return false; }
   }
   function _applyInvOverviewState() {
     var view = document.getElementById('investigation-detail-view');
@@ -11483,6 +11596,18 @@
     var _storedOrient = _getStoredGraphOrientation(window._currentIset);
     var orient = _storedOrient ||
       (window.chooseGraphOrientation ? window.chooseGraphOrientation(depthCounts) : 'LR');
+    // When the graph is hosted in the dockable side panel, its orientation MUST
+    // follow the dock side and stay put across re-renders (a zoom/band change
+    // re-renders): left/right → vertical (TB), top/bottom → horizontal (LR). Don't
+    // let a stored or auto value flip it back (the "docked on the side, then zoom
+    // → jumps to the top layout" bug).
+    var _fsEl = document.getElementById('investigation-dag-fs');
+    if (_fsEl && _fsEl.closest && _fsEl.closest('#viv-graph-panel')) {
+      var _gp = document.getElementById('viv-graph-panel');
+      var _dock = _gp && _gp.dataset ? _gp.dataset.dock : '';
+      if (_dock === 'left' || _dock === 'right') orient = 'TB';
+      else if (_dock === 'top' || _dock === 'bottom') orient = 'LR';
+    }
     if (shellEl) { shellEl.classList.remove('aig-orient-lr', 'aig-orient-tb'); shellEl.classList.add(orient === 'TB' ? 'aig-orient-tb' : 'aig-orient-lr'); }
     _syncGraphOrientToggleUI(orient, !!_storedOrient);
 
@@ -11813,8 +11938,19 @@
     // so the DAG isn't vertically cramped; the user can still drag the
     // resize:vertical handle to override (double-click the background re-fits).
     var shellSize = document.getElementById('investigation-dag-shell');
-    if (shellSize) { shellSize.dataset.canvasW = canvasW; shellSize.dataset.canvasH = canvasH; }
-    _applyAigZoom();
+    if (shellSize) {
+      shellSize.dataset.canvasW = canvasW; shellSize.dataset.canvasH = canvasH;
+      // Band-INVARIANT structural dims (same regardless of detail band) so the
+      // smart default can pick the band from the available space without
+      // oscillating: columns = depth levels, rows = widest column's card count.
+      var _cols = depths.length || 1;
+      var _rows = 1;
+      depths.forEach(function (d) { var n = (byDepth[d] || []).length; if (n > _rows) _rows = n; });
+      shellSize.dataset.cols = String(_cols);
+      shellSize.dataset.rows = String(_rows);
+    }
+    _applyAigZoom();            // sizes the inline pane to the full viewport height
+    _aigAutoFillInline();       // then picks a readable detail band + fits the zoom
 
     // Edges (drawn after positions are known), using measured heights.
     edgesSvg.innerHTML =
@@ -11891,8 +12027,10 @@
 
     // Auto-scroll the shell so the top of the DAG is in view (first pass only —
     // a re-layout from a font-settle or an expand must not yank scroll to top).
+    // Skip when docked in the side panel: a zoom there re-renders, and yanking the
+    // scroll to the top each time made the docked graph "jump back to the top".
     var shell = document.getElementById('investigation-dag-shell');
-    if (shell && isInitial) shell.scrollTop = 0;
+    if (shell && isInitial && !(shell.closest && shell.closest('#viv-graph-panel'))) shell.scrollTop = 0;
 
     // Legend moved behind the "?" info-chip popover (no longer an always-visible
     // strip below the graph). Fill + wire it here so it's ready on first render.
@@ -11930,6 +12068,71 @@
 
   // ── Investigation-graph viewport: continuous zoom / pan / fit / fullscreen ──
   var aigZoom = 1;
+
+  // ── Unified zoom: ONE slider that drives semantic detail (band) AND view zoom
+  // together, from a zoomed-out overview (band 0, small) on the left up to the
+  // single-card level (band 2, large) on the right. The fine-grained Detail /
+  // Width / Zoom sliders live in the ⚙ Display popover and stay in sync. The map
+  // is segmented per band so crossing a detail threshold doesn't lurch in size:
+  // each band restarts its view-zoom range a little lower (bigger cards ⇒ less
+  // magnification) for a smooth ramp. u ∈ [0,100].
+  var _aigUserZoomed = false;         // once the user drives zoom, stop auto-fill
+  var _aigApplyingUnified = false;    // reentrancy guard (band change re-renders)
+  var _aigStudyActive = false;        // a study is open below -> shrink the pane
+  var _aigBandDeferred = false;       // a smart-band re-render is already queued
+  // Band 0 (names only) is reserved for the far-zoomed-out overview — a small
+  // slice of the slider. By the time the cards are any size to read, we're at
+  // band 1 (Question + Finds) already, and the top of the slider is band 2 (full
+  // study cards). Each band restarts its view-zoom a little lower so crossing a
+  // detail threshold keeps the on-screen card size roughly continuous.
+  var _AIG_UZ = [
+    { uLo: 0,  uHi: 12,  band: 0, zLo: 0.45, zHi: 0.70 },
+    { uLo: 13, uHi: 55,  band: 1, zLo: 0.60, zHi: 1.10 },
+    { uLo: 56, uHi: 100, band: 2, zLo: 0.75, zHi: 2.00 },
+  ];
+  function _aigSegForUnified(v) {
+    for (var i = 0; i < _AIG_UZ.length; i++) { if (v <= _AIG_UZ[i].uHi) return _AIG_UZ[i]; }
+    return _AIG_UZ[_AIG_UZ.length - 1];
+  }
+  function _aigUnifiedToBandZoom(u) {
+    var v = Math.max(0, Math.min(100, Number(u) || 0));
+    var seg = _aigSegForUnified(v);
+    var t = (v - seg.uLo) / (seg.uHi - seg.uLo);
+    return { band: seg.band, zoom: seg.zLo + Math.max(0, Math.min(1, t)) * (seg.zHi - seg.zLo) };
+  }
+  function _aigBandZoomToUnified(band, z) {
+    var seg = _AIG_UZ[Math.max(0, Math.min(2, band | 0))];
+    var t = Math.max(0, Math.min(1, (z - seg.zLo) / (seg.zHi - seg.zLo)));
+    return Math.round(seg.uLo + t * (seg.uHi - seg.uLo));
+  }
+  // Reflect the current (band, zoom) on the unified slider + the fine sliders,
+  // without stomping a control the user is actively dragging.
+  function _aigSyncZoomUI(band, z, u) {
+    if (u == null) u = _aigBandZoomToUnified(band, z);
+    var us = document.getElementById('aig-unified-zoom');
+    if (us && document.activeElement !== us) us.value = String(Math.round(u));
+    var ds = document.getElementById('aig-zoom-slider');
+    if (ds && document.activeElement !== ds) ds.value = String(band);
+    var vs = document.getElementById('aig-view-zoom-slider');
+    if (vs && document.activeElement !== vs) vs.value = String((Math.round(z * 100) / 100));
+  }
+  function _setAigUnifiedZoom(u, isUser) {
+    if (_aigApplyingUnified) return;
+    _aigApplyingUnified = true;
+    try {
+      if (isUser) _aigUserZoomed = true;
+      var m = _aigUnifiedToBandZoom(u);
+      aigZoom = Math.max(0.3, Math.min(2, m.zoom));   // set zoom first so a band
+      _setAigBand(m.band);                            // re-render uses it
+      _applyAigZoom();                                // apply when band unchanged
+      _aigSyncZoomUI(m.band, aigZoom, u);
+    } finally { _aigApplyingUnified = false; }
+  }
+  window._setAigUnifiedZoom = _setAigUnifiedZoom;
+  // Fine-grained controls (in the ⚙ popover) call this so the auto-fill default
+  // steps aside and they own the zoom from then on.
+  window._aigMarkUserZoomed = function () { _aigUserZoomed = true; };
+
   function _applyAigZoom() {
     var shell = document.getElementById('investigation-dag-shell');
     var nodes = document.getElementById('investigation-dag-nodes');
@@ -11961,8 +12164,31 @@
     // (resize:vertical), after which their height sticks. Double-click the
     // graph background clears the override and re-fits (see the pan handler).
     if (!shell.dataset.userResized) {
-      var maxH = Math.round((window.innerHeight || 900) * 0.88);
-      var fitH = Math.min(Math.max(Math.ceil(ch * z) + 20, 260), maxH);
+      // Default INLINE view (not docked / not in the side panel / not collapsed):
+      // make the pane the FULL screen height — from the shell's top down to the
+      // bottom of the viewport — so the graph has the whole screen before a study
+      // is opened. _aigAutoFillInline then zooms the graph up to fill it. Docked /
+      // panelled views keep the content-fit height (capped at 88vh).
+      var _fs = document.getElementById('investigation-dag-fs');
+      var _inline = _fs && !_fs.classList.contains('aig-dock') && !_fs.classList.contains('aig-collapsed')
+                    && !(shell.closest && shell.closest('#viv-graph-panel'));
+      var fitH;
+      if (_inline) {
+        var _vh = window.innerHeight || 900;
+        var _top = shell.getBoundingClientRect().top;
+        if (_aigStudyActive) {
+          // A study is open below: keep the graph's TOP where it is but shrink the
+          // pane to ~42% of the viewport so the study card below rises into view
+          // without scrolling. The graph still scrolls inside the shorter pane.
+          fitH = Math.max(Math.round(_vh * 0.42), 220);
+        } else {
+          // No study open: fill the screen from the pane's top down.
+          fitH = Math.max(Math.min(Math.round(_vh - _top - 16), Math.round(_vh * 0.94)), 360);
+        }
+      } else {
+        var maxH = Math.round((window.innerHeight || 900) * 0.88);
+        fitH = Math.min(Math.max(Math.ceil(ch * z) + 20, 260), maxH);
+      }
       shell._aigProgrammaticResize = true;
       shell.style.height = fitH + 'px';
       setTimeout(function () { shell._aigProgrammaticResize = false; }, 60);
@@ -11973,12 +12199,52 @@
       shell._aigResizeObserved = true;
       try {
         new ResizeObserver(function () {
-          if (!shell._aigProgrammaticResize) shell.dataset.userResized = '1';
+          if (shell._aigProgrammaticResize) return;
+          shell.dataset.userResized = '1';
+          // Drag the graph↔study divider all the way up (shell shrinks past the
+          // threshold) → collapse the inline graph to the "Investigation graph" bar.
+          var fs = document.getElementById('investigation-dag-fs');
+          if (fs && !fs.classList.contains('aig-collapsed') && !fs.classList.contains('aig-dock')
+              && !(shell.closest && shell.closest('#viv-graph-panel'))
+              && shell.offsetParent !== null && shell.clientHeight > 0 && shell.clientHeight < 72) {
+            _aigCollapseInline();
+          }
         }).observe(shell);
       } catch (_e) { /* ResizeObserver unavailable — auto-fit still works */ }
     }
+    // Keep the Zoom slider in sync when zoom changes programmatically (e.g. fit).
+    var _zs = document.getElementById('aig-view-zoom-slider');
+    if (_zs && document.activeElement !== _zs) _zs.value = String(aigZoom);
   }
   function _aigZoomBy(f) { aigZoom = Math.max(0.3, Math.min(2.2, aigZoom * f)); _applyAigZoom(); }
+  // Absolute zoom from the Zoom slider (same control style as Detail/Width).
+  function _setAigZoom(v) {
+    aigZoom = Math.max(0.3, Math.min(2, Number(v) || 1));
+    _applyAigZoom();
+    if (!_aigApplyingUnified) _aigSyncZoomUI(aigBand, aigZoom);
+  }
+  window._setAigZoom = _setAigZoom;
+  // Collapse the inline investigation graph to a thin "Investigation graph" bar
+  // (triggered by dragging the graph↔study divider all the way up, or a control),
+  // and expand it back (click the bar) to a normal height.
+  function _aigCollapseInline() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (fs) fs.classList.add('aig-collapsed');
+  }
+  function _aigExpandInline() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (fs) fs.classList.remove('aig-collapsed');
+    var shell = document.getElementById('investigation-dag-shell');
+    if (shell) {
+      shell._aigProgrammaticResize = true;
+      shell.style.height = '460px';
+      delete shell.dataset.userResized;   // let auto-fit resume
+      setTimeout(function () { shell._aigProgrammaticResize = false; }, 80);
+    }
+    try { if (typeof window._aigFit === 'function') window._aigFit(); } catch (e) { /* ignore */ }
+  }
+  window._aigCollapseInline = _aigCollapseInline;
+  window._aigExpandInline = _aigExpandInline;
   function _aigFit() {
     var shell = document.getElementById('investigation-dag-shell');
     if (!shell) return;
@@ -11988,6 +12254,52 @@
     _applyAigZoom();
     shell.scrollLeft = 0; shell.scrollTop = 0;
   }
+  // Default pre-study INLINE view: after _applyAigZoom has sized the pane to the
+  // full viewport height, zoom the graph UP to fill that height (as large as it
+  // goes, capped at 2×). The wide study chain scrolls horizontally. Skipped when
+  // docked / in the side panel / collapsed, or once the user has resized the pane.
+  function _aigAutoFillInline() {
+    if (_aigUserZoomed || _aigApplyingUnified) return;   // user owns zoom now
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell || shell.dataset.userResized) return;
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs || fs.classList.contains('aig-dock') || fs.classList.contains('aig-collapsed')) return;
+    if (shell.closest && shell.closest('#viv-graph-panel')) return;
+    var ch = parseFloat(shell.dataset.canvasH) || 0;
+    var h = shell.clientHeight || 0;
+    if (ch < 1 || h < 40) return;
+
+    // SMART default detail: pick the semantic band from how much VERTICAL room
+    // each row of cards would get when the graph fills the pane height. A wide,
+    // zoomed-out graph gives each card little room, so paragraph text would be
+    // unreadable — show names only (band 0). More room -> Asks/Finds (band 1) ->
+    // full cards (band 2). This uses the BAND-INVARIANT row count so switching
+    // the band doesn't change the decision (no oscillation).
+    var rows = parseInt(shell.dataset.rows, 10) || 1;
+    var rowPx = (h - 24) / rows;                     // px budget per card row at fill
+    var targetBand = rowPx < 110 ? 0 : (rowPx < 175 ? 1 : 2);
+    if (targetBand !== aigBand) {
+      // DEFER the re-render: _aigAutoFillInline runs from inside _layoutAndDraw,
+      // BEFORE this pass draws its edges. Re-rendering synchronously here would
+      // let the current (stale) pass finish drawing edges on top of the new
+      // layout — misaligned edges. A 0ms timeout lets this pass complete, then
+      // re-renders cleanly at the readable band (its own pass fits the zoom).
+      if (!_aigBandDeferred) {
+        _aigBandDeferred = true;
+        setTimeout(function () { _aigBandDeferred = false; _setAigBand(targetBand); }, 0);
+      }
+      return;
+    }
+
+    // Band is right for the space -> fit the view zoom to fill the pane height.
+    var z = Math.max(0.3, Math.min(2, (h - 16) / ch));
+    if (Math.abs(z - aigZoom) < 0.02) { _aigSyncZoomUI(aigBand, aigZoom); return; }
+    aigZoom = z;
+    _applyAigZoom();
+    _aigSyncZoomUI(aigBand, aigZoom);
+    shell.scrollTop = 0;
+  }
+  window._aigAutoFillInline = _aigAutoFillInline;
   function _aigFullscreen() {
     // Fullscreen the WRAPPER (toolbar + shell), not the shell alone, so the
     // graph controls (semantic zoom, +/− view zoom, fit, orientation, download)
@@ -12145,6 +12457,26 @@
   window._aigExport = _aigExport;
   window._aigToggleDownloadMenu = _aigToggleDownloadMenu;
   window._aigDownloadMenuPick = _aigDownloadMenuPick;
+  // ⚙ Display settings popover (Detail / Width / Zoom sliders), same pattern as
+  // the Export menu — click to toggle, outside-click to close.
+  function _aigCloseSettings() {
+    var m = document.getElementById('aig-settings-menu'), b = document.getElementById('aig-settings-btn');
+    if (m) m.style.display = 'none';
+    if (b) b.setAttribute('aria-expanded', 'false');
+  }
+  function _aigToggleSettings(ev) {
+    if (ev) ev.stopPropagation();
+    var m = document.getElementById('aig-settings-menu'), b = document.getElementById('aig-settings-btn');
+    if (!m) return;
+    var open = m.style.display === 'block';
+    m.style.display = open ? 'none' : 'block';
+    if (b) b.setAttribute('aria-expanded', open ? 'false' : 'true');
+  }
+  window._aigToggleSettings = _aigToggleSettings;
+  document.addEventListener('click', function (e) {
+    var ctl = e.target.closest && e.target.closest('.aig-settings-ctl');
+    if (!ctl) _aigCloseSettings();
+  }, true);
   // Drag anywhere on the shell background to pan (card clicks still work).
   document.addEventListener('pointerdown', function (e) {
     var shell = e.target.closest && e.target.closest('#investigation-dag-shell');
@@ -12169,6 +12501,94 @@
     _applyAigZoom();
   });
 
+  // Full-width resize bar below the graph: grab anywhere on it (not just a corner
+  // grip) to drag the graph height up/down. Dragging all the way up collapses the
+  // graph to its "Investigation graph" bar. Uses pointer capture so the drag
+  // keeps tracking even over the study iframe below.
+  var _AIG_RESIZE_COLLAPSE_AT = 72;
+  function _aigWireResizeBar() {
+    var bar = document.getElementById('aig-resize-bar');
+    if (!bar || bar._aigWired) return;
+    bar._aigWired = true;
+    bar.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      var shell = document.getElementById('investigation-dag-shell');
+      if (!shell) return;
+      e.preventDefault();
+      var startY = e.clientY;
+      var startH = shell.getBoundingClientRect().height;
+      var maxH = Math.round((window.innerHeight || 900) * 0.92);
+      var done = false;
+      bar.classList.add('dragging');
+      document.body.style.cursor = 'row-resize';
+      try { bar.setPointerCapture(e.pointerId); } catch (_) { /* older browsers */ }
+      function finish() {
+        if (done) return; done = true;
+        bar.removeEventListener('pointermove', mv);
+        bar.removeEventListener('pointerup', up);
+        bar.removeEventListener('pointercancel', up);
+        bar.classList.remove('dragging');
+        document.body.style.cursor = '';
+      }
+      function mv(ev) {
+        var h = startH + (ev.clientY - startY);
+        if (h < _AIG_RESIZE_COLLAPSE_AT) {
+          // Dragged all the way up -> collapse to the "Investigation graph" bar.
+          shell.dataset.userResized = '1';
+          if (typeof window._aigCollapseInline === 'function') window._aigCollapseInline();
+          finish();
+          return;
+        }
+        h = Math.max(_AIG_RESIZE_COLLAPSE_AT, Math.min(h, maxH));
+        shell._aigProgrammaticResize = false;
+        shell.dataset.userResized = '1';   // a manual height sticks; auto-fit steps aside
+        shell.style.height = h + 'px';
+      }
+      function up() { finish(); }
+      bar.addEventListener('pointermove', mv);
+      bar.addEventListener('pointerup', up);
+      bar.addEventListener('pointercancel', up);
+    });
+  }
+  window._aigWireResizeBar = _aigWireResizeBar;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _aigWireResizeBar);
+  else _aigWireResizeBar();
+
+  // Ctrl/⌘ + mouse-wheel (and trackpad pinch, which the browser delivers as a
+  // wheel event with ctrlKey=true) zooms the investigation graph via the UNIFIED
+  // zoom — so it adjusts semantic detail (band) AND magnification together, just
+  // like the Zoom slider. A plain wheel still scrolls the page normally (we only
+  // hijack it with the modifier). The zoom is anchored on the cursor.
+  function _aigWireWheelZoom() {
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell || shell._aigWheelWired) return;
+    shell._aigWheelWired = true;
+    shell.addEventListener('wheel', function (e) {
+      if (!(e.ctrlKey || e.metaKey)) return;     // only with a modifier / pinch
+      e.preventDefault();
+      var us = document.getElementById('aig-unified-zoom');
+      var curU = us ? parseFloat(us.value) : _aigBandZoomToUnified(aigBand, aigZoom);
+      if (isNaN(curU)) curU = _aigBandZoomToUnified(aigBand, aigZoom);
+      var d = e.deltaY;
+      if (e.deltaMode === 1) d *= 16;            // line mode -> ~pixels
+      else if (e.deltaMode === 2) d *= 400;      // page mode
+      var newU = Math.max(0, Math.min(100, curU - d * 0.06));   // up = zoom in
+      if (Math.abs(newU - curU) < 0.01) return;
+      // Anchor the zoom on the cursor (view-zoom scaling only; a band change
+      // reflows the layout, where exact anchoring doesn't apply).
+      var rect = shell.getBoundingClientRect();
+      var cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+      var oldZoom = aigZoom, oldSL = shell.scrollLeft, oldST = shell.scrollTop;
+      _setAigUnifiedZoom(newU, true);
+      var ratio = (aigZoom || 1) / (oldZoom || 1);
+      shell.scrollLeft = (oldSL + cx) * ratio - cx;
+      shell.scrollTop = (oldST + cy) * ratio - cy;
+    }, { passive: false });
+  }
+  window._aigWireWheelZoom = _aigWireWheelZoom;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _aigWireWheelZoom);
+  else _aigWireWheelZoom();
+
   function _setAigBand(b) {
     var nb = Math.max(0, Math.min(2, b | 0));
     var sl = document.getElementById('aig-zoom-slider');
@@ -12176,6 +12596,7 @@
     // No band change → keep the slider synced (above) but skip the re-render.
     if (nb === aigBand) return;
     aigBand = nb;
+    if (!_aigApplyingUnified) _aigSyncZoomUI(aigBand, aigZoom);
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
   }
   window._setAigBand = _setAigBand;

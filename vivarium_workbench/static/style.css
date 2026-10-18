@@ -1140,21 +1140,23 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
   display:block;
   transition:transform 0.2s;
 }
-/* Collapsed: the toggle overlays the whole header, hidden until the header is
-   hovered — so the Vivarium logo shows by default and the expand icon appears
-   only on mouse-over (logo dims behind it). Click it to expand. */
+/* Collapsed: the expand toggle overlays the whole header and is ALWAYS visible
+   (a persistent, obvious click target to re-open the rail — previously it was
+   opacity:0 until hover, which made the rail feel "stuck" closed). It brightens
+   on hover; the logo stays dimmed behind it so the ❯ expand icon always reads. */
 .viv-rail.viv-rail-collapsed .viv-rail-toggle{
   top:0; left:0; right:0; bottom:0; transform:none;
   width:auto; height:auto;
   border-radius:8px;
-  opacity:0; transition:opacity 0.12s;
-  z-index:3;
+  opacity:1; transition:opacity 0.12s, background 0.12s, color 0.12s;
+  z-index:3; color:#64748b;
 }
 .viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-toggle{
-  opacity:1; background:rgba(249,250,251,0.94);
-  border-color:#e5e7eb; color:#1f2937;
+  background:rgba(238,242,255,0.96);
+  border-color:#c7d2fe; color:#3730a3;
 }
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.12 }
+.viv-rail.viv-rail-collapsed .viv-rail-logo{ opacity:0.18 }
+.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.1 }
 
 /* Collapsed-rail state ----------------------------------------------------- */
 .viv-rail.viv-rail-collapsed{
@@ -4551,6 +4553,19 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 #inv-overview-toggle { font-weight: 600; }
 #investigation-detail-view.inv-overview-collapsed > #investigation-intro,
 #investigation-detail-view.inv-overview-collapsed > #investigation-decision-cockpit { display: none; }
+/* Inline-graph collapse: drag the graph↔study divider all the way up (or the bar)
+   to collapse the whole inline graph (toolbar + shell) to a single clickable
+   "Investigation graph" bar; click it to expand. */
+.aig-collapsed-bar { display: none; }
+#investigation-dag-fs.aig-collapsed .aig-toolbar,
+#investigation-dag-fs.aig-collapsed #investigation-dag-shell,
+#investigation-dag-fs.aig-collapsed .aig-dock-grip { display: none !important; }
+#investigation-dag-fs.aig-collapsed .aig-collapsed-bar {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 8px 12px; color: #475569; font-weight: 600; font-size: 0.9em;
+}
+#investigation-dag-fs.aig-collapsed .aig-collapsed-bar:hover { background: #eef2ff; color: #3730a3; }
 /* Needs-attention: a compact chip in the toolbar (no big banner). All-clear is a
    quiet green pill; the needs state is an amber/red clickable pill. */
 .aig-na-chip-host { display: inline-flex; align-items: center; }
@@ -4563,6 +4578,45 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .aig-na-chip.aig-na-flag { background: #fffbeb; color: #92400e; border-color: #fcd34d; cursor: pointer; }
 .aig-na-chip.aig-na-flag.aig-na-high { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
 .aig-na-chip.aig-na-flag:hover { filter: brightness(0.97); }
+
+/* ── Unified investigation header bar ──────────────────────────────────────
+   Every control in the investigation header (← All investigations, ▸ Investigation
+   overview, ↓ report / notebook / figures, ▶ Run current spec, and the needs-
+   attention chip) shares one neutral slate look — same size, same shape — matching
+   the "▸ Investigation graph" collapsed bar. No blue. */
+.inv-header-bar { gap: 8px; flex-wrap: wrap; }
+.inv-header-bar .btn-mini,
+.inv-header-bar .aig-na-chip {
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 4px 11px;
+  margin: 0;                        /* spacing comes from the flex gap */
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.inv-header-bar .aig-na-chip { display: inline-flex; align-items: center; gap: 5px; }
+.inv-header-bar .btn-mini:hover,
+.inv-header-bar .aig-na-chip:hover { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+.inv-header-bar .btn-mini:disabled { opacity: 0.55; cursor: default; }
+.inv-header-bar .btn-mini:disabled:hover { background: #f8fafc; color: #475569; border-color: #e5e7eb; }
+/* Keep only a quiet status tint on the chip's glyph/text so the pill still reads
+   as a status without breaking the shared shape. */
+.inv-header-bar .aig-na-chip.aig-na-clear { color: #166534; }
+.inv-header-bar .aig-na-chip.aig-na-flag { color: #92400e; }
+.inv-header-bar .aig-na-chip.aig-na-flag.aig-na-high { color: #991b1b; }
+#ws-actions { display: inline-flex; align-items: center; gap: 8px; }
+:root[data-theme="dark"] .inv-header-bar .btn-mini,
+:root[data-theme="dark"] .inv-header-bar .aig-na-chip {
+  background: rgba(148,163,184,0.12); border-color: rgba(148,163,184,0.3); color: #cbd5e1;
+}
+:root[data-theme="dark"] .inv-header-bar .btn-mini:hover,
+:root[data-theme="dark"] .inv-header-bar .aig-na-chip:hover { background: rgba(148,163,184,0.22); color: #e2e8f0; }
 
 /* ── Dockable investigation graph (while a study is embedded) ──
    The graph region (#investigation-dag-fs) becomes a position:fixed floating
@@ -4734,10 +4788,57 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   border: 2px solid #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
+/* Full-width resize bar below the inline graph — grab anywhere on it to change
+   the graph height (replaces the old bottom-right corner grip). */
+#aig-resize-bar {
+  height: 14px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  touch-action: none;           /* let pointer drag own the gesture */
+}
+#aig-resize-bar:hover,
+#aig-resize-bar.dragging { background: #e2e8f0; }
+#aig-resize-bar:focus-visible { outline: 2px solid #6366f1; outline-offset: -2px; }
+.aig-resize-grip {
+  display: block;
+  width: 44px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #cbd5e1;
+}
+#aig-resize-bar:hover .aig-resize-grip,
+#aig-resize-bar.dragging .aig-resize-grip { background: #94a3b8; }
+/* Hidden while the graph is collapsed to its bar, docked, or in the side panel. */
+#investigation-dag-fs.aig-collapsed #aig-resize-bar,
+#investigation-dag-fs.aig-dock #aig-resize-bar,
+.viv-graph-body #aig-resize-bar { display: none; }
+
+/* The primary unified-zoom slider is wider than the fine-tune sliders so it
+   reads as the main control. */
+.aig-tb-slider-wide { width: 180px; }
+/* ⚙ Display popover: the fine-tune sliders stack as labelled rows. */
+.aig-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+}
+.aig-settings-row + .aig-settings-row { border-top: 1px solid #f1f5f9; }
+.aig-settings-row .aig-tb-label { width: 48px; }
+.aig-settings-row .aig-tb-slider { flex: 1 1 auto; width: auto; }
 @media (max-width: 640px) {
   .aig-tb-group + .aig-tb-group { padding-left: 0; border-left: none; }
   .aig-tb-right { margin-left: 0; }
   .aig-tb-slider { width: 84px; }
+  .aig-tb-slider-wide { width: 120px; }
 }
 
 /* Investigation-graph semantic zoom: status-badge click affordance + band tweaks. */
@@ -5674,11 +5775,8 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
 }
 .viv-graph-empty{ padding:18px 16px; font-size:0.85rem; color:var(--c-muted, #64748b); }
 /* The panel has no separate header — the graph toolbar is the single bar. Its
-   panel controls (dock/pop-out menu + back-to-full) show ONLY while docked, and
-   the "open as panel" button hides once docked. The toolbar is the drag handle. */
-.aig-panel-ctl{ display:none; }
-.viv-graph-body .aig-panel-ctl{ display:inline-flex; }
-.viv-graph-body #aig-dock-panel-btn{ display:none; }
+   the single dock button (◧) is ALWAYS visible — inline AND docked — and opens
+   the dock-side menu; no button swap. The toolbar is the drag handle. */
 .viv-graph-body .aig-toolbar{ cursor:grab; }
 .viv-graph-body .aig-toolbar button,
 .viv-graph-body .aig-toolbar input,
@@ -5686,6 +5784,21 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
 .viv-graph-body .aig-toolbar a{ cursor:default; }
 .viv-graph-body .aig-toolbar input[type="range"]{ cursor:pointer; }
 body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
+/* Collapsed: the panel shrinks to a thin edge strip showing only the expand
+   handle (click it, or drag the resize edge back out, to expand). Set by the
+   collapse button or by dragging the resize edge inward past the threshold. */
+.viv-graph-expand{ display:none; }
+.viv-graph-panel.vp-collapsed{ flex:0 0 auto !important; }
+.viv-graph-panel.vp-collapsed[data-dock="left"],
+.viv-graph-panel.vp-collapsed[data-dock="right"]{ width:16px !important; }
+.viv-graph-panel.vp-collapsed[data-dock="top"],
+.viv-graph-panel.vp-collapsed[data-dock="bottom"]{ height:16px !important; min-height:0 !important; }
+.viv-graph-panel.vp-collapsed .viv-graph-body{ display:none !important; }
+.viv-graph-panel.vp-collapsed .viv-graph-expand{
+  display:block; width:100%; height:100%; border:none; background:transparent;
+  cursor:pointer; color:#64748b; font-size:0.95em; line-height:1; padding:0;
+}
+.viv-graph-panel.vp-collapsed .viv-graph-expand:hover{ background:#eef2ff; color:#3730a3; }
 
 /* ── Pop-out window (?popout=<kind>): show only the popped panel, full-window ──
    panel-dock.js adds body.viv-popout + .viv-popout-<kind> and opens that panel.

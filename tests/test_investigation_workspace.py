@@ -80,11 +80,9 @@ def test_dockable_graph_and_graph_bar_navigator():
     draggable/resizable DOCKED window + a COLLAPSED slim bar, full graph controls
     in the docked panel, and a ⛶ control that EXITS the study back to the inline
     graph. The graph-bar navigator drives the embedded study."""
-    # Template: the graph-bar navigator + the dock control (collapse/dock are
-    # states; the third button exits the study).
-    assert 'id="aig-study-nav"' in TPL
-    assert 'id="aig-study-prev"' in TPL and 'id="aig-study-next"' in TPL
-    assert 'id="aig-study-jump-menu"' in TPL
+    # The graph-bar study navigator (prev / next / jump) was removed — clicking a
+    # study node in the graph is the navigation now.
+    assert 'id="aig-study-nav"' not in TPL
     # The popup has NO title bar: #investigation-dag-lead + the "Investigation
     # graph" heading are gone, and the dock control is integrated into the toolbar.
     assert 'id="investigation-dag-lead"' not in TPL
@@ -104,8 +102,9 @@ def test_dockable_graph_and_graph_bar_navigator():
     assert 'id="aig-collapse-btn"' not in TPL
     assert "_aigToggleCollapse" not in TPL and "_aigToggleCollapse" not in JS
 
-    # Full graph controls are present in the toolbar (reused in the docked panel).
-    assert 'id="aig-detail-group"' in TPL and 'id="aig-width-group"' in TPL and 'id="aig-zoom-group"' in TPL
+    # Controls consolidated: one unified Zoom slider + a ⚙ Display popover (the
+    # old separate Detail / Width / Zoom groups were folded into the popover).
+    assert 'id="aig-unified-zoom"' in TPL and 'id="aig-settings-menu"' in TPL
 
     # JS: the dock-state + drag + resize + exit functions exist + are exported.
     for fn in ["_renderGraphBarNav", "_aigSetDockState", "_applyDockState",
@@ -131,16 +130,16 @@ def test_dockable_graph_and_graph_bar_navigator():
     assert ".aig-toolbar" in dragb
     assert "button, input, select" in dragb        # drag ignores interactive controls
 
-    # Opening a study floats the graph (dock) + refreshes the navigator; it drives
-    # the embedded study via _openStudyEmbeddedNewTab and reads the graph's data.
+    # Opening a study keeps the graph IN PLACE but shrinks its pane
+    # (_aigStudyActive) so the study card shows below — no auto-scroll, no float.
+    # It still refreshes the navigator and drives the embedded study.
     openb = _fn_body("_wsOpenStudyTab")
-    assert "_aigEnterDock()" in openb
+    assert "_aigStudyActive = true" in openb
     assert "_renderGraphBarNav()" in openb
-    assert "_setInvProseForStudy(true)" in openb
     assert "ws-context-sticky" not in openb        # sticky strip superseded
     resetb = _fn_body("_wsResetStudyTabs")
     assert "_aigExitDock()" in resetb
-    assert "_setInvProseForStudy(false)" in resetb
+    assert "_aigStudyActive = false" in resetb
     navb = _fn_body("_renderGraphBarNav")
     assert "_openStudyEmbeddedNewTab" in navb
     assert "_lastDagArgs" in navb                  # reuses the graph's data, no re-fetch
@@ -216,12 +215,10 @@ def test_investigation_overview_collapsed_by_default_graph_prominent():
     # separate block, hidden by the collapse CSS.
     assert 'id="inv-overview-toggle"' in TPL
     assert "_toggleInvOverview()" in TPL
-    dv = TPL.index('id="investigation-detail-view"')
-    dv_end = TPL.index('<!-- /#investigation-dag-fs -->', dv)
-    detail = TPL[dv:dv_end]
-    # The toggle lives inside the graph toolbar (within #investigation-dag-fs).
-    tb = detail.index('class="aig-toolbar"')
-    assert detail.index('id="inv-overview-toggle"') > tb, "overview toggle should be in the toolbar"
+    # The toggle now lives in the investigation HEADER bar (above the graph), not
+    # in the graph toolbar, and the overview is OPEN by default on entry.
+    assert TPL.index('id="inv-overview-toggle"') < TPL.index('id="investigation-dag-fs"'), \
+        "overview toggle should be in the header, above the graph"
 
     # CSS: collapsed hides the prose blocks (intro + decision cockpit).
     css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
@@ -233,7 +230,7 @@ def test_investigation_overview_collapsed_by_default_graph_prominent():
     assert "function _invOverviewCollapsed" in JS
     assert "function _applyInvOverviewState" in JS
     oc = JS[JS.index("function _invOverviewCollapsed"): JS.index("function _applyInvOverviewState")]
-    assert "v === null ? true" in oc            # default collapsed when unset
+    assert "v === null ? false" in oc           # default OPEN when unset (overview shown on entry)
     assert "inv-overview-collapsed" in oc
 
     def _fn_body(name):

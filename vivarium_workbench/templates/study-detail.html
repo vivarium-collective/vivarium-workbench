@@ -535,12 +535,18 @@
      _wireStudyExportMenu in study-detail.js). #}
   <div class="overview-toolbar" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
     <h2 class="overview-label" style="margin:0">Overview</h2>
+    <span style="display:inline-flex;align-items:center;gap:8px">
+    {# Jump straight to the figures/visualizations at the bottom of the Overview
+       (scrolls the outer page, since the study renders in a full-height iframe). #}
+    <button type="button" id="study-jump-figures" class="btn-mini" title="Jump to the visualizations"
+            onclick="window._vivStudyJumpToFigures&&window._vivStudyJumpToFigures()">↓ Figures</button>
     <span class="study-dl study-export-wrap" style="position:relative;display:inline-flex">
       <button type="button" id="study-export-btn" class="btn-mini study-dl-btn" aria-haspopup="true" aria-expanded="false" title="Download this study's figures or a runnable notebook">⬇ Export ▾</button>
       <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:200px;padding:4px">
         <button type="button" id="study-dl-figures" role="menuitem" class="study-jump-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download figures</button>
         <button type="button" id="study-dl-notebook" role="menuitem" class="study-jump-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download notebook</button>
       </div>
+    </span>
     </span>
   </div>
   <div class="study-overview">
@@ -682,7 +688,8 @@
       {% if result_figure %}
       <figure class="ctr-figure">{{ result_figure | safe }}</figure>
       {% endif %}
-      <div id="overview-key-figure" class="ov-keyfig" data-study="{{ name }}"></div>
+      {# Overview "key figure" removed: the full figure set renders right below in
+         the Visualizations gallery, so a single hero figure here was redundant. #}
       {% if study.findings %}
     <div class="overview-section findings-section">
       <h2 class="overview-label">🔬 Findings — what this study taught us</h2>

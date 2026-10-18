@@ -12,7 +12,7 @@ STATIC = Path(__file__).parent.parent / "vivarium_workbench" / "static"
 def test_rail_resize_drag_is_coalesced_to_one_write_per_frame():
     js = (STATIC / "walkthrough.js").read_text()
     start = js.index("function _vivRailResizeStart")
-    block = js[start:start + 2000]
+    block = js[start:start + 4000]
     # the move handler defers the width write to rAF instead of writing per mousemove
     assert "requestAnimationFrame(_flush)" in block
     assert "cancelAnimationFrame" in block                      # cancelled + flushed on mouse-up
