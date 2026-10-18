@@ -371,11 +371,15 @@ def test_plan_board_renders_from_detail_payload():
     gates A→E) from `d.plan_board`, mounted under the inquiry brief."""
     assert "function _planBoardHtml" in JS
     i = JS.index("function _planBoardHtml")
-    body = JS[i:i + 1600]
+    body = JS[i:JS.index("window._planBoardHtml", i)]
     assert "d.plan_board" in body                       # reads the derived board
     assert "inv-plan-gate" in body                      # one node per gate
     assert "inv-gate-status-" in body                   # colored live status
-    for st in ("passed", "progress", "blocked", "pending"):
-        assert st in body                               # all four states handled
+    # Honest status set: executed gates show their real verdict, incl. the
+    # met-with-caveats (qualified) and tested-and-refuted (refuted) outcomes.
+    for st in ("passed", "met", "qualified", "refuted", "progress", "blocked", "pending"):
+        assert st in body                               # all states handled
+    # Off-spine branch (e.g. a refuted side-question) marked distinctly.
+    assert "off_spine" in body and "inv-gate-branch" in body
     # Mounted under the brief in _renderInvOpening's consumer.
     assert "_renderInvOpening(d) + _planBoardHtml(d)" in JS

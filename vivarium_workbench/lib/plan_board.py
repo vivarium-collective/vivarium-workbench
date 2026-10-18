@@ -89,6 +89,7 @@ def build_plan_board(
             "name": gate.get("name"),
             "extends": extends,
             "optional": bool(gate.get("optional")),
+            "off_spine": bool(gate.get("off_spine") or gate.get("branch")),
             "criterion": gate.get("criterion"),
             "criterion_findings": list(gate.get("criterion_findings") or []),
             "member_studies": members,

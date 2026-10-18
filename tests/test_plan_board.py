@@ -110,3 +110,17 @@ def test_preserves_gate_metadata_for_render():
     assert row["criterion"] == "network persists"
     assert row["member_studies"] == ["og-29"]
     assert row["pending_studies"] == [{"plan_no": 32, "title": "X"}]
+
+
+def test_off_spine_branch_passed_through():
+    """An off-spine branch gate (e.g. a tested-and-refuted side-question) carries
+    its off_spine flag through to the row so the render can mark it distinctly."""
+    gates = [
+        {"id": "A1", "name": "Persistence", "extends": None, "member_studies": ["s1"]},
+        {"id": "A2", "name": "Autocatalysis", "extends": "A1", "off_spine": True,
+         "member_studies": ["s2"]},
+    ]
+    studies = {"s1": _study(gate_status="passed"), "s2": _study(gate_status="ran")}
+    rows = {g["id"]: g for g in build_plan_board(gates, studies)}
+    assert rows["A2"]["off_spine"] is True
+    assert rows["A1"]["off_spine"] is False
