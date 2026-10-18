@@ -156,10 +156,44 @@ def _processes_by_norm(ws_root: Path) -> dict[str, set[str]]:
         if (p.get("kind") or "process") not in ("process", "step"):
             continue
         addr = p.get("address") or p.get("name") or ""
-        nk = _norm(addr)
+        # Credit to the TRUE origin: _apply_include re-attributes a re-exported
+        # imported process's address to the host workspace (e.g. a genesis
+        # build_core registering viva_equilibrator's EquilibratorThermoStep), but
+        # preserves the real defining package in ``reexported_from``. Use that so
+        # the imported repo is credited for the process it actually contributes,
+        # not the host that re-exported it.
+        nk = _norm(p.get("reexported_from") or addr)
         if not nk:
             continue
         out.setdefault(nk, set()).add(str(addr))
+    return out
+
+
+def _registry_class_origins(ws_root: Path) -> dict[str, str]:
+    """``{ProcessClassName -> true-origin module norm}`` from the live registry.
+
+    Lets the usage scan attribute a study that wires an imported repo's process by
+    a BARE address (``local:EquilibratorThermoStep``) — which carries no package
+    name for the package-variant scan to match — back to the repo that defines the
+    class (via ``reexported_from``). Best-effort: ``{}`` on any failure."""
+    out: dict[str, str] = {}
+    try:
+        from vivarium_workbench.lib.registry import build_registry
+        data = build_registry(Path(ws_root))
+    except Exception:
+        return out
+    for p in (data.get("processes") or []):
+        if not isinstance(p, dict):
+            continue
+        if (p.get("kind") or "process") not in ("process", "step"):
+            continue
+        addr = str(p.get("address") or p.get("name") or "")
+        origin = _norm(p.get("reexported_from") or addr)
+        if not origin:
+            continue
+        cls = addr.split(".")[-1] if addr else str(p.get("name") or "")
+        if cls:
+            out[cls] = origin
     return out
 
 
@@ -380,6 +414,13 @@ def _deep_module_usage(ws_root: Path, study_refs: dict[str, set[str]]) -> dict[s
         candidates = _installed_module_pkgs(ws_root)
     except Exception:
         candidates = set()
+    # Registry class-name -> true-origin map: catches a composite wiring an
+    # imported repo's process by a BARE address (local:EquilibratorThermoStep),
+    # which carries no package name for the variant scan to match.
+    try:
+        class_origins = _registry_class_origins(ws_root)
+    except Exception:
+        class_origins = {}
 
     # (1) composite-source scan, per study.
     _src_cache: dict[str, set[str]] = {}
@@ -404,6 +445,15 @@ def _deep_module_usage(ws_root: Path, study_refs: dict[str, set[str]]) -> dict[s
                         pat = r"\b(?:" + "|".join(re.escape(v) for v in variants) + r")\b"
                         if re.search(pat, txt):
                             hits.add(pkg)
+                    # Also match contributed process CLASS names (bare local:
+                    # addresses) back to their defining repo — the precise signal
+                    # the package-variant scan can't see.
+                    for cls, origin in class_origins.items():
+                        if not origin or origin in hits:
+                            continue
+                        if ("local:" + cls) in txt or re.search(
+                            r"\b" + re.escape(cls) + r"\b", txt):
+                            hits.add(origin)
                 _src_cache[cid] = hits
             for nk in hits:
                 out.setdefault(nk, set()).add(slug)
