@@ -2224,6 +2224,15 @@ function _limitationFor(inv, slug){
   const pick=v=>Array.isArray(v)?String(v[0]||'').trim():(typeof v==='string'?v.trim():'');
   return pick(st.limitations) || pick(st.conclusion_logic) || pick(st.key_assumptions) || '';
 }
+// Framing for a finding block: the driving question + the model/simulator methods
+// of its lead study (the spec's "compact evidence panel" header).
+function _studyFraming(inv, slug){
+  const s=(inv.studies||[]).find(x=>x.slug===slug); if(!s) return null;
+  const q=String(s.question||'').replace(/\s+/g,' ').trim();
+  const m=Array.isArray(s.methods)?s.methods.slice(0,3).map(x=>String(x).trim()).filter(Boolean).join(' · ')
+         :(typeof s.methods==='string'?s.methods.trim():'');
+  return {question:q, methods:m, fidelity:String(s.fidelity||'').trim()};
+}
 // The lead study's limitation for a finding-cluster/stage (first with one).
 function stageLimitation(inv, st){
   for(const m of (st.studies||[])){ const l=_limitationFor(inv, m.slug); if(l)
@@ -2270,7 +2279,8 @@ function execSummary(inv){
 // with each stage's key quantitative findings and an explicit model-dependence flag.
 function integratedFindings(inv){
   const sts=(inv.synthesis||{}).stages||[]; if(!sts.length) return '';
-  const blocks=sts.map(st=>{
+  const edges=((inv.synthesis||{}).continuity||{}).edges||[];
+  const blocks=sts.map((st,i)=>{
     const studyChips=(st.studies||[]).map(m=>`<span style="display:inline-flex;gap:5px;align-items:center;margin:0 10px 5px 0;font-size:12px">${_studyLink(m.slug,m.title)} ${_gradeChip(m.grade)}${m.variant?' <span style="font-size:10px;color:var(--ink-3)">alt</span>':''}</span>`).join('');
     const md=st.model_dependence?`<div class="evnote" style="margin:8px 0"><b>Model dependence.</b> This result holds in one model class but not another at matched conditions — reported as model dependence, not two independent outcomes.</div>`:'';
     const finds=(st.findings||[]).filter(f=>f.statement).slice(0,5).map(f=>{
@@ -2278,16 +2288,28 @@ function integratedFindings(inv){
       const sIcon=(String(f.status||'').toLowerCase()==='contradicts'||String(f.status||'').toLowerCase()==='refutes')?'✗ ':(String(f.status||'').toLowerCase()==='confirms'?'✓ ':'');
       return `<li style="margin-top:5px">${sIcon}${esc(f.statement)}${obs} <span style="color:var(--ink-3);font-size:11px">— ${_studyLink(f.study,f.title)}</span></li>`;
     }).join('');
-    return `<div class="fbsection" style="margin:18px 0 0" id="stage-${esc(st.key)}">${fbBubble('stage:'+st.key, 'Finding — '+(st.label||st.key))}
+    // Framing header: the finding's driving question + how it was computed (lead study).
+    const lead=(st.studies||[])[0]; const fr=_studyFraming(inv, lead&&lead.slug);
+    const frame=fr?`${fr.question?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);margin:5px 0 0"><b style="color:var(--ink)">Question.</b> ${esc(fr.question)}</div>`:''}${fr.methods?`<div class="measure" style="font-size:12px;color:var(--ink-3);margin:2px 0 0"><b style="color:var(--ink-2)">Methods.</b> ${esc(fr.methods)}${fr.fidelity?` <span style="font-size:10px;text-transform:uppercase;letter-spacing:.03em">· ${esc(fr.fidelity)} simulators</span>`:''}</div>`:''}`:'';
+    // Narrative transition — only when a real dependency edge connects this stage to
+    // the next (never inferred from titles): keeps the findings reading as a chain.
+    let trans=''; const next=sts[i+1];
+    if(next){ const mine=new Set((st.studies||[]).map(m=>m.slug)), nx=new Set((next.studies||[]).map(m=>m.slug));
+      if(edges.some(e=>mine.has(e.from)&&nx.has(e.to)))
+        trans=`<div class="measure" style="font-size:12px;color:var(--ink-3);font-style:italic;margin:12px 0 0">↓ builds toward <a href="#stage-${esc(next.key)}" style="color:var(--accent);font-style:normal">${esc(next.label)}</a></div>`;
+    }
+    return `<div class="fbsection" style="margin:22px 0 0" id="stage-${esc(st.key)}">${fbBubble('stage:'+st.key, 'Finding — '+(st.label||st.key))}
       <h3 style="font-size:16px;margin:0 0 2px">${esc(st.label)}</h3>
-      <div style="margin:4px 0 2px">${studyChips}</div>${md}
+      <div style="margin:4px 0 2px">${studyChips}</div>
+      ${frame}${md}
       ${stageFigure(inv, st)}
       ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}
-      ${stageLimitation(inv, st)}</div>`;
+      ${stageLimitation(inv, st)}
+      ${trans}</div>`;
   }).join('');
   return `<div class="narr fbsection" id="integrated-findings">${fbBubble('findings','Integrated findings')}
     <div class="sec-h"><h2>Integrated findings</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">The campaign's results organized by scientific stage. Each stage lists its studies (with evidence grade) and their key findings; a stage spanning more than one model class is flagged for model dependence.</p>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">The campaign's results as a chain of findings. Each is framed by the question it tests and how it was computed, led by its figure, then its result and the limitation that bounds it; dependency links carry the narrative from one finding to the next.</p>
     ${blocks}</div>`;
 }
 
