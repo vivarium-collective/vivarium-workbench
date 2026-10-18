@@ -55,6 +55,14 @@
   /* No scroll frames in print — overflow:auto containers render a scrollbar
      gutter/corner as a gray box; let their content lay out naturally. */
   .wdag-shell{overflow:visible !important;background:#fff !important;max-height:none !important;}
+  /* Figures: keep each figure + its caption together on one page (no mid-figure
+     page breaks), and never let a figure spill past the page width. The Plotly
+     figures are additionally re-fit to the page width in __reportPrintPrep. */
+  figure.main-fig,figure.embedded-viz,.main-fig{break-inside:avoid;page-break-inside:avoid}
+  figure figcaption,.main-fig figcaption{break-inside:avoid}
+  .plotly-holder{overflow:visible !important}
+  .main-fig img,.viz-frame,.plotly-holder,.plotly-holder>div{max-width:100% !important}
+  h2,h3{break-after:avoid}
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -1773,6 +1781,25 @@ window.__reportPrintPrep = function(){
     try{ document.querySelectorAll('.card').forEach(c=>{ if(!c.closest('#supplement')) c.classList.remove('collapsed'); }); }catch(e){}
     try{ setupLazyPlotly(); }catch(e){}
     try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
+    // Re-fit every Plotly figure to its container (page) width. The saved figures
+    // carry a fixed layout.width wider than an A4 page, so without this they spill
+    // past the page edge and get clipped by the holder's overflow. relayout to the
+    // holder width shrinks the whole (multi-panel) figure to fit, nothing cut off.
+    try{
+      if(window.Plotly && Plotly.relayout){
+        // Fit each figure to its holder width. The PDF renderer uses an A4-width
+        // viewport (see render_report_pdf), so the holder width measured here is
+        // the real printed width — the saved figures carry a wider fixed layout
+        // width, so without this they overflow the page and get clipped.
+        document.querySelectorAll('figure.embedded-plotly .plotly-graph-div, figure.embedded-plotly .js-plotly-plot').forEach(gd=>{
+          try{
+            const holder=gd.closest('.plotly-holder')||gd.parentElement;
+            const w=Math.max(220, ((holder&&holder.clientWidth)||680)-14);
+            Plotly.relayout(gd,{width:w, autosize:false});
+          }catch(e){}
+        });
+      }
+    }catch(e){}
     try{ setupInteractiveLooms(); }catch(e){}
     try{ setupRealLooms(); }catch(e){}
     // Investigation graph: lay it out TOP-TO-BOTTOM and scale to fit the page

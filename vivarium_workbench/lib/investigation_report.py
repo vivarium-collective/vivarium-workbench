@@ -1221,7 +1221,10 @@ def render_report_pdf(html: str) -> bytes:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             try:
-                page = browser.new_page(viewport={"width": 1120, "height": 1500},
+                # A4-width viewport so the layout measured during __reportPrintPrep
+                # (figure fit, graph scale) matches the A4 page.pdf() output — a
+                # wide viewport would mis-measure and let figures overflow the page.
+                page = browser.new_page(viewport={"width": 794, "height": 1123},
                                         device_scale_factor=2)
                 # Self-contained HTML, no network — load (not networkidle, which
                 # would wait forever with no requests in flight).
