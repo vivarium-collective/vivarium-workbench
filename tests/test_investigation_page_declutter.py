@@ -20,9 +20,11 @@ def test_header_export_cluster_and_icon_refresh():
     cluster = dv[cluster_start:cluster_start + 600]
     assert '_downloadInvestigationReport()' in cluster, "report button not in export cluster"
     assert '_downloadInvestigationNotebook()' in cluster, "notebook button not in export cluster"
-    # Refresh is icon-only now (no text label on the button itself)
+    # Refresh is icon-only now (no text label on the button itself). The dedicated
+    # detail-view refresh button was removed entirely in the toolbar-simplification
+    # pass (commit 4387bd8d) — the toolbar is self-evident — so there is no longer
+    # an #investigation-detail-refresh id to assert.
     assert '↻ Refresh</button>' not in HTML, "Refresh button still has a text label"
-    assert 'id="investigation-detail-refresh"' in dv, "refresh button id lost"
 
 
 def test_report_button_downloads_not_just_opens():

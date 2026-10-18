@@ -60,8 +60,16 @@ _VERDICT_MAP = {
 
 
 def _study_verdict(spec, computed_gate) -> str:
-    """Reduce a study to one of the five verdict states from its computed gate
-    evaluator, else its gate_status, else run presence."""
+    """The GATE axis — one of five computational-gate states
+    (passed/failing/blocked/not_started) from the study's computed gate evaluator,
+    else its gate_status, else run presence. This is DISTINCT from, and
+    intentionally NOT merged with, the scientific-evidence verdict
+    (``study_ontology.derive_verdict`` → supported/qualified/refuted/inconclusive,
+    stashed as ``sci_verdict`` and used for the finding-first evidence grade): the
+    DAG colours by whether the gate passed, the synthesis grades by what the
+    evidence shows, and a study can pass its gate yet be only scientifically
+    qualified. It already reuses the canonical computed gate_evaluator result when
+    present; only the fallbacks are local."""
     res = (computed_gate or {}).get("result")
     if res and res in _VERDICT_MAP:
         return _VERDICT_MAP[res]
@@ -1058,9 +1066,19 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
     try:
         from vivarium_workbench.lib.report_views import build_needs_attention
         _na, _ = build_needs_attention(ws_root, investigation=inv_slug)
-        _synthesis["validation"] = _na
+        _synthesis["validation"] = _na if isinstance(_na, dict) else {}
     except Exception:  # noqa: BLE001
         _synthesis["validation"] = {"items": [], "summary": {"total": 0, "by_kind": {}, "by_severity": {}}}
+    # Also fold in the EXISTING report-readiness linter (report_views.build_report_lint
+    # → viva_superpowers.report_linter + the dashboard's composite-resolution,
+    # readout-emit-plan, question/approach and visualization-gap checks). Same
+    # deterministic infra the live report-lint endpoint uses — reused, not rebuilt.
+    try:
+        from vivarium_workbench.lib.report_views import build_report_lint
+        _lint, _ = build_report_lint(ws_root)
+        _synthesis["validation"]["report_lint"] = list((_lint or {}).get("findings", []) or [])
+    except Exception:  # noqa: BLE001
+        _synthesis["validation"]["report_lint"] = []
     references = _load_references(ws_root, wp)
 
     return {
