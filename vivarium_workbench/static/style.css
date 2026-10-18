@@ -1140,23 +1140,25 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
   display:block;
   transition:transform 0.2s;
 }
-/* Collapsed: the expand toggle overlays the whole header and is ALWAYS visible
-   (a persistent, obvious click target to re-open the rail — previously it was
-   opacity:0 until hover, which made the rail feel "stuck" closed). It brightens
-   on hover; the logo stays dimmed behind it so the ❯ expand icon always reads. */
+/* Collapsed: the Vivarium logo shows clean by default and is NOT covered; the
+   collapse/expand toggle is hidden and REVEALS on hover over the header (or when
+   keyboard-focused). On hover the logo dims so the expand icon reads over it. */
 .viv-rail.viv-rail-collapsed .viv-rail-toggle{
   top:0; left:0; right:0; bottom:0; transform:none;
   width:auto; height:auto;
   border-radius:8px;
-  opacity:1; transition:opacity 0.12s, background 0.12s, color 0.12s;
+  opacity:0; pointer-events:none;
+  transition:opacity 0.12s, background 0.12s, color 0.12s;
   z-index:3; color:#64748b;
 }
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-toggle{
+.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-toggle,
+.viv-rail.viv-rail-collapsed .viv-rail-toggle:focus-visible{
+  opacity:1; pointer-events:auto;
   background:rgba(238,242,255,0.96);
   border-color:#c7d2fe; color:#3730a3;
 }
-.viv-rail.viv-rail-collapsed .viv-rail-logo{ opacity:0.18 }
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.1 }
+.viv-rail.viv-rail-collapsed .viv-rail-logo{ opacity:1 }
+.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.12 }
 
 /* Collapsed-rail state ----------------------------------------------------- */
 .viv-rail.viv-rail-collapsed{
@@ -5129,7 +5131,11 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   position:relative; display:inline-flex; align-items:center; justify-content:space-between;
   width:56px; height:26px; padding:0 7px; border-radius:14px;
   border:1px solid #d8dee6; background:#eef1f5; cursor:pointer;
+  /* Hidden until hovered (keeps its box so the footer stays a hover target). */
+  opacity:0; transition:opacity .14s;
 }
+.viv-rail-theme-footer:hover .viv-theme-toggle,
+.viv-theme-toggle:focus-visible{ opacity:1; }
 .viv-theme-ico{ display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; z-index:1; }
 .viv-theme-ico svg{ width:13px; height:13px; display:block; }
 .viv-theme-sun{ color:#f59e0b; }

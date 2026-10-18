@@ -883,6 +883,12 @@
     var link = document.querySelector('.menu-link[data-page="' + pageId + '"]');
     if (page) page.classList.add('active');
     if (link) link.classList.add('active');
+    // The docked investigation-graph panel lives OUTSIDE the .page containers, so a
+    // page switch doesn't hide it — close it whenever we leave the investigation
+    // view so it doesn't linger over Registry / Catalog / Runs / etc.
+    if (pageId !== 'investigations' && window.GraphPanel && window.GraphPanel.close) {
+      try { window.GraphPanel.close(); } catch (e) { /* ignore */ }
+    }
     // Load the faceted Market on switch, and the build_core() registry on
     // Modules / Simulation Setup / Visualizations.
     if (pageId === 'market') {
