@@ -207,7 +207,13 @@
       var THRESH = 6;
       handle.addEventListener('pointerdown', function (ev) {
         if (ev.button !== undefined && ev.button !== 0) return;
-        if (ev.target.closest && ev.target.closest('button')) return;   // header buttons keep their clicks
+        // Don't start a dock drag from an interactive control living in the drag
+        // handle — most importantly the zoom/detail/width SLIDERS in the graph
+        // toolbar (dragging one must change zoom, not re-dock the panel). Buttons,
+        // links, inputs, selects, textareas, labels and editable regions all keep
+        // their own interactions.
+        if (ev.target.closest && ev.target.closest(
+            'button, a[href], input, select, textarea, label, [role="slider"], [contenteditable=""], [contenteditable="true"]')) return;
         var x0 = ev.clientX, y0 = ev.clientY, ghost = null, zones = null, zone = null, active = false;
         function mk() {
           ghost = document.createElement('div');

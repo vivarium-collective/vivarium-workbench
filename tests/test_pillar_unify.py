@@ -5,22 +5,24 @@ JS = (ROOT / "vivarium_workbench/static/study-detail.js").read_text()
 
 
 def test_merged_panels_exist_and_old_gone():
-    # 5-tab study layout: Simulations stays a panel; the Visualizations panel is
-    # gone (its gallery folds into Overview). The older split wrappers stay gone.
+    # 6-tab study layout: Simulations stays a panel; Visualizations is its OWN
+    # panel again (the figures moved out of Overview). The older split wrappers
+    # (plural / runs / observables) stay gone.
     assert 'id="panel-simulate"' in HTML and 'data-kind="simulate"' in HTML
-    assert 'id="panel-visualize"' not in HTML and 'data-kind="visualize"' not in HTML
+    assert 'id="panel-visualize"' in HTML and 'data-kind="visualize"' in HTML
     for old in ['id="panel-simulations"', 'id="panel-runs"', 'id="panel-observables"', 'id="panel-visualizations"']:
         assert old not in HTML, f"old wrapper still present: {old}"
 
 
 def test_single_member_buttons():
-    # 5-tab study layout: exactly one `.study-pillar` button for simulate; the
-    # visualize pillar is gone (figures folded into Overview).
+    # 6-tab study layout: exactly one `.study-pillar` button each for simulate and
+    # visualize (Visualizations is a real pillar again).
     import re
     btns = re.findall(r'<button class="study-pillar[^"]*" data-kind="simulate"[^>]*>', HTML)
     assert len(btns) == 1, f"simulate: expected 1 pillar button, got {len(btns)}"
-    assert 'data-kind="visualize"' not in HTML
-    for old in ["_setStudyTab('simulations')", "_setStudyTab('observables')", "_setStudyTab('visualize')"]:
+    vbtns = re.findall(r'<button class="study-pillar[^"]*" data-kind="visualize"[^>]*>', HTML)
+    assert len(vbtns) == 1, f"visualize: expected 1 pillar button, got {len(vbtns)}"
+    for old in ["_setStudyTab('simulations')", "_setStudyTab('observables')"]:
         assert old not in HTML
 
 
@@ -31,12 +33,13 @@ def _panel(idattr):
 
 
 def test_inner_hooks_preserved():
-    # 5-tab study layout: readouts fold into Model (compose); the charts +
-    # native gallery fold into Overview; the runs table stays in Simulations.
+    # 6-tab study layout: readouts fold into Model (compose); the charts +
+    # native gallery live in the Visualizations panel; the runs table stays in
+    # Simulations.
     compose = _panel('id="panel-compose"')
     assert 'readouts-table' in compose
-    overview = _panel('id="panel-overview"')
-    assert 'viz-charts-panel' in overview
+    visualize = _panel('id="panel-visualize"')
+    assert 'viz-charts-panel' in visualize
     sim = _panel('id="panel-simulate"')
     assert 'id="panel-runs"' not in HTML  # wrapper gone; runs render via the Sim-DB table:
     assert 'study-sim-table' in sim
@@ -48,15 +51,14 @@ def test_other_panels_untouched():
 
 
 def test_readouts_and_visualize_load_their_own_content():
-    # 5-tab study layout: the Model tab loads the readouts table; the Overview
-    # tab loads the figure charts (both re-homed from their old tabs). The
-    # per-kind dispatch branches for the removed tabs are gone.
+    # 6-tab study layout: the Model tab loads the readouts table; the
+    # Visualizations tab loads the figure charts/native gallery (opened via its
+    # own pillar). The per-kind dispatch branches for the folded tabs are gone.
     i = JS.index("function _setStudyTab")
     block = JS[i:i + 1200]
     assert "kind === 'compose'" in block and "_loadReadouts()" in block
-    assert "kind === 'overview'" in block and "_loadCharts('viz-charts-panel')" in block
-    # old single-kind loaders gone
-    assert "kind === 'visualize'" not in JS
+    assert "kind === 'visualize'" in block and "_loadCharts('viz-charts-panel')" in block
+    # old folded single-kind loaders gone
     assert "kind === 'readouts'" not in JS
     assert "kind === 'visualizations'" not in JS
     assert "kind === 'observables'" not in JS

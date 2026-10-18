@@ -180,7 +180,7 @@
   // Card-width scale — independent of the zoom band. Lets the viewer widen or
   // narrow the study cards to read the Asks/Finds text as needed. Multiplies the
   // band's cardW; persisted per viewer in localStorage.
-  var AIG_WIDTH_MIN = 0.7, AIG_WIDTH_MAX = 1.8;
+  var AIG_WIDTH_MIN = 0.7, AIG_WIDTH_MAX = 3.0;
   var aigWidthScale = (function () {
     try {
       var v = parseFloat(localStorage.getItem('aig-width-scale'));
@@ -883,6 +883,12 @@
     var link = document.querySelector('.menu-link[data-page="' + pageId + '"]');
     if (page) page.classList.add('active');
     if (link) link.classList.add('active');
+    // The docked investigation-graph panel lives OUTSIDE the .page containers, so a
+    // page switch doesn't hide it — close it whenever we leave the investigation
+    // view so it doesn't linger over Registry / Catalog / Runs / etc.
+    if (pageId !== 'investigations' && window.GraphPanel && window.GraphPanel.close) {
+      try { window.GraphPanel.close(); } catch (e) { /* ignore */ }
+    }
     // Load the faceted Market on switch, and the build_core() registry on
     // Modules / Simulation Setup / Visualizations.
     if (pageId === 'market') {
@@ -9030,6 +9036,7 @@
 
   function _wsResetStudyTabs(investigation) {
     window._wsStudyTabs = { investigation: investigation, active: null };
+    window._aigSelected = null;   // fresh investigation -> clear any selection
     _wsHighlightActiveDagNode(null);
     _aigStudyActive = false;   // no study open -> let the pane fill the screen again
     var panel = document.getElementById('ws-study-panel');
@@ -9062,6 +9069,135 @@
     } catch (e) { /* graph not mounted yet — no-op */ }
   }
   window._wsHighlightActiveDagNode = _wsHighlightActiveDagNode;
+
+  // ── Investigation-graph SELECTION (distinct from OPEN/active) ──────────────
+  // Two-stage interaction: one click SELECTS a study (a "selected" highlight +,
+  // at readable semantic-zoom bands, the full study info expanded in place); a
+  // second click on the already-selected study OPENS it (moves the "open" marker
+  // there — see _wsHighlightActiveDagNode). A node can be BOTH selected and open,
+  // showing both highlights. The selected slug lives on window so it survives the
+  // graph re-renders a band change triggers.
+  window._aigSelected = window._aigSelected || null;
+  function _aigCssEsc(s) {
+    try { if (window.CSS && CSS.escape) return CSS.escape(String(s)); } catch (e) {}
+    return String(s).replace(/["\\\]]/g, '\\$&');
+  }
+  // Expand/collapse ONE DAG node in place (unclamp Asks/Finds + reveal the full
+  // findings list). Pure DOM — no relayout (the caller restacks the column).
+  function _aigSetNodeExpanded(node, want) {
+    if (!node) return;
+    var exp = !!want;
+    node.classList.toggle('aig-node-expanded', exp);
+    node.querySelectorAll('.aig-clamp').forEach(function (el) {
+      el.style.webkitLineClamp = exp ? 'unset' : (el.getAttribute('data-clamp') || '');
+      el.style.lineClamp = exp ? 'unset' : (el.getAttribute('data-clamp') || '');
+    });
+    var _more = node.querySelector('.aig-more-findings');
+    var _all = node.querySelector('.aig-all-findings');
+    if (_more) _more.style.display = exp ? 'none' : '';
+    if (_all) _all.style.display = exp ? 'block' : 'none';
+    node.style.zIndex = exp ? '60' : '';
+    node.style.boxShadow = exp ? '0 8px 24px rgba(0,0,0,0.18)' : '';
+    node.style.whiteSpace = '';
+  }
+  window._aigSetNodeExpanded = _aigSetNodeExpanded;
+  // Re-assert the selected highlight after a (re-)render so it survives. Only the
+  // class — the full-info view lives in a floating popout (below), not inline.
+  function _aigApplySelection(slug) {
+    try {
+      var nodes = document.querySelectorAll('.iset-dag-node[data-study]');
+      for (var i = 0; i < nodes.length; i++) {
+        nodes[i].classList.toggle('aig-node-selected',
+          !!slug && nodes[i].getAttribute('data-study') === slug);
+      }
+    } catch (e) { /* graph not mounted — no-op */ }
+  }
+  window._aigApplySelection = _aigApplySelection;
+
+  // ── Selected-card POPOUT ───────────────────────────────────────────────────
+  // Selecting a study pops its full info out as a floating panel ON TOP of the
+  // window — its TOP pinned to the card's top so it grows only DOWNWARD and is
+  // never clipped by the graph pane. Always shows the full Asks / Finds / plan
+  // from the study DATA (not the band-limited inline card), so it reads well at
+  // any zoom. The panel's "Open study →" button (or a second click on the card)
+  // opens the study. Dismissed on Escape, outside click, scroll, or zoom.
+  var _aigPopoutDismiss = null;
+  function _aigCloseCardPopout() {
+    var p = document.getElementById('aig-card-popout');
+    if (p) p.remove();
+    if (_aigPopoutDismiss) {
+      document.removeEventListener('keydown', _aigPopoutDismiss, true);
+      document.removeEventListener('mousedown', _aigPopoutDismiss, true);
+      _aigPopoutDismiss = null;
+    }
+  }
+  window._aigCloseCardPopout = _aigCloseCardPopout;
+  function _aigPopoutBodyHtml(s) {
+    var q = (s.question || '').replace(/\s+/g, ' ').trim();
+    var finds = _asFindings(s.findings);
+    var H = '';
+    if (q) H += '<div style="margin-top:4px"><span style="font-weight:700;color:#475569">Asks:</span> ' + _esc(q) + '</div>';
+    H += '<div style="margin-top:12px;font-weight:700;color:#475569">Finds:</div>';
+    if (finds && finds.length) {
+      H += finds.map(function (f) {
+        return '<div style="margin-top:6px;padding-left:10px;border-left:2px solid #e2e8f0">' +
+          _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
+      }).join('');
+    } else {
+      H += '<div style="margin-top:4px;color:#94a3b8"><em>pending evidence</em></div>';
+    }
+    try { var plan = _dagPlanHtml(s); if (plan) H += '<div style="margin-top:14px">' + plan + '</div>'; } catch (e) { /* no plan layer */ }
+    return H;
+  }
+  function _aigShowCardPopout(node) {
+    _aigCloseCardPopout();
+    if (!node) return;
+    var s = node._study || {};
+    var slug = node.getAttribute('data-study') || s.name || '';
+    var headColor = node.dataset.headColor || '#2563eb';
+    var titleEl = node.querySelector('strong');
+    var title = (titleEl && titleEl.textContent) || slug;
+    var vm = null; try { vm = _verdictMeta(s); } catch (e) { /* pending */ }
+    var rect = node.getBoundingClientRect();
+    var width = Math.max(Math.min(Math.round(rect.width), 560), 400);
+    // Pin the TOP to the card's top; the panel grows downward from there.
+    var top = Math.max(8, Math.round(rect.top));
+    var left = Math.round(Math.min(Math.max(8, rect.left), (window.innerWidth || 1200) - width - 8));
+    var maxH = Math.max(160, (window.innerHeight || 800) - top - 16);
+    var pop = document.createElement('div');
+    pop.id = 'aig-card-popout';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', 'Study ' + slug);
+    pop.style.cssText = 'position:fixed;top:' + top + 'px;left:' + left + 'px;width:' + width + 'px;' +
+      'max-height:' + maxH + 'px;overflow:auto;z-index:1000;background:#fff;' +
+      'border:1px solid #e5e7eb;border-top:3px solid ' + headColor + ';border-radius:10px;' +
+      'box-shadow:0 18px 50px rgba(0,0,0,0.30);padding:12px 14px 14px;box-sizing:border-box;' +
+      'font-size:13px;line-height:1.5;color:#1e293b';
+    var vpill = vm ? '<span style="font-size:0.72em;font-weight:700;text-transform:uppercase;letter-spacing:.03em;' +
+      'padding:2px 8px;border-radius:9999px;color:#fff;background:' + vm.color + '">' + _esc(vm.label) + '</span>' : '';
+    pop.innerHTML =
+      '<div style="display:flex;align-items:flex-start;gap:8px;justify-content:space-between;margin-bottom:6px">' +
+        '<div style="font-weight:700;font-size:1.05em;line-height:1.3;color:#1e293b">' + _esc(title) + '</div>' +
+        '<button type="button" aria-label="Close" onclick="window._aigCloseCardPopout()" ' +
+          'style="flex:none;border:none;background:transparent;color:#94a3b8;font-size:18px;line-height:1;cursor:pointer;padding:0 2px">&times;</button>' +
+      '</div>' +
+      (vpill ? '<div style="margin-bottom:2px">' + vpill + '</div>' : '') +
+      _aigPopoutBodyHtml(s) +
+      '<div style="position:sticky;bottom:-14px;margin:14px -14px -14px;padding:10px 14px;background:linear-gradient(to top,#fff 70%,rgba(255,255,255,0));text-align:right">' +
+        '<button type="button" onclick="window._openStudyInsideInvestigation(\'' + _esc(slug) + '\');window._aigCloseCardPopout();" ' +
+          'style="font-size:0.9em;font-weight:600;padding:5px 14px;border:none;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Open study &rarr;</button>' +
+      '</div>';
+    document.body.appendChild(pop);
+    _aigPopoutDismiss = function (e) {
+      if (e.type === 'keydown') { if (e.key === 'Escape') _aigCloseCardPopout(); return; }
+      var t = e.target;
+      if (t && t.closest && (t.closest('#aig-card-popout') || t.closest('.iset-dag-node'))) return;
+      _aigCloseCardPopout();
+    };
+    document.addEventListener('keydown', _aigPopoutDismiss, true);
+    document.addEventListener('mousedown', _aigPopoutDismiss, true);
+  }
+  window._aigShowCardPopout = _aigShowCardPopout;
 
   // The next study along this investigation's leads-to chain, for the study
   // detail panel's "Next study →" button. Uses the server-computed studyEdges
@@ -9931,12 +10067,14 @@
   // status derived server-side (lib/plan_board) from member-study state — a
   // campaign-level roadmap rendered directly under the brief. Empty when the
   // investigation declares no plan_gates.
-  function _planBoardHtml(d) {
+  function _planBoardHtml(d, opts) {
     var gates = (d && d.plan_board) || [];
     if (!gates.length) return '';
     // Honest status set: executed gates show their real verdict (met/qualified/
     // refuted), not a cascaded "blocked". passed==met (clean); qualified = met
     // with caveats; refuted = a tested-and-refuted (off-spine) branch.
+    opts = opts || {};
+    var compact = !!opts.compact;   // slim one-row chips for the "Plan progress" tab
     var meta = {
       passed:      { cls: 'passed',    label: 'passed' },
       met:         { cls: 'passed',    label: 'met' },
@@ -9946,8 +10084,9 @@
       blocked:     { cls: 'blocked',   label: 'blocked' },
       pending:     { cls: 'pending',   label: 'pending' },
     };
-    var H = ['<section class="inv-plan-board">'];
-    H.push('<h3 class="inv-plan-board-title">Plan progress · cumulative gates</h3>');
+    var H = ['<section class="inv-plan-board' + (compact ? ' inv-plan-board-compact' : '') + '">'];
+    // The tab label already says "Plan progress" — drop the redundant heading in compact mode.
+    if (!compact) H.push('<h3 class="inv-plan-board-title">Plan progress · cumulative gates</h3>');
     H.push('<ol class="inv-plan-gates">');
     gates.forEach(function (g) {
       var sm = meta[g.status] || meta.pending;
@@ -10033,13 +10172,8 @@
     // Headline.
     if (headline) H.push('<h2 class="inv-brief-q">' + _invInline(headline) + '</h2>');
 
-    // Verdict — a colored status line.
-    if (verdict) {
-      H.push('<div class="inv-brief-verdict">' +
-        '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
-        '<span class="inv-brief-verdict-label">Current verdict</span> ' +
-        '<span class="inv-brief-verdict-text">' + _invInline(verdict) + '</span></div>');
-    }
+    // (The verdict moved out of the header into its own canonical tab below, so
+    // the long status paragraph no longer pushes the rest of the page down.)
 
     // Introduction — the full what_is_this rendered as markdown prose.
     if (whatIs) H.push('<div class="inv-brief-prose inv-brief-intro">' + _renderInvLeadMarkdown(whatIs) + '</div>');
@@ -10050,29 +10184,14 @@
     if (hyp) _meta.push('<span class="inv-brief-meta-item"><em>Hypothesis</em> ' + _invInline(hyp) + '</span>');
     if (_meta.length) H.push('<div class="inv-brief-meta">' + _meta.join('') + '</div>');
 
-    // Depth — one flat tab strip; only tabs with content are shown.
-    var tabs = [];
-    if (hasHowto)
-      tabs.push({ id:'howto', label:'How to read', html: Array.isArray(howto)
-        ? '<ol class="inv-brief-howto">' + howto.map(function(x) {
-            return '<li>' + _renderInvLeadMarkdown(String(typeof x === 'string' ? x : (x.text || x.tip || ''))).replace(/^<p>|<\/p>$/g, '') + '</li>';
-          }).join('') + '</ol>'
-        : '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(String(howto)) + '</div>' });
-    if (bio)
-      tabs.push({ id:'biology', label:'Biology', html:
-        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(bio) + '</div>' });
-    if (leadProse)
-      tabs.push({ id:'background', label:'Background', html:
-        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(leadProse) + '</div>' });
-    if (glossary.length)
-      tabs.push({ id:'glossary', label:'Glossary', html:
-        '<dl class="inv-brief-glossary">' + glossary.map(function(g) {
-          return '<dt>' + _escInv(g.term || g.name || '') + '</dt><dd>' + _escInv(g.definition || g.def || '') + '</dd>';
-        }).join('') + '</dl>' });
-    // Hypothesis & evidence — the top-level thesis as CITED claims (each
-    // {claim, cites}) plus the main claim, with citation chips resolved from
-    // references/papers.bib. So the investigation's headline reasoning traces to
-    // its sources, the same as the exported report. Only shown when declared.
+    // Canonical section set — a FIXED, ordered list of tabs so every
+    // investigation renders the SAME shape (reproducible across the workspace),
+    // not an ad-hoc union of whatever fields happen to be present. Each section
+    // maps to one canonical investigation.yaml field; a tab appears when its
+    // field is authored, always in this order. Add/remove a section in ONE place
+    // (here). Reader flow: the answer (Verdict) → context (Background, Biology) →
+    // argument (Hypothesis & evidence) → aids (How to read, Glossary) → the plan
+    // (Plan progress) → the open calls (Decisions).
     var _refsMap = d.references_resolved || {};
     function _invCite(keys) {
       keys = Array.isArray(keys) ? keys : [];
@@ -10086,9 +10205,35 @@
           _escInv(lbl) + '</span>';
       }).join('');
     }
-    var kclaims = Array.isArray(d.key_claims) ? d.key_claims : [];
-    var sciArg = d.scientific_argument || {};
-    if (kclaims.length || sciArg.main_claim) {
+
+    var tabs = [];
+
+    // 1. Verdict — the campaign's current answer (executive.verdict). First tab
+    // so the answer is what opens; the colored VS pill is kept for status.
+    if (verdict)
+      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vs.toUpperCase() : '',
+        html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
+          '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
+          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' });
+
+    // 2. Background — the lead intro (falls back to description).
+    if (leadProse)
+      tabs.push({ id:'background', label:'Background', html:
+        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(leadProse) + '</div>' });
+
+    // 3. Biology — the plain-English mechanism narrative (biological_story).
+    if (bio)
+      tabs.push({ id:'biology', label:'Biology', html:
+        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(bio) + '</div>' });
+
+    // 4. Hypothesis & evidence — the structured argument (scientific_argument
+    // main_claim + key_claims as CITED claims), with the competing interpretive
+    // frameworks FOLDED IN as a trailing note rather than a separate, usually
+    // thin tab. Citation chips resolve from references/papers.bib.
+    var kclaims    = Array.isArray(d.key_claims) ? d.key_claims : [];
+    var sciArg     = d.scientific_argument || {};
+    var frameworks = Array.isArray(d.competing_frameworks) ? d.competing_frameworks : [];
+    if (kclaims.length || sciArg.main_claim || frameworks.length) {
       var evBody = '';
       if (sciArg.main_claim)
         evBody += '<p class="inv-brief-prose" style="font-weight:600;margin:0 0 10px">' +
@@ -10102,22 +10247,43 @@
               (counter ? '#d97706' : '#cbd5e1') + '">' +
               _escInv(c.claim || c.text || '') + _invCite(c.cites) + '</li>';
           }).join('') + '</ul>';
+      if (frameworks.length)
+        evBody += '<div class="inv-brief-frameworks-fold">' +
+          '<div class="inv-brief-frameworks-label">Competing frameworks adjudicated</div>' +
+          '<ul class="inv-brief-frameworks">' + frameworks.map(function(f) {
+            f = f || {};
+            return '<li><strong>' + _escInv(f.name || '') + '</strong>' +
+              (f.relation ? ' <span class="muted">— ' + _escInv(f.relation) + '</span>' : '') + '</li>';
+          }).join('') + '</ul></div>';
       tabs.push({ id: 'evidence', label: 'Hypothesis & evidence', html: evBody });
     }
-    // Competing frameworks — the interpretive lenses this investigation
-    // adjudicates among (each {name, relation}); comparative framing for the
-    // rigor scorecard. Only shown when the investigation declares them.
-    var frameworks = Array.isArray(d.competing_frameworks) ? d.competing_frameworks : [];
-    if (frameworks.length)
-      tabs.push({ id:'frameworks', label:'Competing frameworks', html:
-        '<ul class="inv-brief-frameworks" style="margin:0;padding-left:18px">' + frameworks.map(function(f) {
-          f = f || {};
-          return '<li><strong>' + _escInv(f.name || '') + '</strong>' +
-            (f.relation ? ' <span class="muted">— ' + _escInv(f.relation) + '</span>' : '') + '</li>';
-        }).join('') + '</ul>' });
 
-    // Decisions — the open expert decisions as their own tab, HIGHLIGHTED to draw
-    // attention when any are open (rather than a space-consuming always-open card).
+    // 5. How to read — evaluator tips (string prose or a list of tips).
+    if (hasHowto)
+      tabs.push({ id:'howto', label:'How to read', html: Array.isArray(howto)
+        ? '<ol class="inv-brief-howto">' + howto.map(function(x) {
+            return '<li>' + _renderInvLeadMarkdown(String(typeof x === 'string' ? x : (x.text || x.tip || ''))).replace(/^<p>|<\/p>$/g, '') + '</li>';
+          }).join('') + '</ol>'
+        : '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(String(howto)) + '</div>' });
+
+    // 6. Glossary — investigation-local term definitions.
+    if (glossary.length)
+      tabs.push({ id:'glossary', label:'Glossary', html:
+        '<dl class="inv-brief-glossary">' + glossary.map(function(g) {
+          return '<dt>' + _escInv(g.term || g.name || '') + '</dt><dd>' + _escInv(g.definition || g.def || '') + '</dd>';
+        }).join('') + '</dl>' });
+
+    // 7. Plan progress — the campaign's cumulative gates (A→E), compacted behind
+    // a tab rather than a space-consuming always-open board under the brief.
+    var _planHtml = _planBoardHtml(d, { compact: true });
+    if (_planHtml) {
+      var _pb = d.plan_board || [];
+      var _passed = _pb.filter(function (g) { return g.status === 'passed'; }).length;
+      tabs.push({ id:'plan', label:'Plan progress', html:_planHtml,
+        badge: _pb.length ? (_passed + '/' + _pb.length + ' gates') : '' });
+    }
+
+    // 8. Decisions — the open expert decisions, HIGHLIGHTED when any are open.
     var _decHtml = _invDecisionTabHtml(d);
     if (_decHtml) {
       var _nDec = (((d.executive || {}).decisions_needed) || []).length;
@@ -10359,10 +10525,12 @@
         // Lead paragraph: render lead (preferred) or fall back to description.
         // Light markdown: paragraph splits, * bullets, `code`, **bold**.
         var leadEl = document.getElementById('investigation-detail-description');
-        // The inquiry brief renders the full opening — headline, verdict, meta,
-        // and the how-to-read / biology / background / glossary tabs — from `d`.
-        // The plan-progress board (cumulative gates A→E, live status) follows it.
-        leadEl.innerHTML = _renderInvOpening(d) + _planBoardHtml(d);
+        // The inquiry brief renders the full opening — headline, intro, meta, and
+        // the fixed canonical tab strip (Verdict / Background / Biology /
+        // Hypothesis & evidence / How to read / Glossary / Plan progress /
+        // Decisions) — all from `d`. The plan-progress board now lives inside its
+        // own compact tab (not appended as a separate board below).
+        leadEl.innerHTML = _renderInvOpening(d);
 
         // Decision cockpit: the open expert decisions + campaign plan, surfaced
         // prominently directly under the brief (built from d.executive).
@@ -10427,12 +10595,15 @@
     if (s === 'medium') return { dot: '#f59e0b', bg: '#fffbeb', bd: '#f59e0b', col: '#92400e' };
     return { dot: '#3b82f6', bg: '#eff6ff', bd: '#3b82f6', col: '#1e40af' };  // low / default
   }
-  // Scroll the needs-attention detail block into view + open it (from the chip).
+  // Needs-attention is a SINGLE surface now — the toolbar chip. Clicking it opens
+  // the same rich scan popover used for "all clear" (per-check pass counts + a
+  // drill-in link per flagged item). The old in-body banner that duplicated this
+  // below the header is gone. Kept as a named entry point for any caller: anchor
+  // the popover on the chip button.
   function _aigShowNeedsAttention() {
-    var b = document.getElementById('investigation-needs-attention');
-    if (!b) return;
-    var d = b.querySelector('details'); if (d) d.open = true;
-    if (b.scrollIntoView) { try { b.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ } }
+    var chip = document.querySelector('#aig-needs-attention-chip .aig-na-chip')
+            || document.getElementById('aig-needs-attention-chip');
+    if (chip && window._aigShowAllClearInfo) window._aigShowAllClearInfo(chip);
   }
   window._aigShowNeedsAttention = _aigShowNeedsAttention;
 
@@ -10547,7 +10718,7 @@
     else setTimeout(open, 60);
   };
   document.addEventListener('click', function (e) {
-    if (e.target.closest && (e.target.closest('#aig-allclear-pop') || e.target.closest('.aig-na-clear'))) return;
+    if (e.target.closest && (e.target.closest('#aig-allclear-pop') || e.target.closest('.aig-na-chip'))) return;
     _aigCloseAllClearInfo();
   }, true);
 
@@ -10575,75 +10746,18 @@
       }
       var bySev = d.summary.by_severity || {};
       var high = bySev.high || 0;
-      // Compact clickable chip in the toolbar; the full list stays in the block.
+      // Compact clickable chip in the toolbar — the SOLE needs-attention surface.
+      // Clicking it opens the rich scan popover (per-check counts + drill-in per
+      // flagged item); there is no longer a duplicate in-body banner.
       if (chip) chip.innerHTML =
         '<button type="button" class="aig-na-chip aig-na-flag' + (high ? ' aig-na-high' : '') + '" '
-        + 'onclick="window._aigShowNeedsAttention()" '
+        + 'onclick="window._aigShowAllClearInfo(this)" '
         + 'title="' + high + ' high · ' + total + ' total — click for details">⚠ ' + total
         + ' need' + (total === 1 ? 's' : '') + ' attention</button>';
-      var head = '⚠ Needs attention — ' + high + ' high, ' + total + ' total';
-      // Human-readable name + which study tab a click should land on, per kind.
-      // These are follow-ups the deterministic scan flags — NOT app updates.
-      var _naKindMeta = {
-        diagnostic_branch_needed: {label: 'Diagnostic study needed', tab: 'conclusions'},
-        next_action_ready:        {label: 'Next action ready',        tab: 'conclusions'},
-        invariant_regression:     {label: 'Invariant regression',     tab: 'conclusions'},
-        uncovered_ac:             {label: 'Acceptance criterion uncovered', tab: 'tests'},
-        open_feedback:            {label: 'Open expert feedback',      tab: 'overview'}
-      };
-      var items = (d.items || []).map(function(it) {
-        var st = _naSeverityStyle(it.severity);
-        var ref = (it.study || it.ref || '').toString();
-        var kindRaw = (it.kind || '').toString();
-        var meta = _naKindMeta[kindRaw] || {label: kindRaw.replace(/_/g, ' '), tab: 'conclusions'};
-        var refHtml = ref ? '<code>' + _esc(ref) + '</code>' : '<span class="muted">—</span>';
-        var hint = it.action_hint ? ' &nbsp;·&nbsp; ' + _esc(it.action_hint.toString()) : '';
-        var titleLine = it.title
-          ? '<div style="font-size:0.9em;margin-top:2px">' + _esc(it.title.toString()) + '</div>'
-          : '';
-        // Clickable when the item names a study: open it at the relevant tab
-        // (verdict-based items → the conclusions/Decide tab).
-        var open = ref
-          ? ' role="button" tabindex="0" onclick="_openStudyInsideInvestigation(\'' + _esc(ref) + '\',\'' + meta.tab + '\')"'
-            + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}"'
-            + ' title="Open study &quot;' + _esc(ref) + '&quot; at its verdict"'
-          : '';
-        var arrow = ref ? '<span style="float:right;opacity:.55;font-size:0.9em">open →</span>' : '';
-        return '<li class="na-item' + (ref ? ' na-item-click' : '') + '"' + open
-          + ' style="margin-top:7px;padding:5px 8px 6px 10px;border-left:3px solid ' + st.bd + ';border-radius:4px'
-          + (ref ? ';cursor:pointer' : '') + '">'
-          + arrow
-          + '<span style="color:' + st.dot + ';font-weight:700">●</span> '
-          + '<strong style="font-size:0.9em">' + _esc(meta.label) + '</strong> &nbsp;·&nbsp; ' + refHtml + hint
-          + titleLine + '</li>';
-      }).join('');
-      var byKind = d.summary.by_kind || {};
-      var breakdown = Object.keys(byKind).sort(function(a, b) {
-        return (byKind[b] || 0) - (byKind[a] || 0);
-      }).map(function(k) {
-        var m = _naKindMeta[k];
-        return (byKind[k] || 0) + '× ' + _esc(m ? m.label : k.replace(/_/g, ' '));
-      }).join(' &nbsp;·&nbsp; ');
-      var sev = _naSeverityStyle(high ? 'high' : 'medium');
-      // Plain-language explainer so the panel is self-describing (the user asked
-      // "what ARE these?"): they're automated follow-ups, and each is clickable.
-      var explain = '<div class="muted" style="font-size:0.84em;margin:2px 14px 4px;line-height:1.45">'
-        + 'Automated checks (no AI) that flag studies needing a follow-up — e.g. a study whose '
-        + 'verdict is <em>failed</em> or <em>needs-calibration</em> but has no diagnostic study seeded '
-        + 'to investigate why. Not app updates. <strong>Click any item</strong> to open that study at the verdict.</div>';
-      container.innerHTML =
-        '<details class="needs-attention-banner" style="margin:10px 0 14px 0;background:' + sev.bg
-        + ';border:1px solid ' + sev.bd + ';border-left-width:5px;border-radius:6px;color:' + sev.col + '">'
-        + '<summary style="padding:10px 14px;cursor:pointer;list-style:none;outline:none">'
-        + '<strong>' + head + '</strong>'
-        + '<span class="na-toggle-hint" style="opacity:.6;font-style:italic;font-size:0.85em;margin-left:8px">— click to expand</span>'
-        + (breakdown ? '<div class="muted" style="font-size:0.82em;margin-top:5px">' + breakdown + '</div>' : '')
-        + '</summary>'
-        + explain
-        + '<ul style="margin:4px 0 12px 0;padding:0 14px 0 18px;list-style:none;font-size:0.92em">'
-        + items + '</ul>'
-        + '</details>';
-    }).catch(function() { /* tolerant — leave the panel empty */ });
+      // The flagged items + per-check breakdown render inside the chip's popover
+      // (window._aigShowAllClearInfo, which reads window._lastNeedsAttention set
+      // above). No in-body banner is drawn — the chip is the single surface.
+    }).catch(function() { /* tolerant — leave the chip empty */ });
   }
   window._renderInvNeedsAttention = _renderInvNeedsAttention;
 
@@ -11425,18 +11539,10 @@
   }
 
   function _dagCacheBadgeHtml(slug) {
-    var st = _dagTriggerBySlug[slug];
-    if (!st) return '';
-    var cached = !!st.cached;
-    var bg = cached ? '#dcfce7' : '#f1f5f9';
-    var fg = cached ? '#166534' : '#475569';
-    var label = cached ? '● cached' : '○ compute';
-    var tip = cached
-      ? 'Output artifact is in the store — this study is pulled, not recomputed'
-      : 'No cached artifact — this study computes when triggered';
-    return '<span class="dag-cache-badge" title="' + _esc(tip) + '" ' +
-      'style="display:inline-block;font-size:0.62em;font-weight:700;padding:1px 7px;' +
-      'border-radius:9999px;background:' + bg + ';color:' + fg + '">' + label + '</span>';
+    // The cached/compute badge ("● cached" / "○ compute") was removed from the
+    // graph cards — it carried no useful signal for browsing. Kept as a no-op so
+    // existing call sites need no change.
+    return '';
   }
 
   function _dagTriggerControlsHtml(slug) {
@@ -11608,17 +11714,21 @@
     var _storedOrient = _getStoredGraphOrientation(window._currentIset);
     var orient = _storedOrient ||
       (window.chooseGraphOrientation ? window.chooseGraphOrientation(depthCounts) : 'LR');
-    // When the graph is hosted in the dockable side panel, its orientation MUST
-    // follow the dock side and stay put across re-renders (a zoom/band change
-    // re-renders): left/right → vertical (TB), top/bottom → horizontal (LR). Don't
-    // let a stored or auto value flip it back (the "docked on the side, then zoom
-    // → jumps to the top layout" bug).
-    var _fsEl = document.getElementById('investigation-dag-fs');
-    if (_fsEl && _fsEl.closest && _fsEl.closest('#viv-graph-panel')) {
-      var _gp = document.getElementById('viv-graph-panel');
-      var _dock = _gp && _gp.dataset ? _gp.dataset.dock : '';
-      if (_dock === 'left' || _dock === 'right') orient = 'TB';
-      else if (_dock === 'top' || _dock === 'bottom') orient = 'LR';
+    // When the graph is hosted in the dockable side panel, the DOCK SIDE sets the
+    // DEFAULT orientation (left/right → vertical TB, top/bottom → horizontal LR)
+    // and keeps it stable across re-renders (a zoom/band change re-renders, which
+    // must not flip an auto value — the "docked on the side, then zoom → jumps to
+    // the top layout" bug). But a MANUAL choice via the LAYOUT ⇄/↕ buttons
+    // (_storedOrient) still wins, so the toggle keeps working while docked — the
+    // dock side only changes the default, it doesn't lock the orientation.
+    if (!_storedOrient) {
+      var _fsEl = document.getElementById('investigation-dag-fs');
+      if (_fsEl && _fsEl.closest && _fsEl.closest('#viv-graph-panel')) {
+        var _gp = document.getElementById('viv-graph-panel');
+        var _dock = _gp && _gp.dataset ? _gp.dataset.dock : '';
+        if (_dock === 'left' || _dock === 'right') orient = 'TB';
+        else if (_dock === 'top' || _dock === 'bottom') orient = 'LR';
+      }
     }
     if (shellEl) { shellEl.classList.remove('aig-orient-lr', 'aig-orient-tb'); shellEl.classList.add(orient === 'TB' ? 'aig-orient-tb' : 'aig-orient-lr'); }
     _syncGraphOrientToggleUI(orient, !!_storedOrient);
@@ -11718,37 +11828,48 @@
       // Stamp the slug so _wsHighlightActiveDagNode can mark the node whose
       // study is open in the detail panel below.
       node.dataset.study = s.name;
-      // Single click EXPANDS the card in place — interrogate the Asks/Finds and
-      // every finding without leaving the graph. The ↗ control opens the full
-      // study. (Previously a card click navigated straight to the study, which
-      // made the graph un-browsable.)
+      // Expand/collapse this card in place (shared pure-DOM helper), then
+      // restack the column so the grown/shrunk card doesn't overlap neighbours.
       var _toggleExpand = function () {
-        var exp = node.classList.toggle('aig-node-expanded');
-        node.querySelectorAll('.aig-clamp').forEach(function (el) {
-          el.style.webkitLineClamp = exp ? 'unset' : (el.getAttribute('data-clamp') || '');
-          el.style.lineClamp = exp ? 'unset' : (el.getAttribute('data-clamp') || '');
-        });
-        var _more = node.querySelector('.aig-more-findings');
-        var _all = node.querySelector('.aig-all-findings');
-        if (_more) _more.style.display = exp ? 'none' : '';
-        if (_all) _all.style.display = exp ? 'block' : 'none';
-        node.style.zIndex = exp ? '60' : '';
-        node.style.boxShadow = exp ? '0 8px 24px rgba(0,0,0,0.18)' : '';
-        node.style.whiteSpace = '';
-        // Re-stack the column so the grown/shrunk card doesn't overlap its
-        // neighbours (keeps the expanded card's elevated z-index/shadow).
+        _aigSetNodeExpanded(node, !node.classList.contains('aig-node-expanded'));
         if (_relayoutDag) _relayoutDag(false);
       };
-      // At the lowest detail (names-only, band 0) the card is too small to expand
-      // usefully, so the WHOLE card opens the study and the ↗ button is dropped.
-      // At higher detail a click expands in place and ↗ opens the study.
+      // Three distinct gestures:
+      //   • first click on the card → SELECT only (highlight; no popout, no open).
+      //   • "… click to show" (the +N-more affordance) → POP the full info out as
+      //     a floating panel pinned to the card's top. Just a reader — it does NOT
+      //     move the "open" marker.
+      //   • second click on the selected card → OPEN it as the open study.
+      // A study can be both selected and open (then the "open" marker wins).
       var _namesOnly = (aigBand === 0);
-      node.onclick = _namesOnly
-        ? function () { _openStudyInsideInvestigation(s.name); }
-        : _toggleExpand;
-      node.title = _namesOnly
-        ? (s.name + ' — ' + confidence + '\n\nClick to open this study')
-        : (s.name + ' — ' + confidence + '\n\nClick to expand in place · ↗ opens the full study');
+      var _selectThis = function () {
+        if (window._aigSelected === s.name) return;
+        if (window._aigSelected) {
+          var prev = nodesHost.querySelector(
+            '.iset-dag-node[data-study="' + _aigCssEsc(window._aigSelected) + '"]');
+          if (prev) prev.classList.remove('aig-node-selected');
+        }
+        window._aigSelected = s.name;
+        node.classList.add('aig-node-selected');
+      };
+      var _aigNodeClick = function () {
+        if (window._aigSelected === s.name) {
+          _aigCloseCardPopout();
+          _openStudyInsideInvestigation(s.name);   // second click opens
+          return;
+        }
+        _selectThis();                             // first click: select only
+      };
+      // "click to show" → select (if needed) + pop the full card out. Explicitly
+      // NOT an open: this gesture only reveals, it never moves the open marker.
+      var _popoutFromShow = function (ev) {
+        ev.stopPropagation();
+        _selectThis();
+        _aigShowCardPopout(node);
+      };
+      node.onclick = _aigNodeClick;
+      node.title = s.name + ' — ' + confidence +
+        '\n\nClick to select · click again to open the study · "click to show" pops out the full card';
       var x = (orient === 'TB')
         ? rowStartX[depth[s.name]] + breadthIndex[s.name] * (CARD_W + BREADTH_GAP)
         : PAD_X + depth[s.name] * (CARD_W + DEPTH_GAP);
@@ -11770,9 +11891,11 @@
       }
       node.innerHTML =
         // Meta row — two prominent, equally-weighted pills on the left (PROGRESS
-        // = execution status, VERDICT = what the evidence supports), evidence pips
-        // + open-study ↗ on the right. Two parallel facts: how far it got, and
-        // what it found. The pills wrap under each other on a narrow card.
+        // = execution status, VERDICT = what the evidence supports) + evidence
+        // pips on the right. Two parallel facts: how far it got, and what it
+        // found. The pills wrap under each other on a narrow card. (The ↗
+        // open-study button was removed — a second click on the selected card
+        // opens it.)
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px">' +
           '<span style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
             _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact) +
@@ -11782,11 +11905,6 @@
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
             _tierPipsHtml(s) +
-            // Names-only (band 0): no ↗ — the whole card opens the study.
-            (_namesOnly ? '' :
-              '<button class="aig-open-study" title="Open the full study" aria-label="Open the full study" ' +
-                'onclick="event.stopPropagation(); _openStudyInsideInvestigation(\'' + _esc(s.name) + '\')" ' +
-                'style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;font-size:0.72em;line-height:1;padding:2px 5px;cursor:pointer">↗</button>') +
           '</span>' +
         '</div>' +
         '<strong style="display:block;font-size:0.85em;line-height:1.3;color:#1e293b">' + _esc(prettyTitle) + '</strong>' +
@@ -11800,18 +11918,14 @@
               (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
             '</div>'
           : '') +
-        // Collapsed indicator (default) + the full findings list (revealed on
-        // expand). Clicking the card toggles between them.
-        (_opts.finds && moreN
-          ? '<div class="aig-more-findings" style="font-size:0.72em;margin-top:3px;color:#94a3b8;cursor:pointer">+' + moreN +
-              ' more finding' + (moreN === 1 ? '' : 's') + ' — click to show</div>' +
-            '<div class="aig-all-findings" style="display:none;font-size:0.72em;margin-top:4px;line-height:1.4;color:#64748b">' +
-              findings.map(function (f) {
-                return '<div style="margin-top:3px">• ' +
-                  _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
-              }).join('') +
-            '</div>'
-          : '') +
+        // Universal "click to show" affordance: pops the full card out so ANY
+        // card's details are readable the same way — at EVERY zoom band,
+        // including the lowest (names-only, band 0) where the card shows nothing
+        // but its title. The full Asks/Finds/plan live in the popout, not inline.
+        ('<div class="aig-more-findings" style="font-size:0.72em;margin-top:6px;color:#7c3aed;font-weight:600;cursor:pointer">⤢ ' +
+              (moreN ? ('+' + moreN + ' more finding' + (moreN === 1 ? '' : 's') + ' — click to show')
+                     : 'click to show full card') +
+            '</div>') +
         // Full-magnification Plan layer: declared contract + mechanisms +
         // models/methods + success criteria (semantic-zoom band 2 only).
         (_opts.plan ? _dagPlanHtml(s) : '') +
@@ -11828,6 +11942,8 @@
         _dagDownloadControlsHtml(s.name) +
         _dagTriggerControlsHtml(s.name);
       node._followUps = followUps;
+      node._study = s;                       // the selected-card popout reads this
+      node.dataset.headColor = headColor;    // match the popout's top accent
       nodesHost.appendChild(node);
       // Wire the pull-or-compute buttons (stopPropagation so the card's own
       // click-to-open handler doesn't also fire).
@@ -11845,15 +11961,21 @@
       });
       var _badge = node.querySelector('.aig-status-badge');
       if (_badge) {
-        var _openReason = function (ev) {
-          ev.stopPropagation();
-          // Interrogate in place — expand the card (its findings/evidence are
-          // right here). The ↗ button opens the full study.
-          _toggleExpand();
-        };
-        _badge.addEventListener('click', _openReason);
-        _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _openReason(ev); } });
+        // Clicking the status pill behaves like clicking the card: select (then
+        // a second click opens), so the interaction is consistent everywhere.
+        var _onBadge = function (ev) { ev.stopPropagation(); _aigNodeClick(); };
+        _badge.addEventListener('click', _onBadge);
+        _badge.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _onBadge(ev); } });
       }
+      // "+N more … click to show" → pop the full card out (reader only, no open).
+      node.querySelectorAll('.aig-more-findings').forEach(function (el) {
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        el.addEventListener('click', _popoutFromShow);
+        el.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _popoutFromShow(ev); }
+        });
+      });
       if (chainsBySlug && window._groupClaims && window._openInvestigationDrawer) {
         (function (study, chain) {
           var claims = window._groupClaims(chain);
@@ -12053,6 +12175,8 @@
     _renderGraphBarNav();
     // Re-apply the open-study highlight after a (re-)render so it survives.
     _wsHighlightActiveDagNode(window._wsStudyTabs && window._wsStudyTabs.active);
+    // Re-apply the SELECTED highlight after a (re-)render so it survives.
+    if (window._aigSelected) _aigApplySelection(window._aigSelected);
     }
     // Run once synchronously, then correct once final layout settles: the next
     // animation frame catches post-innerHTML reflow, and document.fonts.ready
@@ -12128,8 +12252,76 @@
     var vs = document.getElementById('aig-view-zoom-slider');
     if (vs && document.activeElement !== vs) vs.value = String((Math.round(z * 100) / 100));
   }
+  // ── Zoom anchored on the SELECTED study ───────────────────────────────────
+  // Zooming should keep the study you're looking at (the selected one, else the
+  // open one) in the same spot on screen, so you don't have to chase it around.
+  // Capture its on-screen centre before zoom, re-measure after, and scroll the
+  // shell by the delta. Falls back to no anchoring when nothing is selected/open.
+  function _aigNodeCentreInShell(shell, slug) {
+    var node = shell.querySelector('.iset-dag-node[data-study="' + _aigCssEsc(slug) + '"]');
+    if (!node) return null;
+    var sr = shell.getBoundingClientRect();
+    var nr = node.getBoundingClientRect();
+    return { x: (nr.left + nr.width / 2) - sr.left, y: (nr.top + nr.height / 2) - sr.top };
+  }
+  // The node to hold fixed while zooming: the SELECTED one if it's on screen,
+  // otherwise the node nearest the current viewport centre — i.e. whatever the
+  // user is looking at. Anchoring on the open node (which may be anywhere, even
+  // off-screen) is what made a docked zoom yank the view back to the top.
+  function _aigCaptureAnchor() {
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell) return null;
+    var nodes = shell.querySelectorAll('.iset-dag-node[data-study]');
+    if (!nodes.length) return null;
+    var sr = shell.getBoundingClientRect();
+    var cxV = sr.width / 2, cyV = sr.height / 2;
+    var measure = function (n) {
+      var r = n.getBoundingClientRect();
+      return {
+        x: (r.left + r.width / 2) - sr.left,
+        y: (r.top + r.height / 2) - sr.top,
+        vis: r.bottom > sr.top && r.top < sr.bottom && r.right > sr.left && r.left < sr.right,
+      };
+    };
+    // Prefer the selected node when it's actually visible.
+    if (window._aigSelected) {
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].getAttribute('data-study') === window._aigSelected) {
+          var so = measure(nodes[i]);
+          if (so.vis) return { slug: window._aigSelected, x: so.x, y: so.y };
+          break;
+        }
+      }
+    }
+    // Otherwise the visible node closest to the viewport centre.
+    var best = null, bestO = null, bestD = Infinity;
+    for (var j = 0; j < nodes.length; j++) {
+      var o = measure(nodes[j]);
+      if (!o.vis) continue;
+      var d = (o.x - cxV) * (o.x - cxV) + (o.y - cyV) * (o.y - cyV);
+      if (d < bestD) { bestD = d; best = nodes[j]; bestO = o; }
+    }
+    return best ? { slug: best.getAttribute('data-study'), x: bestO.x, y: bestO.y } : null;
+  }
+  function _aigRestoreAnchor(a) {
+    if (!a) return;
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell) return;
+    var apply = function () {
+      var c = _aigNodeCentreInShell(shell, a.slug);
+      if (!c) return;
+      shell.scrollLeft += (c.x - a.x);
+      shell.scrollTop  += (c.y - a.y);
+    };
+    apply();                                            // after the synchronous layout
+    if (typeof requestAnimationFrame === 'function')    // and again after the rAF relayout
+      requestAnimationFrame(apply);
+  }
+
   function _setAigUnifiedZoom(u, isUser) {
     if (_aigApplyingUnified) return;
+    _aigCloseCardPopout();                 // the popout is anchored to screen — drop it on zoom
+    var _anchor = _aigCaptureAnchor();
     _aigApplyingUnified = true;
     try {
       if (isUser) _aigUserZoomed = true;
@@ -12139,6 +12331,7 @@
       _applyAigZoom();                                // apply when band unchanged
       _aigSyncZoomUI(m.band, aigZoom, u);
     } finally { _aigApplyingUnified = false; }
+    _aigRestoreAnchor(_anchor);
   }
   window._setAigUnifiedZoom = _setAigUnifiedZoom;
   // Fine-grained controls (in the ⚙ popover) call this so the auto-fill default
@@ -12205,6 +12398,12 @@
       shell.style.height = fitH + 'px';
       setTimeout(function () { shell._aigProgrammaticResize = false; }, 60);
     }
+    // One-time: scrolling the pane moves the graph under the screen-anchored
+    // selected-card popout, so dismiss it on scroll.
+    if (!shell._aigPopoutScrollBound) {
+      shell._aigPopoutScrollBound = true;
+      shell.addEventListener('scroll', function () { _aigCloseCardPopout(); }, { passive: true });
+    }
     // One-time: watch for a genuine user resize (drag of the resize handle) so
     // auto-fit steps aside once they've set a height themselves.
     if (!shell._aigResizeObserved && typeof ResizeObserver !== 'undefined') {
@@ -12228,12 +12427,21 @@
     var _zs = document.getElementById('aig-view-zoom-slider');
     if (_zs && document.activeElement !== _zs) _zs.value = String(aigZoom);
   }
-  function _aigZoomBy(f) { aigZoom = Math.max(0.3, Math.min(2.2, aigZoom * f)); _applyAigZoom(); }
+  function _aigZoomBy(f) {
+    _aigCloseCardPopout();
+    var _anchor = _aigCaptureAnchor();
+    aigZoom = Math.max(0.3, Math.min(2.2, aigZoom * f));
+    _applyAigZoom();
+    _aigRestoreAnchor(_anchor);
+  }
   // Absolute zoom from the Zoom slider (same control style as Detail/Width).
   function _setAigZoom(v) {
+    _aigCloseCardPopout();
+    var _anchor = _aigCaptureAnchor();
     aigZoom = Math.max(0.3, Math.min(2, Number(v) || 1));
     _applyAigZoom();
     if (!_aigApplyingUnified) _aigSyncZoomUI(aigBand, aigZoom);
+    _aigRestoreAnchor(_anchor);
   }
   window._setAigZoom = _setAigZoom;
   // Collapse the inline investigation graph to a thin "Investigation graph" bar
@@ -12586,15 +12794,10 @@
       else if (e.deltaMode === 2) d *= 400;      // page mode
       var newU = Math.max(0, Math.min(100, curU - d * 0.06));   // up = zoom in
       if (Math.abs(newU - curU) < 0.01) return;
-      // Anchor the zoom on the cursor (view-zoom scaling only; a band change
-      // reflows the layout, where exact anchoring doesn't apply).
-      var rect = shell.getBoundingClientRect();
-      var cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-      var oldZoom = aigZoom, oldSL = shell.scrollLeft, oldST = shell.scrollTop;
+      // Scroll anchoring is handled inside _setAigUnifiedZoom (it holds the
+      // viewport-centre study fixed, docked or inline, across both the scale and
+      // any band re-render) — no separate math here, which previously fought it.
       _setAigUnifiedZoom(newU, true);
-      var ratio = (aigZoom || 1) / (oldZoom || 1);
-      shell.scrollLeft = (oldSL + cx) * ratio - cx;
-      shell.scrollTop = (oldST + cy) * ratio - cy;
     }, { passive: false });
   }
   window._aigWireWheelZoom = _aigWireWheelZoom;
@@ -12607,6 +12810,7 @@
     if (sl && String(sl.value) !== String(nb)) sl.value = String(nb);
     // No band change → keep the slider synced (above) but skip the re-render.
     if (nb === aigBand) return;
+    _aigCloseCardPopout();   // layout changes under it — drop the anchored popout
     aigBand = nb;
     if (!_aigApplyingUnified) _aigSyncZoomUI(aigBand, aigZoom);
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);

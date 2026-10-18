@@ -8,16 +8,15 @@ def test_drawer_element_present():
     assert 'id="investigation-detail-drawer-body"' in html
 
 
-def test_dag_card_opens_full_study_not_drawer():
-    # A DAG node click toggles expand/collapse; the full study is opened from the
-    # node's inline button (guarded with stopPropagation so it doesn't also
-    # toggle). The quick-look side-card drawer is no longer wired from the graph.
+def test_dag_card_selects_then_opens_not_drawer():
+    # A DAG node click SELECTS the study (first click) and OPENS it (second click
+    # on the selected node); the old ↗ open button is gone. The quick-look
+    # side-card drawer is no longer wired from the graph.
     js = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text()
-    # Click expands at higher detail (_toggleExpand) and opens the study at the
-    # lowest detail (names-only, band 0); the ↗ button opens it at higher detail.
-    assert "node.onclick = _namesOnly" in js
-    assert "_toggleExpand" in js
-    assert "event.stopPropagation(); _openStudyInsideInvestigation(" in js
+    assert "node.onclick = _aigNodeClick" in js
+    assert "window._aigSelected" in js
+    assert "_openStudyInsideInvestigation(s.name)" in js   # second click opens
+    assert "aig-open-study" not in js                       # ↗ button removed
     assert "_openInvestigationDrawer('study', s)" not in js
     assert "aig-claim-row" in js            # claim-row rendering still present
     assert "stopPropagation" in js          # row clicks don't double-trigger the card

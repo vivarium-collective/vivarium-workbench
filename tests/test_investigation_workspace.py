@@ -155,16 +155,24 @@ def test_dockable_graph_and_graph_bar_navigator():
     assert "_wsResetStudyTabs" in exitb
 
 
-def test_docked_graph_whole_node_click_opens_study():
-    """In the names-only graph (band 0) a click anywhere on a study node opens
-    that study (the card is too small to expand usefully); at higher detail a
-    click expands in place and ↗ opens the study. Scoped at click time via the
-    aigBand detail level (#1370 unified the study-open entry points)."""
-    i = JS.index("node.onclick = _namesOnly")
-    body = JS[i:i + 200]
-    assert "aigBand === 0" in JS[i - 200:i]         # names-only is the band-0 case
-    assert "_openStudyInsideInvestigation(s.name)" in body
-    assert "_toggleExpand" in body                  # inline fallback preserved
+def test_dag_node_click_selects_then_opens():
+    """Three distinct gestures: (1) a first card click SELECTS only (highlight,
+    no popout, no open); (2) the "+N more … click to show" affordance pops the
+    full info out as a floating panel (reader only, never opens); (3) a second
+    click on the selected card opens it. The ↗ open button was removed."""
+    assert "node.onclick = _aigNodeClick" in JS
+    # First click selects only — the node handler does NOT show the popout.
+    j = JS.index("var _aigNodeClick =")
+    node_body = JS[j:j + 400]
+    assert "window._aigSelected === s.name" in node_body     # already-selected → open
+    assert "_openStudyInsideInvestigation(s.name)" in node_body
+    assert "_selectThis()" in node_body                      # first click: select only
+    assert "_aigShowCardPopout" not in node_body             # NOT from the card click
+    # The "click to show" affordance pops the full card out (no open).
+    p = JS.index("var _popoutFromShow =")
+    popout_body = JS[p:p + 300]
+    assert "_aigShowCardPopout(node)" in popout_body
+    assert "aig-more-findings" in JS                          # wired to the show affordance
 
 
 def test_floating_graph_hides_prose_when_study_open():
@@ -253,9 +261,11 @@ def test_needs_attention_is_a_compact_toolbar_chip():
     # "✓ Nothing needs attention" banner.
     assert "aig-na-clear" in body and "All clear" in body
     assert "Nothing needs attention" not in body     # old big all-clear banner gone
-    # Needs state is a clickable chip that opens the detail list.
+    # Needs state is a clickable chip that opens the detail list (in a popover —
+    # the single surface; the old in-body banner is gone).
     assert "aig-na-flag" in body
-    assert "_aigShowNeedsAttention" in body
+    assert "_aigShowAllClearInfo" in body
+    assert "needs-attention-banner" not in body      # no duplicate in-body banner
     css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
     assert ".aig-na-chip" in css
 
@@ -368,18 +378,21 @@ def test_save_analyses_reads_checklist_selection():
 
 def test_plan_board_renders_from_detail_payload():
     """The investigation overview renders the plan-progress board (cumulative
-    gates A→E) from `d.plan_board`, mounted under the inquiry brief."""
+    gates A→E) from `d.plan_board`, compacted inside its own "Plan progress"
+    brief tab (not an always-open board below the brief)."""
     assert "function _planBoardHtml" in JS
     i = JS.index("function _planBoardHtml")
     body = JS[i:JS.index("window._planBoardHtml", i)]
     assert "d.plan_board" in body                       # reads the derived board
     assert "inv-plan-gate" in body                      # one node per gate
     assert "inv-gate-status-" in body                   # colored live status
+    assert "inv-plan-board-compact" in body             # compact variant for the tab
     # Honest status set: executed gates show their real verdict, incl. the
     # met-with-caveats (qualified) and tested-and-refuted (refuted) outcomes.
     for st in ("passed", "met", "qualified", "refuted", "progress", "blocked", "pending"):
         assert st in body                               # all states handled
     # Off-spine branch (e.g. a refuted side-question) marked distinctly.
     assert "off_spine" in body and "inv-gate-branch" in body
-    # Mounted under the brief in _renderInvOpening's consumer.
-    assert "_renderInvOpening(d) + _planBoardHtml(d)" in JS
+    # Mounted as a canonical brief tab (compact), not appended as a separate board.
+    assert "id:'plan', label:'Plan progress'" in JS
+    assert "_planBoardHtml(d, { compact: true })" in JS

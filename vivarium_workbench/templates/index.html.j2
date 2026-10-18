@@ -1543,9 +1543,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <!-- Run-progress panel: rendered while a run-unblocked job is active. -->
     <div id="investigation-run-progress" class="inv-run-progress" style="display:none"></div>
 
-    <!-- Needs-attention elevated: a distinct, actionable banner directly below the
-         header. Populated by JS from /api/needs-attention; renders nothing when empty. -->
-    <div id="investigation-needs-attention"></div>
+    <!-- Needs-attention is a single surface: the toolbar chip (#aig-needs-attention-chip)
+         opens the deterministic scan in a popover. The old in-body banner that
+         duplicated it here has been removed. -->
 
     <div id="investigation-intro" class="inv-intro" style="margin: 0 0 16px 0;">
       <!-- Inquiry brief: the question as headline → verdict answers it as a
@@ -1627,7 +1627,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           </div>
           <div class="aig-settings-row">
             <label class="aig-tb-label" for="aig-width-slider">Width</label>
-            <input id="aig-width-slider" class="aig-tb-slider" type="range" min="0.7" max="1.8" step="0.05" value="1"
+            <input id="aig-width-slider" class="aig-tb-slider" type="range" min="0.7" max="3.0" step="0.05" value="1"
                    oninput="window._setAigWidthScale(parseFloat(this.value))"
                    aria-label="Study card width"
                    title="Width — widen or narrow the study cards">

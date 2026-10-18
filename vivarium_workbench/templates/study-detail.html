@@ -112,6 +112,10 @@
     <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
     <span class="pillar-label">Overview</span>
   </button>
+  <button class="study-pillar" data-kind="visualize" onclick="_setStudyTab('visualize')">
+    <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.8"/><path d="M21 15l-5-5L5 21"/></svg>
+    <span class="pillar-label">Visualizations</span>
+  </button>
   <button class="study-pillar" data-kind="compose" onclick="_setStudyTab('compose')">
     <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="17" cy="19" r="2"/><line x1="10.1" y1="10.7" x2="6.4" y2="7.2"/><line x1="14" y1="11.2" x2="17.2" y2="8.4"/><line x1="12.9" y1="13.9" x2="16.1" y2="17.3"/></svg>
     <span class="pillar-label">Model</span>
@@ -533,13 +537,11 @@
      (_vivStudyFiguresFromCard / _vivStudyNotebookFromCard) and the same
      outside-click dropdown pattern as the study navigator's jump menu (wired by
      _wireStudyExportMenu in study-detail.js). #}
-  <div class="overview-toolbar" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
-    <h2 class="overview-label" style="margin:0">Overview</h2>
+  {# The redundant "Overview" heading was removed (the active tab already says
+     Overview); the figures moved to their own Visualizations tab, so the "↓
+     Figures" jump button is gone too. Only the Export menu remains, top-right. #}
+  <div class="overview-toolbar" style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:12px">
     <span style="display:inline-flex;align-items:center;gap:8px">
-    {# Jump straight to the figures/visualizations at the bottom of the Overview
-       (scrolls the outer page, since the study renders in a full-height iframe). #}
-    <button type="button" id="study-jump-figures" class="btn-mini" title="Jump to the visualizations"
-            onclick="window._vivStudyJumpToFigures&&window._vivStudyJumpToFigures()">↓ Figures</button>
     <span class="study-dl study-export-wrap" style="position:relative;display:inline-flex">
       <button type="button" id="study-export-btn" class="btn-mini study-dl-btn" aria-haspopup="true" aria-expanded="false" title="Download this study's figures or a runnable notebook">⬇ Export ▾</button>
       <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:200px;padding:4px">
@@ -794,11 +796,15 @@
     <div id="feedback-tracked-panel"></div>
 
   </div>
+</section>
 
-  {# Figures (Phase 1): the former Visualizations gallery, re-homed to the
-     bottom of Overview. Loaders unchanged (_loadNativeGallery / _loadCharts /
-     _loadRemoteFigures), all element ids preserved (#visualize-section,
-     #native-gallery-panel, #viz-charts-panel, #figures-empty-message). #}
+
+{# ─── Visualizations tab: all of this study's figures, moved out of Overview
+     into their own tab (loaded when the tab opens). Loaders unchanged
+     (_loadNativeGallery / _loadCharts / _loadRemoteFigures); all element ids
+     preserved (#visualize-section, #native-gallery-panel, #viz-charts-panel,
+     #figures-empty-message) so existing hooks + deep links keep working. #}
+<section class="study-tab-panel" data-kind="visualize" id="panel-visualize" hidden>
   <div class="overview-section" id="overview-figures-section">
     <h2 class="overview-label">Figures</h2>
 
@@ -1728,6 +1734,15 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
     </div>
   </div>
   {% endif %}
+
+  {# Readiness gaps surfaced at the TOP of the Decide tab (right under the plan
+     stepper) — the concrete, deterministic fixes to close before release. Same
+     report-linter block as the Audit tab; populated by study-detail.js
+     (_renderAuditReadiness) into this mount when the Decide tab opens. #}
+  <div class="overview-section decide-readiness-section">
+    <h2 class="overview-label">Readiness gaps</h2>
+    <div id="decide-readiness" data-slug="{{ name }}"></div>
+  </div>
 
   {# v4 narrative-spine: conclusion_verdicts is a 3-track verdict block
      the dnaa investigation evolved — regression_compatibility (does code

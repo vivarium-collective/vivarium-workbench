@@ -5,18 +5,19 @@ HTML = (ROOT / "vivarium_workbench/templates/study-detail.html").read_text()
 
 
 def test_pillar_buttons_present():
-    # 5-tab study layout (Phase 1): exactly five top-level pillars, each
-    # carrying its panel `data-kind` and calling _setStudyTab(kind) directly.
-    # Pillar name == kind except Decide -> conclusions.
+    # 6-tab study layout: Overview · Visualizations · Model · Simulations ·
+    # Audit · Decide. Each pillar carries its panel `data-kind` and calls
+    # _setStudyTab(kind) directly. Pillar name == kind except Decide -> conclusions.
     pillar_to_kind = {
-        "overview": "overview", "model": "compose", "simulations": "simulate",
+        "overview": "overview", "visualizations": "visualize",
+        "model": "compose", "simulations": "simulate",
         "audit": "audit", "decide": "conclusions",
     }
     for pillar, kind in pillar_to_kind.items():
         assert f'data-kind="{kind}"' in HTML and f"_setStudyTab('{kind}')" in HTML, \
             f"pillar {pillar!r} -> kind {kind!r} not wired"
-    # The folded-away kinds are no longer pillars.
-    for gone in ("readouts", "results", "analyses", "visualize", "tests", "build"):
+    # The folded-away kinds are no longer pillars (Visualizations is a pillar again).
+    for gone in ("readouts", "results", "analyses", "tests", "build"):
         assert f"_setStudyTab('{gone}')" not in HTML
     assert 'data-kind="data"' not in HTML
 
@@ -26,21 +27,21 @@ def test_subnav_container_removed():
 
 
 def test_every_pillar_button_has_a_kind_and_calls_set_study_tab():
-    # 5-tab study layout: exactly five pillar buttons.
+    # 6-tab study layout: exactly six pillar buttons.
     import re
     btns = re.findall(r'<button class="study-pillar[^"]*"[^>]*>', HTML)
-    assert len(btns) == 5, f"expected 5 pillar buttons, got {len(btns)}"
+    assert len(btns) == 6, f"expected 6 pillar buttons, got {len(btns)}"
     for b in btns:
         assert "data-kind=" in b, f"pillar button missing data-kind: {b[:80]}"
     assert re.search(r'onclick="_setStudyTab\(', HTML), "pillar buttons must call _setStudyTab directly"
     assert "_setStudyPillar(" not in HTML
 
 
-def test_panels_unchanged_all_five_present():
-    # 5-tab study layout: the five panels (data-kind / id="panel-<kind>").
-    for kind in ["overview", "compose", "simulate", "audit", "conclusions"]:
+def test_panels_unchanged_all_six_present():
+    # 6-tab study layout: the six panels (data-kind / id="panel-<kind>").
+    for kind in ["overview", "visualize", "compose", "simulate", "audit", "conclusions"]:
         assert f'data-kind="{kind}"' in HTML and f'id="panel-{kind}"' in HTML
-    for gone in ["readouts", "results", "analyses", "visualize", "tests", "build"]:
+    for gone in ["readouts", "results", "analyses", "tests", "build"]:
         assert f'id="panel-{gone}"' not in HTML
 
 

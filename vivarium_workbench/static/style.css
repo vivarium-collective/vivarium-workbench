@@ -1140,23 +1140,25 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
   display:block;
   transition:transform 0.2s;
 }
-/* Collapsed: the expand toggle overlays the whole header and is ALWAYS visible
-   (a persistent, obvious click target to re-open the rail — previously it was
-   opacity:0 until hover, which made the rail feel "stuck" closed). It brightens
-   on hover; the logo stays dimmed behind it so the ❯ expand icon always reads. */
+/* Collapsed: the Vivarium logo shows clean by default and is NOT covered; the
+   collapse/expand toggle is hidden and REVEALS on hover over the header (or when
+   keyboard-focused). On hover the logo dims so the expand icon reads over it. */
 .viv-rail.viv-rail-collapsed .viv-rail-toggle{
   top:0; left:0; right:0; bottom:0; transform:none;
   width:auto; height:auto;
   border-radius:8px;
-  opacity:1; transition:opacity 0.12s, background 0.12s, color 0.12s;
+  opacity:0; pointer-events:none;
+  transition:opacity 0.12s, background 0.12s, color 0.12s;
   z-index:3; color:#64748b;
 }
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-toggle{
+.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-toggle,
+.viv-rail.viv-rail-collapsed .viv-rail-toggle:focus-visible{
+  opacity:1; pointer-events:auto;
   background:rgba(238,242,255,0.96);
   border-color:#c7d2fe; color:#3730a3;
 }
-.viv-rail.viv-rail-collapsed .viv-rail-logo{ opacity:0.18 }
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.1 }
+.viv-rail.viv-rail-collapsed .viv-rail-logo{ opacity:1 }
+.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.12 }
 
 /* Collapsed-rail state ----------------------------------------------------- */
 .viv-rail.viv-rail-collapsed{
@@ -2922,6 +2924,31 @@ body.pcard-splitting iframe{ pointer-events:none; }
 .inv-gate-status-refuted   { background: #ffe4e6; color: #9f1239; }
 .inv-gate-branch-tag { font-size: 0.62em; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
 .inv-gate-members { font-size: 0.72em; color: #64748b; }
+/* Compact plan board — the "Plan progress" brief tab: slim one-row gate chips
+   instead of the full always-open board under the brief. */
+.inv-plan-board-compact { margin: 2px 0 0; }
+.inv-plan-board-compact .inv-plan-gates { gap: 6px; }
+.inv-plan-board-compact .inv-plan-gate {
+  flex: 0 1 auto; min-width: 0;
+  border-top-width: 2px; border-radius: 7px; padding: 5px 10px;
+  flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.inv-plan-board-compact .inv-gate-head { gap: 5px; }
+.inv-plan-board-compact .inv-gate-id { font-size: 0.8em; padding: 0 5px; }
+.inv-plan-board-compact .inv-gate-name { font-size: 0.76em; }
+.inv-plan-board-compact .inv-gate-status { font-size: 0.6em; padding: 1px 7px; }
+.inv-plan-board-compact .inv-gate-members { font-size: 0.68em; margin-left: auto; }
+/* Verdict brief tab — colored VS pill above the verdict prose. */
+.inv-brief-verdict-tab .inv-vs-pill { display: inline-block; margin: 0 0 8px; }
+.inv-brief-verdict-tab .inv-brief-verdict-text { line-height: 1.6; }
+/* Competing-frameworks fold — a trailing note inside the Hypothesis & evidence
+   tab (folded in; no longer a standalone, usually-thin tab). */
+.inv-brief-frameworks-fold { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid #eef2f6; }
+.inv-brief-frameworks-label {
+  font-size: 0.72em; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: #94a3b8; margin: 0 0 6px;
+}
+.inv-brief-frameworks { margin: 0; padding-left: 18px; }
 .inv-brief-tabs {
   display: flex; flex-wrap: wrap; gap: 2px;
   border-bottom: 1px solid #e2e8f0; margin: 0 0 14px;
@@ -4869,6 +4896,25 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
   color: #fff; background: #2563eb; padding: 1px 7px; border-radius: 9999px;
 }
+/* SELECTED (one click) — a distinct violet highlight that STACKS with the blue
+   "open" ring (one uses outline, the other box-shadow) so a study can show both.
+   The "selected" badge sits top-LEFT, opposite the "open" badge top-right. */
+.iset-dag-node.aig-node-selected {
+  outline: 2px solid #7c3aed; outline-offset: 2px;
+  border-color: #7c3aed !important;
+}
+.iset-dag-node.aig-node-selected:not(.aig-node-active) {
+  box-shadow: 0 6px 18px rgba(124,58,237,0.20) !important;
+}
+.iset-dag-node.aig-node-selected::before {
+  content: "selected"; position: absolute; top: -9px; left: 10px;
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: #fff; background: #7c3aed; padding: 1px 7px; border-radius: 9999px; z-index: 1;
+}
+/* When a study is BOTH open and selected, the "open" marker wins — drop the
+   redundant "selected" outline + badge so the card isn't double-flagged. */
+.iset-dag-node.aig-node-active.aig-node-selected { outline: none; }
+.iset-dag-node.aig-node-active.aig-node-selected::before { content: none; }
 
 /* ── Composites page: compact, informative cards ──────────────────────────── */
 .ccard-grid {
@@ -5085,7 +5131,11 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   position:relative; display:inline-flex; align-items:center; justify-content:space-between;
   width:56px; height:26px; padding:0 7px; border-radius:14px;
   border:1px solid #d8dee6; background:#eef1f5; cursor:pointer;
+  /* Hidden until hovered (keeps its box so the footer stays a hover target). */
+  opacity:0; transition:opacity .14s;
 }
+.viv-rail-theme-footer:hover .viv-theme-toggle,
+.viv-theme-toggle:focus-visible{ opacity:1; }
 .viv-theme-ico{ display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; z-index:1; }
 .viv-theme-ico svg{ width:13px; height:13px; display:block; }
 .viv-theme-sun{ color:#f59e0b; }
@@ -5266,6 +5316,8 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 :root[data-theme="dark"] .inv-gate-name{ color:var(--text); }
 :root[data-theme="dark"] .inv-gate-members{ color:var(--text-muted); }
 :root[data-theme="dark"] .inv-gate-branch-tag{ color:var(--text-muted); }
+:root[data-theme="dark"] .inv-brief-frameworks-fold{ border-top-color:var(--border); }
+:root[data-theme="dark"] .inv-brief-frameworks-label{ color:var(--text-muted); }
 :root[data-theme="dark"] .inv-brief-meta-item + .inv-brief-meta-item::before{ color:var(--border-2); }
 :root[data-theme="dark"] .inv-brief-tabs{ border-bottom-color:var(--border); }
 :root[data-theme="dark"] .inv-brief-tab{ color:var(--text-muted); }
