@@ -536,6 +536,21 @@ def scan_investigation(
 
     items: list[dict] = []
 
+    # Live denominators for the per-check summary (what the scan actually looked
+    # at), so the UI can show "N of M" rather than prose. Cheap: member studies
+    # are already iterated below; the AC matrix is one YAML roll-up.
+    member_pairs = _member_studies(wp, inv_spec)
+    member_count = len(member_pairs)
+    ac_total = 0
+    ac_covered = 0
+    try:
+        _m = linkage_index.ac_gating_matrix(ws_root, inv_slug)
+        _crit = _m.get("criteria") or []
+        ac_total = len(_crit)
+        ac_covered = ac_total - len(_m.get("gaps") or [])
+    except Exception:  # noqa: BLE001
+        pass
+
     # Signal 1 — uncovered acceptance criteria (investigation-level).
     try:
         items.extend(_uncovered_ac_items(ws_root, inv_slug))
@@ -544,7 +559,7 @@ def scan_investigation(
 
     # Per member study: signals 2,3,5,6 (+4 when opted in). Each in its own
     # try/except so one failing source never sinks the whole scan.
-    for slug, spec in _member_studies(wp, inv_spec):
+    for slug, spec in member_pairs:
         try:
             items.extend(_verdict_divergence_items(slug, spec))
         except Exception:  # noqa: BLE001
@@ -601,11 +616,61 @@ def scan_investigation(
         _SEVERITY_RANK.get(i["severity"], 99), i["kind"], i["ref"]
     ))
 
+    summary = _summary(items)
+    summary["member_count"] = member_count
+    summary["ac_total"] = ac_total
+    summary["ac_covered"] = ac_covered
+
     return {
         "investigation": inv_slug,
         "items": items,
-        "summary": _summary(items),
+        "summary": summary,
+        "checks": _checks(summary, member_count, ac_total, ac_covered,
+                          include_phantom=observables_for_ref is not None),
     }
+
+
+# Each check the scan runs, with a live "examined" denominator. ``mode`` tells the
+# UI how to read the numbers: 'coverage' => ac_covered/ac_total; 'studies' =>
+# (member_count - flagged)/member_count passing. Order = how they're shown.
+_CHECK_CATALOG = [
+    ("uncovered_ac",             "Acceptance criteria covered",              "coverage"),
+    ("verdict_divergence",       "Verdicts match the authored gate",         "studies"),
+    ("hard_gate",                "Hard gates passing",                        "studies"),
+    ("test_regression",          "No behavior-test regressions",             "studies"),
+    ("diagnostic_branch_needed", "Failed verdicts have a diagnostic study",  "studies"),
+    ("invariant_regression",     "No invariant regressions",                 "studies"),
+    ("open_feedback",            "Expert feedback addressed",                 "studies"),
+    ("param_drift",              "No parameter drift",                        "studies"),
+    ("unregistered_confirmatory","Confirmatory studies registered",          "studies"),
+    ("stale_finding",            "No stale findings",                         "studies"),
+    ("env_stale",                "Run environments current",                  "studies"),
+    ("nondeterministic",         "Runs reproducible",                         "studies"),
+    ("phantom_observable",       "Observables exist in the structure",       "studies"),
+]
+
+
+def _checks(summary: dict, member_count: int, ac_total: int, ac_covered: int,
+            *, include_phantom: bool) -> list[dict]:
+    """Per-check live rollup: {kind, label, mode, flagged, examined, passing}.
+
+    Pure projection of the summary + denominators — invents no new judgment.
+    """
+    by_kind = summary.get("by_kind") or {}
+    out: list[dict] = []
+    for kind, label, mode in _CHECK_CATALOG:
+        if kind == "phantom_observable" and not include_phantom:
+            continue
+        flagged = int(by_kind.get(kind, 0))
+        if mode == "coverage":
+            examined, passing = ac_total, ac_covered
+        else:
+            examined, passing = member_count, max(0, member_count - flagged)
+        out.append({
+            "kind": kind, "label": label, "mode": mode,
+            "flagged": flagged, "examined": examined, "passing": passing,
+        })
+    return out
 
 
 # ---------------------------------------------------------------------------

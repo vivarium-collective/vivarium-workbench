@@ -74,10 +74,26 @@
     var panel = opts.panel, layout = opts.layout, mainEl = opts.mainEl;
     var key = opts.key;
     var V = function (suffix) { return '--viv-' + key + '-' + suffix; };
-    var K = { dock: 'viv.' + key + '.dock', open: 'viv.' + key + '.open', w: 'viv.' + key + '.w', h: 'viv.' + key + '.h' };
-    var def = opts.defaultDock || 'right';
-    var dock = C.validDock(lsGet(K.dock, def)) ? lsGet(K.dock, def) : def;
+    var K = { dock: 'viv.' + key + '.dock', open: 'viv.' + key + '.open', w: 'viv.' + key + '.w', h: 'viv.' + key + '.h', collapsed: 'viv.' + key + '.collapsed' };
+    // A panel may restrict which edges it docks to (opts.docks). The investigation
+    // graph forbids 'top' so it can never push the investigation header off-screen.
+    var ALLOWED = (opts.docks && opts.docks.length) ? opts.docks.filter(C.validDock) : C.DOCKS.slice();
+    function isAllowed(z) { return C.validDock(z) && ALLOWED.indexOf(z) >= 0; }
+    var def = isAllowed(opts.defaultDock) ? opts.defaultDock : (isAllowed('right') ? 'right' : ALLOWED[0]);
+    var dock = isAllowed(lsGet(K.dock, def)) ? lsGet(K.dock, def) : def;
     var justDragged = false;
+    var collapsed = lsGet(K.collapsed, '0') === '1';
+    var COLLAPSE_AT = 48;   // drag the resize edge below this (px) to collapse
+
+    // Collapse the panel to a thin edge strip (body hidden, a small expand handle
+    // shown via CSS .vp-collapsed); expand restores it. State is persisted.
+    function setCollapsed(c, persist) {
+      collapsed = !!c;
+      panel.classList.toggle('vp-collapsed', collapsed);
+      if (persist) lsSet(K.collapsed, collapsed ? '1' : '0');
+      syncVars();
+      if (opts.onCollapse) opts.onCollapse(collapsed);
+    }
 
     function isVertical(d) { return d === 'bottom' || d === 'top'; }   // height-sized docks
     function sizeKey(d) { return isVertical(d) ? K.h : K.w; }
@@ -97,7 +113,12 @@
       panel.dataset.dock = zone;
       if (zone === 'left') layout.insertBefore(panel, mainEl);
       else if (zone === 'right') layout.appendChild(panel);
-      else if (zone === 'top') mainEl.insertBefore(panel, mainEl.firstChild);
+      else if (zone === 'top') {
+        // opts.placeTop lets a panel keep something (e.g. the investigation menu
+        // bar) ABOVE it when docked top. It returns true if it placed the panel;
+        // otherwise fall back to the default (above all of <main>'s content).
+        if (!(opts.placeTop && opts.placeTop(panel))) mainEl.insertBefore(panel, mainEl.firstChild);
+      }
       else mainEl.appendChild(panel);                                  // bottom
       applySize();
     }
@@ -118,6 +139,7 @@
     function setOpen(open) {
       panel.hidden = !open;
       if (open) place(dock);
+      panel.classList.toggle('vp-collapsed', open && collapsed);
       document.body.classList.toggle('viv-' + key + '-open', open);
       lsSet(K.open, open ? '1' : '0');
       if (opts.launcher) {
@@ -129,7 +151,7 @@
       if (!open && opts.onClose) opts.onClose();
     }
     function dockTo(zone, persist) {
-      if (!C.validDock(zone)) return;
+      if (!isAllowed(zone)) return;
       dock = zone;
       if (persist) lsSet(K.dock, zone);
       if (isOpen()) { place(zone); syncVars(); }
@@ -141,17 +163,25 @@
       var menu = document.createElement('div');
       menu.className = 'vp-pop vp-dock-menu';
       menu.setAttribute('role', 'menu');
-      var html = C.DOCKS.map(function (z) {
+      var html = ALLOWED.map(function (z) {
         return '<button type="button" role="menuitemradio" aria-checked="' + (dock === z) + '" ' +
           'class="vp-pop-item' + (dock === z ? ' on' : '') + '" data-zone="' + z + '">' +
           DOCK_GLYPH[z] + '<span>Dock ' + z + '</span></button>';
       }).join('');
-      // Pop-out as the last item of the same menu (only if this panel supports it).
+      // Pop-out + (when open) a "close / back inline" action, so this single
+      // button is the one control for the whole panel: pick a side, pop out, or
+      // close it back to the inline view.
+      var extras = '';
       if (typeof opts.popout === 'function') {
-        html += '<div class="vp-pop-sep" role="separator"></div>' +
-          '<button type="button" role="menuitem" class="vp-pop-item" data-act="popout">' +
+        extras += '<button type="button" role="menuitem" class="vp-pop-item" data-act="popout">' +
           POPOUT_GLYPH + '<span>Pop out</span></button>';
       }
+      if (isOpen()) {
+        extras += '<button type="button" role="menuitem" class="vp-pop-item" data-act="close">' +
+          '<span aria-hidden="true" style="display:inline-block;width:14px;text-align:center">▣</span>' +
+          '<span>Back to inline</span></button>';
+      }
+      if (extras) html += '<div class="vp-pop-sep" role="separator"></div>' + extras;
       menu.innerHTML = html;
       document.body.appendChild(menu);
       var r = anchor.getBoundingClientRect();
@@ -159,6 +189,7 @@
       menu.style.left = Math.round(Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + 'px';
       menu.addEventListener('click', function (ev) {
         if (ev.target.closest('[data-act="popout"]')) { closeMenu(); opts.popout(); return; }
+        if (ev.target.closest('[data-act="close"]')) { closeMenu(); setOpen(false); return; }
         var b = ev.target.closest('[data-zone]'); if (!b) return;
         dockTo(b.getAttribute('data-zone'), true);
         if (!isOpen()) setOpen(true);
@@ -182,7 +213,7 @@
           ghost = document.createElement('div');
           ghost.className = 'vp-ghost'; ghost.innerHTML = (opts.ghostIcon || '') + '<span>' + (opts.label || 'Panel') + '</span>';
           zones = document.createElement('div'); zones.className = 'vp-zones';
-          zones.innerHTML = ['left', 'right', 'top', 'bottom'].map(function (z) {
+          zones.innerHTML = ['left', 'right', 'top', 'bottom'].filter(isAllowed).map(function (z) {
             return '<div class="vp-zone vp-zone-' + z + '" data-zone="' + z + '"><span>Dock ' + z + '</span></div>';
           }).join('');
           document.body.appendChild(zones); document.body.appendChild(ghost);
@@ -191,6 +222,7 @@
           if (!active) { if (Math.hypot(m.clientX - x0, m.clientY - y0) < THRESH) return; active = true; mk(); document.body.classList.add('vp-dragging'); }
           ghost.style.left = (m.clientX + 10) + 'px'; ghost.style.top = (m.clientY + 10) + 'px';
           zone = C.dropZone(m.clientX, m.clientY, innerWidth, innerHeight);
+          if (!isAllowed(zone)) zone = null;   // forbidden edge (e.g. top) — no drop
           Array.prototype.forEach.call(zones.children, function (z) { z.classList.toggle('on', z.getAttribute('data-zone') === zone); });
         }
         function end(commit) {
@@ -203,7 +235,7 @@
           if (commit && zone) { dockTo(zone, true); if (!isOpen()) setOpen(true); }
         }
         // The release position is authoritative (a fast flick may end far from the last move).
-        function up(u) { if (active && u && u.clientX !== undefined) zone = C.dropZone(u.clientX, u.clientY, innerWidth, innerHeight); end(true); }
+        function up(u) { if (active && u && u.clientX !== undefined) { zone = C.dropZone(u.clientX, u.clientY, innerWidth, innerHeight); if (!isAllowed(zone)) zone = null; } end(true); }
         function cancel() { end(false); }
         function keyf(k) { if (k.key === 'Escape') { k.preventDefault(); end(false); } }
         document.addEventListener('pointermove', move); document.addEventListener('pointerup', up, true);
@@ -224,11 +256,17 @@
                   : dock === 'right' ? r0.right - m.clientX
                   : dock === 'top' ? m.clientY - r0.top
                   : r0.bottom - m.clientY;                              // bottom
+          // Drag the resize edge toward the dock edge, past the threshold, to
+          // collapse to a thin strip; drag back out to expand.
+          if (raw < COLLAPSE_AT) { if (!collapsed) setCollapsed(true); return; }
+          if (collapsed) setCollapsed(false);
           panel.style.setProperty(isVertical(dock) ? V('h') : V('w'), C.clampDock(dock, raw, innerWidth, innerHeight) + 'px');
         }
         function up() {
           h.classList.remove('dragging'); document.body.classList.remove('vp-dragging');
           document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+          if (collapsed) { lsSet(K.collapsed, '1'); syncVars(); if (opts.onResize) opts.onResize(); return; }
+          lsSet(K.collapsed, '0');
           var r = panel.getBoundingClientRect();
           lsSet(sizeKey(dock), String(Math.round(dock === 'bottom' ? r.height : r.width)));
           syncVars(); if (opts.onResize) opts.onResize();
@@ -257,6 +295,10 @@
       getDock: function () { return dock; },
       didDrag: function () { return justDragged; },
       syncVars: syncVars,
+      collapse: function () { setCollapsed(true, true); },
+      expand: function () { setCollapsed(false, true); },
+      toggleCollapsed: function () { setCollapsed(!collapsed, true); },
+      isCollapsed: function () { return collapsed; },
       // Bind drag-to-dock on a handle added AFTER make() (e.g. a toolbar that is
       // relocated into the panel later). Guards against double-binding.
       addDragHandle: function (el) { if (el && !el._vpDragBound) { el._vpDragBound = true; initDrag(el); } },

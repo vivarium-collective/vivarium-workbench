@@ -1084,7 +1084,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <div class="viv-rail-resize-handle" id="viv-rail-resize-handle"
          role="separator" aria-orientation="vertical" aria-label="Resize sidebar"
          title="Drag to resize · double-click to reset"
-         onmousedown="_vivRailResizeStart(event)"
+         onpointerdown="_vivRailResizeStart(event)"
          ondblclick="_vivRailResizeReset()"></div>
 
   </aside>
@@ -1428,10 +1428,16 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   </div>
 
   <div id="iset-workspace" style="display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin:0 0 10px">
-      <button id="ws-back" class="btn-mini" onclick="_showExplore()" style="cursor:pointer">← All investigations</button>
+    <div class="inv-header-bar" style="display:flex;align-items:center;gap:8px;margin:0 0 10px">
+      <button id="ws-back" class="btn-mini" onclick="_showExplore()">← All investigations</button>
       <strong id="ws-title" style="font-size:1.1em;color:#0f172a"></strong>
-      <span id="ws-status" style="margin-left:6px"></span>
+      <span id="ws-status"></span>
+      {# Investigation-level controls live in the header (not the graph toolbar):
+         the "Investigation overview" collapse toggle + the all-clear/needs-attention
+         chip. Wired by _toggleInvOverview / _renderInvNeedsAttention (by id). #}
+      <button type="button" id="inv-overview-toggle" class="btn-mini" aria-expanded="false"
+              onclick="window._toggleInvOverview()">▸ Investigation overview</button>
+      <span id="aig-needs-attention-chip" class="aig-na-chip-host"></span>
       <span id="ws-actions" style="margin-left:auto"></span>
     </div>
     <!-- slim collapsed bar (hidden until a study is open) -->
@@ -1560,6 +1566,10 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          view zoom, fit, orientation, download) stay available in fullscreen.
          Fullscreening the shell alone would drop the toolbar. -->
     <div id="investigation-dag-fs">
+    {# Collapsed bar: shown only when the inline graph is collapsed (drag the
+       graph↔study divider all the way up, or this bar is clicked to reopen). #}
+    <button type="button" class="aig-collapsed-bar" onclick="window._aigExpandInline()"
+            aria-label="Expand the investigation graph">&#9656; Investigation graph</button>
     {# No title bar: the toolbar + graph are self-evident. The toolbar below is the
        single control row for BOTH the inline view and the docked popup; in the
        docked popup it is ALSO the drag handle (drag empty toolbar space). #}
@@ -1573,30 +1583,10 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <button type="button" data-dock="docked" title="Dock as a small window (drag the toolbar to move, drag a corner to resize)" aria-label="Dock graph" onclick="window._aigSetDockState('docked')">▭</button>
         <button type="button" title="Back to the investigation graph (exit the study)" aria-label="Back to the investigation graph" onclick="window._aigExitToGraph()">⛶</button>
       </span>
-      {# Inline view (no study open): the "Investigation overview" collapse toggle
-         + the needs-attention chip live in this same row (hidden while docked).
-         The toggle collapses the investigation prose (default collapsed) so the
-         graph is prominent; the chip is the compact all-clear / needs-attention
-         state (filled by _renderInvNeedsAttention). #}
-      <button type="button" id="inv-overview-toggle" class="aig-tb-btn" aria-expanded="false"
-              onclick="window._toggleInvOverview()">▸ Investigation overview</button>
-      <span id="aig-needs-attention-chip" class="aig-na-chip-host"></span>
-      {# Study navigator (graph-level): ← prev / ⇄ jump / next → drives the
-         EMBEDDED study below. Shown only while a study is open (toggled by
-         _renderGraphBarNav in walkthrough.js, which reads the graph's own
-         studies + edges — no re-fetch — and calls _openStudyEmbeddedNewTab).
-         This replaces the in-iframe study-header nav when embedded. #}
-      <span id="aig-study-nav" class="aig-tb-group" role="group" aria-label="Navigate the open study" style="display:none">
-        <span class="aig-tb-label">Study</span>
-        <span class="aig-tb-seg">
-          <button id="aig-study-prev" type="button" title="Previous study" aria-label="Previous study">←</button>
-          <button id="aig-study-next" type="button" title="Next study" aria-label="Next study">→</button>
-        </span>
-        <span class="aig-study-jump-wrap" style="position:relative;display:inline-flex">
-          <button id="aig-study-jump-btn" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false" title="Jump to any study in this investigation">⇄ Studies</button>
-          <div id="aig-study-jump-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:240px;max-width:360px;max-height:380px;overflow:auto;padding:4px"></div>
-        </span>
-      </span>
+      {# "Investigation overview" toggle + "All clear" chip moved UP to the
+         investigation header row (#iset-workspace), so the graph toolbar is only
+         about the graph. Study prev/next/jump navigator removed — clicking a study
+         node in the graph is the navigation now. #}
       <span id="aig-layout-group" class="aig-tb-group" role="group" aria-label="Graph orientation">
         <span class="aig-tb-label">Layout</span>
         <span class="aig-tb-seg">
@@ -1609,45 +1599,56 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                 aria-label="Reset to automatic orientation" onclick="window._resetGraphOrientation()"
                 style="visibility:hidden">auto</button>
       </span>
-      <span id="aig-detail-group" class="aig-tb-group">
-        <label class="aig-tb-label" for="aig-zoom-slider">Detail</label>
-        <input id="aig-zoom-slider" class="aig-tb-slider" type="range" min="0" max="2" step="1" value="1"
-               oninput="window._setAigBand(parseInt(this.value,10))"
-               aria-label="Graph detail level — overview to full study cards"
-               title="Detail — slide left for a compact overview, right for full study cards">
+      <!-- One unified Zoom slider: from a zoomed-out overview (names-only, small)
+           on the left up to the single-card level (full detail, large) on the
+           right — it drives semantic detail AND view zoom together. The fine-
+           grained Detail / Width / view-Zoom sliders live in the ⚙ Display
+           popover (kept in sync by _aigSyncZoomUI). -->
+      <span class="aig-tb-group">
+        <label class="aig-tb-label" for="aig-unified-zoom">Zoom</label>
+        <input id="aig-unified-zoom" class="aig-tb-slider aig-tb-slider-wide" type="range"
+               min="0" max="100" step="1" value="50"
+               oninput="window._setAigUnifiedZoom(parseInt(this.value,10), true)"
+               aria-label="Zoom — overview to a single study card"
+               title="Zoom — slide left for a zoomed-out overview, right to zoom into a single study card">
       </span>
-      <span id="aig-width-group" class="aig-tb-group">
-        <label class="aig-tb-label" for="aig-width-slider">Width</label>
-        <input id="aig-width-slider" class="aig-tb-slider" type="range" min="0.7" max="1.8" step="0.05" value="1"
-               oninput="window._setAigWidthScale(parseFloat(this.value))"
-               aria-label="Study card width"
-               title="Width — widen or narrow the study cards to fit their text">
+      <span class="aig-tb-group aig-settings-ctl" style="position:relative">
+        <button id="aig-settings-btn" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false"
+                title="Display settings — fine-tune detail, card width, and zoom"
+                onclick="window._aigToggleSettings(event)">⚙ Display</button>
+        <div id="aig-settings-menu" role="dialog" aria-label="Graph display settings"
+             style="display:none;position:absolute;left:0;top:100%;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:236px;padding:12px 14px;text-align:left">
+          <div class="aig-settings-row">
+            <label class="aig-tb-label" for="aig-zoom-slider">Detail</label>
+            <input id="aig-zoom-slider" class="aig-tb-slider" type="range" min="0" max="2" step="1" value="1"
+                   oninput="window._aigMarkUserZoomed();window._setAigBand(parseInt(this.value,10))"
+                   aria-label="Graph detail level — overview to full study cards"
+                   title="Detail — compact overview to full study cards">
+          </div>
+          <div class="aig-settings-row">
+            <label class="aig-tb-label" for="aig-width-slider">Width</label>
+            <input id="aig-width-slider" class="aig-tb-slider" type="range" min="0.7" max="1.8" step="0.05" value="1"
+                   oninput="window._setAigWidthScale(parseFloat(this.value))"
+                   aria-label="Study card width"
+                   title="Width — widen or narrow the study cards">
+          </div>
+          <div class="aig-settings-row">
+            <label class="aig-tb-label" for="aig-view-zoom-slider">Zoom</label>
+            <input id="aig-view-zoom-slider" class="aig-tb-slider" type="range" min="0.3" max="2" step="0.05" value="1"
+                   oninput="window._aigMarkUserZoomed();window._setAigZoom(parseFloat(this.value))"
+                   aria-label="Graph view zoom"
+                   title="Zoom the whole graph in or out (view magnification only)">
+          </div>
+        </div>
       </span>
-      <span id="aig-zoom-group" class="aig-tb-group" role="group" aria-label="Zoom and view">
-        <span class="aig-tb-label">Zoom</span>
-        <span class="aig-tb-seg">
-          <button type="button" title="Zoom out" aria-label="Zoom out" onclick="window._aigZoomBy(0.8)">−</button>
-          <button type="button" title="Fit to view" aria-label="Fit to view" onclick="window._aigFit()">⤢</button>
-          <button type="button" title="Zoom in" aria-label="Zoom in" onclick="window._aigZoomBy(1.25)">+</button>
-        </span>
-        <span class="aig-tb-seg" id="aig-legacy-expand-seg">
-          <button id="aig-expand-btn" type="button" title="Expand graph — snap to top and grow it tall (workbench stays)"
-                  aria-label="Expand graph" onclick="window._aigExpand()">⤒</button>
-          <button type="button" title="Fullscreen" aria-label="Fullscreen" onclick="window._aigFullscreen()">⛶</button>
-          <!-- Open the graph as a dockable side panel (graph-panel.js / VivPanelDock):
-               moves this graph into a panel you can dock left/right/top/bottom or pop
-               out. Hidden once the graph is already inside the panel (CSS). -->
-          <button id="aig-dock-panel-btn" type="button" title="Open as a dockable side panel — drag it to any edge or pop it out"
-                  aria-label="Open graph as a side panel" onclick="window.GraphPanel&&GraphPanel.open()">◧</button>
-          <!-- Panel controls: shown ONLY while the graph is docked in the panel
-               (CSS: .viv-graph-body .aig-panel-ctl). They replace the old separate
-               panel header — dock/pop-out menu + close (back to the full-page graph).
-               The toolbar itself is the drag-to-dock handle (graph-panel.js). -->
-          <button class="aig-panel-ctl" type="button" title="Move or pop out the graph panel" aria-label="Move or pop out the graph panel"
-                  onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">▭</button>
-          <button class="aig-panel-ctl" type="button" title="Back to the full-page graph" aria-label="Back to the full-page graph"
-                  onclick="window.GraphPanel&&GraphPanel.toFull()">⤢</button>
-        </span>
+      <!-- ONE always-present dock control: opens a menu to choose a side
+           (left / right / bottom / top), pop out, or go back inline. Works the
+           same whether the graph is currently inline or docked — no button swap. -->
+      <span class="aig-tb-group" role="group" aria-label="Graph panel">
+        <button id="aig-dock-panel-btn" type="button"
+                title="Dock the investigation graph — choose a side, pop out, or go back inline"
+                aria-haspopup="menu" aria-label="Dock the investigation graph"
+                onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">◧</button>
       </span>
       {# Legend lives in the toolbar with the other graph utilities. The "?" button
          opens a click popover with the key (Progress / Verdict / Evidence / Edges),
@@ -1667,8 +1668,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       </span>
     </div>
     <div id="investigation-dag-shell"
-         style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;
-                overflow: auto; resize: vertical; height: 460px; min-height: 240px; max-height: 88vh; cursor: grab;">
+         style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px 6px 0 0; background: #fafafa;
+                overflow: auto; resize: none; height: 460px; min-height: 32px; max-height: 92vh; cursor: grab;">
       <!-- overflow-y must be hidden (not visible): per CSS spec, when one axis
            is `visible` and the other isn't, `visible` gets promoted to `auto`,
            which gives this shell its own vertical scrollbar in addition to
@@ -1677,6 +1678,13 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <svg id="investigation-dag-edges" style="position:absolute; top:0; left:0; pointer-events:none;"></svg>
       <div id="investigation-dag-nodes" style="position:relative; top:0; left:0;"></div>
     </div>
+    {# Full-width resize bar along the bottom of the graph (the divider between the
+       graph and the study below). Grab ANYWHERE on it to change the graph height;
+       drag all the way up to collapse the graph to its "Investigation graph" bar.
+       Replaces the old bottom-right corner grip. Wired by _aigWireResizeBar. #}
+    <div id="aig-resize-bar" role="separator" aria-orientation="horizontal" tabindex="0"
+         aria-label="Resize the investigation graph — drag up or down"
+         title="Drag to resize the graph (drag all the way up to collapse)"><span class="aig-resize-grip"></span></div>
     {# Resize grips for the DOCKED floating window (shown only in the docked state;
        wired by _aigWireDockResize). Custom JS resize — CSS `resize` was unreliable
        on this fixed, transitioned panel and was covered by the shell. #}
@@ -2340,8 +2348,12 @@ a.viv-bs-commit:hover { text-decoration: underline; }
            role="separator" aria-orientation="vertical" aria-label="Resize graph panel"
            title="Drag to resize"></div>
       <!-- No separate panel header: the hosted graph's own toolbar is the single
-           bar, and it carries the dock/close controls (the .aig-panel-ctl group,
-           shown only while docked) + acts as the drag-to-dock handle. -->
+           bar, and it carries the dock controls + acts as the drag-to-dock handle. -->
+      <!-- Expand handle: the only thing visible when the panel is collapsed to a
+           thin edge strip (CSS .vp-collapsed). Click it to expand. -->
+      <button type="button" class="viv-graph-expand" title="Expand the investigation graph"
+              aria-label="Expand the investigation graph"
+              onclick="window.GraphPanel&&GraphPanel.expand()">⟩</button>
       <div class="viv-graph-body" id="viv-graph-body"></div>
     </div>
   </aside>

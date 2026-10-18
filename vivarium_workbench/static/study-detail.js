@@ -112,7 +112,6 @@
     //  • Results + Analyses      -> Simulations subtabs (simulate)
     //  • Tests                   -> Audit
     if (kind === 'overview') {
-      _loadOverviewKeyFigure();
       _loadCharts('viz-charts-panel'); _loadNativeGallery(); _loadRemoteFigures();
     }
     if (kind === 'compose') {
@@ -569,6 +568,21 @@
   // silently did nothing. Define it here (the shell loads study-detail.js).
   // Probe first: the zip only holds declared IMAGE files, and in a snapshot an
   // absent file 404s; a bare <a download> to a 404 reads as a broken button.
+  // Jump to the figures / visualizations at the bottom of the Overview tab. The
+  // study renders in a full-height iframe inside the workbench, so scrollIntoView
+  // propagates to the outer page's scroll container (same-origin) and brings the
+  // figures into view. Loads them first if the gallery hasn't fetched yet.
+  window._vivStudyJumpToFigures = function () {
+    try { if (typeof _loadNativeGallery === 'function') _loadNativeGallery(); } catch (e) { /* ignore */ }
+    try { if (typeof _loadCharts === 'function') _loadCharts('viz-charts-panel'); } catch (e) { /* ignore */ }
+    var target = document.getElementById('overview-figures-section')
+              || document.getElementById('visualize-section')
+              || document.getElementById('native-gallery-panel');
+    if (target && target.scrollIntoView) {
+      try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      catch (e) { target.scrollIntoView(true); }
+    }
+  };
   window._vivStudyFiguresFromCard = function (ev, slug) {
     if (ev && ev.stopPropagation) ev.stopPropagation();
     var c = window.__DASH_CONFIG__ || {};
@@ -5455,7 +5469,6 @@
   function _runStudyInit() {
     // All renderers that need window._study to be populated.
     _renderPlanningOverview();
-    _loadOverviewKeyFigure();   // embed the headline figure on the Overview
     _renderFeedbackTrackedPanel();
     _renderStudyAxisMarkers();
     _populateConclusionVerdictBadges();

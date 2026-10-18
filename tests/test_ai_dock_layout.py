@@ -178,7 +178,7 @@ def test_both_panels_share_one_dock_menu():
     js = (STATIC / "panel-dock.js").read_text()
     assert "function openDockMenu" in js
     assert "vp-pop vp-dock-menu" in js and "vp-pop-item" in js    # chat's popover chrome
-    assert "C.DOCKS.map" in js                                    # left / right / bottom
+    assert "ALLOWED.map" in js                                    # dock sides (ALLOWED defaults to C.DOCKS)
     code_js = (STATIC / "process-code.js").read_text()
     assert "function dockMenu" in code_js and "dockMenu: dockMenu" in code_js
     assert "openDockMenu: openDockMenu" in js                     # exposed on the controller
