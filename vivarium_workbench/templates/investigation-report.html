@@ -141,14 +141,25 @@ a:hover{text-decoration:underline}
 .navmenu{position:relative;display:inline-flex;align-items:center;margin-right:8px;flex:0 0 auto}
 .navmenu-btn{font-size:12.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);border:1px solid transparent;padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
 .navmenu-btn:hover{border-color:var(--accent)}
-.navmenu-panel{position:fixed;top:102px;left:40px;z-index:80;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(20,18,15,.18);padding:14px 16px;display:flex;gap:26px;max-width:min(680px,92vw);max-height:74vh;overflow:auto}
-.navmenu-panel .nm-col{min-width:170px;display:flex;flex-direction:column}
-.navmenu-panel .nm-col.studies{max-height:66vh;overflow:auto;min-width:220px}
-.navmenu-panel .nm-h{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:2px 0 6px}
-.navmenu-panel .nm-h2{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:12px 0 6px;border-top:1px solid var(--line);padding-top:10px}
-.navmenu-panel a{display:block;font-size:12.5px;color:var(--ink);padding:3px 7px;border-radius:6px;text-decoration:none;line-height:1.4}
-.navmenu-panel a:hover{background:var(--accent-soft);color:var(--accent)}
-@media (max-width:640px){.navmenu-panel{left:12px;right:12px;flex-direction:column;gap:14px}.navmenu-panel .nm-col.studies{max-height:40vh}}
+/* Contents: a clean left slide-in drawer (replaces the old wide dropdown). */
+.navdrawer-backdrop{position:fixed;inset:0;background:rgba(20,18,15,.34);z-index:85;opacity:0;pointer-events:none;transition:opacity .2s ease}
+.navdrawer-backdrop.open{opacity:1;pointer-events:auto}
+.navdrawer{position:fixed;top:0;left:0;height:100vh;width:min(330px,86vw);background:var(--surface);border-right:1px solid var(--line);box-shadow:0 10px 44px rgba(20,18,15,.20);z-index:90;transform:translateX(-102%);transition:transform .22s ease;display:flex;flex-direction:column;overflow:hidden}
+.navdrawer.open{transform:none}
+.nd-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 11px;font-size:14px;font-weight:800;letter-spacing:.02em;color:var(--ink);border-bottom:1px solid var(--line);flex:0 0 auto}
+.nd-close{background:transparent;border:none;font-size:15px;color:var(--ink-3);cursor:pointer;padding:4px 9px;border-radius:6px;line-height:1}
+.nd-close:hover{background:var(--chip);color:var(--ink)}
+.nd-body{overflow-y:auto;padding:8px 10px 28px;flex:1 1 auto}
+.nd-grp{font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin:15px 8px 5px}
+.nd-grp:first-child{margin-top:6px}
+.navdrawer a.nd-link{display:block;font-size:13px;color:var(--ink);padding:5px 10px;border-radius:7px;text-decoration:none;line-height:1.35}
+.navdrawer a.nd-link:hover{background:var(--accent-soft);color:var(--accent)}
+.navdrawer a.nd-link.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
+.nd-studies-toggle{display:flex;align-items:center;gap:8px;width:calc(100% - 16px);text-align:left;background:transparent;border:none;cursor:pointer;margin:15px 8px 5px;padding:0;font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+.nd-count{font-weight:700;color:var(--ink-2);background:var(--chip);border-radius:9999px;padding:0 7px;font-size:10px;letter-spacing:0}
+.nd-caret{margin-left:auto;transition:transform .15s ease;font-size:11px}
+.nd-studies-toggle[aria-expanded="true"] .nd-caret{transform:rotate(90deg)}
+.navdrawer .nd-studies a.nd-link{padding-left:16px;font-size:12.5px;color:var(--ink-2)}
 
 /* ---- study card ---- */
 .card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:14px;
@@ -1538,6 +1549,7 @@ function toc(inv){
   // sub-sections and every member study, in one dropdown. The chip row above is
   // the quick main-section nav; this reaches everything.
   const sa=inv.scientific_argument||{};
+  const _ndl=(href,label)=>`<a class="nd-link" href="${href}">${label}</a>`;
   const mainLinks=[
     ['#exec-summary','Summary',true],
     ['#spine-presentation','Investigation map',!!inv.spine],
@@ -1548,7 +1560,7 @@ function toc(inv){
     ['#validation','Validation & reproducibility',((syn.validation||{}).items||[]).length!==undefined],
     ['#claim-evidence','Claim–evidence map',(syn.claim_evidence||[]).length],
     ['#references','References',inv.references&&Object.keys(inv.references).length],
-  ].filter(x=>x[2]).map(x=>`<a href="${x[0]}">${x[1]}</a>`).join('');
+  ].filter(x=>x[2]).map(x=>_ndl(x[0],x[1])).join('');
   const suppFront=[
     ['#how-to-read','How to read',!!inv.how_to_read],
     ['#background','Design & background',!!(inv.biological_story||exv.what_is_this||inv.hypothesis)],
@@ -1559,22 +1571,35 @@ function toc(inv){
     ['#inv-viz','Investigation visualizations',true],
     ['#glossary','Glossary',true],
     ['#appendix','Appendix',true],
-  ].filter(x=>x[2]).map(x=>`<a href="${x[0]}">${x[1]}</a>`).join('');
-  const studyLinks=(inv.studies||[]).map(s=>`<a href="#s-${esc(s.slug)}">${esc(s.title||s.slug)}</a>`).join('');
-  const panel=`<div class="navmenu-panel" id="contents-panel" hidden>
-    <div class="nm-col"><div class="nm-h">Main report</div>${mainLinks}</div>
-    <div class="nm-col"><div class="nm-h">Supplement</div>${suppFront}</div>
-    <div class="nm-col studies"><div class="nm-h">Studies (${(inv.studies||[]).length})</div>${studyLinks}</div>
-  </div>`;
-  const menu=`<div class="navmenu"><button type="button" class="navmenu-btn" onclick="_toggleContents(event)" aria-haspopup="true" aria-expanded="false">☰ Contents</button>${panel}</div>`;
-  return `<div class="subnav"><div class="wrap">${menu}${front.join('')}</div></div>`;
+  ].filter(x=>x[2]).map(x=>_ndl(x[0],x[1])).join('');
+  const nStudies=(inv.studies||[]).length;
+  const studyLinks=(inv.studies||[]).map(s=>_ndl('#s-'+esc(s.slug), esc(s.title||s.slug))).join('');
+  const drawer=
+    '<div class="navdrawer-backdrop" id="navdrawer-backdrop" onclick="_closeContents()"></div>'+
+    '<aside class="navdrawer" id="navdrawer" aria-label="Report contents" aria-hidden="true">'+
+      '<div class="nd-head"><span>Contents</span><button type="button" class="nd-close" onclick="_closeContents()" aria-label="Close contents">✕</button></div>'+
+      '<nav class="nd-body">'+
+        `<div class="nd-grp">Main report</div>${mainLinks}`+
+        `<div class="nd-grp">Supplement</div>${suppFront}`+
+        `<button type="button" class="nd-studies-toggle" onclick="_toggleNdStudies(event)" aria-expanded="false">Studies <span class="nd-count">${nStudies}</span><span class="nd-caret">▸</span></button>`+
+        `<div class="nd-studies" id="nd-studies" hidden>${studyLinks}</div>`+
+      '</nav>'+
+    '</aside>';
+  const menu=`<div class="navmenu"><button type="button" class="navmenu-btn" onclick="_toggleContents(event)" aria-haspopup="true" aria-expanded="false">☰ Contents</button></div>`;
+  return `<div class="subnav"><div class="wrap">${menu}${front.join('')}</div></div>`+drawer;
 }
-function _toggleContents(e){ if(e){e.stopPropagation();} const p=document.getElementById('contents-panel'); const b=e&&e.currentTarget;
-  if(p){ p.hidden=!p.hidden; if(b) b.setAttribute('aria-expanded', String(!p.hidden)); } }
-function _closeContents(){ const p=document.getElementById('contents-panel'); if(p&&!p.hidden){ p.hidden=true;
-  const b=document.querySelector('.navmenu-btn'); if(b) b.setAttribute('aria-expanded','false'); } }
-document.addEventListener('click', e=>{ if(e.target.closest('.navmenu-btn')) return;   // toggle handles itself
-  if(e.target.closest('.navmenu-panel a') || !e.target.closest('.navmenu-panel')) _closeContents(); });
+function _toggleContents(e){ if(e){e.stopPropagation();}
+  const d=document.getElementById('navdrawer'), b=document.getElementById('navdrawer-backdrop'), btn=document.querySelector('.navmenu-btn');
+  const open=!!(d&&d.classList.contains('open'));
+  if(d){ d.classList.toggle('open', !open); d.setAttribute('aria-hidden', String(open)); }
+  if(b) b.classList.toggle('open', !open);
+  if(btn) btn.setAttribute('aria-expanded', String(!open));
+}
+function _closeContents(){ const d=document.getElementById('navdrawer'), b=document.getElementById('navdrawer-backdrop'), btn=document.querySelector('.navmenu-btn');
+  if(d){ d.classList.remove('open'); d.setAttribute('aria-hidden','true'); } if(b) b.classList.remove('open'); if(btn) btn.setAttribute('aria-expanded','false'); }
+function _toggleNdStudies(e){ if(e){e.stopPropagation();} const t=e&&e.currentTarget, el=document.getElementById('nd-studies');
+  if(!el) return; const willOpen=el.hidden; el.hidden=!willOpen; if(t) t.setAttribute('aria-expanded', String(willOpen)); }
+document.addEventListener('click', e=>{ if(e.target.closest('.navdrawer a.nd-link')) _closeContents(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') _closeContents(); });
 function shortTitle(t){ return t.length>22?t.slice(0,21)+'…':t; }
 function spy(){
@@ -2579,7 +2604,9 @@ function render(inv){
       <div class="eyebrow mono">${esc(inv.slug)} · investigation report</div>
       <h1>${esc(inv.title)}</h1>
       <div class="provline">${metaBits.join('<span class="sep">·</span>')}</div>
-    </div>
+    </div></div>`+
+    toc(inv)+
+    `<div class="wrap">
     ${execSummary(inv)}
     ${renderSpine(inv)}
     ${integratedFindings(inv)}
@@ -2589,7 +2616,6 @@ function render(inv){
     ${validationSection(inv)}
     ${claimEvidenceMap(inv)}
     ${renderReferences(inv)}</div>`+
-    toc(inv)+
     `<div class="wrap">
       <details class="supplement" id="supplement">
         <summary style="cursor:pointer;margin:18px 0 2px;font-size:21px;font-weight:700;color:var(--ink)">Technical supplement</summary>

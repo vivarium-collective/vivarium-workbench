@@ -9313,28 +9313,30 @@
     // affordance is discoverable) but starts DISABLED/greyed; the async summary
     // upgrades it to an active download when the investigation actually has
     // figures (same n_figures signal as the card).
-    var _figuresDisabled =
-      ' <button class="btn-mini" disabled ' +
-        'title="No figures yet — run this investigation\'s studies to generate them" ' +
-        'style="opacity:0.5;cursor:not-allowed">↓ figures</button>';
-    // ↓ report ▾ — chooser: HTML report or PDF report (PDF rendered server-side).
-    var _reportDl =
+    // Single "↓ Export ▾" dropdown consolidating report / notebook / figures
+    // (was three separate buttons). The figures item starts disabled and is
+    // upgraded async below when the investigation actually has figures.
+    var _mi = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+    var _figuresMenuItem =
+      '<span id="ws-actions-figures">' +
+        '<button class="btn-mini" role="menuitem" disabled ' +
+          'title="No figures yet — run this investigation\'s studies to generate them" ' +
+          'style="display:block;width:100%;text-align:left;border:none;background:transparent;opacity:0.5;cursor:not-allowed">Figures (none yet)</button>' +
+      '</span>';
+    var _exportDd =
       '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
         '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
-          'title="Download the shareable report (HTML or PDF)" onclick="_toggleInvReportMenu(event)">↓ report ▾</button>' +
+          'title="Download the report, a runnable notebook, or all figures" onclick="_toggleInvReportMenu(event)">↓ Export ▾</button>' +
         '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
-          'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:150px;padding:4px">' +
-          '<button class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent" ' +
-            'onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
-          '<button class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent" ' +
-            'onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'pdf\')">PDF report</button>' +
+          'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:170px;padding:4px">' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'pdf\')">PDF report</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationNotebook()">Notebook</button>' +
+          _figuresMenuItem +
         '</div>' +
       '</span> ';
     actions.innerHTML =
-      _reportDl +
-      '<button class="btn-mini" onclick="_downloadInvestigationNotebook()" ' +
-        'title="Download a self-contained Jupyter notebook">↓ notebook</button>' +
-      '<span id="ws-actions-figures">' + _figuresDisabled + '</span>' +
+      _exportDd +
       (isSnapshot ? '' :
       ' <button class="btn-mini" onclick="_rerunInvestigation()" ' +
         'title="Re-run every member study\'s CURRENT baseline spec (re-derives from each study\'s study.yaml)">▶ Run current spec</button>');
@@ -9352,9 +9354,10 @@
           var me = ((j && j.investigations) || []).filter(function (i) { return i.name === name; })[0];
           var host = document.getElementById('ws-actions-figures');
           if (me && me.n_figures && host) {
-            host.innerHTML = ' <button class="btn-mini" ' +
-              'onclick="window._vivFiguresFromCard(event,\'' + _esc(name) + '\')" ' +
-              'title="Download all figures (studies figures + post-study composites) as a zip">↓ figures</button>';
+            host.innerHTML = '<button class="btn-mini" role="menuitem" ' +
+              'style="display:block;width:100%;text-align:left;border:none;background:transparent" ' +
+              'onclick="_closeInvReportMenu();window._vivFiguresFromCard(event,\'' + _esc(name) + '\')" ' +
+              'title="Download all figures (studies figures + post-study composites) as a zip">Figures (zip)</button>';
           }
           // else: leave the disabled/greyed ↓ figures in place.
         }).catch(function () {});
