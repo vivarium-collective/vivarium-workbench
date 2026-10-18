@@ -2,8 +2,11 @@ name: structured_resources
 version: '1'
 description: >-
   Sample curated structured scientific resources for the Resources tab —
-  lipid structures, a reaction-pathway network summary, imported engines, and
-  cross-linked paper references.
+  lipid structures, a reaction-pathway network summary, evidence datasets,
+  imported engines, and cross-linked paper references.
+evidence_dataset_qa_rule: >-
+  Every evidence dataset must carry a provenance_class and a verbatim caution;
+  a model_prediction stays `status: pending` until its study is wired.
 resources:
 # --- lipid-structure -------------------------------------------------------
 - id: lipid-c12-dodecanoic
@@ -67,6 +70,75 @@ resources:
   honesty_notes:
   - "two reactions only — illustrative, not a closed cycle"
   references: [muchowska2019synthesis]
+
+# --- evidence-dataset ------------------------------------------------------
+- id: evidence-oleic-cmc
+  type: evidence-dataset
+  name: Oleic-acid vesicle CMC (Janke 2014)
+  summary: Critical micelle concentration for a single-chain fatty-acid boundary.
+  citation: {bibtex_key: janke2014oleic, doi: "10.1021/la404270w"}
+  provenance_class: LAB-DIRECT
+  source_figure_table: "Fig 3B"
+  original_measurement:
+    quantity: critical micelle concentration
+    value: 0.8
+    units: mM
+    value_normalized: 8.0e-4
+    uncertainty_or_detection_limit: "±0.1 mM"
+  model_prediction:
+    study: vesicle-boundary-cmc
+    output: cmc_mM
+    value: 0.74
+    units: mM
+  species: [oleic acid, oleate]
+  condition_vector:
+    pH: 8.5
+    T: 298.15
+    P: null
+    ionic_strength: 0.1
+    mineral_comp: null
+    concentrations: "10 mM Tris"
+  control_arm: "buffer-only, no fatty acid"
+  digitization_provenance: "WebPlotDigitizer v4.6, 3 points, axis-calibrated"
+  license_access: "CC-BY 4.0"
+  source_asset_link: "10.1021/la404270w"
+  feeds_into: [vesicle-boundary-cmc]
+  caution: >-
+    CMC is temperature- and counterion-sensitive; do not compare across ionic
+    strengths without re-normalising.
+  status: wired
+  references: [janke2014oleic, souza2021martini3]
+
+- id: evidence-formose-yield
+  type: evidence-dataset
+  name: Formose sugar yield (Breslow, estimated)
+  summary: Order-of-magnitude sugar yield for the base-catalysed formose route.
+  citation: {bibtex_key: breslow1959mechanism}
+  provenance_class: RECONSTRUCTION
+  source_figure_table: "Text, p.22"
+  original_measurement:
+    quantity: total reducing-sugar yield
+    value: 0.3
+    units: "mol fraction"
+    value_normalized: null
+    uncertainty_or_detection_limit: "detection limit ~0.01 mol fraction"
+  model_prediction: {status: pending}
+  species: [glycolaldehyde, glyceraldehyde]
+  condition_vector:
+    pH: 10.5
+    T: 298.15
+    ionic_strength: 0.25
+    mineral_comp: null
+  control_arm: null
+  digitization_provenance: "narrative estimate — not digitized from a plot"
+  license_access: "public domain"
+  source_asset_link: "see pathway-formose universe JSON"
+  feeds_into: [formose-gate-a2]
+  caution: >-
+    Narrative-only yield with no primary table; treat as an upper-bound
+    scaffold, NOT a calibration anchor.
+  status: catalogued
+  references: [breslow1959mechanism, muchowska2019synthesis]
 
 # --- imported-engine -------------------------------------------------------
 - id: engine-equilibrator

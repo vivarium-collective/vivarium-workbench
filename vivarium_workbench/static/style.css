@@ -4354,6 +4354,54 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .res-paper { scroll-margin-top: 80px; }
 .res-ref-flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow 0.2s; }
 
+/* evidence-dataset — a provenance-chain card: original measurement vs model
+   prediction (or pending), condition vector, caution, and provenance/status
+   badges. Reuses the shared surface + .res-caveats for the caution block. */
+.res-ev-qa-banner { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px;
+  padding: 10px 14px; border: 1px solid var(--accent); border-left-width: 4px;
+  border-radius: 6px; background: var(--bg); }
+.res-ev-qa-lbl { font-size: 0.68em; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--accent); flex: 0 0 auto; padding-top: 2px; }
+.res-ev-qa-text { font-size: 0.86em; line-height: 1.5; }
+.res-evidence .res-ev-badges { margin-left: auto; display: flex; flex-wrap: wrap; gap: 5px; }
+.res-ev-badge { font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.04em;
+  font-weight: 600; border-radius: 10px; padding: 1px 8px; white-space: nowrap;
+  border: 1px solid var(--border); }
+/* provenance_class badges — closer to field evidence = cooler/stronger. */
+.res-ev-prov[data-prov="FIELD"]          { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.res-ev-prov[data-prov="LAB-DIRECT"]     { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.res-ev-prov[data-prov="LAB-ANALOG"]     { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
+.res-ev-prov[data-prov="MODEL"]          { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+.res-ev-prov[data-prov="RECONSTRUCTION"] { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
+.res-ev-prov[data-prov="HYPOTHESIS"]     { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+/* status badges — catalogued → digitized → wired progression. */
+.res-ev-status[data-status="catalogued"] { background: var(--bg); color: var(--gray); }
+.res-ev-status[data-status="digitized"]  { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.res-ev-status[data-status="wired"]      { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.res-ev-cite { margin: 2px 0 8px; font-size: 0.8em; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.res-ev-bibkey { font-family: ui-monospace, Menlo, monospace; color: var(--gray); }
+.res-ev-chain { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 10px 0 2px; }
+@media (min-width: 480px) { .res-ev-chain { grid-template-columns: 1fr 1fr; } }
+.res-ev-col { padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.res-ev-predicted { border-style: dashed; }
+.res-ev-col .res-sub { margin-top: 0; }
+.res-ev-kv { grid-template-columns: 1fr; }
+.res-ev-none { margin: 2px 0 0; font-size: 0.84em; }
+.res-ev-pending-mark { font-size: 0.86em; font-weight: 600; color: #b45309; }
+.res-ev-pending { background: #fffbeb; border-color: #fde68a; border-style: dashed; }
+.res-ev-cond { margin-top: 10px; }
+.res-ev-cvrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.res-ev-cvpair { font-size: 0.78em; padding: 1px 8px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg); white-space: nowrap; }
+.res-ev-cvk { color: var(--gray); margin-right: 5px; }
+.res-ev-meta { margin-top: 10px; }
+.res-ev-species { font-style: italic; }
+.res-ev-feeds { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.res-study-chip { cursor: pointer; color: var(--accent); text-decoration: none; }
+.res-study-chip:hover { border-color: var(--accent); }
+.res-ev-caution { margin-top: 12px; }
+.res-ev-caution-text { margin: 0; font-size: 0.86em; line-height: 1.5; }
+
 /* top bar: run picker · view tabs · pop-out */
 .exp-topbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center;
   padding-bottom:8px; border-bottom:1px solid #2a313c; }
@@ -5316,6 +5364,22 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 :root[data-theme="dark"] .res-flag-ok{ background:rgba(16,122,107,0.22); color:#6ee7cf; }
 :root[data-theme="dark"] .res-flag-warn{ background:rgba(180,83,9,0.22); color:#fcd9a8; }
 :root[data-theme="dark"] .res-ref-flash{ box-shadow:0 0 0 2px var(--accent); }
+/* evidence-dataset — dark overrides. Sub-surfaces (provenance-chain columns,
+   condition-vector chips, QA banner) + the provenance/status/pending badges. */
+:root[data-theme="dark"] .res-ev-qa-banner{ background:var(--surface-2); border-color:var(--accent); }
+:root[data-theme="dark"] .res-ev-col{ background:var(--surface-2); border-color:var(--border); }
+:root[data-theme="dark"] .res-ev-cvpair{ background:var(--surface-3); border-color:var(--border); }
+:root[data-theme="dark"] .res-ev-badge{ background:var(--surface-3); border-color:var(--border); color:var(--text-muted); }
+:root[data-theme="dark"] .res-ev-prov[data-prov="FIELD"]          { background:rgba(16,122,107,0.22); color:#6ee7cf; }
+:root[data-theme="dark"] .res-ev-prov[data-prov="LAB-DIRECT"]     { background:rgba(29,78,216,0.24); color:#93c5fd; }
+:root[data-theme="dark"] .res-ev-prov[data-prov="LAB-ANALOG"]     { background:rgba(3,105,161,0.24); color:#7dd3fc; }
+:root[data-theme="dark"] .res-ev-prov[data-prov="MODEL"]          { background:rgba(109,40,217,0.26); color:#c4b5fd; }
+:root[data-theme="dark"] .res-ev-prov[data-prov="RECONSTRUCTION"] { background:rgba(194,65,12,0.24); color:#fdba74; }
+:root[data-theme="dark"] .res-ev-prov[data-prov="HYPOTHESIS"]     { background:rgba(185,28,28,0.26); color:#fca5a5; }
+:root[data-theme="dark"] .res-ev-status[data-status="digitized"]  { background:rgba(180,83,9,0.22); color:#fcd9a8; }
+:root[data-theme="dark"] .res-ev-status[data-status="wired"]      { background:rgba(16,122,107,0.22); color:#6ee7cf; }
+:root[data-theme="dark"] .res-ev-pending{ background:rgba(180,83,9,0.18); border-color:#b45309; }
+:root[data-theme="dark"] .res-ev-pending-mark{ color:#fcd9a8; }
 :root[data-theme="dark"] .loom-config,
 :root[data-theme="dark"] .loom-sec-out,
 :root[data-theme="dark"] .reg-ip,

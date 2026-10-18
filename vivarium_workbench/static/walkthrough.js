@@ -2087,6 +2087,7 @@
   var _RES_TYPE_LABEL = {
     'lipid-structure':  'Lipid structures',
     'reaction-pathway': 'Reaction pathways',
+    'evidence-dataset': 'Evidence datasets',
     'imported-engine':  'Imported engines',
     'paper-reference':  'Paper references'
   };
@@ -2320,6 +2321,153 @@
       tags + '</div>';
   }
 
+  // A study-slug chip that opens the study (feeds_into + model_prediction.study).
+  // Falls back to a plain chip when study navigation isn't available (snapshot).
+  function _resStudyChip(slug) {
+    var s = _resV(slug);
+    if (!s) return '';
+    return '<a class="res-tag res-study-chip" title="Open study ' + _esc(s) + '" ' +
+      'onclick="if(window._openStudyEmbeddedNewTab){_openStudyEmbeddedNewTab(\'' +
+      _esc(String(s)) + '\');}return false;">' + _esc(s) + '</a>';
+  }
+
+  // evidence-dataset → a provenance-chain card: original measurement vs model
+  // prediction (or a "prediction pending" marker), the condition vector, the
+  // caution (verbatim), and provenance/status badges. The whole chain is meant
+  // to read at a glance.
+  function _resEvidenceCard(r, refsById) {
+    // Badges row: provenance_class + status.
+    var badges = '';
+    if (r.provenance_class) {
+      badges += '<span class="res-ev-badge res-ev-prov" data-prov="' +
+        _esc(_resV(r.provenance_class)) + '">' + _esc(_resV(r.provenance_class)) + '</span>';
+    }
+    if (r.status) {
+      badges += '<span class="res-ev-badge res-ev-status" data-status="' +
+        _esc(_resV(r.status)) + '">' + _esc(_resV(r.status)) + '</span>';
+    }
+    var head = '<div class="res-card-head">' +
+      '<strong class="res-card-name">' + _esc(r.name || r.id || '') + '</strong>' +
+      (badges ? '<span class="res-ev-badges">' + badges + '</span>' : '') +
+      '</div>' +
+      (r.summary ? '<p class="res-summary muted">' + _esc(r.summary) + '</p>' : '');
+
+    // Citation line: bibtex_key + DOI link.
+    var cite = '';
+    var c = r.citation;
+    if (c && typeof c === 'object' && (c.bibtex_key || c.doi)) {
+      var parts = [];
+      if (c.bibtex_key) parts.push('<span class="res-ev-bibkey">' + _esc(_resV(c.bibtex_key)) + '</span>');
+      if (c.doi) parts.push('<a class="res-link" href="https://doi.org/' + encodeURIComponent(c.doi) +
+        '" target="_blank" rel="noopener">doi:' + _esc(c.doi) + '</a>');
+      cite = '<div class="res-ev-cite">' + parts.join(' · ') + '</div>';
+    }
+
+    // Provenance chain: original measurement vs model prediction (or pending).
+    var om = r.original_measurement;
+    var measBody = '';
+    if (om && typeof om === 'object') {
+      var val = _resV(om.value);
+      if (val !== '' && om.units) val += ' ' + _resV(om.units);
+      measBody =
+        _resKV('Quantity', om.quantity) +
+        (val !== '' ? _resKV('Value', val) : '') +
+        _resKV('Normalized', om.value_normalized) +
+        _resKV('Uncertainty / detection', om.uncertainty_or_detection_limit);
+    }
+    var measCol = '<div class="res-ev-col res-ev-measured"><div class="res-sub">Original measurement</div>' +
+      (measBody ? '<div class="res-kv-grid res-ev-kv">' + measBody + '</div>'
+                : '<p class="res-ev-none muted">—</p>') + '</div>';
+
+    var mp = r.model_prediction;
+    var predCol;
+    if (mp && typeof mp === 'object' && _resV(mp.status).toLowerCase() === 'pending') {
+      predCol = '<div class="res-ev-col res-ev-predicted res-ev-pending">' +
+        '<div class="res-sub">Model prediction</div>' +
+        '<div class="res-ev-pending-mark">⏳ prediction pending</div></div>';
+    } else if (mp && typeof mp === 'object' && (mp.study || mp.output || mp.value != null)) {
+      var pval = _resV(mp.value);
+      if (pval !== '' && mp.units) pval += ' ' + _resV(mp.units);
+      var studyLine = mp.study
+        ? '<div class="res-kv"><span class="res-kv-k">Study</span><span class="res-kv-v">' +
+          _resStudyChip(mp.study) + '</span></div>'
+        : '';
+      predCol = '<div class="res-ev-col res-ev-predicted"><div class="res-sub">Model prediction</div>' +
+        '<div class="res-kv-grid res-ev-kv">' +
+          studyLine + _resKV('Output', mp.output) +
+          (pval !== '' ? _resKV('Value', pval) : '') +
+        '</div></div>';
+    } else {
+      predCol = '<div class="res-ev-col res-ev-predicted"><div class="res-sub">Model prediction</div>' +
+        '<p class="res-ev-none muted">—</p></div>';
+    }
+    var chain = '<div class="res-ev-chain">' + measCol + predCol + '</div>';
+
+    // Condition vector — compact key:value row, null/empty keys skipped.
+    var cond = '';
+    var cv = r.condition_vector;
+    if (cv && typeof cv === 'object') {
+      var CV_LABELS = {
+        pH: 'pH', T: 'T', P: 'P', ionic_strength: 'ionic strength',
+        mineral_comp: 'mineral', concentrations: 'conc.'
+      };
+      var bits = Object.keys(cv).map(function (k) {
+        var v = cv[k];
+        if (v === null || v === undefined || v === '') return '';
+        if (typeof v === 'object') { try { v = JSON.stringify(v); } catch (e) { v = String(v); } }
+        var lbl = CV_LABELS[k] || k;
+        return '<span class="res-ev-cvpair"><span class="res-ev-cvk">' + _esc(lbl) +
+          '</span>' + _esc(_resV(v)) + '</span>';
+      }).filter(Boolean).join('');
+      if (bits) cond = '<div class="res-ev-cond"><span class="res-sub">Condition vector</span>' +
+        '<div class="res-ev-cvrow">' + bits + '</div></div>';
+    }
+
+    // Species chips.
+    var species = (r.species && r.species.length)
+      ? '<div class="res-kv"><span class="res-kv-k">Species</span><span class="res-kv-v">' +
+        r.species.map(function (s) { return '<span class="res-tag res-ev-species">' + _esc(_resV(s)) + '</span>'; }).join(' ') +
+        '</span></div>'
+      : '';
+
+    // Secondary provenance metadata.
+    var metaKv = [
+      species,
+      _resKV('Source fig/table', r.source_figure_table),
+      _resKV('Control arm', r.control_arm),
+      _resKV('Digitization', r.digitization_provenance),
+      _resKV('License / access', r.license_access)
+    ].join('');
+    // source_asset_link: render DOI/URL as a link, otherwise plain text.
+    var asset = '';
+    if (r.source_asset_link) {
+      var sal = _resV(r.source_asset_link);
+      var href = /^(https?:)?\/\//.test(sal) ? sal
+        : (/^10\.\d/.test(sal) ? 'https://doi.org/' + sal : '');
+      asset = href
+        ? '<div class="res-kv"><span class="res-kv-k">Source asset</span><span class="res-kv-v">' +
+          '<a class="res-link" href="' + _esc(href) + '" target="_blank" rel="noopener">' + _esc(sal) + '</a></span></div>'
+        : _resKV('Source asset', sal);
+    }
+    var meta = (metaKv + asset)
+      ? '<div class="res-kv-grid res-ev-meta">' + metaKv + asset + '</div>' : '';
+
+    // feeds_into study chips.
+    var feeds = (r.feeds_into && r.feeds_into.length)
+      ? '<div class="res-ev-feeds"><span class="res-cites-lbl">Feeds into</span>' +
+        r.feeds_into.map(function (s) { return _resStudyChip(s); }).join('') + '</div>'
+      : '';
+
+    // caution — rendered PROMINENTLY and VERBATIM (like honesty_notes).
+    var caution = r.caution
+      ? '<div class="res-caveats res-ev-caution"><div class="res-caveats-lbl">⚠ Caution</div>' +
+        '<p class="res-ev-caution-text">' + _esc(_resV(r.caution)) + '</p></div>'
+      : '';
+
+    return '<div class="res-card res-evidence">' + head + cite + chain + cond + meta +
+      feeds + caution + _resRefChips(r.references, refsById) + '</div>';
+  }
+
   // Generic fallback for an unknown resource type — never drop it silently.
   function _resGenericCard(r, refsById) {
     var kv = Object.keys(r).filter(function (k) {
@@ -2335,6 +2483,7 @@
     switch (r.type) {
       case 'lipid-structure':  return _resLipidCard(r, refsById);
       case 'reaction-pathway': return _resPathwayCard(r, refsById);
+      case 'evidence-dataset': return _resEvidenceCard(r, refsById);
       case 'imported-engine':  return _resEngineCard(r, refsById);
       case 'paper-reference':  return _resPaperCard(r);
       default:                 return _resGenericCard(r, refsById);
@@ -2350,13 +2499,21 @@
       (data.version ? '<span class="res-manifest-ver">v' + _esc(data.version) + '</span>' : '') +
       (data.description ? '<p class="res-manifest-desc muted">' + _esc(data.description) + '</p>' : '') +
       '</div>';
+    // The evidence-dataset group carries a one-time QA-rule banner, rendered
+    // ONCE above its cards (never per-card).
+    var qaRule = _resV(data.evidence_dataset_qa_rule);
     var sections = order.map(function (t) {
       var items = groups[t] || [];
       if (!items.length) return '';
       var cards = items.map(function (r) { return _resRenderCard(r, refsById); }).join('');
+      var banner = (t === 'evidence-dataset' && qaRule)
+        ? '<div class="res-ev-qa-banner"><span class="res-ev-qa-lbl">QA rule</span>' +
+          '<span class="res-ev-qa-text">' + _esc(qaRule) + '</span></div>'
+        : '';
       return '<section class="res-section" data-res-type="' + _esc(t) + '">' +
         '<h3 class="res-section-title">' + _esc(_resTypeLabel(t)) +
         ' <span class="res-count">' + items.length + '</span></h3>' +
+        banner +
         '<div class="res-grid">' + cards + '</div></section>';
     }).join('');
     container.innerHTML = header + sections;
