@@ -1558,6 +1558,7 @@ function toc(inv){
   if((syn.roadmap||[]).length||Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length) front.push('<a href="#roadmap">Next studies</a>');
   if(((syn.validation||{}).items||[]).length!==undefined) front.push('<a href="#validation">Validation</a>');
   if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
+  if((syn.studies_index||[]).length) front.push('<a href="#evidence-register">Register</a>');
   if(inv.references&&Object.keys(inv.references).length) front.push('<a href="#references">References</a>');
   front.push('<a href="#supplement">Supplement</a>');
   // Full "Contents" jump menu — every part of the report, incl. supplement
@@ -1574,6 +1575,7 @@ function toc(inv){
     ['#roadmap','Next studies & priorities',(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
     ['#validation','Validation & reproducibility',((syn.validation||{}).items||[]).length!==undefined],
     ['#claim-evidence','Claim–evidence map',(syn.claim_evidence||[]).length],
+    ['#evidence-register','Evidence register (all studies)',(syn.studies_index||[]).length],
     ['#references','References',inv.references&&Object.keys(inv.references).length],
   ].filter(x=>x[2]).map(x=>_ndl(x[0],x[1])).join('');
   const suppFront=[
@@ -1623,7 +1625,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('#exec-summary,#spine-presentation,#integrated-findings,#quantitative,#contradictions,#roadmap,#validation,#claim-evidence,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('#exec-summary,#spine-presentation,#integrated-findings,#quantitative,#contradictions,#roadmap,#validation,#claim-evidence,#evidence-register,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -2187,24 +2189,37 @@ function stageFigure(inv, st){
 
 // 1. EXECUTIVE SUMMARY — question, current verdict, the honest gate ladder, and
 // the run-status / evidence / claim separation (a passed gate ≠ a proven mechanism).
+// First n sentences of a block of prose (deterministic — no rewriting).
+function _leadText(text, n){
+  const t=String(text||'').replace(/\s+/g,' ').trim(); if(!t) return {lead:'', rest:''};
+  const parts=t.match(/[^.!?]+[.!?]+(\s|$)/g);
+  if(!parts||parts.length<=(n||3)) return {lead:t, rest:''};
+  const lead=parts.slice(0,n||3).join('').trim();
+  return {lead, rest:t.slice(lead.length).trim()};
+}
+// OPENING SYNTHESIS (plan §1): question → concise saved conclusion → milestone
+// outcomes → one hero figure. The full verdict prose is kept in a collapsible so
+// the opening reads in a glance instead of a wall of text.
 function execSummary(inv){
   const syn=inv.synthesis||{}, c=syn.counts||{}, ex=inv.executive||{};
   const q=(inv.question||'').replace(/\s+/g,' ').trim();
   const verdict=(ex.verdict||'').trim();
+  const {lead, rest}=_leadText(verdict, 3);
   const gl=(syn.headline||[]).map(h=>{ const g=(h.status==='met')?'supported':h.status;
     return `<span style="display:inline-flex;gap:5px;align-items:center;margin:0 12px 7px 0;font-size:12.5px">`+
       `<span class="mono" style="font-weight:800">${esc(h.id||'')}</span> ${esc(h.name||'')} ${_gradeChip(g)}</span>`; }).join('');
   return `<div class="narr fbsection" id="exec-summary">${fbBubble('summary','Executive summary')}
     <div class="sec-h"><h2>Executive summary</h2><span class="rule"></span></div>
     ${q?`<p class="prose" style="font-size:16px;margin:2px 0 8px"><b>Question.</b> ${esc(q)}</p>`:''}
-    ${verdict?`<div class="prose">${mdLite(verdict)}</div>`:''}
-    ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Where the campaign stands</div><div>${gl}</div></div>`:''}
+    ${lead?`<div class="prose" style="font-size:15.5px">${mdLite(lead)}</div>`:''}
+    ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Milestone outcomes</div><div>${gl}</div></div>`:''}
+    ${heroFigure(inv)}
     <p class="measure" style="color:var(--ink-2);font-size:13px;margin:12px 0 0;line-height:1.5">
       Across <b>${c.total||0}</b> studies: <b>${c.supported||0}</b> supported, <b>${c.qualified||0}</b> qualified,
       <b>${c.refuted||0}</b> refuted, <b>${c.planned||0}</b> planned.
       A supported result means a <b>computational gate passed under the stated model assumptions</b> — it is evidence
       for a mechanism's feasibility, not proof that the historical transition occurred.</p>
-    ${heroFigure(inv)}
+    ${rest?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:650;color:var(--accent)">Full synthesis</summary><div class="prose" style="margin-top:6px">${mdLite(rest)}</div></details>`:''}
   </div>`;
 }
 
@@ -2223,8 +2238,8 @@ function integratedFindings(inv){
     return `<div class="fbsection" style="margin:18px 0 0" id="stage-${esc(st.key)}">${fbBubble('stage:'+st.key, 'Finding — '+(st.label||st.key))}
       <h3 style="font-size:16px;margin:0 0 2px">${esc(st.label)}</h3>
       <div style="margin:4px 0 2px">${studyChips}</div>${md}
-      ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}
-      ${stageFigure(inv, st)}</div>`;
+      ${stageFigure(inv, st)}
+      ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}</div>`;
   }).join('');
   return `<div class="narr fbsection" id="integrated-findings">${fbBubble('findings','Integrated findings')}
     <div class="sec-h"><h2>Integrated findings</h2><span class="rule"></span></div>
@@ -2345,6 +2360,25 @@ function keyFigures(inv){
   return `<div class="narr fbsection" id="key-figures">${fbBubble('key-figures','Key figures')}<div class="sec-h"><h2>Key figures</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 4px">The most evidence-bearing figures, ranked by scientific weight — full renders are in the Technical supplement.</p>
     <ol style="list-style:none;padding:0;margin:4px 0 0;font-size:13px;color:var(--ink)">${rows}</ol></div>`;
+}
+
+// EVIDENCE REGISTER (plan §5) — a compact entry for EVERY study, in the MAIN
+// body: scientific verdict × run status × one-line result, each cross-linked to
+// its full record in the supplement. Ensures every study is represented without
+// repeating full per-study tables in the narrative.
+function evidenceRegister(inv){
+  const idx=(inv.synthesis||{}).studies_index||[]; if(!idx.length) return '';
+  const rows=idx.map(r=>`<tr style="border-bottom:1px solid var(--line)">
+    <td style="padding:5px 10px 5px 0;font-size:12.5px;vertical-align:top">${_studyLink(r.slug,r.title)}${r.variant?' <span style="font-size:10px;color:var(--ink-3)">alt</span>':''}</td>
+    <td style="padding:5px 10px 5px 0;white-space:nowrap;vertical-align:top">${_gradeChip(r.grade)}</td>
+    <td style="padding:5px 10px 5px 0;white-space:nowrap;font-size:11px;color:var(--ink-3);vertical-align:top">${esc(r.run_status)}</td>
+    <td style="padding:5px 0;font-size:12px;color:var(--ink-2);line-height:1.4;vertical-align:top">${esc(r.one_line||'')}</td></tr>`).join('');
+  return `<div class="narr fbsection" id="evidence-register">${fbBubble('evidence-register','Evidence register')}
+    <div class="sec-h"><h2>Evidence register</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 6px">Every study in the campaign (${idx.length}) — scientific verdict, run status, and one-line result, each linked to its full record in the supplement.</p>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:26%"><col style="width:12%"><col style="width:12%"><col style="width:50%"></colgroup>
+    <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;font-size:11px;color:var(--ink-3);text-transform:uppercase;padding-bottom:3px">Study</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Verdict</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Run</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Result</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
 }
 
 // SUPPLEMENT HEADER — one-line inventory of every study (detail cards follow).
@@ -2634,6 +2668,7 @@ function render(inv){
     ${roadmapSection(inv)}
     ${validationSection(inv)}
     ${claimEvidenceMap(inv)}
+    ${evidenceRegister(inv)}
     ${renderReferences(inv)}</div>`+
     `<div class="wrap">
       <details class="supplement" id="supplement">
@@ -2645,7 +2680,6 @@ function render(inv){
         ${groundRules(inv)}
         ${evidenceFraming(inv)}
         ${keyFigures(inv)}
-        ${studiesInventory(inv)}
         <div class="sec-h"><h3 style="margin:0">Study records</h3><span class="rule"></span>
           <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
         ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
