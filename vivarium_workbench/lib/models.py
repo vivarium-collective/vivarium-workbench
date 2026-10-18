@@ -529,6 +529,34 @@ class CatalogPayload(BaseModel):
     modules: list[CatalogModule] = []
 
 
+class StructuredResourcesPayload(BaseModel):
+    """``GET /api/structured-resources`` payload
+    (``lib.structured_resources.load_structured_resources``).
+
+    A workspace's curated ``structured_resources`` vg_data manifest, grouped by
+    resource ``type`` plus a ``paper-reference`` lookup by id (so the Resources
+    tab can cross-link each ``references: [id]`` to its citation card).
+
+    ``available`` is ``False`` when the workspace ships no manifest — the tab
+    then stays hidden.  Per-resource shapes are type-specific (lipid-structure,
+    reaction-pathway, imported-engine, paper-reference) and vary widely, so each
+    grouped entry is a passthrough ``dict`` rather than a tight model;
+    ``extra="allow"`` also forwards any future top-level keys.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    available: bool = False
+    name: Optional[str] = None
+    version: Optional[str] = None
+    description: Optional[str] = None
+    type_order: list[str] = []
+    groups: dict[str, list[dict]] = {}
+    references_by_id: dict[str, dict] = {}
+    counts: dict[str, int] = {}
+    n_resources: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Git / branch models
 # ---------------------------------------------------------------------------

@@ -1,0 +1,126 @@
+name: structured_resources
+version: '1'
+description: >-
+  Sample curated structured scientific resources for the Resources tab —
+  lipid structures, a reaction-pathway network summary, imported engines, and
+  cross-linked paper references.
+resources:
+# --- lipid-structure -------------------------------------------------------
+- id: lipid-c12-dodecanoic
+  type: lipid-structure
+  name: Dodecanoic acid (C12:0, lauric acid)
+  summary: Single-chain saturated fatty acid; a model protocell amphiphile.
+  chemical_name: dodecanoic acid
+  abbreviation: "C12:0"
+  lipid_class: fatty-acid
+  n_chains: 1
+  chain_length: 12
+  headgroup: carboxylate
+  charge_state: "carboxylate, pKa ~4.8"
+  role: single-chain amphiphile (endogenous protocell boundary)
+  martini: {version: "Martini 3", model: standard, n_beads_per_chain: 3, bead_mapping: ["SP1 (COOH)", "C1", "C1"], source_itp: "martini_v3 fatty acid"}
+  notes: "Fatty acid, NOT a phosphatidylcholine."
+  references: [souza2021martini3, janke2014oleic]
+
+# --- reaction-pathway (revised schema: curated summary of a generated universe) ---
+- id: pathway-formose
+  type: reaction-pathway
+  name: Formose network (linear autocatalysis route)
+  summary: Sugar-forming network; tested as an A2 autocatalysis route and refuted.
+  pathway: formose
+  description: Base-catalysed condensation toward sugars.
+  role_in_campaign: "A2 endogenous autocatalysis route (off-spine)"
+  campaign_tie: "og-29 (Gate A2, refuted)"
+  data_source:
+    package: viva_genesis
+    path: data/vg_data/formose_universe.json
+    generated_by: "reaction-network-generator v0.3 (rule expansion)"
+  network_summary:
+    n_species: 1021
+    n_reactions: 5515
+    max_carbons: 6
+    rule_families:
+    - {name: aldol-addition, n_reactions: 3100}
+    - {name: retro-aldol, n_reactions: 1800}
+    - {name: enolisation, n_reactions: 615}
+    catalyst_classes: {mineral: 0, base: 5515, none: 0}
+    energetic_span_kj_mol: {min: -42.8, max: 18.6, mean: -11.2}
+    thermo: {p_h: 10.5, ionic_strength_M: 0.25, temperature_K: 298.15, engine: eQuilibrator}
+  keystone_rules:
+  - {rule: "r409 doubling", n_reactions: 12, catalyst: base, role: "autocatalytic core", note: "glycolaldehyde doubling"}
+  - {rule: "r88 branch", n_reactions: 40, catalyst: base, role: "branch to tetroses", note: "off-core"}
+  honesty_notes:
+  - "linear skeletons only — full branched rTCA cannot close here"
+  - "only 50/1022 skeletons carry live eQuilibrator ΔG′"
+  references: [breslow1959mechanism, muchowska2019synthesis]
+
+# --- reaction-pathway with optional legacy curated reactions table ----------
+- id: pathway-wljp-fragment
+  type: reaction-pathway
+  name: Wood-Ljungdahl fragment (curated)
+  summary: A small hand-curated carbon-fixation fragment with explicit ΔG.
+  pathway: wood-ljungdahl
+  role_in_campaign: "carbon fixation seed"
+  campaign_tie: "og-12"
+  reactions:
+  - {name: "CO2 reduction", equation: "CO2 + H2 -> HCOOH", delta_g_kjmol: -3.5, delta_g_type: standard, note: "formate route"}
+  honesty_notes:
+  - "two reactions only — illustrative, not a closed cycle"
+  references: [muchowska2019synthesis]
+
+# --- imported-engine -------------------------------------------------------
+- id: engine-equilibrator
+  type: imported-engine
+  name: eQuilibrator thermodynamics
+  summary: Component-contribution ΔG′ estimates for the reaction universe.
+  engine: eQuilibrator
+  wraps: "equilibrator-api"
+  viva_package: viva_equilibrator
+  role: "per-reaction standard-transformed Gibbs energy"
+  used_by: [pathway-formose, pathway-wljp-fragment]
+  references: [souza2021martini3]
+
+# --- paper-reference (citation targets) ------------------------------------
+- id: souza2021martini3
+  type: paper-reference
+  name: "Martini 3 (Souza et al. 2021)"
+  summary: General-purpose CG force field.
+  authors: "Souza PCT, et al."
+  year: 2021
+  title: "Martini 3: a general purpose force field for coarse-grained molecular dynamics"
+  venue: "Nature Methods"
+  doi: "10.1038/s41592-021-01098-3"
+  tags: [force-field, martini]
+  in_papers_bib: false
+- id: janke2014oleic
+  type: paper-reference
+  name: "Janke et al. 2014"
+  summary: Fatty-acid vesicle boundary behaviour.
+  authors: "Janke JJ, et al."
+  year: 2014
+  title: "Oleic acid phase behaviour from molecular dynamics"
+  venue: "Langmuir"
+  tags: [fatty-acid, vesicle]
+  in_papers_bib: true
+  needs_verification: true
+- id: breslow1959mechanism
+  type: paper-reference
+  name: "Breslow 1959"
+  summary: Formose mechanism.
+  authors: "Breslow R"
+  year: 1959
+  title: "On the mechanism of the formose reaction"
+  venue: "Tetrahedron Letters"
+  tags: [formose]
+  in_papers_bib: true
+- id: muchowska2019synthesis
+  type: paper-reference
+  name: "Muchowska et al. 2019"
+  summary: Nonenzymatic metabolic-like reactions.
+  authors: "Muchowska KB, et al."
+  year: 2019
+  title: "Synthesis and breakdown of universal metabolic precursors promoted by iron"
+  venue: "Nature"
+  doi: "10.1038/s41586-019-1151-1"
+  tags: [metabolism, prebiotic]
+  in_papers_bib: true

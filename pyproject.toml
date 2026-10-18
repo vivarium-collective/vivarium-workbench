@@ -320,6 +320,7 @@ python_version = "3.11"
 files = [
     "vivarium_workbench/lib/startup.py",
     "vivarium_workbench/lib/models.py",
+    "vivarium_workbench/lib/structured_resources.py",
     "vivarium_workbench/lib/active_workspace.py",
     "vivarium_workbench/lib/investigation_status.py",
     "vivarium_workbench/lib/saved_visualizations.py",
