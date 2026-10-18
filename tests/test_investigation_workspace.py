@@ -157,14 +157,15 @@ def test_dockable_graph_and_graph_bar_navigator():
 
 
 def test_docked_graph_whole_node_click_opens_study():
-    """In the docked/embedded graph, a click anywhere on a study node opens that
-    study (names-only; expand-in-place isn't useful there); the inline full graph
-    keeps click-to-expand. Scoped at click time via the .aig-dock class."""
-    i = JS.index("node.onclick = function")
-    body = JS[i:i + 400]
-    assert "aig-dock" in body
-    assert "_openStudyEmbeddedNewTab(s.name)" in body
-    assert "_toggleExpand()" in body               # inline fallback preserved
+    """In the names-only graph (band 0) a click anywhere on a study node opens
+    that study (the card is too small to expand usefully); at higher detail a
+    click expands in place and ↗ opens the study. Scoped at click time via the
+    aigBand detail level (#1370 unified the study-open entry points)."""
+    i = JS.index("node.onclick = _namesOnly")
+    body = JS[i:i + 200]
+    assert "aigBand === 0" in JS[i - 200:i]         # names-only is the band-0 case
+    assert "_openStudyInsideInvestigation(s.name)" in body
+    assert "_toggleExpand" in body                  # inline fallback preserved
 
 
 def test_floating_graph_hides_prose_when_study_open():
