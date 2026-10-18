@@ -155,6 +155,10 @@ def _build_spine(ws_root, inv_slug: str, studies: list) -> dict:
         "verdict_dag": {"nodes": nodes, "edges": edges},
         "acceptance": detail.get("computed_acceptance"),
         "ac_matrix": ac_matrix,
+        # The honest A→E gate ladder (met/qualified/refuted/off-spine), computed
+        # exactly as the live investigation overview — surfaced so the report can
+        # lead the findings with where the campaign stands against its own plan.
+        "plan_board": detail.get("plan_board") or [],
     }
 
 # inline-image budget: keep the self-contained report a sane size

@@ -508,7 +508,7 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
 </div></div>
 
 <footer><div class="wrap">
-  <div>Rendered from workspace <span class="mono">viva-casebook</span> · investigation + study YAML and loop trajectories — every panel maps to a real field.</div>
+  <div>Rendered from workspace <span class="mono" id="foot-ws"></span> · deterministic from investigation + study YAML.</div>
   <div id="foot-prov" class="mono"></div>
 </div></footer>
 
@@ -996,6 +996,20 @@ function fbBubble(key,label){ return `<button class="fbbubble ${FB[key]?'has':''
 function part(label, body, key, klabel){ if(!body) return '';
   return `<div class="substage fbsection">${key?fbBubble(key,klabel||label):''}<div class="slabel">${label}</div>${body}</div>`; }
 
+// Render a limitation / follow-up entry that may be a plain string OR a
+// single-key {title: detail} map (the authored shapes in study.yaml).
+function _debtText(x){
+  if(x==null) return '';
+  if(typeof x==='string') return mdLite(x);
+  if(typeof x==='object'){
+    const k=Object.keys(x);
+    if(k.length===1) return `<b>${esc(k[0])}</b> — ${mdLite(String(x[k[0]]))}`;
+    if(x.study||x.proposal||x.title) return `<b>${esc(x.study||x.title||'')}</b>${(x.proposal||x.rationale||x.reason)?' — '+mdLite(String(x.proposal||x.rationale||x.reason)):''}`;
+    return esc(JSON.stringify(x));
+  }
+  return esc(String(x));
+}
+
 // traceability anchor built via the prefix helper (assembled, not a hardcoded
 // href), so a finding's from_test resolves to its test-card anchor
 function _traceLink(prefix, name){ return '<a class="trace-link" href="#' + prefix + '-' + esc(name) + '">' + esc(name) + '</a>'; }
@@ -1254,6 +1268,21 @@ function renderStudy(s, inv, idx){
   }
   if(has(s.key_assumptions)) anchorsBody+=`<div class="kicker" style="margin:14px 0 4px">Key assumptions</div><ul class="assumptions">${s.key_assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
 
+  // LIMITATIONS & FOLLOW-UPS — the honest debts the study carries and what it
+  // opens up next. Both were authored into study.yaml (limitations[],
+  // discovery_implications{}) but never surfaced in the report before. Entries
+  // may be plain strings or single-key {title: detail} maps (_debtText handles both).
+  let debtsBody='';
+  if(has(s.limitations)) debtsBody+=`<div class="kicker" style="margin:0 0 4px">Limitations</div><ul class="assumptions">${s.limitations.map(l=>`<li>${_debtText(l)}</li>`).join('')}</ul>`;
+  const _di=s.discovery_implications;
+  if(_di && typeof _di==='object'){
+    const _addDi=(key,label)=>{ const v=_di[key]; if(Array.isArray(v)&&v.length) debtsBody+=`<div class="kicker" style="margin:12px 0 4px">${label}</div><ul class="assumptions">${v.map(x=>`<li>${_debtText(x)}</li>`).join('')}</ul>`; };
+    _addDi('resolved_uncertainties','Resolved uncertainties');
+    _addDi('new_uncertainties','New uncertainties');
+    _addDi('open_questions','Open questions');
+    _addDi('followup_study_proposals','Follow-up studies proposed');
+  }
+
   // card badge uses the SAME status derivation as the graph + ladder (workbench
   // _studyStatusMeta), so a running study reads "Investigating" everywhere.
   const sm=studyStatusMeta(s);
@@ -1277,6 +1306,7 @@ function renderStudy(s, inv, idx){
       ${part('Findings', findingsBody, 'study:'+s.slug+'/findings', s.title+' · Findings')}
       ${part('Provenance & anchors', anchorsBody, 'study:'+s.slug+'/provenance', s.title+' · Provenance')}
       ${part('Decision', decisionBody, 'study:'+s.slug+'/decision', s.title+' · Decision')}
+      ${part('Limitations & follow-ups', debtsBody, 'study:'+s.slug+'/debts', s.title+' · Limitations')}
       ${feedbackRow('study:'+s.slug, 'this whole study')}
     </div>
   </section>`;
@@ -1339,9 +1369,8 @@ function renderInvViz(inv){
   else if(MODE==='agentic'){ figs.push(['Agent vs policy — outcomes', vizOutcomeBar(inv)]); figs.push(['Final test outcomes', vizGateMatrix(inv)]); }
   else { figs.push(['Where the transitions are viable — passing vs failing regions', vizGateMatrix(inv)]); }
   const live=figs.filter(f=>f[1]); if(!live.length) return '';
-  const generic=MODE!=='sourcing'&&MODE!=='agentic';
-  return `<div id="inv-viz" class="fbsection">${fbBubble('figures','The viability landscape')}<div class="sec-h"><h2>${generic?'The viability landscape':'Investigation visualizations'}</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 6px">${generic?`A <b>map</b> of where the campaign's transitions are jointly possible — passing regions and <b>failure boundaries in the same visual language</b>, across all ${inv.studies.length} studies. The product is this landscape, not a single successful rock→cell trajectory.`:`The whole investigation in a few figures — the synthesis across all ${inv.studies.length} studies.`}</p>
+  return `<div id="inv-viz" class="fbsection">${fbBubble('figures','Investigation visualizations')}<div class="sec-h"><h2>Investigation visualizations</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 6px">The investigation across all ${inv.studies.length} studies — passing and failing regions in one visual language.</p>
     ${live.map(([t,svg])=>`<div style="margin:20px 0"><div class="kicker" style="margin-bottom:8px">${esc(t)}</div>${svg}</div>`).join('')}</div>`;
 }
 function roleLine(s,inv){
@@ -1375,7 +1404,7 @@ function renderAppendix(inv){
   return `<div class="appendix fbsection" id="appendix">
     ${fbBubble('appendix','Computational architecture (appendix)')}
     <div class="sec-h"><h2>Appendix — computational architecture</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:14px">The implementation substrate: the reusable Process-Bigraph modules and the capabilities each declares. This is the machinery the studies are built from; the science is in the sections above.</p>
+    <p class="measure" style="color:var(--ink-2);font-size:14px">The reusable Process-Bigraph modules the studies are built from, and the capabilities each declares.</p>
     <table class="cat-table"><thead><tr><th>Module</th><th>Declared capabilities</th></tr></thead><tbody>${rows}</tbody></table>
   </div>`;
 }
@@ -1415,7 +1444,7 @@ function renderReferences(inv){
   return `<div class="appendix fbsection" id="references">
     ${fbBubble('references','References')}
     <div class="sec-h"><h2>References</h2><span class="rule"></span></div>
-    <p style="color:var(--ink-2);font-size:14px;max-width:none">Every source the studies cite — the papers behind each acceptance band, finding and literature anchor. The citation chips throughout the report link here.</p>
+    <p style="color:var(--ink-2);font-size:14px;max-width:none">The papers behind each acceptance band, finding and literature anchor.</p>
     <div class="refs-list">${rows}</div>
   </div>`;
 }
@@ -1463,8 +1492,13 @@ function markBubble(key){ document.querySelectorAll('.fbbubble').forEach(b=>{ if
 function toc(inv){
   const exv=inv.executive||{};
   const front=[`<a href="#top" class="exec">${esc(inv.question?'Question':'Overview')}</a>`];
+  if(inv.how_to_read) front.push('<a href="#how-to-read">How to read</a>');
   if(inv.biological_story || exv.what_is_this || inv.hypothesis) front.push('<a href="#background">The world</a>');
+  if((inv.guidelines||{}).architecture_principles) front.push('<a href="#ground-rules">Ground rules</a>');
+  if(Array.isArray(inv.at_a_glance)&&inv.at_a_glance.length) front.push('<a href="#at-a-glance">At a glance</a>');
+  if((inv.spine||{}).plan_board&&inv.spine.plan_board.length) front.push('<a href="#plan-ladder">Where it stands</a>');
   front.push('<a href="#findings">Findings</a>');
+  if(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length) front.push('<a href="#open-decisions">Open decisions</a>');
   if(inv.spine) front.push('<a href="#spine-presentation">Graph</a>');
   front.push('<a href="#inv-viz">Landscape</a>');
   const items=front
@@ -1481,7 +1515,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('.card,#top,#background,#findings,#spine-presentation,#inv-viz,#glossary,#appendix,#references').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('.card,#top,#how-to-read,#background,#ground-rules,#at-a-glance,#plan-ladder,#findings,#open-decisions,#spine-presentation,#inv-viz,#glossary,#appendix,#references').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -1537,13 +1571,13 @@ function renderSpine(inv){
   // stays beneath it.
   const graph=workbenchDag(inv);
   const mx=sp?_acGatingMatrixHtml(sp):'';
-  const strip=autonomyStrip(inv);
-  if(!graph && !mx && !strip) return '';
+  if(!graph && !mx) return '';
   return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Investigation graph & acceptance')}
     <div class="sec-h"><h2>The investigation graph</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">The campaign as a dependency graph — each study a node badged with its code-computed status, wired to the studies it builds on. This is the same graph as the workbench's Investigation view, transformed for a static report.</p>
-    ${graph}${strip}
-    ${mx?`<div style="margin-top:22px">${mx}</div>`:''}</div>`;
+    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">The campaign as a dependency graph — each study a node badged with its code-computed status, wired to the studies it builds on.</p>
+    ${graph}
+    ${mx?`<div style="margin-top:22px">${mx}</div>`:''}
+    ${authoredAcList(inv)}</div>`;
 }
 
 /* ---------- interactive (Plotly) figures — LAZY, visibility-driven ----------
@@ -1813,21 +1847,118 @@ function simulatedWorld(inv){
     <div class="prose">${bits.map(b=>`<p>${mdLite(b)}</p>`).join('')}</div></div>`;
 }
 function evidenceFraming(inv){
-  // What counts as evidence: a passed gate means the modeled mechanism works
-  // under stated assumptions — NOT that the historical transition occurred.
+  // The evidentiary-tier legend — a real key for the tier chips on findings.
+  // The former hardcoded "viability landscape" paragraph (origins-of-life
+  // specific, no data input) was removed as boilerplate. Renders nothing when no
+  // study carries findings, so a report without tiered evidence stays clean.
   const anyTier=(inv.studies||[]).some(s=>Array.isArray(s.findings)&&s.findings.length);
+  if(!anyTier) return '';
   return `<div class="narr" id="evidence-basis">
     <div class="sec-h"><h2>What counts as evidence</h2><span class="rule"></span></div>
-    <div class="evnote"><div class="prose">
-      Each stage is an independently falsifiable nonequilibrium transition a simulation can
-      <b>pass or fail</b>. A passed gate means the <b>modeled mechanism works under the stated
-      assumptions</b> — it is <b>not</b> a claim that the historical transition occurred, only that
-      it is physically admissible in the model. The product is a <b>viability landscape</b>:
-      a map of where the transitions are jointly possible, with failure boundaries treated as
-      first-class results.
-    </div></div>
-    ${anyTier?`<p class="measure" style="color:var(--ink-2);font-size:14px;margin:12px 0 2px">Findings and mechanisms carry an evidentiary tier:</p>${etierLegend()}`:''}
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 2px">Each study's findings and mechanisms carry an evidentiary tier:</p>${etierLegend()}
   </div>`;
+}
+
+/* ====================== PLAN LADDER (honest gate statuses) ====================== */
+// The cumulative A→E gate ladder, computed exactly as the live investigation
+// overview (met / qualified / refuted / off-spine branch). Leads the results so
+// the reader sees where the campaign stands against its own plan before the
+// detailed findings. Renders nothing when the investigation declares no plan_gates.
+function planLadder(inv){
+  const rows=(inv.spine&&inv.spine.plan_board)||[];
+  if(!rows.length) return '';
+  const meta={passed:['passed','#065f46','#d1fae5'],met:['met','#065f46','#d1fae5'],
+    qualified:['qualified','#92400e','#fef3c7'],refuted:['refuted','#991b1b','#fee2e2'],
+    in_progress:['in progress','#92400e','#fef3c7'],blocked:['blocked','#991b1b','#fee2e2'],
+    pending:['pending','#475569','#f1f5f9']};
+  const chips=rows.map(g=>{
+    const m=meta[g.status]||meta.pending;
+    const bits=[];
+    const nm=(g.member_studies||[]).length; if(nm) bits.push(nm+' stud'+(nm===1?'y':'ies'));
+    const np=(g.pending_studies||[]).length; if(np) bits.push(np+' planned');
+    return `<div style="flex:1 1 160px;min-width:150px;border:1px solid var(--line);border-top:3px solid ${m[1]};border-radius:8px;padding:9px 11px;background:var(--surface)">
+      <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+        <span class="mono" style="font-weight:800">${esc(String(g.id||''))}</span>
+        <span style="font-size:13px;font-weight:600;color:var(--ink)">${esc(g.name||'')}</span>
+        ${g.off_spine?`<span style="font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em">branch</span>`:''}
+        ${g.optional?`<span style="font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em">optional</span>`:''}
+      </div>
+      <div style="display:inline-block;margin-top:6px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 8px;border-radius:9999px;color:${m[1]};background:${m[2]}">${esc(m[0])}</div>
+      ${bits.length?`<div style="font-size:11px;color:var(--ink-3);margin-top:5px">${esc(bits.join(' · '))}</div>`:''}
+      ${g.criterion?`<div class="measure" style="font-size:11.5px;color:var(--ink-2);margin-top:5px;line-height:1.4">${esc(String(g.criterion).replace(/\s+/g,' ').trim())}</div>`:''}
+    </div>`;
+  }).join('');
+  return `<div class="narr" id="plan-ladder">
+    <div class="sec-h"><h2>Where the campaign stands</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 10px">The cumulative gate ladder — each gate's honest status, derived from its member studies' verdicts.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${chips}</div>
+  </div>`;
+}
+
+/* ====================== AUTHORED NARRATIVE FIELDS (were dropped before) ====================== */
+function _titleOf(inv,slug){ const s=(inv.studies||[]).find(x=>x.slug===slug); return s?s.title:slug; }
+
+// "How to read" — evaluator orientation note (string prose or a list of tips).
+function howToReadBlock(inv){
+  const h=inv.how_to_read; if(!h) return '';
+  const body=Array.isArray(h)
+    ? `<ol class="assumptions">${h.map(x=>`<li>${mdLite(String((x&&(x.text||x.tip))||x))}</li>`).join('')}</ol>`
+    : `<div class="prose">${mdLite(String(h))}</div>`;
+  return `<div class="narr" id="how-to-read"><div class="sec-h"><h2>How to read this report</h2><span class="rule"></span></div>${body}</div>`;
+}
+
+// "Studies at a glance" — the authored one-line role of each study (at_a_glance[]).
+function glanceBlock(inv){
+  const g=inv.at_a_glance; if(!Array.isArray(g)||!g.length) return '';
+  const rows=g.map(e=>{
+    const slug=(e&&(e.study||e.slug))||''; const role=(e&&(e.role||e.summary))||(typeof e==='string'?e:'');
+    return `<div style="display:grid;grid-template-columns:minmax(120px,0.9fr) 2.3fr;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)">
+      <div style="font-weight:600;color:var(--ink);font-size:13px">${esc(_titleOf(inv,slug))}</div>
+      <div class="measure" style="color:var(--ink-2);font-size:13px;line-height:1.45">${esc(role)}</div></div>`;
+  }).join('');
+  return `<div class="narr" id="at-a-glance"><div class="sec-h"><h2>Studies at a glance</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 8px">What each study contributes, in one line.</p>
+    <div>${rows}</div></div>`;
+}
+
+// "Ground rules" — the campaign-wide architecture principles every study respects
+// (guidelines.architecture_principles only; the rest of guidelines is internal
+// build-plan material that would add clutter, so it stays out of the report).
+function groundRules(inv){
+  const g=inv.guidelines; if(!g||typeof g!=='object') return '';
+  const ap=g.architecture_principles; if(!Array.isArray(ap)||!ap.length) return '';
+  return `<div class="narr" id="ground-rules"><div class="sec-h"><h2>Ground rules</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">The principles every study in the campaign respects.</p>
+    <ul class="assumptions">${ap.map(p=>`<li>${mdLite(String(p))}</li>`).join('')}</ul></div>`;
+}
+
+// "Open decisions" — the expert calls the campaign still needs (executive.decisions_needed).
+function decisionsBlock(inv){
+  const ex=inv.executive||{}; const dn=ex.decisions_needed;
+  if(!Array.isArray(dn)||!dn.length) return '';
+  const items=dn.map(d=>{
+    const q=(typeof d==='string')?d:(d.question||d.title||'');
+    const ctx=(typeof d==='string')?'':(d.context||d.detail||'');
+    return `<li style="margin-top:10px"><div style="font-weight:600;color:var(--ink);line-height:1.5">${esc(q)}</div>${ctx?`<div class="measure" style="color:var(--ink-2);font-size:13px;line-height:1.5;margin-top:3px">${mdLite(ctx)}</div>`:''}</li>`;
+  }).join('');
+  return `<div class="narr" id="open-decisions"><div class="sec-h"><h2>Open decisions</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">Expert calls the campaign still needs — ${dn.length} open.</p>
+    <ol style="list-style:decimal;padding-left:22px;margin:0">${items}</ol></div>`;
+}
+
+// Authored acceptance criteria (behavior → gating study), shown beside the
+// computed AC matrix in the spine section.
+function authoredAcList(inv){
+  const ac=inv.acceptance_criteria; if(!Array.isArray(ac)||!ac.length) return '';
+  const rows=ac.map(c=>{
+    const b=(c&&(c.behavior||c.criterion||c.name))||(typeof c==='string'?c:'');
+    const st=(c&&(c.study||c.slug))||'';
+    return `<div style="display:grid;grid-template-columns:2fr 1.4fr;gap:12px;padding:4px 0;border-bottom:1px solid var(--line);font-size:12.5px">
+      <div class="mono" style="color:var(--ink)">${esc(b)}</div><div style="color:var(--ink-2)">${esc(_titleOf(inv,st))}</div></div>`;
+  }).join('');
+  return `<div style="margin-top:22px"><div class="kicker" style="margin-bottom:6px">Acceptance criteria (authored)</div>
+    <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:0 0 6px">Each criterion and the study that gates it.</p>
+    <div>${rows}</div></div>`;
 }
 
 /* ====================== FINDINGS (moved BELOW the narrative intro) ====================== */
@@ -2048,24 +2179,6 @@ function setupWorkbenchDag(){
    the protocell (individual) across the campaign. This is a QUALITATIVE framing,
    NOT a measured autonomy metric — no numbers are fabricated. Rendered only when
    there is a staged ordering; otherwise omitted. */
-function autonomyStrip(inv){
-  const studies=inv.studies||[];
-  const {anyEdge}=_dagDepthOrder(inv);
-  if(!anyEdge || studies.length<3) return '';
-  const caps=['Energy','Reduced carbon','Catalysis','Concentration','Confinement','Bioenergetics','Heredity'];
-  const chips=caps.map((c,i)=>{
-    const frac=i/(caps.length-1);
-    return `<span style="display:inline-flex;flex-direction:column;align-items:center;gap:4px;flex:1;min-width:70px">
-      <span style="font-size:11.5px;color:var(--ink);font-weight:600;text-align:center;line-height:1.2">${esc(c)}</span>
-      <span style="height:6px;width:100%;border-radius:4px;background:linear-gradient(90deg,var(--cal),var(--accent));opacity:${(0.35+0.6*frac).toFixed(2)}"></span></span>`;
-  }).join('');
-  return `<div style="margin-top:22px"><div class="kicker" style="margin-bottom:6px">Environment → individual (conceptual)</div>
-    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Across the campaign, capabilities that begin as <b>services of the vent</b> are progressively <b>internalized by the protocell</b> — an autonomy axis rising from environment toward individual. This is a <b>qualitative framing</b>; a quantitative autonomy index would need an authored metric (e.g. from the bioenergetics / escape stages).</p>
-    <div style="display:flex;align-items:flex-end;gap:10px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)">${chips}</div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3);margin-top:6px;padding:0 4px">
-      <span>ENVIRONMENT (vent supplies)</span><span>INDIVIDUAL (protocell owns)</span></div></div>`;
-}
-
 /* ====================== GLOSSARY (accessibility) ====================== */
 function renderGlossary(inv){
   const g=inv.glossary;
@@ -2077,7 +2190,6 @@ function renderGlossary(inv){
   const rows=entries.map(([t,d])=>`<div class="refentry"><b class="rt">${esc(t)}</b>${d?`<div class="rmeta">${mdLite(d)}</div>`:''}</div>`).join('');
   return `<div class="appendix fbsection" id="glossary">${fbBubble('glossary','Glossary')}
     <div class="sec-h"><h2>Glossary</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:14px">Key terms used throughout this report.</p>
     <div class="refs-list">${rows}</div></div>`;
 }
 
@@ -2097,17 +2209,22 @@ function render(inv){
     </div>
     ${heroQuestion(inv)}
     ${abstractBlock(inv)}
+    ${howToReadBlock(inv)}
     ${simulatedWorld(inv)}
+    ${groundRules(inv)}
+    ${glanceBlock(inv)}
     ${evidenceFraming(inv)}
     ${renderArgument(inv)}
+    ${planLadder(inv)}
     ${renderFindings(inv)}
+    ${decisionsBlock(inv)}
     ${renderSpine(inv)}
     ${renderInvViz(inv)}</div>`+
     toc(inv)+
     `<div class="wrap">
       <div class="sec-h"><h2>Studies</h2><span class="rule"></span>
         <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
-      <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 8px">Each study is one scientific unit — <b>question → model experiment → observable → what we learn</b>. Studies are collapsed to that summary; click a study (or a number in the index) to expand its full model, run, visualizations, tests and decision.</p>
+      <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 8px">Each study is one scientific unit — <b>question → model experiment → observable → what we learn</b>.</p>
       ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
       ${renderGlossary(inv)}
       ${renderReferences(inv)}
@@ -2126,6 +2243,7 @@ function render(inv){
 /* ---------- wiring ---------- */
 document.getElementById('foot-prov').textContent=(INV.provenance||'investigations/'+INV.slug+'/investigation.yaml · studies/*/study.yaml · loop-trajectory JSON');
 document.getElementById('wsname').textContent=(INV.workspace||'');
+{ const fw=document.getElementById('foot-ws'); if(fw) fw.textContent=(INV.workspace||''); }
 document.getElementById('themebtn').onclick=()=>{const r=document.documentElement;
   const cur=r.getAttribute('data-theme');const dark=cur?cur==='dark':matchMedia('(prefers-color-scheme:dark)').matches;
   r.setAttribute('data-theme',dark?'light':'dark');};
