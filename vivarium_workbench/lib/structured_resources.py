@@ -40,6 +40,7 @@ _GLOB_REL = "*/data/vg_data/structured_resources.yaml"
 TYPE_ORDER: tuple[str, ...] = (
     "lipid-structure",
     "reaction-pathway",
+    "evidence-dataset",
     "imported-engine",
     "paper-reference",
 )
@@ -120,6 +121,7 @@ def load_structured_resources(ws_root: Path) -> Optional[dict]:
           "name": str,            # manifest name (or the file stem)
           "version": str,         # manifest version, as a string
           "description": str,     # manifest-level description
+          "evidence_dataset_qa_rule": str,  # one-time QA-rule banner (may be "")
           "type_order": [str],    # types present, in canonical render order
           "groups": {type: [resource, ...]},   # resources grouped by `type`
           "references_by_id": {id: paper-reference},  # citation lookup
@@ -154,11 +156,13 @@ def load_structured_resources(ws_root: Path) -> Optional[dict]:
     name = raw.get("name")
     version = raw.get("version")
     description = raw.get("description")
+    qa_rule = raw.get("evidence_dataset_qa_rule")
 
     return {
         "name": str(name) if name else path.stem,
         "version": str(version) if version is not None else "",
         "description": str(description) if description else "",
+        "evidence_dataset_qa_rule": str(qa_rule) if qa_rule else "",
         "type_order": type_order,
         "groups": groups,
         "references_by_id": refs_by_id,

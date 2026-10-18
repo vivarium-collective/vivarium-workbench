@@ -29,13 +29,15 @@ def test_loads_and_groups_by_type():
     groups = data["groups"]
     # Every type present in the sample manifest is its own group.
     assert set(groups) == {
-        "lipid-structure", "reaction-pathway", "imported-engine", "paper-reference",
+        "lipid-structure", "reaction-pathway", "evidence-dataset",
+        "imported-engine", "paper-reference",
     }
     assert data["counts"]["lipid-structure"] == 1
     assert data["counts"]["reaction-pathway"] == 2
+    assert data["counts"]["evidence-dataset"] == 2
     assert data["counts"]["imported-engine"] == 1
     assert data["counts"]["paper-reference"] == 4
-    assert data["n_resources"] == 8
+    assert data["n_resources"] == 10
     # Top-level manifest metadata is surfaced.
     assert data["name"] == "structured_resources"
     assert data["version"] == "1"
@@ -45,8 +47,11 @@ def test_loads_and_groups_by_type():
 def test_type_order_is_known_types_first():
     data = load_structured_resources(FIX)
     assert data is not None
-    # All four known types present, so order equals the canonical TYPE_ORDER.
+    # All known types present, so order equals the canonical TYPE_ORDER.
     assert data["type_order"] == list(TYPE_ORDER)
+    # evidence-dataset is ordered immediately after reaction-pathway.
+    order = data["type_order"]
+    assert order.index("evidence-dataset") == order.index("reaction-pathway") + 1
 
 
 def test_resolves_paper_references_by_id():
@@ -101,6 +106,56 @@ def test_imported_engine_fields_preserved():
     assert engine["engine"] == "eQuilibrator"
     assert engine["viva_package"] == "viva_equilibrator"
     assert "pathway-formose" in engine["used_by"]
+
+
+# ── evidence-dataset (new in this change) ───────────────────────────────────
+
+def test_evidence_dataset_qa_rule_surfaced():
+    data = load_structured_resources(FIX)
+    assert data is not None
+    # The top-level manifest QA rule reaches the payload as a non-empty string.
+    assert isinstance(data["evidence_dataset_qa_rule"], str)
+    assert "provenance_class" in data["evidence_dataset_qa_rule"]
+
+
+def test_evidence_dataset_in_type_order_after_reaction_pathway():
+    data = load_structured_resources(FIX)
+    assert data is not None
+    order = data["type_order"]
+    assert "evidence-dataset" in order
+    assert order.index("evidence-dataset") == order.index("reaction-pathway") + 1
+
+
+def test_evidence_dataset_entry_groups_and_preserves_provenance_chain():
+    data = load_structured_resources(FIX)
+    assert data is not None
+    ev = {r["id"]: r for r in data["groups"]["evidence-dataset"]}
+    cmc = ev["evidence-oleic-cmc"]
+    # Provenance chain carried through verbatim.
+    assert cmc["provenance_class"] == "LAB-DIRECT"
+    assert cmc["status"] == "wired"
+    assert cmc["original_measurement"]["value"] == 0.8
+    assert cmc["original_measurement"]["units"] == "mM"
+    assert cmc["model_prediction"]["study"] == "vesicle-boundary-cmc"
+    assert cmc["model_prediction"]["value"] == 0.74
+    assert cmc["citation"]["bibtex_key"] == "janke2014oleic"
+    assert cmc["condition_vector"]["pH"] == 8.5
+    assert cmc["caution"].startswith("CMC is temperature-")
+    assert cmc["feeds_into"] == ["vesicle-boundary-cmc"]
+    # Its references resolve to paper-reference cards (cross-link contract).
+    for rid in cmc["references"]:
+        assert rid in data["references_by_id"]
+
+
+def test_evidence_dataset_pending_model_prediction_tolerated():
+    data = load_structured_resources(FIX)
+    assert data is not None
+    ev = {r["id"]: r for r in data["groups"]["evidence-dataset"]}
+    pending = ev["evidence-formose-yield"]
+    # A model_prediction with only {status: pending} is passed through intact.
+    assert pending["model_prediction"] == {"status": "pending"}
+    assert pending["provenance_class"] == "RECONSTRUCTION"
+    assert pending["status"] == "catalogued"
 
 
 # ── tolerance + path resolution (tmp_path, never touching FIX) ──────────────
@@ -207,7 +262,8 @@ def test_payload_model_validates_reader_output():
     assert data is not None
     payload = StructuredResourcesPayload.model_validate({**data, "available": True})
     assert payload.available is True
-    assert payload.n_resources == 8
+    assert payload.n_resources == 10
+    assert payload.evidence_dataset_qa_rule == data["evidence_dataset_qa_rule"]
     assert set(payload.groups) == set(data["groups"])
     # The unavailable case is a well-formed payload too.
     empty = StructuredResourcesPayload(available=False)

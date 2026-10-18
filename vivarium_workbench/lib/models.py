@@ -539,9 +539,11 @@ class StructuredResourcesPayload(BaseModel):
 
     ``available`` is ``False`` when the workspace ships no manifest — the tab
     then stays hidden.  Per-resource shapes are type-specific (lipid-structure,
-    reaction-pathway, imported-engine, paper-reference) and vary widely, so each
-    grouped entry is a passthrough ``dict`` rather than a tight model;
-    ``extra="allow"`` also forwards any future top-level keys.
+    reaction-pathway, evidence-dataset, imported-engine, paper-reference) and
+    vary widely, so each grouped entry is a passthrough ``dict`` rather than a
+    tight model; ``extra="allow"`` also forwards any future top-level keys.
+    ``evidence_dataset_qa_rule`` is the manifest-level QA rule the Resources tab
+    renders once as a banner above the evidence-dataset group.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -550,6 +552,7 @@ class StructuredResourcesPayload(BaseModel):
     name: Optional[str] = None
     version: Optional[str] = None
     description: Optional[str] = None
+    evidence_dataset_qa_rule: Optional[str] = None
     type_order: list[str] = []
     groups: dict[str, list[dict]] = {}
     references_by_id: dict[str, dict] = {}
