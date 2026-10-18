@@ -42,7 +42,7 @@ _STUDY_KEEP = (
     # the four-part scientific framing (question → experiment → observable → learn)
     # the report leads with: the model experiment, the measured observable, and the
     # study's lifecycle/phase + maturity. Additive — each is optional per study.
-    "objective", "hypothesis", "result", "phase", "kind", "design_status",
+    "objective", "experiment", "hypothesis", "result", "phase", "kind", "design_status",
     "readouts", "discovery_implications", "status",
 )
 
@@ -770,7 +770,7 @@ def _syn_oneline(s):
     if fs:
         f0 = fs[0] or {}
         return _syn_first_sentence(f0.get("summary") or f0.get("statement") or "")
-    return _syn_first_sentence(s.get("objective") or s.get("question") or "")
+    return _syn_first_sentence(s.get("experiment") or s.get("objective") or s.get("question") or "")
 
 
 def _build_synthesis(inv, studies, spine):
@@ -840,7 +840,7 @@ def _build_synthesis(inv, studies, spine):
             fps = di.get("followup_study_proposals") if isinstance(di, dict) else None
             contradictions.append({
                 "kind": "negative-result", "topic": r["title"],
-                "detail": _syn_first_sentence(s.get("conclusion") or _syn_oneline(s), 300),
+                "detail": _syn_first_sentence(s.get("result") or s.get("conclusion") or _syn_oneline(s), 300),
                 "studies": [{"slug": r["slug"], "title": r["title"], "grade": "refuted"}],
                 "discriminating": (fps[0] if isinstance(fps, list) and fps else None),
             })
@@ -878,7 +878,7 @@ def _build_synthesis(inv, studies, spine):
     for r in recs:
         if r["run_status"] == "planned":
             roadmap.append({"priority": "P1", "item": r["title"],
-                            "basis": _syn_first_sentence(r["_s"].get("objective") or r["_s"].get("question") or "", 240),
+                            "basis": _syn_first_sentence(r["_s"].get("experiment") or r["_s"].get("objective") or r["_s"].get("question") or "", 240),
                             "source": r["slug"]})
     for c in contradictions:
         if c["kind"] == "negative-result" and c.get("discriminating"):
