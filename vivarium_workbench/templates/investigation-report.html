@@ -447,6 +447,12 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
 .abstract .main-claim{color:var(--ink);font-style:normal}
 /* a labelled prose section (Background / The simulated world) */
 .narr{margin:8px 0}
+/* Merged "Synthesis & gaps": the sub-sections keep their anchors/feedback but
+   their headings demote to sub-heads so the three read as one section. */
+.syn-group>.narr{margin:16px 0 0}
+.syn-group>.narr>.sec-h{margin-bottom:4px}
+.syn-group>.narr>.sec-h h2{font-size:15px;font-weight:650;letter-spacing:0}
+.syn-group>.narr>.sec-h .rule{display:none}
 .narr .prose{color:var(--ink-2);font-size:15.5px;line-height:1.78}
 .narr .prose b{color:var(--ink)}
 /* "the simulated world" standing callout */
@@ -1553,9 +1559,7 @@ function toc(inv){
   const front=['<a href="#exec-summary" class="exec">Summary</a>'];
   if(inv.spine) front.push('<a href="#spine-presentation">Map</a>');
   if((syn.stages||[]).length) front.push('<a href="#integrated-findings">Findings</a>');
-  if((syn.quantitative||[]).length) front.push('<a href="#quantitative">Quantitative</a>');
-  if((syn.contradictions||[]).length) front.push('<a href="#contradictions">Contradictions</a>');
-  if((syn.roadmap||[]).length||Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length) front.push('<a href="#roadmap">Next studies</a>');
+  if((syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)) front.push('<a href="#synthesis-gaps">Synthesis &amp; gaps</a>');
   if(((syn.validation||{}).items||[]).length!==undefined) front.push('<a href="#validation">Validation</a>');
   if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
   if((syn.studies_index||[]).length) front.push('<a href="#evidence-register">Register</a>');
@@ -1570,9 +1574,7 @@ function toc(inv){
     ['#exec-summary','Summary',true],
     ['#spine-presentation','Investigation map',!!inv.spine],
     ['#integrated-findings','Integrated findings',(syn.stages||[]).length],
-    ['#quantitative','Quantitative synthesis',(syn.quantitative||[]).length],
-    ['#contradictions','Contradictions & uncertainty',(syn.contradictions||[]).length],
-    ['#roadmap','Next studies & priorities',(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
+    ['#synthesis-gaps','Synthesis & gaps',(syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
     ['#validation','Validation & reproducibility',((syn.validation||{}).items||[]).length!==undefined],
     ['#claim-evidence','Claim–evidence map',(syn.claim_evidence||[]).length],
     ['#evidence-register','Evidence register (all studies)',(syn.studies_index||[]).length],
@@ -1625,7 +1627,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('#exec-summary,#spine-presentation,#integrated-findings,#quantitative,#contradictions,#roadmap,#validation,#claim-evidence,#evidence-register,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('#exec-summary,#spine-presentation,#integrated-findings,#synthesis-gaps,#validation,#claim-evidence,#evidence-register,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -2214,11 +2216,9 @@ function execSummary(inv){
     ${lead?`<div class="prose" style="font-size:15.5px">${mdLite(lead)}</div>`:''}
     ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Milestone outcomes</div><div>${gl}</div></div>`:''}
     ${heroFigure(inv)}
-    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:12px 0 0;line-height:1.5">
-      Across <b>${c.total||0}</b> studies: <b>${c.supported||0}</b> supported, <b>${c.qualified||0}</b> qualified,
-      <b>${c.refuted||0}</b> refuted, <b>${c.planned||0}</b> planned.
-      A supported result means a <b>computational gate passed under the stated model assumptions</b> — it is evidence
-      for a mechanism's feasibility, not proof that the historical transition occurred.</p>
+    <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:12px 0 0;line-height:1.5">
+      Across <b>${c.total||0}</b> studies — <b>${c.supported||0}</b> supported · <b>${c.qualified||0}</b> qualified · <b>${c.refuted||0}</b> refuted · <b>${c.planned||0}</b> planned.
+      <i>Supported</i> = a computational gate passed under the stated model assumptions (evidence of feasibility, not proof the transition occurred).</p>
     ${rest?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:650;color:var(--accent)">Full synthesis</summary><div class="prose" style="margin-top:6px">${mdLite(rest)}</div></details>`:''}
   </div>`;
 }
@@ -2340,6 +2340,18 @@ function roadmapSection(inv){
   return `<div class="narr fbsection" id="roadmap">${fbBubble('roadmap','Next studies & priorities')}
     <div class="sec-h"><h2>Next studies &amp; priorities</h2><span class="rule"></span></div>
     ${rows?`<ul style="list-style:none;padding:0;margin:4px 0 0">${rows}</ul>`:''}${dec}</div>`;
+}
+
+// SYNTHESIS & GAPS (plan §4) — one consolidated section: cross-study quantitative
+// synthesis, contradictions/uncertainty, and the prioritized follow-ups, instead
+// of three separate short sections to hop between.
+function synthesisAndGaps(inv){
+  const q=quantitativeSynthesis(inv), c=contradictionsSection(inv), r=roadmapSection(inv);
+  if(!q && !c && !r) return '';
+  return `<div class="narr fbsection" id="synthesis-gaps">${fbBubble('synthesis-gaps','Synthesis & gaps')}
+    <div class="sec-h"><h2>Synthesis &amp; gaps</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Where results agree, conflict, or leave open claims — and the priority follow-ups that would resolve them.</p>
+    <div class="syn-group">${q}${c}${r}</div></div>`;
 }
 
 // 6. CLAIM-EVIDENCE MAP — each study's scientific claim, its status, and a link.
@@ -2663,9 +2675,7 @@ function render(inv){
     ${execSummary(inv)}
     ${renderSpine(inv)}
     ${integratedFindings(inv)}
-    ${quantitativeSynthesis(inv)}
-    ${contradictionsSection(inv)}
-    ${roadmapSection(inv)}
+    ${synthesisAndGaps(inv)}
     ${validationSection(inv)}
     ${claimEvidenceMap(inv)}
     ${evidenceRegister(inv)}
