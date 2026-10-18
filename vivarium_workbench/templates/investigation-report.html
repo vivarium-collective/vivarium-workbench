@@ -38,6 +38,19 @@
   --chip:#2A2723;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 1px 0 var(--line);
 }
+/* Print / PDF: pure-white background for easy printing. Force light inks too so
+   a report printed from dark mode still shows dark text on white. page.pdf()
+   emulates print media, so this governs the server-side PDF export as well. */
+@media print{
+  :root,:root[data-theme="dark"],:root[data-theme="light"]{
+    --paper:#fff; --surface:#fff; --sunken:#fff; --chip:#f2f2f0;
+    --ink:#1a1a1a; --ink-2:#444; --ink-3:#777;
+    --line:#e4e4e2; --line-2:#cfcfcc; --accent:#0F766B; --shadow:none;
+  }
+  html,body{background:#fff !important;}
+  .topbar,.subnav,.fbfloat,#report-feedback{display:none !important;}
+  [onclick*="toggleEditor"],.fbbubble{display:none !important;}
+}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
@@ -123,6 +136,19 @@ a:hover{text-decoration:underline}
 .subnav a{font-size:12.5px;color:var(--ink-2);padding:5px 10px;border-radius:7px;white-space:nowrap;font-weight:500}
 .subnav a.active{background:var(--accent-soft);color:var(--accent);font-weight:700}
 .subnav a.exec{font-weight:600}
+/* Full "Contents" jump menu — reaches every part incl. the 37 supplement studies.
+   The panel is position:fixed so the subnav's overflow:auto never clips it. */
+.navmenu{position:relative;display:inline-flex;align-items:center;margin-right:8px;flex:0 0 auto}
+.navmenu-btn{font-size:12.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);border:1px solid transparent;padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.navmenu-btn:hover{border-color:var(--accent)}
+.navmenu-panel{position:fixed;top:102px;left:40px;z-index:80;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(20,18,15,.18);padding:14px 16px;display:flex;gap:26px;max-width:min(680px,92vw);max-height:74vh;overflow:auto}
+.navmenu-panel .nm-col{min-width:170px;display:flex;flex-direction:column}
+.navmenu-panel .nm-col.studies{max-height:66vh;overflow:auto;min-width:220px}
+.navmenu-panel .nm-h{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:2px 0 6px}
+.navmenu-panel .nm-h2{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:12px 0 6px;border-top:1px solid var(--line);padding-top:10px}
+.navmenu-panel a{display:block;font-size:12.5px;color:var(--ink);padding:3px 7px;border-radius:6px;text-decoration:none;line-height:1.4}
+.navmenu-panel a:hover{background:var(--accent-soft);color:var(--accent)}
+@media (max-width:640px){.navmenu-panel{left:12px;right:12px;flex-direction:column;gap:14px}.navmenu-panel .nm-col.studies{max-height:40vh}}
 
 /* ---- study card ---- */
 .card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:14px;
@@ -1508,11 +1534,51 @@ function toc(inv){
   if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
   if(inv.references&&Object.keys(inv.references).length) front.push('<a href="#references">References</a>');
   front.push('<a href="#supplement">Supplement</a>');
-  return `<div class="subnav"><div class="wrap">${front.join('')}</div></div>`;
+  // Full "Contents" jump menu — every part of the report, incl. supplement
+  // sub-sections and every member study, in one dropdown. The chip row above is
+  // the quick main-section nav; this reaches everything.
+  const sa=inv.scientific_argument||{};
+  const mainLinks=[
+    ['#exec-summary','Summary',true],
+    ['#spine-presentation','Investigation map',!!inv.spine],
+    ['#integrated-findings','Integrated findings',(syn.stages||[]).length],
+    ['#quantitative','Quantitative synthesis',(syn.quantitative||[]).length],
+    ['#contradictions','Contradictions & uncertainty',(syn.contradictions||[]).length],
+    ['#roadmap','Next studies & priorities',(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
+    ['#validation','Validation & reproducibility',((syn.validation||{}).items||[]).length!==undefined],
+    ['#claim-evidence','Claim–evidence map',(syn.claim_evidence||[]).length],
+    ['#references','References',inv.references&&Object.keys(inv.references).length],
+  ].filter(x=>x[2]).map(x=>`<a href="${x[0]}">${x[1]}</a>`).join('');
+  const suppFront=[
+    ['#how-to-read','How to read',!!inv.how_to_read],
+    ['#background','Design & background',!!(inv.biological_story||exv.what_is_this||inv.hypothesis)],
+    ['#hypothesis','Scientific argument',!!(sa.main_claim||(inv.key_claims||[]).length||(sa.evidence_for||[]).length)],
+    ['#ground-rules','Ground rules',!!((inv.guidelines||{}).architecture_principles)],
+    ['#evidence-basis','What counts as evidence',(inv.studies||[]).some(s=>Array.isArray(s.findings)&&s.findings.length)],
+    ['#key-figures','Key figures',(syn.figures_ranked||[]).length],
+    ['#inv-viz','Investigation visualizations',true],
+    ['#glossary','Glossary',true],
+    ['#appendix','Appendix',true],
+  ].filter(x=>x[2]).map(x=>`<a href="${x[0]}">${x[1]}</a>`).join('');
+  const studyLinks=(inv.studies||[]).map(s=>`<a href="#s-${esc(s.slug)}">${esc(s.title||s.slug)}</a>`).join('');
+  const panel=`<div class="navmenu-panel" id="contents-panel" hidden>
+    <div class="nm-col"><div class="nm-h">Main report</div>${mainLinks}</div>
+    <div class="nm-col"><div class="nm-h">Supplement</div>${suppFront}</div>
+    <div class="nm-col studies"><div class="nm-h">Studies (${(inv.studies||[]).length})</div>${studyLinks}</div>
+  </div>`;
+  const menu=`<div class="navmenu"><button type="button" class="navmenu-btn" onclick="_toggleContents(event)" aria-haspopup="true" aria-expanded="false">☰ Contents</button>${panel}</div>`;
+  return `<div class="subnav"><div class="wrap">${menu}${front.join('')}</div></div>`;
 }
+function _toggleContents(e){ if(e){e.stopPropagation();} const p=document.getElementById('contents-panel'); const b=e&&e.currentTarget;
+  if(p){ p.hidden=!p.hidden; if(b) b.setAttribute('aria-expanded', String(!p.hidden)); } }
+function _closeContents(){ const p=document.getElementById('contents-panel'); if(p&&!p.hidden){ p.hidden=true;
+  const b=document.querySelector('.navmenu-btn'); if(b) b.setAttribute('aria-expanded','false'); } }
+document.addEventListener('click', e=>{ if(e.target.closest('.navmenu-btn')) return;   // toggle handles itself
+  if(e.target.closest('.navmenu-panel a') || !e.target.closest('.navmenu-panel')) _closeContents(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') _closeContents(); });
 function shortTitle(t){ return t.length>22?t.slice(0,21)+'…':t; }
 function spy(){
-  const links=[...document.querySelectorAll('.subnav a')];
+  const links=[...document.querySelectorAll('.subnav .wrap > a')];   // chip row only, not the Contents panel
   const map={}; links.forEach(l=>map[l.getAttribute('href').slice(1)]=l);
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
@@ -1665,6 +1731,28 @@ window.__reportPrintPrep = function(){
     try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
     try{ setupInteractiveLooms(); }catch(e){}
     try{ setupRealLooms(); }catch(e){}
+    // Investigation graph: lay it out TOP-TO-BOTTOM and scale to fit the page
+    // width, so the PDF shows the whole DAG instead of a cut-off left-to-right
+    // strip (the on-screen graph stays left-to-right + interactive).
+    try{
+      window.__dagPrint=true;   // keep the deferred relayouts from reverting to left-to-right
+      if(window.__relayoutDag) window.__relayoutDag(true);
+      const shell=document.querySelector('.wdag-shell'), canvas=document.getElementById('wdag-canvas');
+      if(shell&&canvas){
+        const cw=parseFloat(canvas.style.width)||canvas.scrollWidth||1;
+        const ch=parseFloat(canvas.style.height)||canvas.scrollHeight||1;
+        const k=Math.min(1, 700/cw);   // 700px ≈ A4 content width at the PDF's margins
+        canvas.style.transformOrigin='top left';
+        canvas.style.transform='scale('+k+')';
+        // transform is visual-only (layout box stays full-size), so clip the shell
+        // to the SCALED height with overflow:hidden — otherwise the tall unscaled
+        // canvas bleeds over the content below it.
+        shell.style.overflow='hidden';
+        shell.style.width='100%';
+        shell.style.height=Math.ceil(ch*k+2)+'px';
+        shell.style.breakInside='avoid'; shell.style.pageBreakInside='avoid';
+      }
+    }catch(e){}
     let n=0; const tick=()=>{ if(++n<5){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { setTimeout(resolve,700); } };
     try{ requestAnimationFrame(tick); }catch(e){ setTimeout(resolve,700); }
   });
@@ -2107,8 +2195,10 @@ function integratedFindings(inv){
 function quantitativeSynthesis(inv){
   const qs=(inv.synthesis||{}).quantitative||[]; if(!qs.length) return '';
   const rows=qs.map(g=>{
-    const r=(g.rows||[]).map(x=>`<tr><td style="padding:3px 10px 3px 0;color:var(--ink)">${_studyLink(x.study)}</td><td style="padding:3px 0;color:var(--ink-2)">${esc(x.statement)}</td><td class="mono" style="padding:3px 0 3px 10px;white-space:nowrap">${esc(x.observed||'')}${x.units?' '+esc(x.units):''}</td></tr>`).join('');
-    return `<div style="margin-top:12px"><div class="kicker" style="margin-bottom:4px">${esc(g.stage)}</div><table style="width:100%;border-collapse:collapse;font-size:12.5px">${r}</table></div>`;
+    const r=(g.rows||[]).map(x=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:5px 12px 5px 0;color:var(--ink);vertical-align:top;font-size:12px;overflow-wrap:anywhere">${_studyLink(x.study,_titleOf(inv,x.study))}</td><td style="padding:5px 12px 5px 0;color:var(--ink-2);vertical-align:top;line-height:1.45">${esc(x.statement)}</td><td class="mono" style="padding:5px 0;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;font-size:11px">${esc(x.observed||'')}${x.units?' '+esc(x.units):''}</td></tr>`).join('');
+    return `<div style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">${esc(g.stage)}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed">
+        <colgroup><col style="width:22%"><col style="width:44%"><col style="width:34%"></colgroup>${r}</table></div>`;
   }).join('');
   return `<div class="narr" id="quantitative">
     <div class="sec-h"><h2>Cross-study quantitative synthesis</h2><span class="rule"></span></div>
@@ -2384,28 +2474,44 @@ function setupWorkbenchDag(){
   // Measure + position + draw edges, wrapped so it can RE-RUN once web fonts
   // settle (an early offsetHeight under-measures a card -> the column stacks too
   // tight and cards overlap) and whenever a card is expanded in place.
-  const relayout=()=>{
-  // Pass 1: x by depth, measure height.
+  const relayout=(vertical)=>{
   nodeEls.forEach(n=>{ n.style.width=CARD_W+'px'; });
-  studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; const x=PAD_X+depth[s.slug]*(CARD_W+DEPTH_GAP);
-    n.style.left=x+'px'; pos[s.slug]={x, node:n, h:n.offsetHeight||120}; });
-  // Pass 2: stack same-depth cards vertically, center each column.
-  const colTot={}; depths.forEach(d=>{ let sum=0; byDepth[d].forEach(sl=>sum+=pos[sl].h); colTot[d]=sum+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
-  const maxCol=Math.max(0,...depths.map(d=>colTot[d]));
-  const canvasH=Math.max(PAD_Y*2+maxCol,160);
-  depths.forEach(d=>{ let yc=PAD_Y+Math.max(0,(canvasH-PAD_Y*2-colTot[d])/2);
-    byDepth[d].forEach(sl=>{ pos[sl].y=yc; pos[sl].node.style.top=yc+'px'; yc+=pos[sl].h+BREADTH_GAP; }); });
-  const canvasW=PAD_X*2+(depths.length?depths[depths.length-1]:0)*(CARD_W+DEPTH_GAP)+CARD_W;
-  canvas.style.width=canvasW+'px'; canvas.style.height=canvasH+'px';
+  studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; pos[s.slug]={node:n, h:n.offsetHeight||120}; });
+  let canvasW, canvasH;
+  if(vertical){
+    // TOP-TO-BOTTOM (for print/PDF): depth → row; siblings laid left-to-right and
+    // centered. Uses page height and keeps the graph narrow enough to fit width.
+    const rowH={}; depths.forEach(d=>{ rowH[d]=Math.max(120,...byDepth[d].map(sl=>pos[sl].h)); });
+    const rowY={}; let yacc=PAD_Y; depths.forEach(d=>{ rowY[d]=yacc; yacc+=rowH[d]+DEPTH_GAP; });
+    canvasH=Math.max(160,yacc-DEPTH_GAP+PAD_Y);
+    const rowW={}; depths.forEach(d=>{ rowW[d]=byDepth[d].length*CARD_W+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
+    canvasW=PAD_X*2+Math.max(CARD_W,...depths.map(d=>rowW[d]));
+    depths.forEach(d=>{ let xc=PAD_X+Math.max(0,(canvasW-PAD_X*2-rowW[d])/2);
+      byDepth[d].forEach(sl=>{ const p=pos[sl]; p.x=xc; p.y=rowY[d]; p.node.style.left=xc+'px'; p.node.style.top=rowY[d]+'px'; xc+=CARD_W+BREADTH_GAP; }); });
+  } else {
+    // LEFT-TO-RIGHT (screen default): depth → column; stack same-depth cards.
+    studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; const x=PAD_X+depth[s.slug]*(CARD_W+DEPTH_GAP);
+      n.style.left=x+'px'; pos[s.slug].x=x; });
+    const colTot={}; depths.forEach(d=>{ let sum=0; byDepth[d].forEach(sl=>sum+=pos[sl].h); colTot[d]=sum+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
+    const maxCol=Math.max(0,...depths.map(d=>colTot[d]));
+    canvasH=Math.max(PAD_Y*2+maxCol,160);
+    depths.forEach(d=>{ let yc=PAD_Y+Math.max(0,(canvasH-PAD_Y*2-colTot[d])/2);
+      byDepth[d].forEach(sl=>{ pos[sl].y=yc; pos[sl].node.style.top=yc+'px'; yc+=pos[sl].h+BREADTH_GAP; }); });
+    canvasW=PAD_X*2+(depths.length?depths[depths.length-1]:0)*(CARD_W+DEPTH_GAP)+CARD_W;
+  }
+  canvas.style.transform=''; canvas.style.width=canvasW+'px'; canvas.style.height=canvasH+'px';
   svg.setAttribute('width',canvasW); svg.setAttribute('height',canvasH);
   svg.style.width=canvasW+'px'; svg.style.height=canvasH+'px';
-  // Edges — same Bezier routing + arrowhead as the workbench.
+  // Edges — Bezier routing + arrowhead; control points follow the flow axis.
   const NS='http://www.w3.org/2000/svg';
   let defs='<defs><marker id="wdag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
   svg.innerHTML=defs;
   studies.forEach(s=>{ dagEdges(s).forEach(p=>{ const a=pos[p.study], b=pos[s.slug]; if(!a||!b) return;
-    const x1=a.x+CARD_W, y1=a.y+a.h/2, x2=b.x, y2=b.y+b.h/2, dx=Math.max(28,(x2-x1)/2);
-    const d=`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`;
+    let x1,y1,x2,y2,d;
+    if(vertical){ x1=a.x+CARD_W/2; y1=a.y+a.h; x2=b.x+CARD_W/2; y2=b.y; const dy=Math.max(24,(y2-y1)/2);
+      d=`M ${x1} ${y1} C ${x1} ${y1+dy}, ${x2} ${y2-dy}, ${x2} ${y2}`; }
+    else { x1=a.x+CARD_W; y1=a.y+a.h/2; x2=b.x; y2=b.y+b.h/2; const dx=Math.max(28,(x2-x1)/2);
+      d=`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`; }
     const st=dagRelStyle(p.relation);
     const path=document.createElementNS(NS,'path');
     path.setAttribute('d',d); path.setAttribute('fill','none'); path.setAttribute('stroke',st.color);
@@ -2417,11 +2523,14 @@ function setupWorkbenchDag(){
       t.setAttribute('font-size','10'); t.setAttribute('fill',st.color); t.textContent=st.label; svg.appendChild(t); }
   }); });
   };
+  // Expose so the PDF print-prep can re-lay-out vertically + fit to page width.
+  window.__relayoutDag = relayout;
   // First pass, then correct once reflow / web-fonts settle (the usual cause of
-  // columns stacking too tight and overlapping).
-  relayout();
-  if(typeof requestAnimationFrame==='function') requestAnimationFrame(relayout);
-  try{ if(document.fonts&&document.fonts.ready&&document.fonts.ready.then) document.fonts.ready.then(relayout); }catch(e){}
+  // columns stacking too tight and overlapping). Guard the callbacks so their
+  // argument (a timestamp / FontFaceSet) is never read as the `vertical` flag.
+  relayout(false);
+  if(typeof requestAnimationFrame==='function') requestAnimationFrame(()=>{ if(!window.__dagPrint) relayout(false); });
+  try{ if(document.fonts&&document.fonts.ready&&document.fonts.ready.then) document.fonts.ready.then(()=>{ if(!window.__dagPrint) relayout(false); }); }catch(e){}
   // Click-to-expand: mark only the cards whose Asks/Finds are actually clipped
   // (so short cards get no misleading affordance), then let a click anywhere on
   // such a card toggle its in-place expansion. The title link keeps navigating
