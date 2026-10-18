@@ -36,10 +36,14 @@ def test_headline_status_markers_visible_by_default():
     # The dense six-gate status ladder strip was removed from the header, and the
     # gate pill + readiness summary were replaced by the two-axis Progress ×
     # Verdict markers (continuity with the investigation-graph study cards),
-    # filled client-side into #study-axis-markers.
-    assert 'class="status-detail-panel"' not in _HTML
-    assert 'class="status-stepper"' not in _HTML
-    assert 'id="header-audit-summary"' not in _HTML
+    # filled client-side into #study-axis-markers. These absences are HEADER-scoped:
+    # the 5-tab reorg re-added a lifecycle stepper (class="status-stepper") to the
+    # Decide tab (a deliberate, user-requested plan view), so assert the header
+    # itself is free of the old ladder rather than the whole document.
+    header = _HTML[:_HTML.index('</header>')]
+    assert 'class="status-detail-panel"' not in header
+    assert 'class="status-stepper"' not in header
+    assert 'id="header-audit-summary"' not in header
     assert 'class="study-status-row"' in _HTML
     row_i = _HTML.index('class="study-status-row"')
     row = _HTML[row_i:_HTML.index('</header>', row_i)]
