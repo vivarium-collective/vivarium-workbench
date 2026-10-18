@@ -2188,6 +2188,22 @@ function stageFigure(inv, st){
   } }
   return '';
 }
+// Scientific limitation/caveat for a study — the authored `limitations` field
+// (34/39 studies), falling back to conclusion_logic / key_assumptions. This is
+// the SCIENCE caveat (what the model doesn't capture), DISTINCT from the audit /
+// publication-readiness signals shown in the Validation section.
+function _limitationFor(inv, slug){
+  const st=(inv.studies||[]).find(x=>x.slug===slug); if(!st) return '';
+  const pick=v=>Array.isArray(v)?String(v[0]||'').trim():(typeof v==='string'?v.trim():'');
+  return pick(st.limitations) || pick(st.conclusion_logic) || pick(st.key_assumptions) || '';
+}
+// The lead study's limitation for a finding-cluster/stage (first with one).
+function stageLimitation(inv, st){
+  for(const m of (st.studies||[])){ const l=_limitationFor(inv, m.slug); if(l)
+    return `<div class="measure" style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin:8px 0 0;padding-left:10px;border-left:3px solid var(--line-2)"><b style="color:var(--ink)">Limitation.</b> ${esc(l)} <span style="font-size:11px;color:var(--ink-3)">— ${_studyLink(m.slug,m.title)}</span></div>`;
+  }
+  return '';
+}
 
 // 1. EXECUTIVE SUMMARY — question, current verdict, the honest gate ladder, and
 // the run-status / evidence / claim separation (a passed gate ≠ a proven mechanism).
@@ -2239,7 +2255,8 @@ function integratedFindings(inv){
       <h3 style="font-size:16px;margin:0 0 2px">${esc(st.label)}</h3>
       <div style="margin:4px 0 2px">${studyChips}</div>${md}
       ${stageFigure(inv, st)}
-      ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}</div>`;
+      ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}
+      ${stageLimitation(inv, st)}</div>`;
   }).join('');
   return `<div class="narr fbsection" id="integrated-findings">${fbBubble('findings','Integrated findings')}
     <div class="sec-h"><h2>Integrated findings</h2><span class="rule"></span></div>
