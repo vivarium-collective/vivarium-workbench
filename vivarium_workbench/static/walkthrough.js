@@ -9957,6 +9957,46 @@
   // headline; the verdict answers it as a colored status line (not a box); depth
   // (how-to-read / biology / background / glossary) lives in one flat tab strip.
   // Reads the SAME canonical fields as the downloaded report's executive summary.
+  // Plan-progress board: the investigation's cumulative gates (A→E) with a LIVE
+  // status derived server-side (lib/plan_board) from member-study state — a
+  // campaign-level roadmap rendered directly under the brief. Empty when the
+  // investigation declares no plan_gates.
+  function _planBoardHtml(d) {
+    var gates = (d && d.plan_board) || [];
+    if (!gates.length) return '';
+    var meta = {
+      passed:      { cls: 'passed',   label: 'passed' },
+      in_progress: { cls: 'progress', label: 'in progress' },
+      blocked:     { cls: 'blocked',  label: 'blocked' },
+      pending:     { cls: 'pending',  label: 'pending' },
+    };
+    var H = ['<section class="inv-plan-board">'];
+    H.push('<h3 class="inv-plan-board-title">Plan progress · cumulative gates</h3>');
+    H.push('<ol class="inv-plan-gates">');
+    gates.forEach(function (g) {
+      var sm = meta[g.status] || meta.pending;
+      var members = g.member_studies || [];
+      var pending = g.pending_studies || [];
+      var crit = String(g.criterion || '').replace(/\s+/g, ' ').trim();
+      var bits = [];
+      if (members.length) bits.push(members.length + ' stud' + (members.length === 1 ? 'y' : 'ies'));
+      if (pending.length) bits.push(pending.length + ' planned');
+      H.push('<li class="inv-plan-gate inv-gate-' + sm.cls + (g.optional ? ' inv-gate-optional' : '') +
+             '" title="' + _escInv(crit) + '">');
+      H.push('<div class="inv-gate-head">' +
+               '<span class="inv-gate-id">' + _escInv(String(g.id || '')) + '</span>' +
+               '<span class="inv-gate-name">' + _escInv(g.name || '') + '</span>' +
+               (g.optional ? '<span class="inv-gate-opt">optional</span>' : '') +
+             '</div>');
+      H.push('<div class="inv-gate-status inv-gate-status-' + sm.cls + '">' + sm.label + '</div>');
+      if (bits.length) H.push('<div class="inv-gate-members">' + _escInv(bits.join(' · ')) + '</div>');
+      H.push('</li>');
+    });
+    H.push('</ol></section>');
+    return H.join('');
+  }
+  window._planBoardHtml = _planBoardHtml;
+
   function _renderInvOpening(d) {
     d = d || {};
     var ex = d.executive || {};
@@ -10339,7 +10379,8 @@
         var leadEl = document.getElementById('investigation-detail-description');
         // The inquiry brief renders the full opening — headline, verdict, meta,
         // and the how-to-read / biology / background / glossary tabs — from `d`.
-        leadEl.innerHTML = _renderInvOpening(d);
+        // The plan-progress board (cumulative gates A→E, live status) follows it.
+        leadEl.innerHTML = _renderInvOpening(d) + _planBoardHtml(d);
 
         // Decision cockpit: the open expert decisions + campaign plan, surfaced
         // prominently directly under the brief (built from d.executive).

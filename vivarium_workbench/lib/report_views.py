@@ -1199,6 +1199,40 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             return out
         return {"name": str(item), "path": None}
 
+    # Plan-progress board: derive live gate (A→E) status from the investigation's
+    # plan_gates block + member-study state, so the page shows where the campaign
+    # stands against its own cumulative-gate plan. Empty [] when no plan_gates.
+    #
+    # A gate names its member studies explicitly; those may not all be in the
+    # investigation's `studies:` roster loaded above (e.g. a spine study wired into
+    # plan_gates before it joins the roster). Resolve any such member directly so
+    # the board reflects true state instead of silently reading "pending".
+    from vivarium_workbench.lib.plan_board import build_plan_board  # noqa: PLC0415
+    _plan_gates = spec.get("plan_gates") or []
+    _board_studies = {s.get("name"): s for s in studies_out if s.get("name")}
+    _gate_members = {
+        m for g in _plan_gates for m in ((g or {}).get("member_studies") or [])
+    }
+    for _slug in _gate_members:
+        if _slug in _board_studies:
+            continue
+        try:
+            _sp = study_wp.study_dir(_slug, must_exist=True) / "study.yaml"
+        except FileNotFoundError:
+            continue
+        if not _sp.is_file():
+            continue
+        try:
+            _ss = load_spec(_sp)
+        except InvestigationSpecError:
+            continue
+        _board_studies[_slug] = {
+            "name": _ss.get("name") or _slug,
+            "gate_status": _ss.get("gate_status"),
+            "findings": _ss.get("findings") or [],
+        }
+    plan_board = build_plan_board(_plan_gates, _board_studies)
+
     _inputs_block = spec.get("inputs")
     if not isinstance(_inputs_block, dict):
         _inputs_block = {}
@@ -1254,6 +1288,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # papers.bib, so citation chips read "Kelley 2001" and link to a source.
         "references_resolved": _resolve_bib_references(ws_root),
         "proposed_inputs":     spec.get("proposed_inputs") or {},
+        "plan_board":          plan_board,
         "studies":             studies_out,
         # Investigation-level run length hint (the longest member study's baseline
         # composite run) → the `vwb run investigation <slug> --steps N` chip.

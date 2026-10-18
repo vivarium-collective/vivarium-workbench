@@ -164,3 +164,18 @@ def test_save_analyses_reads_checklist_selection():
     assert "ChecklistSelect.selected" in block
     assert ".value.split" not in block   # the old free-text parsing is gone
     assert "o.selected" not in block     # the old <select>-options reading is gone
+
+
+def test_plan_board_renders_from_detail_payload():
+    """The investigation overview renders the plan-progress board (cumulative
+    gates A→E) from `d.plan_board`, mounted under the inquiry brief."""
+    assert "function _planBoardHtml" in JS
+    i = JS.index("function _planBoardHtml")
+    body = JS[i:i + 1600]
+    assert "d.plan_board" in body                       # reads the derived board
+    assert "inv-plan-gate" in body                      # one node per gate
+    assert "inv-gate-status-" in body                   # colored live status
+    for st in ("passed", "progress", "blocked", "pending"):
+        assert st in body                               # all four states handled
+    # Mounted under the brief in _renderInvOpening's consumer.
+    assert "_renderInvOpening(d) + _planBoardHtml(d)" in JS
