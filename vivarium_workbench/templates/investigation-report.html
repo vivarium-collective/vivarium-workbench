@@ -48,8 +48,13 @@
     --line:#e4e4e2; --line-2:#cfcfcc; --accent:#0F766B; --shadow:none;
   }
   html,body{background:#fff !important;}
-  .topbar,.subnav,.fbfloat,#report-feedback{display:none !important;}
+  /* Nav + overlay chrome is screen-only; Chromium paints position:fixed elements
+     on EVERY printed page, so these must be removed or they ghost onto the PDF. */
+  .topbar,.subnav,.fbfloat,#report-feedback,.navdrawer,.navdrawer-backdrop,.modal-bg{display:none !important;}
   [onclick*="toggleEditor"],.fbbubble{display:none !important;}
+  /* No scroll frames in print — overflow:auto containers render a scrollbar
+     gutter/corner as a gray box; let their content lay out naturally. */
+  .wdag-shell{overflow:visible !important;background:#fff !important;max-height:none !important;}
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -497,6 +502,16 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
   display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
 .wdag-node .wn-row .wn-lbl{font-weight:600;color:var(--ink)}
 .wdag-node .wn-etier{margin-top:7px}
+/* Compact (lowest semantic zoom) — used for the PDF: title + status only, at a
+   LARGER font than the detail cards, so the whole graph stays legible when it
+   spans pages. */
+.wdag-shell.dag-compact .wn-row,
+.wdag-shell.dag-compact .wn-etier,
+.wdag-shell.dag-compact .wn-exp{display:none !important}
+.wdag-shell.dag-compact .wdag-node{padding:9px 12px !important}
+.wdag-shell.dag-compact .wn-title{font-size:14.5px !important;line-height:1.28 !important;-webkit-line-clamp:3 !important}
+.wdag-shell.dag-compact .wn-badge{font-size:11.5px !important}
+.wdag-shell.dag-compact .wn-icon{font-size:14px !important}
 /* Click-to-expand: only cards whose Asks/Finds are actually clipped get the
    affordance (data-clip set by setupWorkbenchDag after measuring). The caret
    lives in the fixed-height meta row, so toggling it causes no layout shift.
@@ -1761,21 +1776,21 @@ window.__reportPrintPrep = function(){
     // strip (the on-screen graph stays left-to-right + interactive).
     try{
       window.__dagPrint=true;   // keep the deferred relayouts from reverting to left-to-right
-      if(window.__relayoutDag) window.__relayoutDag(true);
       const shell=document.querySelector('.wdag-shell'), canvas=document.getElementById('wdag-canvas');
+      if(shell) shell.classList.add('dag-compact');   // lowest semantic zoom: title + status only
+      if(window.__relayoutDag) window.__relayoutDag(true, true);   // vertical + compact
       if(shell&&canvas){
         const cw=parseFloat(canvas.style.width)||canvas.scrollWidth||1;
-        const ch=parseFloat(canvas.style.height)||canvas.scrollHeight||1;
         const k=Math.min(1, 700/cw);   // 700px ≈ A4 content width at the PDF's margins
-        canvas.style.transformOrigin='top left';
-        canvas.style.transform='scale('+k+')';
-        // transform is visual-only (layout box stays full-size), so clip the shell
-        // to the SCALED height with overflow:hidden — otherwise the tall unscaled
-        // canvas bleeds over the content below it.
-        shell.style.overflow='hidden';
-        shell.style.width='100%';
-        shell.style.height=Math.ceil(ch*k+2)+'px';
-        shell.style.breakInside='avoid'; shell.style.pageBreakInside='avoid';
+        // Use CSS `zoom` (not transform): it REFLOWS, so the scaled graph occupies
+        // its true height and flows naturally ACROSS PAGES — the whole graph shows
+        // at a larger, legible font instead of being squeezed onto one page.
+        canvas.style.transform='';
+        canvas.style.zoom=k;
+        shell.style.overflow='visible';
+        shell.style.maxHeight='none';   // the shell is capped at 620px on screen
+        shell.style.height='auto';
+        shell.style.breakInside=''; shell.style.pageBreakInside='';
       }
     }catch(e){}
     let n=0; const tick=()=>{ if(++n<5){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { setTimeout(resolve,700); } };
@@ -2500,31 +2515,34 @@ function setupWorkbenchDag(){
   // Measure + position + draw edges, wrapped so it can RE-RUN once web fonts
   // settle (an early offsetHeight under-measures a card -> the column stacks too
   // tight and cards overlap) and whenever a card is expanded in place.
-  const relayout=(vertical)=>{
-  nodeEls.forEach(n=>{ n.style.width=CARD_W+'px'; });
+  const relayout=(vertical, compact)=>{
+  // Compact (lowest semantic zoom, for the PDF): narrower title+status cards.
+  const cw = compact ? 158 : CARD_W;
+  nodeEls.forEach(n=>{ n.style.width=cw+'px'; });
   studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; pos[s.slug]={node:n, h:n.offsetHeight||120}; });
   let canvasW, canvasH;
   if(vertical){
     // TOP-TO-BOTTOM (for print/PDF): depth → row; siblings laid left-to-right and
     // centered. Uses page height and keeps the graph narrow enough to fit width.
-    const rowH={}; depths.forEach(d=>{ rowH[d]=Math.max(120,...byDepth[d].map(sl=>pos[sl].h)); });
+    const rowH={}; depths.forEach(d=>{ rowH[d]=Math.max(compact?64:120,...byDepth[d].map(sl=>pos[sl].h)); });
     const rowY={}; let yacc=PAD_Y; depths.forEach(d=>{ rowY[d]=yacc; yacc+=rowH[d]+DEPTH_GAP; });
     canvasH=Math.max(160,yacc-DEPTH_GAP+PAD_Y);
-    const rowW={}; depths.forEach(d=>{ rowW[d]=byDepth[d].length*CARD_W+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
-    canvasW=PAD_X*2+Math.max(CARD_W,...depths.map(d=>rowW[d]));
+    const rowW={}; depths.forEach(d=>{ rowW[d]=byDepth[d].length*cw+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
+    canvasW=PAD_X*2+Math.max(cw,...depths.map(d=>rowW[d]));
     depths.forEach(d=>{ let xc=PAD_X+Math.max(0,(canvasW-PAD_X*2-rowW[d])/2);
-      byDepth[d].forEach(sl=>{ const p=pos[sl]; p.x=xc; p.y=rowY[d]; p.node.style.left=xc+'px'; p.node.style.top=rowY[d]+'px'; xc+=CARD_W+BREADTH_GAP; }); });
+      byDepth[d].forEach(sl=>{ const p=pos[sl]; p.x=xc; p.y=rowY[d]; p.node.style.left=xc+'px'; p.node.style.top=rowY[d]+'px'; xc+=cw+BREADTH_GAP; }); });
   } else {
     // LEFT-TO-RIGHT (screen default): depth → column; stack same-depth cards.
-    studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; const x=PAD_X+depth[s.slug]*(CARD_W+DEPTH_GAP);
+    studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; const x=PAD_X+depth[s.slug]*(cw+DEPTH_GAP);
       n.style.left=x+'px'; pos[s.slug].x=x; });
     const colTot={}; depths.forEach(d=>{ let sum=0; byDepth[d].forEach(sl=>sum+=pos[sl].h); colTot[d]=sum+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
     const maxCol=Math.max(0,...depths.map(d=>colTot[d]));
     canvasH=Math.max(PAD_Y*2+maxCol,160);
     depths.forEach(d=>{ let yc=PAD_Y+Math.max(0,(canvasH-PAD_Y*2-colTot[d])/2);
       byDepth[d].forEach(sl=>{ pos[sl].y=yc; pos[sl].node.style.top=yc+'px'; yc+=pos[sl].h+BREADTH_GAP; }); });
-    canvasW=PAD_X*2+(depths.length?depths[depths.length-1]:0)*(CARD_W+DEPTH_GAP)+CARD_W;
+    canvasW=PAD_X*2+(depths.length?depths[depths.length-1]:0)*(cw+DEPTH_GAP)+cw;
   }
+  const CARD_HALF=cw/2;
   canvas.style.transform=''; canvas.style.width=canvasW+'px'; canvas.style.height=canvasH+'px';
   svg.setAttribute('width',canvasW); svg.setAttribute('height',canvasH);
   svg.style.width=canvasW+'px'; svg.style.height=canvasH+'px';
@@ -2534,9 +2552,9 @@ function setupWorkbenchDag(){
   svg.innerHTML=defs;
   studies.forEach(s=>{ dagEdges(s).forEach(p=>{ const a=pos[p.study], b=pos[s.slug]; if(!a||!b) return;
     let x1,y1,x2,y2,d;
-    if(vertical){ x1=a.x+CARD_W/2; y1=a.y+a.h; x2=b.x+CARD_W/2; y2=b.y; const dy=Math.max(24,(y2-y1)/2);
+    if(vertical){ x1=a.x+CARD_HALF; y1=a.y+a.h; x2=b.x+CARD_HALF; y2=b.y; const dy=Math.max(24,(y2-y1)/2);
       d=`M ${x1} ${y1} C ${x1} ${y1+dy}, ${x2} ${y2-dy}, ${x2} ${y2}`; }
-    else { x1=a.x+CARD_W; y1=a.y+a.h/2; x2=b.x; y2=b.y+b.h/2; const dx=Math.max(28,(x2-x1)/2);
+    else { x1=a.x+cw; y1=a.y+a.h/2; x2=b.x; y2=b.y+b.h/2; const dx=Math.max(28,(x2-x1)/2);
       d=`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`; }
     const st=dagRelStyle(p.relation);
     const path=document.createElementNS(NS,'path');
