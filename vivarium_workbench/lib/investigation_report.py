@@ -668,6 +668,258 @@ def _load_references(ws_root: Path, wp) -> dict:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Deterministic cross-study SYNTHESIS (report upgrade). No model call, no
+# invented prose: every element is DERIVED from existing per-study +
+# investigation fields (verdicts, findings, edges, limitations, follow-ups) and
+# composed into a finding-first narrative. An optional authored
+# ``report_synthesis`` block in investigation.yaml overrides/enriches any
+# section. Separates run status from evidence strength from scientific claim —
+# a passed computational gate is never reported as a proven mechanism.
+# ---------------------------------------------------------------------------
+def _syn_run_status(s):
+    st = str(s.get("status") or "").lower()
+    if st in ("planned", "proposed"):
+        return "planned"
+    if str(s.get("gate_status") or "").lower() in ("not_started", "blocked"):
+        return "planned"
+    return "ran"
+
+
+def _syn_grade(s):
+    """Evidence grade — DISTINCT from run status. Maps verdict / gate_status /
+    confidence onto supported | qualified | refuted | pending | inconclusive."""
+    if _syn_run_status(s) == "planned":
+        return "pending"
+    gs = str(s.get("gate_status") or "").lower()
+    v = str(s.get("verdict") or "").lower()
+    conf = str(s.get("confidence") or "").lower()
+    if gs in ("failed", "failing") or v in ("refuted", "failed") or conf == "refuted":
+        return "refuted"
+    if gs in ("stale", "needs_calibration") or v in ("qualified", "inconclusive", "needs-calibration") \
+            or conf in ("investigating", "qualified", "mixed"):
+        return "qualified"
+    if gs == "passed" or v in ("passed", "supported", "met") or conf in ("accepted", "supported"):
+        return "supported"
+    return "inconclusive"
+
+
+def _syn_claim_status(grade):
+    return {"supported": "supported", "qualified": "conditional",
+            "refuted": "unsupported", "pending": "pending"}.get(grade, "inconclusive")
+
+
+def _syn_stage_key(slug):
+    m = re.match(r"og-([a-z0-9]+)", str(slug or ""))
+    k = m.group(1) if m else str(slug or "")
+    m2 = re.match(r"(\d+)[a-z]*$", k)   # collapse og-00b -> 00
+    return m2.group(1) if m2 else k
+
+
+_STEM_ORDER = {"cal": 50, "rtca": 51, "res": 60, "energy": 61, "growth": 62, "adv": 70}
+
+
+def _syn_stage_sort(key):
+    return (0, int(key), "") if key.isdigit() else (1, _STEM_ORDER.get(key, 99), key)
+
+
+def _syn_is_variant(slug):
+    s = str(slug or "")
+    return ("-alt-" in s) or ("adversarial" in s) or s.endswith("-control")
+
+
+def _syn_first_sentence(t, n=220):
+    t = re.sub(r"\s+", " ", str(t or "")).strip()
+    if not t:
+        return ""
+    m = re.match(r"^.*?[.!?](?=\s|$)", t)
+    return (m.group(0) if m else t)[:n]
+
+
+def _syn_oneline(s):
+    c = str(s.get("claim") or "").strip()
+    if c:
+        return _syn_first_sentence(c)
+    fs = s.get("findings") or []
+    if fs:
+        f0 = fs[0] or {}
+        return _syn_first_sentence(f0.get("summary") or f0.get("statement") or "")
+    return _syn_first_sentence(s.get("objective") or s.get("question") or "")
+
+
+def _build_synthesis(inv, studies, spine):
+    spine = spine or {}
+    recs = []
+    for s in studies:
+        grade = _syn_grade(s)
+        recs.append({
+            "slug": s.get("slug"), "title": s.get("title"),
+            "stage": _syn_stage_key(s.get("slug")),
+            "run_status": _syn_run_status(s), "grade": grade,
+            "claim_status": _syn_claim_status(grade),
+            "variant": _syn_is_variant(s.get("slug")),
+            "one_line": _syn_oneline(s), "_s": s,
+        })
+
+    pub = ("slug", "title", "stage", "run_status", "grade", "claim_status", "variant", "one_line")
+    studies_index = [{k: r[k] for k in pub} for r in recs]
+
+    # STAGES — integrated findings grouped by scientific stage (not one per study)
+    stages_map = {}
+    for r in recs:
+        stages_map.setdefault(r["stage"], []).append(r)
+    stages = []
+    for key in sorted(stages_map, key=_syn_stage_sort):
+        members = stages_map[key]
+        primary = next((m for m in members if not m["variant"] and m["run_status"] == "ran"), members[0])
+        grades = {m["grade"] for m in members}
+        model_dependence = ("supported" in grades) and bool(grades & {"refuted", "qualified"})
+        fnds = []
+        for m in members:
+            for f in (m["_s"].get("findings") or [])[:3]:
+                ev = (f or {}).get("evidence") or {}
+                fnds.append({
+                    "study": m["slug"], "title": m["title"], "grade": m["grade"],
+                    "status": (f or {}).get("status"),
+                    "statement": _syn_first_sentence((f or {}).get("statement") or (f or {}).get("summary") or "", 260),
+                    "observed": ev.get("observed"), "units": ev.get("units"),
+                })
+        stages.append({
+            "key": key, "label": primary["title"],
+            "studies": [{k: m[k] for k in ("slug", "title", "grade", "claim_status", "variant", "one_line", "run_status")} for m in members],
+            "model_dependence": model_dependence, "findings": fnds,
+        })
+
+    claim_evidence = [{
+        "claim": _syn_first_sentence(r["_s"].get("claim"), 300), "status": r["claim_status"],
+        "grade": r["grade"], "study": r["slug"], "study_title": r["title"],
+    } for r in recs if str(r["_s"].get("claim") or "").strip()]
+
+    # CONTRADICTIONS — model dependence, negative results, finding conflicts, frameworks
+    contradictions = []
+    for st in stages:
+        if st["model_dependence"]:
+            sup = [m for m in st["studies"] if m["grade"] == "supported"]
+            neg = [m for m in st["studies"] if m["grade"] in ("refuted", "qualified")]
+            if sup and neg:
+                contradictions.append({
+                    "kind": "model-dependence", "topic": st["label"],
+                    "detail": "A result holds in one model class but not another at matched conditions — report as model dependence, not two independent outcomes.",
+                    "studies": [{"slug": m["slug"], "title": m["title"], "grade": m["grade"]} for m in (sup + neg)],
+                })
+    for r in recs:
+        if r["grade"] == "refuted":
+            s = r["_s"]
+            di = s.get("discovery_implications") or {}
+            fps = di.get("followup_study_proposals") if isinstance(di, dict) else None
+            contradictions.append({
+                "kind": "negative-result", "topic": r["title"],
+                "detail": _syn_first_sentence(s.get("conclusion") or _syn_oneline(s), 300),
+                "studies": [{"slug": r["slug"], "title": r["title"], "grade": "refuted"}],
+                "discriminating": (fps[0] if isinstance(fps, list) and fps else None),
+            })
+    for r in recs:
+        for f in (r["_s"].get("findings") or []):
+            if str((f or {}).get("status") or "").lower() in ("contradicts", "refutes", "partial"):
+                contradictions.append({
+                    "kind": "finding-conflict", "topic": r["title"],
+                    "detail": _syn_first_sentence((f or {}).get("statement") or (f or {}).get("summary") or "", 300),
+                    "studies": [{"slug": r["slug"], "title": r["title"], "grade": r["grade"]}],
+                })
+    for cf in (inv.get("competing_frameworks") or []):
+        if isinstance(cf, dict) and cf.get("name"):
+            contradictions.append({
+                "kind": "competing-framework", "topic": cf.get("name"),
+                "detail": _syn_first_sentence(cf.get("relation") or "", 300), "studies": [],
+            })
+
+    edges = ((spine.get("verdict_dag") or {}).get("edges")) or []
+    have_parents = {e.get("to") for e in edges}
+    continuity = {
+        "edges": [{"from": e.get("from"), "to": e.get("to")} for e in edges],
+        "external_inputs": [{"slug": r["slug"], "title": r["title"]}
+                            for r in recs if r["run_status"] == "ran" and r["slug"] not in have_parents],
+    }
+
+    quantitative = []
+    for st in stages:
+        rows = [{"study": f["study"], "statement": f["statement"], "observed": f["observed"], "units": f["units"]}
+                for f in st["findings"] if f.get("observed")]
+        if rows:
+            quantitative.append({"stage": st["label"], "rows": rows})
+
+    roadmap = []
+    for r in recs:
+        if r["run_status"] == "planned":
+            roadmap.append({"priority": "P1", "item": r["title"],
+                            "basis": _syn_first_sentence(r["_s"].get("objective") or r["_s"].get("question") or "", 240),
+                            "source": r["slug"]})
+    for c in contradictions:
+        if c["kind"] == "negative-result" and c.get("discriminating"):
+            d = c["discriminating"]
+            roadmap.insert(0, {"priority": "P0", "item": "Discriminate: " + str(c["topic"]),
+                               "basis": _syn_first_sentence(str(d if not isinstance(d, dict) else (d.get("study") or d.get("title") or d)), 240),
+                               "source": (c["studies"][0]["slug"] if c["studies"] else None)})
+    for r in recs:
+        di = r["_s"].get("discovery_implications") or {}
+        fps = di.get("followup_study_proposals") if isinstance(di, dict) else None
+        for fp in (fps or [])[:2]:
+            txt = fp.get("study") or fp.get("title") or fp.get("proposal") if isinstance(fp, dict) else fp
+            if txt:
+                roadmap.append({"priority": "P2", "item": _syn_first_sentence(str(txt), 160), "basis": "", "source": r["slug"]})
+    # Prioritized + bounded: keep all P0/P1, dedupe + cap P2, then order by priority.
+    _seen, _dedup = set(), []
+    for it in roadmap:
+        if it["priority"] == "P2":
+            k = it["item"].lower()[:80]
+            if not it["item"] or k in _seen:
+                continue
+            _seen.add(k)
+        _dedup.append(it)
+    _p2 = [i for i in _dedup if i["priority"] == "P2"][:8]
+    roadmap = sorted([i for i in _dedup if i["priority"] != "P2"] + _p2,
+                     key=lambda i: {"P0": 0, "P1": 1, "P2": 2}.get(i["priority"], 3))
+
+    # Figure shortlist — rank by scientific weight, then DIVERSIFY: at most the
+    # single best figure per study, so the shortlist spans stages (not 6 from one).
+    best_per_study = {}
+    for r in recs:
+        for f in (r["_s"].get("figures_embedded") or []):
+            score = (3 if r["grade"] == "supported" else 2 if r["grade"] in ("qualified", "refuted") else 0)
+            if (f or {}).get("caption") or (f or {}).get("description"):
+                score += 1
+            if not r["variant"]:
+                score += 1
+            cur = best_per_study.get(r["slug"])
+            cand = {"slug": r["slug"], "study_title": r["title"], "name": (f or {}).get("name"),
+                    "caption": (f or {}).get("caption") or (f or {}).get("description"), "score": score}
+            if cur is None or score > cur["score"]:
+                best_per_study[r["slug"]] = cand
+    figures_ranked = sorted(best_per_study.values(), key=lambda x: -x["score"])[:6]
+
+    headline = [{"kind": "gate", "id": g.get("id"), "name": g.get("name"), "status": g.get("status")}
+                for g in (spine.get("plan_board") or [])]
+
+    out = {
+        "studies_index": studies_index, "stages": stages, "claim_evidence": claim_evidence,
+        "contradictions": contradictions, "continuity": continuity, "quantitative": quantitative,
+        "roadmap": roadmap, "figures_ranked": figures_ranked, "headline": headline,
+        "counts": {
+            "total": len(recs),
+            "supported": sum(1 for r in recs if r["grade"] == "supported"),
+            "qualified": sum(1 for r in recs if r["grade"] == "qualified"),
+            "refuted": sum(1 for r in recs if r["grade"] == "refuted"),
+            "planned": sum(1 for r in recs if r["run_status"] == "planned"),
+        },
+    }
+    auth = inv.get("report_synthesis")
+    if isinstance(auth, dict):
+        for k, v in auth.items():
+            if v:
+                out[k] = v
+    return out
+
+
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
     """Assemble the pure report-data dict for one investigation from existing
     files only. Raises FileNotFoundError if the investigation is missing.
@@ -792,6 +1044,10 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "at_a_glance": inv.get("at_a_glance"),
         "acceptance_criteria": inv.get("acceptance_criteria"),
         "spine": spine,
+        # Deterministic cross-study synthesis (claim-evidence map, stage-grouped
+        # integrated findings, contradictions, continuity, roadmap, figure ranking,
+        # run-status/evidence/claim separation) — the finding-first report layer.
+        "synthesis": _build_synthesis(inv, studies, spine),
         "references": references,
         "inv_references": inv.get("inputs", {}).get("references") if isinstance(inv.get("inputs"), dict) else None,
         "catalog": inv.get("catalog"),

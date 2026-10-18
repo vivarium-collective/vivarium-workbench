@@ -141,7 +141,9 @@ def test_sourcing_data_shape_and_provenance(tmp_path):
                       # Background / "simulated world" prose, glossary, guidelines,
                       # how-to-read, and the creation date for the masthead.
                       "biological_story", "glossary", "guidelines", "how_to_read",
-                      "created"}
+                      "created",
+                      # deterministic cross-study synthesis (finding-first report)
+                      "synthesis"}
 
 
 def test_agentic_trajectory_attached(tmp_path):
@@ -495,3 +497,36 @@ def test_render_report_pdf_missing_playwright_raises_guidance(monkeypatch):
         assert "playwright" in str(e).lower()
     else:
         raise AssertionError("expected ReportPdfError when Playwright is missing")
+
+
+def test_synthesis_separates_status_and_classifies_evidence(tmp_path):
+    """The deterministic synthesis separates run status from evidence grade, and a
+    computational pass/refute never silently becomes a proven/unproven claim."""
+    d = build_report_data(_ws(tmp_path), "src")
+    syn = d["synthesis"]
+    assert syn["counts"]["total"] == 2
+    grades = {r["slug"]: r["grade"] for r in syn["studies_index"]}
+    assert grades["reuse-ok"] == "supported"
+    assert grades["trap"] == "refuted"
+    # the refuted study surfaces as a prominent negative-result contradiction
+    negs = [c for c in syn["contradictions"] if c["kind"] == "negative-result"]
+    assert any(c["studies"] and c["studies"][0]["slug"] == "trap" for c in negs)
+    # claim status is derived, not asserted: refuted -> unsupported, supported -> supported
+    claim = {r["slug"]: r["claim_status"] for r in syn["studies_index"]}
+    assert claim["trap"] == "unsupported" and claim["reuse-ok"] == "supported"
+
+
+def test_report_template_is_finding_first():
+    """The report leads with finding-first synthesis sections; full per-study cards
+    are moved into a collapsible Technical supplement."""
+    from pathlib import Path as _P
+    import vivarium_workbench as _vw
+    tpl = (_P(_vw.__file__).parent / "templates" / "investigation-report.html").read_text(encoding="utf-8")
+    for fn in ("function execSummary", "function integratedFindings", "function contradictionsSection",
+               "function roadmapSection", "function claimEvidenceMap", "function studiesInventory"):
+        assert fn in tpl, fn
+    assert '<details class="supplement"' in tpl and 'id="supplement"' in tpl
+    # the main render pipeline calls the synthesis sections, not per-study-in-main
+    i = tpl.index("function render(inv)")
+    body = tpl[i:i + 2000]
+    assert "execSummary(inv)" in body and "integratedFindings(inv)" in body

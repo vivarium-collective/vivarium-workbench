@@ -1490,23 +1490,21 @@ function markBubble(key){ document.querySelectorAll('.fbbubble').forEach(b=>{ if
 
 /* ---------- TOC + scroll spy ---------- */
 function toc(inv){
-  const exv=inv.executive||{};
-  const front=[`<a href="#top" class="exec">${esc(inv.question?'Question':'Overview')}</a>`];
+  const exv=inv.executive||{}, syn=inv.synthesis||{};
+  const front=['<a href="#exec-summary" class="exec">Summary</a>'];
   if(inv.how_to_read) front.push('<a href="#how-to-read">How to read</a>');
-  if(inv.biological_story || exv.what_is_this || inv.hypothesis) front.push('<a href="#background">The world</a>');
+  if(inv.biological_story || exv.what_is_this || inv.hypothesis) front.push('<a href="#background">Design</a>');
   if((inv.guidelines||{}).architecture_principles) front.push('<a href="#ground-rules">Ground rules</a>');
-  if(Array.isArray(inv.at_a_glance)&&inv.at_a_glance.length) front.push('<a href="#at-a-glance">At a glance</a>');
-  if((inv.spine||{}).plan_board&&inv.spine.plan_board.length) front.push('<a href="#plan-ladder">Where it stands</a>');
-  front.push('<a href="#findings">Findings</a>');
-  if(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length) front.push('<a href="#open-decisions">Open decisions</a>');
   if(inv.spine) front.push('<a href="#spine-presentation">Graph</a>');
-  front.push('<a href="#inv-viz">Landscape</a>');
-  const items=front
-    .concat(inv.studies.map((s,i)=>`<a href="#s-${s.slug}" title="${esc(s.title)}">${i+1}. ${esc(shortTitle(s.title))}</a>`))
-    .concat(inv.glossary?['<a href="#glossary">Glossary</a>']:[])
-    .concat((inv.references&&Object.keys(inv.references).length)?['<a href="#references">References</a>']:[])
-    .concat(inv.catalog?['<a href="#appendix">Appendix</a>']:[]).join('');
-  return `<div class="subnav"><div class="wrap">${items}</div></div>`;
+  if((syn.stages||[]).length) front.push('<a href="#integrated-findings">Integrated findings</a>');
+  if((syn.quantitative||[]).length) front.push('<a href="#quantitative">Quantitative</a>');
+  if((syn.figures_ranked||[]).length) front.push('<a href="#key-figures">Key figures</a>');
+  if((syn.contradictions||[]).length) front.push('<a href="#contradictions">Contradictions</a>');
+  if((syn.roadmap||[]).length||Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length) front.push('<a href="#roadmap">Next studies</a>');
+  if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
+  if(inv.references&&Object.keys(inv.references).length) front.push('<a href="#references">References</a>');
+  front.push('<a href="#supplement">Supplement</a>');
+  return `<div class="subnav"><div class="wrap">${front.join('')}</div></div>`;
 }
 function shortTitle(t){ return t.length>22?t.slice(0,21)+'…':t; }
 function spy(){
@@ -1515,7 +1513,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('.card,#top,#how-to-read,#background,#ground-rules,#at-a-glance,#plan-ladder,#findings,#open-decisions,#spine-presentation,#inv-viz,#glossary,#appendix,#references').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('#exec-summary,#how-to-read,#background,#ground-rules,#spine-presentation,#integrated-findings,#quantitative,#key-figures,#contradictions,#roadmap,#claim-evidence,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -1654,6 +1652,7 @@ function setupLazyPlotly(){
 // a few frames to draw. Safe no-op if called in a normal browser.
 window.__reportPrintPrep = function(){
   return new Promise(resolve=>{
+    try{ document.querySelectorAll('details').forEach(d=>d.open=true); }catch(e){}   // open the Technical supplement
     try{ document.querySelectorAll('.card').forEach(c=>c.classList.remove('collapsed')); }catch(e){}
     try{ setupLazyPlotly(); }catch(e){}
     try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
@@ -1977,6 +1976,147 @@ function authoredAcList(inv){
     <div>${rows}</div></div>`;
 }
 
+/* ====================== FINDING-FIRST SYNTHESIS (upgrade) ====================== */
+// All sections below render the deterministic cross-study synthesis assembled
+// server-side in lib.investigation_report._build_synthesis (inv.synthesis). No
+// invented prose — every line composes authored claims/findings/verdicts/edges.
+function _gradeStyle(g){
+  return ({supported:['supported','#065f46','#d1fae5'],met:['met','#065f46','#d1fae5'],
+    qualified:['qualified','#92400e','#fef3c7'],conditional:['conditional','#92400e','#fef3c7'],
+    refuted:['refuted','#991b1b','#fee2e2'],unsupported:['unsupported','#991b1b','#fee2e2'],
+    contested:['contested','#991b1b','#fee2e2'],pending:['pending','#475569','#eef2f7'],
+    inconclusive:['inconclusive','#475569','#eef2f7']})[g] || [String(g||'—'),'#475569','#eef2f7'];
+}
+function _gradeChip(g){ const m=_gradeStyle(g);
+  return `<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 7px;border-radius:9999px;color:${m[1]};background:${m[2]}">${esc(m[0])}</span>`; }
+function _studyLink(slug,title){ return `<a href="#s-${esc(slug)}" style="color:var(--accent);text-decoration:none" title="${esc(title||slug)}">${esc(title||slug)}</a>`; }
+
+// 1. EXECUTIVE SUMMARY — question, current verdict, the honest gate ladder, and
+// the run-status / evidence / claim separation (a passed gate ≠ a proven mechanism).
+function execSummary(inv){
+  const syn=inv.synthesis||{}, c=syn.counts||{}, ex=inv.executive||{};
+  const q=(inv.question||'').replace(/\s+/g,' ').trim();
+  const verdict=(ex.verdict||'').trim();
+  const gl=(syn.headline||[]).map(h=>{ const g=(h.status==='met')?'supported':h.status;
+    return `<span style="display:inline-flex;gap:5px;align-items:center;margin:0 12px 7px 0;font-size:12.5px">`+
+      `<span class="mono" style="font-weight:800">${esc(h.id||'')}</span> ${esc(h.name||'')} ${_gradeChip(g)}</span>`; }).join('');
+  return `<div class="narr" id="exec-summary">
+    <div class="sec-h"><h2>Executive summary</h2><span class="rule"></span></div>
+    ${q?`<p class="prose" style="font-size:16px;margin:2px 0 8px"><b>Question.</b> ${esc(q)}</p>`:''}
+    ${verdict?`<div class="prose">${mdLite(verdict)}</div>`:''}
+    ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Where the campaign stands</div><div>${gl}</div></div>`:''}
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:12px 0 0;line-height:1.5">
+      Across <b>${c.total||0}</b> studies: <b>${c.supported||0}</b> supported, <b>${c.qualified||0}</b> qualified,
+      <b>${c.refuted||0}</b> refuted, <b>${c.planned||0}</b> planned.
+      A supported result means a <b>computational gate passed under the stated model assumptions</b> — it is evidence
+      for a mechanism's feasibility, not proof that the historical transition occurred.</p>
+  </div>`;
+}
+
+// 3. INTEGRATED FINDINGS — grouped by scientific stage (not one chapter per study),
+// with each stage's key quantitative findings and an explicit model-dependence flag.
+function integratedFindings(inv){
+  const sts=(inv.synthesis||{}).stages||[]; if(!sts.length) return '';
+  const blocks=sts.map(st=>{
+    const studyChips=(st.studies||[]).map(m=>`<span style="display:inline-flex;gap:5px;align-items:center;margin:0 10px 5px 0;font-size:12px">${_studyLink(m.slug,m.title)} ${_gradeChip(m.grade)}${m.variant?' <span style="font-size:10px;color:var(--ink-3)">alt</span>':''}</span>`).join('');
+    const md=st.model_dependence?`<div class="evnote" style="margin:8px 0"><b>Model dependence.</b> This result holds in one model class but not another at matched conditions — reported as model dependence, not two independent outcomes.</div>`:'';
+    const finds=(st.findings||[]).filter(f=>f.statement).slice(0,5).map(f=>{
+      const obs=f.observed?` <span class="mono" style="color:var(--ink-2)">[${esc(f.observed)}${f.units?' '+esc(f.units):''}]</span>`:'';
+      const sIcon=(String(f.status||'').toLowerCase()==='contradicts'||String(f.status||'').toLowerCase()==='refutes')?'✗ ':(String(f.status||'').toLowerCase()==='confirms'?'✓ ':'');
+      return `<li style="margin-top:5px">${sIcon}${esc(f.statement)}${obs} <span style="color:var(--ink-3);font-size:11px">— ${_studyLink(f.study,f.title)}</span></li>`;
+    }).join('');
+    return `<div style="margin:18px 0 0" id="stage-${esc(st.key)}">
+      <h3 style="font-size:16px;margin:0 0 2px">${esc(st.label)}</h3>
+      <div style="margin:4px 0 2px">${studyChips}</div>${md}
+      ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}</div>`;
+  }).join('');
+  return `<div class="narr" id="integrated-findings">
+    <div class="sec-h"><h2>Integrated findings</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">The campaign's results organized by scientific stage. Each stage lists its studies (with evidence grade) and their key findings; a stage spanning more than one model class is flagged for model dependence.</p>
+    ${blocks}</div>`;
+}
+
+// CROSS-STUDY QUANTITATIVE — comparable measured values pulled from findings.
+function quantitativeSynthesis(inv){
+  const qs=(inv.synthesis||{}).quantitative||[]; if(!qs.length) return '';
+  const rows=qs.map(g=>{
+    const r=(g.rows||[]).map(x=>`<tr><td style="padding:3px 10px 3px 0;color:var(--ink)">${_studyLink(x.study)}</td><td style="padding:3px 0;color:var(--ink-2)">${esc(x.statement)}</td><td class="mono" style="padding:3px 0 3px 10px;white-space:nowrap">${esc(x.observed||'')}${x.units?' '+esc(x.units):''}</td></tr>`).join('');
+    return `<div style="margin-top:12px"><div class="kicker" style="margin-bottom:4px">${esc(g.stage)}</div><table style="width:100%;border-collapse:collapse;font-size:12.5px">${r}</table></div>`;
+  }).join('');
+  return `<div class="narr" id="quantitative">
+    <div class="sec-h"><h2>Cross-study quantitative synthesis</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Measured values reported across studies, with units. Values from different feeds/model classes are not directly comparable — read each with its study's conditions.</p>
+    ${rows}</div>`;
+}
+
+// 4. CONTRADICTIONS & UNCERTAINTY — model disagreement, negative results, finding
+// conflicts, competing frameworks, and the causal-continuity note (external feeds).
+function contradictionsSection(inv){
+  const syn=inv.synthesis||{}; const cs=syn.contradictions||[]; const cont=syn.continuity||{};
+  if(!cs.length && !(cont.external_inputs||[]).length) return '';
+  const kindLabel={ 'model-dependence':'Model dependence','negative-result':'Negative result','finding-conflict':'Finding conflict','competing-framework':'Competing framework' };
+  const items=cs.map(c=>{
+    const studies=(c.studies||[]).map(s=>`${_studyLink(s.slug,s.title)} ${_gradeChip(s.grade)}`).join(' · ');
+    const disc=c.discriminating?`<div style="font-size:12px;color:var(--ink-2);margin-top:3px"><b>Discriminating next study:</b> ${esc(typeof c.discriminating==='string'?c.discriminating:(c.discriminating.study||c.discriminating.title||''))}</div>`:'';
+    return `<li style="margin-top:10px;padding-left:12px;border-left:3px solid var(--line)">
+      <div style="font-weight:600;color:var(--ink)"><span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-3)">${esc(kindLabel[c.kind]||c.kind)}</span> — ${esc(c.topic||'')}</div>
+      ${c.detail?`<div class="measure" style="font-size:13px;color:var(--ink-2);line-height:1.5;margin-top:2px">${esc(c.detail)}</div>`:''}
+      ${studies?`<div style="font-size:12px;margin-top:3px">${studies}</div>`:''}${disc}</li>`;
+  }).join('');
+  const ext=(cont.external_inputs||[]);
+  const extBlock=ext.length?`<div style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Causal continuity</div>
+    <p class="measure" style="font-size:12.5px;color:var(--ink-2);margin:0 0 4px">These studies take their inputs from outside the chain (a supplied feed or reset state) rather than from an upstream study's output — so their result does not yet rest on a modeled upstream mechanism:</p>
+    <div style="font-size:12.5px">${ext.map(e=>_studyLink(e.slug,e.title)).join(' · ')}</div></div>`:'';
+  return `<div class="narr" id="contradictions">
+    <div class="sec-h"><h2>Contradictions &amp; uncertainty</h2><span class="rule"></span></div>
+    ${items?`<ul style="list-style:none;padding:0;margin:4px 0 0">${items}</ul>`:''}${extBlock}</div>`;
+}
+
+// 5. NEXT STUDIES & PRIORITIES — prioritized roadmap from planned studies, failed
+// gates and authored follow-ups; plus the open expert decisions.
+function roadmapSection(inv){
+  const rm=(inv.synthesis||{}).roadmap||[]; const dn=((inv.executive||{}).decisions_needed)||[];
+  if(!rm.length && !dn.length) return '';
+  const pc={P0:['#991b1b','#fee2e2'],P1:['#92400e','#fef3c7'],P2:['#475569','#eef2f7']};
+  const rows=rm.map(r=>{ const m=pc[r.priority]||pc.P2;
+    return `<li style="margin-top:8px"><span style="display:inline-block;font-size:10px;font-weight:800;padding:1px 6px;border-radius:5px;color:${m[0]};background:${m[1]};margin-right:6px">${esc(r.priority)}</span>`+
+      `<b>${esc(r.item||'')}</b>${r.basis?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);margin:2px 0 0 0;line-height:1.45">${esc(r.basis)}</div>`:''}${r.source?`<span style="font-size:11px;color:var(--ink-3)"> — ${_studyLink(r.source)}</span>`:''}</li>`;
+  }).join('');
+  const dec=dn.length?`<div style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Open expert decisions (${dn.length})</div>
+    <ol style="padding-left:20px;margin:0;font-size:12.5px;color:var(--ink);line-height:1.5">${dn.map(d=>`<li style="margin-top:4px">${esc((typeof d==='string')?d:(d.question||d.title||''))}</li>`).join('')}</ol></div>`:'';
+  return `<div class="narr" id="roadmap">
+    <div class="sec-h"><h2>Next studies &amp; priorities</h2><span class="rule"></span></div>
+    ${rows?`<ul style="list-style:none;padding:0;margin:4px 0 0">${rows}</ul>`:''}${dec}</div>`;
+}
+
+// 6. CLAIM-EVIDENCE MAP — each study's scientific claim, its status, and a link.
+function claimEvidenceMap(inv){
+  const ce=(inv.synthesis||{}).claim_evidence||[]; if(!ce.length) return '';
+  const rows=ce.map(c=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:5px 12px 5px 0;color:var(--ink);font-size:12.5px;line-height:1.4">${esc(c.claim)}</td><td style="padding:5px 10px 5px 0;white-space:nowrap">${_gradeChip(c.status)}</td><td style="padding:5px 0;font-size:12px">${_studyLink(c.study,c.study_title)}</td></tr>`).join('');
+  return `<div class="narr" id="claim-evidence">
+    <div class="sec-h"><h2>Claim–evidence map</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 6px">Each study's central scientific claim, its evidence status, and a link to the study.</p>
+    <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:4px 0;font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em">Claim</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Status</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Study</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// KEY FIGURES — curated shortlist (ranked by scientific weight); full renders
+// live in the Technical supplement gallery, linked from here.
+function keyFigures(inv){
+  const fr=(inv.synthesis||{}).figures_ranked||[]; if(!fr.length) return '';
+  const rows=fr.map((f,i)=>`<li style="margin-top:6px"><b>Figure ${i+1}.</b> ${esc(f.name||'(figure)')} <span style="color:var(--ink-3);font-size:12px">— ${_studyLink(f.slug,f.study_title)}</span>${f.caption?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin-top:1px">${esc(String(f.caption).slice(0,240))}</div>`:''}</li>`).join('');
+  return `<div class="narr" id="key-figures"><div class="sec-h"><h2>Key figures</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 4px">The most evidence-bearing figures, ranked by scientific weight — full renders are in the Technical supplement.</p>
+    <ol style="list-style:none;padding:0;margin:4px 0 0;font-size:13px;color:var(--ink)">${rows}</ol></div>`;
+}
+
+// SUPPLEMENT HEADER — one-line inventory of every study (detail cards follow).
+function studiesInventory(inv){
+  const idx=(inv.synthesis||{}).studies_index||[]; if(!idx.length) return '';
+  const rows=idx.map(r=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:4px 10px 4px 0;font-size:12.5px">${_studyLink(r.slug,r.title)}</td><td style="padding:4px 10px 4px 0;white-space:nowrap;font-size:11px;color:var(--ink-3)">${esc(r.run_status)}</td><td style="padding:4px 10px 4px 0;white-space:nowrap">${_gradeChip(r.grade)}</td><td style="padding:4px 0;font-size:12px;color:var(--ink-2);line-height:1.4">${esc(r.one_line||'')}</td></tr>`).join('');
+  return `<div style="margin:10px 0 18px"><div class="kicker" style="margin-bottom:4px">Study inventory (${idx.length})</div>
+    <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;font-size:11px;color:var(--ink-3);text-transform:uppercase">Study</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Run</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Evidence</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Gist</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 /* ====================== FINDINGS (moved BELOW the narrative intro) ====================== */
 // The verdict + the results-at-a-glance — present, but no longer the first
 // thing a reader meets. Framed as "Findings", after the question/abstract/
@@ -2223,30 +2363,35 @@ function render(inv){
       <h1>${esc(inv.title)}</h1>
       <div class="provline">${metaBits.join('<span class="sep">·</span>')}</div>
     </div>
-    ${heroQuestion(inv)}
-    ${abstractBlock(inv)}
+    ${execSummary(inv)}
     ${howToReadBlock(inv)}
     ${simulatedWorld(inv)}
     ${groundRules(inv)}
-    ${glanceBlock(inv)}
-    ${evidenceFraming(inv)}
     ${renderArgument(inv)}
-    ${planLadder(inv)}
-    ${renderFindings(inv)}
-    ${decisionsBlock(inv)}
     ${renderSpine(inv)}
-    ${renderInvViz(inv)}</div>`+
+    ${evidenceFraming(inv)}
+    ${integratedFindings(inv)}
+    ${quantitativeSynthesis(inv)}
+    ${keyFigures(inv)}
+    ${contradictionsSection(inv)}
+    ${roadmapSection(inv)}
+    ${claimEvidenceMap(inv)}
+    ${renderReferences(inv)}</div>`+
     toc(inv)+
     `<div class="wrap">
-      <div class="sec-h"><h2>Studies</h2><span class="rule"></span>
-        <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
-      <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 8px">Each study is one scientific unit — <b>question → model experiment → observable → what we learn</b>.</p>
-      ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
-      ${renderGlossary(inv)}
-      ${renderReferences(inv)}
-      ${renderAppendix(inv)}
+      <details class="supplement" id="supplement">
+        <summary style="cursor:pointer;margin:18px 0 2px;font-size:21px;font-weight:700;color:var(--ink)">Technical supplement</summary>
+        <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Full per-study records, figures, methods, run metadata and provenance — kept out of the main narrative so it reads clean, but preserved here in full. Click any study link above to jump in.</p>
+        ${studiesInventory(inv)}
+        <div class="sec-h"><h3 style="margin:0">Study records</h3><span class="rule"></span>
+          <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
+        ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
+        ${renderInvViz(inv)}
+        ${renderGlossary(inv)}
+        ${renderAppendix(inv)}
+      </details>
       <div class="sec-h" id="report-feedback"><h2>Report feedback</h2><span class="rule"></span></div>
-      <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes above. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
+      <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes in the supplement. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
       ${feedbackRow('overall','the whole report')}
     </div>`;
   updateCount(); window.scrollTo(0,0); spy();
@@ -2289,9 +2434,18 @@ app.addEventListener('click',e=>{
   // expand/collapse all
   if(e.target.id==='expandall'){ document.querySelectorAll('.card').forEach(c=>c.classList.remove('collapsed')); return; }
   if(e.target.id==='collapseall'){ document.querySelectorAll('.card').forEach(c=>c.classList.add('collapsed')); return; }
-  // index link → expand the target study before scrolling to it
-  const link=e.target.closest('.subnav a');
-  if(link){ const href=link.getAttribute('href')||''; if(href.startsWith('#s-')){ const c=document.getElementById(href.slice(1)); if(c) c.classList.remove('collapsed'); } return; }
+  // ANY in-page link to a study/section → open the enclosing Technical supplement
+  // (<details>) and expand the target study card before the browser scrolls to it.
+  const link=e.target.closest('a[href^="#"]');
+  if(link){
+    const href=link.getAttribute('href')||'';
+    const tgt=href.length>1?document.getElementById(href.slice(1)):null;
+    if(tgt){
+      let d=tgt.closest('details'); while(d){ d.open=true; d=(d.parentElement&&d.parentElement.closest('details'))||null; }
+      if(href.startsWith('#s-')) tgt.classList.remove('collapsed');
+    }
+    return;
+  }
   // a collapsed card is clickable anywhere to expand (ignore real controls/links)
   const anyCard=e.target.closest('.card');
   if(anyCard && anyCard.classList.contains('collapsed') && !e.target.closest('a,button,summary,input,textarea,select')){
