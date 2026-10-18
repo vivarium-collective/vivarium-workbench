@@ -26,15 +26,14 @@ def test_header_export_cluster_and_icon_refresh():
 
 
 def test_report_button_downloads_not_just_opens():
-    """The ↓ report action DOWNLOADS the report into the browser's download
-    folder: the HTML path requests the endpoint with ?download=1 (the server
-    sends Content-Disposition: attachment) and the click goes through an
-    <a download> so the file is saved rather than opened in a tab. (The button is
-    now an HTML/PDF chooser — both formats save via the shared <a download>.)"""
-    assert "?download=1" in JS
-    assert "'investigation-' + name + '.html'" in JS   # download filename
-    assert "a.download = dl" in JS                       # saved via <a download>
+    """The ↓ report action DOWNLOADS the report (saved, not opened in a tab): the
+    large server-rendered file is fetched and the blob saved via an <a download>.
+    An in-flight guard prevents repeat clicks from firing multiple full renders
+    (the 'accidentally downloaded it 3×' bug)."""
+    assert "URL.createObjectURL(blob)" in JS   # blob download of the fetched file
+    assert "a.download = dl" in JS              # saved via <a download>
     assert "a.click()" in JS
+    assert "_invReportBusy" in JS              # guard against repeat clicks
 
 
 def test_report_button_is_html_pdf_chooser():
@@ -43,8 +42,8 @@ def test_report_button_is_html_pdf_chooser():
     assert "inv-report-menu" in JS                       # the chooser dropdown
     assert "HTML report" in JS and "PDF report" in JS     # both options
     assert "_downloadInvestigationReport(null," in JS     # passes a format arg
-    assert "?format=pdf" in JS
-    assert "'investigation-' + name + '.pdf'" in JS
+    assert "?format=pdf" in JS                             # PDF rendered server-side
+    assert "'.pdf' : '.html'" in JS                        # format → file extension
 
 
 def test_intro_is_inquiry_brief_host():

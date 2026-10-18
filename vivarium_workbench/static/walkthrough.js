@@ -13108,6 +13108,7 @@
       ? base + '/reports/investigation-' + encodeURIComponent(name) + '.html'
       : '/api/investigation-report/' + encodeURIComponent(name);
   }
+  var _invReportBusy = false;
   function _downloadInvestigationReport(name, fmt) {
     name = name || window._wsInvestigation || window._currentIset;
     if (!name) {
@@ -13124,31 +13125,48 @@
       a.href = href; a.download = dl; a.rel = 'noopener';
       document.body.appendChild(a); a.click(); a.remove();
     };
-    if (fmt === 'pdf') {
-      // The render takes a few seconds; fetch so a 503 (Playwright/Chromium
-      // missing) surfaces as a message instead of saving an error-text ".pdf".
-      if (typeof _showToast === 'function') _showToast('Rendering PDF… this can take a few seconds');
-      fetch(_investigationReportUrl(name) + '?format=pdf')
-        .then(function (r) {
-          if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
-          return r.blob();
-        })
-        .then(function (blob) {
-          var u = URL.createObjectURL(blob);
-          _save(u, 'investigation-' + name + '.pdf');
-          setTimeout(function () { URL.revokeObjectURL(u); }, 5000);
-        })
-        .catch(function (e) {
-          var m = (e && e.message) || String(e);
-          if (typeof _showToast === 'function') _showToast('PDF export unavailable: ' + m, { danger: true });
-          else alert('PDF export unavailable:\n' + m);
-        });
+    // Snapshot HTML is a pre-rendered static file — instant, no server render.
+    if (fmt === 'html' && cfg.mode === 'snapshot') {
+      _save(_investigationReportUrl(name), 'investigation-' + name + '.html');
       return;
     }
-    // HTML — live: ?download=1 so the server sends Content-Disposition; snapshot:
-    // the pre-rendered static file, downloaded via the anchor's `download` attr.
-    var url = _investigationReportUrl(name) + (cfg.mode === 'snapshot' ? '' : '?download=1');
-    _save(url, 'investigation-' + name + '.html');
+    // Live report (HTML or PDF): the server renders a LARGE self-contained file
+    // (every figure inlined; PDF also goes through headless Chromium), which
+    // takes several seconds. Guard against repeat clicks firing multiple full
+    // renders (the "accidentally downloaded it 3×" bug), fetch so we can show
+    // progress + disable the button, then blob-download the result.
+    if (_invReportBusy) {
+      if (typeof _showToast === 'function') _showToast('Report is still being prepared — one moment…');
+      return;
+    }
+    _invReportBusy = true;
+    var isPdf = (fmt === 'pdf');
+    var ext = isPdf ? '.pdf' : '.html';
+    var btn = document.getElementById('inv-report-btn');
+    var btnLabel = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = isPdf ? 'rendering PDF…' : 'preparing…'; }
+    if (typeof _showToast === 'function')
+      _showToast(isPdf ? 'Rendering PDF… this can take ~20s' : 'Preparing report… (a large self-contained file)');
+    fetch(_investigationReportUrl(name) + (isPdf ? '?format=pdf' : ''))
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+        return r.blob();
+      })
+      .then(function (blob) {
+        var u = URL.createObjectURL(blob);
+        _save(u, 'investigation-' + name + ext);
+        setTimeout(function () { URL.revokeObjectURL(u); }, 8000);
+        if (typeof _showToast === 'function') _showToast((isPdf ? 'PDF' : 'Report') + ' downloaded.');
+      })
+      .catch(function (e) {
+        var m = (e && e.message) || String(e);
+        if (typeof _showToast === 'function') _showToast((isPdf ? 'PDF export' : 'Report') + ' failed: ' + m, { danger: true });
+        else alert((isPdf ? 'PDF export' : 'Report download') + ' failed:\n' + m);
+      })
+      .then(function () {   // finally — restore the button either way
+        _invReportBusy = false;
+        if (btn) { btn.disabled = false; btn.textContent = btnLabel || '↓ report ▾'; }
+      });
   }
   window._downloadInvestigationReport = _downloadInvestigationReport;
 
