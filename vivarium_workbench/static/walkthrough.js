@@ -9317,9 +9317,21 @@
       ' <button class="btn-mini" disabled ' +
         'title="No figures yet — run this investigation\'s studies to generate them" ' +
         'style="opacity:0.5;cursor:not-allowed">↓ figures</button>';
+    // ↓ report ▾ — chooser: HTML report or PDF report (PDF rendered server-side).
+    var _reportDl =
+      '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
+        '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
+          'title="Download the shareable report (HTML or PDF)" onclick="_toggleInvReportMenu(event)">↓ report ▾</button>' +
+        '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
+          'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:150px;padding:4px">' +
+          '<button class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent" ' +
+            'onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
+          '<button class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent" ' +
+            'onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'pdf\')">PDF report</button>' +
+        '</div>' +
+      '</span> ';
     actions.innerHTML =
-      '<button class="btn-mini" onclick="_downloadInvestigationReport()" ' +
-        'title="Download the shareable HTML report">↓ report</button> ' +
+      _reportDl +
       '<button class="btn-mini" onclick="_downloadInvestigationNotebook()" ' +
         'title="Download a self-contained Jupyter notebook">↓ notebook</button>' +
       '<span id="ws-actions-figures">' + _figuresDisabled + '</span>' +
@@ -13096,26 +13108,69 @@
       ? base + '/reports/investigation-' + encodeURIComponent(name) + '.html'
       : '/api/investigation-report/' + encodeURIComponent(name);
   }
-  function _downloadInvestigationReport(name) {
+  function _downloadInvestigationReport(name, fmt) {
     name = name || window._wsInvestigation || window._currentIset;
     if (!name) {
       console.warn('_downloadInvestigationReport: no current investigation');
       return;
     }
+    fmt = (fmt === 'pdf') ? 'pdf' : 'html';
     var cfg = window.__DASH_CONFIG__ || {};
-    // Live: hit the endpoint with ?download=1 so the server sends
-    // Content-Disposition: attachment and the browser saves it. Snapshot: the
-    // pre-rendered static file, downloaded via the anchor's `download` attr.
+    // PDF is rendered server-side (headless Chromium) — not available in a static
+    // snapshot (no server), so fall back to the pre-rendered HTML there.
+    if (fmt === 'pdf' && cfg.mode === 'snapshot') fmt = 'html';
+    var _save = function (href, dl) {
+      var a = document.createElement('a');
+      a.href = href; a.download = dl; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+    };
+    if (fmt === 'pdf') {
+      // The render takes a few seconds; fetch so a 503 (Playwright/Chromium
+      // missing) surfaces as a message instead of saving an error-text ".pdf".
+      if (typeof _showToast === 'function') _showToast('Rendering PDF… this can take a few seconds');
+      fetch(_investigationReportUrl(name) + '?format=pdf')
+        .then(function (r) {
+          if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+          return r.blob();
+        })
+        .then(function (blob) {
+          var u = URL.createObjectURL(blob);
+          _save(u, 'investigation-' + name + '.pdf');
+          setTimeout(function () { URL.revokeObjectURL(u); }, 5000);
+        })
+        .catch(function (e) {
+          var m = (e && e.message) || String(e);
+          if (typeof _showToast === 'function') _showToast('PDF export unavailable: ' + m, { danger: true });
+          else alert('PDF export unavailable:\n' + m);
+        });
+      return;
+    }
+    // HTML — live: ?download=1 so the server sends Content-Disposition; snapshot:
+    // the pre-rendered static file, downloaded via the anchor's `download` attr.
     var url = _investigationReportUrl(name) + (cfg.mode === 'snapshot' ? '' : '?download=1');
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'investigation-' + name + '.html';
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    _save(url, 'investigation-' + name + '.html');
   }
   window._downloadInvestigationReport = _downloadInvestigationReport;
+
+  // "↓ report ▾" chooser (HTML / PDF) in the investigation header.
+  function _toggleInvReportMenu(ev) {
+    if (ev) ev.stopPropagation();
+    var m = document.getElementById('inv-report-menu');
+    if (!m) return;
+    var open = m.style.display !== 'none';
+    m.style.display = open ? 'none' : 'block';
+    if (!open) {
+      setTimeout(function () {
+        document.addEventListener('click', _closeInvReportMenu, { once: true, capture: true });
+      }, 0);
+    }
+  }
+  function _closeInvReportMenu() {
+    var m = document.getElementById('inv-report-menu');
+    if (m) m.style.display = 'none';
+  }
+  window._toggleInvReportMenu = _toggleInvReportMenu;
+  window._closeInvReportMenu = _closeInvReportMenu;
 
   // Per-card actions on the Investigations LIST (don't require opening the
   // investigation) — open the report for the named investigation directly.

@@ -870,6 +870,65 @@ def render_html(data: dict, plotly_js: "str | None" = None) -> str:
     return html.replace("__PLOTLY_JS__", pj)
 
 
+class ReportPdfError(RuntimeError):
+    """Raised when the PDF render can't run (Playwright/Chromium missing) or fails."""
+
+
+def render_report_pdf(html: str) -> bytes:
+    """Render the self-contained report HTML to a PDF via headless Chromium.
+
+    The report is client-rendered (JS builds the document from the embedded data
+    and draws the Plotly figures), so we load it in a real browser, call the
+    report's ``__reportPrintPrep()`` hook (expand every study card + force-render
+    all lazy figures/looms), let it settle, then capture ``page.pdf()``.
+
+    Uses Playwright — the same optional ``loom-render`` extra ``render-loom``
+    already relies on. Raises :class:`ReportPdfError` with install guidance when
+    Playwright or its Chromium build is unavailable, so the route can surface a
+    clear message instead of a 500.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:  # noqa: BLE001
+        raise ReportPdfError(
+            "PDF export needs Playwright (the 'loom-render' extra):\n"
+            "  pip install 'vivarium-workbench[loom-render]'\n"
+            "  python -m playwright install chromium"
+        ) from e
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            try:
+                page = browser.new_page(viewport={"width": 1120, "height": 1500},
+                                        device_scale_factor=2)
+                # Self-contained HTML, no network — load (not networkidle, which
+                # would wait forever with no requests in flight).
+                page.set_content(html, wait_until="load", timeout=60000)
+                try:
+                    page.evaluate("() => (window.__reportPrintPrep ? window.__reportPrintPrep() : null)")
+                except Exception:
+                    pass
+                page.wait_for_timeout(900)   # let any post-prep figure draws settle
+                return page.pdf(
+                    print_background=True,
+                    prefer_css_page_size=False,
+                    format="A4",
+                    margin={"top": "14mm", "bottom": "14mm", "left": "12mm", "right": "12mm"},
+                )
+            finally:
+                browser.close()
+    except ReportPdfError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)
+        if "Executable doesn't exist" in msg or "playwright install" in msg:
+            raise ReportPdfError(
+                "Chromium isn't installed for Playwright:\n"
+                "  python -m playwright install chromium"
+            ) from e
+        raise ReportPdfError(f"PDF render failed: {type(e).__name__}: {msg}") from e
+
+
 def render_investigation_report(ws_root, inv_slug: str, *, out_dir=None,
                                 loom_embed: "dict | None" = None) -> Path:
     """Render one investigation to ``reports/investigation-<slug>.html`` (or

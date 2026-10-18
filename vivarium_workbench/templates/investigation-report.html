@@ -1648,6 +1648,22 @@ function setupLazyPlotly(){
   try{ setTimeout(sweep,120); }catch(e){}
 }
 
+// Print / PDF preparation — called by the server-side PDF renderer (Playwright).
+// Expands every study card and force-renders all lazy Plotly figures + looms so
+// nothing is collapsed or blank in the static PDF, then resolves once they've had
+// a few frames to draw. Safe no-op if called in a normal browser.
+window.__reportPrintPrep = function(){
+  return new Promise(resolve=>{
+    try{ document.querySelectorAll('.card').forEach(c=>c.classList.remove('collapsed')); }catch(e){}
+    try{ setupLazyPlotly(); }catch(e){}
+    try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
+    try{ setupInteractiveLooms(); }catch(e){}
+    try{ setupRealLooms(); }catch(e){}
+    let n=0; const tick=()=>{ if(++n<5){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { setTimeout(resolve,700); } };
+    try{ requestAnimationFrame(tick); }catch(e){ setTimeout(resolve,700); }
+  });
+};
+
 /* ---------- interactive loom: hover / tooltip / expand / pan-zoom ---------- */
 function _iloomHi(id,kind,name){
   const root=document.getElementById(id); if(!root) return;

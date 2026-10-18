@@ -27,12 +27,24 @@ def test_header_export_cluster_and_icon_refresh():
 
 def test_report_button_downloads_not_just_opens():
     """The ↓ report action DOWNLOADS the report into the browser's download
-    folder: live mode requests the endpoint with ?download=1 (the server sends
-    Content-Disposition: attachment) and the click goes through an <a download>
-    so the file is saved rather than opened in a tab."""
+    folder: the HTML path requests the endpoint with ?download=1 (the server
+    sends Content-Disposition: attachment) and the click goes through an
+    <a download> so the file is saved rather than opened in a tab. (The button is
+    now an HTML/PDF chooser — both formats save via the shared <a download>.)"""
     assert "?download=1" in JS
-    assert "a.download = 'investigation-'" in JS
+    assert "'investigation-' + name + '.html'" in JS   # download filename
+    assert "a.download = dl" in JS                       # saved via <a download>
     assert "a.click()" in JS
+
+
+def test_report_button_is_html_pdf_chooser():
+    """The investigation 'download report' control offers HTML and PDF; PDF is
+    rendered server-side via ?format=pdf."""
+    assert "inv-report-menu" in JS                       # the chooser dropdown
+    assert "HTML report" in JS and "PDF report" in JS     # both options
+    assert "_downloadInvestigationReport(null," in JS     # passes a format arg
+    assert "?format=pdf" in JS
+    assert "'investigation-' + name + '.pdf'" in JS
 
 
 def test_intro_is_inquiry_brief_host():

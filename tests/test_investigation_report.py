@@ -450,3 +450,48 @@ def test_bib_label_and_reference_parsing(tmp_path):
     assert seg["label"] == "Segrè 2000", seg["label"]
     assert seg["author"].startswith("Segrè, Daniel")
     assert "{" not in seg["author"] and "\\" not in seg["author"]
+
+
+def test_build_report_data_surfaces_plan_board(tmp_path):
+    """The honest A→E gate ladder (plan_board) is surfaced through the report
+    spine so the report can lead the findings with where the campaign stands."""
+    _write(tmp_path / "workspace.yaml", {"schema_version": 2, "name": "tw", "package_path": "pkg"})
+    _write(tmp_path / "investigations" / "camp" / "investigation.yaml", {
+        "name": "camp", "title": "Campaign", "status": "in_progress", "question": "Q?",
+        "studies": ["s1"],
+        "plan_gates": [{"id": "A", "name": "Gate A", "member_studies": ["s1"],
+                        "criterion": "s1 passes", "criterion_findings": []}],
+    })
+    _write(tmp_path / "studies" / "s1" / "study.yaml", {
+        "name": "s1", "title": "S1", "gate_status": "passed",
+        "baseline": [{"name": "b", "composite": "pkg.composites.c"}],
+        "findings": [{"id": "f1", "status": "passed", "statement": "ok"}],
+    })
+    data = build_report_data(tmp_path, "camp")
+    pb = (data.get("spine") or {}).get("plan_board")
+    assert isinstance(pb, list) and pb, "plan_board should be surfaced in the report spine"
+    assert pb[0]["id"] == "A"
+
+
+def test_render_report_pdf_missing_playwright_raises_guidance(monkeypatch):
+    """PDF export degrades cleanly: with Playwright unavailable, render_report_pdf
+    raises ReportPdfError carrying install guidance (so the route returns a 503
+    message, not a 500) — deterministic regardless of whether Playwright is
+    installed in the test environment."""
+    import builtins
+    from vivarium_workbench.lib import investigation_report as ir
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name.split(".")[0] == "playwright":
+            raise ImportError("playwright not installed")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    try:
+        ir.render_report_pdf("<!doctype html><html><body>x</body></html>")
+    except ir.ReportPdfError as e:
+        assert "playwright" in str(e).lower()
+    else:
+        raise AssertionError("expected ReportPdfError when Playwright is missing")
