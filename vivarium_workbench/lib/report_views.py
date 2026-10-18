@@ -1253,13 +1253,14 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
                 import importlib.util  # noqa: PLC0415
                 _ps = importlib.util.spec_from_file_location(
                     "_vwb_workspace_plan_progress", _pp_path)
-                _ppmod = importlib.util.module_from_spec(_ps)
-                _ps.loader.exec_module(_ppmod)
-                _ppfn = getattr(_ppmod, "build_plan_progress", None)
-                if callable(_ppfn):
-                    _rows = _ppfn(spec, _gate_member_specs)
-                    if isinstance(_rows, list) and _rows:
-                        plan_board = _rows
+                if _ps is not None and _ps.loader is not None:
+                    _ppmod = importlib.util.module_from_spec(_ps)
+                    _ps.loader.exec_module(_ppmod)
+                    _ppfn = getattr(_ppmod, "build_plan_progress", None)
+                    if callable(_ppfn):
+                        _rows = _ppfn(spec, _gate_member_specs)
+                        if isinstance(_rows, list) and _rows:
+                            plan_board = _rows
         except Exception:  # noqa: BLE001
             plan_board = []
         if not plan_board:
