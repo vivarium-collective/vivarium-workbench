@@ -50,11 +50,15 @@ def test_intro_is_inquiry_brief_host():
         assert f'id="{id_}"' not in dv, f"stale block {id_} still present"
 
 
-def test_needs_attention_elevated_above_intro():
-    dv = detail_view()
-    na = dv.index('id="investigation-needs-attention"')
-    intro = dv.index('id="investigation-intro"')
-    assert na < intro, "needs-attention should appear before the intro block"
+def test_needs_attention_single_surface_is_toolbar_chip():
+    # Needs-attention is a SINGLE surface now: the toolbar chip. The duplicate
+    # in-body banner (#investigation-needs-attention) was removed, and the chip
+    # opens the deterministic scan in the same rich popover used for "all clear".
+    assert 'id="investigation-needs-attention"' not in HTML, \
+        "in-body needs-attention banner should be removed (chip is the only surface)"
+    assert 'id="aig-needs-attention-chip"' in HTML, "toolbar needs-attention chip missing"
+    assert "_aigShowAllClearInfo(this)" in JS, "chip should open the scan popover"
+    assert "needs-attention-banner" not in JS, "in-body banner HTML should be gone"
 
 
 def test_at_a_glance_removed():

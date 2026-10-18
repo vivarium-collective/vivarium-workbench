@@ -107,11 +107,11 @@
     // 5-tab study layout (Phase 1): removed tabs' loaders now fire from the tab
     // that re-homed them, so every re-homed panel's content loads when its new
     // home opens (and never shows an empty box on a subtab switch).
-    //  • Visualizations gallery  -> Overview (Figures section)
+    //  • Visualizations gallery  -> its own Visualizations tab (visualize)
     //  • Readouts + Build        -> Model (compose)
     //  • Results + Analyses      -> Simulations subtabs (simulate)
     //  • Tests                   -> Audit
-    if (kind === 'overview') {
+    if (kind === 'visualize') {
       _loadCharts('viz-charts-panel'); _loadNativeGallery(); _loadRemoteFigures();
     }
     if (kind === 'compose') {
@@ -127,6 +127,11 @@
     if (kind === 'audit') {
       _loadTestsPanel(window._study);
       _loadAudit(window._study);
+    }
+    if (kind === 'conclusions') {
+      // Decide tab leads with the plan/lifecycle stepper (server-rendered) +
+      // the same readiness gaps as Audit, surfaced here at the top.
+      if (window._renderAuditReadiness) window._renderAuditReadiness(window._study);
     }
     // Textareas measured 0 while their tab was hidden; re-fit the now-visible
     // panel's auto-grow boxes so they show all content without a scrollbar.
@@ -568,21 +573,8 @@
   // silently did nothing. Define it here (the shell loads study-detail.js).
   // Probe first: the zip only holds declared IMAGE files, and in a snapshot an
   // absent file 404s; a bare <a download> to a 404 reads as a broken button.
-  // Jump to the figures / visualizations at the bottom of the Overview tab. The
-  // study renders in a full-height iframe inside the workbench, so scrollIntoView
-  // propagates to the outer page's scroll container (same-origin) and brings the
-  // figures into view. Loads them first if the gallery hasn't fetched yet.
-  window._vivStudyJumpToFigures = function () {
-    try { if (typeof _loadNativeGallery === 'function') _loadNativeGallery(); } catch (e) { /* ignore */ }
-    try { if (typeof _loadCharts === 'function') _loadCharts('viz-charts-panel'); } catch (e) { /* ignore */ }
-    var target = document.getElementById('overview-figures-section')
-              || document.getElementById('visualize-section')
-              || document.getElementById('native-gallery-panel');
-    if (target && target.scrollIntoView) {
-      try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-      catch (e) { target.scrollIntoView(true); }
-    }
-  };
+  // (The "↓ Figures" jump button + _vivStudyJumpToFigures were removed — the
+  // figures now live in their own Visualizations tab, opened via _setStudyTab.)
   window._vivStudyFiguresFromCard = function (ev, slug) {
     if (ev && ev.stopPropagation) ev.stopPropagation();
     var c = window.__DASH_CONFIG__ || {};
@@ -3282,9 +3274,8 @@
 
   // --- Runs ---
   bindAll('.btn-view-run', function(btn) {
-    // Per-run viewer: open the study-level Figures view (re-homed from the old
-    // Visualizations tab into Overview; #visualize-section id preserved).
-    _gotoStudyTab('overview', 'visualize-section');
+    // Per-run viewer: open the study-level Visualizations tab (#visualize-section).
+    _gotoStudyTab('visualize', 'visualize-section');
   });
 
   // study-run-delete → _post_investigation_run_delete
@@ -4088,19 +4079,24 @@
   // but expanded and grouped by check, so the exact fixes to make the study
   // release-ready lead the audit. Re-computes from the live linter (responsive
   // to the current study state), AI-free.
-  var _auditReadinessLoaded = false;
+  // Readiness gaps render into BOTH the Audit tab (#audit-readiness) and the top
+  // of the Decide tab (#decide-readiness) — same deterministic linter, shown
+  // wherever the mount exists. Per-host guard so each populates once, whichever
+  // tab opens first.
   function _renderAuditReadiness(spec) {
-    var host = document.getElementById('audit-readiness');
-    if (!host || _auditReadinessLoaded) return;
-    _auditReadinessLoaded = true;
-    var slug = host.getAttribute('data-slug') || (spec && spec.name) || studyName() || '';
+    var hosts = ['audit-readiness', 'decide-readiness']
+      .map(function (id) { return document.getElementById(id); })
+      .filter(function (h) { return h && !h._readinessDone; });
+    if (!hosts.length) return;
+    var _setAll = function (html) { hosts.forEach(function (h) { h.innerHTML = html; h._readinessDone = true; }); };
+    var slug = hosts[0].getAttribute('data-slug') || (spec && spec.name) || studyName() || '';
     _reportLint().then(function (j) {
       var findings = (j.findings || []).filter(function (f) { return (f.study || '') === slug; });
       if (!findings.length) {
-        host.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:10px 13px;'
+        _setAll('<div style="display:flex;align-items:center;gap:8px;padding:10px 13px;'
           + 'border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;font-size:0.9em;color:#166534">'
           + '<strong>✓ Ready</strong><span style="color:#166534">no readiness gaps — the report '
-          + 'linter finds nothing to fix.</span></div>';
+          + 'linter finds nothing to fix.</span></div>');
         return;
       }
       var sev = { error: 0, warning: 0, info: 0 };
@@ -4129,16 +4125,17 @@
       if (sev.error) counts.push(sev.error + ' error' + (sev.error === 1 ? '' : 's'));
       if (sev.warning) counts.push(sev.warning + ' warning' + (sev.warning === 1 ? '' : 's'));
       if (sev.info) counts.push(sev.info + ' note' + (sev.info === 1 ? '' : 's'));
-      host.innerHTML =
+      _setAll(
         '<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:12px 14px">'
         + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">'
         + '<strong style="color:' + headColor + ';font-size:1.02em">⚠ ' + gaps + ' readiness gap'
         + (gaps === 1 ? '' : 's') + ' to close</strong>'
         + '<span class="muted" style="font-size:0.82em">' + _esc(counts.join(' · ')) + '</span>'
         + '<span class="muted" style="font-size:0.82em;margin-left:auto">code-computed — report linter (deterministic)</span>'
-        + '</div>' + groups + '</div>';
-    }).catch(function () { _auditReadinessLoaded = false; });
+        + '</div>' + groups + '</div>');
+    }).catch(function () { /* allow retry on next tab open (no host marked done) */ });
   }
+  window._renderAuditReadiness = _renderAuditReadiness;
 
   function _loadAudit(spec) {
     _renderAuditReadiness(spec);
@@ -5452,7 +5449,6 @@
   // folded into another now resolves to its new home — and, for Results/
   // Analyses, to the right Simulations subtab. Returns {tab, sub?}.
   var _REMOVED_TAB_HOME = {
-    visualize:  { tab: 'overview', anchor: 'visualize-section' },
     readouts:   { tab: 'compose' },
     build:      { tab: 'compose' },
     tests:      { tab: 'audit' },
@@ -5477,8 +5473,8 @@
     // Open the Overview tab on load — unless a ?tab=<kind> deep-link asks
     // for a specific tab. Needs-attention items link here with
     // ?tab=conclusions so a click lands on the verdict that triggered the alert.
-    // A deep-link to a now-folded tab (results/analyses/tests/build/readouts/
-    // visualize) redirects to its new home (and subtab).
+    // A deep-link to a now-folded tab (results/analyses/tests/build/readouts)
+    // redirects to its new home (and subtab). `visualize` is a real tab again.
     var _resolved = { tab: 'overview' };
     try {
       var _q = new URLSearchParams(window.location.search).get('tab');

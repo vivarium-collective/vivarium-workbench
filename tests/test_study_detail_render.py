@@ -351,11 +351,11 @@ def test_simulations_is_readonly_table(tmp_path, dashboard_client):
 
 
 def test_visualizations_stripped_to_gallery(tmp_path, dashboard_client):
-    """5-tab layout (Phase 1): the Visualizations tab is gone — its figure
-    gallery is re-homed into the Overview panel as a "Figures" section. It stays
-    one gallery with no explanatory prose and no per-mount section chrome, just
-    the three mounts (native gallery, embedded-viz iframes, latest-run charts)
-    under the preserved `study-figures` / `#visualize-section` wrapper."""
+    """6-tab layout: the Visualizations tab holds the figure gallery as a
+    "Figures" section. It stays one gallery with no explanatory prose and no
+    per-mount section chrome, just the three mounts (native gallery, embedded-viz
+    iframes, latest-run charts) under the preserved `study-figures` /
+    `#visualize-section` wrapper."""
     ws = tmp_path / "ws"
     sd = ws / "studies" / "viz-gallery-study"
     sd.mkdir(parents=True)
@@ -375,15 +375,17 @@ def test_visualizations_stripped_to_gallery(tmp_path, dashboard_client):
     assert resp.status_code == 200
     html = resp.text
 
-    # No standalone Visualizations tab/panel any more — the gallery lives in
-    # Overview (its #visualize-section wrapper is preserved).
-    assert 'id="panel-visualize"' not in html
-    assert 'data-kind="visualize"' not in html
-    overview = html[html.index('id="panel-overview"'):html.index('id="panel-compose"')]
-    assert 'id="visualize-section"' in overview
-    assert 'study-figures' in overview
-    assert 'id="native-gallery-panel"' in overview
-    assert 'id="viz-charts-panel"' in overview
+    # The Visualizations tab/panel holds the gallery (its #visualize-section
+    # wrapper is preserved); it is NOT in the Overview panel.
+    assert 'id="panel-visualize"' in html
+    assert 'data-kind="visualize"' in html
+    visualize = html[html.index('id="panel-visualize"'):html.index('id="panel-compose"')]
+    assert 'id="visualize-section"' in visualize
+    assert 'study-figures' in visualize
+    assert 'id="native-gallery-panel"' in visualize
+    assert 'id="viz-charts-panel"' in visualize
+    overview = html[html.index('id="panel-overview"'):html.index('id="panel-visualize"')]
+    assert 'id="visualize-section"' not in overview
 
     assert 'Figures for this study' not in html
     assert 'native-gallery-section' not in html
@@ -961,19 +963,19 @@ def test_pillars_drive_tabs_directly_no_subnav(tmp_path, dashboard_client):
     assert 'id="study-subnav"' not in html
     assert 'study-subnav' not in html
 
-    # 5-tab study layout (Phase 1): exactly FIVE pillars remain — Overview,
-    # Model (compose), Simulations (simulate), Audit, Decide (conclusions) —
-    # each carrying data-kind and calling _setStudyTab(kind) directly. The six
-    # folded-away kinds (readouts/results/analyses/visualize/tests/build) are no
-    # longer pillars.
-    five_kinds = ["overview", "compose", "simulate", "audit", "conclusions"]
-    for kind in five_kinds:
+    # 6-tab study layout: exactly SIX pillars — Overview, Visualizations
+    # (visualize), Model (compose), Simulations (simulate), Audit, Decide
+    # (conclusions) — each carrying data-kind and calling _setStudyTab(kind)
+    # directly. The folded-away kinds (readouts/results/analyses/tests/build) are
+    # no longer pillars (Visualizations is a pillar again).
+    six_kinds = ["overview", "visualize", "compose", "simulate", "audit", "conclusions"]
+    for kind in six_kinds:
         assert f'data-kind="{kind}"' in html and f"_setStudyTab('{kind}')" in html, \
             f"pillar kind {kind!r} not wired to _setStudyTab('{kind}')"
-    for gone in ("readouts", "results", "analyses", "visualize", "tests", "build"):
+    for gone in ("readouts", "results", "analyses", "tests", "build"):
         assert f"_setStudyTab('{gone}')" not in html, f"stale pillar for {gone!r}"
     import re
-    assert len(re.findall(r'<button class="study-pillar[^"]*"', html)) == 5
+    assert len(re.findall(r'<button class="study-pillar[^"]*"', html)) == 6
     assert 'data-kind="data"' not in html
 
     # No pillar/member indirection left anywhere (grep-proven, both served
@@ -1029,13 +1031,13 @@ def test_act_rail_renders_above_tab_nav(tmp_path, dashboard_client):
     for label in ("The Study", "Design", "Evidence", "Assurance", "Decision"):
         assert label not in nav, f"group label {label!r} should be removed"
 
-    # Five icon+label pillars, in order, each with an inline-SVG icon.
+    # Six icon+label pillars, in order, each with an inline-SVG icon.
     import re
     kinds = re.findall(r'<button class="study-pillar[^"]*" data-kind="([a-z]+)"', nav)
-    assert kinds == ["overview", "compose", "simulate", "audit", "conclusions"], kinds
-    assert nav.count('class="pillar-icon"') == 5
-    assert nav.count('<svg') == 5
-    assert nav.count('class="pillar-label"') == 5
+    assert kinds == ["overview", "visualize", "compose", "simulate", "audit", "conclusions"], kinds
+    assert nav.count('class="pillar-icon"') == 6
+    assert nav.count('<svg') == 6
+    assert nav.count('class="pillar-label"') == 6
 
 
 def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
@@ -1078,6 +1080,7 @@ def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
     # <span class="pillar-label">LABEL</span>, in order.
     expected = [
         ("overview", "Overview"),
+        ("visualize", "Visualizations"),
         ("compose", "Model"),
         ("simulate", "Simulations"),
         ("audit", "Audit"),
@@ -1117,7 +1120,7 @@ def test_readouts_repositioned_to_slot_three(tmp_path, dashboard_client):
     assert resp.status_code == 200
     html = resp.text
 
-    kinds_in_order = ["overview", "compose", "simulate", "audit", "conclusions"]
+    kinds_in_order = ["overview", "visualize", "compose", "simulate", "audit", "conclusions"]
     positions = [html.index(f'data-kind="{k}"') for k in kinds_in_order]
     assert positions == sorted(positions), (
         f"expected pillar order {kinds_in_order}, got positions {positions}"
@@ -1768,12 +1771,13 @@ def test_simulate_is_a_top_level_pillar(tmp_path):
 
 
 def test_results_and_analyses_are_simulations_subtabs(tmp_path):
-    """5-tab layout: Results + Analyses are no longer top-level pillars — they
+    """6-tab layout: Results + Analyses are no longer top-level pillars — they
     are secondary subtabs (Runs | Results | Analysis) inside the Simulations
-    panel. Visualizations folds into Overview (no pillar)."""
+    panel. Visualizations is its own top-level pillar again."""
     html = _render_minimal(tmp_path)
-    for gone in ("results", "analyses", "visualize"):
+    for gone in ("results", "analyses"):
         assert f"_setStudyTab('{gone}')" not in html
+    assert "_setStudyTab('visualize')" in html
     sim_panel = html[html.index('id="panel-simulate"'):html.index('id="panel-audit"')]
     assert "_setSimSubtab('runs')" in sim_panel
     assert "_setSimSubtab('results')" in sim_panel
@@ -1781,22 +1785,22 @@ def test_results_and_analyses_are_simulations_subtabs(tmp_path):
 
 
 def test_results_and_analyses_subpanels_exist(tmp_path):
-    """5-tab layout: the Results + Analyses content lives in inner subpanels of
+    """6-tab layout: the Results + Analyses content lives in inner subpanels of
     the Simulations panel (ids preserved); there are no standalone
-    panel-results / panel-analyses / panel-visualize sections."""
+    panel-results / panel-analyses sections. Visualizations is its own panel."""
     html = _render_minimal(tmp_path)
     assert 'id="panel-results"' not in html
     assert 'id="panel-analyses"' not in html
-    assert 'id="panel-visualize"' not in html
+    assert 'id="panel-visualize"' in html
     sim_panel = html[html.index('id="panel-simulate"'):html.index('id="panel-audit"')]
     assert 'id="sim-subpanel-runs"' in sim_panel
     assert 'id="sim-subpanel-results"' in sim_panel
     assert 'id="sim-subpanel-analysis"' in sim_panel
     assert 'id="results-section"' in sim_panel
     assert 'id="analyses-results-section"' in sim_panel
-    # Visualizations gallery re-homed to Overview.
-    overview = html[html.index('id="panel-overview"'):html.index('id="panel-compose"')]
-    assert 'id="visualize-section"' in overview
+    # Visualizations gallery lives in its own panel.
+    visualize = html[html.index('id="panel-visualize"'):html.index('id="panel-compose"')]
+    assert 'id="visualize-section"' in visualize
 
 
 # ---------------------------------------------------------------------------

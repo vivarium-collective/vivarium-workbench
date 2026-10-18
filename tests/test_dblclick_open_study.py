@@ -3,18 +3,18 @@ ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text()
 
 
-def test_dag_node_click_expands_and_opens_via_button():
-    """A DAG node single-click toggles expand/collapse; the full study view is
-    opened from the node's inline "open" button, which stops propagation so the
-    open click doesn't also toggle the node. Still no double-click handler and
-    no quick-look side-card drawer (both removed)."""
-    # node click toggles expand/collapse at higher detail, and opens the study
-    # directly at the lowest detail (names-only, band 0) where expand is useless.
-    assert "node.onclick = _namesOnly" in JS
-    assert "_toggleExpand" in JS
-    # the full study is opened from the inline ↗ button (higher detail) / the whole
-    # card (band 0), guarded against bubbling up to the node's expand toggle
-    assert "event.stopPropagation(); _openStudyInsideInvestigation(" in JS
+def test_dag_node_click_selects_then_opens():
+    """Two-stage DAG interaction: one click SELECTS a study (highlight + expand
+    in place at readable bands); a second click on the already-selected study
+    OPENS it. The old inline ↗ open button is gone. Still no double-click handler
+    and no quick-look side-card drawer (both removed)."""
+    assert "node.onclick = _aigNodeClick" in JS           # single handler now
+    assert "window._aigSelected" in JS                    # selection state tracked
+    assert "node.classList.add('aig-node-selected')" in JS
+    assert "_openStudyInsideInvestigation(s.name)" in JS  # second click opens
+    assert "_toggleExpand" in JS                          # expand helper still used
+    # the standalone ↗ open-study button was removed
+    assert "aig-open-study" not in JS
     # no double-click handler
     assert "node.ondblclick" not in JS
     # the graph no longer opens the quick-look side-card drawer

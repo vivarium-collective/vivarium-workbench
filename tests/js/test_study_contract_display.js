@@ -38,8 +38,9 @@ assert.ok(sd.includes('_renderPlanningOverview();'), '_runStudyInit calls _rende
 assert.ok(sd.includes("'overview-expert-questions'"), 'Overview has an expert-questions slot');
 assert.ok(sd.includes('Open questions / decisions'), 'Overview labels the expert-questions block');
 
-// --- investigation page: competing_frameworks ---
+// --- investigation page: competing_frameworks folded into the evidence tab ---
 assert.ok(wt.includes('d.competing_frameworks'), 'investigation opening reads competing_frameworks');
-assert.ok(wt.includes("label:'Competing frameworks'"), 'investigation opening adds a Competing frameworks tab');
+assert.ok(wt.includes('inv-brief-frameworks-fold'), 'competing_frameworks folded into the Hypothesis & evidence tab (no standalone tab)');
+assert.ok(!wt.includes("label:'Competing frameworks'"), 'competing_frameworks is no longer a standalone brief tab');
 
 console.log('test_study_contract_display OK');

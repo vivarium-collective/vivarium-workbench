@@ -73,29 +73,29 @@ def test_study_detail_spec_returns_none_for_missing(_ws):
     assert _study_detail_spec(_ws, "does-not-exist") is None
 
 
-def test_study_detail_page_has_five_tabs(_ws):
-    """5-tab study layout: the pillar tabs are Overview · Model (compose) ·
-    Simulations (simulate) · Audit · Decide (conclusions). The folded-away tabs
-    (Tests/Readouts/Visualizations/Results/Analyses/Build) are no longer their
-    own pillars/kinds.
+def test_study_detail_page_has_six_tabs(_ws):
+    """6-tab study layout: the pillar tabs are Overview · Visualizations
+    (visualize) · Model (compose) · Simulations (simulate) · Audit · Decide
+    (conclusions). The folded-away tabs (Tests/Readouts/Results/Analyses/Build)
+    are no longer their own pillars/kinds.
     """
     from vivarium_workbench.lib.study_page import render_study_detail_html as _render_study_detail_html
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
     html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     # Required pillar buttons
-    for kind in ("overview", "compose", "simulate", "audit", "conclusions"):
+    for kind in ("overview", "visualize", "compose", "simulate", "audit", "conclusions"):
         assert 'class="study-pillar' in html
         assert f'data-kind="{kind}"' in html
-    # Folded-away tabs are no longer separate kinds.
-    for gone in ("tests", "readouts", "visualize", "results", "analyses", "build"):
+    # Folded-away tabs are no longer separate kinds (Visualizations is a pillar again).
+    for gone in ("tests", "readouts", "results", "analyses", "build"):
         assert f"_setStudyTab('{gone}')" not in html
     assert 'data-kind="report-cards"' not in html
     assert 'data-kind="data"' not in html
     assert 'id="panel-data"' not in html
-    # Exactly five panels.
+    # Exactly six panels.
     panels = html.count('class="study-tab-panel')
-    assert panels == 5, f"expected 5 panel elements, got {panels}"
+    assert panels == 6, f"expected 6 panel elements, got {panels}"
     # The Overview tab is active by default — must have both active class and overview kind on a button.
     # (Pre-existing bug fix, unrelated to E4: this checked the pre-Fable-A-#6
     # "study-tab" class name, which the pillar buttons never carried — they're
@@ -187,17 +187,20 @@ def test_simulate_panel_has_sim_table_mount(_ws):
     assert 'id="study-sim-table"' in html
 
 
-def test_visualizations_gallery_present_in_overview(_ws):
-    """5-tab layout: the Visualizations gallery folds into the Overview panel
-    (Figures section); the manual registered-viz list + add-viz button stay
-    retired (auto latest-run charts only)."""
+def test_visualizations_gallery_in_its_own_tab(_ws):
+    """6-tab layout: the Visualizations gallery lives in its OWN Visualizations
+    panel (#panel-visualize); the manual registered-viz list + add-viz button
+    stay retired (auto latest-run charts only)."""
     from vivarium_workbench.lib.study_page import render_study_detail_html as _render_study_detail_html
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
     html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
-    assert 'id="panel-visualize"' not in html
-    overview = html[html.index('id="panel-overview"'):html.index('id="panel-compose"')]
-    assert 'id="visualize-section"' in overview
+    assert 'id="panel-visualize"' in html
+    visualize = html[html.index('id="panel-visualize"'):html.index('id="panel-compose"')]
+    assert 'id="visualize-section"' in visualize
+    # The figures are NOT in the Overview panel anymore.
+    overview = html[html.index('id="panel-overview"'):html.index('id="panel-visualize"')]
+    assert 'id="visualize-section"' not in overview
     # Registered-visualization-modules section + "+ Add visualization" removed.
     assert 'id="viz-list"' not in html
     assert 'btn-add-viz' not in html
@@ -246,11 +249,11 @@ def test_full_study_renders_all_tabs(_rich_ws):
     spec = _study_detail_spec(_rich_ws, "rich")
     html = _render_study_detail_html(_rich_ws, "rich", spec)
 
-    # 5-tab layout: the five pillars. Tests/Readouts/Visualizations/Results/
-    # Analyses/Build are folded into these and are no longer separate kinds.
-    for kind in ("overview", "compose", "simulate", "audit", "conclusions"):
+    # 6-tab layout: the six pillars. Tests/Readouts/Results/Analyses/Build are
+    # folded in and no longer separate kinds (Visualizations is a pillar again).
+    for kind in ("overview", "visualize", "compose", "simulate", "audit", "conclusions"):
         assert f'data-kind="{kind}"' in html
-    for gone in ("tests", "readouts", "visualize", "results", "analyses", "build"):
+    for gone in ("tests", "readouts", "results", "analyses", "build"):
         assert f"_setStudyTab('{gone}')" not in html
     assert 'data-kind="report-cards"' not in html
     assert 'data-kind="data"' not in html
@@ -265,9 +268,9 @@ def test_full_study_renders_all_tabs(_rich_ws):
     # filled client-side from /api/simulations (no server-rendered run rows).
     assert 'id="study-sim-table"' in html
 
-    # Figures (folded into Overview): the manual registered-visualization-
+    # Figures (own Visualizations tab): the manual registered-visualization-
     # modules list was retired; the gallery shows auto latest-run charts.
-    assert 'id="panel-visualize"' not in html
+    assert 'id="panel-visualize"' in html
     assert 'id="visualize-section"' in html
     assert 'id="viz-list"' not in html
 
@@ -290,20 +293,20 @@ def _section(html: str, start_marker: str, end_marker: str) -> str:
 
 
 def test_simulate_tab_does_not_render_charts_panel(_rich_ws):
-    """5-tab layout: the inline 'Latest run — visualizations' charts panel is not
-    on the Simulations tab; the figure charts live in the Overview Figures
-    section (#viz-charts-panel)."""
+    """6-tab layout: the inline 'Latest run — visualizations' charts panel is not
+    on the Simulations tab; the figure charts live in the Visualizations panel's
+    Figures section (#viz-charts-panel)."""
     from vivarium_workbench.lib.study_page import render_study_detail_html as _render_study_detail_html
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
     html = _render_study_detail_html(_rich_ws, "rich", _study_detail_spec(_rich_ws, "rich"))
     sim_panel = _section(html, 'id="panel-simulate"', 'id="panel-audit"')
     assert 'id="charts-panel"' not in sim_panel, (
         "Simulations tab should not contain the inline charts panel — charts "
-        "belong to the Overview Figures section."
+        "belong to the Visualizations Figures section."
     )
-    # Sanity: the Overview Figures section has the chart panel.
-    overview = _section(html, 'id="panel-overview"', 'id="panel-compose"')
-    assert 'id="viz-charts-panel"' in overview
+    # Sanity: the Visualizations Figures section has the chart panel.
+    visualize = _section(html, 'id="panel-visualize"', 'id="panel-compose"')
+    assert 'id="viz-charts-panel"' in visualize
 
 
 # The per-run column set (Composite, Started, Duration, Model changes) now lives
