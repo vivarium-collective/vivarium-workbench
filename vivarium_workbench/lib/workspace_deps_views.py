@@ -10,7 +10,6 @@ inside server.py itself.
 from __future__ import annotations
 
 import json
-import os
 import platform
 import subprocess
 from pathlib import Path
