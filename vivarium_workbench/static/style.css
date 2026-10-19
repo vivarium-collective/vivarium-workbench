@@ -4722,19 +4722,19 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: 5px 8px;
   margin: 2px 0 10px;
-  padding: 6px 10px;
+  padding: 4px 9px;
   background: #f8fafc;
   border: 1px solid #eef2f7;
   border-radius: 8px;
-  font-size: 0.86em;
+  font-size: 0.8em;
   color: #475569;
 }
 .aig-tb-group {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
 }
 /* While a study is open, hide the investigation PROSE (verdict / question /
    description / decision cockpit + tab blocks) so only the graph region remains;
@@ -4915,15 +4915,15 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   color: #94a3b8; padding: 6px 10px 2px; font-weight: 700;
 }
 .aig-tb-group + .aig-tb-group {
-  padding-left: 12px;
+  padding-left: 8px;
   border-left: 1px solid #e2e8f0;
 }
 .aig-tb-right { margin-left: auto; }
 .aig-tb-group.aig-tb-right { padding-left: 0; border-left: none; }
 .aig-tb-label {
-  font-size: 0.8em;
+  font-size: 0.74em;
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: #94a3b8;
   white-space: nowrap;
@@ -4942,7 +4942,7 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   background: transparent;
   color: #475569;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 3px 8px;
   cursor: pointer;
   font-size: 0.82em;
   line-height: 1.4;
@@ -4955,13 +4955,13 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
      one consistent button set (same size, weight, fill, border, hover). */
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   background: #f8fafc;
   color: #475569;
   font-weight: 600;
-  padding: 4px 11px;
+  padding: 3px 8px;
   cursor: pointer;
   font-size: 0.82em;
   line-height: 1.4;
@@ -5037,7 +5037,7 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 
 /* The primary unified-zoom slider is wider than the fine-tune sliders so it
    reads as the main control. */
-.aig-tb-slider-wide { width: 180px; }
+.aig-tb-slider-wide { width: 130px; }
 /* ⚙ Display popover: the fine-tune sliders stack as labelled rows. */
 .aig-settings-row {
   display: flex;
