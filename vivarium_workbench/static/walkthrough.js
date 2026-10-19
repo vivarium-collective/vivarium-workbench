@@ -9841,25 +9841,40 @@
     // affordance is discoverable) but starts DISABLED/greyed; the async summary
     // upgrades it to an active download when the investigation actually has
     // figures (same n_figures signal as the card).
-    var _figuresDisabled =
-      ' <button class="btn-mini" disabled ' +
-        'title="No figures yet — run this investigation\'s studies to generate them" ' +
-        'style="opacity:0.5;cursor:not-allowed">↓ figures</button>';
+    // Single "↓ Export ▾" dropdown consolidating report / notebook / figures
+    // (was three separate buttons). The figures item starts disabled and is
+    // upgraded async below when the investigation actually has figures.
+    //
+    // That async upgrade is snapshot-aware: DataSource.loadIsetList() maps to the
+    // baked /api/investigation-summaries.json in a published bundle. The `_api()`
+    // adapter only prefixes the base path (never appends `.json`), so it 404s in a
+    // snapshot — leaving the ↓ figures button greyed even when figures.zip is
+    // baked. DataSource is always present in a published bundle.
+    var _mi = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+    var _figuresMenuItem =
+      '<span id="ws-actions-figures">' +
+        '<button class="btn-mini" role="menuitem" disabled ' +
+          'title="No figures yet — run this investigation\'s studies to generate them" ' +
+          'style="display:block;width:100%;text-align:left;border:none;background:transparent;opacity:0.5;cursor:not-allowed">Figures (none yet)</button>' +
+      '</span>';
+    var _exportDd =
+      '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
+        '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
+          'title="Download the report, a runnable notebook, or all figures" onclick="_toggleInvReportMenu(event)">↓ Export ▾</button>' +
+        '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
+          'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:170px;padding:4px">' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'pdf\')">PDF report</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationNotebook()">Notebook</button>' +
+          _figuresMenuItem +
+        '</div>' +
+      '</span> ';
     actions.innerHTML =
-      '<button class="btn-mini" onclick="_downloadInvestigationReport()" ' +
-        'title="Download the shareable HTML report">↓ report</button> ' +
-      '<button class="btn-mini" onclick="_downloadInvestigationNotebook()" ' +
-        'title="Download a self-contained Jupyter notebook">↓ notebook</button>' +
-      '<span id="ws-actions-figures">' + _figuresDisabled + '</span>' +
+      _exportDd +
       (isSnapshot ? '' :
       ' <button class="btn-mini" onclick="_rerunInvestigation()" ' +
         'title="Re-run every member study\'s CURRENT baseline spec (re-derives from each study\'s study.yaml)">▶ Run current spec</button>');
     if (name) {
-      // Snapshot-aware: DataSource.loadIsetList() maps to the baked
-      // /api/investigation-summaries.json in a published bundle. The `_api()`
-      // adapter only prefixes the base path (never appends `.json`), so it 404s
-      // in a snapshot — leaving the ↓ figures button greyed even when figures.zip
-      // is baked. DataSource is always present in a published bundle.
       (window.DataSource
         ? window.DataSource.loadIsetList()
         : fetch('/api/investigation-summaries', {headers: {Accept: 'application/json'}})
@@ -9868,9 +9883,10 @@
           var me = ((j && j.investigations) || []).filter(function (i) { return i.name === name; })[0];
           var host = document.getElementById('ws-actions-figures');
           if (me && me.n_figures && host) {
-            host.innerHTML = ' <button class="btn-mini" ' +
-              'onclick="window._vivFiguresFromCard(event,\'' + _esc(name) + '\')" ' +
-              'title="Download all figures (studies figures + post-study composites) as a zip">↓ figures</button>';
+            host.innerHTML = '<button class="btn-mini" role="menuitem" ' +
+              'style="display:block;width:100%;text-align:left;border:none;background:transparent" ' +
+              'onclick="_closeInvReportMenu();window._vivFiguresFromCard(event,\'' + _esc(name) + '\')" ' +
+              'title="Download all figures (studies figures + post-study composites) as a zip">Figures (zip)</button>';
           }
           // else: leave the disabled/greyed ↓ figures in place.
         }).catch(function () {});
@@ -13339,9 +13355,11 @@
     // No band change → keep the slider synced (above) but skip the re-render.
     if (nb === aigBand) return;
     _aigCloseCardPopout();   // layout changes under it — drop the anchored popout
+    var _anchor = _aigCaptureAnchor();   // keep the selected study fixed on screen (same as zoom)
     aigBand = nb;
     if (!_aigApplyingUnified) _aigSyncZoomUI(aigBand, aigZoom);
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+    _aigRestoreAnchor(_anchor);
   }
   window._setAigBand = _setAigBand;
 
@@ -13353,9 +13371,12 @@
     var sl = document.getElementById('aig-width-slider');
     if (sl && String(sl.value) !== String(s)) sl.value = String(s);
     if (s === aigWidthScale) return;
+    _aigCloseCardPopout();   // cards resize under it — drop the anchored popout
+    var _anchor = _aigCaptureAnchor();   // keep the selected study fixed on screen (same as zoom)
     aigWidthScale = s;
     try { localStorage.setItem('aig-width-scale', String(s)); } catch (e) {}
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+    _aigRestoreAnchor(_anchor);
   }
   window._setAigWidthScale = _setAigWidthScale;
 
@@ -13624,26 +13645,87 @@
       ? base + '/reports/investigation-' + encodeURIComponent(name) + '.html'
       : '/api/investigation-report/' + encodeURIComponent(name);
   }
-  function _downloadInvestigationReport(name) {
+  // In-flight exports keyed by `${name}|${fmt}`. We guard only against firing the
+  // SAME export twice (the "downloaded it 3×" bug) — different exports can run
+  // concurrently, and the Export dropdown stays enabled so you can pick another
+  // item while one is still rendering. Progress is surfaced via toasts, not by
+  // disabling the menu.
+  var _invReportInflight = {};
+  function _downloadInvestigationReport(name, fmt) {
     name = name || window._wsInvestigation || window._currentIset;
     if (!name) {
       console.warn('_downloadInvestigationReport: no current investigation');
       return;
     }
+    fmt = (fmt === 'pdf') ? 'pdf' : 'html';
     var cfg = window.__DASH_CONFIG__ || {};
-    // Live: hit the endpoint with ?download=1 so the server sends
-    // Content-Disposition: attachment and the browser saves it. Snapshot: the
-    // pre-rendered static file, downloaded via the anchor's `download` attr.
-    var url = _investigationReportUrl(name) + (cfg.mode === 'snapshot' ? '' : '?download=1');
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'investigation-' + name + '.html';
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    // PDF is rendered server-side (headless Chromium) — not available in a static
+    // snapshot (no server), so fall back to the pre-rendered HTML there.
+    if (fmt === 'pdf' && cfg.mode === 'snapshot') fmt = 'html';
+    var _save = function (href, dl) {
+      var a = document.createElement('a');
+      a.href = href; a.download = dl; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+    };
+    // Snapshot HTML is a pre-rendered static file — instant, no server render.
+    if (fmt === 'html' && cfg.mode === 'snapshot') {
+      _save(_investigationReportUrl(name), 'investigation-' + name + '.html');
+      return;
+    }
+    // Live report (HTML or PDF): the server renders a LARGE self-contained file
+    // (every figure inlined; PDF also goes through headless Chromium), which
+    // takes several seconds. Only block a duplicate of the SAME export.
+    var key = name + '|' + fmt;
+    var isPdf = (fmt === 'pdf');
+    if (_invReportInflight[key]) {
+      if (typeof _showToast === 'function') _showToast((isPdf ? 'PDF' : 'Report') + ' is still being prepared — one moment…');
+      return;
+    }
+    _invReportInflight[key] = true;
+    var ext = isPdf ? '.pdf' : '.html';
+    if (typeof _showToast === 'function')
+      _showToast(isPdf ? 'Rendering PDF… this can take ~20s (you can start another export meanwhile)' : 'Preparing report… (a large self-contained file)');
+    fetch(_investigationReportUrl(name) + (isPdf ? '?format=pdf' : ''))
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+        return r.blob();
+      })
+      .then(function (blob) {
+        var u = URL.createObjectURL(blob);
+        _save(u, 'investigation-' + name + ext);
+        setTimeout(function () { URL.revokeObjectURL(u); }, 8000);
+        if (typeof _showToast === 'function') _showToast((isPdf ? 'PDF' : 'Report') + ' downloaded.');
+      })
+      .catch(function (e) {
+        var m = (e && e.message) || String(e);
+        if (typeof _showToast === 'function') _showToast((isPdf ? 'PDF export' : 'Report') + ' failed: ' + m, { danger: true });
+        else alert((isPdf ? 'PDF export' : 'Report download') + ' failed:\n' + m);
+      })
+      .then(function () {   // finally — clear this export's in-flight flag
+        delete _invReportInflight[key];
+      });
   }
   window._downloadInvestigationReport = _downloadInvestigationReport;
+
+  // "↓ report ▾" chooser (HTML / PDF) in the investigation header.
+  function _toggleInvReportMenu(ev) {
+    if (ev) ev.stopPropagation();
+    var m = document.getElementById('inv-report-menu');
+    if (!m) return;
+    var open = m.style.display !== 'none';
+    m.style.display = open ? 'none' : 'block';
+    if (!open) {
+      setTimeout(function () {
+        document.addEventListener('click', _closeInvReportMenu, { once: true, capture: true });
+      }, 0);
+    }
+  }
+  function _closeInvReportMenu() {
+    var m = document.getElementById('inv-report-menu');
+    if (m) m.style.display = 'none';
+  }
+  window._toggleInvReportMenu = _toggleInvReportMenu;
+  window._closeInvReportMenu = _closeInvReportMenu;
 
   // Per-card actions on the Investigations LIST (don't require opening the
   // investigation) — open the report for the named investigation directly.

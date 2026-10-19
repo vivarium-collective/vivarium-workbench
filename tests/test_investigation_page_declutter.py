@@ -20,19 +20,32 @@ def test_header_export_cluster_and_icon_refresh():
     cluster = dv[cluster_start:cluster_start + 600]
     assert '_downloadInvestigationReport()' in cluster, "report button not in export cluster"
     assert '_downloadInvestigationNotebook()' in cluster, "notebook button not in export cluster"
-    # Refresh is icon-only now (no text label on the button itself)
+    # Refresh is icon-only now (no text label on the button itself). The dedicated
+    # detail-view refresh button was removed entirely in the toolbar-simplification
+    # pass (commit 4387bd8d) — the toolbar is self-evident — so there is no longer
+    # an #investigation-detail-refresh id to assert.
     assert '↻ Refresh</button>' not in HTML, "Refresh button still has a text label"
-    assert 'id="investigation-detail-refresh"' in dv, "refresh button id lost"
 
 
 def test_report_button_downloads_not_just_opens():
-    """The ↓ report action DOWNLOADS the report into the browser's download
-    folder: live mode requests the endpoint with ?download=1 (the server sends
-    Content-Disposition: attachment) and the click goes through an <a download>
-    so the file is saved rather than opened in a tab."""
-    assert "?download=1" in JS
-    assert "a.download = 'investigation-'" in JS
+    """The ↓ report action DOWNLOADS the report (saved, not opened in a tab): the
+    large server-rendered file is fetched and the blob saved via an <a download>.
+    An in-flight guard prevents repeat clicks from firing multiple full renders
+    (the 'accidentally downloaded it 3×' bug)."""
+    assert "URL.createObjectURL(blob)" in JS   # blob download of the fetched file
+    assert "a.download = dl" in JS              # saved via <a download>
     assert "a.click()" in JS
+    assert "_invReportInflight" in JS          # per-key guard against repeat clicks
+
+
+def test_report_button_is_html_pdf_chooser():
+    """The investigation 'download report' control offers HTML and PDF; PDF is
+    rendered server-side via ?format=pdf."""
+    assert "inv-report-menu" in JS                       # the chooser dropdown
+    assert "HTML report" in JS and "PDF report" in JS     # both options
+    assert "_downloadInvestigationReport(null," in JS     # passes a format arg
+    assert "?format=pdf" in JS                             # PDF rendered server-side
+    assert "'.pdf' : '.html'" in JS                        # format → file extension
 
 
 def test_intro_is_inquiry_brief_host():
