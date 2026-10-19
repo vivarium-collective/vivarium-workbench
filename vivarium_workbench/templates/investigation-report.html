@@ -1208,11 +1208,13 @@ function renderStudy(s, inv, idx){
   // expand stores) when we have the wired topology; fall back to the pre-rendered
   // image, the live loom iframe, the static SVG topology, then a plain viz.
   const loomInter = (s.model_topology && (s.model_topology.edges||[]).length) ? loomInteractive(s.model_topology) : '';
-  // Prefer the REAL embedded loom (served bundle); it carries its own offline
-  // fallback. Then the pre-rendered image, the lightweight SVG loom, the static
-  // topology, and finally a plain viz.
-  const loomReal = loomRealEmbed(s);
-  let modelBody = loomReal || loomRendered || loomInter || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
+  // The report is a self-contained document (often opened from disk / a static
+  // bundle), so DON'T use the live-loaded loom iframe (loomRealEmbed) — it needs
+  // a running loom server/bundle and fails offline (blank/broken Model section).
+  // Use a static/self-contained rendering instead: the pre-rendered loom PNG
+  // (render-loom), else the self-contained interactive-SVG loom, else the static
+  // SVG topology, then a plain viz. All render with no network.
+  let modelBody = loomRendered || loomInter || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
   if(s.sourcing){
     modelBody += `<div class="decision-line" style="margin-top:6px"><span class="chip decision">${esc(s.sourcing.decision)}</span>
       ${(s.sourcing.modules||[]).map(m=>`<span class="chip mod">${esc(m)}</span>`).join(' ')||'<span class="chip mod">new module</span>'}</div>
