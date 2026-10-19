@@ -11,6 +11,7 @@ import warnings
 from pathlib import Path
 
 import yaml
+import psutil
 
 
 def _pick_free_port() -> int:
@@ -1081,19 +1082,15 @@ def _server_pid(ws: Path) -> int | None:
     except (OSError, ValueError):
         return None
 
-
+# C.M. 261014: Process checking updated to use psutil so that it will
+# work on Windows as well as Unix type systems.
 def _pid_alive(pid: int | None) -> bool:
     if not pid:
         return False
     try:
-        os.kill(int(pid), 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # alive, owned by another user
+        return psutil.pid_exists(int(pid))
     except (OSError, ValueError):
         return False
-    return True
 
 
 def _http_ok(url: str, timeout: float = 1.0) -> bool:

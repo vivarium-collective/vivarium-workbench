@@ -9,6 +9,10 @@ description = "Web-based workbench for Vivarium / process-bigraph workspaces"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.11"
 dependencies = [
+    # C.M. 261014: The workbench has similar test failures on windows as viva-superpowers
+    # related to os.kill. As before, psutil is being imported to manage process checks
+    # across systems.
+    "psutil>=5.9",
     # boto3: the remote analysis figures read S3 directly (lib/remote_analysis_figures.py,
     # #1072/#1078). Without it that path reports s3-unavailable in the image.
     "boto3>=1.34",

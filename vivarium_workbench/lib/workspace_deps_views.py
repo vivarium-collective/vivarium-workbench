@@ -10,12 +10,12 @@ inside server.py itself.
 from __future__ import annotations
 
 import json
-import os
 import platform
 import subprocess
 from pathlib import Path
 from typing import Optional
 
+import psutil
 
 # ---------------------------------------------------------------------------
 # GET /api/source/builds
@@ -227,13 +227,10 @@ def build_workspaces(ws_root: Path) -> dict:
                 if pid_val <= 0:
                     alive = False
                 else:
+                    # C.M. 261014: This block of conditions needed to be updated
+                    # to use psutil instead of os.kill
                     try:
-                        os.kill(pid_val, 0)
-                        alive = True
-                    except ProcessLookupError:
-                        alive = False
-                    except PermissionError:
-                        alive = True  # PID exists but owned by another user
+                        alive = psutil.pid_exists(pid_val)
                     except (OSError, ValueError):
                         alive = False
                 if alive:
@@ -248,13 +245,10 @@ def build_workspaces(ws_root: Path) -> dict:
                 if pid_val <= 0:
                     alive = False
                 else:
+                    # C.M. 261014: This block of conditions needed to be updated
+                    # to use psutil instead of os.kill
                     try:
-                        os.kill(pid_val, 0)
-                        alive = True
-                    except ProcessLookupError:
-                        alive = False
-                    except PermissionError:
-                        alive = True  # PID exists but owned by another user
+                        alive = psutil.pid_exists(pid_val)
                     except (OSError, ValueError):
                         alive = False
                 if alive:
