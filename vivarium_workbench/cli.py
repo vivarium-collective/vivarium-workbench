@@ -278,6 +278,15 @@ def cmd_migrate_studies(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_migrate_fields(args: argparse.Namespace) -> int:
+    """CLI handler for the migrate-fields subcommand."""
+    from vivarium_workbench.lib.field_migrate import migrate_fields
+    ws = Path(args.workspace).resolve()
+    result = migrate_fields(ws, dry_run=args.dry_run)
+    print(json.dumps(result, indent=2))
+    return 1 if result["errors"] else 0
+
+
 def cmd_migrate_artifacts(args: argparse.Namespace) -> int:
     """CLI handler for the migrate-artifacts subcommand."""
     from vivarium_workbench.lib.artifacts.migrate import migrate_artifacts
@@ -1524,6 +1533,17 @@ def main(argv: list[str] | None = None) -> int:
     p_migs.add_argument("--workspace", default=".", help="Path to workspace root (default: cwd)")
     p_migs.add_argument("--dry-run", action="store_true", help="Report what would move without touching disk")
     p_migs.set_defaults(func=cmd_migrate_studies)
+
+    p_migf = sub.add_parser(
+        "migrate-fields",
+        help="Rename deprecated study fields to their canonical names "
+             "(schema-driven, format-preserving, conflict-guarded). "
+             "Idempotent — safe to re-run.",
+    )
+    p_migf.add_argument("--workspace", default=".", help="Path to workspace root (default: cwd)")
+    p_migf.add_argument("--dry-run", action="store_true",
+                        help="Report what would be renamed without touching disk")
+    p_migf.set_defaults(func=cmd_migrate_fields)
 
     p_miga = sub.add_parser(
         "migrate-artifacts",

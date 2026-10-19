@@ -57,6 +57,13 @@ vivarium-workbench-publish --workspace /path/to/workspace --out /tmp/bundle
 # One-shot legacy migration (investigations/<name>/spec.yaml → studies/, v2→v3)
 vivarium-workbench migrate-investigations --workspace /path/to/ws [--dry-run]
 
+# Rename deprecated study fields to their canonical names, driven by the
+# workspace's own .pbg/schemas/study.schema.json (deprecated + x-replaced-by).
+# Only provably-safe 1:1 renames are applied (format-preserving, conflict-guarded,
+# idempotent); the status collapse and other value-aware changes are reported, not
+# applied. Run --dry-run first to see the plan.
+vivarium-workbench migrate-fields --workspace /path/to/ws [--dry-run]
+
 # Diagnose stale framework deps (opaque ImportError on boot / blank Audit+Build tabs)
 vivarium-workbench doctor          # exits non-zero if process-bigraph/viva-superpowers are stale
 
