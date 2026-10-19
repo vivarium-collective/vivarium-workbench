@@ -1249,16 +1249,22 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             return out
         return {"name": str(item), "path": None}
 
-    # Plan-progress board: derive live gate (A→E) status from the investigation's
-    # plan_gates block + member-study state, so the page shows where the campaign
-    # stands against its own cumulative-gate plan. Empty [] when no plan_gates.
+    # Plan-progress board: derive live gate status from the investigation's plan
+    # (the five-act plan_acts spine, or the legacy flat plan_gates) + member-study
+    # state, so the page shows where the campaign stands against its own plan.
+    # Empty [] when the spec declares neither.
     #
     # A gate names its member studies explicitly; those may not all be in the
     # investigation's `studies:` roster loaded above (e.g. a spine study wired into
     # plan_gates before it joins the roster). Resolve any such member directly so
     # the board reflects true state instead of silently reading "pending".
-    from vivarium_workbench.lib.plan_board import build_plan_board  # noqa: PLC0415
-    _plan_gates = spec.get("plan_gates") or []
+    from vivarium_workbench.lib.plan_board import build_plan_board, iter_plan_gates  # noqa: PLC0415
+    # Flatten the plan to an ordered gate list — reads the five-act ``plan_acts``
+    # shape (gates nested under acts) OR the legacy flat ``plan_gates`` — so the
+    # board renders for both and never silently blanks when a workspace adopts the
+    # act spine. (The workspace's own build_plan_progress, preferred below, reads
+    # the raw spec itself; this feeds the member-resolution + the generic fallback.)
+    _plan_gates = iter_plan_gates(spec)
     _board_studies = {s.get("name"): s for s in studies_out if s.get("name")}
     _gate_member_specs: dict = {}
     _gate_members = {

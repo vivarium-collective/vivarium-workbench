@@ -1,14 +1,24 @@
 """Investigation plan-progress board.
 
-An investigation.yaml may declare a ``plan_gates`` block: the cumulative gates
-(A→E, each ``extends`` the prior) the campaign is working toward, their member
-studies, and the matched-null ``criterion_findings`` each gate must clear. This
-module derives each gate's LIVE status from member-study state — not the YAML's
-static ``status:`` — so the board reflects reality as studies progress.
+An investigation.yaml declares its plan in one of two shapes, both supported here:
 
-Generic: any investigation whose spec declares ``plan_gates`` gets a board. The
-derivation mirrors the viva-genesis ``build_plan_progress`` rules so the workspace
-and the workbench tell the same story.
+* ``plan_acts`` — the five-act spine: a list of acts (I–V), each with a
+  ``primary_question`` / ``decisive_exit_condition`` and its matched-null
+  checkpoints nested under ``gates:``. The spine order is act order, then gate
+  order within an act; ``off_spine`` gates branch off and never become a prior.
+* ``plan_gates`` — the legacy flat list of cumulative gates (A→E, each
+  ``extends`` the prior).
+
+``iter_plan_gates(spec)`` flattens either shape into one ordered gate list (for
+``plan_acts`` it synthesizes each gate's ``extends`` from spine order and
+annotates the gate with its act context), so the rest of this module — and any
+caller — works unchanged on both. This keeps the board backward-compatible for
+every workspace that still authors ``plan_gates``.
+
+This module derives each gate's LIVE status from member-study state — not the
+YAML's static ``status:`` — so the board reflects reality as studies progress.
+The derivation mirrors the viva-genesis ``build_plan_progress`` rules so the
+workspace and the workbench tell the same story.
 
 A gate's status:
   pending     — no scaffolded member studies yet (all its studies are pending_studies)
@@ -23,6 +33,48 @@ from __future__ import annotations
 from typing import Any, Optional
 
 _CONFIRMED = {"confirms", "confirmed"}
+
+
+def iter_plan_gates(spec: dict) -> list[dict[str, Any]]:
+    """Flatten an investigation spec's plan into one ordered list of gate dicts.
+
+    Reads the five-act ``plan_acts`` shape (gates nested under ``acts[].gates``)
+    OR the legacy flat ``plan_gates`` list, so callers handle both without
+    branching. Backward-compatible: a spec with only ``plan_gates`` is returned
+    unchanged (its explicit ``extends`` preserved), and a spec with neither
+    returns ``[]``.
+
+    For ``plan_acts`` each gate is returned as a shallow copy annotated with:
+
+    * ``act`` — ``{id, name, primary_question, decisive_exit_condition}`` of its act.
+    * ``extends`` — synthesized as the prior SPINE gate's id (the previous
+      non-``off_spine`` gate in flatten order) when the gate does not set one,
+      so the existing ladder derivation is unchanged. An ``off_spine`` gate takes
+      the current prior spine gate as ``extends`` but never becomes a prior itself.
+    """
+    acts = spec.get("plan_acts")
+    if acts:
+        out: list[dict[str, Any]] = []
+        prior_spine: Optional[str] = None
+        for act in acts or []:
+            act = act or {}
+            act_ctx = {
+                "id": act.get("id"),
+                "name": act.get("name"),
+                "primary_question": act.get("primary_question"),
+                "decisive_exit_condition": act.get("decisive_exit_condition"),
+            }
+            for gate in act.get("gates") or []:
+                gate = dict(gate or {})
+                off = bool(gate.get("off_spine") or gate.get("branch"))
+                if gate.get("extends") is None:
+                    gate["extends"] = prior_spine
+                gate["act"] = act_ctx
+                out.append(gate)
+                if not off:
+                    prior_spine = gate.get("id")
+        return out
+    return list(spec.get("plan_gates") or [])
 
 
 def _criterion_met(criterion_findings: list, studies: dict) -> bool:
@@ -88,6 +140,7 @@ def build_plan_board(
             "id": gate.get("id"),
             "name": gate.get("name"),
             "extends": extends,
+            "act": gate.get("act"),
             "optional": bool(gate.get("optional")),
             "off_spine": bool(gate.get("off_spine") or gate.get("branch")),
             "criterion": gate.get("criterion"),
