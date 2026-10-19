@@ -422,10 +422,10 @@ a.refchip:hover{text-decoration:none;border-color:var(--accent)}
 .assumptions{margin:10px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px}
 .assumptions li{margin:3px 0}
 /* references section */
-.refs-list{display:grid;gap:2px;margin-top:8px}
-.refentry{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13.5px;scroll-margin-top:120px}
+.refs-list{display:grid;gap:0;margin-top:8px}
+.refentry{padding:4px 10px;border-bottom:1px solid var(--line);font-size:13px;line-height:1.5;scroll-margin-top:120px}
 .refentry:target{background:var(--accent-soft);border-radius:8px}
-.refentry .rk{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.refentry .rk{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
 .refentry .rt{color:var(--ink)}
 .refentry .rmeta{color:var(--ink-2)}
 .refentry .rcount{float:right;font-size:11px;color:var(--ink-3)}
@@ -1208,11 +1208,13 @@ function renderStudy(s, inv, idx){
   // expand stores) when we have the wired topology; fall back to the pre-rendered
   // image, the live loom iframe, the static SVG topology, then a plain viz.
   const loomInter = (s.model_topology && (s.model_topology.edges||[]).length) ? loomInteractive(s.model_topology) : '';
-  // Prefer the REAL embedded loom (served bundle); it carries its own offline
-  // fallback. Then the pre-rendered image, the lightweight SVG loom, the static
-  // topology, and finally a plain viz.
-  const loomReal = loomRealEmbed(s);
-  let modelBody = loomReal || loomRendered || loomInter || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
+  // The report is a self-contained document (often opened from disk / a static
+  // bundle), so DON'T use the live-loaded loom iframe (loomRealEmbed) — it needs
+  // a running loom server/bundle and fails offline (blank/broken Model section).
+  // Use a static/self-contained rendering instead: the pre-rendered loom PNG
+  // (render-loom), else the self-contained interactive-SVG loom, else the static
+  // SVG topology, then a plain viz. All render with no network.
+  let modelBody = loomRendered || loomInter || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
   if(s.sourcing){
     modelBody += `<div class="decision-line" style="margin-top:6px"><span class="chip decision">${esc(s.sourcing.decision)}</span>
       ${(s.sourcing.modules||[]).map(m=>`<span class="chip mod">${esc(m)}</span>`).join(' ')||'<span class="chip mod">new module</span>'}</div>
@@ -1500,15 +1502,13 @@ function renderReferences(inv){
   const rows=keys.map(k=>{
     const r=REFS[k]||{};
     const label=r.label||k;
-    const meta=[r.author,r.year].filter(Boolean).join(' · ');
+    // One compact line per reference: count · label · key — title · author, year · source.
+    const bits=[r.title,[r.author,r.year].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
     const link=r.url?` · <a href="${esc(r.url.startsWith('http')?r.url:'https://doi.org/'+r.url)}" target="_blank" rel="noopener">source ↗</a>`:'';
     const n=cnt[k];
-    return `<div class="refentry" id="ref-${esc(k)}">
-      <span class="rcount">cited ${n}×</span>
-      <b class="rt">${esc(label)}</b> <span class="rk">${esc(k)}</span>
-      ${r.title?`<div class="rmeta">${esc(r.title)}</div>`:''}
-      ${meta?`<div class="rmeta">${esc(meta)}${link}</div>`:(link?`<div class="rmeta">${link}</div>`:'')}
-    </div>`;
+    return `<div class="refentry" id="ref-${esc(k)}"><span class="rcount">${n}×</span>`+
+      `<b class="rt">${esc(label)}</b> <span class="rk">${esc(k)}</span>`+
+      `${bits?` <span class="rmeta">— ${esc(bits)}</span>`:''}${link}</div>`;
   }).join('');
   return `<div class="appendix fbsection" id="references">
     ${fbBubble('references','References')}
@@ -2255,7 +2255,6 @@ function execSummary(inv){
     ${q?`<p class="prose" style="font-size:16px;margin:2px 0 8px"><b>Question.</b> ${esc(q)}</p>`:''}
     ${verdict?`<div class="prose" style="font-size:15.5px">${mdLite(verdict)}</div>`:''}
     ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Milestone outcomes</div><div>${gl}</div></div>`:''}
-    ${heroFigure(inv)}
     <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:12px 0 0;line-height:1.5">
       Across <b>${c.total||0}</b> studies — <b>${c.supported||0}</b> supported · <b>${c.qualified||0}</b> qualified · <b>${c.refuted||0}</b> refuted · <b>${c.planned||0}</b> planned.
       <i>Supported</i> = a computational gate passed under the stated model assumptions (evidence of feasibility, not proof the transition occurred).</p>
