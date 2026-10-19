@@ -865,7 +865,10 @@
   // -------------------------------------------------------------------------
 
   function _switchPage(pageId) {
-    pageId = pageId || 'workspace-inputs';
+    pageId = pageId || 'resources';
+    // Back-compat: the former "Inputs" page (#workspace-inputs) was merged into
+    // the unified "Resources" tab. Old hashes/links resolve to it.
+    if (pageId === 'workspace-inputs') pageId = 'resources';
     // Snapshot mode: redirect authoring-only tabs to the investigations view.
     // composite-explore needs live composite resolution (build_core) which is
     // unavailable in a static bundle → redirect to simulation-setup (composites list).
@@ -904,8 +907,11 @@
     if (pageId === 'visualizations') {
       _loadAnalysesPage();
     }
-    // Resources page: curated structured resources from the workspace manifest.
+    // Resources page: unified source-material tab — the /api/inputs datasets &
+    // references (always present) plus the curated structured scientific
+    // resources from the workspace manifest (sub-tab revealed when available).
     if (pageId === 'resources') {
+      _loadInputs();
       _loadResources();
     }
     // Branch page: render the Source (Scope Local/Remote, repo, branch) section on
@@ -951,9 +957,6 @@
       // even when an investigation detail is currently open.
       if (typeof _closeInvestigationDetail === 'function') _closeInvestigationDetail();
       _loadInvestigationSets();
-    }
-    if (pageId === 'workspace-inputs') {
-      _loadInputs();
     }
     if (pageId === 'audit' && typeof window._loadAudit === 'function') {
       _loadAudit();
@@ -1002,7 +1005,7 @@
         var validPages = _snap
           ? ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'resources', 'audit', 'composite-explore', 'github', 'about']
           : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'resources', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
-        _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
+        _switchPage(validPages.indexOf(h) >= 0 ? h : 'resources');
       }
       window.addEventListener('hashchange', fromHash);
       fromHash();
@@ -2519,10 +2522,28 @@
     container.innerHTML = header + sections;
   }
 
-  // Reveal / hide the Resources rail link based on manifest availability.
-  function _resSetRailVisible(visible) {
-    var link = document.getElementById('rail-resources');
-    if (link) link.style.display = visible ? '' : 'none';
+  // Switch between the two Resources sub-tabs ("inputs" = datasets & references,
+  // "scientific" = structured scientific resources). Reuses the .registry-tab /
+  // .registry-tab-panel underline-tab styling.
+  function _setResourcesTab(name) {
+    document.querySelectorAll('#page-resources .registry-tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.restab === name);
+    });
+    document.querySelectorAll('#page-resources .registry-tab-panel').forEach(function (p) {
+      p.classList.toggle('active', p.dataset.restab === name);
+    });
+  }
+  window._setResourcesTab = _setResourcesTab;
+
+  // Reveal / hide the "Scientific resources" sub-tab based on manifest
+  // availability. The Resources rail tab itself is ALWAYS shown (it always
+  // carries the datasets & references sub-tab); only the structured-resources
+  // sub-tab is conditional. When the manifest is absent, keep the always-present
+  // inputs sub-tab active so the tab never lands on an empty/hidden panel.
+  function _resSetScientificVisible(visible) {
+    var tab = document.getElementById('resources-scientific-tab');
+    if (tab) tab.style.display = visible ? '' : 'none';
+    if (!visible) _setResourcesTab('inputs');
   }
 
   function _loadResources() {
@@ -2542,11 +2563,11 @@
       .then(function (data) {
         data = data || {};
         if (!data.available || !(data.type_order && data.type_order.length)) {
-          _resSetRailVisible(false);
+          _resSetScientificVisible(false);
           container.innerHTML = '<p class="empty-state">This workspace ships no structured-resources manifest.</p>';
           return;
         }
-        _resSetRailVisible(true);
+        _resSetScientificVisible(true);
         _resRenderPage(container, data);
       })
       .catch(function (err) {
@@ -2555,9 +2576,10 @@
   }
   window._loadResources = _loadResources;
 
-  // One-time probe at startup: reveal the Resources rail link iff the active
-  // workspace ships the manifest. Keeps the tab purely additive — hidden
-  // everywhere else — without the user having to navigate to it first.
+  // One-time probe at startup: reveal the "Scientific resources" sub-tab iff the
+  // active workspace ships the manifest, so it's visible from the first visit
+  // without the user having to navigate to the Resources tab first. (The
+  // Resources rail tab itself is always shown — it carries the inputs sub-tab.)
   function _initResourcesRail() {
     var _base = _analysesBase();
     var _url = _analysesSnapshot()
@@ -2568,9 +2590,9 @@
       .then(function (t) {
         var data = {};
         try { data = t ? JSON.parse(t) : {}; } catch (e) { data = {}; }
-        _resSetRailVisible(!!(data && data.available));
+        _resSetScientificVisible(!!(data && data.available));
       })
-      .catch(function () { _resSetRailVisible(false); });
+      .catch(function () { _resSetScientificVisible(false); });
   }
   window._initResourcesRail = _initResourcesRail;
 
