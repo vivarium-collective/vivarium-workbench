@@ -422,10 +422,10 @@ a.refchip:hover{text-decoration:none;border-color:var(--accent)}
 .assumptions{margin:10px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px}
 .assumptions li{margin:3px 0}
 /* references section */
-.refs-list{display:grid;gap:2px;margin-top:8px}
-.refentry{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13.5px;scroll-margin-top:120px}
+.refs-list{display:grid;gap:0;margin-top:8px}
+.refentry{padding:4px 10px;border-bottom:1px solid var(--line);font-size:13px;line-height:1.5;scroll-margin-top:120px}
 .refentry:target{background:var(--accent-soft);border-radius:8px}
-.refentry .rk{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.refentry .rk{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
 .refentry .rt{color:var(--ink)}
 .refentry .rmeta{color:var(--ink-2)}
 .refentry .rcount{float:right;font-size:11px;color:var(--ink-3)}
@@ -1500,15 +1500,13 @@ function renderReferences(inv){
   const rows=keys.map(k=>{
     const r=REFS[k]||{};
     const label=r.label||k;
-    const meta=[r.author,r.year].filter(Boolean).join(' · ');
+    // One compact line per reference: count · label · key — title · author, year · source.
+    const bits=[r.title,[r.author,r.year].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
     const link=r.url?` · <a href="${esc(r.url.startsWith('http')?r.url:'https://doi.org/'+r.url)}" target="_blank" rel="noopener">source ↗</a>`:'';
     const n=cnt[k];
-    return `<div class="refentry" id="ref-${esc(k)}">
-      <span class="rcount">cited ${n}×</span>
-      <b class="rt">${esc(label)}</b> <span class="rk">${esc(k)}</span>
-      ${r.title?`<div class="rmeta">${esc(r.title)}</div>`:''}
-      ${meta?`<div class="rmeta">${esc(meta)}${link}</div>`:(link?`<div class="rmeta">${link}</div>`:'')}
-    </div>`;
+    return `<div class="refentry" id="ref-${esc(k)}"><span class="rcount">${n}×</span>`+
+      `<b class="rt">${esc(label)}</b> <span class="rk">${esc(k)}</span>`+
+      `${bits?` <span class="rmeta">— ${esc(bits)}</span>`:''}${link}</div>`;
   }).join('');
   return `<div class="appendix fbsection" id="references">
     ${fbBubble('references','References')}
