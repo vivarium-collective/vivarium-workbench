@@ -158,7 +158,7 @@
         group: "Resources", tag: "Resource",
         title: title, sub: x.description || x.kind || x.type || x.path || "",
         hay: hayOf([title, x.description, x.kind, x.type, x.path, x.id, x.key]),
-        open: function () { goPage("workspace-inputs"); }
+        open: function () { goPage("resources"); }
       });
     });
     // Resources — references (papers.bib)
@@ -170,7 +170,7 @@
         group: "Resources", tag: "Reference",
         title: title, sub: [authors, x.year].filter(Boolean).join(" · ") || x.key || "",
         hay: hayOf([title, authors, x.year, x.key, x.id, x.journal]),
-        open: function () { goPage("workspace-inputs"); }
+        open: function () { goPage("resources"); }
       });
     });
 

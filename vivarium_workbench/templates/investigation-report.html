@@ -38,6 +38,32 @@
   --chip:#2A2723;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 1px 0 var(--line);
 }
+/* Print / PDF: pure-white background for easy printing. Force light inks too so
+   a report printed from dark mode still shows dark text on white. page.pdf()
+   emulates print media, so this governs the server-side PDF export as well. */
+@media print{
+  :root,:root[data-theme="dark"],:root[data-theme="light"]{
+    --paper:#fff; --surface:#fff; --sunken:#fff; --chip:#f2f2f0;
+    --ink:#1a1a1a; --ink-2:#444; --ink-3:#777;
+    --line:#e4e4e2; --line-2:#cfcfcc; --accent:#0F766B; --shadow:none;
+  }
+  html,body{background:#fff !important;}
+  /* Nav + overlay chrome is screen-only; Chromium paints position:fixed elements
+     on EVERY printed page, so these must be removed or they ghost onto the PDF. */
+  .topbar,.subnav,.fbfloat,#report-feedback,.navdrawer,.navdrawer-backdrop,.modal-bg{display:none !important;}
+  [onclick*="toggleEditor"],.fbbubble{display:none !important;}
+  /* No scroll frames in print — overflow:auto containers render a scrollbar
+     gutter/corner as a gray box; let their content lay out naturally. */
+  .wdag-shell{overflow:visible !important;background:#fff !important;max-height:none !important;}
+  /* Figures: keep each figure + its caption together on one page (no mid-figure
+     page breaks), and never let a figure spill past the page width. The Plotly
+     figures are additionally re-fit to the page width in __reportPrintPrep. */
+  figure.main-fig,figure.embedded-viz,.main-fig{break-inside:avoid;page-break-inside:avoid}
+  figure figcaption,.main-fig figcaption{break-inside:avoid}
+  .plotly-holder{overflow:visible !important}
+  .main-fig img,.viz-frame,.plotly-holder,.plotly-holder>div{max-width:100% !important}
+  h2,h3{break-after:avoid}
+}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
@@ -123,6 +149,30 @@ a:hover{text-decoration:underline}
 .subnav a{font-size:12.5px;color:var(--ink-2);padding:5px 10px;border-radius:7px;white-space:nowrap;font-weight:500}
 .subnav a.active{background:var(--accent-soft);color:var(--accent);font-weight:700}
 .subnav a.exec{font-weight:600}
+/* Full "Contents" jump menu — reaches every part incl. the 37 supplement studies.
+   The panel is position:fixed so the subnav's overflow:auto never clips it. */
+.navmenu{position:relative;display:inline-flex;align-items:center;margin-right:8px;flex:0 0 auto}
+.navmenu-btn{font-size:12.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);border:1px solid transparent;padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.navmenu-btn:hover{border-color:var(--accent)}
+/* Contents: a clean left slide-in drawer (replaces the old wide dropdown). */
+.navdrawer-backdrop{position:fixed;inset:0;background:rgba(20,18,15,.34);z-index:85;opacity:0;pointer-events:none;transition:opacity .2s ease}
+.navdrawer-backdrop.open{opacity:1;pointer-events:auto}
+.navdrawer{position:fixed;top:0;left:0;height:100vh;width:min(330px,86vw);background:var(--surface);border-right:1px solid var(--line);box-shadow:0 10px 44px rgba(20,18,15,.20);z-index:90;transform:translateX(-102%);transition:transform .22s ease;display:flex;flex-direction:column;overflow:hidden}
+.navdrawer.open{transform:none}
+.nd-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 11px;font-size:14px;font-weight:800;letter-spacing:.02em;color:var(--ink);border-bottom:1px solid var(--line);flex:0 0 auto}
+.nd-close{background:transparent;border:none;font-size:15px;color:var(--ink-3);cursor:pointer;padding:4px 9px;border-radius:6px;line-height:1}
+.nd-close:hover{background:var(--chip);color:var(--ink)}
+.nd-body{overflow-y:auto;padding:8px 10px 28px;flex:1 1 auto}
+.nd-grp{font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin:15px 8px 5px}
+.nd-grp:first-child{margin-top:6px}
+.navdrawer a.nd-link{display:block;font-size:13px;color:var(--ink);padding:5px 10px;border-radius:7px;text-decoration:none;line-height:1.35}
+.navdrawer a.nd-link:hover{background:var(--accent-soft);color:var(--accent)}
+.navdrawer a.nd-link.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
+.nd-studies-toggle{display:flex;align-items:center;gap:8px;width:calc(100% - 16px);text-align:left;background:transparent;border:none;cursor:pointer;margin:15px 8px 5px;padding:0;font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+.nd-count{font-weight:700;color:var(--ink-2);background:var(--chip);border-radius:9999px;padding:0 7px;font-size:10px;letter-spacing:0}
+.nd-caret{margin-left:auto;transition:transform .15s ease;font-size:11px}
+.nd-studies-toggle[aria-expanded="true"] .nd-caret{transform:rotate(90deg)}
+.navdrawer .nd-studies a.nd-link{padding-left:16px;font-size:12.5px;color:var(--ink-2)}
 
 /* ---- study card ---- */
 .card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:14px;
@@ -405,6 +455,12 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
 .abstract .main-claim{color:var(--ink);font-style:normal}
 /* a labelled prose section (Background / The simulated world) */
 .narr{margin:8px 0}
+/* Merged "Synthesis & gaps": the sub-sections keep their anchors/feedback but
+   their headings demote to sub-heads so the three read as one section. */
+.syn-group>.narr{margin:16px 0 0}
+.syn-group>.narr>.sec-h{margin-bottom:4px}
+.syn-group>.narr>.sec-h h2{font-size:15px;font-weight:650;letter-spacing:0}
+.syn-group>.narr>.sec-h .rule{display:none}
 .narr .prose{color:var(--ink-2);font-size:15.5px;line-height:1.78}
 .narr .prose b{color:var(--ink)}
 /* "the simulated world" standing callout */
@@ -460,6 +516,16 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
   display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
 .wdag-node .wn-row .wn-lbl{font-weight:600;color:var(--ink)}
 .wdag-node .wn-etier{margin-top:7px}
+/* Compact (lowest semantic zoom) — used for the PDF: title + status only, at a
+   LARGER font than the detail cards, so the whole graph stays legible when it
+   spans pages. */
+.wdag-shell.dag-compact .wn-row,
+.wdag-shell.dag-compact .wn-etier,
+.wdag-shell.dag-compact .wn-exp{display:none !important}
+.wdag-shell.dag-compact .wdag-node{padding:9px 12px !important}
+.wdag-shell.dag-compact .wn-title{font-size:14.5px !important;line-height:1.28 !important;-webkit-line-clamp:3 !important}
+.wdag-shell.dag-compact .wn-badge{font-size:11.5px !important}
+.wdag-shell.dag-compact .wn-icon{font-size:14px !important}
 /* Click-to-expand: only cards whose Asks/Finds are actually clipped get the
    affordance (data-clip set by setupWorkbenchDag after measuring). The caret
    lives in the fixed-height meta row, so toggling it causes no layout shift.
@@ -508,7 +574,7 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
 </div></div>
 
 <footer><div class="wrap">
-  <div>Rendered from workspace <span class="mono">viva-casebook</span> · investigation + study YAML and loop trajectories — every panel maps to a real field.</div>
+  <div>Rendered from workspace <span class="mono" id="foot-ws"></span> · deterministic from investigation + study YAML.</div>
   <div id="foot-prov" class="mono"></div>
 </div></footer>
 
@@ -712,10 +778,14 @@ function gateOf(s){ // pass / fail / planned / warn
   if(g==='fail'||g==='failed') return 'fail';
   // Not yet gated: a study the author marks Planned (or with no run at all) is
   // DESIGNED-not-run — a distinct state from an evaluated-but-open gate, so the
-  // report never paints a not-yet-run study as if it had passed.
+  // report never paints a not-yet-run study as if it had passed. Prefer the
+  // server's canonical execution_status (study_ontology) over guessing from the
+  // absence of runs.
+  const ex=String(s.execution_status||'').toLowerCase();
+  if(ex==='planned'||ex==='proposed') return 'planned';
   const c=(s.confidence||'').toLowerCase();
   if(c==='planned') return 'planned';
-  if(!s.gate_status && !(s.runs&&s.runs.length)) return 'planned';
+  if(!ex && !s.gate_status && !(s.runs&&s.runs.length)) return 'planned';
   return 'warn';
 }
 /* ---------- citation chips (provenance → References) ---------- */
@@ -996,6 +1066,20 @@ function fbBubble(key,label){ return `<button class="fbbubble ${FB[key]?'has':''
 function part(label, body, key, klabel){ if(!body) return '';
   return `<div class="substage fbsection">${key?fbBubble(key,klabel||label):''}<div class="slabel">${label}</div>${body}</div>`; }
 
+// Render a limitation / follow-up entry that may be a plain string OR a
+// single-key {title: detail} map (the authored shapes in study.yaml).
+function _debtText(x){
+  if(x==null) return '';
+  if(typeof x==='string') return mdLite(x);
+  if(typeof x==='object'){
+    const k=Object.keys(x);
+    if(k.length===1) return `<b>${esc(k[0])}</b> — ${mdLite(String(x[k[0]]))}`;
+    if(x.study||x.proposal||x.title) return `<b>${esc(x.study||x.title||'')}</b>${(x.proposal||x.rationale||x.reason)?' — '+mdLite(String(x.proposal||x.rationale||x.reason)):''}`;
+    return esc(JSON.stringify(x));
+  }
+  return esc(String(x));
+}
+
 // traceability anchor built via the prefix helper (assembled, not a hardcoded
 // href), so a finding's from_test resolves to its test-card anchor
 function _traceLink(prefix, name){ return '<a class="trace-link" href="#' + prefix + '-' + esc(name) + '">' + esc(name) + '</a>'; }
@@ -1254,6 +1338,21 @@ function renderStudy(s, inv, idx){
   }
   if(has(s.key_assumptions)) anchorsBody+=`<div class="kicker" style="margin:14px 0 4px">Key assumptions</div><ul class="assumptions">${s.key_assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
 
+  // LIMITATIONS & FOLLOW-UPS — the honest debts the study carries and what it
+  // opens up next. Both were authored into study.yaml (limitations[],
+  // discovery_implications{}) but never surfaced in the report before. Entries
+  // may be plain strings or single-key {title: detail} maps (_debtText handles both).
+  let debtsBody='';
+  if(has(s.limitations)) debtsBody+=`<div class="kicker" style="margin:0 0 4px">Limitations</div><ul class="assumptions">${s.limitations.map(l=>`<li>${_debtText(l)}</li>`).join('')}</ul>`;
+  const _di=s.discovery_implications;
+  if(_di && typeof _di==='object'){
+    const _addDi=(key,label)=>{ const v=_di[key]; if(Array.isArray(v)&&v.length) debtsBody+=`<div class="kicker" style="margin:12px 0 4px">${label}</div><ul class="assumptions">${v.map(x=>`<li>${_debtText(x)}</li>`).join('')}</ul>`; };
+    _addDi('resolved_uncertainties','Resolved uncertainties');
+    _addDi('new_uncertainties','New uncertainties');
+    _addDi('open_questions','Open questions');
+    _addDi('followup_study_proposals','Follow-up studies proposed');
+  }
+
   // card badge uses the SAME status derivation as the graph + ladder (workbench
   // _studyStatusMeta), so a running study reads "Investigating" everywhere.
   const sm=studyStatusMeta(s);
@@ -1277,6 +1376,7 @@ function renderStudy(s, inv, idx){
       ${part('Findings', findingsBody, 'study:'+s.slug+'/findings', s.title+' · Findings')}
       ${part('Provenance & anchors', anchorsBody, 'study:'+s.slug+'/provenance', s.title+' · Provenance')}
       ${part('Decision', decisionBody, 'study:'+s.slug+'/decision', s.title+' · Decision')}
+      ${part('Limitations & follow-ups', debtsBody, 'study:'+s.slug+'/debts', s.title+' · Limitations')}
       ${feedbackRow('study:'+s.slug, 'this whole study')}
     </div>
   </section>`;
@@ -1339,9 +1439,8 @@ function renderInvViz(inv){
   else if(MODE==='agentic'){ figs.push(['Agent vs policy — outcomes', vizOutcomeBar(inv)]); figs.push(['Final test outcomes', vizGateMatrix(inv)]); }
   else { figs.push(['Where the transitions are viable — passing vs failing regions', vizGateMatrix(inv)]); }
   const live=figs.filter(f=>f[1]); if(!live.length) return '';
-  const generic=MODE!=='sourcing'&&MODE!=='agentic';
-  return `<div id="inv-viz" class="fbsection">${fbBubble('figures','The viability landscape')}<div class="sec-h"><h2>${generic?'The viability landscape':'Investigation visualizations'}</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 6px">${generic?`A <b>map</b> of where the campaign's transitions are jointly possible — passing regions and <b>failure boundaries in the same visual language</b>, across all ${inv.studies.length} studies. The product is this landscape, not a single successful rock→cell trajectory.`:`The whole investigation in a few figures — the synthesis across all ${inv.studies.length} studies.`}</p>
+  return `<div id="inv-viz" class="fbsection">${fbBubble('figures','Investigation visualizations')}<div class="sec-h"><h2>Investigation visualizations</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 6px">The investigation across all ${inv.studies.length} studies — passing and failing regions in one visual language.</p>
     ${live.map(([t,svg])=>`<div style="margin:20px 0"><div class="kicker" style="margin-bottom:8px">${esc(t)}</div>${svg}</div>`).join('')}</div>`;
 }
 function roleLine(s,inv){
@@ -1375,7 +1474,7 @@ function renderAppendix(inv){
   return `<div class="appendix fbsection" id="appendix">
     ${fbBubble('appendix','Computational architecture (appendix)')}
     <div class="sec-h"><h2>Appendix — computational architecture</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:14px">The implementation substrate: the reusable Process-Bigraph modules and the capabilities each declares. This is the machinery the studies are built from; the science is in the sections above.</p>
+    <p class="measure" style="color:var(--ink-2);font-size:14px">The reusable Process-Bigraph modules the studies are built from, and the capabilities each declares.</p>
     <table class="cat-table"><thead><tr><th>Module</th><th>Declared capabilities</th></tr></thead><tbody>${rows}</tbody></table>
   </div>`;
 }
@@ -1415,7 +1514,7 @@ function renderReferences(inv){
   return `<div class="appendix fbsection" id="references">
     ${fbBubble('references','References')}
     <div class="sec-h"><h2>References</h2><span class="rule"></span></div>
-    <p style="color:var(--ink-2);font-size:14px;max-width:none">Every source the studies cite — the papers behind each acceptance band, finding and literature anchor. The citation chips throughout the report link here.</p>
+    <p style="color:var(--ink-2);font-size:14px;max-width:none">The papers behind each acceptance band, finding and literature anchor.</p>
     <div class="refs-list">${rows}</div>
   </div>`;
 }
@@ -1461,27 +1560,82 @@ function markBubble(key){ document.querySelectorAll('.fbbubble').forEach(b=>{ if
 
 /* ---------- TOC + scroll spy ---------- */
 function toc(inv){
-  const exv=inv.executive||{};
-  const front=[`<a href="#top" class="exec">${esc(inv.question?'Question':'Overview')}</a>`];
-  if(inv.biological_story || exv.what_is_this || inv.hypothesis) front.push('<a href="#background">The world</a>');
-  front.push('<a href="#findings">Findings</a>');
-  if(inv.spine) front.push('<a href="#spine-presentation">Graph</a>');
-  front.push('<a href="#inv-viz">Landscape</a>');
-  const items=front
-    .concat(inv.studies.map((s,i)=>`<a href="#s-${s.slug}" title="${esc(s.title)}">${i+1}. ${esc(shortTitle(s.title))}</a>`))
-    .concat(inv.glossary?['<a href="#glossary">Glossary</a>']:[])
-    .concat((inv.references&&Object.keys(inv.references).length)?['<a href="#references">References</a>']:[])
-    .concat(inv.catalog?['<a href="#appendix">Appendix</a>']:[]).join('');
-  return `<div class="subnav"><div class="wrap">${items}</div></div>`;
+  const exv=inv.executive||{}, syn=inv.synthesis||{};
+  // Lean, evidence-led main TOC. Context/front-matter (how-to-read, design
+  // background, ground rules, the key-figure gallery) now lives in the
+  // Supplement, reached via the single Supplement link.
+  const front=['<a href="#exec-summary" class="exec">Summary</a>'];
+  if(inv.spine) front.push('<a href="#spine-presentation">Map</a>');
+  if((syn.stages||[]).length) front.push('<a href="#integrated-findings">Findings</a>');
+  if((syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)) front.push('<a href="#synthesis-gaps">Synthesis &amp; gaps</a>');
+  if(((syn.validation||{}).items||[]).length!==undefined) front.push('<a href="#validation">Validation</a>');
+  if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
+  if((syn.studies_index||[]).length) front.push('<a href="#evidence-register">Register</a>');
+  if(inv.references&&Object.keys(inv.references).length) front.push('<a href="#references">References</a>');
+  front.push('<a href="#supplement">Supplement</a>');
+  // Full "Contents" jump menu — every part of the report, incl. supplement
+  // sub-sections and every member study, in one dropdown. The chip row above is
+  // the quick main-section nav; this reaches everything.
+  const sa=inv.scientific_argument||{};
+  const _ndl=(href,label)=>`<a class="nd-link" href="${href}">${label}</a>`;
+  const mainLinks=[
+    ['#exec-summary','Summary',true],
+    ['#spine-presentation','Investigation map',!!inv.spine],
+    ['#integrated-findings','Integrated findings',(syn.stages||[]).length],
+    ['#synthesis-gaps','Synthesis & gaps',(syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
+    ['#validation','Validation & reproducibility',((syn.validation||{}).items||[]).length!==undefined],
+    ['#claim-evidence','Claim–evidence map',(syn.claim_evidence||[]).length],
+    ['#evidence-register','Evidence register (all studies)',(syn.studies_index||[]).length],
+    ['#references','References',inv.references&&Object.keys(inv.references).length],
+  ].filter(x=>x[2]).map(x=>_ndl(x[0],x[1])).join('');
+  const suppFront=[
+    ['#how-to-read','How to read',!!inv.how_to_read],
+    ['#background','Design & background',!!(inv.biological_story||exv.what_is_this||inv.hypothesis)],
+    ['#hypothesis','Scientific argument',!!(sa.main_claim||(inv.key_claims||[]).length||(sa.evidence_for||[]).length)],
+    ['#ground-rules','Ground rules',!!((inv.guidelines||{}).architecture_principles)],
+    ['#evidence-basis','What counts as evidence',(inv.studies||[]).some(s=>Array.isArray(s.findings)&&s.findings.length)],
+    ['#key-figures','Key figures',(syn.figures_ranked||[]).length],
+    ['#inv-viz','Investigation visualizations',true],
+    ['#glossary','Glossary',true],
+    ['#appendix','Appendix',true],
+  ].filter(x=>x[2]).map(x=>_ndl(x[0],x[1])).join('');
+  const nStudies=(inv.studies||[]).length;
+  const studyLinks=(inv.studies||[]).map(s=>_ndl('#s-'+esc(s.slug), esc(s.title||s.slug))).join('');
+  const drawer=
+    '<div class="navdrawer-backdrop" id="navdrawer-backdrop" onclick="_closeContents()"></div>'+
+    '<aside class="navdrawer" id="navdrawer" aria-label="Report contents" aria-hidden="true">'+
+      '<div class="nd-head"><span>Contents</span><button type="button" class="nd-close" onclick="_closeContents()" aria-label="Close contents">✕</button></div>'+
+      '<nav class="nd-body">'+
+        `<div class="nd-grp">Main report</div>${mainLinks}`+
+        `<div class="nd-grp">Supplement</div>${suppFront}`+
+        `<button type="button" class="nd-studies-toggle" onclick="_toggleNdStudies(event)" aria-expanded="false">Studies <span class="nd-count">${nStudies}</span><span class="nd-caret">▸</span></button>`+
+        `<div class="nd-studies" id="nd-studies" hidden>${studyLinks}</div>`+
+      '</nav>'+
+    '</aside>';
+  const menu=`<div class="navmenu"><button type="button" class="navmenu-btn" onclick="_toggleContents(event)" aria-haspopup="true" aria-expanded="false">☰ Contents</button></div>`;
+  return `<div class="subnav"><div class="wrap">${menu}${front.join('')}</div></div>`+drawer;
 }
+function _toggleContents(e){ if(e){e.stopPropagation();}
+  const d=document.getElementById('navdrawer'), b=document.getElementById('navdrawer-backdrop'), btn=document.querySelector('.navmenu-btn');
+  const open=!!(d&&d.classList.contains('open'));
+  if(d){ d.classList.toggle('open', !open); d.setAttribute('aria-hidden', String(open)); }
+  if(b) b.classList.toggle('open', !open);
+  if(btn) btn.setAttribute('aria-expanded', String(!open));
+}
+function _closeContents(){ const d=document.getElementById('navdrawer'), b=document.getElementById('navdrawer-backdrop'), btn=document.querySelector('.navmenu-btn');
+  if(d){ d.classList.remove('open'); d.setAttribute('aria-hidden','true'); } if(b) b.classList.remove('open'); if(btn) btn.setAttribute('aria-expanded','false'); }
+function _toggleNdStudies(e){ if(e){e.stopPropagation();} const t=e&&e.currentTarget, el=document.getElementById('nd-studies');
+  if(!el) return; const willOpen=el.hidden; el.hidden=!willOpen; if(t) t.setAttribute('aria-expanded', String(willOpen)); }
+document.addEventListener('click', e=>{ if(e.target.closest('.navdrawer a.nd-link')) _closeContents(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') _closeContents(); });
 function shortTitle(t){ return t.length>22?t.slice(0,21)+'…':t; }
 function spy(){
-  const links=[...document.querySelectorAll('.subnav a')];
+  const links=[...document.querySelectorAll('.subnav .wrap > a')];   // chip row only, not the Contents panel
   const map={}; links.forEach(l=>map[l.getAttribute('href').slice(1)]=l);
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('.card,#top,#background,#findings,#spine-presentation,#inv-viz,#glossary,#appendix,#references').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('#exec-summary,#spine-presentation,#integrated-findings,#synthesis-gaps,#validation,#claim-evidence,#evidence-register,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -1537,13 +1691,13 @@ function renderSpine(inv){
   // stays beneath it.
   const graph=workbenchDag(inv);
   const mx=sp?_acGatingMatrixHtml(sp):'';
-  const strip=autonomyStrip(inv);
-  if(!graph && !mx && !strip) return '';
+  if(!graph && !mx) return '';
   return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Investigation graph & acceptance')}
     <div class="sec-h"><h2>The investigation graph</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">The campaign as a dependency graph — each study a node badged with its code-computed status, wired to the studies it builds on. This is the same graph as the workbench's Investigation view, transformed for a static report.</p>
-    ${graph}${strip}
-    ${mx?`<div style="margin-top:22px">${mx}</div>`:''}</div>`;
+    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">The campaign as a dependency graph — each study a node badged with its code-computed status, wired to the studies it builds on.</p>
+    ${graph}
+    ${mx?`<div style="margin-top:22px">${mx}</div>`:''}
+    ${authoredAcList(inv)}</div>`;
 }
 
 /* ---------- interactive (Plotly) figures — LAZY, visibility-driven ----------
@@ -1613,6 +1767,67 @@ function setupLazyPlotly(){
   // Anchored deep-link (opening the report at #s-<slug>): render after layout.
   try{ setTimeout(sweep,120); }catch(e){}
 }
+
+// Print / PDF preparation — called by the server-side PDF renderer (Playwright).
+// Expands every study card and force-renders all lazy Plotly figures + looms so
+// nothing is collapsed or blank in the static PDF, then resolves once they've had
+// a few frames to draw. Safe no-op if called in a normal browser.
+window.__reportPrintPrep = function(){
+  return new Promise(resolve=>{
+    // Open main-report details (e.g. the report-readiness block) but LEAVE THE
+    // TECHNICAL SUPPLEMENT COLLAPSED — the PDF is the evidence-led main report
+    // (8–15 pp), not the full 37-study supplement (which inflated it to 150+ pp).
+    try{ document.querySelectorAll('details').forEach(d=>{ if(d.id!=='supplement' && !d.closest('#supplement')) d.open=true; }); }catch(e){}
+    try{ document.querySelectorAll('.card').forEach(c=>{ if(!c.closest('#supplement')) c.classList.remove('collapsed'); }); }catch(e){}
+    try{ setupLazyPlotly(); }catch(e){}
+    try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
+    // Re-fit every Plotly figure to its container (page) width. The saved figures
+    // carry a fixed layout.width wider than an A4 page, so without this they spill
+    // past the page edge and get clipped by the holder's overflow. relayout to the
+    // holder width shrinks the whole (multi-panel) figure to fit, nothing cut off.
+    try{
+      if(window.Plotly && Plotly.relayout){
+        // Fit each figure to its holder width. The PDF renderer uses an A4-width
+        // viewport (see render_report_pdf), so the holder width measured here is
+        // the real printed width — the saved figures carry a wider fixed layout
+        // width, so without this they overflow the page and get clipped.
+        document.querySelectorAll('figure.embedded-plotly .plotly-graph-div, figure.embedded-plotly .js-plotly-plot').forEach(gd=>{
+          try{
+            const holder=gd.closest('.plotly-holder')||gd.parentElement;
+            const w=Math.max(220, ((holder&&holder.clientWidth)||680)-14);
+            Plotly.relayout(gd,{width:w, autosize:false});
+          }catch(e){}
+        });
+      }
+    }catch(e){}
+    try{ setupInteractiveLooms(); }catch(e){}
+    try{ setupRealLooms(); }catch(e){}
+    // Investigation graph: lay it out TOP-TO-BOTTOM and scale to fit the page
+    // width, so the PDF shows the whole DAG instead of a cut-off left-to-right
+    // strip (the on-screen graph stays left-to-right + interactive).
+    try{
+      window.__dagPrint=true;   // keep the deferred relayouts from reverting to left-to-right
+      const shell=document.querySelector('.wdag-shell'), canvas=document.getElementById('wdag-canvas');
+      if(shell) shell.classList.add('dag-compact');   // lowest semantic zoom: title + status only
+      if(window.__relayoutDag) window.__relayoutDag(true, true);   // vertical + compact
+      if(shell&&canvas){
+        const cw=parseFloat(canvas.style.width)||canvas.scrollWidth||1;
+        const k=Math.min(1, 700/cw);   // 700px ≈ A4 content width at the PDF's margins
+        // Use CSS `zoom` (not transform): it REFLOWS, so the scaled graph occupies
+        // its true height and flows naturally ACROSS PAGES — the whole graph shows
+        // at a larger, legible font instead of being squeezed onto one page.
+        canvas.style.transform='';
+        canvas.style.zoom=k;
+        shell.style.overflow='visible';
+        shell.style.maxHeight='none';   // the shell is capped at 620px on screen
+        shell.style.height='auto';
+        shell.style.breakInside=''; shell.style.pageBreakInside='';
+      }
+    }catch(e){}
+    let n=0; const tick=()=>{ if(++n<5){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { setTimeout(resolve,700); } };
+    try{ requestAnimationFrame(tick); }catch(e){ setTimeout(resolve,700); }
+  });
+};
 
 /* ---------- interactive loom: hover / tooltip / expand / pan-zoom ---------- */
 function _iloomHi(id,kind,name){
@@ -1706,7 +1921,9 @@ function studyStatusState(s){
   if(gate==='failed'||gate==='failed_evaluation'||gate==='refuted') return 'Refuted';
   if(gate==='blocked') return 'Blocked';
   if(gate==='partial'||gate==='needs_calibration'||gate==='in_progress') return 'Investigating';
-  const life=String(s.effective_status||s.status||'').trim().toLowerCase();
+  // Canonical execution_status (study_ontology) first — the same run-state the
+  // live graph uses — then the report's legacy effective_status/status fallback.
+  const life=String(s.execution_status||s.effective_status||s.status||'').trim().toLowerCase();
   if(life.indexOf('blocked')!==-1) return 'Blocked';
   if(life.indexOf('fail')!==-1||life==='invalid'||life==='refuted') return 'Refuted';
   const conf=String(s.confidence||'').trim();
@@ -1813,21 +2030,441 @@ function simulatedWorld(inv){
     <div class="prose">${bits.map(b=>`<p>${mdLite(b)}</p>`).join('')}</div></div>`;
 }
 function evidenceFraming(inv){
-  // What counts as evidence: a passed gate means the modeled mechanism works
-  // under stated assumptions — NOT that the historical transition occurred.
+  // The evidentiary-tier legend — a real key for the tier chips on findings.
+  // The former hardcoded "viability landscape" paragraph (origins-of-life
+  // specific, no data input) was removed as boilerplate. Renders nothing when no
+  // study carries findings, so a report without tiered evidence stays clean.
   const anyTier=(inv.studies||[]).some(s=>Array.isArray(s.findings)&&s.findings.length);
+  if(!anyTier) return '';
   return `<div class="narr" id="evidence-basis">
     <div class="sec-h"><h2>What counts as evidence</h2><span class="rule"></span></div>
-    <div class="evnote"><div class="prose">
-      Each stage is an independently falsifiable nonequilibrium transition a simulation can
-      <b>pass or fail</b>. A passed gate means the <b>modeled mechanism works under the stated
-      assumptions</b> — it is <b>not</b> a claim that the historical transition occurred, only that
-      it is physically admissible in the model. The product is a <b>viability landscape</b>:
-      a map of where the transitions are jointly possible, with failure boundaries treated as
-      first-class results.
-    </div></div>
-    ${anyTier?`<p class="measure" style="color:var(--ink-2);font-size:14px;margin:12px 0 2px">Findings and mechanisms carry an evidentiary tier:</p>${etierLegend()}`:''}
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 2px">Each study's findings and mechanisms carry an evidentiary tier:</p>${etierLegend()}
   </div>`;
+}
+
+/* ====================== PLAN LADDER (honest gate statuses) ====================== */
+// The cumulative A→E gate ladder, computed exactly as the live investigation
+// overview (met / qualified / refuted / off-spine branch). Leads the results so
+// the reader sees where the campaign stands against its own plan before the
+// detailed findings. Renders nothing when the investigation declares no plan_gates.
+function planLadder(inv){
+  const rows=(inv.spine&&inv.spine.plan_board)||[];
+  if(!rows.length) return '';
+  const meta={passed:['passed','#065f46','#d1fae5'],met:['met','#065f46','#d1fae5'],
+    qualified:['qualified','#92400e','#fef3c7'],refuted:['refuted','#991b1b','#fee2e2'],
+    in_progress:['in progress','#92400e','#fef3c7'],blocked:['blocked','#991b1b','#fee2e2'],
+    pending:['pending','#475569','#f1f5f9']};
+  const chips=rows.map(g=>{
+    const m=meta[g.status]||meta.pending;
+    const bits=[];
+    const nm=(g.member_studies||[]).length; if(nm) bits.push(nm+' stud'+(nm===1?'y':'ies'));
+    const np=(g.pending_studies||[]).length; if(np) bits.push(np+' planned');
+    return `<div style="flex:1 1 160px;min-width:150px;border:1px solid var(--line);border-top:3px solid ${m[1]};border-radius:8px;padding:9px 11px;background:var(--surface)">
+      <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+        <span class="mono" style="font-weight:800">${esc(String(g.id||''))}</span>
+        <span style="font-size:13px;font-weight:600;color:var(--ink)">${esc(g.name||'')}</span>
+        ${g.off_spine?`<span style="font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em">branch</span>`:''}
+        ${g.optional?`<span style="font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em">optional</span>`:''}
+      </div>
+      <div style="display:inline-block;margin-top:6px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 8px;border-radius:9999px;color:${m[1]};background:${m[2]}">${esc(m[0])}</div>
+      ${bits.length?`<div style="font-size:11px;color:var(--ink-3);margin-top:5px">${esc(bits.join(' · '))}</div>`:''}
+      ${g.criterion?`<div class="measure" style="font-size:11.5px;color:var(--ink-2);margin-top:5px;line-height:1.4">${esc(String(g.criterion).replace(/\s+/g,' ').trim())}</div>`:''}
+    </div>`;
+  }).join('');
+  return `<div class="narr" id="plan-ladder">
+    <div class="sec-h"><h2>Where the campaign stands</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 10px">The cumulative gate ladder — each gate's honest status, derived from its member studies' verdicts.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${chips}</div>
+  </div>`;
+}
+
+/* ====================== AUTHORED NARRATIVE FIELDS (were dropped before) ====================== */
+function _titleOf(inv,slug){ const s=(inv.studies||[]).find(x=>x.slug===slug); return s?s.title:slug; }
+
+// "How to read" — evaluator orientation note (string prose or a list of tips).
+function howToReadBlock(inv){
+  const h=inv.how_to_read; if(!h) return '';
+  const body=Array.isArray(h)
+    ? `<ol class="assumptions">${h.map(x=>`<li>${mdLite(String((x&&(x.text||x.tip))||x))}</li>`).join('')}</ol>`
+    : `<div class="prose">${mdLite(String(h))}</div>`;
+  return `<div class="narr" id="how-to-read"><div class="sec-h"><h2>How to read this report</h2><span class="rule"></span></div>${body}</div>`;
+}
+
+// "Studies at a glance" — the authored one-line role of each study (at_a_glance[]).
+function glanceBlock(inv){
+  const g=inv.at_a_glance; if(!Array.isArray(g)||!g.length) return '';
+  const rows=g.map(e=>{
+    const slug=(e&&(e.study||e.slug))||''; const role=(e&&(e.role||e.summary))||(typeof e==='string'?e:'');
+    return `<div style="display:grid;grid-template-columns:minmax(120px,0.9fr) 2.3fr;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)">
+      <div style="font-weight:600;color:var(--ink);font-size:13px">${esc(_titleOf(inv,slug))}</div>
+      <div class="measure" style="color:var(--ink-2);font-size:13px;line-height:1.45">${esc(role)}</div></div>`;
+  }).join('');
+  return `<div class="narr" id="at-a-glance"><div class="sec-h"><h2>Studies at a glance</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 8px">What each study contributes, in one line.</p>
+    <div>${rows}</div></div>`;
+}
+
+// "Ground rules" — the campaign-wide architecture principles every study respects
+// (guidelines.architecture_principles only; the rest of guidelines is internal
+// build-plan material that would add clutter, so it stays out of the report).
+function groundRules(inv){
+  const g=inv.guidelines; if(!g||typeof g!=='object') return '';
+  const ap=g.architecture_principles; if(!Array.isArray(ap)||!ap.length) return '';
+  return `<div class="narr" id="ground-rules"><div class="sec-h"><h2>Ground rules</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">The principles every study in the campaign respects.</p>
+    <ul class="assumptions">${ap.map(p=>`<li>${mdLite(String(p))}</li>`).join('')}</ul></div>`;
+}
+
+// "Open decisions" — the expert calls the campaign still needs (executive.decisions_needed).
+function decisionsBlock(inv){
+  const ex=inv.executive||{}; const dn=ex.decisions_needed;
+  if(!Array.isArray(dn)||!dn.length) return '';
+  const items=dn.map(d=>{
+    const q=(typeof d==='string')?d:(d.question||d.title||'');
+    const ctx=(typeof d==='string')?'':(d.context||d.detail||'');
+    return `<li style="margin-top:10px"><div style="font-weight:600;color:var(--ink);line-height:1.5">${esc(q)}</div>${ctx?`<div class="measure" style="color:var(--ink-2);font-size:13px;line-height:1.5;margin-top:3px">${mdLite(ctx)}</div>`:''}</li>`;
+  }).join('');
+  return `<div class="narr" id="open-decisions"><div class="sec-h"><h2>Open decisions</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">Expert calls the campaign still needs — ${dn.length} open.</p>
+    <ol style="list-style:decimal;padding-left:22px;margin:0">${items}</ol></div>`;
+}
+
+// Authored acceptance criteria (behavior → gating study), shown beside the
+// computed AC matrix in the spine section.
+function authoredAcList(inv){
+  const ac=inv.acceptance_criteria; if(!Array.isArray(ac)||!ac.length) return '';
+  const rows=ac.map(c=>{
+    const b=(c&&(c.behavior||c.criterion||c.name))||(typeof c==='string'?c:'');
+    const st=(c&&(c.study||c.slug))||'';
+    return `<div style="display:grid;grid-template-columns:2fr 1.4fr;gap:12px;padding:4px 0;border-bottom:1px solid var(--line);font-size:12.5px">
+      <div class="mono" style="color:var(--ink)">${esc(b)}</div><div style="color:var(--ink-2)">${esc(_titleOf(inv,st))}</div></div>`;
+  }).join('');
+  return `<div style="margin-top:22px"><div class="kicker" style="margin-bottom:6px">Acceptance criteria (authored)</div>
+    <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:0 0 6px">Each criterion and the study that gates it.</p>
+    <div>${rows}</div></div>`;
+}
+
+/* ====================== FINDING-FIRST SYNTHESIS (upgrade) ====================== */
+// All sections below render the deterministic cross-study synthesis assembled
+// server-side in lib.investigation_report._build_synthesis (inv.synthesis). No
+// invented prose — every line composes authored claims/findings/verdicts/edges.
+function _gradeStyle(g){
+  return ({supported:['supported','#065f46','#d1fae5'],met:['met','#065f46','#d1fae5'],
+    qualified:['qualified','#92400e','#fef3c7'],conditional:['conditional','#92400e','#fef3c7'],
+    refuted:['refuted','#991b1b','#fee2e2'],unsupported:['unsupported','#991b1b','#fee2e2'],
+    contested:['contested','#991b1b','#fee2e2'],pending:['pending','#475569','#eef2f7'],
+    inconclusive:['inconclusive','#475569','#eef2f7']})[g] || [String(g||'—'),'#475569','#eef2f7'];
+}
+function _gradeChip(g){ const m=_gradeStyle(g);
+  return `<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 7px;border-radius:9999px;color:${m[1]};background:${m[2]}">${esc(m[0])}</span>`; }
+function _studyLink(slug,title){ return `<a href="#s-${esc(slug)}" style="color:var(--accent);text-decoration:none" title="${esc(title||slug)}">${esc(title||slug)}</a>`; }
+
+/* ---- Figure-first helpers: bring the real figures UP into the main report.
+   A study's figures live on inv.studies[].figures_embedded[]
+   ({name, data_uri (raster) | html (+interactive=Plotly) | skipped}). We resolve
+   a renderable one and embed it beside the finding it supports — not just name it.
+   An interactive (Plotly) figure also appears in the supplement study card, so we
+   rewrite its plot id on the main copy to avoid a duplicate-id collision. */
+const _FIG_USED=new Set();   // (slug|name) already shown — don't repeat hero in a stage
+let   _FIG_BUDGET=7;         // stage figures beyond the hero; the rest stay in the supplement
+let   _FIG_UID=0;
+function _figResolve(inv, slug, name){
+  const st=(inv.studies||[]).find(x=>x.slug===slug); if(!st) return null;
+  const imgs=(st.figures_embedded||[]).filter(i=>(i.data_uri||i.html) && !i.skipped);
+  let im = name ? imgs.find(i=>i.name===name) : null;
+  if(!im) im = imgs.find(i=>i.data_uri && !_FIG_USED.has(slug+'|'+i.name))
+            || imgs.find(i=>!_FIG_USED.has(slug+'|'+i.name)) || null;
+  return im;
+}
+function _uniquePlotly(html){
+  const m=String(html||'').match(/Plotly\.newPlot\(\s*["']([^"']+)["']/);
+  if(!m) return html; const id=m[1]; if(!id) return html;
+  return String(html).split(id).join(id+'-m'+(_FIG_UID++));   // ids are hashes/UUIDs → safe split
+}
+function _figMarkup(im, slug, caption, hero){
+  if(!im) return ''; _FIG_USED.add(slug+'|'+im.name);
+  let body='', cls='main-fig';
+  if(im.data_uri)
+    body=`<img src="${im.data_uri}" alt="${esc(im.name||'')}" loading="lazy" style="width:100%;display:block;border:1px solid var(--line);border-radius:8px">`;
+  else if(im.html && im.interactive){ cls='main-fig embedded-viz embedded-plotly';
+    body=`<div class="plotly-holder">${_uniquePlotly(im.html)}</div>`; }
+  else if(im.html)
+    body=`<iframe class="viz-frame" srcdoc="${esc(im.html)}" loading="lazy" style="width:100%;border:1px solid var(--line);border-radius:8px;min-height:${hero?'420px':'300px'}" onload="try{this.style.height=(this.contentWindow.document.documentElement.scrollHeight+8)+'px';}catch(e){}"></iframe>`;
+  if(!body) return '';
+  const nm=(im.name)?`<b>${esc(im.name)}.</b> `:'';
+  const cap=(caption||im.name)?`<figcaption class="measure" style="font-size:11.5px;color:var(--ink-2);line-height:1.45;margin-top:5px">${nm}${caption||''}</figcaption>`:'';
+  const fb=(typeof fbBubble==='function')?fbBubble('fig:'+slug+':'+(im.name||''), 'Figure — '+(im.name||slug)):'';
+  return `<figure class="${cls} fbsection" style="margin:${hero?'12px 0 4px':'8px 0 2px'}">${fb}${body}${cap}</figure>`;
+}
+// The hero figure for the opening — the top-ranked figure, embedded in full.
+function heroFigure(inv){
+  const fr=(inv.synthesis||{}).figures_ranked||[]; if(!fr.length) return '';
+  for(const top of fr){ const im=_figResolve(inv, top.slug, top.name); if(im){
+    const cap=`${top.caption?esc(String(top.caption).slice(0,220)):''} <span style="color:var(--ink-3)">— ${_studyLink(top.slug,top.study_title)}</span>`;
+    return _figMarkup(im, top.slug, cap, true);
+  } }
+  return '';
+}
+// Best figure for one finding-cluster/stage, embedded beside its findings.
+// Budgeted: the first few principal stages get a figure in the main report; the
+// rest are a link away in the supplement, keeping the main presentation-sized.
+function stageFigure(inv, st){
+  if(_FIG_BUDGET<=0) return '';
+  for(const m of (st.studies||[])){ const im=_figResolve(inv, m.slug); if(im){
+    _FIG_BUDGET--; return _figMarkup(im, m.slug, `<span style="color:var(--ink-3)">— ${esc(m.title||m.slug)}</span>`, false);
+  } }
+  return '';
+}
+// Scientific limitation/caveat for a study — the authored `limitations` field
+// (34/39 studies), falling back to conclusion_logic / key_assumptions. This is
+// the SCIENCE caveat (what the model doesn't capture), DISTINCT from the audit /
+// publication-readiness signals shown in the Validation section.
+function _limitationFor(inv, slug){
+  const st=(inv.studies||[]).find(x=>x.slug===slug); if(!st) return '';
+  const pick=v=>Array.isArray(v)?String(v[0]||'').trim():(typeof v==='string'?v.trim():'');
+  return pick(st.limitations) || pick(st.conclusion_logic) || pick(st.key_assumptions) || '';
+}
+// Framing for a finding block: the driving question + the model/simulator methods
+// of its lead study (the spec's "compact evidence panel" header).
+function _studyFraming(inv, slug){
+  const s=(inv.studies||[]).find(x=>x.slug===slug); if(!s) return null;
+  const q=String(s.question||'').replace(/\s+/g,' ').trim();
+  const m=Array.isArray(s.methods)?s.methods.slice(0,3).map(x=>String(x).trim()).filter(Boolean).join(' · ')
+         :(typeof s.methods==='string'?s.methods.trim():'');
+  return {question:q, methods:m, fidelity:String(s.fidelity||'').trim()};
+}
+// The lead study's limitation for a finding-cluster/stage (first with one).
+function stageLimitation(inv, st){
+  for(const m of (st.studies||[])){ const l=_limitationFor(inv, m.slug); if(l)
+    return `<div class="measure" style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin:8px 0 0;padding-left:10px;border-left:3px solid var(--line-2)"><b style="color:var(--ink)">Limitation.</b> ${esc(l)} <span style="font-size:11px;color:var(--ink-3)">— ${_studyLink(m.slug,m.title)}</span></div>`;
+  }
+  return '';
+}
+
+// 1. EXECUTIVE SUMMARY — question, current verdict, the honest gate ladder, and
+// the run-status / evidence / claim separation (a passed gate ≠ a proven mechanism).
+// First n sentences of a block of prose (deterministic — no rewriting).
+function _leadText(text, n){
+  const t=String(text||'').replace(/\s+/g,' ').trim(); if(!t) return {lead:'', rest:''};
+  const parts=t.match(/[^.!?]+[.!?]+(\s|$)/g);
+  if(!parts||parts.length<=(n||3)) return {lead:t, rest:''};
+  const lead=parts.slice(0,n||3).join('').trim();
+  return {lead, rest:t.slice(lead.length).trim()};
+}
+// OPENING SYNTHESIS (plan §1): question → concise saved conclusion → milestone
+// outcomes → one hero figure. The full verdict prose is kept in a collapsible so
+// the opening reads in a glance instead of a wall of text.
+function execSummary(inv){
+  const syn=inv.synthesis||{}, c=syn.counts||{}, ex=inv.executive||{};
+  const q=(inv.question||'').replace(/\s+/g,' ').trim();
+  const verdict=(ex.verdict||'').trim();
+  const {lead, rest}=_leadText(verdict, 3);
+  const gl=(syn.headline||[]).map(h=>{ const g=(h.status==='met')?'supported':h.status;
+    return `<span style="display:inline-flex;gap:5px;align-items:center;margin:0 12px 7px 0;font-size:12.5px">`+
+      `<span class="mono" style="font-weight:800">${esc(h.id||'')}</span> ${esc(h.name||'')} ${_gradeChip(g)}</span>`; }).join('');
+  return `<div class="narr fbsection" id="exec-summary">${fbBubble('summary','Executive summary')}
+    <div class="sec-h"><h2>Executive summary</h2><span class="rule"></span></div>
+    ${q?`<p class="prose" style="font-size:16px;margin:2px 0 8px"><b>Question.</b> ${esc(q)}</p>`:''}
+    ${lead?`<div class="prose" style="font-size:15.5px">${mdLite(lead)}</div>`:''}
+    ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Milestone outcomes</div><div>${gl}</div></div>`:''}
+    ${heroFigure(inv)}
+    <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:12px 0 0;line-height:1.5">
+      Across <b>${c.total||0}</b> studies — <b>${c.supported||0}</b> supported · <b>${c.qualified||0}</b> qualified · <b>${c.refuted||0}</b> refuted · <b>${c.planned||0}</b> planned.
+      <i>Supported</i> = a computational gate passed under the stated model assumptions (evidence of feasibility, not proof the transition occurred).</p>
+    ${rest?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:650;color:var(--accent)">Full synthesis</summary><div class="prose" style="margin-top:6px">${mdLite(rest)}</div></details>`:''}
+  </div>`;
+}
+
+// 3. INTEGRATED FINDINGS — grouped by scientific stage (not one chapter per study),
+// with each stage's key quantitative findings and an explicit model-dependence flag.
+function integratedFindings(inv){
+  const sts=(inv.synthesis||{}).stages||[]; if(!sts.length) return '';
+  const edges=((inv.synthesis||{}).continuity||{}).edges||[];
+  const blocks=sts.map((st,i)=>{
+    const studyChips=(st.studies||[]).map(m=>`<span style="display:inline-flex;gap:5px;align-items:center;margin:0 10px 5px 0;font-size:12px">${_studyLink(m.slug,m.title)} ${_gradeChip(m.grade)}${m.variant?' <span style="font-size:10px;color:var(--ink-3)">alt</span>':''}</span>`).join('');
+    const md=st.model_dependence?`<div class="evnote" style="margin:8px 0"><b>Model dependence.</b> This result holds in one model class but not another at matched conditions — reported as model dependence, not two independent outcomes.</div>`:'';
+    const finds=(st.findings||[]).filter(f=>f.statement).slice(0,5).map(f=>{
+      const obs=f.observed?` <span class="mono" style="color:var(--ink-2)">[${esc(f.observed)}${f.units?' '+esc(f.units):''}]</span>`:'';
+      const sIcon=(String(f.status||'').toLowerCase()==='contradicts'||String(f.status||'').toLowerCase()==='refutes')?'✗ ':(String(f.status||'').toLowerCase()==='confirms'?'✓ ':'');
+      return `<li style="margin-top:5px">${sIcon}${esc(f.statement)}${obs} <span style="color:var(--ink-3);font-size:11px">— ${_studyLink(f.study,f.title)}</span></li>`;
+    }).join('');
+    // Framing header: the finding's driving question + how it was computed (lead study).
+    const lead=(st.studies||[])[0]; const fr=_studyFraming(inv, lead&&lead.slug);
+    const frame=fr?`${fr.question?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);margin:5px 0 0"><b style="color:var(--ink)">Question.</b> ${esc(fr.question)}</div>`:''}${fr.methods?`<div class="measure" style="font-size:12px;color:var(--ink-3);margin:2px 0 0"><b style="color:var(--ink-2)">Methods.</b> ${esc(fr.methods)}${fr.fidelity?` <span style="font-size:10px;text-transform:uppercase;letter-spacing:.03em">· ${esc(fr.fidelity)} simulators</span>`:''}</div>`:''}`:'';
+    // Narrative transition — only when a real dependency edge connects this stage to
+    // the next (never inferred from titles): keeps the findings reading as a chain.
+    let trans=''; const next=sts[i+1];
+    if(next){ const mine=new Set((st.studies||[]).map(m=>m.slug)), nx=new Set((next.studies||[]).map(m=>m.slug));
+      if(edges.some(e=>mine.has(e.from)&&nx.has(e.to)))
+        trans=`<div class="measure" style="font-size:12px;color:var(--ink-3);font-style:italic;margin:12px 0 0">↓ builds toward <a href="#stage-${esc(next.key)}" style="color:var(--accent);font-style:normal">${esc(next.label)}</a></div>`;
+    }
+    return `<div class="fbsection" style="margin:22px 0 0" id="stage-${esc(st.key)}">${fbBubble('stage:'+st.key, 'Finding — '+(st.label||st.key))}
+      <h3 style="font-size:16px;margin:0 0 2px">${esc(st.label)}</h3>
+      <div style="margin:4px 0 2px">${studyChips}</div>
+      ${frame}${md}
+      ${stageFigure(inv, st)}
+      ${finds?`<ul style="list-style:none;padding:0;margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink)">${finds}</ul>`:''}
+      ${stageLimitation(inv, st)}
+      ${trans}</div>`;
+  }).join('');
+  return `<div class="narr fbsection" id="integrated-findings">${fbBubble('findings','Integrated findings')}
+    <div class="sec-h"><h2>Integrated findings</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">The campaign's results as a chain of findings. Each is framed by the question it tests and how it was computed, led by its figure, then its result and the limitation that bounds it; dependency links carry the narrative from one finding to the next.</p>
+    ${blocks}</div>`;
+}
+
+// CROSS-STUDY QUANTITATIVE — comparable measured values pulled from findings.
+function quantitativeSynthesis(inv){
+  const qs=(inv.synthesis||{}).quantitative||[]; if(!qs.length) return '';
+  const rows=qs.map(g=>{
+    const r=(g.rows||[]).map(x=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:5px 12px 5px 0;color:var(--ink);vertical-align:top;font-size:12px;overflow-wrap:anywhere">${_studyLink(x.study,_titleOf(inv,x.study))}</td><td style="padding:5px 12px 5px 0;color:var(--ink-2);vertical-align:top;line-height:1.45">${esc(x.statement)}</td><td class="mono" style="padding:5px 0;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;font-size:11px">${esc(x.observed||'')}${x.units?' '+esc(x.units):''}</td></tr>`).join('');
+    return `<div style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">${esc(g.stage)}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed">
+        <colgroup><col style="width:22%"><col style="width:44%"><col style="width:34%"></colgroup>${r}</table></div>`;
+  }).join('');
+  return `<div class="narr fbsection" id="quantitative">${fbBubble('quantitative','Quantitative synthesis')}
+    <div class="sec-h"><h2>Cross-study quantitative synthesis</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Measured values reported across studies, with units. Values from different feeds/model classes are not directly comparable — read each with its study's conditions.</p>
+    ${rows}</div>`;
+}
+
+// 4. CONTRADICTIONS & UNCERTAINTY — model disagreement, negative results, finding
+// conflicts, competing frameworks, and the causal-continuity note (external feeds).
+function contradictionsSection(inv){
+  const syn=inv.synthesis||{}; const cs=syn.contradictions||[]; const cont=syn.continuity||{};
+  if(!cs.length && !(cont.external_inputs||[]).length) return '';
+  const kindLabel={ 'model-dependence':'Model dependence','negative-result':'Negative result','finding-conflict':'Finding conflict','competing-framework':'Competing framework' };
+  const items=cs.map(c=>{
+    const studies=(c.studies||[]).map(s=>`${_studyLink(s.slug,s.title)} ${_gradeChip(s.grade)}`).join(' · ');
+    const disc=c.discriminating?`<div style="font-size:12px;color:var(--ink-2);margin-top:3px"><b>Discriminating next study:</b> ${esc(typeof c.discriminating==='string'?c.discriminating:(c.discriminating.study||c.discriminating.title||''))}</div>`:'';
+    return `<li style="margin-top:10px;padding-left:12px;border-left:3px solid var(--line)">
+      <div style="font-weight:600;color:var(--ink)"><span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-3)">${esc(kindLabel[c.kind]||c.kind)}</span> — ${esc(c.topic||'')}</div>
+      ${c.detail?`<div class="measure" style="font-size:13px;color:var(--ink-2);line-height:1.5;margin-top:2px">${esc(c.detail)}</div>`:''}
+      ${studies?`<div style="font-size:12px;margin-top:3px">${studies}</div>`:''}${disc}</li>`;
+  }).join('');
+  const ext=(cont.external_inputs||[]);
+  const extBlock=ext.length?`<div style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Causal continuity</div>
+    <p class="measure" style="font-size:12.5px;color:var(--ink-2);margin:0 0 4px">These studies take their inputs from outside the chain (a supplied feed or reset state) rather than from an upstream study's output — so their result does not yet rest on a modeled upstream mechanism:</p>
+    <div style="font-size:12.5px">${ext.map(e=>_studyLink(e.slug,e.title)).join(' · ')}</div></div>`:'';
+  return `<div class="narr fbsection" id="contradictions">${fbBubble('contradictions','Contradictions & uncertainty')}
+    <div class="sec-h"><h2>Contradictions &amp; uncertainty</h2><span class="rule"></span></div>
+    ${items?`<ul style="list-style:none;padding:0;margin:4px 0 0">${items}</ul>`:''}${extBlock}</div>`;
+}
+
+// VALIDATION & REPRODUCIBILITY — reuses the existing deterministic needs-attention
+// scan (invariant/conservation regressions, verdict divergence, reproducibility,
+// param drift, phantom observables, AC coverage). No new checker; code-computed.
+function validationSection(inv){
+  const v=(inv.synthesis||{}).validation||{}; const items=v.items||[];
+  const total=(v.summary&&v.summary.total)||items.length;
+  const KM={diagnostic_branch_needed:'Diagnostic study needed',verdict_divergence:'Verdict divergence (computed ≠ authored)',
+    invariant_regression:'Invariant / conservation regression',phantom_observable:'Phantom observable (declared but absent in the built composite)',
+    env_stale:'Stale run environment',nondeterministic:'Non-reproducible run (fingerprint changed)',param_drift:'Parameter drift (applied ≠ pinned)',
+    stale_finding:'Stale finding',uncovered_ac:'Uncovered acceptance criterion',next_action_ready:'Next action ready'};
+  const sev={high:'#991b1b',medium:'#92400e',low:'#475569'};
+  const rows=items.map(it=>{ const sc=sev[it.severity]||'#475569';
+    return `<li style="margin-top:7px;padding-left:10px;border-left:3px solid ${sc}"><b>${esc(KM[it.kind]||String(it.kind||'').replace(/_/g,' '))}</b>${it.ref?` <span class="mono" style="font-size:11px;color:var(--ink-3)">${esc(it.ref)}</span>`:''}${it.title?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin-top:1px">${esc(it.title)}</div>`:''}</li>`; }).join('');
+  const body=total?`<ul style="list-style:none;padding:0;margin:4px 0 0">${rows}</ul>`
+    :`<p class="measure" style="color:#065f46;font-size:13.5px;margin:2px 0 0">✓ No open validation flags — the deterministic scan found nothing to act on.</p>`;
+  // Report-readiness linter (reused report_views.build_report_lint): composite
+  // resolution, readout emit-plans, question/approach completeness, viz gaps.
+  // These run to hundreds of findings across an investigation, so AGGREGATE by
+  // check (count + worst severity + a few example studies) rather than list raw.
+  const lint=(v.report_lint||[]).filter(f=>String(f.severity||'').toLowerCase()!=='info');
+  const lsev={error:'#991b1b',high:'#991b1b',warn:'#92400e',warning:'#92400e'};
+  const sevRank={error:3,high:3,warning:2,warn:2,info:1};
+  const byCheck={};
+  lint.forEach(f=>{ const k=f.check||'check'; (byCheck[k]=byCheck[k]||{n:0,sev:'',studies:new Set()});
+    byCheck[k].n++; const sl=String(f.severity||'').toLowerCase();
+    if((sevRank[sl]||0)>(sevRank[byCheck[k].sev]||0)) byCheck[k].sev=sl;
+    if(f.study&&f.study!=='<workspace>') byCheck[k].studies.add(f.study); });
+  const grouped=Object.entries(byCheck).sort((a,b)=>(sevRank[b[1].sev]||0)-(sevRank[a[1].sev]||0)||b[1].n-a[1].n);
+  const nErr=lint.filter(f=>['error','high'].includes(String(f.severity||'').toLowerCase())).length;
+  const nWarn=lint.length-nErr;
+  const lrows=grouped.map(([k,g])=>{ const sc=lsev[g.sev]||'#475569'; const egs=[...g.studies].slice(0,4);
+    return `<li style="margin-top:6px;padding-left:10px;border-left:3px solid ${sc};display:flex;gap:8px;align-items:baseline"><span style="font-variant-numeric:tabular-nums;color:${sc};font-weight:650;min-width:2.2em;text-align:right">${g.n}</span><span><b>${esc(k.replace(/_/g,' '))}</b> <span style="font-size:11px;color:var(--ink-3)">${esc(g.sev)}</span>${egs.length?`<div class="mono" style="font-size:10.5px;color:var(--ink-3);line-height:1.4;margin-top:1px">${egs.map(esc).join(', ')}${g.studies.size>egs.length?` +${g.studies.size-egs.length}`:''}</div>`:''}</span></li>`; }).join('');
+  const lintBlock=lint.length?`<details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;font-weight:650;letter-spacing:.02em;color:var(--ink-2);text-transform:uppercase">Report readiness — ${lint.length} findings across ${grouped.length} checks (${nErr} error${nErr===1?'':'s'}, ${nWarn} warning${nWarn===1?'':'s'})</summary><ul style="list-style:none;padding:0;margin:6px 0 0">${lrows}</ul></details>`:'';
+  return `<div class="narr fbsection" id="validation">${fbBubble('validation','Validation & reproducibility')}
+    <div class="sec-h"><h2>Validation &amp; reproducibility</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Automated, code-computed consistency checks (no AI): conservation/invariant ledgers, computed-vs-authored verdicts, run reproducibility (environment + determinism), parameter drift and acceptance-criterion coverage. Each study's own ledger predicates (e.g. mass/charge balance) are its gating behavior tests, listed in the supplement.</p>
+    ${body}
+    ${lintBlock}</div>`;
+}
+
+// 5. NEXT STUDIES & PRIORITIES — prioritized roadmap from planned studies, failed
+// gates and authored follow-ups; plus the open expert decisions.
+function roadmapSection(inv){
+  const rm=(inv.synthesis||{}).roadmap||[]; const dn=((inv.executive||{}).decisions_needed)||[];
+  if(!rm.length && !dn.length) return '';
+  const pc={P0:['#991b1b','#fee2e2'],P1:['#92400e','#fef3c7'],P2:['#475569','#eef2f7']};
+  const rows=rm.map(r=>{ const m=pc[r.priority]||pc.P2;
+    return `<li style="margin-top:8px"><span style="display:inline-block;font-size:10px;font-weight:800;padding:1px 6px;border-radius:5px;color:${m[0]};background:${m[1]};margin-right:6px">${esc(r.priority)}</span>`+
+      `<b>${esc(r.item||'')}</b>${r.basis?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);margin:2px 0 0 0;line-height:1.45">${esc(r.basis)}</div>`:''}${r.source?`<span style="font-size:11px;color:var(--ink-3)"> — ${_studyLink(r.source)}</span>`:''}</li>`;
+  }).join('');
+  const dec=dn.length?`<div style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Open expert decisions (${dn.length})</div>
+    <ol style="padding-left:20px;margin:0;font-size:12.5px;color:var(--ink);line-height:1.5">${dn.map(d=>`<li style="margin-top:4px">${esc((typeof d==='string')?d:(d.question||d.title||''))}</li>`).join('')}</ol></div>`:'';
+  return `<div class="narr fbsection" id="roadmap">${fbBubble('roadmap','Next studies & priorities')}
+    <div class="sec-h"><h2>Next studies &amp; priorities</h2><span class="rule"></span></div>
+    ${rows?`<ul style="list-style:none;padding:0;margin:4px 0 0">${rows}</ul>`:''}${dec}</div>`;
+}
+
+// SYNTHESIS & GAPS (plan §4) — one consolidated section: cross-study quantitative
+// synthesis, contradictions/uncertainty, and the prioritized follow-ups, instead
+// of three separate short sections to hop between.
+function synthesisAndGaps(inv){
+  const q=quantitativeSynthesis(inv), c=contradictionsSection(inv), r=roadmapSection(inv);
+  if(!q && !c && !r) return '';
+  return `<div class="narr fbsection" id="synthesis-gaps">${fbBubble('synthesis-gaps','Synthesis & gaps')}
+    <div class="sec-h"><h2>Synthesis &amp; gaps</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Where results agree, conflict, or leave open claims — and the priority follow-ups that would resolve them.</p>
+    <div class="syn-group">${q}${c}${r}</div></div>`;
+}
+
+// 6. CLAIM-EVIDENCE MAP — each study's scientific claim, its status, and a link.
+function claimEvidenceMap(inv){
+  const ce=(inv.synthesis||{}).claim_evidence||[]; if(!ce.length) return '';
+  const rows=ce.map(c=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:5px 12px 5px 0;color:var(--ink);font-size:12.5px;line-height:1.4">${esc(c.claim)}</td><td style="padding:5px 10px 5px 0;white-space:nowrap">${_gradeChip(c.status)}</td><td style="padding:5px 0;font-size:12px">${_studyLink(c.study,c.study_title)}</td></tr>`).join('');
+  return `<div class="narr fbsection" id="claim-evidence">${fbBubble('claim-evidence','Claim–evidence map')}
+    <div class="sec-h"><h2>Claim–evidence map</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 6px">Each study's central scientific claim, its evidence status, and a link to the study.</p>
+    <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:4px 0;font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em">Claim</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Status</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Study</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// KEY FIGURES — curated shortlist (ranked by scientific weight); full renders
+// live in the Technical supplement gallery, linked from here.
+function keyFigures(inv){
+  const fr=(inv.synthesis||{}).figures_ranked||[]; if(!fr.length) return '';
+  const rows=fr.map((f,i)=>`<li style="margin-top:6px"><b>Figure ${i+1}.</b> ${esc(f.name||'(figure)')} <span style="color:var(--ink-3);font-size:12px">— ${_studyLink(f.slug,f.study_title)}</span>${f.caption?`<div class="measure" style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin-top:1px">${esc(String(f.caption).slice(0,240))}</div>`:''}</li>`).join('');
+  return `<div class="narr fbsection" id="key-figures">${fbBubble('key-figures','Key figures')}<div class="sec-h"><h2>Key figures</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 4px">The most evidence-bearing figures, ranked by scientific weight — full renders are in the Technical supplement.</p>
+    <ol style="list-style:none;padding:0;margin:4px 0 0;font-size:13px;color:var(--ink)">${rows}</ol></div>`;
+}
+
+// EVIDENCE REGISTER (plan §5) — a compact entry for EVERY study, in the MAIN
+// body: scientific verdict × run status × one-line result, each cross-linked to
+// its full record in the supplement. Ensures every study is represented without
+// repeating full per-study tables in the narrative.
+function evidenceRegister(inv){
+  const idx=(inv.synthesis||{}).studies_index||[]; if(!idx.length) return '';
+  const rows=idx.map(r=>`<tr style="border-bottom:1px solid var(--line)">
+    <td style="padding:5px 10px 5px 0;font-size:12.5px;vertical-align:top">${_studyLink(r.slug,r.title)}${r.variant?' <span style="font-size:10px;color:var(--ink-3)">alt</span>':''}</td>
+    <td style="padding:5px 10px 5px 0;white-space:nowrap;vertical-align:top">${_gradeChip(r.grade)}</td>
+    <td style="padding:5px 10px 5px 0;white-space:nowrap;font-size:11px;color:var(--ink-3);vertical-align:top">${esc(r.run_status)}</td>
+    <td style="padding:5px 0;font-size:12px;color:var(--ink-2);line-height:1.4;vertical-align:top">${esc(r.one_line||'')}</td></tr>`).join('');
+  return `<div class="narr fbsection" id="evidence-register">${fbBubble('evidence-register','Evidence register')}
+    <div class="sec-h"><h2>Evidence register</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 6px">Every study in the campaign (${idx.length}) — scientific verdict, run status, and one-line result, each linked to its full record in the supplement.</p>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:26%"><col style="width:12%"><col style="width:12%"><col style="width:50%"></colgroup>
+    <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;font-size:11px;color:var(--ink-3);text-transform:uppercase;padding-bottom:3px">Study</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Verdict</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Run</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Result</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+// SUPPLEMENT HEADER — one-line inventory of every study (detail cards follow).
+function studiesInventory(inv){
+  const idx=(inv.synthesis||{}).studies_index||[]; if(!idx.length) return '';
+  const rows=idx.map(r=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:4px 10px 4px 0;font-size:12.5px">${_studyLink(r.slug,r.title)}</td><td style="padding:4px 10px 4px 0;white-space:nowrap;font-size:11px;color:var(--ink-3)">${esc(r.run_status)}</td><td style="padding:4px 10px 4px 0;white-space:nowrap">${_gradeChip(r.grade)}</td><td style="padding:4px 0;font-size:12px;color:var(--ink-2);line-height:1.4">${esc(r.one_line||'')}</td></tr>`).join('');
+  return `<div style="margin:10px 0 18px"><div class="kicker" style="margin-bottom:4px">Study inventory (${idx.length})</div>
+    <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;font-size:11px;color:var(--ink-3);text-transform:uppercase">Study</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Run</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Evidence</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Gist</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 /* ====================== FINDINGS (moved BELOW the narrative intro) ====================== */
@@ -1990,28 +2627,47 @@ function setupWorkbenchDag(){
   // Measure + position + draw edges, wrapped so it can RE-RUN once web fonts
   // settle (an early offsetHeight under-measures a card -> the column stacks too
   // tight and cards overlap) and whenever a card is expanded in place.
-  const relayout=()=>{
-  // Pass 1: x by depth, measure height.
-  nodeEls.forEach(n=>{ n.style.width=CARD_W+'px'; });
-  studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; const x=PAD_X+depth[s.slug]*(CARD_W+DEPTH_GAP);
-    n.style.left=x+'px'; pos[s.slug]={x, node:n, h:n.offsetHeight||120}; });
-  // Pass 2: stack same-depth cards vertically, center each column.
-  const colTot={}; depths.forEach(d=>{ let sum=0; byDepth[d].forEach(sl=>sum+=pos[sl].h); colTot[d]=sum+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
-  const maxCol=Math.max(0,...depths.map(d=>colTot[d]));
-  const canvasH=Math.max(PAD_Y*2+maxCol,160);
-  depths.forEach(d=>{ let yc=PAD_Y+Math.max(0,(canvasH-PAD_Y*2-colTot[d])/2);
-    byDepth[d].forEach(sl=>{ pos[sl].y=yc; pos[sl].node.style.top=yc+'px'; yc+=pos[sl].h+BREADTH_GAP; }); });
-  const canvasW=PAD_X*2+(depths.length?depths[depths.length-1]:0)*(CARD_W+DEPTH_GAP)+CARD_W;
-  canvas.style.width=canvasW+'px'; canvas.style.height=canvasH+'px';
+  const relayout=(vertical, compact)=>{
+  // Compact (lowest semantic zoom, for the PDF): narrower title+status cards.
+  const cw = compact ? 158 : CARD_W;
+  nodeEls.forEach(n=>{ n.style.width=cw+'px'; });
+  studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; pos[s.slug]={node:n, h:n.offsetHeight||120}; });
+  let canvasW, canvasH;
+  if(vertical){
+    // TOP-TO-BOTTOM (for print/PDF): depth → row; siblings laid left-to-right and
+    // centered. Uses page height and keeps the graph narrow enough to fit width.
+    const rowH={}; depths.forEach(d=>{ rowH[d]=Math.max(compact?64:120,...byDepth[d].map(sl=>pos[sl].h)); });
+    const rowY={}; let yacc=PAD_Y; depths.forEach(d=>{ rowY[d]=yacc; yacc+=rowH[d]+DEPTH_GAP; });
+    canvasH=Math.max(160,yacc-DEPTH_GAP+PAD_Y);
+    const rowW={}; depths.forEach(d=>{ rowW[d]=byDepth[d].length*cw+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
+    canvasW=PAD_X*2+Math.max(cw,...depths.map(d=>rowW[d]));
+    depths.forEach(d=>{ let xc=PAD_X+Math.max(0,(canvasW-PAD_X*2-rowW[d])/2);
+      byDepth[d].forEach(sl=>{ const p=pos[sl]; p.x=xc; p.y=rowY[d]; p.node.style.left=xc+'px'; p.node.style.top=rowY[d]+'px'; xc+=cw+BREADTH_GAP; }); });
+  } else {
+    // LEFT-TO-RIGHT (screen default): depth → column; stack same-depth cards.
+    studies.forEach(s=>{ const n=el[s.slug]; if(!n) return; const x=PAD_X+depth[s.slug]*(cw+DEPTH_GAP);
+      n.style.left=x+'px'; pos[s.slug].x=x; });
+    const colTot={}; depths.forEach(d=>{ let sum=0; byDepth[d].forEach(sl=>sum+=pos[sl].h); colTot[d]=sum+Math.max(0,byDepth[d].length-1)*BREADTH_GAP; });
+    const maxCol=Math.max(0,...depths.map(d=>colTot[d]));
+    canvasH=Math.max(PAD_Y*2+maxCol,160);
+    depths.forEach(d=>{ let yc=PAD_Y+Math.max(0,(canvasH-PAD_Y*2-colTot[d])/2);
+      byDepth[d].forEach(sl=>{ pos[sl].y=yc; pos[sl].node.style.top=yc+'px'; yc+=pos[sl].h+BREADTH_GAP; }); });
+    canvasW=PAD_X*2+(depths.length?depths[depths.length-1]:0)*(cw+DEPTH_GAP)+cw;
+  }
+  const CARD_HALF=cw/2;
+  canvas.style.transform=''; canvas.style.width=canvasW+'px'; canvas.style.height=canvasH+'px';
   svg.setAttribute('width',canvasW); svg.setAttribute('height',canvasH);
   svg.style.width=canvasW+'px'; svg.style.height=canvasH+'px';
-  // Edges — same Bezier routing + arrowhead as the workbench.
+  // Edges — Bezier routing + arrowhead; control points follow the flow axis.
   const NS='http://www.w3.org/2000/svg';
   let defs='<defs><marker id="wdag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
   svg.innerHTML=defs;
   studies.forEach(s=>{ dagEdges(s).forEach(p=>{ const a=pos[p.study], b=pos[s.slug]; if(!a||!b) return;
-    const x1=a.x+CARD_W, y1=a.y+a.h/2, x2=b.x, y2=b.y+b.h/2, dx=Math.max(28,(x2-x1)/2);
-    const d=`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`;
+    let x1,y1,x2,y2,d;
+    if(vertical){ x1=a.x+CARD_HALF; y1=a.y+a.h; x2=b.x+CARD_HALF; y2=b.y; const dy=Math.max(24,(y2-y1)/2);
+      d=`M ${x1} ${y1} C ${x1} ${y1+dy}, ${x2} ${y2-dy}, ${x2} ${y2}`; }
+    else { x1=a.x+cw; y1=a.y+a.h/2; x2=b.x; y2=b.y+b.h/2; const dx=Math.max(28,(x2-x1)/2);
+      d=`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`; }
     const st=dagRelStyle(p.relation);
     const path=document.createElementNS(NS,'path');
     path.setAttribute('d',d); path.setAttribute('fill','none'); path.setAttribute('stroke',st.color);
@@ -2023,11 +2679,14 @@ function setupWorkbenchDag(){
       t.setAttribute('font-size','10'); t.setAttribute('fill',st.color); t.textContent=st.label; svg.appendChild(t); }
   }); });
   };
+  // Expose so the PDF print-prep can re-lay-out vertically + fit to page width.
+  window.__relayoutDag = relayout;
   // First pass, then correct once reflow / web-fonts settle (the usual cause of
-  // columns stacking too tight and overlapping).
-  relayout();
-  if(typeof requestAnimationFrame==='function') requestAnimationFrame(relayout);
-  try{ if(document.fonts&&document.fonts.ready&&document.fonts.ready.then) document.fonts.ready.then(relayout); }catch(e){}
+  // columns stacking too tight and overlapping). Guard the callbacks so their
+  // argument (a timestamp / FontFaceSet) is never read as the `vertical` flag.
+  relayout(false);
+  if(typeof requestAnimationFrame==='function') requestAnimationFrame(()=>{ if(!window.__dagPrint) relayout(false); });
+  try{ if(document.fonts&&document.fonts.ready&&document.fonts.ready.then) document.fonts.ready.then(()=>{ if(!window.__dagPrint) relayout(false); }); }catch(e){}
   // Click-to-expand: mark only the cards whose Asks/Finds are actually clipped
   // (so short cards get no misleading affordance), then let a click anywhere on
   // such a card toggle its in-place expansion. The title link keeps navigating
@@ -2048,24 +2707,6 @@ function setupWorkbenchDag(){
    the protocell (individual) across the campaign. This is a QUALITATIVE framing,
    NOT a measured autonomy metric — no numbers are fabricated. Rendered only when
    there is a staged ordering; otherwise omitted. */
-function autonomyStrip(inv){
-  const studies=inv.studies||[];
-  const {anyEdge}=_dagDepthOrder(inv);
-  if(!anyEdge || studies.length<3) return '';
-  const caps=['Energy','Reduced carbon','Catalysis','Concentration','Confinement','Bioenergetics','Heredity'];
-  const chips=caps.map((c,i)=>{
-    const frac=i/(caps.length-1);
-    return `<span style="display:inline-flex;flex-direction:column;align-items:center;gap:4px;flex:1;min-width:70px">
-      <span style="font-size:11.5px;color:var(--ink);font-weight:600;text-align:center;line-height:1.2">${esc(c)}</span>
-      <span style="height:6px;width:100%;border-radius:4px;background:linear-gradient(90deg,var(--cal),var(--accent));opacity:${(0.35+0.6*frac).toFixed(2)}"></span></span>`;
-  }).join('');
-  return `<div style="margin-top:22px"><div class="kicker" style="margin-bottom:6px">Environment → individual (conceptual)</div>
-    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Across the campaign, capabilities that begin as <b>services of the vent</b> are progressively <b>internalized by the protocell</b> — an autonomy axis rising from environment toward individual. This is a <b>qualitative framing</b>; a quantitative autonomy index would need an authored metric (e.g. from the bioenergetics / escape stages).</p>
-    <div style="display:flex;align-items:flex-end;gap:10px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)">${chips}</div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3);margin-top:6px;padding:0 4px">
-      <span>ENVIRONMENT (vent supplies)</span><span>INDIVIDUAL (protocell owns)</span></div></div>`;
-}
-
 /* ====================== GLOSSARY (accessibility) ====================== */
 function renderGlossary(inv){
   const g=inv.glossary;
@@ -2077,13 +2718,13 @@ function renderGlossary(inv){
   const rows=entries.map(([t,d])=>`<div class="refentry"><b class="rt">${esc(t)}</b>${d?`<div class="rmeta">${mdLite(d)}</div>`:''}</div>`).join('');
   return `<div class="appendix fbsection" id="glossary">${fbBubble('glossary','Glossary')}
     <div class="sec-h"><h2>Glossary</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:14px">Key terms used throughout this report.</p>
     <div class="refs-list">${rows}</div></div>`;
 }
 
 /* ---------- one contiguous document ---------- */
 function render(inv){
   CUR=inv.slug; loadFB(); REFS=inv.references||{};
+  _FIG_USED.clear(); _FIG_BUDGET=7; _FIG_UID=0;   // figure-first budget, per render
   // meta line: status · workspace · N studies · date (calm, not a stat grid)
   const metaBits=[inv.status?`<span>${esc(String(inv.status).replace(/_/g,' '))}</span>`:'',
     `<span class="mono">${esc(inv.workspace||'')}</span>`,
@@ -2094,26 +2735,36 @@ function render(inv){
       <div class="eyebrow mono">${esc(inv.slug)} · investigation report</div>
       <h1>${esc(inv.title)}</h1>
       <div class="provline">${metaBits.join('<span class="sep">·</span>')}</div>
-    </div>
-    ${heroQuestion(inv)}
-    ${abstractBlock(inv)}
-    ${simulatedWorld(inv)}
-    ${evidenceFraming(inv)}
-    ${renderArgument(inv)}
-    ${renderFindings(inv)}
-    ${renderSpine(inv)}
-    ${renderInvViz(inv)}</div>`+
+    </div></div>`+
     toc(inv)+
     `<div class="wrap">
-      <div class="sec-h"><h2>Studies</h2><span class="rule"></span>
-        <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
-      <p class="measure" style="color:var(--ink-2);font-size:14px;margin:0 0 8px">Each study is one scientific unit — <b>question → model experiment → observable → what we learn</b>. Studies are collapsed to that summary; click a study (or a number in the index) to expand its full model, run, visualizations, tests and decision.</p>
-      ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
-      ${renderGlossary(inv)}
-      ${renderReferences(inv)}
-      ${renderAppendix(inv)}
+    ${execSummary(inv)}
+    ${renderSpine(inv)}
+    ${integratedFindings(inv)}
+    ${synthesisAndGaps(inv)}
+    ${validationSection(inv)}
+    ${claimEvidenceMap(inv)}
+    ${evidenceRegister(inv)}
+    ${renderReferences(inv)}</div>`+
+    `<div class="wrap">
+      <details class="supplement" id="supplement">
+        <summary style="cursor:pointer;margin:18px 0 2px;font-size:21px;font-weight:700;color:var(--ink)">Technical supplement</summary>
+        <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Full context, per-study records, figures, methods, run metadata and provenance — kept out of the main narrative so it reads clean, but preserved here in full. Click any study link above to jump in.</p>
+        ${howToReadBlock(inv)}
+        ${simulatedWorld(inv)}
+        ${renderArgument(inv)}
+        ${groundRules(inv)}
+        ${evidenceFraming(inv)}
+        ${keyFigures(inv)}
+        <div class="sec-h"><h3 style="margin:0">Study records</h3><span class="rule"></span>
+          <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
+        ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
+        ${renderInvViz(inv)}
+        ${renderGlossary(inv)}
+        ${renderAppendix(inv)}
+      </details>
       <div class="sec-h" id="report-feedback"><h2>Report feedback</h2><span class="rule"></span></div>
-      <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes above. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
+      <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes in the supplement. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
       ${feedbackRow('overall','the whole report')}
     </div>`;
   updateCount(); window.scrollTo(0,0); spy();
@@ -2126,6 +2777,7 @@ function render(inv){
 /* ---------- wiring ---------- */
 document.getElementById('foot-prov').textContent=(INV.provenance||'investigations/'+INV.slug+'/investigation.yaml · studies/*/study.yaml · loop-trajectory JSON');
 document.getElementById('wsname').textContent=(INV.workspace||'');
+{ const fw=document.getElementById('foot-ws'); if(fw) fw.textContent=(INV.workspace||''); }
 document.getElementById('themebtn').onclick=()=>{const r=document.documentElement;
   const cur=r.getAttribute('data-theme');const dark=cur?cur==='dark':matchMedia('(prefers-color-scheme:dark)').matches;
   r.setAttribute('data-theme',dark?'light':'dark');};
@@ -2155,9 +2807,18 @@ app.addEventListener('click',e=>{
   // expand/collapse all
   if(e.target.id==='expandall'){ document.querySelectorAll('.card').forEach(c=>c.classList.remove('collapsed')); return; }
   if(e.target.id==='collapseall'){ document.querySelectorAll('.card').forEach(c=>c.classList.add('collapsed')); return; }
-  // index link → expand the target study before scrolling to it
-  const link=e.target.closest('.subnav a');
-  if(link){ const href=link.getAttribute('href')||''; if(href.startsWith('#s-')){ const c=document.getElementById(href.slice(1)); if(c) c.classList.remove('collapsed'); } return; }
+  // ANY in-page link to a study/section → open the enclosing Technical supplement
+  // (<details>) and expand the target study card before the browser scrolls to it.
+  const link=e.target.closest('a[href^="#"]');
+  if(link){
+    const href=link.getAttribute('href')||'';
+    const tgt=href.length>1?document.getElementById(href.slice(1)):null;
+    if(tgt){
+      let d=tgt.closest('details'); while(d){ d.open=true; d=(d.parentElement&&d.parentElement.closest('details'))||null; }
+      if(href.startsWith('#s-')) tgt.classList.remove('collapsed');
+    }
+    return;
+  }
   // a collapsed card is clickable anywhere to expand (ignore real controls/links)
   const anyCard=e.target.closest('.card');
   if(anyCard && anyCard.classList.contains('collapsed') && !e.target.closest('a,button,summary,input,textarea,select')){

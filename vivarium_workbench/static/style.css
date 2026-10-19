@@ -3777,7 +3777,7 @@ body.col-resizing .col-resizer::after { background: #6366f1; }
    `.panel` card, leaving a buffer margin around the operating space. Registry and
    Investigations fill the pane flush — match that by stripping the card chrome
    from these pages' outermost panel (nested panels keep their chrome). */
-#page-workspace-inputs > .panel,
+#page-resources .registry-tab-panel[data-restab="inputs"] > .panel,
 #page-simulation-setup > .panel,
 #page-visualizations > .panel {
   background: none; border: none; border-radius: 0; padding: 0; margin: 0;

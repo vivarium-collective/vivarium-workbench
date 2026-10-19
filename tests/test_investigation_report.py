@@ -141,7 +141,9 @@ def test_sourcing_data_shape_and_provenance(tmp_path):
                       # Background / "simulated world" prose, glossary, guidelines,
                       # how-to-read, and the creation date for the masthead.
                       "biological_story", "glossary", "guidelines", "how_to_read",
-                      "created"}
+                      "created",
+                      # deterministic cross-study synthesis (finding-first report)
+                      "synthesis"}
 
 
 def test_agentic_trajectory_attached(tmp_path):
@@ -450,3 +452,81 @@ def test_bib_label_and_reference_parsing(tmp_path):
     assert seg["label"] == "Segrè 2000", seg["label"]
     assert seg["author"].startswith("Segrè, Daniel")
     assert "{" not in seg["author"] and "\\" not in seg["author"]
+
+
+def test_build_report_data_surfaces_plan_board(tmp_path):
+    """The honest A→E gate ladder (plan_board) is surfaced through the report
+    spine so the report can lead the findings with where the campaign stands."""
+    _write(tmp_path / "workspace.yaml", {"schema_version": 2, "name": "tw", "package_path": "pkg"})
+    _write(tmp_path / "investigations" / "camp" / "investigation.yaml", {
+        "name": "camp", "title": "Campaign", "status": "in_progress", "question": "Q?",
+        "studies": ["s1"],
+        "plan_gates": [{"id": "A", "name": "Gate A", "member_studies": ["s1"],
+                        "criterion": "s1 passes", "criterion_findings": []}],
+    })
+    _write(tmp_path / "studies" / "s1" / "study.yaml", {
+        "name": "s1", "title": "S1", "gate_status": "passed",
+        "baseline": [{"name": "b", "composite": "pkg.composites.c"}],
+        "findings": [{"id": "f1", "status": "passed", "statement": "ok"}],
+    })
+    data = build_report_data(tmp_path, "camp")
+    pb = (data.get("spine") or {}).get("plan_board")
+    assert isinstance(pb, list) and pb, "plan_board should be surfaced in the report spine"
+    assert pb[0]["id"] == "A"
+
+
+def test_render_report_pdf_missing_playwright_raises_guidance(monkeypatch):
+    """PDF export degrades cleanly: with Playwright unavailable, render_report_pdf
+    raises ReportPdfError carrying install guidance (so the route returns a 503
+    message, not a 500) — deterministic regardless of whether Playwright is
+    installed in the test environment."""
+    import builtins
+    from vivarium_workbench.lib import investigation_report as ir
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name.split(".")[0] == "playwright":
+            raise ImportError("playwright not installed")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    try:
+        ir.render_report_pdf("<!doctype html><html><body>x</body></html>")
+    except ir.ReportPdfError as e:
+        assert "playwright" in str(e).lower()
+    else:
+        raise AssertionError("expected ReportPdfError when Playwright is missing")
+
+
+def test_synthesis_separates_status_and_classifies_evidence(tmp_path):
+    """The deterministic synthesis separates run status from evidence grade, and a
+    computational pass/refute never silently becomes a proven/unproven claim."""
+    d = build_report_data(_ws(tmp_path), "src")
+    syn = d["synthesis"]
+    assert syn["counts"]["total"] == 2
+    grades = {r["slug"]: r["grade"] for r in syn["studies_index"]}
+    assert grades["reuse-ok"] == "supported"
+    assert grades["trap"] == "refuted"
+    # the refuted study surfaces as a prominent negative-result contradiction
+    negs = [c for c in syn["contradictions"] if c["kind"] == "negative-result"]
+    assert any(c["studies"] and c["studies"][0]["slug"] == "trap" for c in negs)
+    # claim status is derived, not asserted: refuted -> unsupported, supported -> supported
+    claim = {r["slug"]: r["claim_status"] for r in syn["studies_index"]}
+    assert claim["trap"] == "unsupported" and claim["reuse-ok"] == "supported"
+
+
+def test_report_template_is_finding_first():
+    """The report leads with finding-first synthesis sections; full per-study cards
+    are moved into a collapsible Technical supplement."""
+    from pathlib import Path as _P
+    import vivarium_workbench as _vw
+    tpl = (_P(_vw.__file__).parent / "templates" / "investigation-report.html").read_text(encoding="utf-8")
+    for fn in ("function execSummary", "function integratedFindings", "function contradictionsSection",
+               "function roadmapSection", "function claimEvidenceMap", "function studiesInventory"):
+        assert fn in tpl, fn
+    assert '<details class="supplement"' in tpl and 'id="supplement"' in tpl
+    # the main render pipeline calls the synthesis sections, not per-study-in-main
+    i = tpl.index("function render(inv)")
+    body = tpl[i:i + 2000]
+    assert "execSummary(inv)" in body and "integratedFindings(inv)" in body

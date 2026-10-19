@@ -17,8 +17,9 @@
 <body>
 <main class="study-page">
 <header class="study-header">
-  <div style="display:flex; align-items:baseline; gap:12px; justify-content:space-between;">
-  <h1 class="study-title">
+  <div style="display:flex; align-items:center; gap:14px; justify-content:space-between;">
+  <div style="display:flex; align-items:center; gap:12px; min-width:0; flex-wrap:wrap">
+  <h1 class="study-title" style="margin:0">
     {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" data-study-kind="{{ study.kind }}" title="{{ name }}">{{ display_name }}</span>
     {# The old standalone "kind" + "phase" pills were visual noise next to the
        title (uniform across a computational investigation; the phase just
@@ -26,6 +27,11 @@
        any consumer; the lifecycle stage is now shown — and highlighted "you are
        here" — inside the six-gate status row below (gate-current). #}
   </h1>
+    {# Two-axis study markers — Progress (● Completed) × Verdict (◆ Supported) —
+       lined up inline with the title (filled by _renderStudyAxisMarkers in
+       study-detail.js) so they don't take a separate row above the content. #}
+    <span id="study-axis-markers" data-slug="{{ name }}" style="display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap"></span>
+  </div>
   <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0; align-items:center;">
     {# Export (figures / notebook) moved OUT of the header into the Overview
        panel's section toolbar (Phase 4 refinement). The launch actions
@@ -50,15 +56,6 @@
       <button type="button" id="study-next" class="btn-mini study-nav-btn" title="Next study" aria-label="Next study">→</button>
     </span>
   </span>
-  </div>
-  <div class="study-status-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px;">
-    {# Two-axis study markers — Progress (● Completed) × Verdict (◆ Supported) —
-       in the SAME ontology as the investigation-graph study cards, for
-       continuity. Filled + made interactive (click → a popover that interrogates
-       the underlying signals) client-side by _renderStudyAxisMarkers from
-       window._study (study-detail.js). Replaces the old gate pill + readiness
-       summary — gate/readiness no longer live in the study header. #}
-    <span id="study-axis-markers" data-slug="{{ name }}"></span>
   </div>
 </header>
 
@@ -132,6 +129,16 @@
     <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6"/><path d="M6 12h6a4 4 0 0 0 4-4V11"/></svg>
     <span class="pillar-label">{{ "Decide" if _is_v3 else "Conclusions" }}</span>
   </button>
+  {# Export menu — top-right of the study tab bar (moved out of the Overview
+     panel). Same handlers + outside-click dropdown as before (wired by
+     _wireStudyExportMenu). Styled to match the investigation-level ↓ Export. #}
+  <span class="study-dl study-export-wrap" style="margin-left:auto; align-self:center; position:relative; display:inline-flex">
+    <button type="button" id="study-export-btn" class="btn-mini study-dl-btn" aria-haspopup="true" aria-expanded="false" title="Download this study's figures or a runnable notebook">↓ Export ▾</button>
+    <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:200px;padding:4px">
+      <button type="button" id="study-dl-figures" role="menuitem" class="study-jump-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download figures</button>
+      <button type="button" id="study-dl-notebook" role="menuitem" class="study-jump-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download notebook</button>
+    </div>
+  </span>
 </nav>
 <style>
 /* Task 4: header restructure — kind tag, promoted question, tightened status row.
@@ -151,7 +158,6 @@
 .study-kind-tag.study-kind-theoretical{background:#faf5ff;color:#6b21a8}
 .study-question-headline{margin:6px 0 0 0;font-size:1.05em;line-height:1.5;color:#1e293b;font-family:Georgia,"Times New Roman",serif}
 .study-question-headline .q-glyph{display:inline-block;font-size:0.78em;font-weight:700;font-family:ui-monospace,monospace;color:#64748b;background:#f1f5f9;padding:1px 7px;border-radius:4px;margin-right:6px;vertical-align:middle}
-.study-status-row{font-size:0.95em}
 .status-detail-panel{margin:0;padding:2px 0;background:transparent;border:none;border-radius:0;font-size:0.92em}
 .status-detail-row{display:flex;align-items:center;gap:8px;padding:3px 0}
 .status-detail-axis{min-width:140px;color:#475569;font-size:0.9em}
@@ -532,25 +538,8 @@
 :root[data-theme="dark"] .tag-input{border-color:var(--border-2);background:var(--field);color:var(--text)}
 </style>
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
-  {# Overview section toolbar (Phase 4 refinement): the Export menu lives here,
-     top-right of the Overview panel, not in the main page header. Same handlers
-     (_vivStudyFiguresFromCard / _vivStudyNotebookFromCard) and the same
-     outside-click dropdown pattern as the study navigator's jump menu (wired by
-     _wireStudyExportMenu in study-detail.js). #}
-  {# The redundant "Overview" heading was removed (the active tab already says
-     Overview); the figures moved to their own Visualizations tab, so the "↓
-     Figures" jump button is gone too. Only the Export menu remains, top-right. #}
-  <div class="overview-toolbar" style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:12px">
-    <span style="display:inline-flex;align-items:center;gap:8px">
-    <span class="study-dl study-export-wrap" style="position:relative;display:inline-flex">
-      <button type="button" id="study-export-btn" class="btn-mini study-dl-btn" aria-haspopup="true" aria-expanded="false" title="Download this study's figures or a runnable notebook">⬇ Export ▾</button>
-      <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:200px;padding:4px">
-        <button type="button" id="study-dl-figures" role="menuitem" class="study-jump-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download figures</button>
-        <button type="button" id="study-dl-notebook" role="menuitem" class="study-jump-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download notebook</button>
-      </div>
-    </span>
-    </span>
-  </div>
+  {# The Export menu moved OUT of the Overview panel to the top-right of the
+     study tab bar (see the .study-export-wrap in <nav class="study-tabs">). #}
   <div class="study-overview">
 
     {# ─── v4 narrative spine. Reading order: Question & approach → Findings
@@ -806,19 +795,12 @@
      #figures-empty-message) so existing hooks + deep links keep working. #}
 <section class="study-tab-panel" data-kind="visualize" id="panel-visualize" hidden>
   <div class="overview-section" id="overview-figures-section">
-    <h2 class="overview-label">Figures</h2>
 
 
   <div class="overview-section study-figures figure-gallery" id="visualize-section">
 
-    {# Quick download of this study's figures (panels + its stitched composite)
-       as a zip, right where the figures are viewed. Same handler as the
-       investigation card's ↓ figures. #}
-    {% if study.visualizations %}
-    <div class="viz-actions-row" style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-      <button type="button" class="btn-mini" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')" title="Download this study's visualizations (figure panels + its composite) as a zip">↓ visualizations</button>
-    </div>
-    {% endif %}
+    {# Figures download moved to the study tab bar's ↓ Export menu (top-right);
+       the per-tab "↓ visualizations" button + "Figures" heading were removed. #}
 
     <div id="native-gallery-panel" class="figure-mount"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading figures…</span></div></div>
 

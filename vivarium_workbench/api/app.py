@@ -1078,6 +1078,7 @@ def create_app() -> FastAPI:
     def investigation_report(
         slug: str,
         download: int = 0,
+        format: str = "html",
         ws: Path = Depends(get_workspace),
     ) -> Response:
         """Render one investigation to a single self-contained HTML document.
@@ -1085,12 +1086,16 @@ def create_app() -> FastAPI:
         Deterministic and data-only: every panel is read from existing
         ``investigation.yaml`` / ``study.yaml`` / loop-trajectory JSON (no model
         call, no invented prose). ``?download=1`` sets a ``Content-Disposition``
-        so the browser saves the file. Library-backed via
+        so the browser saves the file. ``?format=pdf`` renders that same HTML to a
+        PDF via headless Chromium (Playwright, the ``loom-render`` extra) and
+        always downloads. Library-backed via
         ``lib.investigation_report.build_report_data`` + ``render_html``.
         """
         from vivarium_workbench.lib.investigation_report import (
             build_report_data,
             render_html,
+            render_report_pdf,
+            ReportPdfError,
             _find_plotly_js,
             _has_interactive_figures,
         )
@@ -1107,6 +1112,17 @@ def create_app() -> FastAPI:
         # render_investigation_report; image/SVG-only reports stay lean.
         plotly_js = _find_plotly_js(ws) if _has_interactive_figures(data) else None
         html = render_html(data, plotly_js)
+        if (format or "html").lower() == "pdf":
+            try:
+                pdf = render_report_pdf(html)
+            except ReportPdfError as e:
+                # 503: the server can't produce a PDF right now (missing Playwright
+                # / Chromium). Plain-text body carries the install guidance.
+                return Response(content=str(e), status_code=503, media_type="text/plain")
+            return Response(
+                content=pdf, media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="investigation-{slug}.pdf"'},
+            )
         headers = None
         if download:
             headers = {"Content-Disposition": f'attachment; filename="investigation-{slug}.html"'}

@@ -42,7 +42,7 @@ _STUDY_KEEP = (
     # the four-part scientific framing (question → experiment → observable → learn)
     # the report leads with: the model experiment, the measured observable, and the
     # study's lifecycle/phase + maturity. Additive — each is optional per study.
-    "objective", "hypothesis", "result", "phase", "kind", "design_status",
+    "objective", "experiment", "hypothesis", "result", "phase", "kind", "design_status",
     "readouts", "discovery_implications", "status",
 )
 
@@ -60,8 +60,16 @@ _VERDICT_MAP = {
 
 
 def _study_verdict(spec, computed_gate) -> str:
-    """Reduce a study to one of the five verdict states from its computed gate
-    evaluator, else its gate_status, else run presence."""
+    """The GATE axis — one of five computational-gate states
+    (passed/failing/blocked/not_started) from the study's computed gate evaluator,
+    else its gate_status, else run presence. This is DISTINCT from, and
+    intentionally NOT merged with, the scientific-evidence verdict
+    (``study_ontology.derive_verdict`` → supported/qualified/refuted/inconclusive,
+    stashed as ``sci_verdict`` and used for the finding-first evidence grade): the
+    DAG colours by whether the gate passed, the synthesis grades by what the
+    evidence shows, and a study can pass its gate yet be only scientifically
+    qualified. It already reuses the canonical computed gate_evaluator result when
+    present; only the fallbacks are local."""
     res = (computed_gate or {}).get("result")
     if res and res in _VERDICT_MAP:
         return _VERDICT_MAP[res]
@@ -155,6 +163,10 @@ def _build_spine(ws_root, inv_slug: str, studies: list) -> dict:
         "verdict_dag": {"nodes": nodes, "edges": edges},
         "acceptance": detail.get("computed_acceptance"),
         "ac_matrix": ac_matrix,
+        # The honest A→E gate ladder (met/qualified/refuted/off-spine), computed
+        # exactly as the live investigation overview — surfaced so the report can
+        # lead the findings with where the campaign stands against its own plan.
+        "plan_board": detail.get("plan_board") or [],
     }
 
 # inline-image budget: keep the self-contained report a sane size
@@ -664,6 +676,276 @@ def _load_references(ws_root: Path, wp) -> dict:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Deterministic cross-study SYNTHESIS (report upgrade). No model call, no
+# invented prose: every element is DERIVED from existing per-study +
+# investigation fields (verdicts, findings, edges, limitations, follow-ups) and
+# composed into a finding-first narrative. An optional authored
+# ``report_synthesis`` block in investigation.yaml overrides/enriches any
+# section. Separates run status from evidence strength from scientific claim —
+# a passed computational gate is never reported as a proven mechanism.
+# ---------------------------------------------------------------------------
+def _syn_run_status(s):
+    """Run status — REUSES the canonical two-axis ontology
+    (``study_ontology.derive_execution_status``) rather than re-deriving it. The
+    canonical value (completed/running/failed/planned/proposed) is stashed on the
+    study as ``execution_status`` in build_report_data; collapse it to ran|planned."""
+    es = str(s.get("execution_status") or "").lower()
+    if not es:
+        try:
+            from vivarium_workbench.lib.study_ontology import derive_execution_status
+            es = str(derive_execution_status(s, str(s.get("status") or "")) or "").lower()
+        except Exception:  # noqa: BLE001
+            es = str(s.get("status") or "").lower()
+    return "planned" if es in ("planned", "proposed", "not_started", "designing", "not_run") else "ran"
+
+
+def _syn_grade(s):
+    """Evidence grade — DISTINCT from run status. REUSES the canonical scientific
+    verdict (``study_ontology.derive_verdict`` → supported/qualified/refuted/
+    inconclusive, stashed as ``sci_verdict``); only when that is absent does it
+    fall back to a gate_status/confidence mapping. Planned studies → pending."""
+    if _syn_run_status(s) == "planned":
+        return "pending"
+    sv = str(s.get("sci_verdict") or "").lower()
+    if not sv:
+        try:
+            from vivarium_workbench.lib.study_ontology import derive_verdict
+            sv = str(derive_verdict(s) or "").lower()
+        except Exception:  # noqa: BLE001
+            sv = ""
+    if sv in ("supported", "qualified", "refuted", "inconclusive"):
+        return sv
+    # Fallback (no derivable scientific verdict): the gate/confidence reduction.
+    gs = str(s.get("gate_status") or "").lower()
+    v = str(s.get("verdict") or "").lower()
+    conf = str(s.get("confidence") or "").lower()
+    if gs in ("failed", "failing") or v in ("refuted", "failed") or conf == "refuted":
+        return "refuted"
+    if gs in ("stale", "needs_calibration") or v in ("qualified", "inconclusive") \
+            or conf in ("investigating", "qualified", "mixed"):
+        return "qualified"
+    if gs == "passed" or v in ("passed", "supported", "met") or conf in ("accepted", "supported"):
+        return "supported"
+    return "inconclusive"
+
+
+def _syn_claim_status(grade):
+    return {"supported": "supported", "qualified": "conditional",
+            "refuted": "unsupported", "pending": "pending"}.get(grade, "inconclusive")
+
+
+def _syn_stage_key(slug):
+    m = re.match(r"og-([a-z0-9]+)", str(slug or ""))
+    k = m.group(1) if m else str(slug or "")
+    m2 = re.match(r"(\d+)[a-z]*$", k)   # collapse og-00b -> 00
+    return m2.group(1) if m2 else k
+
+
+_STEM_ORDER = {"cal": 50, "rtca": 51, "res": 60, "energy": 61, "growth": 62, "adv": 70}
+
+
+def _syn_stage_sort(key):
+    return (0, int(key), "") if key.isdigit() else (1, _STEM_ORDER.get(key, 99), key)
+
+
+def _syn_is_variant(slug):
+    s = str(slug or "")
+    return ("-alt-" in s) or ("adversarial" in s) or s.endswith("-control")
+
+
+def _syn_first_sentence(t, n=220):
+    t = re.sub(r"\s+", " ", str(t or "")).strip()
+    if not t:
+        return ""
+    m = re.match(r"^.*?[.!?](?=\s|$)", t)
+    return (m.group(0) if m else t)[:n]
+
+
+def _syn_oneline(s):
+    c = str(s.get("claim") or "").strip()
+    if c:
+        return _syn_first_sentence(c)
+    fs = s.get("findings") or []
+    if fs:
+        f0 = fs[0] or {}
+        return _syn_first_sentence(f0.get("summary") or f0.get("statement") or "")
+    return _syn_first_sentence(s.get("experiment") or s.get("objective") or s.get("question") or "")
+
+
+def _build_synthesis(inv, studies, spine):
+    spine = spine or {}
+    recs = []
+    for s in studies:
+        grade = _syn_grade(s)
+        recs.append({
+            "slug": s.get("slug"), "title": s.get("title"),
+            "stage": _syn_stage_key(s.get("slug")),
+            "run_status": _syn_run_status(s), "grade": grade,
+            "claim_status": _syn_claim_status(grade),
+            "variant": _syn_is_variant(s.get("slug")),
+            "one_line": _syn_oneline(s), "_s": s,
+        })
+
+    pub = ("slug", "title", "stage", "run_status", "grade", "claim_status", "variant", "one_line")
+    studies_index = [{k: r[k] for k in pub} for r in recs]
+
+    # STAGES — integrated findings grouped by scientific stage (not one per study)
+    stages_map = {}
+    for r in recs:
+        stages_map.setdefault(r["stage"], []).append(r)
+    stages = []
+    for key in sorted(stages_map, key=_syn_stage_sort):
+        members = stages_map[key]
+        primary = next((m for m in members if not m["variant"] and m["run_status"] == "ran"), members[0])
+        grades = {m["grade"] for m in members}
+        model_dependence = ("supported" in grades) and bool(grades & {"refuted", "qualified"})
+        fnds = []
+        for m in members:
+            for f in (m["_s"].get("findings") or [])[:3]:
+                ev = (f or {}).get("evidence") or {}
+                fnds.append({
+                    "study": m["slug"], "title": m["title"], "grade": m["grade"],
+                    "status": (f or {}).get("status"),
+                    "statement": _syn_first_sentence((f or {}).get("statement") or (f or {}).get("summary") or "", 260),
+                    "observed": ev.get("observed"), "units": ev.get("units"),
+                })
+        stages.append({
+            "key": key, "label": primary["title"],
+            "studies": [{k: m[k] for k in ("slug", "title", "grade", "claim_status", "variant", "one_line", "run_status")} for m in members],
+            "model_dependence": model_dependence, "findings": fnds,
+        })
+
+    claim_evidence = [{
+        "claim": _syn_first_sentence(r["_s"].get("claim"), 300), "status": r["claim_status"],
+        "grade": r["grade"], "study": r["slug"], "study_title": r["title"],
+    } for r in recs if str(r["_s"].get("claim") or "").strip()]
+
+    # CONTRADICTIONS — model dependence, negative results, finding conflicts, frameworks
+    contradictions = []
+    for st in stages:
+        if st["model_dependence"]:
+            sup = [m for m in st["studies"] if m["grade"] == "supported"]
+            neg = [m for m in st["studies"] if m["grade"] in ("refuted", "qualified")]
+            if sup and neg:
+                contradictions.append({
+                    "kind": "model-dependence", "topic": st["label"],
+                    "detail": "A result holds in one model class but not another at matched conditions — report as model dependence, not two independent outcomes.",
+                    "studies": [{"slug": m["slug"], "title": m["title"], "grade": m["grade"]} for m in (sup + neg)],
+                })
+    for r in recs:
+        if r["grade"] == "refuted":
+            s = r["_s"]
+            di = s.get("discovery_implications") or {}
+            fps = di.get("followup_study_proposals") if isinstance(di, dict) else None
+            contradictions.append({
+                "kind": "negative-result", "topic": r["title"],
+                "detail": _syn_first_sentence(s.get("result") or s.get("conclusion") or _syn_oneline(s), 300),
+                "studies": [{"slug": r["slug"], "title": r["title"], "grade": "refuted"}],
+                "discriminating": (fps[0] if isinstance(fps, list) and fps else None),
+            })
+    for r in recs:
+        for f in (r["_s"].get("findings") or []):
+            if str((f or {}).get("status") or "").lower() in ("contradicts", "refutes", "partial"):
+                contradictions.append({
+                    "kind": "finding-conflict", "topic": r["title"],
+                    "detail": _syn_first_sentence((f or {}).get("statement") or (f or {}).get("summary") or "", 300),
+                    "studies": [{"slug": r["slug"], "title": r["title"], "grade": r["grade"]}],
+                })
+    for cf in (inv.get("competing_frameworks") or []):
+        if isinstance(cf, dict) and cf.get("name"):
+            contradictions.append({
+                "kind": "competing-framework", "topic": cf.get("name"),
+                "detail": _syn_first_sentence(cf.get("relation") or "", 300), "studies": [],
+            })
+
+    edges = ((spine.get("verdict_dag") or {}).get("edges")) or []
+    have_parents = {e.get("to") for e in edges}
+    continuity = {
+        "edges": [{"from": e.get("from"), "to": e.get("to")} for e in edges],
+        "external_inputs": [{"slug": r["slug"], "title": r["title"]}
+                            for r in recs if r["run_status"] == "ran" and r["slug"] not in have_parents],
+    }
+
+    quantitative = []
+    for st in stages:
+        rows = [{"study": f["study"], "statement": f["statement"], "observed": f["observed"], "units": f["units"]}
+                for f in st["findings"] if f.get("observed")]
+        if rows:
+            quantitative.append({"stage": st["label"], "rows": rows})
+
+    roadmap = []
+    for r in recs:
+        if r["run_status"] == "planned":
+            roadmap.append({"priority": "P1", "item": r["title"],
+                            "basis": _syn_first_sentence(r["_s"].get("experiment") or r["_s"].get("objective") or r["_s"].get("question") or "", 240),
+                            "source": r["slug"]})
+    for c in contradictions:
+        if c["kind"] == "negative-result" and c.get("discriminating"):
+            d = c["discriminating"]
+            roadmap.insert(0, {"priority": "P0", "item": "Discriminate: " + str(c["topic"]),
+                               "basis": _syn_first_sentence(str(d if not isinstance(d, dict) else (d.get("study") or d.get("title") or d)), 240),
+                               "source": (c["studies"][0]["slug"] if c["studies"] else None)})
+    for r in recs:
+        di = r["_s"].get("discovery_implications") or {}
+        fps = di.get("followup_study_proposals") if isinstance(di, dict) else None
+        for fp in (fps or [])[:2]:
+            txt = fp.get("study") or fp.get("title") or fp.get("proposal") if isinstance(fp, dict) else fp
+            if txt:
+                roadmap.append({"priority": "P2", "item": _syn_first_sentence(str(txt), 160), "basis": "", "source": r["slug"]})
+    # Prioritized + bounded: keep all P0/P1, dedupe + cap P2, then order by priority.
+    _seen, _dedup = set(), []
+    for it in roadmap:
+        if it["priority"] == "P2":
+            k = it["item"].lower()[:80]
+            if not it["item"] or k in _seen:
+                continue
+            _seen.add(k)
+        _dedup.append(it)
+    _p2 = [i for i in _dedup if i["priority"] == "P2"][:8]
+    roadmap = sorted([i for i in _dedup if i["priority"] != "P2"] + _p2,
+                     key=lambda i: {"P0": 0, "P1": 1, "P2": 2}.get(i["priority"], 3))
+
+    # Figure shortlist — rank by scientific weight, then DIVERSIFY: at most the
+    # single best figure per study, so the shortlist spans stages (not 6 from one).
+    best_per_study = {}
+    for r in recs:
+        for f in (r["_s"].get("figures_embedded") or []):
+            score = (3 if r["grade"] == "supported" else 2 if r["grade"] in ("qualified", "refuted") else 0)
+            if (f or {}).get("caption") or (f or {}).get("description"):
+                score += 1
+            if not r["variant"]:
+                score += 1
+            cur = best_per_study.get(r["slug"])
+            cand = {"slug": r["slug"], "study_title": r["title"], "name": (f or {}).get("name"),
+                    "caption": (f or {}).get("caption") or (f or {}).get("description"), "score": score}
+            if cur is None or score > cur["score"]:
+                best_per_study[r["slug"]] = cand
+    figures_ranked = sorted(best_per_study.values(), key=lambda x: -x["score"])[:6]
+
+    headline = [{"kind": "gate", "id": g.get("id"), "name": g.get("name"), "status": g.get("status")}
+                for g in (spine.get("plan_board") or [])]
+
+    out = {
+        "studies_index": studies_index, "stages": stages, "claim_evidence": claim_evidence,
+        "contradictions": contradictions, "continuity": continuity, "quantitative": quantitative,
+        "roadmap": roadmap, "figures_ranked": figures_ranked, "headline": headline,
+        "counts": {
+            "total": len(recs),
+            "supported": sum(1 for r in recs if r["grade"] == "supported"),
+            "qualified": sum(1 for r in recs if r["grade"] == "qualified"),
+            "refuted": sum(1 for r in recs if r["grade"] == "refuted"),
+            "planned": sum(1 for r in recs if r["run_status"] == "planned"),
+        },
+    }
+    auth = inv.get("report_synthesis")
+    if isinstance(auth, dict):
+        for k, v in auth.items():
+            if v:
+                out[k] = v
+    return out
+
+
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
     """Assemble the pure report-data dict for one investigation from existing
     files only. Raises FileNotFoundError if the investigation is missing.
@@ -699,6 +981,19 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         s = {k: spec.get(k) for k in _STUDY_KEEP if spec.get(k) is not None}
         s["slug"] = real_slug
         s["title"] = spec.get("title") or _humanize(real_slug)   # title is optional in some workspaces
+        # Canonical two-axis ontology (REUSED, not re-derived): execution status +
+        # scientific verdict from study_ontology — the same functions the live
+        # graph + build_iset_detail use. Stashed here on the raw spec BEFORE
+        # _build_spine sets the gate-state `verdict` for the DAG, so the synthesis
+        # grade reuses the canonical scientific verdict instead of re-mapping.
+        try:
+            from vivarium_workbench.lib import study_ontology as _onto
+            s["execution_status"] = _onto.derive_execution_status(spec, str(spec.get("status") or ""))
+            _sv = _onto.derive_verdict(spec)
+            if _sv:
+                s["sci_verdict"] = _sv
+        except Exception:  # noqa: BLE001
+            pass
         # "Methods · Simulations" node-card block (locked shared spec, matching the
         # live workbench graph): the baseline composite id + graded-test counts are
         # computed here. `methods`/`fidelity` come from process-bigraph's
@@ -762,6 +1057,28 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         studies.append(s)
 
     spine = _build_spine(ws_root, inv_slug, studies)
+    _synthesis = _build_synthesis(inv, studies, spine)
+    # Reuse the EXISTING deterministic needs-attention scan as the report's
+    # validation/consistency layer (invariant & conservation-invariant
+    # regressions, verdict divergence, reproducibility env-stale/nondeterministic,
+    # param drift, phantom observables, uncovered acceptance criteria). Build-free
+    # + tolerant; empty when the scan is unavailable.
+    try:
+        from vivarium_workbench.lib.report_views import build_needs_attention
+        _na, _ = build_needs_attention(ws_root, investigation=inv_slug)
+        _synthesis["validation"] = _na if isinstance(_na, dict) else {}
+    except Exception:  # noqa: BLE001
+        _synthesis["validation"] = {"items": [], "summary": {"total": 0, "by_kind": {}, "by_severity": {}}}
+    # Also fold in the EXISTING report-readiness linter (report_views.build_report_lint
+    # → viva_superpowers.report_linter + the dashboard's composite-resolution,
+    # readout-emit-plan, question/approach and visualization-gap checks). Same
+    # deterministic infra the live report-lint endpoint uses — reused, not rebuilt.
+    try:
+        from vivarium_workbench.lib.report_views import build_report_lint
+        _lint, _ = build_report_lint(ws_root)
+        _synthesis["validation"]["report_lint"] = list((_lint or {}).get("findings", []) or [])
+    except Exception:  # noqa: BLE001
+        _synthesis["validation"]["report_lint"] = []
     references = _load_references(ws_root, wp)
 
     return {
@@ -788,6 +1105,15 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "at_a_glance": inv.get("at_a_glance"),
         "acceptance_criteria": inv.get("acceptance_criteria"),
         "spine": spine,
+        # Deterministic cross-study synthesis (claim-evidence map, stage-grouped
+        # integrated findings, contradictions, continuity, roadmap, figure ranking,
+        # run-status/evidence/claim separation) — the finding-first report layer.
+        # Also carries a `validation` block: the EXISTING deterministic
+        # needs-attention scan (invariant/conservation regressions, verdict
+        # divergence, reproducibility env-stale/nondeterministic, param drift,
+        # phantom observables, uncovered ACs) reused from report_views — not a new
+        # checker. Added after the dict literal (see just below).
+        "synthesis": _synthesis,
         "references": references,
         "inv_references": inv.get("inputs", {}).get("references") if isinstance(inv.get("inputs"), dict) else None,
         "catalog": inv.get("catalog"),
@@ -864,6 +1190,68 @@ def render_html(data: dict, plotly_js: "str | None" = None) -> str:
         pj = pj.replace("</script", "<\\/script")
     # done last so the (large, opaque) bundle can't collide with other tokens
     return html.replace("__PLOTLY_JS__", pj)
+
+
+class ReportPdfError(RuntimeError):
+    """Raised when the PDF render can't run (Playwright/Chromium missing) or fails."""
+
+
+def render_report_pdf(html: str) -> bytes:
+    """Render the self-contained report HTML to a PDF via headless Chromium.
+
+    The report is client-rendered (JS builds the document from the embedded data
+    and draws the Plotly figures), so we load it in a real browser, call the
+    report's ``__reportPrintPrep()`` hook (expand every study card + force-render
+    all lazy figures/looms), let it settle, then capture ``page.pdf()``.
+
+    Uses Playwright — the same optional ``loom-render`` extra ``render-loom``
+    already relies on. Raises :class:`ReportPdfError` with install guidance when
+    Playwright or its Chromium build is unavailable, so the route can surface a
+    clear message instead of a 500.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:  # noqa: BLE001
+        raise ReportPdfError(
+            "PDF export needs Playwright (the 'loom-render' extra):\n"
+            "  pip install 'vivarium-workbench[loom-render]'\n"
+            "  python -m playwright install chromium"
+        ) from e
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            try:
+                # A4-width viewport so the layout measured during __reportPrintPrep
+                # (figure fit, graph scale) matches the A4 page.pdf() output — a
+                # wide viewport would mis-measure and let figures overflow the page.
+                page = browser.new_page(viewport={"width": 794, "height": 1123},
+                                        device_scale_factor=2)
+                # Self-contained HTML, no network — load (not networkidle, which
+                # would wait forever with no requests in flight).
+                page.set_content(html, wait_until="load", timeout=60000)
+                try:
+                    page.evaluate("() => (window.__reportPrintPrep ? window.__reportPrintPrep() : null)")
+                except Exception:
+                    pass
+                page.wait_for_timeout(900)   # let any post-prep figure draws settle
+                return page.pdf(
+                    print_background=True,
+                    prefer_css_page_size=False,
+                    format="A4",
+                    margin={"top": "14mm", "bottom": "14mm", "left": "12mm", "right": "12mm"},
+                )
+            finally:
+                browser.close()
+    except ReportPdfError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)
+        if "Executable doesn't exist" in msg or "playwright install" in msg:
+            raise ReportPdfError(
+                "Chromium isn't installed for Playwright:\n"
+                "  python -m playwright install chromium"
+            ) from e
+        raise ReportPdfError(f"PDF render failed: {type(e).__name__}: {msg}") from e
 
 
 def render_investigation_report(ws_root, inv_slug: str, *, out_dir=None,
