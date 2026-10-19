@@ -44,6 +44,10 @@ _STUDY_KEEP = (
     # study's lifecycle/phase + maturity. Additive — each is optional per study.
     "objective", "experiment", "hypothesis", "result", "phase", "kind", "design_status",
     "readouts", "discovery_implications", "status",
+    # §7 figure-first card: the single discriminating limitation, the cross-study
+    # state transfer (handoff.emits/receives), and the planned-scaffold analogs
+    # (honest_caveat / proposed_controls) used where a realized study has none.
+    "primary_limitation", "handoff", "honest_caveat", "proposed_controls",
 )
 
 # 5-state study verdict (mirrors viva_superpowers roll-up): each maps to a glyph
@@ -182,6 +186,14 @@ _IMG_MIME = {".svg": "image/svg+xml", ".png": "image/png", ".gif": "image/gif",
 
 def _humanize(slug: str) -> str:
     return re.sub(r"[-_]+", " ", str(slug)).strip().title()
+
+
+def _norm_fig_name(name) -> str:
+    """Normalize a figure/visualization name for joining a declared viz entry to
+    its embedded figure: lowercase, strip every non-alphanumeric char. So the
+    declared ``carbon-fixation-phase-map`` and the humanized ``Carbon Fixation
+    Phase Map`` collapse to the same key."""
+    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
 
 
 def _embed_visualizations(study_dir: Path, viz_list, budget: list) -> list:
@@ -1050,6 +1062,23 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         # embedded above (by display name).
         embedded_names = {f.get("name") for f in figs if isinstance(f, dict)}
         figs.extend(_embed_native_gallery_panels(ws_root, real_slug, img_budget, embedded_names))
+        # Carry the declared `display:` intent (primary / mechanism) from
+        # `visualizations[]` onto each embedded figure, so the report's figure-first
+        # card can show the decisive figure (+ mechanism) and collapse the rest into
+        # a technical record. Joined on a normalized name (the native-gallery / HTML
+        # embedders humanize stems, so an exact match would miss). Additive and
+        # data-safe: a study with no `display` flags leaves every fig unmarked.
+        _disp_by_norm = {
+            _norm_fig_name(v.get("name")): v.get("display")
+            for v in (spec.get("visualizations") or [])
+            if isinstance(v, dict) and v.get("display") and v.get("name")
+        }
+        if _disp_by_norm:
+            for f in figs:
+                if isinstance(f, dict) and not f.get("display"):
+                    d = _disp_by_norm.get(_norm_fig_name(f.get("name")))
+                    if d:
+                        f["display"] = d
         if figs:
             s["figures_embedded"] = figs
         # resolve the baseline composite's bigraph topology for the Model loom view

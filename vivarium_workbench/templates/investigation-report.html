@@ -314,6 +314,17 @@ details.exp>summary::before{content:"▸ ";color:var(--ink-3)}
 details.exp[open]>summary::before{content:"▾ "}
 details.exp .body{font-size:13.5px;color:var(--ink-2);margin-top:8px;max-width:none}
 
+/* §7 figure-first card slots */
+.disc-control{margin-top:8px;padding:8px 11px;background:var(--sunken);border:1px solid var(--line);border-radius:8px;font-size:13px;color:var(--ink-2)}
+.dc-k{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);margin-right:6px}
+.card-limitation{padding:11px 14px;background:color-mix(in srgb,var(--warn) 7%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 32%,var(--line));border-left:3px solid var(--warn);border-radius:8px;font-size:13.5px;color:var(--ink);line-height:1.5}
+.ho-row{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin:5px 0}
+.ho-dir{font-size:11px;font-weight:700;letter-spacing:.03em;color:var(--ink-2);white-space:nowrap}
+.ho-who{color:var(--ink-3);font-weight:600}
+.ho-items{display:flex;gap:5px;flex-wrap:wrap}
+.tech-record{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line-2)}
+.tech-record>.body{margin-top:12px}
+
 /* appendix */
 .appendix{margin:52px 0 24px}
 .cat-table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -1091,22 +1102,9 @@ function outcomeRows(outcomes){
   }).join('');
 }
 
-// The four-part scientific unit — the PRIMARY structure of a study:
-// question → model experiment → observable → what we learn. Each part no-ops
-// when its field is absent, so a minimal study still renders cleanly.
-function sciUnit(s){
-  const q=s.question||(s.purpose&&s.purpose.question)||s.claim||'';
-  const exp=_experimentOf(s);
-  const obs=_observableOf(s);
-  const learn=_whatWeLearn(s);
-  const tier=(Array.isArray(s.findings)&&s.findings.length)?evidenceTier(s.findings[0],s):null;
-  const row=(k,v,isQ,extra)=> v?`<div class="sci-part ${isQ?'q':''}"><div class="sp-k">${esc(k)}</div><div class="sp-v">${v}${extra||''}</div></div>`:'';
-  const body=row('Scientific question', q?esc(q):'', true)
-    + row('Model experiment', exp?mdLite(exp):'')
-    + row('Observable', obs?`<span class="mono">${esc(obs)}</span>`:'')
-    + row('What we learn', learn?mdLite(learn):'', false, tier?` ${etierBadge(tier)}`:'');
-  return body?`<div class="sci-unit">${body}</div>`:'';
-}
+// (The former four-part sciUnit() was superseded by the §7 figure-first card
+// slots in renderStudy; its field helpers _experimentOf/_observableOf/_whatWeLearn
+// are still used there and in studySummary.)
 
 // "Methods · Simulations" node-card block — matches the locked SHARED spec used by
 // the live workbench graph's study card (same rows + fidelity vocabulary + CSS
@@ -1227,30 +1225,47 @@ function renderStudy(s, inv, idx){
     _rcVariants.forEach(_vc=>{ runBody += `<div class="texp">${esc(_vc.name)}: ${_runChip(_vc && _vc.cmd)}</div>`; });
   }
 
-  // VISUALIZATIONS (study figures + inlined images + audit axes)
-  const figs=[];
-  if(s.agent_trajectory) figs.push(['Margin ladder — LLM agent', vizMarginLadder(s.agent_trajectory)]);
-  if(s.policy_trajectory) figs.push(['Margin ladder — deterministic policy control', vizMarginLadder(s.policy_trajectory)]);
-  if(s.sourcing) figs.push(['Capability coverage', vizCapMatrix(s,inv)]);
-  let figHtml=figs.filter(f=>f[1]).map(([t,svg])=>`<div style="margin:12px 0"><div class="kicker" style="margin-bottom:6px">${esc(t)}</div>${svg}</div>`).join('');
-  // on-disk study visualizations, inlined by the generator: images as data
-  // URIs, and `local:` live visualizations as their committed rendered HTML.
-  (s.figures_embedded||[]).forEach(im=>{
-    if(im.data_uri) figHtml+=`<figure><img src="${im.data_uri}" alt="${esc(im.name)}" loading="lazy"><figcaption>${esc(im.name)}</figcaption></figure>`;
+  // VISUALIZATIONS — split by the declared `display:` intent (set in the study's
+  // visualizations[], carried onto each embedded figure by the report builder):
+  // the card LEADS with the decisive figure (display: primary, then mechanism),
+  // and everything unmarked (repeated time-series, 3D re-renders, solver traces,
+  // reaction catalogs, audit axes, derived ladders) drops into the collapsed
+  // technical record below. If NO figure is flagged (older / other workspaces),
+  // `anyFigFlagged` is false and every figure renders in one plain Visualizations
+  // section — degrade, don't break.
+  let primaryFigHtml='', mechFigHtml='', techFigHtml='';
+  const anyFigFlagged=(s.figures_embedded||[]).some(im=>im&&im.display);
+  // single embedded-figure item → its HTML fragment (image / inline Plotly /
+  // iframe HTML / skipped note), the same renderings as before.
+  const _figItem=(im)=>{
+    if(im.data_uri) return `<figure><img src="${im.data_uri}" alt="${esc(im.name)}" loading="lazy"><figcaption>${esc(im.name)}</figcaption></figure>`;
     // Interactive figure (Plotly): the generator stripped its own Plotly loader
     // and handed us just the graph <div> + its Plotly.newPlot script. Render it
     // INLINE in the main document so it draws with the report's one shared
     // Plotly.js. The script stays inert until setupLazyPlotly() runs it the first
-    // time the figure is actually laid out with a real width (see below) — so a
-    // tab-hidden / collapsed figure is drawn at correct size when revealed, never
-    // blank.
-    else if(im.html && im.interactive) figHtml+=`<figure class="embedded-viz embedded-plotly" style="margin:12px 0"><figcaption class="kicker" style="margin-bottom:6px">${esc(im.name)}</figcaption><div class="plotly-holder">${im.html}</div></figure>`;
+    // time the figure is actually laid out with a real width — so a tab-hidden /
+    // collapsed figure is drawn at correct size when revealed, never blank.
+    if(im.html && im.interactive) return `<figure class="embedded-viz embedded-plotly" style="margin:12px 0"><figcaption class="kicker" style="margin-bottom:6px">${esc(im.name)}</figcaption><div class="plotly-holder">${im.html}</div></figure>`;
     // Any other committed HTML figure keeps the isolated-iframe path.
-    else if(im.html) figHtml+=`<figure class="embedded-viz" style="margin:12px 0"><figcaption class="kicker" style="margin-bottom:6px">${esc(im.name)}</figcaption><iframe class="viz-frame" srcdoc="${esc(im.html)}" loading="lazy" onload="try{this.style.height=(this.contentWindow.document.documentElement.scrollHeight+8)+'px';}catch(e){}"></iframe></figure>`;
-    else if(im.skipped) figHtml+=`<div class="texp" style="color:var(--ink-3)">↪ ${esc(im.name)} — ${esc(im.reason||'not inlined')}</div>`;
+    if(im.html) return `<figure class="embedded-viz" style="margin:12px 0"><figcaption class="kicker" style="margin-bottom:6px">${esc(im.name)}</figcaption><iframe class="viz-frame" srcdoc="${esc(im.html)}" loading="lazy" onload="try{this.style.height=(this.contentWindow.document.documentElement.scrollHeight+8)+'px';}catch(e){}"></iframe></figure>`;
+    if(im.skipped) return `<div class="texp" style="color:var(--ink-3)">↪ ${esc(im.name)} — ${esc(im.reason||'not inlined')}</div>`;
+    return '';
+  };
+  (s.figures_embedded||[]).forEach(im=>{
+    const html=_figItem(im); if(!html) return;
+    if(im.display==='primary') primaryFigHtml+=html;
+    else if(im.display==='mechanism') mechFigHtml+=html;
+    else techFigHtml+=html;
   });
-  const auditHtml=(s.sourcing&&s.sourcing.audit&&s.sourcing.audit.axes)?`<div style="margin:10px 0"><div class="kicker" style="margin-bottom:6px">Audit — sourcing gate (4 axes)</div>${vizAuditAxes(s)}</div>`:'';
-  const vizBody=(figHtml+auditHtml)||'';
+  // derived / audit figures are always technical record (never the decisive figure)
+  const dfigs=[];
+  if(s.agent_trajectory) dfigs.push(['Margin ladder — LLM agent', vizMarginLadder(s.agent_trajectory)]);
+  if(s.policy_trajectory) dfigs.push(['Margin ladder — deterministic policy control', vizMarginLadder(s.policy_trajectory)]);
+  if(s.sourcing) dfigs.push(['Capability coverage', vizCapMatrix(s,inv)]);
+  techFigHtml = dfigs.filter(f=>f[1]).map(([t,svg])=>`<div style="margin:12px 0"><div class="kicker" style="margin-bottom:6px">${esc(t)}</div>${svg}</div>`).join('') + techFigHtml;
+  if(s.sourcing&&s.sourcing.audit&&s.sourcing.audit.axes) techFigHtml+=`<div style="margin:10px 0"><div class="kicker" style="margin-bottom:6px">Audit — sourcing gate (4 axes)</div>${vizAuditAxes(s)}</div>`;
+  // the decisive-figure slot: the primary, then any mechanism view
+  const decisiveFigBody=(primaryFigHtml+mechFigHtml)||'';
 
   // TESTS (+ build reasoning for agentic)
   let testsBody = has(s.behavior_tests)?testsTable(s.behavior_tests, s.agent_trajectory):'';
@@ -1325,7 +1340,7 @@ function renderStudy(s, inv, idx){
     }).join('');
     anchorsBody=`<table class="anchors"><thead><tr><th>Expectation (literature)</th><th>Model observable</th><th>Source</th><th>Status in workspace</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
-  if(has(s.key_assumptions)) anchorsBody+=`<div class="kicker" style="margin:14px 0 4px">Key assumptions</div><ul class="assumptions">${s.key_assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
+  // (key_assumptions moved up to the §7 "Model & key assumptions" slot)
 
   // LIMITATIONS & FOLLOW-UPS — the honest debts the study carries and what it
   // opens up next. Both were authored into study.yaml (limitations[],
@@ -1342,6 +1357,63 @@ function renderStudy(s, inv, idx){
     _addDi('followup_study_proposals','Follow-up studies proposed');
   }
 
+  // ---- §7 figure-first narrative slots ---------------------------------------
+  // The card reads as a tight scientific argument: question (the serif lead above)
+  // → hypothesis + discriminating control → model + key assumptions → decisive
+  // figure → quantitative finding → verdict → primary limitation → downstream
+  // state-transfer. Each slot no-ops when its field is absent, so an older study
+  // (no §7 fields) still renders cleanly; the heavy supporting material (model
+  // internals, full figure set, sim run, tests, provenance, follow-ups) collapses
+  // into one "Technical record" expander.
+
+  // slot 2 — hypothesis + discriminating control
+  const hypoText = s.hypothesis || s.objective || (s.purpose&&s.purpose.mechanism) || '';
+  const expText = _experimentOf(s);
+  const obsText = _observableOf(s);
+  // the discriminating control: a matched-null / ablation baseline arm, else the
+  // scaffold analog (proposed_controls) for a planned study.
+  const _ctrlArm = (s.baseline||[]).find(b=>b&&/\b(null|matched|ablation|control|no[-\s])/i.test(b.name||''));
+  let ctrlHtml='';
+  if(_ctrlArm) ctrlHtml=`<div class="disc-control"><span class="dc-k">Discriminating control</span> ${esc(_ctrlArm.name)}</div>`;
+  else if(has(s.proposed_controls)) ctrlHtml=`<div class="disc-control"><span class="dc-k">Proposed controls</span><ul class="assumptions" style="margin:4px 0 0">${s.proposed_controls.map(c=>`<li>${_debtText(c)}</li>`).join('')}</ul></div>`;
+  let hypoBody='';
+  if(hypoText) hypoBody+=`<div class="sp-v">${mdLite(hypoText)}</div>`;
+  if(expText) hypoBody+=`<div class="texp" style="margin-top:6px"><span class="dc-k">Model experiment</span> ${mdLite(expText)}</div>`;
+  if(obsText) hypoBody+=`<div class="texp" style="margin-top:4px"><span class="dc-k">Observable</span> <span class="mono">${esc(obsText)}</span></div>`;
+  hypoBody+=ctrlHtml;
+
+  // slot 3 — model + key assumptions (full bigraph internals go to the technical record)
+  let modelSlot=methodsSimsBlock(s);
+  if(has(s.key_assumptions)) modelSlot+=`<div class="kicker" style="margin:12px 0 4px">Key assumptions</div><ul class="assumptions">${s.key_assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
+
+  // slot 7 — primary limitation (realized study), else the scaffold's honest caveat
+  const limText = s.primary_limitation || s.honest_caveat || '';
+  const limSlot = limText?`<div class="card-limitation">${mdLite(limText)}</div>`:'';
+
+  // slot 8 — downstream state-transfer (handoff.emits / .receives)
+  let handoffBody='';
+  const _ho=s.handoff;
+  if(_ho && typeof _ho==='object'){
+    const _hoRow=(label, arr, dirKey)=> (Array.isArray(arr)&&arr.length)?arr.map(h=>{
+      const who=(dirKey==='to')?(h.to!=null?('study '+esc(h.to)):''):(h.from!=null?('study '+esc(h.from)):'');
+      const items=(h.provides||h.requires||[]);
+      return `<div class="ho-row"><span class="ho-dir">${label}${who?` <span class="ho-who">${who}</span>`:''}</span>${items.length?`<span class="ho-items">${items.map(x=>`<span class="chip mod">${esc(x)}</span>`).join(' ')}</span>`:''}</div>`;
+    }).join(''):'';
+    handoffBody = _hoRow('Provides →','emits'in _ho?_ho.emits:null,'to') + _hoRow('Requires ←','receives'in _ho?_ho.receives:null,'from');
+  }
+
+  // Technical record — everything that supports but isn't the headline argument.
+  const techInner =
+      part('Model — composite internals', modelBody, 'study:'+s.slug+'/model', s.title+' · Model')
+    + part('Simulation run', runBody, 'study:'+s.slug+'/simulation', s.title+' · Simulation run')
+    + (anyFigFlagged?part('Full figure set', techFigHtml, 'study:'+s.slug+'/visualizations', s.title+' · Visualizations'):'')
+    + part('Tests', testsBody, 'study:'+s.slug+'/tests', s.title+' · Tests')
+    + part('Provenance & anchors', anchorsBody, 'study:'+s.slug+'/provenance', s.title+' · Provenance')
+    + part('Limitations & follow-ups', debtsBody, 'study:'+s.slug+'/debts', s.title+' · Limitations');
+  const techRecord = techInner.trim()
+    ? `<details class="exp tech-record"><summary>Technical record — model internals, full figure set, tests, provenance &amp; follow-ups</summary><div class="body">${techInner}</div></details>`
+    : '';
+
   // card badge uses the SAME status derivation as the graph + ladder (workbench
   // _studyStatusMeta), so a running study reads "Investigating" everywhere.
   const sm=studyStatusMeta(s);
@@ -1356,16 +1428,15 @@ function renderStudy(s, inv, idx){
     ${claimLine}${overview}
     <div class="study-summary">${studySummary(s,inv)}</div>
     <div class="study-detail">
-      ${sciUnit(s)}
-      ${methodsSimsBlock(s)}
-      ${part('Model — composite internals', modelBody, 'study:'+s.slug+'/model', s.title+' · Model')}
-      ${part('Simulation run', runBody, 'study:'+s.slug+'/simulation', s.title+' · Simulation run')}
-      ${part('Visualizations', vizBody, 'study:'+s.slug+'/visualizations', s.title+' · Visualizations')}
-      ${part('Tests', testsBody, 'study:'+s.slug+'/tests', s.title+' · Tests')}
-      ${part('Findings', findingsBody, 'study:'+s.slug+'/findings', s.title+' · Findings')}
-      ${part('Provenance & anchors', anchorsBody, 'study:'+s.slug+'/provenance', s.title+' · Provenance')}
-      ${part('Decision', decisionBody, 'study:'+s.slug+'/decision', s.title+' · Decision')}
-      ${part('Limitations & follow-ups', debtsBody, 'study:'+s.slug+'/debts', s.title+' · Limitations')}
+      ${part('Hypothesis & discriminating control', hypoBody, 'study:'+s.slug+'/hypothesis', s.title+' · Hypothesis')}
+      ${part('Model & key assumptions', modelSlot, 'study:'+s.slug+'/model-assumptions', s.title+' · Model & assumptions')}
+      ${anyFigFlagged?part('Decisive figure', decisiveFigBody, 'study:'+s.slug+'/decisive-figure', s.title+' · Decisive figure')
+                    :part('Visualizations', techFigHtml, 'study:'+s.slug+'/visualizations', s.title+' · Visualizations')}
+      ${part('Finding', findingsBody, 'study:'+s.slug+'/findings', s.title+' · Finding')}
+      ${part('Verdict', decisionBody, 'study:'+s.slug+'/decision', s.title+' · Verdict')}
+      ${part('Primary limitation', limSlot, 'study:'+s.slug+'/limitation', s.title+' · Primary limitation')}
+      ${part('Downstream state-transfer', handoffBody, 'study:'+s.slug+'/handoff', s.title+' · Handoff')}
+      ${techRecord}
       ${feedbackRow('study:'+s.slug, 'this whole study')}
     </div>
   </section>`;
