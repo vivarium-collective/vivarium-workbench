@@ -4290,8 +4290,26 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
 .res-count { font-size: 0.72em; color: var(--gray); font-weight: 600;
   background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 0 7px; }
-.res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+/* Cards: readable 1–2 columns, never 3–4 tiny ones. Each card gets at least
+   ~400px (min(100%, 400px) so it still collapses to 1-up on a phone). */
+.res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
   gap: 14px; align-items: start; }
+/* Reaction pathways are prose-heavy (role/caveats/tables) → full width, with a
+   second column only on a genuinely wide viewport. */
+.res-section[data-res-type="reaction-pathway"] .res-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 640px), 1fr)); }
+/* Evidence datasets carry an internal 2-column measured/predicted chain → give
+   each card room so that chain isn't squeezed. */
+.res-section[data-res-type="evidence-dataset"] .res-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr)); }
+/* A stacked prose field: label on its own line, value full-width beneath — the
+   fix for long prose (Role in campaign, ΔG span, caution, …) that used to wrap
+   one character per line in a cramped 2nd grid column. */
+.res-field { margin: 8px 0; min-width: 0; }
+.res-field + .res-field { margin-top: 6px; }
+.res-field-k { display: block; font-size: 0.72em; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--gray); font-weight: 600; margin-bottom: 2px; }
+.res-field-v { display: block; font-size: 0.88em; line-height: 1.5; overflow-wrap: anywhere; }
 .res-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px;
   background: var(--panel); }
 .res-card-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
@@ -4304,11 +4322,15 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .res-desc { font-size: 0.86em; margin: 8px 0; }
 .res-sub { font-size: 0.74em; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--gray); font-weight: 600; margin: 12px 0 6px; }
-.res-kv-grid { display: grid; grid-template-columns: 1fr; gap: 3px 14px; }
-@media (min-width: 420px) { .res-kv-grid { grid-template-columns: 1fr 1fr; } }
+/* Short scalar pairs only. auto-fit with a 220px floor keyed to CARD width
+   (not the viewport) so a pair never shrinks into a 1-char-per-line column; a
+   pair that doesn't fit drops to its own row instead. Prose belongs in
+   .res-field (stacked), never here. */
+.res-kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 4px 18px; }
 .res-kv { display: flex; gap: 6px; font-size: 0.84em; line-height: 1.4; min-width: 0; }
 .res-kv-k { color: var(--gray); flex: 0 0 auto; }
-.res-kv-v { color: inherit; min-width: 0; word-break: break-word; }
+.res-kv-v { color: inherit; min-width: 0; overflow-wrap: anywhere; }
 .res-martini, .res-network { margin-top: 10px; padding: 10px; border: 1px solid var(--border);
   border-radius: 6px; background: var(--bg); }
 .res-martini .res-sub, .res-network .res-sub { margin-top: 0; }
@@ -4352,6 +4374,9 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .res-flag-ok { background: #ecfdf5; color: #047857; }
 .res-flag-warn { background: #fffbeb; color: #b45309; }
 .res-paper { scroll-margin-top: 80px; }
+/* References-list entries are the cross-link targets now (paper-reference cards
+   were folded in), so they need the same scroll offset + flash affordance. */
+.res-ref-anchor { scroll-margin-top: 80px; }
 .res-ref-flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow 0.2s; }
 
 /* evidence-dataset — a provenance-chain card: original measurement vs model
