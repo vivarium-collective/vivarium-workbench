@@ -612,6 +612,87 @@ def build_needs_attention(
         return _empty, 200
 
 
+def build_concept_overlay(
+    ws_root: Path,
+    *,
+    investigation: Optional[str] = None,
+    derive_fn: Optional[Callable] = None,
+    verdict_fn: Optional[Callable] = None,
+) -> tuple[dict, int]:
+    """GET /api/concept-overlay builder.
+
+    Derives the EPHEMERAL Concept overlay (the formalized investigation-graph
+    grouping layer) for one investigation and attaches each member study's
+    canonical verdict. Pure projection — nothing is written to the workspace.
+
+    The derivation lives in the companion ``viva_superpowers`` package
+    (``concept_overlay.derive_concepts`` + ``verdict_vocab.canonical_verdict_detail``);
+    both are injectable (``derive_fn`` / ``verdict_fn``) for testing and degrade
+    gracefully to an empty overlay when the package isn't importable, mirroring
+    the ``loop_state`` / ``needs_attention`` seams. Always returns status 200.
+    """
+    ws_root = Path(ws_root)
+    empty: dict = {
+        "investigation": investigation,
+        "concepts": [],
+        "study_verdicts": {},
+        "diverges": [],
+    }
+    if derive_fn is None or verdict_fn is None:
+        try:
+            from viva_superpowers.concept_overlay import derive_concepts as _dc
+            from viva_superpowers.verdict_vocab import canonical_verdict_detail as _cv
+        except Exception:  # noqa: BLE001
+            return empty, 200
+        derive_fn = derive_fn or _dc
+        verdict_fn = verdict_fn or _cv
+
+    # Load the investigation spec (tolerant).
+    inv_spec: dict = {}
+    try:
+        wp = WorkspacePaths.load(ws_root)
+        if investigation:
+            inv_path = wp.investigations / investigation / "investigation.yaml"
+            if inv_path.is_file():
+                loaded = yaml.safe_load(inv_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    inv_spec = loaded
+    except Exception:  # noqa: BLE001
+        inv_spec = {}
+
+    studies_by_slug: dict = {}
+    try:
+        studies_by_slug = {slug: spec for slug, spec in _iter_study_slugs(ws_root)}
+    except Exception:  # noqa: BLE001
+        studies_by_slug = {}
+
+    try:
+        concepts = derive_fn(inv_spec, studies_by_slug) or []
+    except Exception:  # noqa: BLE001
+        return empty, 200
+
+    verdicts: dict = {}
+    diverges: list = []
+    for concept in concepts:
+        for slug in (concept.get("member_studies") or []):
+            if slug in verdicts:
+                continue
+            try:
+                detail = verdict_fn(studies_by_slug.get(slug, {}))
+            except Exception:  # noqa: BLE001
+                continue
+            verdicts[slug] = detail
+            if detail.get("diverges"):
+                diverges.append(slug)
+
+    return {
+        "investigation": investigation,
+        "concepts": concepts,
+        "study_verdicts": verdicts,
+        "diverges": diverges,
+    }, 200
+
+
 def _collect_cite_keys(obj: Any, acc: set) -> None:
     """Recursively collect every bib key under any ``cites`` field of a nested
     study spec. ``cites`` may be an inline list (``cites: [a, b]``), a block

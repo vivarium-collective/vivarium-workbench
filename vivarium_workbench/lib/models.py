@@ -930,6 +930,24 @@ class NeedsAttention(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ConceptOverlay(BaseModel):
+    """``GET /api/concept-overlay`` payload (lib.report_views.build_concept_overlay).
+
+    Shape: ``{investigation, concepts: [...], study_verdicts: {slug: {...}},
+    diverges: [slug, ...]}`` — the ephemeral Concept grouping overlay of the
+    formalized investigation graph, derived from plan_gates/plan_acts, plus each
+    member study's canonical verdict. Always HTTP 200 — degrades to empty when
+    the ``viva_superpowers`` derivation package is unavailable.
+
+    Pure pass-through (``extra="allow"``, no declared fields) so the derived
+    concept + verdict sub-dict shapes survive verbatim.
+
+    Source: ``lib.report_views.build_concept_overlay``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
 class BandProvenanceMissing(BaseModel):
     """``GET /api/band-provenance`` payload
     (lib.cite_bands_views.build_band_provenance_missing).

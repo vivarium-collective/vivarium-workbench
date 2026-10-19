@@ -168,6 +168,7 @@ from vivarium_workbench.lib.models import (
     DirtyStatus,
     IsetDetail,
     InputsPayload,
+    ConceptOverlay,
     NeedsAttention,
     ReportLint,
     BandProvenanceMissing,
@@ -2780,6 +2781,29 @@ def create_app() -> FastAPI:
         """
         body, _ = _report_views.build_needs_attention(ws, investigation=investigation)
         return NeedsAttention.model_validate(body)
+
+    @app.get(
+        "/api/concept-overlay",
+        response_model=ConceptOverlay,
+        tags=["Data, inputs & references"],
+        summary="Investigation Concept overlay (derived)",
+    )
+    def concept_overlay(
+        investigation: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> ConceptOverlay:
+        """Derive the ephemeral Concept overlay for an investigation.
+
+        Returns ``{investigation, concepts: [...], study_verdicts: {slug: {...}},
+        diverges: [...]}`` — one Concept per plan_gates gate (fallback plan_acts),
+        plus each member study's canonical verdict. Nothing is written. Always
+        HTTP 200 — degrades to empty when the ``viva_superpowers`` derivation
+        package is unavailable.
+
+        Library-backed via ``lib.report_views.build_concept_overlay``.
+        """
+        body, _ = _report_views.build_concept_overlay(ws, investigation=investigation)
+        return ConceptOverlay.model_validate(body)
 
     # -----------------------------------------------------------------------
     # Cite-bands routes (Phase 2.1e — backs the /viva-cite-bands skill).
