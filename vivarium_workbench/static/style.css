@@ -1397,6 +1397,28 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
   margin-left:4px;
 }
 
+/* Resources tab — segmented category nav + search. Reuses the detail-tab look
+   (.investigation-detail-tabs/-tab/.tab-count-badge) so it matches the study +
+   investigation sub-tabs; the controls row owns the underline and seats the
+   search box to the right. */
+.res-controls{
+  display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  border-bottom:1px solid #e5e7eb; margin:4px 0 16px;
+}
+.res-controls .res-tabs{
+  border-bottom:0; margin:0; flex:1 1 auto; flex-wrap:wrap; gap:20px;
+}
+.res-search{
+  flex:0 0 auto; width:220px; max-width:100%;
+  padding:6px 10px; margin-bottom:8px;
+  border:1px solid #d1d5db; border-radius:6px;
+  font:inherit; font-size:0.9em; color:#1f2937; background:#fff;
+}
+.res-search:focus{
+  outline:none; border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,0.15);
+}
+@media (max-width:640px){ .res-search{ width:100%; } }
+
 /* Study Detail page shell — gives breathing room around the content
    in both the standalone /studies/<name> view and inside the
    Investigations iframe (where body margin:0 used to push text
