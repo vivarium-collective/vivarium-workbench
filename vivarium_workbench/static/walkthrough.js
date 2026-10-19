@@ -907,11 +907,11 @@
     if (pageId === 'visualizations') {
       _loadAnalysesPage();
     }
-    // Resources page: unified source-material tab — the /api/inputs datasets &
-    // references (always present) plus the curated structured scientific
-    // resources from the workspace manifest (sub-tab revealed when available).
+    // Resources page: one scrolling page — Datasets / References / Expert docs
+    // (/api/inputs) + the structured science sections (/api/structured-resources).
+    // _loadResources fetches the manifest, renders the science gallery, and then
+    // (re)renders the inputs so paper-references fold into the References list.
     if (pageId === 'resources') {
-      _loadInputs();
       _loadResources();
     }
     // Branch page: render the Source (Scope Local/Remote, repo, branch) section on
@@ -1244,8 +1244,36 @@
 
     var citedHtml = _inputsCitedByHtml(ref.cited_by);
 
-    return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
-      '<div>' + titleHtml + actions + '</div>' + meta + noteHtml + bibBlock + citedHtml + '</div>';
+    // A structured paper-reference folded in from the vg_data manifest (it is
+    // NOT in papers.bib) — mark it so the provenance is honest, and still show
+    // its bibdata rather than dropping it.
+    var foldFlag = ref._structured
+      ? ' <span class="res-flag res-flag-warn" title="From the structured-resources manifest; not in papers.bib">not in papers.bib</span>'
+      : '';
+
+    // Anchor by bib key so lipid/reaction citation cross-links (_resScrollToRef)
+    // resolve to this References entry.
+    var anchor = key ? ' id="res-ref-' + _esc(String(key)) + '" class="res-ref-anchor"' : '';
+
+    return '<div' + anchor + ' style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+      '<div>' + titleHtml + foldFlag + actions + '</div>' + meta + noteHtml + bibBlock + citedHtml + '</div>';
+  }
+
+  // Adapt a structured-resources paper-reference entry to the inputs reference
+  // card shape so a manifest paper not in papers.bib can be folded into the
+  // unified References list (inline bibdata) instead of a separate section.
+  function _structuredPaperToRef(p) {
+    p = p || {};
+    return {
+      key: p.bibtex_key || p.id || '',
+      title: p.title || p.name || '',
+      author: p.authors || '',
+      year: p.year || '',
+      journal: p.venue || '',
+      doi: p.doi || '',
+      note: (p.summary && p.summary !== (p.title || p.name)) ? p.summary : '',
+      _structured: true
+    };
   }
 
   // Copy the text content of a <pre> to the clipboard; flash the button label.
@@ -1453,9 +1481,34 @@
     // Uploads now target the workspace (repo-wide), not an investigation.
     window._inputsSelectedSlug = '';
 
-    var refs = glob.references || [];
+    var refs = (glob.references || []).slice();
     var datasets = glob.datasets || [];
     var experts = glob.expert_docs || [];
+
+    // Fold the structured manifest's paper-references into this one References
+    // list, deduped by bib key: a paper already in papers.bib keeps its richer
+    // inputs card; one that ISN'T (no matching key) is appended inline so it is
+    // surfaced, not dropped. (Lipid/reaction citation cross-links resolve to
+    // these entries via their res-ref-<key> anchors.)
+    var _foldedPaperKeys = [];
+    var _haveRefKeys = {};
+    refs.forEach(function (r) {
+      var k = (r && (r.key || r.bib_key)) || (typeof r === 'string' ? r : '');
+      if (k) _haveRefKeys[String(k).toLowerCase()] = true;
+    });
+    var _sr = window._resStructured;
+    if (_sr && _sr.references_by_id) {
+      Object.keys(_sr.references_by_id).forEach(function (id) {
+        var p = _sr.references_by_id[id] || {};
+        var key = p.bibtex_key || p.id || id;
+        if (!key || _haveRefKeys[String(key).toLowerCase()]) return;
+        refs.push(_structuredPaperToRef(p));
+        _haveRefKeys[String(key).toLowerCase()] = true;
+        _foldedPaperKeys.push(key);
+      });
+    }
+    // Expose the folded (not-in-papers.bib) keys for diagnostics/reporting.
+    window._resFoldedPaperKeys = _foldedPaperKeys;
 
     var html = '<div>';
     html += '<h3 style="margin:0 0 2px">Resources</h3>';
@@ -1474,15 +1527,20 @@
         'PDFs → references · .md / .txt / .docx → expert docs · everything else → datasets' +
       '</div></div>';
 
-    // References (papers) — the richest section, with cited-by study chips.
-    html += _inputsSection('References', 'papers · BibTeX · PDFs', 'reference',
-      _inputsRefsHtml(refs));
+    // Section order (unified Resources page): Datasets, References, Expert docs,
+    // then the structured science sections (rendered separately into
+    // #resources-gallery below this block).
 
     // Datasets — provider-backed bundle (if any) renders into this host first,
     // then the declared datasets.
     var dsBody = '<div id="data-sources-host" style="display:none;margin-bottom:12px"></div>' +
       _inputsDatasetsHtml(datasets);
     html += _inputsSection('Datasets', 'data files', 'dataset', dsBody);
+
+    // References (papers) — the richest section, with cited-by study chips and
+    // the folded-in manifest paper-references.
+    html += _inputsSection('References', 'papers · BibTeX · PDFs', 'reference',
+      _inputsRefsHtml(refs));
 
     // Expert docs — source dossiers / background the workspace draws on.
     html += _inputsSection('Expert docs', 'dossiers · notes', 'expert',
@@ -2099,12 +2157,23 @@
 
   function _resV(v) { return (v === null || v === undefined || v === '') ? '' : String(v); }
 
-  // One "label: value" row, omitted entirely when the value is empty.
+  // One compact "label: value" row (short scalars only), omitted when empty.
   function _resKV(label, value) {
     var v = _resV(value);
     if (!v) return '';
     return '<div class="res-kv"><span class="res-kv-k">' + _esc(label) +
       '</span><span class="res-kv-v">' + _esc(v) + '</span></div>';
+  }
+
+  // A stacked prose field: label line, then the full-width value beneath. Use
+  // this (not _resKV) for anything that can run long — prose and numeric
+  // summaries — so the value never wraps one character per line in a narrow
+  // grid column. Omitted entirely when the value is empty.
+  function _resField(label, value) {
+    var v = _resV(value);
+    if (!v) return '';
+    return '<div class="res-field"><span class="res-field-k">' + _esc(label) +
+      '</span><span class="res-field-v">' + _esc(v) + '</span></div>';
   }
 
   // Scroll to (and briefly flash) a paper-reference card. Used instead of a raw
@@ -2187,9 +2256,8 @@
     var head = _resCardHead(r);
     var role = '';
     if (r.role_in_campaign || r.campaign_tie) {
-      role = '<div class="res-kv-grid">' +
-        _resKV('Role in campaign', r.role_in_campaign) +
-        _resKV('Campaign tie', r.campaign_tie) + '</div>';
+      role = _resField('Role in campaign', r.role_in_campaign) +
+        _resField('Campaign tie', r.campaign_tie);
     }
     if (r.description) head += '<p class="res-desc">' + _esc(r.description) + '</p>';
 
@@ -2212,21 +2280,21 @@
           '</tbody></table>'
         : '';
       var spanLine = (span.min != null || span.max != null || span.mean != null)
-        ? _resKV('ΔG′ span (kJ/mol)',
+        ? _resField('ΔG′ span (kJ/mol)',
             'min ' + _resV(span.min) + ', max ' + _resV(span.max) + ', mean ' + _resV(span.mean))
         : '';
       var catLine = (cc.mineral != null || cc.base != null || cc.none != null)
-        ? _resKV('Catalyst classes',
+        ? _resField('Catalyst classes',
             'mineral ' + _resV(cc.mineral) + ', base ' + _resV(cc.base) + ', none ' + _resV(cc.none))
         : '';
       var thermo = (th.p_h != null || th.ionic_strength_M != null || th.temperature_K != null || th.engine)
-        ? _resKV('Thermo conditions',
+        ? _resField('Thermo conditions',
             'pH ' + _resV(th.p_h) + ', I ' + _resV(th.ionic_strength_M) + ' M, T ' +
             _resV(th.temperature_K) + ' K' + (th.engine ? ' (' + _resV(th.engine) + ')' : ''))
         : '';
       net = '<div class="res-network"><div class="res-sub">Generated reaction universe</div>' +
         (headline.length ? '<div class="res-headline">' + _esc(headline.join(' · ')) + '</div>' : '') +
-        '<div class="res-kv-grid">' + spanLine + catLine + thermo + '</div>' +
+        spanLine + catLine + thermo +
         families + '</div>';
     }
 
@@ -2497,11 +2565,12 @@
     var order = data.type_order || [];
     var groups = data.groups || {};
     var refsById = data.references_by_id || {};
-    var header = '<div class="res-manifest-head">' +
-      '<h2 class="res-manifest-title">' + _esc(data.name || 'Resources') + '</h2>' +
-      (data.version ? '<span class="res-manifest-ver">v' + _esc(data.version) + '</span>' : '') +
-      (data.description ? '<p class="res-manifest-desc muted">' + _esc(data.description) + '</p>' : '') +
-      '</div>';
+    // No big "Resources" title here — the page already leads with one (from the
+    // inputs block above). Keep only the manifest description as a slim lead.
+    var header = (data.description)
+      ? '<div class="res-manifest-head"><p class="res-manifest-desc muted">' +
+        _esc(data.description) + '</p></div>'
+      : '';
     // The evidence-dataset group carries a one-time QA-rule banner, rendered
     // ONCE above its cards (never per-card).
     var qaRule = _resV(data.evidence_dataset_qa_rule);
@@ -2522,33 +2591,17 @@
     container.innerHTML = header + sections;
   }
 
-  // Switch between the two Resources sub-tabs ("inputs" = datasets & references,
-  // "scientific" = structured scientific resources). Reuses the .registry-tab /
-  // .registry-tab-panel underline-tab styling.
-  function _setResourcesTab(name) {
-    document.querySelectorAll('#page-resources .registry-tab').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.restab === name);
-    });
-    document.querySelectorAll('#page-resources .registry-tab-panel').forEach(function (p) {
-      p.classList.toggle('active', p.dataset.restab === name);
-    });
-  }
-  window._setResourcesTab = _setResourcesTab;
+  // The last-loaded structured-resources manifest, so _renderInputs can fold the
+  // manifest's paper-references into the unified References list (and resolve the
+  // lipid/reaction citation cross-links). null when the workspace ships none.
+  window._resStructured = null;
 
-  // Reveal / hide the "Scientific resources" sub-tab based on manifest
-  // availability. The Resources rail tab itself is ALWAYS shown (it always
-  // carries the datasets & references sub-tab); only the structured-resources
-  // sub-tab is conditional. When the manifest is absent, keep the always-present
-  // inputs sub-tab active so the tab never lands on an empty/hidden panel.
-  function _resSetScientificVisible(visible) {
-    var tab = document.getElementById('resources-scientific-tab');
-    if (tab) tab.style.display = visible ? '' : 'none';
-    if (!visible) _setResourcesTab('inputs');
-  }
-
+  // Load the structured manifest, render the science gallery (lipid / reaction /
+  // evidence — paper-references and imported-engines are excluded server-side),
+  // then (re)render the inputs so paper-references fold into References. Always
+  // renders the inputs, manifest or not.
   function _loadResources() {
     var container = document.getElementById('resources-gallery');
-    if (!container) return;
     var _base = _analysesBase();
     var _url = _analysesSnapshot()
       ? _base + '/api/structured-resources.json'
@@ -2562,39 +2615,27 @@
       })
       .then(function (data) {
         data = data || {};
-        if (!data.available || !(data.type_order && data.type_order.length)) {
-          _resSetScientificVisible(false);
-          container.innerHTML = '<p class="empty-state">This workspace ships no structured-resources manifest.</p>';
-          return;
+        var hasManifest = !!(data.available);
+        window._resStructured = hasManifest ? data : null;
+        if (container) {
+          if (hasManifest && data.type_order && data.type_order.length) {
+            _resRenderPage(container, data);
+          } else {
+            container.innerHTML = '';  // no science sections; inputs still render
+          }
         }
-        _resSetScientificVisible(true);
-        _resRenderPage(container, data);
       })
-      .catch(function (err) {
-        container.innerHTML = '<p class="empty-state" style="color:#991b1b">Error loading resources: ' + _esc(String(err)) + '</p>';
+      .catch(function () {
+        window._resStructured = null;
+        if (container) container.innerHTML = '';
+      })
+      .then(function () {
+        // Render (or re-render) the inputs with whatever manifest we resolved so
+        // the References fold is consistent, regardless of fetch outcome.
+        if (typeof _loadInputs === 'function') _loadInputs();
       });
   }
   window._loadResources = _loadResources;
-
-  // One-time probe at startup: reveal the "Scientific resources" sub-tab iff the
-  // active workspace ships the manifest, so it's visible from the first visit
-  // without the user having to navigate to the Resources tab first. (The
-  // Resources rail tab itself is always shown — it carries the inputs sub-tab.)
-  function _initResourcesRail() {
-    var _base = _analysesBase();
-    var _url = _analysesSnapshot()
-      ? _base + '/api/structured-resources.json'
-      : '/api/structured-resources';
-    fetch(_url)
-      .then(function (r) { return r.text(); })
-      .then(function (t) {
-        var data = {};
-        try { data = t ? JSON.parse(t) : {}; } catch (e) { data = {}; }
-        _resSetScientificVisible(!!(data && data.available));
-      })
-      .catch(function () { _resSetScientificVisible(false); });
-  }
-  window._initResourcesRail = _initResourcesRail;
 
   // Source-rank for picker sort: in_workspace classes are the ones the user
   // can act on directly (they live in this workspace's package or an
@@ -7568,9 +7609,6 @@
 
     // Initialize menu navigation.
     _initMenuNav();
-
-    // Reveal the Resources rail link iff this workspace ships the manifest.
-    try { _initResourcesRail(); } catch (e) {}
 
     // Restore Vivarium left-rail collapsed state (V4).
     _vivRestoreRailState();

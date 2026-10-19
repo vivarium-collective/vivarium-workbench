@@ -243,14 +243,43 @@ def test_unknown_type_grouped_and_appended_after_known(tmp_path):
         "name": "m",
         "resources": [
             {"id": "z", "type": "zeta-thing", "name": "Z"},
-            {"id": "p", "type": "paper-reference", "name": "P"},
+            {"id": "l", "type": "lipid-structure", "name": "L"},
         ],
     }))
     data = load_structured_resources(tmp_path)
     assert data is not None
     # Known type first, unknown appended after.
-    assert data["type_order"] == ["paper-reference", "zeta-thing"]
+    assert data["type_order"] == ["lipid-structure", "zeta-thing"]
     assert "zeta-thing" in data["groups"]
+
+
+def test_hidden_types_excluded_from_type_order_but_still_indexed(tmp_path):
+    """paper-reference and imported-engine are never rendered as their own
+    section (excluded from type_order), but stay in groups + references_by_id
+    so the References fold and citation cross-links keep working."""
+    (tmp_path / "workspace.yaml").write_text("name: m\n")
+    d = tmp_path / "viva_genesis" / "data" / "vg_data"
+    d.mkdir(parents=True)
+    (d / "structured_resources.yaml").write_text(yaml.safe_dump({
+        "name": "m",
+        "resources": [
+            {"id": "lip", "type": "lipid-structure", "name": "L",
+             "references": ["pap"]},
+            {"id": "eng", "type": "imported-engine", "name": "E"},
+            {"id": "pap", "type": "paper-reference", "name": "P",
+             "doi": "10.1/x"},
+        ],
+    }))
+    data = load_structured_resources(tmp_path)
+    assert data is not None
+    # Rendered sections: only the lipid structure.
+    assert data["type_order"] == ["lipid-structure"]
+    # But both hidden types remain grouped (full inventory), and the
+    # paper-reference is still resolvable by id for the cross-link / fold.
+    assert "imported-engine" in data["groups"]
+    assert "paper-reference" in data["groups"]
+    assert data["references_by_id"]["pap"]["doi"] == "10.1/x"
+    assert data["n_resources"] == 3
 
 
 def test_payload_model_validates_reader_output():

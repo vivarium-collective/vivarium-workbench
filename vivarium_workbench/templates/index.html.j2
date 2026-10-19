@@ -1197,45 +1197,24 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
 </section>
 
-<!-- ===== PAGE: RESOURCES — the workspace's source material, unified into one
-      tab with two sub-tabs (reusing the .registry-tab underline-tab pattern):
+<!-- ===== PAGE: RESOURCES — the workspace's source material on ONE scrolling
+      page (no sub-tabs). Section order: Datasets, References, Expert docs (from
+      /api/inputs, rendered by _loadInputs/_renderInputs into #inputs-api-render)
+      then the curated structured science — Lipid structures, Reaction pathways,
+      Evidence datasets (from /api/structured-resources, rendered by
+      _loadResources into #resources-gallery).
 
-      • "Datasets & references" — the /api/inputs datasets / references /
-        expert-docs lists + their add/edit management panels + the bib explorer.
-        Rendered client-side by _loadInputs/_renderInputs into #inputs-api-render.
-        ALWAYS present (this is why the Resources rail tab is always shown).
-
-      • "Scientific resources" — the curated structured lipid structures /
-        reaction pathways / evidence datasets (+ QA-rule banner) / imported
-        engines / paper references from the workspace's structured_resources
-        vg_data manifest. Rendered by _loadResources from /api/structured-resources
-        into #resources-gallery. The SUB-TAB is hidden until that manifest ships
-        (revealed by _loadResources); the tab itself still shows (inputs content). ===== -->
+      Paper-references from the structured manifest are FOLDED into the References
+      list (deduped by bibtex key); lipid/reaction citation cross-links resolve to
+      those References entries. Imported engines are NOT shown here — engines are
+      the Registry tab's domain. ===== -->
 <section id="page-resources" class="page" data-page="resources">
   <div class="page-fill">
-    <div class="registry-sticky">
-      <div class="registry-tabs" role="tablist">
-        <button class="registry-tab active" data-restab="inputs" role="tab"
-                onclick="_setResourcesTab('inputs')">Datasets &amp; references</button>
-        <button class="registry-tab" data-restab="scientific" id="resources-scientific-tab" role="tab"
-                onclick="_setResourcesTab('scientific')" style="display:none">Scientific resources</button>
+    <div class="panel">
+      <div id="inputs-api-render">
+        <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading resources…</span></div>
       </div>
-    </div>
-
-    <!-- Datasets & references (from /api/inputs) -->
-    <div class="registry-tab-panel active" data-restab="inputs">
-      <div id="inputs-api-render" class="panel">
-        <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading inputs…</span></div>
-      </div>
-    </div>
-
-    <!-- Scientific resources (from /api/structured-resources) -->
-    <div class="registry-tab-panel" data-restab="scientific">
-      <div class="panel">
-        <div id="resources-gallery" class="resources-gallery">
-          <p class="empty-state">Loading&hellip;</p>
-        </div>
-      </div>
+      <div id="resources-gallery" class="resources-gallery"></div>
     </div>
   </div>
 </section>

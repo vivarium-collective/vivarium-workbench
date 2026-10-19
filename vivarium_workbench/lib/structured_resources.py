@@ -41,11 +41,17 @@ TYPE_ORDER: tuple[str, ...] = (
     "lipid-structure",
     "reaction-pathway",
     "evidence-dataset",
-    "imported-engine",
-    "paper-reference",
 )
 
 _REFERENCE_TYPE = "paper-reference"
+
+# Types that are indexed/kept in the payload but NEVER rendered as their own
+# Resources section:
+#   * paper-reference  — folded into the unified References list (deduped by
+#     bibtex key); still indexed in `references_by_id` so lipid/reaction
+#     citation cross-links resolve.
+#   * imported-engine  — engines are the Registry tab's domain, not Resources.
+_HIDDEN_TYPES: frozenset[str] = frozenset({_REFERENCE_TYPE, "imported-engine"})
 
 
 def manifest_path(ws_root: Path) -> Optional[Path]:
@@ -101,8 +107,11 @@ def _group_resources(
 
 def _ordered_types(present: list[str]) -> list[str]:
     """Known types first (in :data:`TYPE_ORDER`), then any remaining present
-    types sorted alphabetically. Only types actually present are returned."""
-    present_set = set(present)
+    types sorted alphabetically. Only types actually present are returned.
+
+    :data:`_HIDDEN_TYPES` are excluded: they stay in ``groups`` /
+    ``references_by_id`` for lookups but are never rendered as a section."""
+    present_set = {t for t in present if t not in _HIDDEN_TYPES}
     ordered = [t for t in TYPE_ORDER if t in present_set]
     extras = sorted(t for t in present_set if t not in TYPE_ORDER)
     return ordered + extras
@@ -151,7 +160,10 @@ def load_structured_resources(ws_root: Path) -> Optional[dict]:
         return None
 
     type_order = _ordered_types(list(groups.keys()))
-    counts = {t: len(groups[t]) for t in type_order}
+    # counts/n_resources describe the full manifest inventory (every group,
+    # including the hidden paper-reference / imported-engine types); type_order
+    # controls only which types are rendered as their own section.
+    counts = {t: len(v) for t, v in groups.items()}
 
     name = raw.get("name")
     version = raw.get("version")
