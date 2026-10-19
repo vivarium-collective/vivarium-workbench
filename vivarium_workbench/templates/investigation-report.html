@@ -599,114 +599,105 @@ function mdLite(t){
 
 // The Model-section "loom view": the composite's resolved bigraph — the nested
 // state tree (name : type) beside the process list (name · address · ports).
+// Static bigraph of the composite — a self-contained SVG that reads like a
+// process-bigraph: the PLACE GRAPH (compartments as containers holding their
+// state leaves) on the right, the PROCESS nodes (with typed in/out ports) on the
+// left, and the LINK GRAPH (each process wired to every compartment it reads or
+// writes) drawn as connectors between them. Compartments, their state leaves and
+// the wiring are all derived from the topology's edges ({p: process, c:
+// compartment, s: state}); the declared store tree fills in any unwired
+// compartments + leaf types. No server, no interactivity — embeds + prints.
 function loomTopoSVG(topo){
   if(!topo) return '';
-  const procs=topo.processes||[], stores=topo.stores||[];
-  const rows=[]; (function fl(ns,d){ (ns||[]).forEach(n=>{ rows.push({d,n}); fl(n.children,d+1); }); })(stores,0);
-  if(!rows.length && !procs.length) return '';
-  const rowH=23, headH=28, padX=14, colGap=44;
-  const storeW=Math.max(240,...rows.map(r=>padX+r.d*16+(String(r.n.name).length)*7+(String(r.n.type||'').length)*6.2+70));
-  const procH=64;
-  const procW=Math.max(250,...procs.map(p=>Math.max(String(p.name).length*8+28,
-      String(p.address||'').length*6.2+20,
-      (('in: '+(p.inputs||[]).join(', ')).length)*6.0+20,
-      (('out: '+(p.outputs||[]).join(', ')).length)*6.0+20)));
-  const storesH=headH+rows.length*rowH+8, procsH=headH+procs.length*(procH+10);
-  const H=Math.max(storesH,procsH)+14, W=storeW+colGap+procW+padX;
+  const procs=topo.processes||[], edges=topo.edges||[], storeTree=topo.stores||[];
+
+  // --- Derive the bigraph: compartment -> state leaves, and link weights. ---
+  const compStates=new Map();          // compartment -> Set(state names)
+  const typeOf={};                     // "comp" or "comp.state" -> type label
+  edges.forEach(e=>{ if(e.c==null) return;
+    if(!compStates.has(e.c)) compStates.set(e.c,new Set());
+    if(e.s) compStates.get(e.c).add(e.s); });
+  (function walk(ns){ (ns||[]).forEach(n=>{ if(n.name==null) return;
+    if(!compStates.has(n.name)) compStates.set(n.name,new Set());
+    if(n.type) typeOf[n.name]=n.type;
+    (n.children||[]).forEach(ch=>{ if(ch.name){ compStates.get(n.name).add(ch.name);
+      if(ch.type) typeOf[n.name+'.'+ch.name]=ch.type; } }); }); })(storeTree);
+  const comps=[...compStates.keys()];
+  if(!procs.length && !comps.length) return '';
+  const linkStates={};                 // "proc|comp" -> Set(shared state names)
+  edges.forEach(e=>{ if(e.p==null||e.c==null) return; const k=e.p+'|'+e.c;
+    (linkStates[k]||(linkStates[k]=new Set())).add(e.s); });
+  const outSet={};                     // proc -> Set(output port names) for read/write colouring
+  procs.forEach(p=>{ outSet[p.name]=new Set(p.outputs||[]); });
+  // Keep a process box's text on one line: truncate a port list to ~max chars,
+  // trailing "+N" for the remainder, and clip an over-long address.
+  const portStr=(arr,max)=>{ arr=(arr||[]).map(String); if(!arr.length) return '—';
+    let out='',i=0; for(; i<arr.length; i++){ const nxt=out?out+', '+arr[i]:arr[i]; if(nxt.length>max && out) break; out=nxt; }
+    const rem=arr.length-i; return (out.length>max?out.slice(0,max-1)+'…':out)+(rem>0?` +${rem}`:''); };
+  const clip=(s,max)=>{ s=String(s||''); return s.length>max?s.slice(0,max-1)+'…':s; };
+
+  // --- Geometry: processes (left column) ⇄ compartments (right column). ---
+  const PADX=14, TOP=30, GAP=118, PW=236, CW=210, VGAP=16;
+  const ph=p=>20+(p.address?13:0)+14+14+12;            // process box height
+  const ch=c=>{ const n=compStates.get(c).size; return 22+(n?n*15+8:8); };  // compartment box height
+  const procY={}; let py=TOP; procs.forEach(p=>{ procY[p.name]=py; py+=ph(p)+VGAP; });
+  const compY={}; let cy=TOP; comps.forEach(c=>{ compY[c]=cy; cy+=ch(c)+VGAP; });
+  const procX=PADX, compX=PADX+PW+GAP;
+  const W=compX+CW+PADX, H=Math.max(py,cy)+6;
+
   let sv=`<svg viewBox="0 0 ${W} ${H}" font-family="var(--sans)" font-size="12">`;
-  sv+=`<text x="${padX}" y="16" fill="var(--ink-3)" font-size="10" letter-spacing=".08em">STATE · BIGRAPH</text>`;
-  rows.forEach((r,i)=>{ const y=headH+i*rowH, x=padX+r.d*16, leaf=!(r.n.children&&r.n.children.length);
-    if(r.d>0) sv+=`<line x1="${x-8}" y1="${y+ (rowH-4)/2}" x2="${x}" y2="${y+(rowH-4)/2}" stroke="var(--line-2)"/>`;
-    sv+=`<rect x="${x}" y="${y}" width="${storeW-x-6}" height="${rowH-5}" rx="5" fill="${leaf?'var(--sunken)':'var(--surface)'}" stroke="var(--line)"/>`;
-    sv+=`<text x="${x+9}" y="${y+13}" fill="var(--ink)" font-family="var(--mono)" font-size="11.5">${esc(r.n.name)}</text>`;
-    if(r.n.type) sv+=`<text x="${storeW-12}" y="${y+13}" text-anchor="end" fill="var(--accent)" font-size="10.5" font-family="var(--mono)">${esc(r.n.type)}</text>`;
+  sv+=`<text x="${procX}" y="16" fill="var(--ink-3)" font-size="10" letter-spacing=".08em">PROCESSES</text>`;
+  sv+=`<text x="${compX}" y="16" fill="var(--ink-3)" font-size="10" letter-spacing=".08em">COMPARTMENTS · STATE</text>`;
+
+  // Link graph first, so the node boxes sit on top of the wires. A link is a
+  // "write" (accent) when the process outputs any of the states it shares with
+  // that compartment, else a "read" (muted); thickness grows with shared states.
+  Object.keys(linkStates).forEach(k=>{ const [pn,cn]=k.split('|');
+    if(procY[pn]==null||compY[cn]==null) return;
+    const y1=procY[pn]+ph(procs.find(p=>p.name===pn))/2, y2=compY[cn]+ch(cn)/2;
+    const x1=procX+PW, x2=compX, mx=(x1+x2)/2;
+    const sts=linkStates[k], os=outSet[pn]||new Set();
+    const write=[...sts].some(s=>os.has(s));
+    const w=Math.min(4,sts.size), col=write?'var(--accent)':'var(--line-2)';
+    sv+=`<path d="M${x1} ${y1} C${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" fill="none" `+
+        `stroke="${col}" stroke-width="${0.8+w*0.5}" opacity="${write?0.55:0.4}"/>`;
   });
-  const px=storeW+colGap;
-  sv+=`<text x="${px}" y="16" fill="var(--ink-3)" font-size="10" letter-spacing=".08em">PROCESSES</text>`;
-  procs.forEach((p,i)=>{ const y=headH+i*(procH+10);
-    sv+=`<rect x="${px}" y="${y}" width="${procW}" height="${procH}" rx="9" fill="var(--surface)" stroke="var(--accent)"/>`;
-    sv+=`<text x="${px+12}" y="${y+21}" fill="var(--ink)" font-weight="700" font-family="var(--mono)" font-size="12.5">${esc(p.name)}</text>`;
-    if(p.address) sv+=`<text x="${px+12}" y="${y+36}" fill="var(--ink-3)" font-size="10.5" font-family="var(--mono)">${esc(p.address)}</text>`;
-    sv+=`<text x="${px+12}" y="${y+50}" fill="var(--ink-2)" font-size="10.5">in: <tspan fill="var(--ink)">${esc((p.inputs||[]).join(', ')||'—')}</tspan></text>`;
-    sv+=`<text x="${px+12}" y="${y+62}" fill="var(--ink-2)" font-size="10.5">out: <tspan fill="var(--ink)">${esc((p.outputs||[]).join(', ')||'—')}</tspan></text>`;
+
+  // Process nodes: name, address, typed in/out ports.
+  procs.forEach(p=>{ const y=procY[p.name], h=ph(p); let ty=y+21;
+    sv+=`<rect x="${procX}" y="${y}" width="${PW}" height="${h}" rx="9" fill="var(--surface)" stroke="var(--accent)"/>`;
+    sv+=`<circle cx="${procX+PW}" cy="${y+h/2}" r="3.5" fill="var(--accent)"/>`;
+    sv+=`<text x="${procX+12}" y="${ty}" fill="var(--ink)" font-weight="700" font-family="var(--mono)" font-size="12.5">${esc(p.name)}</text>`; ty+=15;
+    if(p.address){ sv+=`<text x="${procX+12}" y="${ty}" fill="var(--ink-3)" font-size="10.5" font-family="var(--mono)">${esc(clip(p.address,34))}</text>`; ty+=14; }
+    sv+=`<text x="${procX+12}" y="${ty}" fill="var(--ink-2)" font-size="10.5">in: <tspan fill="var(--ink)">${esc(portStr(p.inputs,30))}</tspan></text>`; ty+=14;
+    sv+=`<text x="${procX+12}" y="${ty}" fill="var(--ink-2)" font-size="10.5">out: <tspan fill="var(--ink)">${esc(portStr(p.outputs,29))}</tspan></text>`;
   });
+
+  // Compartment containers (place graph): header + nested state leaves.
+  comps.forEach(c=>{ const y=compY[c], h=ch(c), states=[...compStates.get(c)];
+    sv+=`<rect x="${compX}" y="${y}" width="${CW}" height="${h}" rx="8" fill="var(--sunken)" stroke="var(--line)"/>`;
+    sv+=`<circle cx="${compX}" cy="${y+h/2}" r="3.5" fill="var(--ink-3)"/>`;
+    sv+=`<text x="${compX+11}" y="${y+15}" fill="var(--ink)" font-weight="700" font-family="var(--mono)" font-size="11.5">${esc(c)}</text>`;
+    if(typeOf[c]) sv+=`<text x="${compX+CW-10}" y="${y+15}" text-anchor="end" fill="var(--ink-3)" font-size="9.5" font-family="var(--mono)">${esc(typeOf[c])}</text>`;
+    states.forEach((s,j)=>{ const ly=y+22+j*15;
+      sv+=`<rect x="${compX+9}" y="${ly}" width="${CW-18}" height="13" rx="3" fill="var(--surface)" stroke="var(--line)"/>`;
+      sv+=`<text x="${compX+15}" y="${ly+10}" fill="var(--ink-2)" font-family="var(--mono)" font-size="10">${esc(s)}</text>`;
+      const tt=typeOf[c+'.'+s]; if(tt) sv+=`<text x="${compX+CW-14}" y="${ly+10}" text-anchor="end" fill="var(--accent)" font-size="9" font-family="var(--mono)">${esc(tt)}</text>`;
+    });
+  });
+
   sv+=`</svg>`;
-  const cap=`Static topology of <span class="mono">${esc(topo.composite||'')}</span> — ${procs.length} process${procs.length==1?'':'es'} over ${rows.length} state node${rows.length==1?'':'s'}.`;
+  const nLinks=Object.keys(linkStates).length;
+  const cap=`Static bigraph of <span class="mono">${esc(topo.composite||'')}</span> — `+
+    `${procs.length} process${procs.length==1?'':'es'} wired to ${comps.length} compartment${comps.length==1?'':'s'}`+
+    (nLinks?` over ${nLinks} link${nLinks==1?'':'s'}`:'')+`. `+
+    `<span style="color:var(--accent)">●</span> writes · <span style="color:var(--ink-3)">●</span> reads.`;
   return `<figure><div class="fig-scroll">${sv}</div><figcaption>${cap}</figcaption></figure>`;
 }
 
-// ---------- lightweight INTERACTIVE bigraph loom (self-contained, no server) ----------
-// A pan/zoom bipartite view of the composite: process nodes on the left wired to
-// the top-level store compartments on the right (from topo.edges). Hover a
-// process to read its contract and light up the compartments it touches; hover a
-// compartment to light up the processes that read/write it; click a compartment
-// to expand its store leaves. Vanilla SVG + a little JS — embeds directly in the
-// static report and works offline.
+// Shared id counter for the loom-embed helpers below (loomRealEmbed).
 let _ILOOM_SEQ=0;
-function loomInteractive(topo){
-  if(!topo) return '';
-  const procs=topo.processes||[], edges=topo.edges||[];
-  // The biological compartments are the children of the single "cell" root (a
-  // process-bigraph store tree nests everything under one root), so unwrap a
-  // lone root to its children. Fall back to whatever compartments the edges
-  // actually reference so nothing is dropped.
-  let roots=topo.stores||[];
-  if(roots.length===1 && (roots[0].children||[]).length) roots=roots[0].children;
-  let comps=roots.map(n=>n.name).filter(Boolean);
-  const edgeComps=[...new Set(edges.map(e=>e.c).filter(Boolean))];
-  // keep only compartments that carry edges, in store-tree order, then append
-  // any edge compartments the tree didn't name (defensive).
-  const compSet0=new Set(comps);
-  comps=comps.filter(c=>edgeComps.includes(c)).concat(edgeComps.filter(c=>!compSet0.has(c)));
-  if(!comps.length) comps=edgeComps;
-  if(!procs.length || !comps.length) return '';
-  // leaves per compartment (for click-to-expand): flatten each compartment subtree.
-  const leavesByComp={};
-  roots.forEach(n=>{ const out=[]; (function fl(ns){(ns||[]).forEach(c=>{ if(!(c.children&&c.children.length)) out.push(c.name); fl(c.children);});})(n.children); leavesByComp[n.name]=out.length?out:[n.name]; });
-  const compSet=new Set(comps);
-  const id='il'+(++_ILOOM_SEQ);
-  const rowH=26, padY=34, pW=210, cW=200, gap=230, cx0=24;
-  const compX=cx0+pW+gap;
-  const H=Math.max(procs.length,comps.length)*rowH+padY*2, W=compX+cW+cx0;
-  const py=i=>padY+i*rowH+ (Math.max(0,(comps.length-procs.length))*rowH)/2;
-  const cy=i=>padY+i*rowH+ (Math.max(0,(procs.length-comps.length))*rowH)/2;
-  const compIdx={}; comps.forEach((c,i)=>compIdx[c]=i);
-  const palette=['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#17becf','#bcbd22'];
-  const compColor=c=>palette[(compIdx[c]||0)%palette.length];
-  let g='';
-  // edges
-  edges.forEach(e=>{
-    const pi=procs.findIndex(p=>p.name===e.p); if(pi<0||!compSet.has(e.c)) return;
-    const x1=cx0+pW, y1=py(pi)+rowH/2-3, x2=compX, y2=cy(compIdx[e.c])+rowH/2-3, mx=(x1+x2)/2;
-    g+=`<path class="il-edge" data-p="${esc(e.p)}" data-c="${esc(e.c)}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${compColor(e.c)}" stroke-opacity=".28" stroke-width="1.1"/>`;
-  });
-  // process nodes
-  procs.forEach((p,i)=>{ const y=py(i);
-    g+=`<g class="il-proc" data-proc="${esc(p.name)}" tabindex="0"
-          onmouseenter="_iloomHi('${id}','proc','${esc(p.name)}')" onmouseleave="_iloomClear('${id}')"
-          onmousemove="_iloomTip(event,'${id}',${JSON.stringify(esc(p.name)+' — '+(p.doc||p.address||'')).replace(/"/g,'&quot;')})">
-        <rect x="${cx0}" y="${y}" width="${pW}" height="${rowH-6}" rx="7" fill="var(--surface)" stroke="var(--accent)"/>
-        <text x="${cx0+10}" y="${y+14}" font-family="var(--mono)" font-size="11" fill="var(--ink)">${esc(p.name)}</text></g>`;
-  });
-  // compartment nodes
-  comps.forEach((c,i)=>{ const y=cy(i), n=(leavesByComp[c]||[]).length;
-    g+=`<g class="il-comp" data-comp="${esc(c)}" tabindex="0"
-          onmouseenter="_iloomHi('${id}','comp','${esc(c)}')" onmouseleave="_iloomClear('${id}')"
-          onclick="_iloomExpand('${id}','${esc(c)}')"
-          onmousemove="_iloomTip(event,'${id}',${JSON.stringify(esc(c)+' — '+'store compartment').replace(/"/g,'&quot;')})">
-        <rect x="${compX}" y="${y}" width="${cW}" height="${rowH-6}" rx="7" fill="${compColor(c)}22" stroke="${compColor(c)}"/>
-        <text x="${compX+10}" y="${y+14}" font-family="var(--mono)" font-size="11" fill="var(--ink)">${esc(c)} <tspan fill="var(--ink-3)">· ${n}</tspan></text></g>`;
-  });
-  const leavesJSON=esc(JSON.stringify(leavesByComp)).replace(/"/g,'&quot;');
-  return `<figure class="iloom-fig">
-    <div class="iloom" id="${id}" data-leaves="${leavesJSON}">
-      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet"><g class="il-view">${g}</g></svg>
-      <div class="il-tip" hidden></div>
-      <div class="il-hint">drag to pan · scroll to zoom · hover a process for its contract · click a compartment to list its stores</div>
-    </div>
-    <figcaption><b>bigraph-loom</b> (interactive) — <span class="mono">${esc(topo.composite||'')}</span>: ${procs.length} processes wired to ${comps.length} cell compartments.</figcaption>
-  </figure>`;
-}
+
 // Embed the REAL bigraph-loom for a study's baseline composite — the same live
 // loom the workbench serves at /bigraph-loom/, so the Model section shows loom's
 // own rendering instead of a re-drawn topology. Returns '' when no composite is
@@ -1204,17 +1195,14 @@ function renderStudy(s, inv, idx){
          <img src="${s.model_loom}" alt="bigraph-loom view of ${esc(_mcid)}" style="width:100%;display:block"/></div>
        <figcaption><b>bigraph-loom</b> view of <span class="mono">${esc(_mcid)}</span> — the composite's bigraph with its config loaded.</figcaption></figure>`
     : '';
-  // Prefer the lightweight INTERACTIVE loom (pan/zoom, hover contracts, click to
-  // expand stores) when we have the wired topology; fall back to the pre-rendered
-  // image, the live loom iframe, the static SVG topology, then a plain viz.
-  const loomInter = (s.model_topology && (s.model_topology.edges||[]).length) ? loomInteractive(s.model_topology) : '';
   // The report is a self-contained document (often opened from disk / a static
-  // bundle), so DON'T use the live-loaded loom iframe (loomRealEmbed) — it needs
-  // a running loom server/bundle and fails offline (blank/broken Model section).
-  // Use a static/self-contained rendering instead: the pre-rendered loom PNG
-  // (render-loom), else the self-contained interactive-SVG loom, else the static
-  // SVG topology, then a plain viz. All render with no network.
-  let modelBody = loomRendered || loomInter || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
+  // bundle), so the Model section uses only renderings that need no network:
+  // the pre-rendered bigraph-loom PNG (render-loom) when the composite has one,
+  // else the static bigraph topology drawn from model_topology, then a plain viz.
+  // (The live loom iframe and the re-drawn interactive-SVG loom were both removed:
+  // the iframe failed offline, and the interactive SVG kept recurring in place of
+  // a real loom figure.)
+  let modelBody = loomRendered || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
   if(s.sourcing){
     modelBody += `<div class="decision-line" style="margin-top:6px"><span class="chip decision">${esc(s.sourcing.decision)}</span>
       ${(s.sourcing.modules||[]).map(m=>`<span class="chip mod">${esc(m)}</span>`).join(' ')||'<span class="chip mod">new module</span>'}</div>
