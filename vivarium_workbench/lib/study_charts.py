@@ -490,6 +490,21 @@ def _resolve_figure_path(study_dir: Path, ref: str) -> Path | None:
     for c in candidates:
         if c.is_file():
             return c
+    # Nested per-arm layout: a consolidated study keeps each absorbed arm's viz
+    # under viz/<arm-slug>/... (e.g. viz/og-32b-fatty-acid-vesicle-stability/
+    # vesicle-3d-structure.html), so the top-level viz/<ref> check above misses
+    # them and the Visualizations tab / native gallery came back empty. Find the
+    # ref's basename anywhere under viz/ or charts/ (mirrors the report's
+    # nested-figure embedding in investigation_report._embed_html_figures).
+    base = Path(ref).name
+    if base:
+        for sub in ("viz", "charts"):
+            d = study_dir / sub
+            if not d.is_dir():
+                continue
+            for f in sorted(d.rglob(base), key=lambda p: p.as_posix()):
+                if f.is_file():
+                    return f
     return None
 
 

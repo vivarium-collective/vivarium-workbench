@@ -329,3 +329,30 @@ def test_local_renderer_without_committed_html_yields_no_declared_chart(tmp_path
     }), encoding="utf-8")
     charts = build_study_charts_payload(ws, "demo")["charts"]
     assert not [c for c in charts if c.get("source") == "declared"]
+
+
+def test_nested_per_arm_viz_is_surfaced(tmp_path):
+    """A consolidated study keeps each absorbed arm's viz under
+    viz/<arm-slug>/<name>.html. build_study_charts_payload must still surface them
+    (the Visualizations tab / native gallery came back EMPTY because the resolver
+    only checked top-level viz/<ref>). Mirrors the report's nested-figure embed."""
+    ws = tmp_path / "ws"
+    study_dir = ws / "studies" / "consolidated"
+    nested = study_dir / "viz" / "arm-a"
+    nested.mkdir(parents=True)
+    (nested / "my-arm-fig.html").write_text(
+        "<html><body>arm fig</body></html>", encoding="utf-8")
+    (study_dir / "study.yaml").write_text(
+        yaml.safe_dump({
+            "name": "consolidated",
+            # live-renderer address → the committed render lives at the nested
+            # viz/<arm>/<name>.html (render-viz convention).
+            "visualizations": [{"name": "my-arm-fig", "address": "local:SomeViz"}],
+        }),
+        encoding="utf-8",
+    )
+    payload = build_study_charts_payload(ws, "consolidated")
+    recs = [c for c in payload["charts"] if c.get("source") == "declared"]
+    assert recs, "nested per-arm declared viz was not surfaced (Visualizations tab empty)"
+    assert recs[0]["media"] == "html"
+    assert recs[0]["iframe_url"] == "/studies/consolidated/viz/arm-a/my-arm-fig.html"
