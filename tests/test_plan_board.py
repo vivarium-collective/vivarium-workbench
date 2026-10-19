@@ -4,11 +4,66 @@ The board turns an investigation.yaml ``plan_gates`` block into live gate rows
 whose status is DERIVED from member-study state (not the YAML's static status),
 mirroring the viva-genesis build_plan_progress rules.
 """
-from vivarium_workbench.lib.plan_board import build_plan_board
+from vivarium_workbench.lib.plan_board import build_plan_board, iter_plan_gates
 
 
 def _study(gate_status=None, findings=None):
     return {"gate_status": gate_status, "findings": findings or []}
+
+
+def test_iter_plan_gates_legacy_flat_unchanged():
+    """A spec with the legacy flat plan_gates is returned as-is (explicit extends)."""
+    spec = {"plan_gates": [{"id": "A1", "extends": None}, {"id": "B", "extends": "A1"}]}
+    gates = iter_plan_gates(spec)
+    assert [g["id"] for g in gates] == ["A1", "B"]
+    assert gates[1]["extends"] == "A1"
+
+
+def test_iter_plan_gates_neither_returns_empty():
+    assert iter_plan_gates({"name": "x"}) == []
+
+
+def test_iter_plan_gates_flattens_plan_acts_with_spine_order():
+    """plan_acts nested gates flatten in act+gate order; extends is synthesized from
+    spine order; an off_spine gate branches (takes the prior spine gate as extends but
+    never becomes a prior); each gate carries its act context."""
+    spec = {"plan_acts": [
+        {"id": "I", "name": "Geological engine",
+         "primary_question": "Q1", "decisive_exit_condition": "E1",
+         "gates": [{"id": "I.1", "name": "Vent feasibility"}]},
+        {"id": "II", "name": "Chemical organization",
+         "primary_question": "Q2", "decisive_exit_condition": "E2",
+         "gates": [
+             {"id": "II.2", "name": "Network persistence"},
+             {"id": "II.A2", "name": "Autocatalysis", "off_spine": True},
+         ]},
+        {"id": "III", "name": "Chemical individuality",
+         "gates": [{"id": "III.C", "name": "Self-compartmentation"}]},
+    ]}
+    gates = iter_plan_gates(spec)
+    assert [g["id"] for g in gates] == ["I.1", "II.2", "II.A2", "III.C"]
+    extends = {g["id"]: g["extends"] for g in gates}
+    assert extends["I.1"] is None
+    assert extends["II.2"] == "I.1"
+    assert extends["II.A2"] == "II.2"          # off_spine branches off the prior spine gate
+    assert extends["III.C"] == "II.2"          # ...and skips the off_spine gate
+    assert gates[0]["act"]["id"] == "I"
+    assert gates[0]["act"]["primary_question"] == "Q1"
+
+
+def test_build_plan_board_consumes_flattened_plan_acts():
+    """End to end: a plan_acts spec flattened by iter_plan_gates renders a board with
+    the act surfaced per row."""
+    spec = {"plan_acts": [
+        {"id": "I", "name": "Geological engine",
+         "gates": [{"id": "I.1", "name": "Vent feasibility",
+                    "member_studies": ["og-vent-environment"]}]},
+    ]}
+    studies = {"og-vent-environment": _study(gate_status="passed")}
+    board = build_plan_board(iter_plan_gates(spec), studies)
+    assert board[0]["id"] == "I.1"
+    assert board[0]["act"]["id"] == "I"
+    assert board[0]["status"] == "passed"
 
 
 def test_empty_plan_gates_returns_empty():
