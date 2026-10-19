@@ -11926,6 +11926,19 @@
   function _applyInvOverviewState() {
     var view = document.getElementById('investigation-detail-view');
     if (!view) return;
+    // Safeguard: the investigation overview (intro + decision cockpit) must sit
+    // ABOVE the graph. The template already orders them that way, but enforce it
+    // defensively so no state (or a stale cached fragment) can leave the graph
+    // rendered above the overview — the overview opens below the graph otherwise.
+    // Idempotent: a no-op when the order is already correct.
+    var _graph = document.getElementById('investigation-dag-fs');
+    var _intro = document.getElementById('investigation-intro');
+    var _cockpit = document.getElementById('investigation-decision-cockpit');
+    if (_graph && _intro && _intro.parentNode === view && _graph.parentNode === view &&
+        (_intro.compareDocumentPosition(_graph) & Node.DOCUMENT_POSITION_PRECEDING)) {
+      view.insertBefore(_intro, _graph);
+      if (_cockpit && _cockpit.parentNode === view) view.insertBefore(_cockpit, _graph);
+    }
     var collapsed = _invOverviewCollapsed();
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
