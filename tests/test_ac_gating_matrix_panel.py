@@ -1,13 +1,13 @@
-"""Investigation report: the AC → study gating-matrix panel.
+"""Investigation report: the acceptance-criteria gating matrix is NOT rendered.
 
-The report (``lib.investigation_report`` + template) renders an acceptance-criteria
-→ study gating matrix: rows = acceptance criteria, the gating study (linked) + the
-code-computed result, and criteria with NO ``study:`` link are FLAGGED
-("no study linked — gap"). Unlike the old client panel (which fetched
-``/api/linkage-index`` live), the matrix is now computed server-side by
-``linkage_index.ac_gating_matrix`` and embedded in the report data — see
-``test_investigation_report.py`` for the data-shape coverage. These assert the
-template's render source.
+The report used to render an acceptance-criteria → study gating matrix (plus an
+authored acceptance-criteria list) beneath the investigation graph. Both were
+removed from the report (HTML + PDF) on request. The spine DATA that computes the
+matrix (``linkage_index.ac_gating_matrix``, embedded in the report payload) is
+UNCHANGED — only the rendering was removed; see ``test_investigation_report.py``
+(``test_spine_verdict_dag_acceptance_and_matrix``) for the data-shape coverage.
+
+These assert the matrix is gone from the report's render source.
 """
 from __future__ import annotations
 
@@ -18,24 +18,22 @@ _TPL = (
 ).read_text(encoding="utf-8")
 
 
-def test_panel_present_and_built():
-    assert "ac-gating-matrix" in _TPL
-    assert "_acGatingMatrixHtml" in _TPL
+def test_ac_gating_matrix_not_rendered_in_report():
+    # The matrix table + its builder + its helpers are gone.
+    assert "ac-gating-matrix" not in _TPL
+    assert "_acGatingMatrixHtml" not in _TPL
+    assert "_acResultBadge" not in _TPL
+    # The user-facing matrix strings are gone.
+    assert "no study linked — gap" not in _TPL
+    assert "have no study linked (gaps)" not in _TPL
 
 
-def test_panel_built_from_server_computed_matrix():
-    # Built from the embedded, server-computed matrix (linkage_index), not a
-    # live browser fetch.
-    assert "ac_matrix" in _TPL
+def test_authored_acceptance_criteria_list_not_rendered():
+    assert "authoredAcList" not in _TPL
+    assert "Acceptance criteria (authored)" not in _TPL
 
 
-def test_panel_flags_unlinked_acceptance_gap():
-    assert "no study linked — gap" in _TPL
-    # The gap-count footnote.
-    assert "have no study linked (gaps)" in _TPL
-
-
-def test_panel_rows_link_studies_and_show_results():
-    # Linked criteria link to their per-study section + show a result badge.
-    assert "#s-" in _TPL
-    assert "_acResultBadge" in _TPL
+def test_spine_graph_still_rendered():
+    # Removing the matrix must not take the investigation graph with it.
+    assert "function renderSpine" in _TPL
+    assert "The investigation graph" in _TPL
