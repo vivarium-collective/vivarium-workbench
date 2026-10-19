@@ -3208,11 +3208,36 @@
     var btn = document.getElementById('study-export-btn');
     var menu = document.getElementById('study-export-menu');
     if (!btn || !menu) return;
+    // Pop the menu OUT of the horizontally-scrolling .study-tabs bar. That nav
+    // is overflow-x:auto, which CLIPS an absolutely-positioned dropdown — so the
+    // menu opened INSIDE the bar and had to be scrolled to. Fixed positioning,
+    // right-aligned under the button, escapes the clip and overlays the page,
+    // matching the investigation-level ↓ Export dropdown.
+    function _place() {
+      var r = btn.getBoundingClientRect();
+      menu.style.position = 'fixed';
+      menu.style.top = (r.bottom + 4) + 'px';
+      menu.style.left = 'auto';
+      menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    }
     btn.addEventListener('click', function (ev) {
       ev.stopPropagation();
       var open = menu.style.display !== 'none' && menu.style.display !== '';
-      menu.style.display = open ? 'none' : 'block';
-      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+      if (open) {
+        menu.style.display = 'none';
+        btn.setAttribute('aria-expanded', 'false');
+      } else {
+        menu.style.display = 'block';
+        _place();
+        btn.setAttribute('aria-expanded', 'true');
+      }
+    });
+    // Keep it anchored while open (the fixed menu would otherwise drift from the
+    // button on scroll/resize); cheap and only runs while the menu is open.
+    ['scroll', 'resize'].forEach(function (evt) {
+      window.addEventListener(evt, function () {
+        if (menu.style.display === 'block') _place();
+      }, true);
     });
     // Close after choosing an item (the item's own onclick runs the download).
     menu.querySelectorAll('[role="menuitem"]').forEach(function (it) {

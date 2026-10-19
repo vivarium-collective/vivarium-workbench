@@ -1451,7 +1451,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          the "Investigation overview" collapse toggle + the all-clear/needs-attention
          chip. Wired by _toggleInvOverview / _renderInvNeedsAttention (by id). #}
       <button type="button" id="inv-overview-toggle" class="btn-mini" aria-expanded="false"
-              onclick="window._toggleInvOverview()">▸ Investigation overview</button>
+              onclick="window._toggleInvOverview()">▸ Overview</button>
       <span id="aig-needs-attention-chip" class="aig-na-chip-host"></span>
       <span id="ws-actions" style="margin-left:auto"></span>
     </div>
@@ -1630,7 +1630,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <span class="aig-tb-group aig-settings-ctl" style="position:relative">
         <button id="aig-settings-btn" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false"
                 title="Display settings — fine-tune detail, card width, and zoom"
-                onclick="window._aigToggleSettings(event)">⚙ Display</button>
+                aria-label="Display settings" onclick="window._aigToggleSettings(event)">⚙</button>
         <div id="aig-settings-menu" role="dialog" aria-label="Graph display settings"
              style="display:none;position:absolute;left:0;top:100%;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:236px;padding:12px 14px;text-align:left">
           <div class="aig-settings-row">
@@ -1656,30 +1656,30 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           </div>
         </div>
       </span>
-      <!-- ONE always-present dock control: opens a menu to choose a side
-           (left / right / bottom / top), pop out, or go back inline. Works the
-           same whether the graph is currently inline or docked — no button swap. -->
-      <span class="aig-tb-group" role="group" aria-label="Graph panel">
-        <button id="aig-dock-panel-btn" type="button"
-                title="Dock the investigation graph — choose a side, pop out, or go back inline"
-                aria-haspopup="menu" aria-label="Dock the investigation graph"
-                onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">◧</button>
-      </span>
       {# Legend lives in the toolbar with the other graph utilities. The "?" button
          opens a click popover with the key (Progress / Verdict / Evidence / Edges),
          filled + wired by _wireDagLegendPopover (walkthrough.js); outside-click closes. #}
-      <span class="aig-tb-group aig-tb-right dag-legend-wrap" style="position:relative">
+      <span class="aig-tb-group dag-legend-wrap" style="position:relative">
         <button id="dag-legend-chip" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false"
-                title="Legend — node Progress/Verdict markers and edge types">? Legend</button>
+                aria-label="Legend" title="Legend — node Progress/Verdict markers and edge types">?</button>
         <div id="dag-legend-popover" role="dialog" aria-label="Investigation graph legend" style="display:none;position:absolute;right:0;top:100%;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:240px;max-width:360px;padding:10px 12px;text-align:left"></div>
       </span>
       <span class="aig-tb-group aig-dl-ctl" style="position:relative">
         <button id="aig-dl-btn" type="button" class="aig-tb-btn" title="Download the investigation graph as an image (PNG) or PDF"
-                aria-haspopup="true" aria-expanded="false" onclick="window._aigToggleDownloadMenu(event)">⬇ Export</button>
+                aria-label="Export graph" aria-haspopup="true" aria-expanded="false" onclick="window._aigToggleDownloadMenu(event)">⬇</button>
         <div id="aig-dl-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.14);z-index:70;min-width:132px;overflow:hidden">
           <button type="button" role="menuitem" onclick="window._aigDownloadMenuPick('png')" style="display:block;width:100%;text-align:left;border:none;background:transparent;padding:7px 12px;cursor:pointer;font-size:0.95em;color:#334155">↓ PNG image</button>
           <button type="button" role="menuitem" onclick="window._aigDownloadMenuPick('pdf')" style="display:block;width:100%;text-align:left;border:none;border-top:1px solid #f1f5f9;background:transparent;padding:7px 12px;cursor:pointer;font-size:0.95em;color:#334155">↓ PDF</button>
         </div>
+      </span>
+      <!-- Dock control: choose a side (left/right/bottom/top), pop out, or go back
+           inline. Placed after the Display/Legend/Export trio so those three stay
+           grouped together. -->
+      <span class="aig-tb-group" role="group" aria-label="Graph panel">
+        <button id="aig-dock-panel-btn" type="button" class="aig-tb-btn"
+                title="Dock the investigation graph — choose a side, pop out, or go back inline"
+                aria-haspopup="menu" aria-label="Dock the investigation graph"
+                onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">◧</button>
       </span>
     </div>
     <div id="investigation-dag-shell"
