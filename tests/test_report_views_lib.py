@@ -220,3 +220,107 @@ def test_build_iset_detail_effective_status(tmp_ws):
     result = build_iset_detail(tmp_ws, "the-inv")
     assert result is not None
     assert "effective_status" in result
+
+
+# ---------------------------------------------------------------------------
+# 4b. Regression: a *planned* study whose spec doesn't fully validate yet
+#     (e.g. an unbuilt baseline) must render as its true neutral state, never
+#     as the red "⊘ Failed" badge. See _execState in static/walkthrough.js:
+#     execution_status wins, and "failed" is reserved for a study that actually
+#     ran and failed.
+# ---------------------------------------------------------------------------
+
+def test_unloadable_planned_study_node_is_not_failed(tmp_path):
+    """The stub node for a planned-but-unvalidatable study keeps its neutral
+    execution axis — never the failed/invalid lifecycle sentinel."""
+    from vivarium_workbench.lib.report_views import _unloadable_study_node
+
+    sd = tmp_path / "studies" / "mem-m1"
+    sd.mkdir(parents=True)
+    sp = sd / "study.yaml"
+    sp.write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "mem-m1",
+        "title": "Amphiphile assembly (planned)",
+        "status": "planned",
+        "execution_status": "proposed",
+        "simulation_status": "not_run",
+        "evaluation_status": "not_started",
+        "gate_status": "not_started",
+        "proposed": True,
+        # baseline[0] without composite/step/process → fails v3 validation
+        "baseline": [{"name": "core"}],
+    }), encoding="utf-8")
+
+    node = _unloadable_study_node(sp, "mem-m1", "v3 study: baseline[0] requires composite")
+    # Honours the authored execution axis — neutral, not failed.
+    assert node["execution_status"] == "proposed"
+    assert node["execution_status"] != "failed"
+    # Keeps the authored lifecycle status instead of the "invalid" sentinel,
+    # so the investigation roll-up doesn't count it as a failed child.
+    assert node["status"] == "planned"
+    assert node["status"] != "invalid"
+    # No verdict for a study that hasn't been evaluated.
+    assert "verdict" not in node
+    # The validation error is still available for diagnostics.
+    assert node["spec_error"]
+
+
+def test_unloadable_ran_failed_study_node_stays_failed(tmp_path):
+    """A study that actually ran and failed still derives to failed even when
+    its spec no longer validates — the failed badge is not blunted."""
+    from vivarium_workbench.lib.report_views import _unloadable_study_node
+
+    sd = tmp_path / "studies" / "broke"
+    sd.mkdir(parents=True)
+    sp = sd / "study.yaml"
+    sp.write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "broke",
+        "status": "ran",
+        "simulation_status": "failed",
+        "baseline": [{"name": "core"}],  # still invalid spec
+    }), encoding="utf-8")
+
+    node = _unloadable_study_node(sp, "broke", "v3 study: baseline[0] requires composite")
+    assert node["execution_status"] == "failed"
+
+
+def test_build_iset_detail_planned_member_not_failed(tmp_path):
+    """End-to-end: a planned member whose spec fails validation surfaces as a
+    neutral (non-failed) node, and the investigation itself is not 'failed'."""
+    from vivarium_workbench.lib.report_views import build_iset_detail
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: test-ws\n", encoding="utf-8")
+
+    sd = ws / "studies" / "planned-member"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "planned-member",
+        "title": "Planned member",
+        "status": "planned",
+        "execution_status": "proposed",
+        "proposed": True,
+        "baseline": [{"name": "core"}],  # unbuilt → fails v3 validation
+    }), encoding="utf-8")
+
+    inv_dir = ws / "investigations" / "inv"
+    inv_dir.mkdir(parents=True)
+    (inv_dir / "investigation.yaml").write_text(yaml.safe_dump({
+        "name": "inv",
+        "title": "Inv",
+        "status": "planning",
+        "studies": ["planned-member"],
+    }), encoding="utf-8")
+
+    result = build_iset_detail(ws, "inv")
+    assert result is not None
+    study = result["studies"][0]
+    assert study["name"] == "planned-member"
+    assert study["execution_status"] == "proposed"
+    assert study["status"] != "invalid"
+    # The investigation roll-up must not read 'failed' because of this member.
+    assert result["effective_status"] != "failed"
