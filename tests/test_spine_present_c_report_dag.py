@@ -32,12 +32,10 @@ def test_report_renders_verdict_annotated_study_dag():
     assert "#s-" in _TPL
 
 
-def test_report_renders_acceptance_gating_matrix():
-    # The per-criterion roll-up and the AC gating matrix were the same rows
-    # transposed; consolidated to the single gating matrix (which also flags
-    # unlinked-criterion gaps). The divergence badge rides on its label.
-    assert "ac-gating-matrix" in _TPL
-    assert "acceptance criteria" in _TPL
+def test_report_no_longer_renders_acceptance_gating_matrix():
+    # The AC gating matrix was removed from the report on request (the
+    # investigation graph stays; spine data is untouched).
+    assert "ac-gating-matrix" not in _TPL
     assert "acceptance-rollup" not in _TPL
 
 

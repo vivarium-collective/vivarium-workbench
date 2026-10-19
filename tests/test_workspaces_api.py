@@ -56,9 +56,23 @@ def server(tmp_path):
     # serve_fastapi writes server-info before uvicorn binds the port, so wait
     # for the app to actually answer /health, not just for the file to exist.
     base_url = f"http://127.0.0.1:{port}"
-    for _ in range(80):
+
+    def _drain(p, t=5):
+        # Robustly collect a (possibly still-terminating) server's output: wait up
+        # to `t`s, then hard-kill so this never raises TimeoutExpired itself (the
+        # old timeout=2 flaked on loaded CI runners mid-shutdown).
+        try:
+            return p.communicate(timeout=t)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            return p.communicate()
+
+    # 240 * 0.25s = 60s: a cold CI start + generator discovery can exceed the old
+    # 20s budget, which made this fixture flaky (serve not up within 80 iters →
+    # terminate + a 2s communicate that timed out while the process was dying).
+    for _ in range(240):
         if proc.poll() is not None:
-            out, err = proc.communicate(timeout=2)
+            out, err = _drain(proc)
             pytest.fail(f"server did not start:\n{out.decode()}\n{err.decode()}")
         try:
             with urllib.request.urlopen(base_url + "/health", timeout=2) as r:
@@ -69,8 +83,8 @@ def server(tmp_path):
         time.sleep(0.25)
     else:
         proc.terminate()
-        out, err = proc.communicate(timeout=2)
-        pytest.fail(f"server did not answer /health:\n{out.decode()}\n{err.decode()}")
+        out, err = _drain(proc)
+        pytest.fail(f"server did not answer /health within 60s:\n{out.decode()}\n{err.decode()}")
     yield {"url": base_url, "ws": ws, "pbg_home": pbg_home, "workspace": ws}
     proc.terminate()
     try:

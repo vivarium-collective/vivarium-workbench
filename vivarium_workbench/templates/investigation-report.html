@@ -266,8 +266,7 @@ figure img{max-width:100%;height:auto;display:block;border:1px solid var(--line)
 .aig-fidelity-chip{display:inline-block;margin-left:7px;padding:0 7px;border-radius:999px;font-size:0.9em;font-weight:600;vertical-align:baseline}
 .aig-fidelity-real{background:color-mix(in srgb,var(--cal) 15%,var(--surface));color:var(--cal);border:1px solid color-mix(in srgb,var(--cal) 32%,transparent)}
 .aig-fidelity-repro{background:var(--chip);color:var(--ink-2);border:1px solid var(--line-2)}
-.study-verdict-dag,.ac-gating-matrix{margin-top:4px}
-.ac-gating-matrix td{font-size:13.5px}
+.study-verdict-dag{margin-top:4px}
 figcaption{color:var(--ink-2);font-size:12.5px;margin-top:8px;max-width:none}
 .fig-scroll{overflow-x:auto}
 .loom-embed{margin:12px 0 4px}
@@ -1628,12 +1627,11 @@ function spy(){
   document.querySelectorAll('#exec-summary,#spine-presentation,#studies,#synthesis-gaps,#validation,#claim-evidence,#evidence-register,#references').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
-/* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
+/* ---------- spine presentation: investigation graph (verdict-badged DAG) ---------- */
 const VG={passed:['✅','passed'],failing:['⛔','failing'],blocked:['⚠','blocked'],
           needs_calibration:['🔄','needs calibration'],not_started:['◽','not evaluated']};
 function _spineVerdictBadge(v){ const g=VG[v]||VG.not_started; return `<span class="spine-badge v-${v}">${g[0]} ${g[1]}</span>`; }
 function _spineCountLabel(c){ if(!c) return ''; const p=[]; if(c.passed) p.push(c.passed+' passed'); if(c.skipped) p.push(c.skipped+' skipped'); if(c.failed) p.push(c.failed+' failed'); return p.join(' · '); }
-function _acResultBadge(r){ const ok=(r==='passing'||r==='passed'||r==='passing-with-caveats'); const bad=(r==='failing'||r==='failed'); return `<span class="chip ${ok?'pass':(bad?'fail':'')}">${esc(r||'—')}</span>`; }
 
 // V8 — verdict-annotated study DAG (renders only when there are dependency edges;
 // otherwise the at-a-glance table already conveys the flat list)
@@ -1661,33 +1659,17 @@ function _verdictDagHtml(sp){
     <div class="spine-legend">${legend}</div>
     <figcaption>Member studies as a dependency DAG (edges from <span class="mono">parent_studies</span>), each badged with its code-computed gate verdict.</figcaption></div>`;
 }
-function _acGatingMatrixHtml(sp){
-  const m=sp&&sp.ac_matrix; if(!m||!(m.criteria&&m.criteria.length)) return '';
-  const rows=m.criteria.map(c=> c.gap
-    ? `<tr><td>${esc(c.behavior||'')}</td><td class="gap" style="color:var(--fail)">no study linked — gap</td><td></td></tr>`
-    : `<tr><td>${esc(c.behavior||'')}</td><td><a href="#s-${esc(c.study)}">${esc(c.study)}</a></td><td class="tv">${_acResultBadge(c.result)}</td></tr>`).join('');
-  const gaps=m.criteria.filter(c=>c.gap).length;
-  const foot=gaps?`<div class="texp" style="color:var(--ink-3);margin-top:6px">${gaps} acceptance criteria have no study linked (gaps).</div>`:'';
-  // Divergence flag rides on the spine's acceptance roll-up; surface it on the
-  // matrix label (not recomputed here) so the one table carries that signal.
-  const div=(sp.acceptance&&sp.acceptance.diverges_from_authored)?`<span class="acceptance-divergence chip warn">⚠ code differs from authored</span>`:'';
-  return `<div class="ac-gating-matrix"><div class="slabel">Acceptance-criteria gating matrix ${div}</div>
-    <table class="ttable"><thead><tr><th>Criterion</th><th>Gating study</th><th class="tv">Result</th></tr></thead><tbody>${rows}</tbody></table>${foot}</div>`;
-}
 function renderSpine(inv){
-  const sp=inv.spine;
-  // The graph REUSES the workbench's investigation-DAG rendering (ported), so
-  // the report's graph matches the SPA the user drives. The AC gating matrix
-  // stays beneath it.
+  // The graph REUSES the workbench's investigation-DAG rendering (ported), so the
+  // report's graph matches the SPA the user drives. Acceptance-criteria gating
+  // (the gating matrix + the authored acceptance-criteria list) was removed from
+  // the report on request — the spine DATA is untouched, only this rendering.
   const graph=workbenchDag(inv);
-  const mx=sp?_acGatingMatrixHtml(sp):'';
-  if(!graph && !mx) return '';
-  return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Investigation graph & acceptance')}
+  if(!graph) return '';
+  return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Investigation graph')}
     <div class="sec-h"><h2>The investigation graph</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">The campaign as a dependency graph — each study a node badged with its code-computed status, wired to the studies it builds on.</p>
-    ${graph}
-    ${mx?`<div style="margin-top:22px">${mx}</div>`:''}
-    ${authoredAcList(inv)}</div>`;
+    ${graph}</div>`;
 }
 
 /* ---------- interactive (Plotly) figures — LAZY, visibility-driven ----------
@@ -1764,13 +1746,14 @@ function setupLazyPlotly(){
 // a few frames to draw. Safe no-op if called in a normal browser.
 window.__reportPrintPrep = function(){
   return new Promise(resolve=>{
-    // Open main-report details (e.g. the report-readiness block) but LEAVE THE
-    // STUDY CARDS COLLAPSED — in the PDF each study shows as its summary card
-    // (question · verdict · what-we-learn), not its full expanded record, so the
-    // PDF stays the evidence-led main report (8–15 pp) instead of 150+ pp of every
-    // study expanded. Card-internal <details> sit inside the collapsed card, so
-    // they stay hidden regardless.
-    try{ document.querySelectorAll('details').forEach(d=>{ if(!d.closest('.card')) d.open=true; }); }catch(e){}
+    // Expand EVERY study card and open all its detail sections, so the PDF shows
+    // each study's FULL record (model, runs, figures, tests, findings, limitations),
+    // not just the summary card. The downloadable PDF is the complete archive, so a
+    // long document (one full study per section) is intended here; the interactive
+    // HTML report keeps the cards collapsible. Expanding BEFORE the Plotly setup
+    // below ensures figures inside the now-visible cards render + fit the page.
+    try{ document.querySelectorAll('.card.collapsed').forEach(c=>c.classList.remove('collapsed')); }catch(e){}
+    try{ document.querySelectorAll('details').forEach(d=>{ d.open=true; }); }catch(e){}
     try{ setupLazyPlotly(); }catch(e){}
     try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
     // Re-fit every Plotly figure to its container (page) width. The saved figures
@@ -1792,6 +1775,36 @@ window.__reportPrintPrep = function(){
         });
       }
     }catch(e){}
+    // Rasterize WebGL Plotly figures to static PNGs for the PDF. 3D figures
+    // (scatter3d / mesh3d / surface) and 2D-gl paint to a <canvas> that does NOT
+    // reliably capture in the headless-Chromium print surface — so the MD
+    // membrane / vesicle 3D plots came out blank. Plotly.toImage renders the GL
+    // context to a data-URI we swap in as an <img>, which prints reliably. SVG
+    // figures already print, so they're left interactive. Runs only in the PDF
+    // path (__reportPrintPrep), so the HTML report keeps its live figures.
+    function _rasterizePlotly(){
+      const proms=[];
+      try{
+        if(!(window.Plotly && Plotly.toImage)) return proms;
+        document.querySelectorAll('figure.embedded-plotly .plotly-graph-div, figure.embedded-plotly .js-plotly-plot').forEach(gd=>{
+          try{
+            if(!gd.querySelector('canvas')) return;   // SVG figure already prints
+            const holder=gd.closest('.plotly-holder')||gd.parentElement;
+            const w=Math.max(220, ((holder&&holder.clientWidth)||680)-14);
+            const h=Math.max(220, gd.clientHeight||gd.offsetHeight||440);
+            proms.push(Plotly.toImage(gd,{format:'png', width:w, height:h, scale:2}).then(function(uri){
+              try{
+                const img=document.createElement('img');
+                img.src=uri; img.className='plotly-static';
+                img.style.width='100%'; img.style.height='auto'; img.style.display='block';
+                if(gd.parentNode) gd.parentNode.replaceChild(img, gd);
+              }catch(e){}
+            }).catch(function(){}));
+          }catch(e){}
+        });
+      }catch(e){}
+      return proms;
+    }
     try{ setupInteractiveLooms(); }catch(e){}
     try{ setupRealLooms(); }catch(e){}
     // Investigation graph: lay it out TOP-TO-BOTTOM and scale to fit the page
@@ -1816,8 +1829,11 @@ window.__reportPrintPrep = function(){
         shell.style.breakInside=''; shell.style.pageBreakInside='';
       }
     }catch(e){}
-    let n=0; const tick=()=>{ if(++n<5){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { setTimeout(resolve,700); } };
-    try{ requestAnimationFrame(tick); }catch(e){ setTimeout(resolve,700); }
+    // Settle (figures + graph laid out), THEN rasterize WebGL figures and resolve
+    // once every static snapshot has been swapped in.
+    const _finish=()=>{ try{ Promise.all(_rasterizePlotly()).then(function(){setTimeout(resolve,500);}, function(){setTimeout(resolve,500);}); }catch(e){ setTimeout(resolve,700); } };
+    let n=0; const tick=()=>{ if(++n<6){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { _finish(); } };
+    try{ requestAnimationFrame(tick); }catch(e){ _finish(); }
   });
 };
 
@@ -2119,21 +2135,6 @@ function decisionsBlock(inv){
   return `<div class="narr" id="open-decisions"><div class="sec-h"><h2>Open decisions</h2><span class="rule"></span></div>
     <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 6px">Expert calls the campaign still needs — ${dn.length} open.</p>
     <ol style="list-style:decimal;padding-left:22px;margin:0">${items}</ol></div>`;
-}
-
-// Authored acceptance criteria (behavior → gating study), shown beside the
-// computed AC matrix in the spine section.
-function authoredAcList(inv){
-  const ac=inv.acceptance_criteria; if(!Array.isArray(ac)||!ac.length) return '';
-  const rows=ac.map(c=>{
-    const b=(c&&(c.behavior||c.criterion||c.name))||(typeof c==='string'?c:'');
-    const st=(c&&(c.study||c.slug))||'';
-    return `<div style="display:grid;grid-template-columns:2fr 1.4fr;gap:12px;padding:4px 0;border-bottom:1px solid var(--line);font-size:12.5px">
-      <div class="mono" style="color:var(--ink)">${esc(b)}</div><div style="color:var(--ink-2)">${esc(_titleOf(inv,st))}</div></div>`;
-  }).join('');
-  return `<div style="margin-top:22px"><div class="kicker" style="margin-bottom:6px">Acceptance criteria (authored)</div>
-    <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:0 0 6px">Each criterion and the study that gates it.</p>
-    <div>${rows}</div></div>`;
 }
 
 /* ====================== FINDING-FIRST SYNTHESIS (upgrade) ====================== */
