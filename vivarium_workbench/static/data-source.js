@@ -156,6 +156,15 @@
       : "/api/investigation-graph?investigation=" + encodeURIComponent(slug);
   }
 
+  // The derived Concept overlay for an investigation (the formalized
+  // investigation-graph grouping layer). publish.py bakes it to
+  // api/concept-overlay/<slug>.json for the static bundle.
+  function _conceptOverlayUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/concept-overlay/" + encodeURIComponent(slug) + ".json"
+      : "/api/concept-overlay?investigation=" + encodeURIComponent(slug);
+  }
+
   function _auditUrl() {
     return cfg().mode === "snapshot"
       ? _base() + "/api/audit.json"
@@ -344,6 +353,20 @@
      */
     async loadInvestigationGraph(slug) {
       return _get(_investigationGraphUrl(slug));
+    },
+
+    /**
+     * Load the derived Concept overlay for an investigation — one Concept per
+     * plan_gates gate (fallback plan_acts) plus each member study's canonical
+     * verdict. Ephemeral/derived; nothing is written.
+     * Local mode:    fetches GET /api/concept-overlay?investigation=<slug>
+     * Snapshot mode: fetches /api/concept-overlay/<slug>.json from the bundle
+     * Returns {investigation, concepts[], study_verdicts{}, diverges[]} — or an
+     * empty overlay when the derivation package is unavailable.
+     * @param {string} slug - the investigation slug.
+     */
+    async loadConceptOverlay(slug) {
+      return _get(_conceptOverlayUrl(slug));
     },
 
     /**
