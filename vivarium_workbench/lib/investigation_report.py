@@ -293,11 +293,18 @@ def _embed_html_figures(study_dir: Path, budget: list, skip_names: set) -> list:
         d = study_dir / sub
         if not d.is_dir():
             continue
-        for f in sorted(d.glob("*.html")):
+        # Recurse: a consolidated study keeps each absorbed sub-study's rendered
+        # viz under viz/<sub-study>/*.html, so a flat viz/*.html glob missed them
+        # entirely (e.g. og-self-compartmentation's fatty-acid-vesicle-stability /
+        # self-maintaining-protocell MD figures). rglob covers both the flat and
+        # the nested layout; dedup on the path relative to the study dir (not the
+        # bare basename) so same-named figures in different subdirs both survive.
+        for f in sorted(d.rglob("*.html"), key=lambda p: p.as_posix()):
             base = f.name
-            if base in _HTML_FIG_SKIP or base in skip_names or base in seen:
+            rel = f.relative_to(study_dir).as_posix()
+            if base in _HTML_FIG_SKIP or base in skip_names or rel in seen:
                 continue
-            seen.add(base)
+            seen.add(rel)
             try:
                 raw_size = f.stat().st_size
             except OSError:

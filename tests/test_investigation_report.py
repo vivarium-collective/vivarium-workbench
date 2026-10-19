@@ -199,6 +199,26 @@ def test_spatioflux_style_fields_and_inlined_figure(tmp_path):
     assert "fetch(" not in html and "/api/" not in html
 
 
+def test_nested_viz_html_figures_are_embedded(tmp_path):
+    """Consolidated studies keep each absorbed sub-study's rendered viz under
+    viz/<sub-study>/*.html; _embed_html_figures must recurse to find them — a flat
+    viz/*.html glob dropped every nested figure (e.g. the fatty-acid-vesicle MD
+    figures on og-self-compartmentation)."""
+    import vivarium_workbench.lib.investigation_report as mod
+    sd = tmp_path / "studies" / "consolidated"
+    nested = sd / "viz" / "og-32b-fatty-acid-vesicle"
+    nested.mkdir(parents=True)
+    (nested / "fatty-acid-vesicle-stability.html").write_text("<div>vesicle-fig</div>")
+    (nested / "model-loom.html").write_text("<div>loom-reserved</div>")  # reserved → skipped
+    (sd / "viz" / "flat.html").write_text("<div>flat-fig</div>")
+
+    figs = mod._embed_html_figures(sd, [0], set())
+    htmls = [f.get("html", "") for f in figs]
+    assert any("vesicle-fig" in h for h in htmls), "nested viz figure was not embedded"
+    assert any("flat-fig" in h for h in htmls), "flat viz figure was not embedded"
+    assert not any("loom-reserved" in h for h in htmls), "model-loom.html must be skipped"
+
+
 def test_oversized_figure_is_skipped_not_read(tmp_path):
     """A figure past the per-file cap is reported as skipped, not embedded."""
     import vivarium_workbench.lib.investigation_report as mod
