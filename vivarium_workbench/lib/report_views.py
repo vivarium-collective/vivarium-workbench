@@ -44,6 +44,51 @@ from vivarium_workbench.lib.study_ontology import (
     derive_verdict as _derive_verdict,
 )
 
+
+def _unloadable_study_node(sp: "Path", slug: str, error: str) -> dict:
+    """Neutral graph node for a member study whose spec fails v3 validation.
+
+    A study spec can fail to validate for a perfectly benign reason: a
+    *planned* study whose baseline composite hasn't been built yet (e.g.
+    ``baseline[0]`` lacks a ``composite``/``step``/``process``). That is an
+    authoring/not-yet-built state, NOT a failed execution — so the node must
+    NOT masquerade as ``status: invalid`` (which the investigation-graph card's
+    ``_execState`` maps to the red "⊘ Failed" badge, and which the investigation
+    roll-up counts as a failed child).
+
+    Recover the authored lifecycle/execution axis straight from the raw YAML so
+    the card shows the study's true neutral state (Planned/Proposed). A study
+    that genuinely ran and failed (``simulation_status: failed`` or an authored
+    ``status: invalid``/``failed``) still derives to ``failed`` and renders as
+    such — the ``failed`` badge is reserved for real run failures, per
+    ``study_ontology.derive_execution_status``'s contract. The validation error
+    is preserved on ``spec_error`` for diagnostics.
+    """
+    raw: dict = {}
+    try:
+        loaded = yaml.safe_load(Path(sp).read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            raw = loaded
+    except Exception:  # noqa: BLE001 — unreadable/empty file degrades gracefully
+        raw = {}
+    authored_status = str(raw.get("status") or "").strip()
+    node: dict = {
+        "name": slug,
+        # Keep the authored lifecycle status (e.g. "planned"); only fall back to
+        # the legacy "invalid" sentinel when the file carries no status at all.
+        "status": authored_status or "invalid",
+        # Always carry the derived execution axis so the client honours it
+        # (execution_status wins in _execState) instead of inferring "failed"
+        # from the "invalid" status sentinel.
+        "execution_status": _derive_execution_status(raw, authored_status),
+        "spec_error": error,
+    }
+    _verdict = _derive_verdict(raw)
+    if _verdict:
+        node["verdict"] = _verdict
+    return node
+
+
 # ---------------------------------------------------------------------------
 # Module-level TTL cache for the linkage index (mirrors server._LINKAGE_CACHE)
 # ---------------------------------------------------------------------------
@@ -934,7 +979,12 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         try:
             study_spec = load_spec(sp)
         except InvestigationSpecError as e:
-            studies_out.append({"name": slug, "status": "invalid", "error": str(e)})
+            # A study whose spec doesn't fully validate yet (e.g. a *planned*
+            # study with an unbuilt baseline) must not render as "⊘ Failed" nor
+            # roll its investigation up to failed — recover its true neutral
+            # execution state from the raw YAML. "failed" stays reserved for a
+            # study that actually ran and failed.
+            studies_out.append(_unloadable_study_node(sp, slug, str(e)))
             continue
 
         sim_set = study_spec.get("simulation_set") or []
