@@ -327,12 +327,47 @@ def _validate_element(
     )
 
 
+def _port_units_of(available: dict, path: str | None) -> str | None:
+    """The declared units of the composite leaf a scalar readout points at."""
+    return ((available.get("types") or {}).get(path) or {}).get("units")
+
+
+def _units_compatible(u1: str, u2: str) -> bool | None:
+    """True/False if two unit strings are dimensionally (in)compatible; None when
+    the check can't be made (no unit registry, or an unparseable unit) — so a
+    missing capability never fabricates a mismatch."""
+    try:
+        from bigraph_schema.units import get_quantity_registry
+        reg = get_quantity_registry()
+        return reg(u1).dimensionality == reg(u2).dimensionality
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _unit_check(name: str, declared: str | None, port: str | None) -> dict | None:
+    """Return a ``unit_mismatch`` result iff a study readout DECLARES a unit that
+    is dimensionally incompatible with the port's declared unit. Either side
+    missing, or an un-checkable unit, → None (never fabricate)."""
+    if not declared or not port:
+        return None
+    if _units_compatible(declared, port) is False:
+        return _result(
+            name, "unit_mismatch",
+            f"readout units {declared!r} are dimensionally incompatible with the "
+            f"port units {port!r}",
+        )
+    return None
+
+
 def _validate_resolved(r: ResolvedReadout, available: dict) -> dict:
     """Validate a ResolvedReadout against the available structure."""
     leaves: list[str] = available.get("leaves", [])
 
     if r.kind == "scalar":
         if r.observable in leaves:
+            mism = _unit_check(r.name, r.units, _port_units_of(available, r.observable))
+            if mism is not None:
+                return mism
             return _result(r.name, "ok", f"scalar {r.observable!r} is an emittable leaf")
         return _result(
             r.name, "not_in_structure",
@@ -396,7 +431,7 @@ def validate_readouts(
 
     Returns:
         One ``{name, status, detail}`` per readout.  ``status`` ∈
-        ``{ok, unresolved, not_in_structure, aspirational}``.
+        ``{ok, unresolved, not_in_structure, aspirational, unit_mismatch}``.
     """
     if available is None:
         if state is None:

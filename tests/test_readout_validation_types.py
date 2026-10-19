@@ -32,3 +32,41 @@ class TestTypesMap:
         res = available_observables(None, {"listeners": {"mass": 1.0}},
                                     {"listeners": {"mass": {"_type": "float"}}})
         assert "leaves" in res and "catalogs" in res
+
+
+from viva_superpowers.readout_resolver import ResolvedReadout
+from vivarium_workbench.lib.readout_validation import _validate_resolved, _units_compatible
+
+
+def _rr(units):
+    return ResolvedReadout(
+        name="r", kind="scalar", observable="listeners.mass", index_by=None,
+        expression=None, operand_ids=None, aggregate=None, units=units,
+        source_dialect="store_path",
+    )
+
+
+def _avail(leaf_units):
+    return {"leaves": ["listeners.mass"], "catalogs": {},
+            "types": {"listeners.mass": {"type": "float", "units": leaf_units, "min": None, "max": None}}}
+
+
+class TestUnitCheck:
+    def test_compatible_units_ok(self):
+        # fg and kg are both mass → dimensionally compatible
+        assert _validate_resolved(_rr("kg"), _avail("fg"))["status"] == "ok"
+
+    def test_incompatible_units_flagged(self):
+        assert _validate_resolved(_rr("mol"), _avail("fg"))["status"] == "unit_mismatch"
+
+    def test_no_declared_units_is_ok(self):
+        # readout declares no units → never fabricate a mismatch
+        assert _validate_resolved(_rr(None), _avail("fg"))["status"] == "ok"
+
+    def test_port_without_units_is_ok(self):
+        # the port carries no units → silent, not a mismatch
+        assert _validate_resolved(_rr("mol"), _avail(None))["status"] == "ok"
+
+    def test_units_compatible_helper(self):
+        assert _units_compatible("fg", "kg") is True
+        assert _units_compatible("fg", "mol") is False
