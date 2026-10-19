@@ -89,6 +89,25 @@ def test_injected_fns_bypass_package_import(tmp_ws):
     assert body["diverges"] == ["og-vent"]
 
 
+def test_authored_concept_record_merges_through(tmp_ws):
+    """An authored concept record (synthesis/assessment) overlays the derived
+    overlay (Concept-as-Store), keeping derived member_studies."""
+    inv_yaml = tmp_ws / "investigations" / "og" / "investigation.yaml"
+    spec = yaml.safe_load(inv_yaml.read_text())
+    spec["concepts"] = [
+        {"id": "a1", "synthesis": "Vent environment is calibrated.",
+         "assessment": {"verdict": "supported", "basis": "og-vent"}},
+    ]
+    inv_yaml.write_text(yaml.safe_dump(spec))
+
+    body, status = build_concept_overlay(tmp_ws, investigation="og")
+    assert status == 200
+    a1 = next(c for c in body["concepts"] if c["id"] == "a1")
+    assert a1["synthesis"] == "Vent environment is calibrated."   # authored wins
+    assert a1["member_studies"] == ["og-vent"]                     # derived kept
+    assert a1["derived"] is False
+
+
 def test_concept_overlay_endpoint(tmp_ws):
     """GET /api/concept-overlay wires the builder end-to-end through the FastAPI app."""
     from fastapi.testclient import TestClient

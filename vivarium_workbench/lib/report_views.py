@@ -640,7 +640,9 @@ def build_concept_overlay(
     }
     if derive_fn is None or verdict_fn is None:
         try:
-            from viva_superpowers.concept_overlay import derive_concepts as _dc
+            # Concept-as-Store (RFC-0004 §3): load_concepts merges the authored
+            # record (synthesis/assessment/revisions) over the derived overlay.
+            from viva_superpowers.concept_store import load_concepts as _dc
             from viva_superpowers.verdict_vocab import canonical_verdict_detail as _cv
         except Exception:  # noqa: BLE001
             return empty, 200
