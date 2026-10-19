@@ -2253,7 +2253,6 @@ function execSummary(inv){
     ${q?`<p class="prose" style="font-size:16px;margin:2px 0 8px"><b>Question.</b> ${esc(q)}</p>`:''}
     ${verdict?`<div class="prose" style="font-size:15.5px">${mdLite(verdict)}</div>`:''}
     ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Milestone outcomes</div><div>${gl}</div></div>`:''}
-    ${heroFigure(inv)}
     <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:12px 0 0;line-height:1.5">
       Across <b>${c.total||0}</b> studies — <b>${c.supported||0}</b> supported · <b>${c.qualified||0}</b> qualified · <b>${c.refuted||0}</b> refuted · <b>${c.planned||0}</b> planned.
       <i>Supported</i> = a computational gate passed under the stated model assumptions (evidence of feasibility, not proof the transition occurred).</p>
