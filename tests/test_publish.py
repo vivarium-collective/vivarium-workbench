@@ -103,6 +103,36 @@ def test_build_bundle_structure_and_parity(tmp_workspace, tmp_path):
     assert "commit" in cfg
 
 
+def test_build_bundle_bakes_concept_overlay(tmp_workspace, tmp_path):
+    """build_bundle bakes api/concept-overlay/<inv>.json so the Concept overlay is
+    available in snapshot mode (DataSource.loadConceptOverlay). The file + shape are
+    always present; the gates become Concepts when the derivation package is importable."""
+    import importlib.util
+    from vivarium_workbench import publish
+
+    # give the fixture investigation a gate spine so the overlay has content
+    inv_yaml = tmp_workspace / "investigations" / "main-inv" / "investigation.yaml"
+    spec = yaml.safe_load(inv_yaml.read_text())
+    spec["plan_gates"] = [
+        {"id": "A1", "member_studies": ["alpha"]},
+        {"id": "B", "member_studies": ["beta"]},
+    ]
+    inv_yaml.write_text(yaml.safe_dump(spec))
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(tmp_workspace, out)
+
+    f = out / "api" / "concept-overlay" / "main-inv.json"
+    assert f.is_file(), "concept-overlay/<inv>.json not baked"
+    overlay = json.loads(f.read_text())
+    assert overlay["investigation"] == "main-inv"
+    assert set(overlay.keys()) >= {"investigation", "concepts", "study_verdicts", "diverges"}
+
+    if importlib.util.find_spec("viva_superpowers.concept_overlay") is not None:
+        assert [c["from_gate"] for c in overlay["concepts"]] == ["A1", "B"]
+        assert overlay["concepts"][0]["member_studies"] == ["alpha"]
+
+
 def test_build_bundle_investigation_json(tmp_workspace, tmp_path):
     """build_bundle writes api/investigation/<name>.json with the same data as _iset_detail_data."""
     from vivarium_workbench import publish

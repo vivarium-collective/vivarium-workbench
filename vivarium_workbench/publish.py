@@ -786,7 +786,9 @@ def _do_build(
     from vivarium_workbench.lib.investigation_status import (
         build_iset_summary, study_run_slugs,
     )
-    from vivarium_workbench.lib.report_views import build_inputs, build_iset_detail
+    from vivarium_workbench.lib.report_views import (
+        build_inputs, build_iset_detail, build_concept_overlay,
+    )
     from vivarium_workbench.lib.catalog import build_catalog
     from vivarium_workbench.lib.structured_resources import load_structured_resources
     from vivarium_workbench.lib.audit_views import build_audit as _build_audit
@@ -829,6 +831,7 @@ def _do_build(
     (api_dir / "investigation").mkdir(parents=True, exist_ok=True)
     (api_dir / "study").mkdir(parents=True, exist_ok=True)
     (api_dir / "inputs").mkdir(parents=True, exist_ok=True)
+    (api_dir / "concept-overlay").mkdir(parents=True, exist_ok=True)
 
     # api/workspace.json
     _write_json(api_dir / "workspace.json", build_workspace_home(ws_root))
@@ -851,6 +854,17 @@ def _do_build(
         except Exception:
             payload = {}
         _write_json(api_dir / "inputs" / f"{inv_name}.json", payload)
+
+    # api/concept-overlay/<inv>.json — derived Concept overlay
+    # (GET /api/concept-overlay?investigation=<slug>). Empty overlay when the
+    # viva_superpowers derivation package isn't available at publish time.
+    for inv_name in investigations:
+        try:
+            overlay, _ = build_concept_overlay(ws_root, investigation=inv_name)
+        except Exception:
+            overlay = {"investigation": inv_name, "concepts": [],
+                       "study_verdicts": {}, "diverges": []}
+        _write_json(api_dir / "concept-overlay" / f"{inv_name}.json", overlay)
 
     # reports/investigation-<slug>.html — pre-rendered investigation reports. In
     # the live app these come from GET /api/investigation-report/<slug>; in the
