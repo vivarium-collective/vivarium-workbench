@@ -1566,13 +1566,12 @@ function toc(inv){
   // Supplement, reached via the single Supplement link.
   const front=['<a href="#exec-summary" class="exec">Summary</a>'];
   if(inv.spine) front.push('<a href="#spine-presentation">Map</a>');
-  if((syn.stages||[]).length) front.push('<a href="#integrated-findings">Findings</a>');
+  if((inv.studies||[]).length) front.push('<a href="#studies">Studies</a>');
   if((syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)) front.push('<a href="#synthesis-gaps">Synthesis &amp; gaps</a>');
   if(((syn.validation||{}).items||[]).length!==undefined) front.push('<a href="#validation">Validation</a>');
   if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
   if((syn.studies_index||[]).length) front.push('<a href="#evidence-register">Register</a>');
   if(inv.references&&Object.keys(inv.references).length) front.push('<a href="#references">References</a>');
-  front.push('<a href="#supplement">Supplement</a>');
   // Full "Contents" jump menu — every part of the report, incl. supplement
   // sub-sections and every member study, in one dropdown. The chip row above is
   // the quick main-section nav; this reaches everything.
@@ -1581,20 +1580,12 @@ function toc(inv){
   const mainLinks=[
     ['#exec-summary','Summary',true],
     ['#spine-presentation','Investigation map',!!inv.spine],
-    ['#integrated-findings','Integrated findings',(syn.stages||[]).length],
+    ['#studies','Studies',(inv.studies||[]).length],
     ['#synthesis-gaps','Synthesis & gaps',(syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
     ['#validation','Validation & reproducibility',((syn.validation||{}).items||[]).length!==undefined],
     ['#claim-evidence','Claim–evidence map',(syn.claim_evidence||[]).length],
     ['#evidence-register','Evidence register (all studies)',(syn.studies_index||[]).length],
     ['#references','References',inv.references&&Object.keys(inv.references).length],
-  ].filter(x=>x[2]).map(x=>_ndl(x[0],x[1])).join('');
-  const suppFront=[
-    ['#how-to-read','How to read',!!inv.how_to_read],
-    ['#background','Design & background',!!(inv.biological_story||exv.what_is_this||inv.hypothesis)],
-    ['#hypothesis','Scientific argument',!!(sa.main_claim||(inv.key_claims||[]).length||(sa.evidence_for||[]).length)],
-    ['#ground-rules','Ground rules',!!((inv.guidelines||{}).architecture_principles)],
-    ['#evidence-basis','What counts as evidence',(inv.studies||[]).some(s=>Array.isArray(s.findings)&&s.findings.length)],
-    ['#key-figures','Key figures',(syn.figures_ranked||[]).length],
     ['#inv-viz','Investigation visualizations',true],
     ['#glossary','Glossary',true],
     ['#appendix','Appendix',true],
@@ -1607,8 +1598,7 @@ function toc(inv){
       '<div class="nd-head"><span>Contents</span><button type="button" class="nd-close" onclick="_closeContents()" aria-label="Close contents">✕</button></div>'+
       '<nav class="nd-body">'+
         `<div class="nd-grp">Main report</div>${mainLinks}`+
-        `<div class="nd-grp">Supplement</div>${suppFront}`+
-        `<button type="button" class="nd-studies-toggle" onclick="_toggleNdStudies(event)" aria-expanded="false">Studies <span class="nd-count">${nStudies}</span><span class="nd-caret">▸</span></button>`+
+        `<button type="button" class="nd-studies-toggle" onclick="_toggleNdStudies(event)" aria-expanded="false">Jump to a study <span class="nd-count">${nStudies}</span><span class="nd-caret">▸</span></button>`+
         `<div class="nd-studies" id="nd-studies" hidden>${studyLinks}</div>`+
       '</nav>'+
     '</aside>';
@@ -1635,7 +1625,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('#exec-summary,#spine-presentation,#integrated-findings,#synthesis-gaps,#validation,#claim-evidence,#evidence-register,#references,#supplement').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('#exec-summary,#spine-presentation,#studies,#synthesis-gaps,#validation,#claim-evidence,#evidence-register,#references').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: verdict DAG · acceptance roll-up · AC gating matrix ---------- */
@@ -1775,10 +1765,12 @@ function setupLazyPlotly(){
 window.__reportPrintPrep = function(){
   return new Promise(resolve=>{
     // Open main-report details (e.g. the report-readiness block) but LEAVE THE
-    // TECHNICAL SUPPLEMENT COLLAPSED — the PDF is the evidence-led main report
-    // (8–15 pp), not the full 37-study supplement (which inflated it to 150+ pp).
-    try{ document.querySelectorAll('details').forEach(d=>{ if(d.id!=='supplement' && !d.closest('#supplement')) d.open=true; }); }catch(e){}
-    try{ document.querySelectorAll('.card').forEach(c=>{ if(!c.closest('#supplement')) c.classList.remove('collapsed'); }); }catch(e){}
+    // STUDY CARDS COLLAPSED — in the PDF each study shows as its summary card
+    // (question · verdict · what-we-learn), not its full expanded record, so the
+    // PDF stays the evidence-led main report (8–15 pp) instead of 150+ pp of every
+    // study expanded. Card-internal <details> sit inside the collapsed card, so
+    // they stay hidden regardless.
+    try{ document.querySelectorAll('details').forEach(d=>{ if(!d.closest('.card')) d.open=true; }); }catch(e){}
     try{ setupLazyPlotly(); }catch(e){}
     try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
     // Re-fit every Plotly figure to its container (page) width. The saved figures
@@ -2244,39 +2236,45 @@ function stageLimitation(inv, st){
 // 1. EXECUTIVE SUMMARY — question, current verdict, the honest gate ladder, and
 // the run-status / evidence / claim separation (a passed gate ≠ a proven mechanism).
 // First n sentences of a block of prose (deterministic — no rewriting).
-function _leadText(text, n){
-  const t=String(text||'').replace(/\s+/g,' ').trim(); if(!t) return {lead:'', rest:''};
-  const parts=t.match(/[^.!?]+[.!?]+(\s|$)/g);
-  if(!parts||parts.length<=(n||3)) return {lead:t, rest:''};
-  const lead=parts.slice(0,n||3).join('').trim();
-  return {lead, rest:t.slice(lead.length).trim()};
-}
-// OPENING SYNTHESIS (plan §1): question → concise saved conclusion → milestone
-// outcomes → one hero figure. The full verdict prose is kept in a collapsible so
-// the opening reads in a glance instead of a wall of text.
+// OPENING SYNTHESIS (plan §1): question → saved conclusion → milestone outcomes →
+// one hero figure. The synthesis prose is shown IN FULL as one coherent block.
+// (An earlier version split it into a 3-sentence lead + a "Full synthesis"
+// remainder, but slicing the text by the trimmed lead length drifted with
+// abbreviations/decimals and could start the remainder mid-word — simpler and
+// safe to keep it together.)
 function execSummary(inv){
   const syn=inv.synthesis||{}, c=syn.counts||{}, ex=inv.executive||{};
   const q=(inv.question||'').replace(/\s+/g,' ').trim();
   const verdict=(ex.verdict||'').trim();
-  const {lead, rest}=_leadText(verdict, 3);
   const gl=(syn.headline||[]).map(h=>{ const g=(h.status==='met')?'supported':h.status;
     return `<span style="display:inline-flex;gap:5px;align-items:center;margin:0 12px 7px 0;font-size:12.5px">`+
       `<span class="mono" style="font-weight:800">${esc(h.id||'')}</span> ${esc(h.name||'')} ${_gradeChip(g)}</span>`; }).join('');
   return `<div class="narr fbsection" id="exec-summary">${fbBubble('summary','Executive summary')}
     <div class="sec-h"><h2>Executive summary</h2><span class="rule"></span></div>
     ${q?`<p class="prose" style="font-size:16px;margin:2px 0 8px"><b>Question.</b> ${esc(q)}</p>`:''}
-    ${lead?`<div class="prose" style="font-size:15.5px">${mdLite(lead)}</div>`:''}
+    ${verdict?`<div class="prose" style="font-size:15.5px">${mdLite(verdict)}</div>`:''}
     ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Milestone outcomes</div><div>${gl}</div></div>`:''}
     ${heroFigure(inv)}
     <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:12px 0 0;line-height:1.5">
       Across <b>${c.total||0}</b> studies — <b>${c.supported||0}</b> supported · <b>${c.qualified||0}</b> qualified · <b>${c.refuted||0}</b> refuted · <b>${c.planned||0}</b> planned.
       <i>Supported</i> = a computational gate passed under the stated model assumptions (evidence of feasibility, not proof the transition occurred).</p>
-    ${rest?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:650;color:var(--accent)">Full synthesis</summary><div class="prose" style="margin-top:6px">${mdLite(rest)}</div></details>`:''}
   </div>`;
 }
 
 // 3. INTEGRATED FINDINGS — grouped by scientific stage (not one chapter per study),
 // with each stage's key quantitative findings and an explicit model-dependence flag.
+// STUDIES — every study as a collapsible card (renderStudy): its question,
+// verdict, and "what we learn" at a glance; expand for the full record. This is
+// the main-body home for studies (renamed from "Findings") and reuses the card
+// that used to live only in the supplement — so each study appears exactly once.
+function renderStudies(inv){
+  const studies=inv.studies||[]; if(!studies.length) return '';
+  return `<div class="narr" id="studies">
+    <div class="sec-h"><h2>Studies</h2><span class="rule"></span>
+      <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
+    <p class="measure" style="color:var(--ink-2);font-size:14px;margin:2px 0 10px">Every study in the campaign as a collapsible card — the question it tests, its verdict, and what it found at a glance. Click a card to expand the full record: model, runs, figures, tests, findings, and the limitations that bound it.</p>
+    ${studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}</div>`;
+}
 function integratedFindings(inv){
   const sts=(inv.synthesis||{}).stages||[]; if(!sts.length) return '';
   const edges=((inv.synthesis||{}).continuity||{}).edges||[];
@@ -2386,7 +2384,7 @@ function validationSection(inv){
   const lintBlock=lint.length?`<details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;font-weight:650;letter-spacing:.02em;color:var(--ink-2);text-transform:uppercase">Report readiness — ${lint.length} findings across ${grouped.length} checks (${nErr} error${nErr===1?'':'s'}, ${nWarn} warning${nWarn===1?'':'s'})</summary><ul style="list-style:none;padding:0;margin:6px 0 0">${lrows}</ul></details>`:'';
   return `<div class="narr fbsection" id="validation">${fbBubble('validation','Validation & reproducibility')}
     <div class="sec-h"><h2>Validation &amp; reproducibility</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Automated, code-computed consistency checks (no AI): conservation/invariant ledgers, computed-vs-authored verdicts, run reproducibility (environment + determinism), parameter drift and acceptance-criterion coverage. Each study's own ledger predicates (e.g. mass/charge balance) are its gating behavior tests, listed in the supplement.</p>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 2px">Automated, code-computed consistency checks (no AI): conservation/invariant ledgers, computed-vs-authored verdicts, run reproducibility (environment + determinism), parameter drift and acceptance-criterion coverage. Each study's own ledger predicates (e.g. mass/charge balance) are its gating behavior tests, listed on the study's card (its Tests).</p>
     ${body}
     ${lintBlock}</div>`;
 }
@@ -2453,7 +2451,7 @@ function evidenceRegister(inv){
     <td style="padding:5px 0;font-size:12px;color:var(--ink-2);line-height:1.4;vertical-align:top">${esc(r.one_line||'')}</td></tr>`).join('');
   return `<div class="narr fbsection" id="evidence-register">${fbBubble('evidence-register','Evidence register')}
     <div class="sec-h"><h2>Evidence register</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 6px">Every study in the campaign (${idx.length}) — scientific verdict, run status, and one-line result, each linked to its full record in the supplement.</p>
+    <p class="measure" style="color:var(--ink-2);font-size:13px;margin:2px 0 6px">Every study in the campaign (${idx.length}) — scientific verdict, run status, and one-line result, each linked to its full study card above.</p>
     <table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:26%"><col style="width:12%"><col style="width:12%"><col style="width:50%"></colgroup>
     <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;font-size:11px;color:var(--ink-3);text-transform:uppercase;padding-bottom:3px">Study</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Verdict</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Run</th><th style="text-align:left;font-size:11px;color:var(--ink-3)">Result</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
@@ -2740,31 +2738,18 @@ function render(inv){
     `<div class="wrap">
     ${execSummary(inv)}
     ${renderSpine(inv)}
-    ${integratedFindings(inv)}
+    ${renderStudies(inv)}
     ${synthesisAndGaps(inv)}
     ${validationSection(inv)}
     ${claimEvidenceMap(inv)}
     ${evidenceRegister(inv)}
-    ${renderReferences(inv)}</div>`+
+    ${renderReferences(inv)}
+    ${renderInvViz(inv)}
+    ${renderGlossary(inv)}
+    ${renderAppendix(inv)}</div>`+
     `<div class="wrap">
-      <details class="supplement" id="supplement">
-        <summary style="cursor:pointer;margin:18px 0 2px;font-size:21px;font-weight:700;color:var(--ink)">Technical supplement</summary>
-        <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Full context, per-study records, figures, methods, run metadata and provenance — kept out of the main narrative so it reads clean, but preserved here in full. Click any study link above to jump in.</p>
-        ${howToReadBlock(inv)}
-        ${simulatedWorld(inv)}
-        ${renderArgument(inv)}
-        ${groundRules(inv)}
-        ${evidenceFraming(inv)}
-        ${keyFigures(inv)}
-        <div class="sec-h"><h3 style="margin:0">Study records</h3><span class="rule"></span>
-          <div class="studies-toolbar"><button id="expandall">Expand all</button><button id="collapseall">Collapse all</button></div></div>
-        ${inv.studies.map((s,i)=>renderStudy(s,inv,i+1)).join('')}
-        ${renderInvViz(inv)}
-        ${renderGlossary(inv)}
-        ${renderAppendix(inv)}
-      </details>
       <div class="sec-h" id="report-feedback"><h2>Report feedback</h2><span class="rule"></span></div>
-      <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes in the supplement. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
+      <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes on each study card. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
       ${feedbackRow('overall','the whole report')}
     </div>`;
   updateCount(); window.scrollTo(0,0); spy();
@@ -2807,8 +2792,8 @@ app.addEventListener('click',e=>{
   // expand/collapse all
   if(e.target.id==='expandall'){ document.querySelectorAll('.card').forEach(c=>c.classList.remove('collapsed')); return; }
   if(e.target.id==='collapseall'){ document.querySelectorAll('.card').forEach(c=>c.classList.add('collapsed')); return; }
-  // ANY in-page link to a study/section → open the enclosing Technical supplement
-  // (<details>) and expand the target study card before the browser scrolls to it.
+  // ANY in-page link to a study/section → open any enclosing <details> and expand
+  // the target study card before the browser scrolls to it.
   const link=e.target.closest('a[href^="#"]');
   if(link){
     const href=link.getAttribute('href')||'';

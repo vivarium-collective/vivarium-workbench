@@ -516,17 +516,22 @@ def test_synthesis_separates_status_and_classifies_evidence(tmp_path):
     assert claim["trap"] == "unsupported" and claim["reuse-ok"] == "supported"
 
 
-def test_report_template_is_finding_first():
-    """The report leads with finding-first synthesis sections; full per-study cards
-    are moved into a collapsible Technical supplement."""
+def test_report_studies_are_cards_in_main_no_supplement():
+    """Studies render as collapsible cards in a single main 'Studies' section
+    (renderStudies → renderStudy), and the Technical supplement is removed, so
+    each study appears exactly once."""
     from pathlib import Path as _P
     import vivarium_workbench as _vw
     tpl = (_P(_vw.__file__).parent / "templates" / "investigation-report.html").read_text(encoding="utf-8")
-    for fn in ("function execSummary", "function integratedFindings", "function contradictionsSection",
-               "function roadmapSection", "function claimEvidenceMap", "function studiesInventory"):
+    for fn in ("function execSummary", "function renderStudies", "function renderStudy",
+               "function claimEvidenceMap"):
         assert fn in tpl, fn
-    assert '<details class="supplement"' in tpl and 'id="supplement"' in tpl
-    # the main render pipeline calls the synthesis sections, not per-study-in-main
+    # the Technical supplement wrapper is gone (studies are not duplicated there)
+    assert '<details class="supplement"' not in tpl
+    assert 'id="supplement"' not in tpl
+    # the main render pipeline renders the Studies section (cards), exactly once
     i = tpl.index("function render(inv)")
     body = tpl[i:i + 2000]
-    assert "execSummary(inv)" in body and "integratedFindings(inv)" in body
+    assert "renderStudies(inv)" in body
+    assert body.count("renderStudies(inv)") == 1
+    assert 'id="studies"' in tpl
