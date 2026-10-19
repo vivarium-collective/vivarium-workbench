@@ -1164,7 +1164,7 @@
       var dl = path ? _inputsDownloadLink(path, 'Download') :
         (ds.url ? '<a href="' + _esc(ds.url) + '" target="_blank" rel="noopener" ' +
           'class="action-btn" style="font-size:0.8em;padding:1px 8px;text-decoration:none">↗ Source</a>' : '');
-      return '<tr><td><code>' + name + '</code></td><td><small class="muted">' +
+      return '<tr class="res-item"><td><code>' + name + '</code></td><td><small class="muted">' +
         _esc(src) + '</small></td><td style="text-align:right">' + dl + '</td></tr>';
     }).join('');
     return '<table><thead><tr><th>Name</th><th>Source</th><th></th></tr></thead><tbody>' +
@@ -1187,7 +1187,7 @@
     var key = ref.key || ref.bib_key || '';
 
     if (ref._unmatched) {
-      return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+      return '<div class="res-item" style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
         '<code>' + _esc(key || _inputsRefLabel(ref)) + '</code> ' +
         '<small class="muted">(no bib entry)</small></div>';
     }
@@ -1253,7 +1253,7 @@
 
     // Anchor by bib key so lipid/reaction citation cross-links (_resScrollToRef)
     // resolve to this References entry.
-    var anchor = key ? ' id="res-ref-' + _esc(String(key)) + '" class="res-ref-anchor"' : '';
+    var anchor = key ? ' id="res-ref-' + _esc(String(key)) + '" class="res-item res-ref-anchor"' : ' class="res-item"';
 
     return '<div' + anchor + ' style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
       '<div>' + titleHtml + foldFlag + actions + '</div>' + meta + noteHtml + bibBlock + citedHtml + '</div>';
@@ -1313,7 +1313,7 @@
           ? '<div class="muted" style="font-size:0.85em;margin-top:2px">' +
             _esc(doc.description) + '</div>'
           : '';
-        return '<li><strong>' + name + '</strong>' + path + dl + desc + '</li>';
+        return '<li class="res-item"><strong>' + name + '</strong>' + path + dl + desc + '</li>';
       }).join('') + '</ul>';
   }
 
@@ -1510,48 +1510,168 @@
     // Expose the folded (not-in-papers.bib) keys for diagnostics/reporting.
     window._resFoldedPaperKeys = _foldedPaperKeys;
 
+    // Counts per formalized resource category, for the tab badges. Structured
+    // data comes from the structured-resources manifest (already loaded into
+    // window._resStructured by _loadResources before this runs).
+    var _rs = window._resStructured;
+    var structAvail = !!(_rs && _rs.type_order && _rs.type_order.length);
+    var structCount = 0;
+    if (structAvail) (_rs.type_order || []).forEach(function (t) {
+      structCount += ((_rs.groups || {})[t] || []).length;
+    });
+    var dsCount = (datasets || []).length;
+    var refCount = (refs || []).length;
+    var expCount = (experts || []).length;
+    var totalCount = dsCount + refCount + expCount + structCount;
+
+    // One segmented tab, matching the study/investigation detail tabs so it fits
+    // the rest of the workbench (same .investigation-detail-tab classes + count
+    // badge). Clicking a tab shows just that category — no scrolling a long page.
+    var _resTabBtn = function (id, label, count) {
+      return '<button type="button" class="investigation-detail-tab res-tab" ' +
+        'data-restab="' + id + '" role="tab" onclick="_resTab(\'' + id + '\')">' +
+        '<span class="tab-label">' + label + '</span>' +
+        (count != null ? '<span class="tab-count-badge">' + count + '</span>' : '') +
+        '</button>';
+    };
+
     var html = '<div>';
     html += '<h3 style="margin:0 0 2px">Resources</h3>';
     html += '<p class="muted" style="font-size:0.85em;margin:0 0 14px">' +
-      'Papers, datasets, and expert docs for this workspace. Each reference shows ' +
-      'the studies that cite it — click a study to open it.</p>';
+      'Papers, datasets, expert docs, and structured data for this workspace. Each ' +
+      'reference shows the studies that cite it — click a study to open it.</p>';
 
     // Drag-and-drop upload zone (live/authoring only; category inferred from the
     // dropped file's extension). Files land in the workspace-wide store.
     html += '<div id="inputs-dropzone" class="js-authoring" ' +
       'ondragover="_inputsDragOver(event)" ondragleave="_inputsDragLeave(event)" ondrop="_inputsDrop(event)" ' +
       'style="border:2px dashed #cbd5e1;border-radius:8px;padding:16px 14px;text-align:center;' +
-      'color:#64748b;font-size:0.9em;margin:0 0 20px;background:#f8fafc;transition:background .12s,border-color .12s">' +
+      'color:#64748b;font-size:0.9em;margin:0 0 14px;background:#f8fafc;transition:background .12s,border-color .12s">' +
       '<div style="font-weight:600;color:#475569">⬆ Drag papers, datasets, or expert docs here to upload</div>' +
       '<div style="font-size:0.78em;color:#94a3b8;margin-top:3px">' +
         'PDFs → references · .md / .txt / .docx → expert docs · everything else → datasets' +
       '</div></div>';
 
-    // Section order (unified Resources page): Datasets, References, Expert docs,
-    // then the structured science sections (rendered separately into
-    // #resources-gallery below this block).
+    // Category nav + search. The tabs route to the four formalized categories
+    // (Datasets / References / Expert docs / Structured data), each with a live
+    // count; "All" shows everything. The search box filters across every
+    // category at once, revealing matches wherever they live.
+    html += '<div class="res-controls">' +
+      '<div class="investigation-detail-tabs res-tabs" role="tablist">' +
+        _resTabBtn('all', 'All', totalCount) +
+        _resTabBtn('datasets', 'Datasets', dsCount) +
+        _resTabBtn('references', 'References', refCount) +
+        _resTabBtn('expert', 'Expert docs', expCount) +
+        (structAvail ? _resTabBtn('structured', 'Structured data', structCount) : '') +
+      '</div>' +
+      '<input type="search" id="res-search" class="res-search" placeholder="Search resources…" ' +
+        'oninput="_resSearch(this.value)" aria-label="Search resources">' +
+      '</div>';
 
+    // One pane per category (the structured gallery lives in the sibling
+    // #resources-gallery and is adopted as the "structured" pane below).
     // Datasets — provider-backed bundle (if any) renders into this host first,
     // then the declared datasets.
     var dsBody = '<div id="data-sources-host" style="display:none;margin-bottom:12px"></div>' +
       _inputsDatasetsHtml(datasets);
-    html += _inputsSection('Datasets', 'data files', 'dataset', dsBody);
+    html += '<div class="investigation-detail-panel res-pane" data-restab="datasets">' +
+      _inputsSection('Datasets', 'data files', 'dataset', dsBody) + '</div>';
 
-    // References (papers) — the richest section, with cited-by study chips and
+    // References (papers) — the richest category, with cited-by study chips and
     // the folded-in manifest paper-references.
-    html += _inputsSection('References', 'papers · BibTeX · PDFs', 'reference',
-      _inputsRefsHtml(refs));
+    html += '<div class="investigation-detail-panel res-pane" data-restab="references">' +
+      _inputsSection('References', 'papers · BibTeX · PDFs', 'reference', _inputsRefsHtml(refs)) + '</div>';
 
     // Expert docs — source dossiers / background the workspace draws on.
-    html += _inputsSection('Expert docs', 'dossiers · notes', 'expert',
-      _inputsExpertDocsHtml(experts));
+    html += '<div class="investigation-detail-panel res-pane" data-restab="expert">' +
+      _inputsSection('Expert docs', 'dossiers · notes', 'expert', _inputsExpertDocsHtml(experts)) + '</div>';
 
+    html += '<div id="res-empty" class="muted" style="display:none;font-style:italic;' +
+      'padding:18px 2px">No resources match your search.</div>';
     html += '</div>';
 
     el.innerHTML = html;
 
+    // Adopt the structured science gallery as the "structured" pane, then apply
+    // the active tab (persisted across reloads) and any live search.
+    _resAdoptStructuredPane();
+    _resTab(window._resActiveTab || 'all');
+
     _loadDataSources();
   }
+
+  // Give the sibling structured-science gallery (#resources-gallery) the pane
+  // classes so _resTab / _resSearch treat it as the "Structured data" category.
+  function _resAdoptStructuredPane() {
+    var g = document.getElementById('resources-gallery');
+    if (!g) return;
+    g.classList.add('investigation-detail-panel', 'res-pane');
+    g.setAttribute('data-restab', 'structured');
+  }
+
+  // Switch the visible resource category. 'all' shows every pane; otherwise only
+  // the matching one. Re-applies an active search so a filter survives tab
+  // changes. Mirrors _invDetailTab's active-class toggling.
+  function _resTab(tab) {
+    window._resActiveTab = tab;
+    document.querySelectorAll('.res-tab').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-restab') === tab);
+    });
+    var search = document.getElementById('res-search');
+    var q = search ? (search.value || '').trim() : '';
+    if (q) { _resSearch(q); return; }  // search owns visibility while active
+    // No active search: undo any search-time per-item hiding, then show the pane(s).
+    document.querySelectorAll('.res-pane .res-item, .res-pane .res-grid > *, .res-pane .res-section')
+      .forEach(function (it) { it.style.display = ''; });
+    document.querySelectorAll('.res-pane').forEach(function (p) {
+      // Explicit display (not just the .active class): the structured pane carries
+      // its own .resources-gallery display rule that would otherwise keep it shown.
+      var show = tab === 'all' || p.getAttribute('data-restab') === tab;
+      p.classList.toggle('active', show);
+      p.style.display = show ? '' : 'none';
+    });
+    var empty = document.getElementById('res-empty');
+    if (empty) empty.style.display = 'none';
+  }
+  window._resTab = _resTab;
+
+  // Filter resource items across every category by substring. While a query is
+  // active, all panes are revealed so matches surface wherever they live; each
+  // item (dataset row / reference card / expert doc / structured card) toggles
+  // on its text, and panes/sections with no match collapse. Clearing restores
+  // the active tab.
+  function _resSearch(q) {
+    q = (q || '').toLowerCase().trim();
+    var panes = Array.prototype.slice.call(document.querySelectorAll('.res-pane'));
+    if (!q) { _resTab(window._resActiveTab || 'all'); return; }
+    var anyMatch = false;
+    panes.forEach(function (p) {
+      p.classList.add('active');  // reveal all panes while searching
+      var structured = p.getAttribute('data-restab') === 'structured';
+      var items = structured
+        ? p.querySelectorAll('.res-grid > *')
+        : p.querySelectorAll('.res-item');
+      var paneMatch = false;
+      Array.prototype.forEach.call(items, function (it) {
+        var hit = (it.textContent || '').toLowerCase().indexOf(q) !== -1;
+        it.style.display = hit ? '' : 'none';
+        if (hit) paneMatch = true;
+      });
+      if (structured) {
+        // Hide a structured sub-section whose cards are all filtered out.
+        p.querySelectorAll('.res-section').forEach(function (sec) {
+          var vis = Array.prototype.slice.call(sec.querySelectorAll('.res-grid > *'))
+            .some(function (c) { return c.style.display !== 'none'; });
+          sec.style.display = vis ? '' : 'none';
+        });
+      }
+      p.style.display = paneMatch ? '' : 'none';
+      if (paneMatch) anyMatch = true;
+    });
+    var empty = document.getElementById('res-empty');
+    if (empty) empty.style.display = anyMatch ? 'none' : 'block';
+  }
+  window._resSearch = _resSearch;
 
   // -------------------------------------------------------------------------
   // Repo-wide data sources — provider-backed bundle (workspace.yaml hook).
