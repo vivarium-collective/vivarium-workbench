@@ -866,10 +866,22 @@ def _do_build(
     _loom_embed = {"loom": "../bigraph-loom/index.html", "state": "../api/composite-state/"}
     for inv_name in investigations:
         try:
-            render_investigation_report(ws_root, inv_name, out_dir=reports_dir,
-                                        loom_embed=_loom_embed)
+            _rp = render_investigation_report(ws_root, inv_name, out_dir=reports_dir,
+                                              loom_embed=_loom_embed)
         except Exception:
-            pass
+            continue
+        # Also pre-bake the report PDF (headless Chromium) so the snapshot's
+        # "PDF report" button downloads a REAL pdf — in a static bundle there's no
+        # server to render it on demand, so without this the frontend silently
+        # downgraded to the HTML (the "export → pdf gives an html" bug). Guarded:
+        # if Playwright/Chromium isn't available at publish time we just skip the
+        # pdf (the snapshot then falls back to the HTML), never aborting a publish.
+        try:
+            from vivarium_workbench.lib.investigation_report import render_report_pdf
+            _pdf = render_report_pdf(_rp.read_text(encoding="utf-8"))
+            (reports_dir / f"investigation-{inv_name}.pdf").write_bytes(_pdf)
+        except Exception as _pe:  # noqa: BLE001 — pdf bake is best-effort
+            print(f"  warn: report PDF bake skipped for {inv_name!r}: {_pe}")
 
     # api/catalog.json — curated module catalog (GET /api/catalog)
     try:

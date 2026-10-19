@@ -13683,6 +13683,13 @@
       ? base + '/reports/investigation-' + encodeURIComponent(name) + '.html'
       : '/api/investigation-report/' + encodeURIComponent(name);
   }
+  // The pre-baked PDF in a static bundle (publish.py renders it with headless
+  // Chromium when available). Only meaningful in snapshot mode.
+  function _investigationReportPdfUrl(name) {
+    var cfg = window.__DASH_CONFIG__ || {};
+    var base = cfg.basePath || '';
+    return base + '/reports/investigation-' + encodeURIComponent(name) + '.pdf';
+  }
   // In-flight exports keyed by `${name}|${fmt}`. We guard only against firing the
   // SAME export twice (the "downloaded it 3×" bug) — different exports can run
   // concurrently, and the Export dropdown stays enabled so you can pick another
@@ -13697,16 +13704,28 @@
     }
     fmt = (fmt === 'pdf') ? 'pdf' : 'html';
     var cfg = window.__DASH_CONFIG__ || {};
-    // PDF is rendered server-side (headless Chromium) — not available in a static
-    // snapshot (no server), so fall back to the pre-rendered HTML there.
-    if (fmt === 'pdf' && cfg.mode === 'snapshot') fmt = 'html';
     var _save = function (href, dl) {
       var a = document.createElement('a');
       a.href = href; a.download = dl; a.rel = 'noopener';
       document.body.appendChild(a); a.click(); a.remove();
     };
-    // Snapshot HTML is a pre-rendered static file — instant, no server render.
-    if (fmt === 'html' && cfg.mode === 'snapshot') {
+    // Static snapshot: both the HTML and the (pre-baked) PDF report are plain files
+    // in the bundle — serve the requested one directly, no server render. The PDF
+    // is baked at publish time only when headless Chromium was available there; if
+    // it's missing, fall back to the HTML rather than downloading a 404 page named
+    // ".pdf" (which the OS then rejects as a corrupt file).
+    if (cfg.mode === 'snapshot') {
+      if (fmt === 'pdf') {
+        var _pdfUrl = _investigationReportPdfUrl(name);
+        fetch(_pdfUrl, { method: 'HEAD' })
+          .then(function (r) {
+            if (r && r.ok) { _save(_pdfUrl, 'investigation-' + name + '.pdf'); return; }
+            if (typeof _showToast === 'function') _showToast('PDF isn’t available in this read-only snapshot — downloading the HTML report instead');
+            _save(_investigationReportUrl(name), 'investigation-' + name + '.html');
+          })
+          .catch(function () { _save(_investigationReportUrl(name), 'investigation-' + name + '.html'); });
+        return;
+      }
       _save(_investigationReportUrl(name), 'investigation-' + name + '.html');
       return;
     }
