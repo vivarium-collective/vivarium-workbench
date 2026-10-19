@@ -146,7 +146,47 @@ def available_observables(
     catalogs: dict[str, list] = {}
     if schema is not None:
         _walk_catalogs(core, schema, (), catalogs)
-    return {"leaves": leaves, "catalogs": catalogs}
+    # PR-A: per-leaf type metadata (type/units/bounds) resolved from the schema,
+    # so a study readout can be checked against the composite's typed contract —
+    # not just "does the path exist". Units via core._port_units (same primitive
+    # composite_audit uses), falling back to inline `_units`. Additive key.
+    types: dict[str, dict] = {}
+    if schema is not None:
+        for path in leaves:
+            node = _schema_node_at(schema, path)
+            if isinstance(node, dict):
+                types[path] = {
+                    "type": node.get("_type"),
+                    "units": _leaf_units(core, node),
+                    "min": node.get("_min"),
+                    "max": node.get("_max"),
+                }
+    return {"leaves": leaves, "catalogs": catalogs, "types": types}
+
+
+def _schema_node_at(schema: Any, dotted: str) -> Any:
+    """Navigate a composition schema to the node at a dotted leaf path."""
+    node = schema
+    for part in dotted.split("."):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return None
+    return node
+
+
+def _leaf_units(core: Any, node: dict) -> str | None:
+    """A leaf's declared units — via ``core._port_units`` when a core is present
+    (mirrors ``composite_audit._safe_units``), else the inline ``_units``. Never
+    fabricates: returns None when no units are declared."""
+    try:
+        if core is not None and hasattr(core, "_port_units"):
+            u = core._port_units(node)
+            if u:
+                return u
+    except Exception:  # noqa: BLE001
+        pass
+    return node.get("_units") if isinstance(node, dict) else None
 
 
 # ---------------------------------------------------------------------------
