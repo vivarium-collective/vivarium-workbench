@@ -29,9 +29,13 @@ def test_investigation_actions_summaries_fetch_uses_snapshot_loader():
     """The ↓ figures button gates on n_figures from the summaries; that load must
     go through DataSource.loadIsetList() so it resolves the baked .json offline."""
     js = _js()
-    # The button block lives just after the #ws-actions-figures span.
+    # The gating loader lives just after the #ws-actions-figures span, but the
+    # three export actions were consolidated into one "↓ Export ▾" dropdown, so
+    # ~900 chars of menu markup now sit between the span and the loader. Widen the
+    # proximity window to span that markup. (The actual snapshot bug — a base-path
+    # _api() fetch — is guarded exhaustively by the two tests below.)
     anchor = js.index("ws-actions-figures")
-    block = js[anchor:anchor + 1500]
+    block = js[anchor:anchor + 2400]
     assert "DataSource.loadIsetList()" in block, (
         "the ↓ figures button must load summaries via DataSource.loadIsetList() "
         "(snapshot-aware), not a base-path-only _api() fetch that 404s offline"
