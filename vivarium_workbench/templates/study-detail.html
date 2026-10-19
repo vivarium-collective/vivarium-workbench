@@ -133,7 +133,7 @@
      panel). Same handlers + outside-click dropdown as before (wired by
      _wireStudyExportMenu). Styled to match the investigation-level ↓ Export. #}
   <span class="study-dl study-export-wrap" style="margin-left:auto; align-self:center; position:relative; display:inline-flex">
-    <button type="button" id="study-export-btn" class="btn-mini study-dl-btn" aria-haspopup="true" aria-expanded="false" title="Download this study's figures or a runnable notebook">↓ Export ▾</button>
+    <button type="button" id="study-export-btn" class="btn-mini" aria-haspopup="true" aria-expanded="false" title="Download this study's figures or a runnable notebook">↓ Export ▾</button>
     <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:200px;padding:4px">
       <button type="button" id="study-dl-figures" role="menuitem" class="study-jump-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download figures</button>
       <button type="button" id="study-dl-notebook" role="menuitem" class="study-jump-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download notebook</button>
@@ -145,13 +145,6 @@
    The 6-axis stepper + gate-status colors below are carried over verbatim from
    the pre-restructure Pass A styling (the <details> markup was repositioned,
    not rebuilt). */
-/* Prominent, easy-access downloads in the study header (moved off the graph
-   cards). Filled accent so they read as the primary "grab this study" CTAs,
-   distinct from the outlined run/reproduce launch buttons beside them. */
-.study-dl-btn{background:#1976d2;color:#fff;border-color:#1976d2;font-weight:600}
-.study-dl-btn:hover{background:#1565c0;border-color:#1565c0}
-:root[data-theme="dark"] .study-dl-btn{background:#3b82f6;border-color:#3b82f6;color:#fff}
-:root[data-theme="dark"] .study-dl-btn:hover{background:#2563eb;border-color:#2563eb}
 .study-kind-tag{display:inline-block;font-size:0.5em;font-weight:600;padding:3px 9px;border-radius:9999px;vertical-align:middle;margin-left:8px;background:#f1f5f9;color:#475569;text-transform:capitalize}
 .study-kind-tag.study-kind-biological{background:#ecfdf5;color:#065f46}
 .study-kind-tag.study-kind-computational{background:#eff6ff;color:#1e40af}
