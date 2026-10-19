@@ -1775,6 +1775,36 @@ window.__reportPrintPrep = function(){
         });
       }
     }catch(e){}
+    // Rasterize WebGL Plotly figures to static PNGs for the PDF. 3D figures
+    // (scatter3d / mesh3d / surface) and 2D-gl paint to a <canvas> that does NOT
+    // reliably capture in the headless-Chromium print surface — so the MD
+    // membrane / vesicle 3D plots came out blank. Plotly.toImage renders the GL
+    // context to a data-URI we swap in as an <img>, which prints reliably. SVG
+    // figures already print, so they're left interactive. Runs only in the PDF
+    // path (__reportPrintPrep), so the HTML report keeps its live figures.
+    function _rasterizePlotly(){
+      const proms=[];
+      try{
+        if(!(window.Plotly && Plotly.toImage)) return proms;
+        document.querySelectorAll('figure.embedded-plotly .plotly-graph-div, figure.embedded-plotly .js-plotly-plot').forEach(gd=>{
+          try{
+            if(!gd.querySelector('canvas')) return;   // SVG figure already prints
+            const holder=gd.closest('.plotly-holder')||gd.parentElement;
+            const w=Math.max(220, ((holder&&holder.clientWidth)||680)-14);
+            const h=Math.max(220, gd.clientHeight||gd.offsetHeight||440);
+            proms.push(Plotly.toImage(gd,{format:'png', width:w, height:h, scale:2}).then(function(uri){
+              try{
+                const img=document.createElement('img');
+                img.src=uri; img.className='plotly-static';
+                img.style.width='100%'; img.style.height='auto'; img.style.display='block';
+                if(gd.parentNode) gd.parentNode.replaceChild(img, gd);
+              }catch(e){}
+            }).catch(function(){}));
+          }catch(e){}
+        });
+      }catch(e){}
+      return proms;
+    }
     try{ setupInteractiveLooms(); }catch(e){}
     try{ setupRealLooms(); }catch(e){}
     // Investigation graph: lay it out TOP-TO-BOTTOM and scale to fit the page
@@ -1799,8 +1829,11 @@ window.__reportPrintPrep = function(){
         shell.style.breakInside=''; shell.style.pageBreakInside='';
       }
     }catch(e){}
-    let n=0; const tick=()=>{ if(++n<5){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { setTimeout(resolve,700); } };
-    try{ requestAnimationFrame(tick); }catch(e){ setTimeout(resolve,700); }
+    // Settle (figures + graph laid out), THEN rasterize WebGL figures and resolve
+    // once every static snapshot has been swapped in.
+    const _finish=()=>{ try{ Promise.all(_rasterizePlotly()).then(function(){setTimeout(resolve,500);}, function(){setTimeout(resolve,500);}); }catch(e){ setTimeout(resolve,700); } };
+    let n=0; const tick=()=>{ if(++n<6){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { _finish(); } };
+    try{ requestAnimationFrame(tick); }catch(e){ _finish(); }
   });
 };
 
