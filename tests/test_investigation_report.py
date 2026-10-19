@@ -537,3 +537,45 @@ def test_report_studies_are_cards_in_main_no_supplement():
     assert "renderStudies(inv)" in body
     assert body.count("renderStudies(inv)") == 1
     assert 'id="studies"' in tpl
+
+
+def test_card_template_wires_figure_first_section7_slots():
+    """Each study card renders the §7 figure-first narrative: question (the serif
+    lead) → hypothesis + discriminating control → model + key assumptions →
+    decisive figure → finding → verdict → primary limitation → downstream
+    state-transfer, with the supporting material in a collapsed Technical record.
+    Guards the slot order + the graceful degrade (no display flag → plain
+    Visualizations section, not an empty decisive-figure slot)."""
+    from pathlib import Path as _P
+    import vivarium_workbench as _vw
+    tpl = (_P(_vw.__file__).parent / "templates" / "investigation-report.html").read_text(encoding="utf-8")
+    i = tpl.index("function renderStudy(")
+    card = tpl[i:tpl.index("function reportMode(", i)]
+    # the eight §7 slot labels are wired into the card
+    for slot in ("Hypothesis & discriminating control", "Model & key assumptions",
+                 "Decisive figure", "Finding", "Verdict", "Primary limitation",
+                 "Downstream state-transfer"):
+        assert slot in card, slot
+    # figures are split by the declared display intent, not all dumped inline
+    assert "anyFigFlagged" in card
+    assert "im.display==='primary'" in card and "im.display==='mechanism'" in card
+    # graceful degrade: no flag anywhere → a plain Visualizations section
+    assert "'Visualizations'" in card
+    # supporting material collapses into one Technical record expander
+    assert 'details class="exp tech-record"' in card
+    # the §7 data fields are consumed
+    assert "s.primary_limitation" in card and "s.handoff" in card
+    assert "s.honest_caveat" in card and "s.proposed_controls" in card
+
+
+def test_report_builder_stamps_display_intent_onto_figures():
+    """The builder carries each visualization's declared `display:` intent onto its
+    embedded figure, joining on a normalized name so a humanized gallery/HTML stem
+    still matches its declared entry."""
+    from vivarium_workbench.lib.investigation_report import _norm_fig_name
+    # declared slug and its humanized render collapse to the same join key
+    assert _norm_fig_name("carbon-fixation-phase-map") == _norm_fig_name("Carbon Fixation Phase Map")
+    assert _norm_fig_name("electrochemistry-mechanism-map") == _norm_fig_name("Electrochemistry Mechanism Map")
+    # distinct names do not collide
+    assert _norm_fig_name("growth-division") != _norm_fig_name("growth-division-map")
+    assert _norm_fig_name(None) == ""
