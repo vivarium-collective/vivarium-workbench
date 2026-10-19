@@ -303,7 +303,7 @@ def test_compact_bigraph_extracts_processes_and_nested_stores():
     assert any(c["name"] == "biomass" and c["type"] == "mass" for c in cell["children"])
     sub = next(c for c in cell["children"] if c["name"] == "sub")
     assert any(gc["name"] == "x" and gc["type"] == "concentration" for gc in sub["children"])
-    # process↔compartment wiring edges are emitted for the interactive loom
+    # process↔compartment wiring edges are emitted for the static bigraph loom
     assert {(e["p"], e["c"]) for e in topo["edges"]} == {
         ("metabolism", "env"), ("metabolism", "physiology")}
 
@@ -364,24 +364,6 @@ def test_template_wires_real_loom_embed():
     assert "?embed=1&static=1&stateUrl=" in tpl
     # the template itself must contain no /api/ literal (self-contained default)
     assert "/api/" not in tpl
-
-
-def test_template_wires_interactive_loom():
-    """The Model section prefers the lightweight interactive loom when the
-    resolved topology carries wiring edges, and the interaction helpers are
-    present so the embedded SVG pans/zooms/highlights without a server."""
-    from pathlib import Path
-    import vivarium_workbench
-    tpl = (Path(vivarium_workbench.__file__).parent
-           / "templates" / "investigation-report.html").read_text(encoding="utf-8")
-    assert "function loomInteractive(" in tpl
-    # the interactive view is chosen first, falling back to the static renders
-    assert "loomInteractive(s.model_topology)" in tpl
-    # interaction handlers wired into the embedded SVG
-    for fn in ("_iloomHi", "_iloomClear", "_iloomTip", "_iloomExpand",
-               "setupInteractiveLooms"):
-        assert f"function {fn}(" in tpl, fn
-    assert "setupInteractiveLooms();" in tpl
 
 
 def test_model_loom_png_embedded_in_report(tmp_path):
