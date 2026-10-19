@@ -1048,13 +1048,17 @@ def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
     remains."""
     import re
 
+    # NB: the fixture slug deliberately avoids the substring "act-cluster" — the
+    # study-tabs nav now hosts the ↓ Export menu, which embeds the study slug, so
+    # a slug containing "act-cluster" would false-trip the grouping-absence asserts
+    # below.
     ws = tmp_path / "ws"
-    sd = ws / "studies" / "act-cluster-study"
+    sd = ws / "studies" / "pillar-nav-study"
     sd.mkdir(parents=True)
     (ws / "workspace.yaml").write_text("name: ws\n")
     (sd / "study.yaml").write_text(yaml.safe_dump({
         "schema_version": 3,
-        "name": "act-cluster-study",
+        "name": "pillar-nav-study",
         "kind": "biological",
         "baseline": [{"name": "core", "composite": "pkg.composites.core"}],
         "variants": [],
@@ -1063,7 +1067,7 @@ def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
     }))
 
     client = dashboard_client(ws)
-    resp = client.get("/studies/act-cluster-study")
+    resp = client.get("/studies/pillar-nav-study")
     assert resp.status_code == 200
     html = resp.text
 

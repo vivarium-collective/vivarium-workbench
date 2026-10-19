@@ -35,7 +35,7 @@ def test_report_button_downloads_not_just_opens():
     assert "URL.createObjectURL(blob)" in JS   # blob download of the fetched file
     assert "a.download = dl" in JS              # saved via <a download>
     assert "a.click()" in JS
-    assert "_invReportBusy" in JS              # guard against repeat clicks
+    assert "_invReportInflight" in JS          # per-key guard against repeat clicks
 
 
 def test_report_button_is_html_pdf_chooser():

@@ -44,10 +44,9 @@ def test_headline_status_markers_visible_by_default():
     assert 'class="status-detail-panel"' not in header
     assert 'class="status-stepper"' not in header
     assert 'id="header-audit-summary"' not in header
-    assert 'class="study-status-row"' in _HTML
-    row_i = _HTML.index('class="study-status-row"')
-    row = _HTML[row_i:_HTML.index('</header>', row_i)]
-    assert 'id="study-axis-markers"' in row
+    # The markers are now lined up INLINE with the title (the standalone
+    # study-status-row wrapper was removed), still inside the header.
+    assert 'id="study-axis-markers"' in header
 
 
 def test_discovery_implications_elevated_above_conclusion_text():
