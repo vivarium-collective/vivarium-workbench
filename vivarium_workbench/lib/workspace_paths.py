@@ -47,6 +47,7 @@ __all__ = [
     "LAYOUT_KEYS",
     "find_workspace_root",
     "study_dir",
+    "study_yaml_path",
     "package_slug",
     "add_ws_to_sys_path",
 ]
@@ -137,6 +138,24 @@ def study_dir(
     paths = root_or_paths if isinstance(root_or_paths, _BaseWorkspacePaths) \
         else WorkspacePaths.load(root_or_paths)
     return paths.study_dir(slug, must_exist=must_exist)
+
+
+def study_yaml_path(root_or_paths, slug: str, *, must_exist: bool = False) -> Path:
+    """Canonical path to a study's ``study.yaml``.
+
+    Replaces the several private ``_study_yaml`` helpers that each rebuilt
+    ``study_dir(slug) / 'study.yaml'``. ``must_exist=True`` raises
+    ``FileNotFoundError`` when the file is absent; the default returns the
+    canonical write location regardless (callers wanting ``None``-on-missing
+    check ``.is_file()`` themselves). Hardcodes ``study.yaml`` with no legacy
+    ``spec.yaml`` fallback, matching the helpers it supersedes.
+    """
+    path = study_dir(root_or_paths, slug) / "study.yaml"
+    if must_exist and not path.is_file():
+        raise FileNotFoundError(
+            f"Study '{slug}' not found at {path}. Run '/viva-study new <name> "
+            f"<composite>' to create it.")
+    return path
 
 
 # ``load`` memoization internals live in ``viva_workspace.paths`` now. Re-export

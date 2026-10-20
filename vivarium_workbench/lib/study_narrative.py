@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from viva_superpowers.paths import find_workspace_root
-from viva_superpowers.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import study_yaml_path
 from viva_superpowers.study_io import (
     atomic_write as _atomic_write,
     dump_yaml as _dump,
@@ -47,16 +47,6 @@ from viva_superpowers.study_io import (
 def _walk_to_workspace(start: Path) -> Path:
     """Walk up from `start` until a workspace.yaml is found; raise if absent."""
     return find_workspace_root(start)
-
-
-def _study_yaml(ws_root: Path, slug: str) -> Path:
-    p = WorkspacePaths.load(ws_root).study_dir(slug) / "study.yaml"
-    if not p.is_file():
-        raise FileNotFoundError(
-            f"Study '{slug}' not found at {p}. Run '/viva-study new <name> "
-            f"<composite>' to create it."
-        )
-    return p
 
 
 # _load / _atomic_write / _dump are imported from study_io (see the import
@@ -129,7 +119,7 @@ def set_verdicts(
             f"got {explanatory.result!r}"
         )
 
-    sf = _study_yaml(ws_root, slug)
+    sf = study_yaml_path(ws_root, slug, must_exist=True)
     spec = _load(sf)
     cv = dict(spec.get("conclusion_verdicts") or {})
     before = _dump({"conclusion_verdicts": cv}) if cv else "(empty)\n"
@@ -187,7 +177,7 @@ def add_literature_anchor(
     if not anchor.model_observable.strip():
         raise ValueError("literature anchor: model_observable must not be empty")
 
-    sf = _study_yaml(ws_root, slug)
+    sf = study_yaml_path(ws_root, slug, must_exist=True)
     spec = _load(sf)
     anchors = list(spec.get("literature_anchors") or [])
 
@@ -252,7 +242,7 @@ def add_pivot(
     if not pivot.question.strip():
         raise ValueError("pivot: question must not be empty")
 
-    sf = _study_yaml(ws_root, slug)
+    sf = study_yaml_path(ws_root, slug, must_exist=True)
     spec = _load(sf)
     pivots = list(spec.get("design_pivot_required") or [])
     if any(p.get("id") == pivot.id for p in pivots if isinstance(p, dict)):
@@ -327,7 +317,7 @@ def add_requirement(
             f"got {req.effort!r}"
         )
 
-    sf = _study_yaml(ws_root, slug)
+    sf = study_yaml_path(ws_root, slug, must_exist=True)
     spec = _load(sf)
     reqs_raw = spec.get("implementation_requirements")
     # Schema allows both array + object shapes; coerce to array for append.
