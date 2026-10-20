@@ -8,7 +8,8 @@ Returns (response_dict, status_code). File side-effects only — no HTTP,
 no server imports, no workstream/git operations.
 
 The 11 study-CRUD ``_for_test`` seams are moved here verbatim from server.py.
-The server keeps name-shims for backward compatibility with test imports.
+The tests and the FastAPI routes import these builders from here; ``server.py``
+no longer has the seams.
 
 Batch 19 of the FastAPI strangler-fig migration (POST phase, Phase C).
 """

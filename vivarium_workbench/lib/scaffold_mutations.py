@@ -186,7 +186,7 @@ def delete_investigation(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
 
     Extracted from the ``action`` closure in ``server._post_investigation_delete``.
     Returns (response_dict, status_code).  Performs validation + file deletion;
-    NO git — the commit stays in the server shim (via ``_active_branch_action``).
+    NO git — the git commit is not yet wired under the FastAPI route.
 
     Body:
         name / study / investigation: the investigation slug (any alias accepted).

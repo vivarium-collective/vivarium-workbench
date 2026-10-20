@@ -202,9 +202,9 @@ class ChartPayload(BaseModel):
 class StudyChartsPayload(BaseModel):
     """``GET /api/study-charts/<slug>`` payload.
 
-    Source: ``lib.study_charts.build_study_charts_payload`` (the single
-    implementation shared by the FastAPI seam and the stdlib server's
-    ``_study_charts_payload`` forwarder). Every field below is always present.
+    Source: ``lib.study_charts.build_study_charts_payload`` (called directly by
+    the FastAPI seam and ``publish.build_bundle``). Every field below is always
+    present.
     """
 
     study: str
@@ -248,10 +248,10 @@ class InvestigationSummary(BaseModel):
 class InvestigationSummariesPayload(BaseModel):
     """``GET /api/investigation-summaries`` payload.
 
-    The stdlib handler returns ``{"investigations": [...]}`` (an object), and
-    the client reads ``j.investigations`` — so the payload MUST be wrapped, not
-    a bare array. (The first FastAPI port returned a bare list, which made the
-    Investigations page render "No investigations declared".)
+    The client reads ``j.investigations``, so the payload MUST be wrapped as
+    ``{"investigations": [...]}`` (an object), not a bare array. (The first
+    FastAPI port returned a bare list, which made the Investigations page render
+    "No investigations declared".)
     """
 
     investigations: list[InvestigationSummary] = []
@@ -2983,8 +2983,8 @@ class RenderResponse(BaseModel):
 class VisualizationAcceptResponse(BaseModel):
     """200-path payload for ``POST /api/visualization-accept`` — ``{"ok": True}``.
 
-    The live server commits via ``_active_branch_action``; the FastAPI path
-    defers that commit to the flip and returns ``{ok: True}`` on success.  The
+    The FastAPI path returns ``{ok: True}`` on success; the git commit is not
+    yet wired under the FastAPI seam.  The
     error paths (``{"error": ...}``, HTTP 400/404/500) are returned via
     ``JSONResponse``, not this model.
 

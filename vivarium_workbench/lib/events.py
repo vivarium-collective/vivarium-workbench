@@ -1,8 +1,8 @@
 """Workspace-state SSE helpers.
 
 Provides the single-source payload builder (``workspace_state_payload``) and
-the async generator (``workspace_state_stream``) that back both the legacy
-stdlib handler (``server.py``) and the FastAPI SSE route (``api/app.py``).
+the async generator (``workspace_state_stream``) that back the FastAPI SSE
+route (``api/app.py``).
 
 No imports from ``server`` — this module is the clean seam.
 """

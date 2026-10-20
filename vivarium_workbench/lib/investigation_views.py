@@ -1,14 +1,14 @@
 """Investigation-detail view builders extracted from server.py.
 
 These are the ``ws_root``-parameterised public builders for the 4
-investigation-detail read-only routes ported in Phase A, Batch 2.  The legacy
-``server.py`` handlers now delegate to these functions (thin shims), so there
-is one implementation shared by both the stdlib server and the FastAPI seam.
+investigation-detail read-only routes ported in Phase A, Batch 2.  The FastAPI
+seam (``api/app.py``) calls these builders directly; ``server.py`` no longer has
+the handlers.
 
-``investigation-rigor`` is intentionally NOT ported here: it depends on the
-per-study run-merging loader (``server._study_detail_spec`` merges runs.db +
-reconciles simulation_set), which ``viva_superpowers.rigor`` reads via
-``spec["runs"]`` — extracting that loader belongs with Batch 3.
+``investigation-rigor`` is intentionally NOT built here: it depends on the
+per-study run-merging loader (``study_spec.load_study_detail_spec`` merges
+runs.db + reconciles simulation_set), which ``viva_superpowers.rigor`` reads via
+``spec["runs"]``.
 
 Builders
 --------

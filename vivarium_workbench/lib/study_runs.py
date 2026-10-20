@@ -5,11 +5,9 @@ engine extraction, phase E4) — the orchestration stage that drives a study run
 end to end: resolve the study spec, build/resolve the baseline (or variant)
 composite state, dispatch the simulation subprocess (or delegate an ensemble
 sweep to v2ecoli-workflow), then fire the post-run side-effects (render viz,
-post-run scripts, analyses, outcome sync). The legacy server.py
-``_post_study_run_*_for_test`` functions now delegate to the functions here via
-thin name-shims, keeping their route handlers + test imports intact and the live
-path byte-identical (the route handlers call ``_post_study_run_*_for_test(WORKSPACE,
-body)``, so ``ws_root`` is ``WORKSPACE`` on the live path).
+post-run scripts, analyses, outcome sync). These orchestrators are called
+directly by the FastAPI study-run routes (and the tests import them from here);
+``server.py`` no longer has the ``_post_study_run_*_for_test`` functions.
 
 None of these functions import ``server``. They reuse the already-extracted lib
 engine pieces — ``composite_subprocess`` (E1), ``study_run_state`` (E2),
@@ -17,7 +15,7 @@ engine pieces — ``composite_subprocess`` (E1), ``study_run_state`` (E2),
 ``lifecycle_mutations``, ``investigations``, ``study_crud_mutations``,
 ``composite_runs``, ``ensemble_config``, ``spec_migration``). The workspace root
 is threaded explicitly as ``ws_root`` (replacing the server ``WORKSPACE`` global)
-so the module stays importable standalone and flip-ready.
+so the module stays importable standalone.
 
 Functions
 ---------

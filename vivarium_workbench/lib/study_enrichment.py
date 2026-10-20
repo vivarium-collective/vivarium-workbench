@@ -2,8 +2,7 @@
 
 These four helpers were previously private to the stdlib server module and
 reached only from ``lib/study_spec.py`` via a lazy ``import server``.  Moving
-them here breaks the last ``lib → server`` import in the codebase, which the
-flip design forbids.
+them here breaks the last ``lib → server`` import in the codebase.
 
 All functions are **pure** or **ws_root-parameterised** (no module-level
 globals):
@@ -13,8 +12,8 @@ compute_param_enforcement       (was server._compute_param_enforcement)
 collect_study_feedback          (was server._collect_study_feedback)
 study_acceptance_criterion      (was server._study_acceptance_criterion)
 
-The ``server.py`` shims keep their ``_``-prefixed names and delegate here,
-so every existing call-site outside ``lib/`` continues to work unchanged.
+These functions are called directly from ``lib/`` (e.g. ``study_spec.py``);
+``server.py`` no longer has them.
 """
 
 from __future__ import annotations

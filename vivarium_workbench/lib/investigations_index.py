@@ -2,9 +2,8 @@
 
 Extracted from ``vivarium_workbench.server._investigations_data`` so the
 FastAPI seam (``api/app.py``) can call it without importing the stdlib server
-module.  The single implementation is shared: ``server.py`` re-imports
-``build_investigations`` and keeps its old ``_investigations_data`` name as a
-thin wrapper.
+module.  It is called directly by the FastAPI seam (``api/app.py``) and
+``publish.build_bundle``; ``server.py`` no longer has it.
 
 Helpers moved here from server.py:
   - ``_conclusions_excerpt``

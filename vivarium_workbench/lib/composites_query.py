@@ -5,13 +5,8 @@ in a long-running process because stale ``sys.modules`` entries hide newly-added
 generators.  Running a fresh Python interpreter in a child process avoids that
 problem: the child sees the full, current set.
 
-This module is **stdlib-only** (``subprocess``, ``json``, ``sys``).  It must
-never import ``vivarium_workbench.server`` — the FastAPI seam (``api/app.py``)
-calls this from a context where importing server would couple the typed app to
-the legacy 16k-line module.
-
-``server.py``'s ``_get_composites`` handler re-imports ``composites_via_subprocess``
-so the stdlib server still has one implementation (no duplication).
+This module is **stdlib-only** (``subprocess``, ``json``, ``sys``).  The FastAPI
+seam (``api/app.py``)'s ``/api/composites`` route calls it directly.
 """
 
 from __future__ import annotations

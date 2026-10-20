@@ -6,9 +6,8 @@ HTTP-free builders behind three dashboard routes:
   * ``GET /api/visualization-status``    → :func:`build_visualization_status`
   * ``GET /api/visualization-instances`` → :func:`build_visualization_instances`
 
-Pure ``ws_root``-parameterised functions: NO ``import server`` (the stdlib
-``vivarium_workbench.server`` keeps thin shims that delegate here, passing the
-``WORKSPACE`` global).  The FastAPI app imports this module directly.
+Pure ``ws_root``-parameterised functions: NO ``import server``.  The FastAPI app
+imports this module directly.
 """
 
 from __future__ import annotations

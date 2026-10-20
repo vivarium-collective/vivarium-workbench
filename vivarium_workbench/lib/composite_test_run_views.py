@@ -18,10 +18,10 @@ to raise) and never spawn a real subprocess.
 
 The workspace root is threaded explicitly as ``ws_root`` (replacing the server
 ``WORKSPACE`` global / ``workspace_paths()`` helper) so the module stays
-importable standalone and flip-ready.  ``_ws_add_to_sys_path`` is replicated
+importable standalone.  ``_ws_add_to_sys_path`` is replicated
 inline (the workspace's own ``pbg_<slug>`` package must be importable when the
-detached CLI is later spawned).  The legacy server.py handler keeps its inline
-logic for now — the dedup happens at the flip.
+detached CLI is later spawned).  This builder is the sole implementation;
+``api/app.py`` calls it directly.
 """
 
 from __future__ import annotations

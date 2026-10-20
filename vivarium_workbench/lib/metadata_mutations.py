@@ -8,8 +8,8 @@ Returns (response_dict, status_code). File side-effects only — no HTTP,
 no server imports, no workstream/git operations.
 
 The two study _for_test seams (set_study_objective / set_study_narrative)
-are moved here verbatim from server.py. The server keeps name-shims for
-backward compatibility with test imports.
+are moved here verbatim from server.py. The tests and the FastAPI routes import
+these builders from here; ``server.py`` no longer has the seams.
 """
 from __future__ import annotations
 

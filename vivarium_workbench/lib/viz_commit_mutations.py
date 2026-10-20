@@ -11,9 +11,9 @@ Routes covered:
   - POST /api/visualization                → add visualization entry to workspace.yaml
   - POST /api/visualization-commit-batch   → move staged viz files to workspace pkg
 
-These are ``_active_branch_action``-wrapped routes; the lib builder performs
-validation + mutation (no git).  The server keeps ``_active_branch_action`` and
-delegates the mutation to these builders from inside the ``action()`` closure.
+These were ``_active_branch_action``-wrapped routes; the lib builder performs
+validation + mutation (no git).  The git-commit wrapper is not yet wired under
+the FastAPI routes.
 
 Batch 24 of the FastAPI strangler-fig migration (POST phase, Phase C).
 """
@@ -249,8 +249,8 @@ def _delete_named_ws_entry(
     Shared helper for :func:`simulation_delete` and :func:`visualization_delete`.
     Relocated from the retired ``server._delete_simulation`` /
     ``server._delete_visualization`` (minus the ``_active_branch_action`` git
-    wrapper — the git commit is the caller's concern, deferred to the flip
-    batch like the other FastAPI mutation routes).
+    wrapper — the git commit is the caller's concern, not yet wired under the
+    FastAPI mutation routes).
 
     Returns:
       200  ``{ok: True}``

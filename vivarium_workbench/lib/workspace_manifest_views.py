@@ -9,8 +9,8 @@ The manifest aggregates six sections into a single snapshot of workspace state
 health, and installed pbg-* skills) so an agent does not have to stitch together
 ten separate API calls.
 
-No imports from ``vivarium_workbench.server`` — the stdlib server keeps thin
-instance-method shims that forward into this module.
+No imports from ``vivarium_workbench.server`` — the FastAPI seam (``api/app.py``)
+calls these builders directly.
 """
 from __future__ import annotations
 

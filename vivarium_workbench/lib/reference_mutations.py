@@ -20,12 +20,10 @@ Routes covered:
                                merge, optional PDF save).
 
 Each ``register_*`` builder is the FULL flow (validation + mutation) that the
-FastAPI route calls directly.  The git-committing legacy server keeps its
-``_active_branch_action`` wrapper and delegates ONLY the mutation to the private
-``_apply_*`` functions here — so the live shim's pre/post-wrapper sections stay
-byte-identical to before this batch.  ``_apply_*`` raises ``ValueError`` on a
-papers.bib key conflict or a missing investigation (the live wrapper already
-catches it → HTTP 500; the FastAPI ``register_*`` path maps it to 409 / 404).
+FastAPI route calls directly, invoking the private ``_apply_*`` functions here.
+The git-commit wrapper is not yet wired under the FastAPI routes.  ``_apply_*``
+raises ``ValueError`` on a papers.bib key conflict or a missing investigation;
+the FastAPI ``register_*`` path maps it to 409 / 404.
 
 Batch 26 of the FastAPI strangler-fig migration (POST phase, Phase C).
 """

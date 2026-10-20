@@ -8,8 +8,8 @@ These 3 POSTs edit the **GLOBAL** ``~/.pbg`` workspace catalog via
 ``viva_superpowers.workspace_catalog`` (already a lib; process-global, NOT server
 state).  They take a ``path`` from the request body and use NO workspace /
 ws_root — so the builders take ONLY ``body`` and operate on the global catalog.
-There is nothing to thread through: a FastAPI call mutates the SAME ``~/.pbg``
-catalog the stdlib server does.  No ``import server`` here.
+There is nothing to thread through: a FastAPI call mutates the global ``~/.pbg``
+catalog directly.  No ``import server`` here.
 
 Each builder returns ``(body, status)`` — the FastAPI route wraps every path
 (success AND error) in ``JSONResponse`` so the lib-returned code is preserved

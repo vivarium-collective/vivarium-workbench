@@ -5,10 +5,9 @@ This is a thin facade over :mod:`vivarium_workbench.lib._root` (the live
 one ``_WS_ROOT``; the getters/setters here simply delegate to ``_root``.
 
 It also owns a callback registry so each workspace-keyed cache module can
-register its ``clear_cache`` at import time. On a workspace switch the stdlib
-server (and, eventually, the FastAPI app) calls :func:`invalidate` to fire
-every registered callback in one place, instead of hard-coding the list of
-lib caches inside ``server._invalidate_workspace_caches``.
+register its ``clear_cache`` at import time. On a workspace switch the FastAPI
+app (via :func:`switch_workspace`) calls :func:`invalidate` to fire every
+registered callback in one place.
 
 Import direction is one-way: this module imports only ``_root``; the cache
 modules import ``active_workspace`` (never the reverse), so there is no cycle.
@@ -36,9 +35,8 @@ def switch_workspace(new_root: Path | str) -> None:
     """Re-point the active workspace (lib side): set the root + invalidate caches.
 
     This is the lib-shareable half of a workspace switch — the part the FastAPI
-    app needs. The stdlib ``server._switch_active_workspace`` additionally
-    updates its own ``WORKSPACE`` global + server-local caches (stdlib-only),
-    so it is NOT refactored to call this; the dedup happens at the flip.
+    app needs: it sets the active root and fires the registered cache-clear
+    callbacks.
     """
     set_workspace_root(Path(new_root).resolve())
     invalidate()

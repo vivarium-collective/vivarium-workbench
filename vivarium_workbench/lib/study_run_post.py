@@ -4,16 +4,14 @@ These are the ``ws_root``-parameterized post-run helpers for the study-run
 engine (study-run engine extraction, phase E3) — the side-effect stage that
 fires AFTER a study run's simulation subprocess completes: render the study's
 declared visualizations, invoke its ``post_run_scripts``, and run its
-``analyses`` steps over the parquet output. The legacy server.py module-level
-helpers (``_render_study_visualizations``, ``_run_post_run_scripts``,
-``_run_study_analyses``) now delegate to the corresponding functions here via
-thin name-shims, keeping their existing call-sites + test imports intact and the
-live path byte-identical.
+``analyses`` steps over the parquet output. These functions are called directly
+by the study-run engine in ``lib`` (and the tests import them from here);
+``server.py`` no longer has the corresponding helpers.
 
 None of these functions import ``server``. ``render_study_visualizations`` takes
 the workspace root as an explicit ``ws_root`` argument (replacing the server
 ``WORKSPACE`` global and replicating ``_ws_add_to_sys_path`` inline) so the
-module stays importable standalone and flip-ready. The simulation itself is NOT
+module stays importable standalone. The simulation itself is NOT
 run here — these stages only render/shell-out over an already-completed run.
 
 Functions

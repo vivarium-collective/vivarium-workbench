@@ -1,10 +1,8 @@
 """Git/branch status helpers extracted from server.py for the FastAPI seam.
 
 These are the ``ws_root``-parameterized public builders for the git-related
-read-only routes.  The legacy server.py module-level helpers (``_has_origin_remote``,
-``_stale_branch_threshold``, ``_commits_behind``, ``_dirty_workspace``) now
-delegate to the corresponding functions here, keeping their existing call-sites
-intact.
+read-only routes, called directly by ``api/app.py`` (extracted from the retired
+server.py).
 
 Builders
 --------
@@ -75,8 +73,8 @@ def has_origin_remote(ws_root: Path) -> bool:
 def diagnose_push_error(err: str) -> dict | None:
     """Return a structured diagnosis for known push failure patterns, else None.
 
-    Verbatim copy of the pure ``server._diagnose_push_error`` (server keeps its
-    own copy; dedup at the flip). Used by ``lib.work_mutations.work_push`` to
+    Verbatim copy of the former pure ``server._diagnose_push_error``. Used by
+    ``lib.work_mutations.work_push`` to
     attach a clickable diagnosis to a ``git push`` failure response.
     """
     if not err:
@@ -108,8 +106,7 @@ def remote_repo_url(ws_root: Path) -> str | None:
     Mirrors ``server._remote_repo_url`` parameterised on ``ws_root``: runs
     ``git remote get-url origin`` in ``cwd=ws_root``, returns ``None`` on a
     non-zero exit or empty URL, else the URL normalized via
-    :func:`lib.source_build_views._normalize_repo_url` (reused, not re-copied —
-    server keeps its own ``_normalize_repo_url``; dedup at the flip).
+    :func:`lib.source_build_views._normalize_repo_url` (reused, not re-copied).
     """
     from vivarium_workbench.lib.source_build_views import _normalize_repo_url
 

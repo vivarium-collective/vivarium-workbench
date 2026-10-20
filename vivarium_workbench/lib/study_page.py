@@ -1,10 +1,9 @@
 """Study-detail page builder — Jinja2 render + page builder.
 
-Extracted from ``vivarium_workbench.server`` so both the FastAPI seam
-(``api/app.py``) and ``server.py``'s handler can share one implementation.
-``server.py`` re-exports ``_render_study_detail_html`` as a thin shim (2-arg
-``(name, spec)``) so ``publish.py`` and existing call-sites keep working
-unchanged.
+Extracted from ``vivarium_workbench.server``. ``render_study_detail_html`` is
+called directly by the FastAPI seam (``api/app.py``, via
+``build_study_detail_page``) and by ``publish.py``; ``server.py`` no longer has
+it.
 
 Public API
 ----------
