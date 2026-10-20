@@ -10884,8 +10884,10 @@
     var H = [];
     H.push('<div class="inv-brief inv-vs-' + vsClass + '">');
 
-    // Headline.
-    if (headline) H.push('<h2 class="inv-brief-q">' + _invInline(headline) + '</h2>');
+    // Headline. The chrome header (#ws-title) already shows the investigation
+    // title, so don't repeat it here — only render the brief headline when it's
+    // the driving-question fallback (title-less investigations), never a title dup.
+    if (headline && headline !== d.title) H.push('<h2 class="inv-brief-q">' + _invInline(headline) + '</h2>');
 
     // Front stays lean — just the headline — so the investigation graph sits high
     // on the page. The overview, verdict, background (with the question/hypothesis
