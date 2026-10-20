@@ -18,7 +18,6 @@ import importlib.metadata as metadata
 import importlib.util
 import json
 
-from viva_superpowers.composite_spec import load_spec
 import os
 import re
 import sys
@@ -35,6 +34,13 @@ _FULL_PLACEHOLDER = re.compile(r"^\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}$")
 _INLINE_PLACEHOLDER = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 
+
+
+def load_spec(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() == ".json":
+        return json.loads(text)
+    return yaml.safe_load(text)
 
 
 def _spec_record(spec: dict, package: str, stem: str, path: Path,
