@@ -4936,6 +4936,16 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   color: #94a3b8;
   white-space: nowrap;
 }
+/* Compact interaction hint at the end of the toolbar — small + muted so it never
+   competes with the controls. margin-left:auto pushes it to the trailing edge;
+   it wraps to its own line (the toolbar is flex-wrap) before crowding anything. */
+.aig-tb-hint {
+  margin-left: auto;
+  font-size: 0.72em;
+  color: #94a3b8;
+  white-space: nowrap;
+  font-style: italic;
+}
 .aig-tb-seg {
   display: inline-flex;
   border: 1px solid #e5e7eb;
@@ -5083,25 +5093,41 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
   color: #fff; background: #2563eb; padding: 1px 7px; border-radius: 9999px;
 }
-/* SELECTED (one click) — a distinct violet highlight that STACKS with the blue
-   "open" ring (one uses outline, the other box-shadow) so a study can show both.
-   The "selected" badge sits top-LEFT, opposite the "open" badge top-right. */
-.iset-dag-node.aig-node-selected {
+/* SELECTED (one click) — a distinct violet highlight. The blue "open" state takes
+   visual PRECEDENCE: an open card is styled blue only (blue ring + "open" badge),
+   so the violet selected styling and its badge apply only when the card is NOT
+   also open (:not(.aig-node-active)). The "selected" badge sits top-RIGHT, the
+   same corner the "open" badge uses, so the marker is in a consistent spot
+   (the two never show at once — open suppresses selected). */
+.iset-dag-node.aig-node-selected:not(.aig-node-active) {
   outline: 2px solid #7c3aed; outline-offset: 2px;
   border-color: #7c3aed !important;
-}
-.iset-dag-node.aig-node-selected:not(.aig-node-active) {
   box-shadow: 0 6px 18px rgba(124,58,237,0.20) !important;
 }
-.iset-dag-node.aig-node-selected::before {
-  content: "selected"; position: absolute; top: -9px; left: 10px;
+.iset-dag-node.aig-node-selected:not(.aig-node-active)::before {
+  content: "selected"; position: absolute; top: -9px; right: 10px;
   font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
   color: #fff; background: #7c3aed; padding: 1px 7px; border-radius: 9999px; z-index: 1;
 }
-/* When a study is BOTH open and selected, the "open" marker wins — drop the
-   redundant "selected" outline + badge so the card isn't double-flagged. */
-.iset-dag-node.aig-node-active.aig-node-selected { outline: none; }
-.iset-dag-node.aig-node-active.aig-node-selected::before { content: none; }
+/* "Show full card" pop-out affordance — a LOCALIZED button chip, visually distinct
+   from the card body (click = select, double-click = open). A subtle bordered pill
+   with padding + hover so it reads as "click THIS element", not a generic hint. It
+   sizes to its content (inline-flex) so it never spans the whole card. */
+.aig-more-wrap { display: flex; }
+.aig-more-findings {
+  display: inline-flex; align-items: center; gap: 4px;
+  max-width: 100%; box-sizing: border-box;
+  font-size: 0.72em; font-weight: 600; line-height: 1.2;
+  color: #7c3aed; background: #f5f3ff;
+  border: 1px solid #ddd6fe; border-radius: 9999px;
+  padding: 2px 9px; cursor: pointer;
+  font-family: inherit; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.aig-more-findings .aig-more-icon { font-weight: 400; }
+.aig-more-findings:hover { background: #ede9fe; border-color: #c4b5fd; color: #6d28d9; }
+.aig-more-findings:focus-visible { outline: 2px solid #7c3aed; outline-offset: 1px; }
 
 /* ── Composites page: compact, informative cards ──────────────────────────── */
 .ccard-grid {

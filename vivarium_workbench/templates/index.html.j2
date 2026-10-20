@@ -1700,6 +1700,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                 aria-haspopup="menu" aria-label="Dock the investigation graph"
                 onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">◧</button>
       </span>
+      {# Compact interaction hint — how clicking a study node behaves. Pushed to the
+         end so it wraps to its own line before it crowds the controls. #}
+      <span class="aig-tb-hint" aria-hidden="true" title="Single-click a study to select it; double-click to open it">click: select · double-click: open</span>
     </div>
     <div id="investigation-dag-shell"
          style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px 6px 0 0; background: #fafafa;
