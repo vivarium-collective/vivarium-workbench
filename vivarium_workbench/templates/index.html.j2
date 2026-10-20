@@ -1627,6 +1627,12 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                aria-label="Zoom — overview to a single study card"
                title="Zoom — slide left for a zoomed-out overview, right to zoom into a single study card">
       </span>
+      <span class="aig-tb-group">
+        <button id="aig-fill-btn" type="button" class="aig-tb-btn"
+                title="Fill to screen — fit the whole investigation graph to the view and centre it"
+                aria-label="Fill the investigation graph to the screen"
+                onclick="window._aigFillToScreen&&window._aigFillToScreen()">&#10530; Fit</button>
+      </span>
       <span class="aig-tb-group aig-settings-ctl" style="position:relative">
         <span class="aig-tb-label">Display</span>
         <button id="aig-settings-btn" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false"
@@ -1688,7 +1694,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     </div>
     <div id="investigation-dag-shell"
          style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px 6px 0 0; background: #fafafa;
-                overflow: auto; resize: none; height: 460px; min-height: 32px; max-height: 92vh; cursor: grab;">
+                overflow: auto; resize: none; height: 460px; min-height: 32px; max-height: 92vh; cursor: grab;
+                touch-action: none;">
       <!-- overflow-y must be hidden (not visible): per CSS spec, when one axis
            is `visible` and the other isn't, `visible` gets promoted to `auto`,
            which gives this shell its own vertical scrollbar in addition to
