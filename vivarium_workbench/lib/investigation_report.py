@@ -18,6 +18,7 @@ import base64
 import json
 import re
 from pathlib import Path
+from vivarium_workbench.lib.html_render import esc as _h
 
 import yaml
 
@@ -1162,8 +1163,6 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
     }
 
 
-def _h(s) -> str:
-    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 _PLOTLY_PKG_CANDIDATES = ("package_data/plotly.min.js", "plotly.min.js")

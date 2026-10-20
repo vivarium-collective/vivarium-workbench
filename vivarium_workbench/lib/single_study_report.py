@@ -18,11 +18,11 @@ Public API:
 """
 from __future__ import annotations
 
-import html as _htmllib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from vivarium_workbench.lib.html_render import esc as _h
 
 import yaml
 
@@ -128,10 +128,6 @@ _VERDICT_MAP = {
 }
 
 
-def _h(s) -> str:
-    if s is None:
-        return ""
-    return _htmllib.escape(str(s), quote=True)
 
 
 def _multiline(s) -> str:

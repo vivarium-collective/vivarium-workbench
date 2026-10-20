@@ -7,10 +7,10 @@ generation, inline CSS, no external assets.
 """
 from __future__ import annotations
 
-import html
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from vivarium_workbench.lib.html_render import esc as _esc
 
 from vivarium_workbench.lib.audit_views import build_audit
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
@@ -20,8 +20,6 @@ _GRADE_COLORS = ["#ef4444", "#f97316", "#eab308", "#84cc16", "#22c55e", "#16a34a
 _STATUS = {"pass": ("✓", "#0d9488"), "warn": ("⚠", "#d97706"), "fail": ("✗", "#e11d48")}
 
 
-def _esc(s) -> str:
-    return html.escape("" if s is None else str(s), quote=True)
 
 
 def _grade_color(level) -> str:
