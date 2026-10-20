@@ -684,7 +684,7 @@ def _all_investigation_declared_inputs(ws_root: Path) -> dict:
     ``investigations/<slug>/investigation.yaml``'s ``inputs:`` block. The repo-wide
     Resources page folds them in beside the workspace.yaml-level ones so they all
     show together. Best-effort; a malformed investigation is skipped."""
-    from vivarium_workbench.lib.investigation_inputs import investigation_inputs
+    from viva_superpowers.investigation_inputs import investigation_inputs
     datasets: list = []
     expert_docs: list = []
     try:
@@ -733,7 +733,7 @@ def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
     Mirrors ``server._inputs_payload`` parameterised on ``ws_root``; the
     current-branch slug comes from ``lib.investigation_status.current_branch_slug``.
     """
-    from vivarium_workbench.lib.investigation_inputs import investigation_inputs
+    from viva_superpowers.investigation_inputs import investigation_inputs
     from vivarium_workbench.lib.investigation_status import current_branch_slug
     from vivarium_workbench.lib.report import _parse_bib_entries, _enrich_with_file_info
 
