@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import yaml
 
+from vivarium_workbench.lib.atomic_io import atomic_write_text
+
 from .workspace_paths import WorkspacePaths
 
 
@@ -268,6 +270,4 @@ def _write_last_results(spec_path: Path, result: StudyTestsResult) -> None:
         spec["tests"]["last_results"] = meta
     else:
         spec["last_test_run"] = meta
-    tmp = spec_path.with_suffix(spec_path.suffix + ".tmp")
-    tmp.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
-    os.replace(tmp, spec_path)
+    atomic_write_text(spec_path, yaml.safe_dump(spec, sort_keys=False))

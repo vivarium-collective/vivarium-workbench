@@ -39,6 +39,8 @@ from __future__ import annotations
 
 import io
 import os
+
+from vivarium_workbench.lib.atomic_io import atomic_write_text
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -249,9 +251,7 @@ def _write_outcomes(
     updated = new_sio.getvalue()
 
     if updated != original:
-        tmp = study_yaml.with_suffix(study_yaml.suffix + ".tmp")
-        tmp.write_text(updated, encoding="utf-8")
-        os.replace(str(tmp), str(study_yaml))
+        atomic_write_text(study_yaml, updated)
         return (True, written, skipped)
     return (False, written, skipped)
 
