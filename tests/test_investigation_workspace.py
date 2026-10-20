@@ -157,22 +157,35 @@ def test_dockable_graph_and_graph_bar_navigator():
 
 def test_dag_node_click_selects_then_opens():
     """Three distinct gestures: (1) a first card click SELECTS only (highlight,
-    no popout, no open); (2) the "+N more … click to show" affordance pops the
-    full info out as a floating panel (reader only, never opens); (3) a second
-    click on the selected card opens it. The ↗ open button was removed."""
+    no expand, no open); (2) the "+N more … show full card" affordance expands the
+    card IN PLACE (reader only, never opens); (3) a second click on the selected
+    card opens it. The floating pop-out was removed in favour of inline expansion."""
     assert "node.onclick = _aigNodeClick" in JS
-    # First click selects only — the node handler does NOT show the popout.
+    # First click selects only — the node handler does NOT expand or open.
     j = JS.index("var _aigNodeClick =")
     node_body = JS[j:j + 400]
     assert "window._aigSelected === s.name" in node_body     # already-selected → open
     assert "_openStudyInsideInvestigation(s.name)" in node_body
     assert "_selectThis()" in node_body                      # first click: select only
-    assert "_aigShowCardPopout" not in node_body             # NOT from the card click
-    # The "click to show" affordance pops the full card out (no open).
-    p = JS.index("var _popoutFromShow =")
-    popout_body = JS[p:p + 300]
-    assert "_aigShowCardPopout(node)" in popout_body
+    # The "show full card" affordance expands the card IN PLACE (no open), growing
+    # it downward from its anchored top and extending the graph's scroll extent.
+    p = JS.index("var _toggleExpandInPlace =")
+    expand_body = JS[p:p + 400]
+    assert "_aigSetNodeExpanded(node" in expand_body
+    assert "_aigAccommodateExpansion()" in expand_body
     assert "aig-more-findings" in JS                          # wired to the show affordance
+    assert "aig-full-details" in JS                           # inline detail block exists
+    # The floating pop-out code path is gone (no modal element / × close / show fn).
+    assert "_aigShowCardPopout" not in JS
+    assert "aig-card-popout" not in JS
+    # Expanding must NOT relayout/reposition — it anchors the top and only grows the
+    # shell's scroll extent via dataset.canvasH.
+    acc = JS.index("function _aigAccommodateExpansion")
+    acc_body = JS[acc:acc + 700]
+    assert "dataset.canvasH" in acc_body
+    assert "layoutCanvasH" in acc_body
+    # The "Open study →" navigation is preserved inside the expanded detail.
+    assert "aig-open-study" in JS
 
 
 def test_floating_graph_hides_prose_when_study_open():
