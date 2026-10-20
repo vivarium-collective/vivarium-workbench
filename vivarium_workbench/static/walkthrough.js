@@ -13314,6 +13314,23 @@
   }
   window._aigZoomBy = _aigZoomBy;
   window._aigFit = _aigFit;
+  // Fill to screen (toolbar ⤢ Fit): fit the WHOLE graph to the viewport in both
+  // dimensions and CENTRE it — the on-demand "re-fit + centre now" control. Unlike
+  // the passive auto-fill, it runs even after the user has taken over the view.
+  function _aigFillToScreen() {
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell) return;
+    try { _aigCloseCardPopout(); } catch (_e) { /* ignore */ }
+    var cw = parseFloat(shell.dataset.canvasW) || 1, ch = parseFloat(shell.dataset.canvasH) || 1;
+    var z = Math.min((shell.clientWidth - 16) / cw, (shell.clientHeight - 16) / ch);
+    aigZoom = Math.max(0.3, Math.min(2, z || 1));
+    _applyAigZoom();
+    // Centre the now-fully-visible graph in the viewport.
+    shell.scrollLeft = Math.max(0, (cw * aigZoom - shell.clientWidth) / 2);
+    shell.scrollTop  = Math.max(0, (ch * aigZoom - shell.clientHeight) / 2);
+    try { _aigSyncZoomUI(aigBand, aigZoom); } catch (_e) { /* ignore */ }
+  }
+  window._aigFillToScreen = _aigFillToScreen;
   window._aigFullscreen = _aigFullscreen;
   window._aigExpand = _aigExpand;
 
@@ -13449,6 +13466,7 @@
   }, true);
   // Drag anywhere on the shell background to pan (card clicks still work).
   document.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'touch') return;   // touch pan + pinch is owned by _aigWireTouch
     var shell = e.target.closest && e.target.closest('#investigation-dag-shell');
     if (!shell || (e.target.closest && e.target.closest('.iset-dag-node'))) return;
     var sx = e.clientX, sy = e.clientY, sl = shell.scrollLeft, st0 = shell.scrollTop, moved = false;
@@ -13458,6 +13476,9 @@
       document.removeEventListener('pointermove', mv);
       document.removeEventListener('pointerup', up);
       shell.style.cursor = '';
+      // A real pan means the user now owns the view — stop auto-fit from snapping
+      // it back to the fit on the next re-render / resize / poll.
+      if (moved) { try { window._aigMarkUserZoomed(); } catch (_e) { /* ignore */ } }
     }
     document.addEventListener('pointermove', mv);
     document.addEventListener('pointerup', up);
@@ -13553,6 +13574,54 @@
   window._aigWireWheelZoom = _aigWireWheelZoom;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _aigWireWheelZoom);
   else _aigWireWheelZoom();
+
+  // Touch: one-finger PAN + two-finger PINCH-zoom on the graph shell, so the
+  // investigation graph is navigable on a phone. touch-action:none on the shell
+  // (template) keeps these gestures from scrolling / zooming the PAGE instead; the
+  // mouse/pen pan path (pointerdown above) ignores touch so the two never fight.
+  // Both gestures mark the view user-owned, so auto-fit won't snap it back.
+  function _aigWireTouch() {
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell || shell._aigTouchWired) return;
+    shell._aigTouchWired = true;
+    var mode = 0, sx = 0, sy = 0, sl = 0, st = 0, startDist = 1, startZoom = 1;
+    function dist(t) {
+      var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    shell.addEventListener('touchstart', function (e) {
+      if (e.target.closest && e.target.closest('.iset-dag-node')) return;   // let node taps through
+      if (e.touches.length === 1) {
+        mode = 1; sx = e.touches[0].clientX; sy = e.touches[0].clientY; sl = shell.scrollLeft; st = shell.scrollTop;
+      } else if (e.touches.length >= 2) {
+        mode = 2; startDist = dist(e.touches) || 1; startZoom = aigZoom;
+      }
+    }, { passive: true });
+    shell.addEventListener('touchmove', function (e) {
+      if (mode === 1 && e.touches.length === 1) {
+        e.preventDefault();
+        shell.scrollLeft = sl - (e.touches[0].clientX - sx);
+        shell.scrollTop  = st - (e.touches[0].clientY - sy);
+      } else if (mode === 2 && e.touches.length >= 2) {
+        e.preventDefault();
+        aigZoom = Math.max(0.3, Math.min(2, startZoom * (dist(e.touches) / startDist)));
+        _applyAigZoom();
+        try { _aigSyncZoomUI(aigBand, aigZoom); } catch (_e) { /* ignore */ }
+      }
+    }, { passive: false });
+    function end(e) {
+      if (mode) { try { window._aigMarkUserZoomed(); } catch (_e) { /* ignore */ } }
+      if (!e.touches || e.touches.length === 0) { mode = 0; }
+      else if (e.touches.length === 1) {
+        mode = 1; sx = e.touches[0].clientX; sy = e.touches[0].clientY; sl = shell.scrollLeft; st = shell.scrollTop;
+      }
+    }
+    shell.addEventListener('touchend', end, { passive: true });
+    shell.addEventListener('touchcancel', end, { passive: true });
+  }
+  window._aigWireTouch = _aigWireTouch;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _aigWireTouch);
+  else _aigWireTouch();
 
   function _setAigBand(b) {
     var nb = Math.max(0, Math.min(2, b | 0));
