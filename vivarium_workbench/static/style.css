@@ -4315,7 +4315,7 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 /* Cards: readable 1–2 columns, never 3–4 tiny ones. Each card gets at least
    ~400px (min(100%, 400px) so it still collapses to 1-up on a phone). */
 .res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
-  gap: 14px; align-items: start; }
+  gap: 10px; align-items: start; }
 /* Reaction pathways are prose-heavy (role/caveats/tables) → full width, with a
    second column only on a genuinely wide viewport. */
 .res-section[data-res-type="reaction-pathway"] .res-grid {
@@ -4327,40 +4327,48 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 /* A stacked prose field: label on its own line, value full-width beneath — the
    fix for long prose (Role in campaign, ΔG span, caution, …) that used to wrap
    one character per line in a cramped 2nd grid column. */
-.res-field { margin: 8px 0; min-width: 0; }
-.res-field + .res-field { margin-top: 6px; }
+.res-field { margin: 5px 0; min-width: 0; }
+.res-field + .res-field { margin-top: 4px; }
 .res-field-k { display: block; font-size: 0.72em; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--gray); font-weight: 600; margin-bottom: 2px; }
-.res-field-v { display: block; font-size: 0.88em; line-height: 1.5; overflow-wrap: anywhere; }
-.res-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+  letter-spacing: 0.04em; color: var(--gray); font-weight: 600; margin-bottom: 1px; }
+.res-field-v { display: block; font-size: 0.85em; line-height: 1.4; overflow-wrap: anywhere; }
+.res-card { border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px;
   background: var(--panel); }
-.res-card-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
-.res-card-name { font-size: 0.98em; }
+.res-card-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.res-card-name { font-size: 0.95em; }
 .res-abbr { font-family: ui-monospace, Menlo, monospace; font-size: 0.8em; color: var(--gray); }
-.res-badge { margin-left: auto; font-size: 0.68em; text-transform: uppercase;
+.res-badge { margin-left: auto; font-size: 0.66em; text-transform: uppercase;
   letter-spacing: 0.04em; background: var(--bg); border: 1px solid var(--border);
   border-radius: 10px; padding: 1px 8px; color: var(--gray); white-space: nowrap; }
-.res-summary { margin: 6px 0 10px; font-size: 0.86em; }
-.res-desc { font-size: 0.86em; margin: 8px 0; }
-.res-sub { font-size: 0.74em; text-transform: uppercase; letter-spacing: 0.04em;
-  color: var(--gray); font-weight: 600; margin: 12px 0 6px; }
+.res-summary { margin: 3px 0 6px; font-size: 0.84em; }
+.res-desc { font-size: 0.84em; margin: 5px 0; }
+.res-sub { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--gray); font-weight: 600; margin: 7px 0 4px; }
+/* Lead-with-identity line for data cards (lipid formula + chemical name). */
+.res-identity { display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 12px; margin: 2px 0 6px; }
+.res-formula { font-family: ui-monospace, Menlo, monospace; font-size: 0.9em; font-weight: 600; }
+.res-chemname { font-size: 0.82em; color: var(--gray); }
 /* Short scalar pairs only. auto-fit with a 220px floor keyed to CARD width
    (not the viewport) so a pair never shrinks into a 1-char-per-line column; a
    pair that doesn't fit drops to its own row instead. Prose belongs in
    .res-field (stacked), never here. */
-.res-kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-  gap: 4px 18px; }
-.res-kv { display: flex; gap: 6px; font-size: 0.84em; line-height: 1.4; min-width: 0; }
+.res-kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 2px 16px; }
+.res-kv { display: flex; gap: 6px; font-size: 0.8em; line-height: 1.35; min-width: 0; }
 .res-kv-k { color: var(--gray); flex: 0 0 auto; }
 .res-kv-v { color: inherit; min-width: 0; overflow-wrap: anywhere; }
-.res-martini, .res-network { margin-top: 10px; padding: 10px; border: 1px solid var(--border);
+.res-martini, .res-network { margin-top: 6px; padding: 7px 9px; border: 1px solid var(--border);
   border-radius: 6px; background: var(--bg); }
 .res-martini .res-sub, .res-network .res-sub { margin-top: 0; }
-.res-beads { margin: 8px 0 0; padding-left: 20px; font-size: 0.82em;
+/* Martini mapping is a collapsed <details>; its summary carries .res-sub. */
+details.res-martini > summary { cursor: pointer; margin-bottom: 0; }
+details.res-martini[open] > summary { margin-bottom: 5px; }
+.res-beads { margin: 5px 0 0; padding-left: 20px; font-size: 0.78em;
   font-family: ui-monospace, Menlo, monospace; }
-.res-beads li { margin: 2px 0; }
-.res-headline { font-weight: 600; font-size: 0.9em; margin-bottom: 8px; }
-.res-notes { margin: 10px 0 0; font-size: 0.82em; font-style: italic; color: var(--gray); }
+.res-beads li { margin: 1px 0; }
+.res-headline { font-weight: 600; font-size: 0.9em; margin-bottom: 5px; }
+.res-notes { margin: 6px 0 0; font-size: 0.78em; font-style: italic; color: var(--gray); }
 .res-table { width: 100%; border-collapse: collapse; margin: 6px 0 2px; font-size: 0.82em; }
 .res-table th { text-align: left; font-weight: 600; background: var(--bg);
   border-bottom: 1px solid var(--border); padding: 4px 7px; }

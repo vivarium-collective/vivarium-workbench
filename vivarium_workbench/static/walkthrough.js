@@ -1122,13 +1122,13 @@
         'onclick="if(window._openStudyEmbeddedNewTab){_openStudyEmbeddedNewTab(\'' +
         _esc(slug) + '\');return false;}" ' +
         'title="Open study in workbench: ' + _esc(label) + '" ' +
-        'style="display:inline-block;font-size:0.72em;line-height:1.5;padding:1px 9px;' +
-        'margin:0 4px 2px 0;border:1px solid #c7d2fe;background:#eef2ff;color:#4338ca;' +
-        'border-radius:10px;text-decoration:none">' + _esc(label) + '</a>';
+        'style="display:inline-block;font-size:0.68em;line-height:1.4;padding:0 7px;' +
+        'margin:0 3px 2px 0;border:1px solid #c7d2fe;background:#eef2ff;color:#4338ca;' +
+        'border-radius:9px;text-decoration:none">' + _esc(label) + '</a>';
     }).join('');
     if (!chips) return '';
-    return '<div style="margin-top:7px;display:flex;flex-wrap:wrap;align-items:baseline">' +
-      '<span class="muted" style="font-size:0.72em;margin-right:5px;letter-spacing:0.02em;' +
+    return '<div style="margin-top:3px;display:flex;flex-wrap:wrap;align-items:baseline">' +
+      '<span class="muted" style="font-size:0.65em;margin-right:5px;letter-spacing:0.02em;' +
       'text-transform:uppercase">Cited by</span>' + chips + '</div>';
   }
 
@@ -1177,7 +1177,10 @@
   // references. Unmatched bare keys render as a labeled stub.
   function _inputsRefsHtml(refs) {
     if (!refs || !refs.length) return _inputsNone();
-    return '<div style="display:flex;flex-direction:column;gap:10px">' +
+    // Dense scannable list: thin dividers between rows instead of tall bordered
+    // cards with gaps, so many more references fit per screen.
+    return '<div class="res-reflist" style="display:flex;flex-direction:column;' +
+      'border-top:1px solid #e2e8f0">' +
       refs.map(_inputsRefCardHtml).join('') + '</div>';
   }
 
@@ -1187,7 +1190,7 @@
     var key = ref.key || ref.bib_key || '';
 
     if (ref._unmatched) {
-      return '<div class="res-item" style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+      return '<div class="res-item" style="border-bottom:1px solid #e2e8f0;padding:5px 2px">' +
         '<code>' + _esc(key || _inputsRefLabel(ref)) + '</code> ' +
         '<small class="muted">(no bib entry)</small></div>';
     }
@@ -1202,16 +1205,16 @@
 
     var titleHtml = link
       ? '<a href="' + _esc(link) + '" target="_blank" rel="noopener" ' +
-        'style="font-weight:600">' + _esc(title) + '</a> ' +
+        'style="font-weight:600;font-size:0.9em">' + _esc(title) + '</a> ' +
         '<small class="muted">↗</small>'
-      : '<strong>' + _esc(title) + '</strong>';
+      : '<strong style="font-size:0.9em">' + _esc(title) + '</strong>';
 
     var metaParts = [];
     if (ref.author) metaParts.push(_esc(ref.author));
     if (ref.year) metaParts.push(_esc(ref.year));
     if (ref.journal) metaParts.push(_esc(ref.journal));
     var meta = metaParts.length
-      ? '<div class="muted" style="font-size:0.85em;margin-top:2px">' +
+      ? '<div class="muted" style="font-size:0.8em;margin-top:1px">' +
         metaParts.join(' · ') + '</div>'
       : '';
 
@@ -1222,8 +1225,8 @@
     var bibBlock = '';
     if (bibtex) {
       var bibId = 'bibtex-' + (key || Math.random().toString(36).slice(2));
-      bibBlock = '<details style="margin-top:6px">' +
-        '<summary style="cursor:pointer;font-size:0.82em;color:#475569">BibTeX</summary>' +
+      bibBlock = '<details style="margin-top:3px">' +
+        '<summary style="cursor:pointer;font-size:0.75em;color:#475569">BibTeX</summary>' +
         // Wrap instead of scroll: a BibTeX entry's `title = {…}` line runs
         // 200-400px past the panel, and overflow:auto turned every reference
         // into its own horizontal scrollbar. Wrapping costs a line and removes
@@ -1239,7 +1242,9 @@
 
     // Show the note as a sub-line only when it isn't already the headline.
     var noteHtml = (ref.note && ref.note !== title)
-      ? '<div class="muted" style="font-size:0.85em;margin-top:2px;font-style:italic">' + _esc(ref.note) + '</div>'
+      ? '<div class="muted" title="' + _esc(ref.note) + '" ' +
+        'style="font-size:0.8em;margin-top:1px;font-style:italic;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + _esc(ref.note) + '</div>'
       : '';
 
     var citedHtml = _inputsCitedByHtml(ref.cited_by);
@@ -1255,8 +1260,9 @@
     // resolve to this References entry.
     var anchor = key ? ' id="res-ref-' + _esc(String(key)) + '" class="res-item res-ref-anchor"' : ' class="res-item"';
 
-    return '<div' + anchor + ' style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
-      '<div>' + titleHtml + foldFlag + actions + '</div>' + meta + noteHtml + bibBlock + citedHtml + '</div>';
+    return '<div' + anchor + ' style="border-bottom:1px solid #e2e8f0;padding:6px 2px">' +
+      '<div style="line-height:1.3">' + titleHtml + foldFlag + actions + '</div>' +
+      meta + noteHtml + bibBlock + citedHtml + '</div>';
   }
 
   // Adapt a structured-resources paper-reference entry to the inputs reference
@@ -2339,17 +2345,23 @@
 
   // lipid-structure → identity, chain/headgroup/charge, and the Martini CG mapping.
   function _resLipidCard(r, refsById) {
+    // Lead with the identity: formula (monospace) + chemical name, so the reader
+    // sees WHAT the molecule is before the detail grid. (class/type is the badge
+    // in the head.) Formula/chemical name are hoisted here, not repeated below.
+    var ident = [];
+    if (r.formula) ident.push('<span class="res-formula">' + _esc(_resV(r.formula)) + '</span>');
+    if (r.chemical_name) ident.push('<span class="res-chemname">' + _esc(_resV(r.chemical_name)) + '</span>');
+    var identLine = ident.length ? '<div class="res-identity">' + ident.join('') + '</div>' : '';
     var kv = [
-      _resKV('Chemical name', r.chemical_name),
-      _resKV('Class', r.lipid_class),
       _resKV('Chains', r.n_chains),
       _resKV('Chain length', r.chain_length),
       _resKV('Headgroup', r.headgroup),
       _resKV('Charge', r.charge_state),
       _resKV('Role', r.role),
-      _resKV('Formula', r.formula),
       _resKV('SMILES', r.smiles)
     ].join('');
+    // Martini CG mapping: a compact collapsed <details> so its grid + bead list
+    // don't dominate the card; one click reveals the full mapping.
     var martini = '';
     var m = r.martini;
     if (m && typeof m === 'object') {
@@ -2357,16 +2369,16 @@
         ? '<ol class="res-beads">' + m.bead_mapping.map(function (b) {
             return '<li>' + _esc(_resV(b)) + '</li>'; }).join('') + '</ol>'
         : '';
-      martini = '<div class="res-martini"><div class="res-sub">Martini coarse-grained mapping</div>' +
+      martini = '<details class="res-martini">' +
+        '<summary class="res-sub">Martini coarse-grained mapping</summary>' +
         '<div class="res-kv-grid">' +
           _resKV('Version', m.version) + _resKV('Model', m.model) +
           _resKV('Beads/chain', m.n_beads_per_chain) + _resKV('Source ITP', m.source_itp) +
-        '</div>' + beads + '</div>';
+        '</div>' + beads + '</details>';
     }
-    return '<div class="res-card res-lipid">' + _resCardHead(r) +
+    return '<div class="res-card res-lipid">' + _resCardHead(r) + identLine +
       '<div class="res-kv-grid">' + kv + '</div>' + martini +
-      (r.notes ? '<p class="res-notes">' + _esc(r.notes) + '</p>' : '') +
-      _resRefChips(r.references, refsById) + '</div>';
+      (r.notes ? '<p class="res-notes">' + _esc(r.notes) + '</p>' : '') + '</div>';
   }
 
   // reaction-pathway → network_summary from a generated universe + keystone rules
@@ -2392,9 +2404,16 @@
       if (ns.n_reactions != null) headline.push(_resV(ns.n_reactions) + ' reactions');
       if (ns.n_species != null) headline.push(_resV(ns.n_species) + ' species');
       if (ns.max_carbons != null) headline.push('C≤' + _resV(ns.max_carbons));
-      var families = (ns.rule_families && ns.rule_families.length)
+      // Only render the Rule-family table when there are actual rows — never an
+      // empty table-with-headers shell. Drop rows that carry no family name AND
+      // no count so a populated-but-empty list can't produce a headers-only table.
+      var ruleRows = (ns.rule_families && ns.rule_families.length)
+        ? ns.rule_families.filter(function (f) {
+            return f && (_resV(f.name || f.rule) || _resV(f.n_reactions)); })
+        : [];
+      var families = ruleRows.length
         ? '<table class="res-table"><thead><tr><th>Rule family</th><th>#rxns</th></tr></thead><tbody>' +
-          ns.rule_families.map(function (f) {
+          ruleRows.map(function (f) {
             return '<tr><td>' + _esc(_resV(f.name || f.rule)) + '</td><td>' +
               _esc(_resV(f.n_reactions)) + '</td></tr>'; }).join('') +
           '</tbody></table>'
@@ -2465,7 +2484,7 @@
     }
 
     return '<div class="res-card res-pathway">' + head + role + net + keystone +
-      caveats + reactions + prov + _resRefChips(r.references, refsById) + '</div>';
+      caveats + reactions + prov + '</div>';
   }
 
   // imported-engine → engine/wraps/viva_package/role/used_by.
@@ -2479,8 +2498,7 @@
       '<div class="res-kv-grid">' +
         _resKV('Engine', r.engine) + _resKV('Wraps', r.wraps) +
         _resKV('viva package', r.viva_package) + _resKV('Role', r.role) +
-      '</div>' + usedBy +
-      _resRefChips(r.references, refsById) + '</div>';
+      '</div>' + usedBy + '</div>';
   }
 
   // paper-reference → a citation card, anchored by id so other resources'
