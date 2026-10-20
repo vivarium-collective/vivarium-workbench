@@ -15,11 +15,11 @@ def test_dag_node_click_selects_then_opens():
     assert "node.classList.add('aig-node-selected')" in JS
     assert "_openStudyInsideInvestigation(s.name)" in JS  # second click opens
     assert "_toggleExpandInPlace" in JS                   # in-place expand handler
-    # "Open study →" now lives INLINE inside the expanded detail block (not a
-    # floating pop-out, not a drawer) — so the button is present, but the pop-out
-    # modal code path is gone.
+    # The expanded detail block is present; the redundant inline "Open study →"
+    # button was removed (a second click on the selected card opens it), and the
+    # floating pop-out modal code path is gone.
     assert "aig-full-details" in JS                       # inline expansion block
-    assert "aig-open-study" in JS                         # open-study button is inline
+    assert "aig-open-study" not in JS                     # inline open-study button removed
     assert "_aigShowCardPopout" not in JS                 # floating pop-out removed
     assert "aig-card-popout" not in JS                    # ...and its modal element
     # no double-click handler

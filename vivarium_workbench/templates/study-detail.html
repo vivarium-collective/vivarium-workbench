@@ -856,7 +856,7 @@
 </section>
 
 
-{# ─── Model tab (Design): composition + Readouts + Advanced build provenance ─ #}
+{# ─── Model tab (Design): composition + Readouts ────────────────────────────── #}
 <section class="study-tab-panel" data-kind="compose" id="panel-compose" hidden>
   <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
     <h2 class="overview-label" style="margin:0">Model composition</h2>
@@ -1275,18 +1275,6 @@
   </div>
   </div>
 
-  {# Advanced — build provenance (Phase 1): the former Build tab, collapsed by
-     default at the bottom of Model. Loader _loadBuild(window._study) +
-     #build-loop-state id unchanged. #}
-  <details class="model-advanced" style="margin-top:18px">
-    <summary style="cursor:pointer;font-weight:600;color:#475569">Advanced — build provenance</summary>
-    <div style="margin-top:12px">
-
-  <p class="muted" style="margin:0 0 12px 0"><strong>How the model was built</strong> — the <code>/viva-model-build</code> loop trajectory (draft, frozen tests, iteration edits, result) and the agent's notes, when it was built that way.</p>
-
-  <div id="build-loop-state"><div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading loop provenance…</span></div></div>
-    </div>
-  </details>
 </section>
 
 
@@ -1391,10 +1379,17 @@
    Tests tab in as the first section; all ids preserved (report-cards-panel,
    tests-list, bt-<id>, audit-readiness, check-group-*). #}
 <section class="study-tab-panel" data-kind="audit" id="panel-audit" hidden>
-  <div class="overview-section" id="audit-tests-section">
-    <h3>Tests — the bar</h3>
 
-  <p class="muted" style="margin:0 0 12px 0"><strong>The bar</strong> — what must be true for this model to count as correct: the acceptance criteria, their bands, and the report cards that grade them.</p>
+  {# Readiness gaps (the deterministic report linter, GET /api/report-lint)
+     made the actionable TOP of the Audit tab: the exact, code-computed fixes
+     that make this study release-ready. Filled by _renderAuditReadiness; shows
+     a ✓ Ready card when there are none. Rendered FIRST, above the gates and
+     behavioral tests. #}
+  <div id="audit-readiness" data-slug="{{ name }}" style="margin:0 0 18px 0">
+    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading readiness…</span></div>
+  </div>
+
+  <div class="overview-section" id="audit-tests-section">
 
   {# C5 moved literature_anchors here verbatim from the dissolved Overview
      "Plan & provenance" group. C6 restyles it as an "Expectations" band: each
@@ -1646,16 +1641,6 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
   </div>
   </div>
 
-  <p class="muted" style="margin:0 0 12px 0"><strong>Is the bar sound?</strong> The concrete readiness gaps to close first, then whether the test set itself is rigorous and matched to the problem — sufficiency, sourcing, and the rigor + reproducibility scorecards.</p>
-
-  {# Readiness gaps (the deterministic report linter, GET /api/report-lint)
-     pulled in from the header dropdown and made the actionable top of Audit:
-     the exact, code-computed fixes that make this study release-ready. Filled
-     by _renderAuditReadiness; shows a ✓ Ready card when there are none. #}
-  <div id="audit-readiness" data-slug="{{ name }}" style="margin:0 0 18px 0">
-    <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading readiness…</span></div>
-  </div>
-
   <div class="checks-band">
     <div class="check-group check-group-sufficiency" id="audit-sufficiency" data-check-group="sufficiency">
       <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading sufficiency checks…</span></div>
@@ -1710,14 +1695,8 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
   </div>
   {% endif %}
 
-  {# Readiness gaps surfaced at the TOP of the Decide tab (right under the plan
-     stepper) — the concrete, deterministic fixes to close before release. Same
-     report-linter block as the Audit tab; populated by study-detail.js
-     (_renderAuditReadiness) into this mount when the Decide tab opens. #}
-  <div class="overview-section decide-readiness-section">
-    <h2 class="overview-label">Readiness gaps</h2>
-    <div id="decide-readiness" data-slug="{{ name }}"></div>
-  </div>
+  {# Readiness gaps now live ONLY at the top of the Audit tab (#audit-readiness);
+     the Decide tab no longer duplicates that block. #}
 
   {# v4 narrative-spine: conclusion_verdicts is a 3-track verdict block
      the dnaa investigation evolved — regression_compatibility (does code

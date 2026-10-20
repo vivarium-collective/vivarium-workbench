@@ -915,23 +915,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
     <!-- Primary nav -->
     <nav class="viv-rail-section" role="tablist">
-      <!-- Studies: the investigations overview — the default landing view and the
-           first rail item. The per-investigation study list lives in the search
-           section below. Branching-fan (DAG) icon. -->
-      <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="2.5" y="9" width="6" height="6"/>
-            <rect x="16" y="3" width="5.5" height="4"/>
-            <rect x="16" y="10" width="5.5" height="4"/>
-            <rect x="16" y="17" width="5.5" height="4"/>
-            <path d="M8.5 12L16 5"/>
-            <path d="M8.5 12h7.5"/>
-            <path d="M8.5 12L16 19"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">Studies</span>
-      </a>
       <!-- Resources: the workspace's source material. A single tab with two
            sub-tabs — "Datasets & references" (the /api/inputs datasets,
            references and expert docs) and "Scientific resources" (the curated
@@ -1041,6 +1024,25 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           </svg>
         </span>
         <span class="viv-rail-link-label">Code</span>
+      </a>
+      <!-- Studies: the investigations overview. The LAST rail item (moved to the
+           bottom of the menu), but still the DEFAULT landing view on workbench
+           load (the default page is 'investigations', set in walkthrough.js —
+           independent of this menu position). The per-investigation study list
+           lives in the search section below. Branching-fan (DAG) icon. -->
+      <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="2.5" y="9" width="6" height="6"/>
+            <rect x="16" y="3" width="5.5" height="4"/>
+            <rect x="16" y="10" width="5.5" height="4"/>
+            <rect x="16" y="17" width="5.5" height="4"/>
+            <path d="M8.5 12L16 5"/>
+            <path d="M8.5 12h7.5"/>
+            <path d="M8.5 12L16 19"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Studies</span>
       </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
@@ -1556,7 +1558,13 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   <div id="investigation-detail-view" style="display:none; margin-top:8px">
     <button class="iset-back-link" onclick="_showInvestigationList()" title="Back to all investigations"
             style="background:none; border:none; padding:0; margin:0 0 4px; color:#64748b; font-size:0.82em; cursor:pointer; display:inline-flex; align-items:center; gap:4px">&larr; All investigations</button>
-    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+    <!-- Duplicate of the workspace chrome header (#ws-title/#ws-status/#ws-actions),
+         which is the single chrome for the investigation title, status, and
+         Report/Notebook/Run actions now. Hidden on every render path so the
+         detail view doesn't show a second title row. (walkthrough.js also hides
+         this from _renderInvestigationDetailInto, but that doesn't fire on all
+         paths — the inline display:none guarantees it.) -->
+    <div style="display:none; align-items:center; gap:12px; margin-bottom:8px;">
       <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
       <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
       <span class="inv-export-actions" style="display:inline-flex; gap:6px">
