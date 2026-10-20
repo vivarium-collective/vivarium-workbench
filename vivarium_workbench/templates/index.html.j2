@@ -915,6 +915,23 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
     <!-- Primary nav -->
     <nav class="viv-rail-section" role="tablist">
+      <!-- Studies: the investigations overview — the default landing view and the
+           first rail item. The per-investigation study list lives in the search
+           section below. Branching-fan (DAG) icon. -->
+      <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="2.5" y="9" width="6" height="6"/>
+            <rect x="16" y="3" width="5.5" height="4"/>
+            <rect x="16" y="10" width="5.5" height="4"/>
+            <rect x="16" y="17" width="5.5" height="4"/>
+            <path d="M8.5 12L16 5"/>
+            <path d="M8.5 12h7.5"/>
+            <path d="M8.5 12L16 19"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Studies</span>
+      </a>
       <!-- Resources: the workspace's source material. A single tab with two
            sub-tabs — "Datasets & references" (the /api/inputs datasets,
            references and expert docs) and "Scientific resources" (the curated
@@ -964,22 +981,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           </svg>
         </span>
         <span class="viv-rail-link-label">Registry</span>
-      </a>
-      <!-- Studies: the investigations overview. Sits directly under Composites; the
-           per-investigation study list lives in the search section below. Branching-fan (DAG) icon. -->
-      <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="2.5" y="9" width="6" height="6"/>
-            <rect x="16" y="3" width="5.5" height="4"/>
-            <rect x="16" y="10" width="5.5" height="4"/>
-            <rect x="16" y="17" width="5.5" height="4"/>
-            <path d="M8.5 12L16 5"/>
-            <path d="M8.5 12h7.5"/>
-            <path d="M8.5 12L16 19"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">Studies</span>
       </a>
       <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
         <span class="viv-rail-link-icon">

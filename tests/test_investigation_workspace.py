@@ -311,7 +311,10 @@ def test_router_uses_workspace_not_legacy():
 
 
 def test_showworkspace_renders_graph_not_legacy_icon_view():
-    w = JS[JS.index("function _showInvestigationWorkspace"): JS.index("function _showInvestigationWorkspace") + 1200]
+    # Slice exactly the function body (definition → its window.* export) so this
+    # stays correct as the function grows (e.g. resolving the display title).
+    _start = JS.index("function _showInvestigationWorkspace")
+    w = JS[_start: JS.index("window._showInvestigationWorkspace =", _start)]
     assert "ws-context" in w
     assert "_showWorkspace" in w
     assert "_wsResetStudyTabs" in w
