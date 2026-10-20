@@ -87,6 +87,109 @@ def _store_stats(values: list) -> "dict | None":
     }
 
 
+def _global_run_id(row: dict) -> str:
+    """The run's workspace-GLOBAL id — the one the on-disk store is keyed by,
+    and the one the SQLite reader matches against ``simulation_id``.
+
+    ``simulations_index._study_run_uid`` prefixes a store-less ``study.yaml``
+    run's id with ``<slug>:`` (to keep name-runs unique across the workspace),
+    but the run's store on disk — e.g. the XArray ``<study>/runs.<run_id>.zarr``
+    — is named with the UN-prefixed global id. Strip only that exact ``<slug>:``
+    prefix; every other row's ``run_id`` is already the global id (and must be
+    left verbatim — NOT replaced by the display ``label``, which is the sim
+    name, not the store key).
+    """
+    rid = str(row.get("run_id") or "")
+    slug = row.get("study_slug")
+    if slug and rid.startswith(f"{slug}:"):
+        return rid[len(str(slug)) + 1:]
+    return rid
+
+
+def _study_dir_for_run(ws_root: Path, row: dict) -> "Path | None":
+    """The study directory (root OR nested-investigation layout) for a run row,
+    or ``None`` when the run isn't study-associated / the dir can't be found.
+
+    Reuses ``simulations_index._iter_all_study_dirs`` so a ``layout:`` remap and
+    the nested ``investigations/<inv>/studies/<slug>`` layout both resolve.
+    """
+    slug = row.get("study_slug") or next(iter(row.get("studies") or []), None)
+    if not slug:
+        return None
+    try:
+        from .simulations_index import _iter_all_study_dirs
+
+        for sdir, _inv, _rel in _iter_all_study_dirs(ws_root):
+            if sdir.name == slug:
+                return sdir
+    except Exception:  # noqa: BLE001 — best-effort; absence just means no zarr fallback
+        return None
+    return None
+
+
+def _candidate_stores(ws_root: Path, row: dict) -> "list[Path]":
+    """Ordered, on-disk stores that MAY hold this run's emitted observables.
+
+    The preview reads whichever one FIRST yields scalar leaves, so a run that
+    emitted to an XArray/zarr store is previewed from that zarr even when the
+    simulations-index row's ``store_path`` points at an empty — or entirely
+    absent — SQLite ``runs.db`` (the bug this resolves). Emitter-agnostic and
+    per-study-config-free; it only ever returns stores that actually exist on
+    disk, so a genuinely scalar-less run still previews empty (never fabricated).
+
+    Priority:
+      1. the row's recorded ``store_path`` / ``db_path``, resolved against BOTH
+         the workspace root and the study dir (a ``study.yaml`` run records a
+         study-relative path like ``canonical-runs/<id>/run.db`` that does NOT
+         resolve against the workspace root);
+      2. the canonical per-run XArray store ``<study>/runs.<run_id>.zarr``;
+      3. any other ``<study>/runs.*.zarr`` (newest first);
+      4. the study's ``runs.db``.
+    """
+    from . import run_store
+
+    ws_root = Path(ws_root)
+    study_dir = _study_dir_for_run(ws_root, row)
+    run_id = _global_run_id(row)
+    seen: set[str] = set()
+    out: list[Path] = []
+
+    def _add(p) -> None:
+        if not p:
+            return
+        p = Path(p)
+        key = str(p)
+        if key in seen:
+            return
+        seen.add(key)
+        if p.exists():
+            out.append(p)
+
+    for recorded in (row.get("store_path"), row.get("db_path")):
+        if not recorded:
+            continue
+        p = Path(recorded)
+        if p.is_absolute():
+            _add(p)
+        else:
+            _add(ws_root / p)
+            if study_dir is not None:
+                _add(study_dir / p)
+
+    if study_dir is not None:
+        if run_id:
+            _add(run_store.zarr_store_path(study_dir, run_id))
+        try:
+            for z in sorted(run_store.iter_zarr_stores(study_dir),
+                            key=lambda d: d.stat().st_mtime, reverse=True):
+                _add(z)
+        except OSError:
+            pass
+        _add(study_dir / "runs.db")
+
+    return out
+
+
 def build_study_results(ws_root: Path, slug: "str | None") -> tuple[dict, int]:
     """Worker for ``GET /api/study-results?study=<slug>`` -> ``(payload, 200)``.
 
@@ -120,7 +223,15 @@ def build_study_results(ws_root: Path, slug: "str | None") -> tuple[dict, int]:
 
     run_id = row.get("run_id")
     db_path = row.get("store_path") or row.get("db_path")
-    if not db_path:
+    # The GLOBAL run id (un-prefixed) is what the on-disk store is keyed by, so
+    # the store readers are addressed with it, not the possibly ``<slug>:``-
+    # prefixed row id.
+    store_run_id = _global_run_id(row)
+    # Every store this run might have emitted to, resolved from what's actually
+    # on disk — NOT just the one path the index row recorded. The scalar preview
+    # reads whichever first yields scalar leaves (see ``_candidate_stores``).
+    candidates = _candidate_stores(ws_root, row)
+    if not db_path and not candidates:
         return {"present": False, "run_id": run_id,
                 "reason": "this run has no on-disk store"}, 200
 
@@ -149,13 +260,28 @@ def build_study_results(ws_root: Path, slug: "str | None") -> tuple[dict, int]:
     try:
         from . import explorer_data
 
-        obs = explorer_data.list_observables(str(db_path), run_id=run_id, workspace=ws_root)
-        leaf_paths = _scalar_leaf_paths(obs.get("categories") or {})
-        if not leaf_paths:
+        # Read whichever store ACTUALLY holds this run's scalar observables.
+        # A study.yaml run may record a SQLite ``store_path`` while its scalars
+        # were emitted to the sibling ``<study>/runs.<run_id>.zarr`` — so we try
+        # each candidate and use the first that yields scalar leaves rather than
+        # trusting the one recorded path (which may be empty or missing).
+        chosen = None
+        leaf_paths: list[str] = []
+        for store in candidates:
+            obs = explorer_data.list_observables(
+                str(store), run_id=store_run_id, workspace=ws_root)
+            found = _scalar_leaf_paths(obs.get("categories") or {})
+            if found:
+                chosen, leaf_paths = store, found
+                break
+        if chosen is None:
+            # Every resolvable store read clean but none carried a scalar leaf —
+            # a genuinely scalar-less run. Present, with nothing to preview
+            # (never fabricated).
             return {"present": True, "stores": [], **common}, 200
         series = explorer_data.get_series(
-            str(db_path), [(p, None) for p in leaf_paths],
-            subsample=_SPARKLINE_POINTS, run_id=run_id, workspace=ws_root,
+            str(chosen), [(p, None) for p in leaf_paths],
+            subsample=_SPARKLINE_POINTS, run_id=store_run_id, workspace=ws_root,
         )
     except Exception as e:  # noqa: BLE001 — an unreadable store must never 500 the panel
         return {"present": False, "run_id": run_id,
