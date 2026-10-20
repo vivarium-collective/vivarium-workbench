@@ -1005,7 +1005,9 @@
         var validPages = _snap
           ? ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'resources', 'audit', 'composite-explore', 'github', 'about']
           : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'resources', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
-        _switchPage(validPages.indexOf(h) >= 0 ? h : 'resources');
+        // Default landing view is Studies (the #investigations page) when there's
+        // no (or an unknown) hash.
+        _switchPage(validPages.indexOf(h) >= 0 ? h : 'investigations');
       }
       window.addEventListener('hashchange', fromHash);
       fromHash();
@@ -10053,7 +10055,13 @@
     window._wsInvestigation = name;
     _showWorkspace();
     var title = document.getElementById('ws-title');
-    if (title) { title.textContent = name; title.title = name; }
+    if (title) {
+      // Show the investigation's display title (fall back to the slug when
+      // there's no title). Routing/API still keys off `name` (the slug).
+      var _iset = (window._isetIndex || []).find(function (i) { return i.name === name; });
+      var _label = (_iset && _iset.title) || name;
+      title.textContent = _label; title.title = _label;
+    }
     var kicker = document.getElementById('ws-title-kicker');
     if (kicker) kicker.textContent = 'Investigation';
     var status = document.getElementById('ws-status');
