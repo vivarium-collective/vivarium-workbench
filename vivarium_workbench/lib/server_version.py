@@ -8,7 +8,6 @@ the ``git_rev`` field to ``"unknown"``, never raises.
 
 from __future__ import annotations
 
-import subprocess
 
 from vivarium_workbench.lib.git_io import git_text
 import uuid

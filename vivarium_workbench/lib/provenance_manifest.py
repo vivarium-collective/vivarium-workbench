@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 
 from vivarium_workbench.lib.git_io import git_text
 from pathlib import Path

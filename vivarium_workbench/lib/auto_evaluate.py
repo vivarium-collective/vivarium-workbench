@@ -38,7 +38,6 @@ verdict yet, leaving authored outcomes untouched by default.
 from __future__ import annotations
 
 import io
-import os
 
 from vivarium_workbench.lib.atomic_io import atomic_write_text
 from pathlib import Path
