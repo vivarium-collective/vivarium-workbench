@@ -12674,10 +12674,14 @@
         // card's details are readable the same way — at EVERY zoom band,
         // including the lowest (names-only, band 0) where the card shows nothing
         // but its title. The full Asks/Finds/plan live in the popout, not inline.
-        ('<div class="aig-more-findings" style="font-size:0.72em;margin-top:6px;color:#7c3aed;font-weight:600;cursor:pointer">⤢ ' +
-              (moreN ? ('+' + moreN + ' more finding' + (moreN === 1 ? '' : 's') + ' — click to show')
-                     : 'click to show full card') +
-            '</div>') +
+        ('<div class="aig-more-wrap" style="margin-top:6px">' +
+            '<button type="button" class="aig-more-findings" tabindex="-1" ' +
+              'title="Pop out the full card (a separate action from click-to-select / double-click-to-open)">' +
+              '<span class="aig-more-icon" aria-hidden="true">⤢</span>' +
+              (moreN ? ('+' + moreN + ' more finding' + (moreN === 1 ? '' : 's'))
+                     : 'show full card') +
+            '</button>' +
+          '</div>') +
         // Full-magnification Plan layer: declared contract + mechanisms +
         // models/methods + success criteria (semantic-zoom band 2 only).
         (_opts.plan ? _dagPlanHtml(s) : '') +
