@@ -202,6 +202,10 @@
   // aig-graph.js) unless the user has manually toggled it, in which case the
   // choice is persisted per-investigation in localStorage and wins over auto.
   // -------------------------------------------------------------------------
+  // Once the user picks a direction with the ⇄/⇅ LAYOUT toggle, that choice stops
+  // the dock from auto-switching the flow direction (mirrors _aigUserZoomed, which
+  // stops auto-fit once the user drives the zoom). Cleared by the "auto" reset.
+  var _aigUserLayout = false;
   function _graphOrientationKey(name) {
     return 'aig-orientation:' + (name || 'default');
   }
@@ -214,15 +218,29 @@
   }
   function _setGraphOrientation(o) {
     if (o !== 'LR' && o !== 'TB') return;
+    _aigUserLayout = true;   // explicit manual choice — the dock no longer auto-switches
     try { window.localStorage.setItem(_graphOrientationKey(window._currentIset), o); } catch (e) { /* ignore */ }
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
   }
   window._setGraphOrientation = _setGraphOrientation;
   function _resetGraphOrientation() {
+    _aigUserLayout = false;   // back to automatic — the dock drives the default again
     try { window.localStorage.removeItem(_graphOrientationKey(window._currentIset)); } catch (e) { /* ignore */ }
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
   }
   window._resetGraphOrientation = _resetGraphOrientation;
+  // Dock-driven DEFAULT direction: when the Graph panel re-docks, match the flow
+  // to the panel's aspect — top/bottom (wide, short) → LR, left/right (narrow,
+  // tall) → TB. This is a DEFAULT, not a manual choice, so it does NOT persist and
+  // it steps aside once the user has set a direction (_aigUserLayout). We just
+  // re-render; the render's dock-side logic reads #viv-graph-panel's data-dock and
+  // applies LR/TB (a persisted manual choice still wins there).
+  function _setGraphOrientationForDock(o) {
+    if (o !== 'LR' && o !== 'TB') return;
+    if (_aigUserLayout) return;   // user picked a direction — respect it, don't auto-switch
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+  }
+  window._setGraphOrientationForDock = _setGraphOrientationForDock;
   // Reflect the active/override state on the toggle control, if present.
   function _syncGraphOrientToggleUI(orient, isOverride) {
     var lrBtn = document.getElementById('aig-orient-lr');

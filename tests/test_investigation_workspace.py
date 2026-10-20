@@ -25,10 +25,52 @@ def test_dock_resize_and_redock_keep_zoom_fixed():
     # The dock panel's resize/redock/expand reflow (keep zoom); they do NOT fit.
     assert "_aigReflowKeepZoom" in _gp_fn("reflow")
     assert "reflow()" in _gp_fn("relayout")         # re-dock / expand keep zoom
-    # The resize callback is the zoom-preserving reflow, not fit.
+    # The resize callback is the zoom-preserving reflow, not fit. This is the path
+    # the docked panel's resize GRIP/edge fires on mouseup (drag release) — so
+    # enlarging the docked panel and releasing keeps the user's zoom (no snap-to-fit).
     assert "onResize: reflow" in GP
+    assert "onResize: fit" not in GP                 # the snap-on-release bug path is gone
     # fit() (dock enter/exit, an initial-ish fit) honors the user-zoom intent lever.
     assert "_aigFitOrKeep" in _gp_fn("fit")
+
+
+def test_dock_position_drives_default_layout_direction():
+    """The DOCK position drives the graph's default flow direction: top/bottom
+    (wide, short panel) → LEFT-RIGHT; left/right (tall, narrow panel) → TOP-BOTTOM.
+    It's a DEFAULT — the manual ⇄/⇅ LAYOUT toggle still wins (via _aigUserLayout,
+    mirroring _aigUserZoomed)."""
+    # graph-panel.js: the dock-change path maps side → direction and routes through
+    # the dock orientation setter (not the persisting manual one).
+    i = GP.index("function orientForDock")
+    ob = GP[i: GP.find("\n  function ", i + 1)]
+    assert "(d === 'left' || d === 'right') ? 'TB' : 'LR'" in ob   # L/R→TB, T/B→LR
+    assert "_setGraphOrientationForDock" in ob
+    assert "_setGraphOrientation(" not in ob          # does NOT persist as a manual pick
+    # relayout() (the onDock handler) re-orients for the dock, keeping zoom.
+    r = GP.index("function relayout")
+    assert "orientForDock()" in GP[r: GP.find("\n", r + 20)]
+
+    # walkthrough.js: the manual-override flag mirrors _aigUserZoomed.
+    assert "var _aigUserLayout = false" in JS
+
+    def _js_fn(name):
+        k = JS.index("function %s" % name)
+        j = JS.find("\n  function ", k + 1)
+        return JS[k:j] if j != -1 else JS[k:]
+
+    # Manual toggle sets the flag + persists; the "auto" reset clears it.
+    assert "_aigUserLayout = true" in _js_fn("_setGraphOrientation")
+    assert "_aigUserLayout = false" in _js_fn("_resetGraphOrientation")
+    # The dock setter respects the manual flag and does NOT persist (no setItem).
+    dfn = _js_fn("_setGraphOrientationForDock")
+    assert "if (_aigUserLayout) return" in dfn
+    assert "setItem" not in dfn
+    assert "window._setGraphOrientationForDock" in JS
+
+    # The render maps the docked panel's data-dock to the default direction
+    # (only when no manual choice is stored), so the auto-switch takes effect.
+    assert "_dock === 'left' || _dock === 'right') orient = 'TB'" in JS
+    assert "_dock === 'top' || _dock === 'bottom') orient = 'LR'" in JS
 
 
 def test_studies_grouped_by_investigation():

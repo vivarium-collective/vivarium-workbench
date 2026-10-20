@@ -46,9 +46,14 @@
   function orientForDock() {
     if (!ctl || !ctl.getDock) { render(); return; }
     var d = ctl.getDock();
+    // Match the flow to the panel's aspect: a LEFT/RIGHT (tall, narrow) panel reads
+    // best top→bottom (TB); a TOP/BOTTOM (wide, short) panel left→right (LR).
     var orient = (d === 'left' || d === 'right') ? 'TB' : 'LR';
-    if (typeof global._setGraphOrientation === 'function') {
-      try { global._setGraphOrientation(orient); return; } catch (e) { /* fall through */ }
+    // Use the DOCK setter: it sets the DEFAULT direction (doesn't persist) and
+    // steps aside once the user has picked a layout via the ⇄/⇅ toggle, so the
+    // auto-switch is the default on dock change, not a lock.
+    if (typeof global._setGraphOrientationForDock === 'function') {
+      try { global._setGraphOrientationForDock(orient); return; } catch (e) { /* fall through */ }
     }
     render();
   }
