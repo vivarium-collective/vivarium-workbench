@@ -10789,6 +10789,16 @@
     var H = ['<section class="inv-plan-board' + (compact ? ' inv-plan-board-compact' : '') + '">'];
     // The tab label already says "Plan progress" — drop the redundant heading in compact mode.
     if (!compact) H.push('<h3 class="inv-plan-board-title">Plan progress · cumulative gates</h3>');
+    // Honest at-a-glance tally by outcome — NOT a strict "passed" count (which reads 0
+    // against met/qualified/refuted verdicts and makes an evaluated board look idle).
+    var _tally = {};
+    gates.forEach(function (g) { _tally[g.status] = (_tally[g.status] || 0) + 1; });
+    var _tOrder = ['passed', 'met', 'qualified', 'refuted', 'in_progress', 'blocked', 'pending'];
+    var _tBits = [];
+    _tOrder.forEach(function (s) { if (_tally[s]) _tBits.push(_tally[s] + ' ' + (meta[s] ? meta[s].label : s)); });
+    if (_tBits.length)
+      H.push('<div class="inv-plan-tally" style="font-size:0.82em;color:#64748b;margin:' +
+             (compact ? '0 0 8px' : '2px 0 10px') + '">' + _escInv(_tBits.join(' · ')) + '</div>');
     H.push('<ol class="inv-plan-gates">');
     gates.forEach(function (g) {
       var sm = meta[g.status] || meta.pending;
@@ -10980,9 +10990,13 @@
     var _planHtml = _planBoardHtml(d, { compact: true });
     if (_planHtml) {
       var _pb = d.plan_board || [];
-      var _passed = _pb.filter(function (g) { return g.status === 'passed'; }).length;
+      // Count EVALUATED gates (any terminal verdict), not strict "passed" — honest
+      // met/qualified/refuted verdicts are real progress, so "0/N passed" misread an
+      // evaluated board as no progress. The per-outcome breakdown is in the board tally.
+      var _TERMINAL = { passed: 1, met: 1, qualified: 1, refuted: 1 };
+      var _evaluated = _pb.filter(function (g) { return _TERMINAL[g.status]; }).length;
       tabs.push({ id:'plan', label:'Plan progress', html:_planHtml,
-        badge: _pb.length ? (_passed + '/' + _pb.length + ' gates') : '' });
+        badge: _pb.length ? (_evaluated + '/' + _pb.length + ' evaluated') : '' });
     }
 
     // 8. Decisions — the open expert decisions, HIGHLIGHTED when any are open.
@@ -10992,6 +11006,12 @@
       tabs.push({ id: 'decisions', label: 'Decisions', html: _decHtml,
         badge: _nDec ? (_nDec + ' needed') : 'all clear', attention: _nDec > 0 });
     }
+
+    // Lead with the argument, not the verdict wall: make "Hypothesis & evidence" the
+    // default (first/active) tab; Verdict stays available, just not the landing.
+    var _evIdx = -1;
+    for (var _ti = 0; _ti < tabs.length; _ti++) { if (tabs[_ti].id === 'evidence') { _evIdx = _ti; break; } }
+    if (_evIdx > 0) tabs.unshift(tabs.splice(_evIdx, 1)[0]);
 
     if (tabs.length) {
       H.push('<div class="inv-brief-tabs" role="tablist">' + tabs.map(function(t, i) {
