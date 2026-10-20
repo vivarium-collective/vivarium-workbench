@@ -1622,15 +1622,16 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          node in the graph is the navigation now. #}
       <span id="aig-layout-group" class="aig-tb-group" role="group" aria-label="Graph orientation">
         <span class="aig-tb-label">Layout</span>
+        {# Orientation is AUTO by default (derived from the container aspect) and
+           re-autos on every dock switch. The ⇄/⇅ buttons are a transient manual
+           override for the current dock; the next dock switch re-autos — so there
+           is no separate "auto" reset button. #}
         <span class="aig-tb-seg">
           <button id="aig-orient-lr" type="button" title="Left → right" aria-label="Left to right"
                   onclick="window._setGraphOrientation('LR')">⇄</button>
           <button id="aig-orient-tb" type="button" title="Top → bottom" aria-label="Top to bottom"
                   onclick="window._setGraphOrientation('TB')">⇅</button>
         </span>
-        <button id="aig-orient-auto" type="button" class="aig-tb-link" title="Reset to automatic orientation"
-                aria-label="Reset to automatic orientation" onclick="window._resetGraphOrientation()"
-                style="visibility:hidden">auto</button>
       </span>
       <!-- One unified Zoom slider: from a zoomed-out overview (names-only, small)
            on the left up to the single-card level (full detail, large) on the

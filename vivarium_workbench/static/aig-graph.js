@@ -207,9 +207,11 @@
   //     stack downward so a wide single row doesn't get squished into one column.
   //   - DEEP/NARROW graphs (long dependency chains, few studies per depth) go "LR"
   //     (left-to-right): a long chain reads naturally as a left->right sequence.
-  // A manual per-investigation toggle (persisted in localStorage) overrides this
-  // default entirely — see _getStoredGraphOrientation/_setGraphOrientation in
-  // walkthrough.js.
+  // NOTE: this shape heuristic is now only a LAST-RESORT fallback. The default
+  // orientation is AUTO from the container ASPECT (_aigAutoOrient in walkthrough.js:
+  // wide → LR, tall → TB; dock side when docked), re-applied on load and on every
+  // dock switch; the ⇄/⇅ buttons are a transient manual override (_setGraphOrientation).
+  // This function is used only when nothing can be measured (e.g. a headless render).
   function chooseGraphOrientation(depthCounts) {
     var counts = depthCounts || {};
     var levels = Object.keys(counts);

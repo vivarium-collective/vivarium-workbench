@@ -29,39 +29,45 @@
       if (typeof global._aigFit === 'function') global._aigFit();
     } catch (e) { /* ignore */ }
   }
-  // Reflow the viewport at the CURRENT zoom — used on panel RESIZE / RE-DOCK /
-  // expand so relocating or resizing the panel never recomputes (changes) the
-  // zoom. Falls back to a plain re-render when the helper isn't present.
+  // Reflow the viewport at the CURRENT zoom — used on edge-RESIZE (drag the resize
+  // grip) so resizing the panel never recomputes (changes) the zoom. This is the
+  // headline "resize snaps to fit" fix; it must NOT re-fit.
   function reflow() {
     try {
       if (typeof global._aigReflowKeepZoom === 'function') { global._aigReflowKeepZoom(); return; }
       if (typeof global._aigFit === 'function') global._aigFit();
     } catch (e) { /* ignore */ }
   }
+  // Fill the docked panel cleanly — zoom the graph to the panel's constrained
+  // dimension (top/bottom band → fill height; left/right column → fill width) so
+  // it doesn't sit small in a mostly-empty box. Used on dock ENTER / dock-position
+  // SWITCH / expand (a fresh geometry), honoring the user's zoom intent lever.
+  function dockFill() {
+    try {
+      if (typeof global._aigFitDockPanel === 'function') { global._aigFitDockPanel(); return; }
+      reflow();
+    } catch (e) { /* ignore */ }
+  }
   function render() { try { if (typeof global._reflowInvestigationDag === 'function') global._reflowInvestigationDag(); } catch (e) { /* ignore */ } }
 
-  // Orientation follows the dock side: a LEFT/RIGHT (tall, narrow) panel reads best
-  // with a VERTICAL flow (top→bottom), a TOP/BOTTOM (wide, short) panel with a
-  // HORIZONTAL flow (left→right). _setGraphOrientation re-renders the graph.
+  // A dock-position switch RE-AUTOS the orientation from the new dock's aspect:
+  // _setGraphOrientationForDock clears any transient manual (⇄/⇅) override and
+  // re-renders; the render derives the direction from the live dock side (left/right
+  // → TB, top/bottom → LR). So the dock switch itself IS the "reset to auto".
   function orientForDock() {
-    if (!ctl || !ctl.getDock) { render(); return; }
-    var d = ctl.getDock();
-    // Match the flow to the panel's aspect: a LEFT/RIGHT (tall, narrow) panel reads
-    // best top→bottom (TB); a TOP/BOTTOM (wide, short) panel left→right (LR).
-    var orient = (d === 'left' || d === 'right') ? 'TB' : 'LR';
-    // Use the DOCK setter: it sets the DEFAULT direction (doesn't persist) and
-    // steps aside once the user has picked a layout via the ⇄/⇅ toggle, so the
-    // auto-switch is the default on dock change, not a lock.
     if (typeof global._setGraphOrientationForDock === 'function') {
+      var d = (ctl && ctl.getDock) ? ctl.getDock() : '';
+      var orient = (d === 'left' || d === 'right') ? 'TB' : 'LR';   // advisory; render recomputes
       try { global._setGraphOrientationForDock(orient); return; } catch (e) { /* fall through */ }
     }
     render();
   }
 
-  // Re-orient for the current dock and re-render, keeping the user's zoom. Used on
-  // RE-DOCK and on expand: the dock side may flip the flow orientation (a re-render),
-  // but the zoom scale is preserved — the viewport reflows, it does not re-fit.
-  function relayout() { orientForDock(); reflow(); }
+  // Re-auto the orientation for the current dock, then FILL the panel cleanly at a
+  // sensible zoom. Used on dock-position SWITCH and on expand: the dock side may
+  // flip the flow orientation, and we fill the new band/column so it isn't a small
+  // graph in a mostly-empty box.
+  function relayout() { orientForDock(); dockFill(); }
 
   function showEmptyHint(show) {
     var b = bodyEl(); if (!b) return;
@@ -110,9 +116,9 @@
       var g = graphEl();
       var tb = g && g.querySelector('.aig-toolbar');
       if (tb && ctl && ctl.addDragHandle) ctl.addDragHandle(tb);
-      // Dock ENTER: orient for the dock side, then fit the initial view (fit() is
-      // zoom-intent aware — it keeps the user's zoom if they've set one).
-      setTimeout(function () { orientForDock(); fit(); }, 60);
+      // Dock ENTER: auto-orient for the dock side, then fill the panel cleanly
+      // (dockFill is zoom-intent aware — it keeps the user's zoom if they set one).
+      setTimeout(function () { orientForDock(); dockFill(); }, 60);
     } else {
       showEmptyHint(true);
     }
@@ -120,9 +126,14 @@
 
   function onClose() {
     graphToInline();
-    // Back inline == the full-page graph; restore auto orientation + re-fit it.
+    // Back inline == the full-page graph. Clearing the manual override re-renders,
+    // and the inline render re-autos the orientation (wide → LR) and runs its own
+    // height auto-fill — so no explicit fit here (a fit-both would shrink a wide
+    // inline LR graph). Fall back to a fit only if the reset helper is absent.
     setTimeout(function () {
-      try { if (typeof global._resetGraphOrientation === 'function') global._resetGraphOrientation(); } catch (e) { /* ignore */ }
+      if (typeof global._resetGraphOrientation === 'function') {
+        try { global._resetGraphOrientation(); return; } catch (e) { /* fall through */ }
+      }
       fit();
     }, 60);
   }
@@ -169,7 +180,7 @@
       // at the user's current zoom instead (relayout/reflow keep the scale).
       onResize: reflow,
       onDock: function () { setTimeout(relayout, 60); },
-      onCollapse: function (c) { if (!c) setTimeout(relayout, 60); },   // reflow on expand
+      onCollapse: function (c) { if (!c) setTimeout(relayout, 60); },   // re-auto + fill on expand
     });
 
     // Public API — mirrors window.ProcessCode.* so the toolbar buttons can call it.

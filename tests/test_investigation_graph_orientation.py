@@ -36,28 +36,40 @@ def test_choose_graph_orientation_helper_exists_and_is_exported():
 
 def test_render_dag_computes_and_applies_orientation():
     fn = dag_render_fn()
-    # auto default comes from the pure helper, keyed on this investigation's depth shape
+    # AUTO default comes from the container aspect (_aigAutoOrient); the pure shape
+    # helper is only the last-resort fallback when nothing can be measured.
+    assert "_aigAutoOrient()" in fn
     assert "window.chooseGraphOrientation" in fn
     assert "depthCounts" in fn
-    # manual override (localStorage) wins over auto when present
-    assert "_getStoredGraphOrientation(window._currentIset)" in fn
-    assert "var orient = _storedOrient ||" in fn
+    # A transient in-memory manual override wins over auto when present.
+    assert "_aigManualOrient === 'LR' || _aigManualOrient === 'TB'" in fn
     # both orientation branches are present in the layout + edge-drawing passes
     assert "orient === 'TB'" in fn
     assert fn.count("orient === 'TB'") >= 3, "expected TB branch in layout AND edge-drawing code"
 
 
-def test_orientation_persistence_helpers_use_localstorage():
-    assert "function _graphOrientationKey(name)" in JS
-    assert "'aig-orientation:'" in JS
-    assert "function _getStoredGraphOrientation(name)" in JS
-    assert "window.localStorage.getItem(_graphOrientationKey(name))" in JS
+def test_orientation_is_auto_by_aspect_with_in_memory_override():
+    # Orientation is no longer persisted to localStorage — it is AUTO from the
+    # container aspect, with a transient in-memory manual override.
+    assert "aig-orientation" not in JS                    # no persistence key
+    assert "function _graphOrientationKey" not in JS
+    assert "function _getStoredGraphOrientation" not in JS
+    # Aspect-derived auto: dock side (L/R → TB, T/B → LR) + inline wide → LR.
+    assert "function _aigAutoOrient()" in JS
+    assert "dock === 'left' || dock === 'right'" in JS and "return 'TB'" in JS
+    assert "dock === 'top' || dock === 'bottom'" in JS and "return 'LR'" in JS
+    assert "availW >= availH ? 'LR' : 'TB'" in JS
+    # Manual override: in-memory, not persisted; exposed as before.
+    assert "var _aigManualOrient = null" in JS
     assert "function _setGraphOrientation(o)" in JS
-    assert "window.localStorage.setItem(_graphOrientationKey(window._currentIset), o)" in JS
+    assert "_aigManualOrient = o" in JS
+    assert "localStorage" not in JS.split("function _setGraphOrientation(o)")[1].split("\n  function ")[0]
     assert "window._setGraphOrientation = _setGraphOrientation;" in JS
-    # reset-to-auto affordance
+    # A dock switch re-autos (clears the override); helper exposed for graph-panel.js.
+    assert "function _setGraphOrientationForDock(o)" in JS
+    assert "window._setGraphOrientationForDock = _setGraphOrientationForDock;" in JS
+    # _resetGraphOrientation kept (used on dock close) but no longer touches storage.
     assert "function _resetGraphOrientation()" in JS
-    assert "window.localStorage.removeItem(_graphOrientationKey(window._currentIset));" in JS
     assert "window._resetGraphOrientation = _resetGraphOrientation;" in JS
 
 
@@ -66,9 +78,9 @@ def test_manual_toggle_control_wired_in_template():
     assert 'id="aig-orient-tb"' in HTML
     assert "window._setGraphOrientation('LR')" in HTML
     assert "window._setGraphOrientation('TB')" in HTML
-    # reset-to-auto affordance in the UI
-    assert 'id="aig-orient-auto"' in HTML
-    assert "window._resetGraphOrientation()" in HTML
+    # No separate "auto" reset button — the dock switch IS the reset to auto.
+    assert 'id="aig-orient-auto"' not in HTML
+    assert "window._resetGraphOrientation()" not in HTML
 
 
 def test_tb_edge_endpoints_use_vertical_flow_not_horizontal():
