@@ -2,22 +2,15 @@
 variant IS a saved (composite, config) run — the data-model unification (SP-B)."""
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 
 from vivarium_workbench.lib import composite_runs
-from vivarium_workbench.lib.workspace_paths import WorkspacePaths
-
-
-def _study_yaml(workspace: Path, study: str) -> Path | None:
-    p = WorkspacePaths.load(workspace).study_dir(study) / "study.yaml"
-    return p if p.is_file() else None
+from vivarium_workbench.lib.workspace_paths import study_yaml_path
 
 
 def save_run_as_variant(workspace, *, run_id, source_db, study, variant_name):
-    sf = _study_yaml(Path(workspace), study)
-    if sf is None:
+    sf = study_yaml_path(workspace, study)
+    if not sf.is_file():
         return {"error": f"study not found: {study}"}, 404
     conn = composite_runs.connect(source_db)
     try:

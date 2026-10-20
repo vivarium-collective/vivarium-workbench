@@ -45,6 +45,7 @@ from ruamel.yaml import YAML
 from viva_superpowers import study_io
 from viva_superpowers.feedback_import import _feedback_files
 from viva_superpowers.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import study_yaml_path
 
 # Action status sets ──────────────────────────────────────────────────────────
 
@@ -314,10 +315,6 @@ def record_feedback_action(
 # ── apply ─────────────────────────────────────────────────────────────────────
 
 
-def _study_yaml(workspace: Path | str, slug: str) -> Path:
-    return WorkspacePaths.load(workspace).study_dir(slug) / "study.yaml"
-
-
 def _write_finding_next_action(study_yaml: Path, finding_id: str, text: str) -> None:
     """Set ``findings[<finding_id>].next_action = text`` (ruamel, atomic).
 
@@ -424,7 +421,7 @@ def apply_feedback_action(
             if not target_finding:
                 return {"applied": False, "error": "next_action action has no target_finding"}
             _write_finding_next_action(
-                _study_yaml(workspace, target_study), target_finding, proposed_text)
+                study_yaml_path(workspace, target_study), target_finding, proposed_text)
             result["target_finding"] = target_finding
             result["wrote"] = "findings.next_action"
 
@@ -432,7 +429,7 @@ def apply_feedback_action(
             if not target_study:
                 return {"applied": False, "error": "finding action has no target_study"}
             fid = _draft_finding_stub(
-                _study_yaml(workspace, target_study), proposed_text, item_id)
+                study_yaml_path(workspace, target_study), proposed_text, item_id)
             result["drafted_finding"] = fid
 
         elif kind == "design-edit":
@@ -444,7 +441,7 @@ def apply_feedback_action(
             from viva_superpowers import seed_from_followup
             if not target_study:
                 return {"applied": False, "error": "study-seed action has no target_study"}
-            parent_spec = study_io.load_yaml(_study_yaml(workspace, target_study))
+            parent_spec = study_io.load_yaml(study_yaml_path(workspace, target_study))
             seed_source = seed_from_followup.resolve_seed_source(
                 parent_spec,
                 finding_id=action.get("target_finding"),

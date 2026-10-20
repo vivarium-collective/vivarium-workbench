@@ -107,9 +107,9 @@ def test_node_store_resolves_nested_study(nested_ws):
 
 
 def test_study_variants_resolves_nested_study_under_layout(nested_ws):
-    from vivarium_workbench.lib.study_variants import _study_yaml
+    from vivarium_workbench.lib.workspace_paths import study_yaml_path
 
-    assert _study_yaml(nested_ws, _SLUG) == (_study_dir(nested_ws) / "study.yaml").resolve()
+    assert study_yaml_path(nested_ws, _SLUG) == (_study_dir(nested_ws) / "study.yaml").resolve()
 
 
 def test_study_rename_renames_nested_study_in_place(nested_ws):
@@ -130,9 +130,9 @@ def _expected(ws: Path) -> Path:
 
 
 def test_study_narrative_resolves_nested_study(nested_ws):
-    from vivarium_workbench.lib.study_narrative import _study_yaml
+    from vivarium_workbench.lib.workspace_paths import study_yaml_path
 
-    assert _study_yaml(nested_ws, _SLUG) == _expected(nested_ws) / "study.yaml"
+    assert study_yaml_path(nested_ws, _SLUG) == _expected(nested_ws) / "study.yaml"
 
 
 def test_study_findings_resolves_nested_study(nested_ws):
