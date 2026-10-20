@@ -13238,6 +13238,27 @@
     _applyAigZoom();
     shell.scrollLeft = 0; shell.scrollTop = 0;
   }
+  // Reflow the graph viewport at the CURRENT zoom — re-apply the transform and
+  // resize the scroll spacer to match the (unchanged) scale, WITHOUT recomputing
+  // the zoom to fit. Relocating or resizing the dockable Graph panel then pans /
+  // reflows the view but never changes the zoom level the user set. This is the
+  // fix for "resize or re-dock snaps the graph to fit": the dock callbacks used to
+  // call _aigFit (which overwrites aigZoom); they now call this.
+  function _aigReflowKeepZoom() {
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell) return;
+    _applyAigZoom();   // re-apply the current aigZoom + re-size the scroll extent
+  }
+  window._aigReflowKeepZoom = _aigReflowKeepZoom;
+  // Fit to the container UNLESS the user has taken the zoom over (_aigUserZoomed),
+  // in which case keep their zoom and just reflow. Used when the graph ENTERS or
+  // LEAVES the dock (an initial-ish fit) so the first dock view is sized sensibly,
+  // while still honoring the user's zoom intent lever.
+  function _aigFitOrKeep() {
+    if (_aigUserZoomed) { _aigReflowKeepZoom(); return; }
+    _aigFit();
+  }
+  window._aigFitOrKeep = _aigFitOrKeep;
   // Default pre-study INLINE view: after _applyAigZoom has sized the pane to the
   // full viewport height, zoom the graph UP to fill that height (as large as it
   // goes, capped at 2×). The wide study chain scrolls horizontally. Skipped when

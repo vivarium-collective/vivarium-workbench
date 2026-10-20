@@ -21,7 +21,23 @@
   function graphEl() { return el(GRAPH_ID); }
   function bodyEl() { return el(BODY_ID); }
 
-  function fit() { try { if (typeof global._aigFit === 'function') global._aigFit(); } catch (e) { /* ignore */ } }
+  // Fit on dock ENTER/EXIT (an initial-ish fit) but honor the user's zoom intent:
+  // _aigFitOrKeep keeps the current zoom once the user has driven it, else fits.
+  function fit() {
+    try {
+      if (typeof global._aigFitOrKeep === 'function') { global._aigFitOrKeep(); return; }
+      if (typeof global._aigFit === 'function') global._aigFit();
+    } catch (e) { /* ignore */ }
+  }
+  // Reflow the viewport at the CURRENT zoom — used on panel RESIZE / RE-DOCK /
+  // expand so relocating or resizing the panel never recomputes (changes) the
+  // zoom. Falls back to a plain re-render when the helper isn't present.
+  function reflow() {
+    try {
+      if (typeof global._aigReflowKeepZoom === 'function') { global._aigReflowKeepZoom(); return; }
+      if (typeof global._aigFit === 'function') global._aigFit();
+    } catch (e) { /* ignore */ }
+  }
   function render() { try { if (typeof global._reflowInvestigationDag === 'function') global._reflowInvestigationDag(); } catch (e) { /* ignore */ } }
 
   // Orientation follows the dock side: a LEFT/RIGHT (tall, narrow) panel reads best
@@ -37,8 +53,10 @@
     render();
   }
 
-  // Re-orient for the current dock, re-render, then fit the graph to the panel.
-  function relayout() { orientForDock(); fit(); }
+  // Re-orient for the current dock and re-render, keeping the user's zoom. Used on
+  // RE-DOCK and on expand: the dock side may flip the flow orientation (a re-render),
+  // but the zoom scale is preserved — the viewport reflows, it does not re-fit.
+  function relayout() { orientForDock(); reflow(); }
 
   function showEmptyHint(show) {
     var b = bodyEl(); if (!b) return;
@@ -87,7 +105,9 @@
       var g = graphEl();
       var tb = g && g.querySelector('.aig-toolbar');
       if (tb && ctl && ctl.addDragHandle) ctl.addDragHandle(tb);
-      setTimeout(relayout, 60);
+      // Dock ENTER: orient for the dock side, then fit the initial view (fit() is
+      // zoom-intent aware — it keeps the user's zoom if they've set one).
+      setTimeout(function () { orientForDock(); fit(); }, 60);
     } else {
       showEmptyHint(true);
     }
@@ -140,9 +160,11 @@
       popout: function () { global.VivPanelDock.popout('graph'); },
       defaultDock: 'right', defaultSize: { side: 480, bottom: 340 },
       onOpen: onOpen, onClose: onClose,
-      onResize: fit,
+      // Resize / re-dock / expand must NOT recompute the zoom — reflow the viewport
+      // at the user's current zoom instead (relayout/reflow keep the scale).
+      onResize: reflow,
       onDock: function () { setTimeout(relayout, 60); },
-      onCollapse: function (c) { if (!c) setTimeout(relayout, 60); },   // re-fit on expand
+      onCollapse: function (c) { if (!c) setTimeout(relayout, 60); },   // reflow on expand
     });
 
     // Public API — mirrors window.ProcessCode.* so the toolbar buttons can call it.

@@ -2,7 +2,33 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text(encoding="utf-8")
+GP = (ROOT / "vivarium_workbench/static/graph-panel.js").read_text(encoding="utf-8")
 TPL = (ROOT / "vivarium_workbench/templates/index.html.j2").read_text(encoding="utf-8")
+
+
+def test_dock_resize_and_redock_keep_zoom_fixed():
+    """Resizing the docked Graph panel or changing its dock position/size must
+    reflow the viewport at the CURRENT zoom — never recompute it with _aigFit
+    (that was the "resize snaps the graph to fit" bug). walkthrough.js exposes a
+    zoom-preserving reflow; graph-panel.js wires it to the resize/re-dock paths."""
+    # walkthrough.js: a reflow that re-applies the current zoom without refitting,
+    # and a fit that steps aside once the user has driven the zoom.
+    assert "function _aigReflowKeepZoom" in JS
+    assert "window._aigReflowKeepZoom" in JS
+    assert "function _aigFitOrKeep" in JS and "window._aigFitOrKeep" in JS
+
+    def _gp_fn(name):
+        i = GP.index("function %s" % name)
+        j = GP.find("\n  function ", i + 1)
+        return GP[i:j] if j != -1 else GP[i:]
+
+    # The dock panel's resize/redock/expand reflow (keep zoom); they do NOT fit.
+    assert "_aigReflowKeepZoom" in _gp_fn("reflow")
+    assert "reflow()" in _gp_fn("relayout")         # re-dock / expand keep zoom
+    # The resize callback is the zoom-preserving reflow, not fit.
+    assert "onResize: reflow" in GP
+    # fit() (dock enter/exit, an initial-ish fit) honors the user-zoom intent lever.
+    assert "_aigFitOrKeep" in _gp_fn("fit")
 
 
 def test_studies_grouped_by_investigation():
