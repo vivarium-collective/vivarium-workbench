@@ -633,11 +633,12 @@ from vivarium_workbench.lib.single_study_report import (  # noqa: E402
     _claim_scope_chip,
     _generality_chip,
     _lifecycle_chip,
+)
+from vivarium_workbench.lib.single_study_report_rigor import (  # noqa: E402
     _threshold_provenance_chip,
     _pass_if_text,
     _render_threshold_sensitivity,
     _render_calibration_ladder,
-    _render_measurement_integrity,
 )
 
 
@@ -774,7 +775,7 @@ def test_measurement_integrity_omitted_when_absent(_ws):
 def test_measurement_integrity_sensitivity_via_stub(monkeypatch, _ws):
     # #9 — drive the sensitivity mini-view through a stubbed bridge so the
     # render is covered even when pbg-superpowers lacks threshold_sensitivity.
-    import vivarium_workbench.lib.single_study_report as ssr
+    import vivarium_workbench.lib.single_study_report_rigor as ssr
     monkeypatch.setattr(ssr, "_threshold_sensitivity",
                         lambda spec, name: [{"cutoff": 0.9, "result": "PASS"},
                                             {"cutoff": 1.1, "result": "FAIL"}])
