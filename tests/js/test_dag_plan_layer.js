@@ -13,7 +13,10 @@ const w = fs.readFileSync(
 
 // The plan-layer helper exists and is wired, gated on _opts.plan.
 assert.ok(w.includes('function _dagPlanHtml'), '_dagPlanHtml helper defined');
-assert.ok(w.includes('_opts.plan ? _dagPlanHtml(s)'), 'plan layer wired, gated on _opts.plan');
+// Gated on _opts.plan; wrapped in .aig-plan-inline so in-place card expansion can
+// hide this compact preview (the full plan lives in the expanded .aig-full-details).
+assert.ok(/_opts\.plan \? \('<div class="aig-plan-inline">' \+ _dagPlanHtml\(s\)/.test(w),
+  'plan layer wired, gated on _opts.plan, wrapped in .aig-plan-inline');
 // It renders each planning sub-block from the node data.
 assert.ok(w.includes('s.proposed_mechanisms'), 'plan layer reads proposed_mechanisms');
 assert.ok(w.includes('s.proposed_models_methods'), 'plan layer reads proposed_models_methods');

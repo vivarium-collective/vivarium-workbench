@@ -5109,10 +5109,12 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
   color: #fff; background: #7c3aed; padding: 1px 7px; border-radius: 9999px; z-index: 1;
 }
-/* "Show full card" pop-out affordance — a LOCALIZED button chip, visually distinct
-   from the card body (click = select, double-click = open). A subtle bordered pill
-   with padding + hover so it reads as "click THIS element", not a generic hint. It
-   sizes to its content (inline-flex) so it never spans the whole card. */
+/* "Show full card" expand-in-place affordance — a LOCALIZED button chip, visually
+   distinct from the card body (click = select, double-click = open). A subtle
+   bordered pill with padding + hover so it reads as "click THIS element", not a
+   generic hint. It sizes to its content (inline-flex) so it never spans the whole
+   card. Clicking it expands the card IN PLACE (the full Asks/Finds/plan grow
+   downward from the card's anchored top); clicking again collapses it. */
 .aig-more-wrap { display: flex; }
 .aig-more-findings {
   display: inline-flex; align-items: center; gap: 4px;
@@ -5128,6 +5130,21 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 .aig-more-findings .aig-more-icon { font-weight: 400; }
 .aig-more-findings:hover { background: #ede9fe; border-color: #c4b5fd; color: #6d28d9; }
 .aig-more-findings:focus-visible { outline: 2px solid #7c3aed; outline-offset: 1px; }
+.aig-more-findings[aria-expanded="true"] { background: #ede9fe; border-color: #c4b5fd; color: #6d28d9; }
+
+/* Full detail revealed inline when the card is expanded. It grows the card
+   downward (the card's top-left stays anchored); the graph shell grows its
+   scroll extent to match so the content is reachable by scrolling. */
+.aig-full-details { word-break: break-word; overflow-wrap: anywhere; }
+.aig-full-details .aig-open-study {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 1em; font-weight: 600; font-family: inherit; line-height: 1.2;
+  color: #fff; background: #2563eb;
+  border: none; border-radius: 6px; padding: 5px 14px; cursor: pointer;
+  transition: background 0.12s ease;
+}
+.aig-full-details .aig-open-study:hover { background: #1d4ed8; }
+.aig-full-details .aig-open-study:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 
 /* ── Composites page: compact, informative cards ──────────────────────────── */
 .ccard-grid {
@@ -5537,6 +5554,9 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 :root[data-theme="dark"] .aig-orient-tb{ background:var(--bg) !important; }
 :root[data-theme="dark"] .iset-dag-node{ background:var(--surface) !important; border-color:var(--border) !important; color:var(--text); }
 :root[data-theme="dark"] .iset-dag-node .aig-claim-row:hover{ background:var(--hover); }
+/* In-place full-detail block — dark. Its inline base colours (slate text + light
+   divider) are overridden with theme tokens, like the node itself. */
+:root[data-theme="dark"] .aig-full-details{ color:var(--text) !important; border-top-color:var(--border) !important; }
 /* "Methods · Simulations" block — dark. Inline base colours are overridden with
    theme tokens (mirrors the .iset-dag-node / .aig-claim-row dark handling). */
 :root[data-theme="dark"] .aig-methods-block{ border-top-color:var(--border) !important; }
