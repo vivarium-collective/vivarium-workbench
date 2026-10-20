@@ -10884,17 +10884,10 @@
     // Headline.
     if (headline) H.push('<h2 class="inv-brief-q">' + _invInline(headline) + '</h2>');
 
-    // (The verdict moved out of the header into its own canonical tab below, so
-    // the long status paragraph no longer pushes the rest of the page down.)
-
-    // Introduction — the full what_is_this rendered as markdown prose.
-    if (whatIs) H.push('<div class="inv-brief-prose inv-brief-intro">' + _renderInvLeadMarkdown(whatIs) + '</div>');
-
-    // Meta — the driving question + hypothesis, one muted line each.
-    var _meta = [];
-    if (q) _meta.push('<span class="inv-brief-meta-item"><em>Question</em> ' + _invInline(oneline(q)) + '</span>');
-    if (hyp) _meta.push('<span class="inv-brief-meta-item"><em>Hypothesis</em> ' + _invInline(hyp) + '</span>');
-    if (_meta.length) H.push('<div class="inv-brief-meta">' + _meta.join('') + '</div>');
+    // Front stays lean — just the headline — so the investigation graph sits high
+    // on the page. The overview, verdict, background (with the question/hypothesis
+    // + evidence folded in), plan and decisions all live behind the tab strip
+    // below; only the short Overview tab shows on load.
 
     // Canonical section set — a FIXED, ordered list of tabs so every
     // investigation renders the SAME shape (reproducible across the workspace),
@@ -10920,32 +10913,13 @@
 
     var tabs = [];
 
-    // 1. Verdict — the campaign's current answer (executive.verdict). First tab
-    // so the answer is what opens; the colored VS pill is kept for status.
-    if (verdict)
-      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vs.toUpperCase() : '',
-        html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
-          '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
-          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' });
-
-    // 2. Background — the lead intro (falls back to description).
-    if (leadProse)
-      tabs.push({ id:'background', label:'Background', html:
-        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(leadProse) + '</div>' });
-
-    // 3. Biology — the plain-English mechanism narrative (biological_story).
-    if (bio)
-      tabs.push({ id:'biology', label:'Biology', html:
-        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(bio) + '</div>' });
-
-    // 4. Hypothesis & evidence — the structured argument (scientific_argument
-    // main_claim + key_claims as CITED claims), with the competing interpretive
-    // frameworks FOLDED IN as a trailing note rather than a separate, usually
-    // thin tab. Citation chips resolve from references/papers.bib.
+    // Structured-argument (evidence) body — now folded INTO Background rather than
+    // its own tab (scientific_argument main_claim + key_claims as cited claims +
+    // competing frameworks). Citation chips resolve from references/papers.bib.
     var kclaims    = Array.isArray(d.key_claims) ? d.key_claims : [];
     var sciArg     = d.scientific_argument || {};
     var frameworks = Array.isArray(d.competing_frameworks) ? d.competing_frameworks : [];
-    if (kclaims.length || sciArg.main_claim || frameworks.length) {
+    function _evidenceBody() {
       var evBody = '';
       if (sciArg.main_claim)
         evBody += '<p class="inv-brief-prose" style="font-weight:600;margin:0 0 10px">' +
@@ -10967,8 +10941,53 @@
             return '<li><strong>' + _escInv(f.name || '') + '</strong>' +
               (f.relation ? ' <span class="muted">— ' + _escInv(f.relation) + '</span>' : '') + '</li>';
           }).join('') + '</ul></div>';
-      tabs.push({ id: 'evidence', label: 'Hypothesis & evidence', html: evBody });
+      return evBody;
     }
+
+    // 1. Overview — the lean landing tab (DEFAULT): a one-paragraph what-is-this +
+    // the verdict in brief (status pill + opening sentence). Deliberately short so
+    // the investigation graph sits high on the page; depth lives in the tabs below.
+    var whatIsLede = whatIs ? whatIs.split(/\n\s*\n/)[0].trim() : '';
+    var ovParts = [];
+    if (whatIsLede)
+      ovParts.push('<div class="inv-brief-prose inv-brief-overview-lede">' +
+        _renderInvLeadMarkdown(whatIsLede) + '</div>');
+    if (verdict)
+      ovParts.push('<div class="inv-brief-overview-verdict inv-vs-' + vsClass + '" ' +
+        'style="margin-top:10px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">' +
+        '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span> ' +
+        '<span class="inv-brief-overview-verdict-text" style="color:#475569">' +
+        _invInline(headlineOf(verdict)) + '</span></div>');
+    if (ovParts.length)
+      tabs.push({ id:'overview', label:'Overview', html: ovParts.join('') });
+
+    // 2. Verdict — the full campaign answer (executive.verdict); behind a click.
+    if (verdict)
+      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vs.toUpperCase() : '',
+        html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
+          '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
+          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' });
+
+    // 3. Background — the lead intro, the driving Question + Hypothesis, and the
+    // structured argument (Hypothesis & evidence folded in here per the owner).
+    var bgParts = [];
+    if (leadProse)
+      bgParts.push('<div class="inv-brief-prose">' + _renderInvLeadMarkdown(leadProse) + '</div>');
+    var _bgMeta = [];
+    if (q) _bgMeta.push('<span class="inv-brief-meta-item"><em>Question</em> ' + _invInline(oneline(q)) + '</span>');
+    if (hyp) _bgMeta.push('<span class="inv-brief-meta-item"><em>Hypothesis</em> ' + _invInline(hyp) + '</span>');
+    if (_bgMeta.length) bgParts.push('<div class="inv-brief-meta">' + _bgMeta.join('') + '</div>');
+    var _evBody = _evidenceBody();
+    if (_evBody)
+      bgParts.push('<div class="inv-brief-evidence">' +
+        '<div class="inv-brief-frameworks-label">Hypothesis &amp; evidence</div>' + _evBody + '</div>');
+    if (bgParts.length)
+      tabs.push({ id:'background', label:'Background', html: bgParts.join('') });
+
+    // 4. Biology — the plain-English mechanism narrative (biological_story).
+    if (bio)
+      tabs.push({ id:'biology', label:'Biology', html:
+        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(bio) + '</div>' });
 
     // 5. How to read — evaluator tips (string prose or a list of tips).
     if (hasHowto)
@@ -11007,12 +11026,8 @@
         badge: _nDec ? (_nDec + ' needed') : 'all clear', attention: _nDec > 0 });
     }
 
-    // Lead with the argument, not the verdict wall: make "Hypothesis & evidence" the
-    // default (first/active) tab; Verdict stays available, just not the landing.
-    var _evIdx = -1;
-    for (var _ti = 0; _ti < tabs.length; _ti++) { if (tabs[_ti].id === 'evidence') { _evIdx = _ti; break; } }
-    if (_evIdx > 0) tabs.unshift(tabs.splice(_evIdx, 1)[0]);
-
+    // Overview is pushed first, so it is the default (active) tab via the i===0
+    // rule below; every other tab (Verdict, Background, …) is reached by a click.
     if (tabs.length) {
       H.push('<div class="inv-brief-tabs" role="tablist">' + tabs.map(function(t, i) {
         var _cls = 'inv-brief-tab' + (i === 0 ? ' active' : '') + (t.attention ? ' inv-brief-tab-attn' : '');
