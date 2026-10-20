@@ -2,14 +2,14 @@
 
 Extracted from ``vivarium_workbench.server`` so the FastAPI seam
 (``api/app.py``) can call them without importing the stdlib server module.
-The single implementation is shared: ``server.py`` keeps thin shims with
-identical names/signatures that delegate here.
+These builders are called directly by the FastAPI seam; ``server.py`` no longer
+has the handlers.
 
 Phase A Batch 7 — five routes:
   GET /api/report-lint         → build_report_lint
   GET /api/linkage-index       → build_linkage_index
   GET /api/needs-attention     → build_needs_attention
-  GET /api/inputs              → _inputs_payload lives in server.py (already ws_root-parameterized)
+  GET /api/inputs              → _inputs_payload (ws_root-parameterized)
   GET /api/investigation/{slug}         → build_iset_detail
 """
 
@@ -100,9 +100,10 @@ _LINKAGE_TTL = 30.0  # seconds
 def clear_cache() -> None:
     """Clear the linkage-index TTL cache.
 
-    Called from ``server._invalidate_workspace_caches`` on a workspace switch so
-    a re-pointed workspace never serves the previous workspace's cached linkage
-    index. Mirrors the ``clear_cache`` contract of the other lib view modules
+    Registered via ``active_workspace.register_clear_cb`` and fired by
+    ``active_workspace.invalidate()`` on a workspace switch so a re-pointed
+    workspace never serves the previous workspace's cached linkage index.
+    Mirrors the ``clear_cache`` contract of the other lib view modules
     (``observables_views``, ``composite_state_views``) — the source-switch hook
     invokes all three.
     """
@@ -528,9 +529,9 @@ def build_linkage_index(
 
     ``observables_for_ref_fn``: injectable callable ``(ws_root, ref) ->
     dict | tuple`` used for the SP4b observable_registry / composite paths.
-    The server.py shim injects ``server._observables_for_ref`` so tests can
-    monkeypatch it; the FastAPI route leaves it ``None`` (those paths degrade
-    gracefully to empty payloads when no fn is supplied).
+    The FastAPI route (and the tests) inject
+    ``observables_views.observables_for_ref_payload``; when no fn is supplied
+    those paths degrade gracefully to empty payloads.
     """
     ws_root = Path(ws_root)
     try:

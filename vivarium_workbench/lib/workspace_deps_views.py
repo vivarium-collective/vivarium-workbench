@@ -4,8 +4,8 @@ These are pure, ws_root-parameterised functions extracted from server.py so the
 FastAPI seam (``api/app.py``) can call them without importing the stdlib server
 module.
 
-No imports from ``vivarium_workbench.server`` — those live as shim wrappers
-inside server.py itself.
+No imports from ``vivarium_workbench.server`` — the FastAPI seam (``api/app.py``)
+calls these builders directly.
 """
 from __future__ import annotations
 

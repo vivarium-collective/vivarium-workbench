@@ -7,12 +7,14 @@ Each builder is ws_root-parameterised and AI-free:
 Returns (response_dict, status_code). File side-effects only — no HTTP,
 no server imports, no git operations.
 
-The 6 lifecycle seams are moved here verbatim from server.py. The server
-keeps name-shims for backward compatibility with test imports.
+The 6 lifecycle seams are moved here verbatim from server.py. The tests and the
+FastAPI routes import these builders from here; ``server.py`` no longer has the
+seams.
 
-Note: ``_decide_proposed_input_for_test`` in server.py has a distinct
-positional signature ``(ws_root, inv, item_id, decision)``; its name-shim
-reconstructs a body dict and delegates here.
+Note: the legacy ``_decide_proposed_input_for_test`` seam had a distinct
+positional signature ``(ws_root, inv, item_id, decision)``; the builder here
+(``decide_proposed_input``) takes the standard ``(ws_root, body)`` and
+reconstructs those fields from the body.
 
 Batch 20 of the FastAPI strangler-fig migration (POST phase, Phase C).
 """

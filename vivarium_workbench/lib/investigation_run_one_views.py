@@ -23,7 +23,7 @@ FAILS to run still returns **200** with ``{"ok": False, ...}`` (the run row is
 marked ``failed``).  No ``import server`` here.
 
 The workspace root is threaded explicitly as ``ws_root`` (replacing the server
-``WORKSPACE`` global) so the module stays importable standalone and flip-ready.
+``WORKSPACE`` global) so the module stays importable standalone.
 ``subprocess`` is referenced at module level so tests monkeypatch
 ``investigation_run_one_views.subprocess.run`` and never run a real composite.
 """

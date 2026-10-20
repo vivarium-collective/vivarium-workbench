@@ -2,16 +2,14 @@
 
 Extracted from ``vivarium_workbench.server._catalog_data`` so the FastAPI
 seam (``api/app.py``) can call it without importing the stdlib server module.
-The single implementation is shared: ``server.py`` re-imports
-``build_catalog`` and keeps its old ``_catalog_data`` name as a thin wrapper.
+The sole caller is the FastAPI seam (``api/app.py``).
 
 Helpers moved here from server.py:
   - ``_filter_catalog_modules``
   - ``_build_override_catalog``
   - ``_build_reexport_origin_modules``
   - ``_name_variants``          (was a nested function inside ``_catalog_data``)
-  - ``_check_installed_module_sync``  (ws_root-parameterized; server.py keeps
-                                       a thin WORKSPACE-forwarding wrapper)
+  - ``_check_installed_module_sync``  (ws_root-parameterized)
   - ``_CATALOG_VENV_PROBE_SCRIPT``   (module-level constant)
   - ``_detect_workspace_venv_distributions``
   - ``_read_workspace_pyproject_deps``
@@ -585,8 +583,8 @@ def build_catalog(ws_root: Path, full: bool = False) -> dict:
     surfacing all still apply, so each ecosystem module shows its correct
     installed/available state for *this* workspace.
 
-    Called by the FastAPI seam (``api/app.py``) and, via the thin
-    ``_catalog_data`` wrapper, by the stdlib handler and ``publish.build_bundle``.
+    Called directly by the FastAPI seam (``api/app.py``) and
+    ``publish.build_bundle``.
     Takes ``ws_root`` explicitly — does NOT read the ``WORKSPACE`` global.
 
     Best-effort: helpers that inspect the venv / pyproject swallow errors and

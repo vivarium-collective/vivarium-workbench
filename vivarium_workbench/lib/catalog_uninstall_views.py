@@ -6,13 +6,12 @@ catalog-install:
   * ``uninstall_unmanaged_or_404(ws_root, name)`` — the extracted
     ``_uninstall_unmanaged_or_404`` instance method (the "unmanaged" case: a
     catalog module present in the venv but NOT declared in
-    ``workspace.yaml.imports``).  ``server.py`` keeps a 1-line instance shim
-    (``return self._json(*uninstall_unmanaged_or_404(WORKSPACE, name))``) so the
-    call-site stays byte-identical.
-  * ``catalog_uninstall(ws_root, body)`` — the main handler
-    ``_post_catalog_uninstall``, which delegates the not-in-imports case to the
-    lib ``uninstall_unmanaged_or_404`` (NOT the server shim) and otherwise runs
-    the pypi / git-submodule uninstall ``action()``.
+    ``workspace.yaml.imports``).  Called directly by ``catalog_uninstall`` and
+    the FastAPI route.
+  * ``catalog_uninstall(ws_root, body)`` — the main builder (ported from
+    ``_post_catalog_uninstall``): it delegates the not-in-imports case to
+    ``uninstall_unmanaged_or_404`` and otherwise runs the pypi / git-submodule
+    uninstall ``action()``.
 
 Both return ``(body, status)`` so the FastAPI route wraps every path in
 ``JSONResponse`` (preserving the non-200 codes verbatim).  No ``import server``.

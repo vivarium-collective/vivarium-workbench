@@ -1,10 +1,7 @@
 """Resolve a single composite spec/generator by ID.
 
-Extracted from ``vivarium_workbench.server._composite_resolve_data`` so the
-FastAPI seam (``api/app.py``) can call it without importing the stdlib server
-module.  The single implementation is shared: ``server.py`` re-imports
-``resolve_composite`` and keeps its old ``_composite_resolve_data`` name as a
-thin wrapper.
+Extracted from the retired ``vivarium_workbench.server`` so the FastAPI seam
+(``api/app.py``) can call it directly.
 """
 
 from __future__ import annotations
@@ -275,9 +272,9 @@ def resolve_composite(
     """Return the resolve payload dict for a single composite, or ``None`` on miss.
 
     Mirrors the data returned by ``GET /api/composite-resolve``.  The expensive
-    SVG render is set to ``None``; it is only performed by the stdlib server's
-    live handler.  Used by ``publish.build_bundle`` (via the server.py forwarder)
-    to pre-build ``api/composite-state/<id>.json`` files.
+    SVG render is set to ``None``; it is only performed by the live FastAPI route
+    handler.  Used by ``publish.build_bundle`` to pre-build
+    ``api/composite-state/<id>.json`` files.
 
     State is sourced in order: the spec's declared ``default_state_ref``, the
     regen script's committed ``reports/composite-state/<id>.json`` artifact,

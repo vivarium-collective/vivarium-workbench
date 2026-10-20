@@ -11,8 +11,8 @@ These are the library seam behind five dashboard GET routes:
 All read from the workspace's ``.pbg/composite-runs.db`` via ``lib.composite_runs``.
 Pure ``ws_root``-parameterised functions: NO ``import server`` (docstring reference only).
 
-The FastAPI app (``api/app.py``) imports these builders directly; ``server.py``'s
-``_get_composite_run*`` shims delegate here rather than duplicating the logic.
+The FastAPI app (``api/app.py``) imports these builders directly; ``server.py``
+no longer has the ``_get_composite_run*`` handlers.
 """
 from __future__ import annotations
 

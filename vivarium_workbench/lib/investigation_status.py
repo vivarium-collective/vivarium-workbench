@@ -1,14 +1,14 @@
 """Investigation status derivation + iset-summary, as library code.
 
 Extracted from ``server.py`` so the FastAPI app (and tests) can build the
-``/api/investigation-summaries`` payload without reaching into the 16.9k-line stdlib server.
+``/api/investigation-summaries`` payload without reaching into the stdlib server.
 Everything here is parameterized by ``ws_root`` (no module-level WORKSPACE
 global) and the one workspace-coupled dependency — "does this study have any
-runs?" — is *injected* as ``study_has_runs`` so the server's runs.db reader
-stays where it is.
+runs?" — is *injected* as ``study_has_runs`` so the runs.db reader stays where
+it is.
 
-``server.py`` keeps thin back-compat shims (``_iter_iset_dirs``,
-``_build_iset_summary_for_test``, …) that delegate here.
+The FastAPI app calls the builders here directly; ``lib.iset_test_shims``
+(re-exported from ``server.py`` for external repos) also delegates here.
 """
 
 from __future__ import annotations

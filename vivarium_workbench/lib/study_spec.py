@@ -9,9 +9,8 @@ merged spec — most importantly rigor (``viva_superpowers.rigor`` reads
 ``spec["runs"]`` for the replication + run-persistence dimensions), and
 ``GET /api/study/{slug}`` (Phase A, Batch 4).
 
-The legacy ``server.py`` helpers now delegate to these functions (thin shims
-passing the module-level ``WORKSPACE``), so the many existing call-sites keep
-working unchanged.
+The FastAPI seam (``api/app.py``) and the other ``lib`` modules call these
+functions directly; ``server.py`` no longer has them.
 
 Public functions
 ----------------
@@ -21,8 +20,8 @@ read_runs_db_for_study    ← server._read_runs_db_for_study
 discover_viz_html_files   ← server._discover_viz_html_files
 load_study_detail_spec    ← server._study_detail_spec  (the full run-merging mirror)
 
-``SLUG_RE`` — the compiled regex shared by server.py and api/app.py so neither
-imports the other.  Study/investigation names are generated with underscores
+``SLUG_RE`` — the compiled regex used by ``api/app.py`` (and this module) for
+slug validation.  Study/investigation names are generated with underscores
 (e.g. derived from composite names like ``monod_kinetics``), so the pattern
 allows ``_`` alongside ``-``, anchored to alphanumerics at both ends.
 """
@@ -64,8 +63,7 @@ SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$")
 def collect_study_observables(spec: dict) -> list[str]:
     """Return slash-joined observable store paths declared by the study spec.
 
-    Pure copy of ``server._collect_study_observables`` (server keeps its own
-    copy, used by many study-run handlers; dedup at the flip). Sweeps the spec
+    Pure copy of the former ``server._collect_study_observables``. Sweeps the spec
     for every observable-shaped path declaration so a run handler can wire
     ``inject_emitter_for_paths`` automatically.
 

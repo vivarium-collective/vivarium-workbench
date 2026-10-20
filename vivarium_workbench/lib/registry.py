@@ -2,14 +2,11 @@
 
 Extracted from ``vivarium_workbench.server._get_registry_data`` so the
 FastAPI seam (``api/app.py``) can call it without importing the stdlib server
-module.  The single implementation is shared: ``server.py`` re-imports
-``build_registry`` and keeps its old ``_get_registry_data`` name as a thin
-wrapper.
+module.  It is called directly by the FastAPI seam (``api/app.py``) and
+``publish.build_bundle``; ``server.py`` no longer has it.
 
-The module-level ``_REGISTRY_CACHE`` is the live cache used by both paths.
-Call ``clear_registry_cache()`` to invalidate it on workspace changes
-(``server.py`` calls this wherever it previously wrote
-``_REGISTRY_CACHE["data"] = None`` inline).
+The module-level ``_REGISTRY_CACHE`` is the live cache.
+Call ``clear_registry_cache()`` to invalidate it on workspace changes.
 """
 
 from __future__ import annotations
@@ -23,7 +20,7 @@ from vivarium_workbench.lib import env_compat
 
 
 # ---------------------------------------------------------------------------
-# Module-level registry cache (shared by server.py thin wrapper + FastAPI route)
+# Module-level registry cache (used by the FastAPI route + publish)
 # ---------------------------------------------------------------------------
 
 # Keyed by ``str(ws_root)`` -> ``{"data": <payload>, "ts": <epoch>}`` (slice 3

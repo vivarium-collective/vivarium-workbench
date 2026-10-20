@@ -3,8 +3,8 @@
 These are the ``ws_root``-parameterised builders behind the Phase-A, Batch-14
 **download** routes.  Unlike the JSON view builders, these return raw bytes (or
 a file path) plus the serving metadata — Content-Type, the inline-vs-attachment
-decision, and the download filename — so a single implementation drives both the
-legacy stdlib ``server.py`` handlers (thin shims) and the FastAPI seam.
+decision, and the download filename — so one implementation drives the FastAPI
+seam.
 
 Error contract: builders raise :class:`DownloadError` (``body`` dict + HTTP
 ``status``) for the non-200 paths, exactly mirroring the legacy handlers'
@@ -94,8 +94,7 @@ def _zip_dir(src: Path, arc_root: Optional[Path] = None) -> bytes:
 def study_export_zip(ws_root: Path, name: str) -> bytes:
     """Zip ``studies/<name>/`` to bytes and return the zip content.
 
-    Moved verbatim from ``server._study_export_zip`` (``server`` keeps a thin
-    re-export shim for its existing call-sites / tests).
+    Moved verbatim from ``server._study_export_zip``.
     """
     src = WorkspacePaths.load(ws_root).study_dir(name)
     return _zip_dir(src)

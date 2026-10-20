@@ -13,9 +13,9 @@ Routes covered:
                              workspace.yaml.expert_docs or investigation yaml
   - POST /api/import       → register an import in workspace.yaml.imports
 
-These are ``_active_branch_action``-wrapped routes; the lib builder performs
-validation + mutation (no git).  The server keeps ``_active_branch_action`` and
-delegates the mutation to these builders from inside the ``action()`` closure.
+These were ``_active_branch_action``-wrapped routes; the lib builder performs
+validation + mutation (no git).  The git-commit wrapper is not yet wired under
+the FastAPI routes.
 
 Batch 25 of the FastAPI strangler-fig migration (POST phase, Phase C).
 """
@@ -434,7 +434,7 @@ def register_import_entry(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, i
         return {"error": str(exc)}, 409
 
     resp: dict = {"ok": True}
-    # Guidance about the submodule step (mirrors the live server shim shaping).
+    # Guidance about the submodule step (matches the original handler's shaping).
     if mode in ("reference",):
         resp["next_terminal_step"] = f"git submodule add {source} external/{name}"
     elif mode == "in-place":

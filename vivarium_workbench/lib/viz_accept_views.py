@@ -5,12 +5,12 @@ visualization file:
 
     visualization_accept(ws_root: Path, body: dict) -> tuple[dict, int]
 
-It reproduces the live ``_post_visualization_accept`` handler's PRE-WRAPPER
+It reproduces the original ``_post_visualization_accept`` handler's PRE-WRAPPER
 validation/verification byte-identically (steps 1-6): name check, generated-file
 lookup, registry-cache invalidation, in-process import-verify, ``build_core()``
-smoke-test, and class discovery.  The handler's step 7 — the
-``_active_branch_action`` git commit whose ``action()`` is a NO-OP — is DEFERRED
-to the FastAPI flip; on success this builder returns ``({"ok": True}, 200)``.
+smoke-test, and class discovery.  Step 7 — the ``_active_branch_action`` git
+commit whose ``action()`` is a NO-OP — is not yet wired under the FastAPI seam;
+on success this builder returns ``({"ok": True}, 200)``.
 
 The import / reload / ``build_core`` / class-walk operate on the running process
 exactly as the handler does (importing the workspace's generated module into the
@@ -36,7 +36,8 @@ def visualization_accept(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
     Body: ``{name, class_name?}``.
 
     Reproduces steps 1-6 of ``_post_visualization_accept`` with ``ws_root`` in
-    place of ``WORKSPACE``.  The git commit (step 7) is deferred to the flip.
+    place of ``WORKSPACE``.  The git commit (step 7) is not yet wired under the
+    FastAPI seam.
 
     Returns:
       200  ``{ok: True}``                    happy path (commit deferred)
@@ -79,5 +80,5 @@ def visualization_accept(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
         return {"error": res["error"]}, 500
 
     # Step 7 (the _active_branch_action git commit with a no-op action) is
-    # DEFERRED to the FastAPI flip; on success return the success payload.
+    # not yet wired under the FastAPI seam; on success return the success payload.
     return {"ok": True}, 200

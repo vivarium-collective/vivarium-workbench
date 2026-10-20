@@ -1,17 +1,15 @@
 """Study-run state-resolution helpers extracted from server.py.
 
 These are the ``ws_root``-parameterized leaf helpers for the study-run engine
-(study-run engine extraction, phase E2). The legacy server.py module-level
-helpers (``_resolve_study_baseline_state``, ``_investigation_emitter_for_study``,
-``_zarr_store_for_sim``) now delegate to the corresponding functions here via
-thin name-shims, keeping their existing call-sites + test imports intact and the
-live path byte-identical.
+(study-run engine extraction, phase E2). These helpers are called directly by
+the study-run engine in ``lib`` (and the tests import them from here);
+``server.py`` no longer has the corresponding module-level helpers.
 
 None of these functions run a simulation or import ``server`` — they resolve a
 composite spec_id to a state dict, read an investigation's declared emitter, and
 map a sim_name to its most-recent zarr store, respectively. Each takes the
 workspace root (or an explicit study db path) as an argument rather than reading
-a module global, which keeps the module importable standalone and flip-ready.
+a module global, which keeps the module importable standalone.
 
 Functions
 ---------

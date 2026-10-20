@@ -9,8 +9,7 @@ never-500" GET routes:
   build_workspace_home     → GET /api/workspace
 
 Each function returns a plain ``dict`` (the FastAPI route returns it via a typed
-model; the legacy server.py shim wraps it into ``(json_bytes, status)`` via
-``_json_body``).  All errors are swallowed and degrade to a typed empty-default
+model).  All errors are swallowed and degrade to a typed empty-default
 body — callers must never 500 on these routes.
 """
 

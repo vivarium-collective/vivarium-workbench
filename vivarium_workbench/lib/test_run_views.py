@@ -13,8 +13,8 @@ monkeypatch ``lib.study_tests.run_study_tests`` directly.
 
 The workspace root is threaded explicitly as ``ws_root`` (replacing the server
 ``WORKSPACE`` global / ``workspace_paths()`` helper) so the module stays
-importable standalone and flip-ready.  The legacy server.py handlers keep their
-inline logic for now — the dedup happens at the flip.
+importable standalone.  These builders are the sole implementation; ``api/app.py``
+calls them directly.
 """
 
 from __future__ import annotations

@@ -14,14 +14,15 @@ resolved, with a best-effort workspace ``build_core()`` threaded through for
 ``LabeledArray`` catalog resolution.  Emittable observables are reported via
 ``vivarium_workbench.lib.readout_validation.available_observables``.
 
-Pure ``ws_root``-parameterised functions: NO ``import server`` (the stdlib
-``vivarium_workbench.server`` keeps thin shims that delegate here, passing the
-``WORKSPACE`` global).  The FastAPI app imports this module directly.
+Pure ``ws_root``-parameterised functions: NO ``import server``.  The FastAPI app
+imports this module directly; ``server.py`` re-exports ``_observables_for_ref``
+from here for external repos.
 
 Caching: this module owns :data:`_OBS_CACHE`, DISJOINT from
-``server._COMPOSITE_STATE_CACHE`` (the subprocess composite-state build keeps
-its own cache + keys).  :func:`clear_cache` is wired into
-``server._invalidate_workspace_caches`` so a workspace switch clears it.
+``composite_state_views._COMPOSITE_STATE_CACHE`` (the subprocess composite-state
+build keeps its own cache + keys).  :func:`clear_cache` is registered via
+``active_workspace.register_clear_cb`` and fired by ``active_workspace.invalidate()``
+so a workspace switch clears it.
 """
 
 from __future__ import annotations
@@ -35,10 +36,10 @@ import yaml
 # Observables build cache — keyed ("observables", str(ws_root), ref) →
 # (built_at_epoch, payload_dict).  Building a whole-cell composite is ~1s+, so
 # repeat opens + pop-outs are cached.  Short TTL so code edits are picked up.
-# DISJOINT from server._COMPOSITE_STATE_CACHE (which the subprocess
-# composite-state build owns); the keys never collide but keep them separate.
+# DISJOINT from composite_state_views._COMPOSITE_STATE_CACHE (which the
+# subprocess composite-state build owns); the keys never collide but keep them separate.
 _OBS_CACHE: dict = {}
-_OBS_CACHE_TTL_S = 300.0  # seconds (mirrors server._COMPOSITE_STATE_TTL_S)
+_OBS_CACHE_TTL_S = 300.0  # seconds (mirrors composite_state_views._COMPOSITE_STATE_TTL_S)
 
 
 def clear_cache() -> None:

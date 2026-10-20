@@ -13,13 +13,11 @@ level so tests monkeypatch them with fakes and never touch a real network.
 
 ``switch_build`` re-points the active workspace via the 3a shared lib switch
 ``active_workspace.switch_workspace`` (sets ``lib._root`` + invalidates the lib
-caches) — NOT the server's ``_switch_active_workspace`` (which also mutates the
-stdlib ``WORKSPACE`` global; that part stays in ``server``, dedup at the flip).
+caches).
 
 ``_sms_api_base`` is REUSED from :mod:`lib.workspace_deps_views` (the batch-13
 canonical lib copy) rather than adding a 4th copy.  ``_normalize_repo_url`` is
-server-only today, so it is COPIED verbatim here as a pure string fn (server
-keeps its own; dedup at the flip).
+COPIED verbatim here as a pure string fn.
 """
 
 from __future__ import annotations
@@ -45,8 +43,7 @@ def _normalize_repo_url(url: str) -> str:
     (it builds an image tag / repo path from the URL), so strip a trailing
     ``.git`` and surrounding whitespace.
 
-    Verbatim copy of ``server._normalize_repo_url`` (server-only today; the
-    dedup happens at the flip).
+    Verbatim copy of the former ``server._normalize_repo_url``.
     """
     url = url.strip()
     if url.endswith(".git"):

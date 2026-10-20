@@ -5,12 +5,12 @@ Behaviour-preserving ports of the stdlib handlers
 ``_get_auth_github_status`` / ``_post_auth_github_logout`` /
 ``_get_auth_github_orgs``.
 
-Each handler is already a THIN wrapper around an existing
+Each builder is a THIN wrapper around an existing
 :mod:`vivarium_workbench.lib.github_auth` function, and the device-flow session
 state lives in that module's process-global singletons (``_PENDING_FLOWS`` /
 ``_CACHED_SESSION``).  So there is nothing to extract: a FastAPI poll/logout
-mutates the SAME ``github_auth`` state the stdlib server uses.  These builders
-just reproduce each handler's status-code mapping, returning ``(body, status)``
+mutates the ``github_auth`` state directly.  These builders
+just reproduce each original handler's status-code mapping, returning ``(body, status)``
 — the FastAPI route wraps every path (success AND error) in ``JSONResponse`` so
 the lib-returned code is preserved verbatim.  No ``import server`` here.
 

@@ -8,19 +8,18 @@ calls directly:
 Routes covered:
   - POST /api/investigation-add-viz    → ``add_viz``:
       append a visualization entry to the study's ``spec.yaml``
-      ``visualizations`` list. The git-committing legacy server keeps its
-      ``_active_branch_action`` wrapper + post-wrapper augmentation VERBATIM,
-      delegating ONLY the file write to the private ``_apply_add_viz`` helper
-      (which raises ``RuntimeError`` on a duplicate name — so the live path
-      collapses to its existing 500 — while the public ``add_viz`` pre-checks
-      and returns a precise 409).
+      ``visualizations`` list. The public ``add_viz`` is the full flow the
+      FastAPI route calls: it pre-checks and returns a precise 409 on a
+      duplicate name, delegating the file write to the private ``_apply_add_viz``
+      helper (which raises ``RuntimeError`` on a duplicate name).  The git-commit
+      wrapper is not yet wired under the FastAPI routes.
   - POST /api/investigation-render-viz → ``render_viz``:
       re-render the study's declared visualizations against its existing
       emitter data (NO simulation re-run). This route has NO commit wrapper —
       a plain no-commit extract: the WHOLE handler logic (workspace core build,
       viva_superpowers viz-class registry augmentation, the ``build_and_run``
-      ``process_bigraph.Composite`` runner and ``render_visualizations``) moves
-      here, and the server shim becomes a thin lib delegate.
+      ``process_bigraph.Composite`` runner and ``render_visualizations``) lives
+      here, and ``api/app.py`` calls it directly.
 
 File / render side-effects only — no HTTP, no server imports, no git
 operations.

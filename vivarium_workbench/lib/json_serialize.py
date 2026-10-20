@@ -1,11 +1,11 @@
 """JSON serialization fallbacks extracted from server.py.
 
-``_json_default`` is the ``json.dumps(default=...)`` fallback used across the
-stdlib server (``_json_body``/``_json_sanitize`` and several embedded
-subprocess scripts) AND by the FastAPI-ported builders that serialise a
-pre-built composite state into a ``python -c`` child script.  It lives here so
-those lib builders can import it without an ``import server`` (which would pull
-the whole stdlib handler module into the pure lib layer).
+``_json_default`` is the ``json.dumps(default=...)`` fallback used by
+``_json_body``/``_json_sanitize`` (also in this module) AND by the
+FastAPI-ported builders that serialise a pre-built composite state into a
+``python -c`` child script.  It lives here so those lib builders can import it
+without an ``import server`` (which, in the old stdlib server, would have pulled
+the whole handler module into the pure lib layer).
 
 The server keeps a thin name-shim (``_json_default = json_serialize._json_default``)
 so its existing call-sites stay byte-identical.  ``_structured_array_to_json``

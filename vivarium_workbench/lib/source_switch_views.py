@@ -7,10 +7,8 @@ the matched entry re-points the active workspace via
 ``active_workspace.switch_workspace`` (sets ``lib._root`` + invalidates the
 lib caches — the lib-shareable half of the switch).
 
-The stdlib handler additionally updates its own ``WORKSPACE`` global +
-server-local caches; that part stays in ``server`` (this builder is pure and
-never imports ``server``).  ``workspace_catalog`` is imported lazily, mirroring
-the handler, so importing this module never pulls in viva_superpowers.
+This builder is pure and never imports ``server``.  ``workspace_catalog`` is
+imported lazily so importing this module never pulls in viva_superpowers.
 """
 
 from __future__ import annotations

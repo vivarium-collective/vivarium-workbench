@@ -1,18 +1,16 @@
 """Subprocess-based composite/ensemble run engine extracted from server.py.
 
 These are the ``ws_root``-parameterized public builders for the
-simulation-execution cluster (study-run engine extraction, phase E1). The
-legacy server.py module-level helpers (``_run_composite_subprocess``,
-``_invoke_v2ecoli_workflow``, ``_strip_process_instances``) now delegate to the
-corresponding functions here via thin name-shims, keeping their existing
-call-sites + test imports intact and the live path byte-identical.
+simulation-execution cluster (study-run engine extraction, phase E1).
+``api/app.py`` and the tests call these functions here directly; the old
+server.py module-level helpers they replaced are gone.
 
 All simulation execution stays subprocess-based: ``run_composite_subprocess``
 spawns ``python -c <script>`` (the script ``__import__``s the workspace
 ``pkg.core`` in a child process); ``invoke_v2ecoli_workflow`` spawns the
 v2ecoli workflow console script. This module therefore does NOT import or run
 ``process_bigraph.Composite`` in-process — it orchestrates and shells out,
-which keeps it importable standalone and flip-ready.
+which keeps it importable standalone.
 
 Functions
 ---------

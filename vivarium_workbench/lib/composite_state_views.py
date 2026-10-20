@@ -15,13 +15,13 @@ static path resolution, else a structured 404.
 
 Pure ``ws_root``-parameterised functions: NO ``import server`` — crucially the
 EMBEDDED SUBPROCESS SCRIPT no longer imports ``vivarium_workbench.server``
-either (it does ``sys.path.insert(0, sys.argv[1])`` directly), so this seam is
-flip-ready.  The stdlib ``vivarium_workbench.server`` keeps thin shims that
-delegate here.  The FastAPI app imports this module directly.
+either (it does ``sys.path.insert(0, sys.argv[1])`` directly), so this seam
+carries no server dependency.  The FastAPI app imports this module directly.
 
 Caching: this module owns :data:`_COMPOSITE_STATE_CACHE`, DISJOINT from
-``lib.observables_views._OBS_CACHE``.  :func:`clear_cache` is wired into
-``server._invalidate_workspace_caches`` so a workspace switch clears it.
+``lib.observables_views._OBS_CACHE``.  :func:`clear_cache` is registered via
+``active_workspace.register_clear_cb`` and fired by ``active_workspace.invalidate()``
+so a workspace switch clears it.
 """
 
 from __future__ import annotations

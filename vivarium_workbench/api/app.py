@@ -1042,7 +1042,7 @@ def create_app() -> FastAPI:
         """Per-study charts (mirrors the stdlib /api/study-charts/<slug>).
 
         Library-backed via ``lib.study_charts.build_study_charts_payload`` — the
-        single implementation the stdlib handler now forwards to. Charts are
+        single implementation. Charts are
         polymorphic: ``live`` charts carry inline SVG, ``static`` / ``declared``
         charts carry an image data-URI plus a freshness badge (see ChartPayload).
         """
@@ -1162,8 +1162,7 @@ def create_app() -> FastAPI:
         failures — returns an empty ``classes`` list rather than 500.
 
         Library-backed via ``lib.visualization_classes.list_visualization_classes``
-        — the single implementation the stdlib ``_visualization_classes_data``
-        now forwards to.
+        — the single implementation.
         """
         result = list_visualization_classes(ws)
         return VisualizationClassesPayload(
@@ -1308,8 +1307,7 @@ def create_app() -> FastAPI:
         server's import state.  The response is cached for 30 s; ``?refresh=1``
         bypasses that cache (used right after authoring a new process/composite).
 
-        Library-backed via ``lib.registry.build_registry`` — the single
-        implementation the stdlib ``_get_registry_data`` now forwards to.
+        Library-backed via ``lib.registry.build_registry`` — the single implementation.
         """
         return RegistryPayload.model_validate(build_registry(ws, bypass_cache=refresh))
 
@@ -2069,8 +2067,7 @@ def create_app() -> FastAPI:
         state (imports / pyproject / venv presence).  Best-effort: venv/
         pyproject probes swallow errors — the route never returns 500.
 
-        Library-backed via ``lib.catalog.build_catalog`` — the single
-        implementation the stdlib ``_catalog_data`` now forwards to.
+        Library-backed via ``lib.catalog.build_catalog`` — the single implementation.
         """
         return CatalogPayload.model_validate(build_catalog(ws))
 

@@ -1689,8 +1689,8 @@ def _compute_db_exists(
 def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = False) -> dict:
     """Build the ``GET /api/study-charts/<name>`` payload (pure, unit-testable).
 
-    The single implementation shared by the FastAPI seam (``api/app.py``) and the
-    stdlib server's ``_study_charts_payload`` forwarder. ``hide_superseded``
+    Called directly by the FastAPI seam (``api/app.py``) and
+    ``publish.build_bundle``. ``hide_superseded``
     (opt-in) drops static charts from a superseded run — used by the
     per-investigation report render.
 

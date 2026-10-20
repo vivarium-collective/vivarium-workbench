@@ -25,11 +25,9 @@ Routes covered:
       current parent document.
 
 Each public builder is the FULL flow (validation + computation + mutation) that
-the FastAPI route calls directly. The git-committing legacy server keeps its
-``_commit_or_run`` wrapper and its heavy pre-wrapper computation verbatim,
-delegating ONLY the file-writing mutation to the private ``_apply_*`` helpers
-here (which take the already-computed values) — so the live shim's
-pre/post-wrapper sections stay byte-identical to before this batch.
+the FastAPI route calls directly, delegating ONLY the file-writing mutation to
+the private ``_apply_*`` helpers here (which take the already-computed values).
+The git-commit wrapper is not yet wired under the FastAPI routes.
 
 Batch 27 of the FastAPI strangler-fig migration (POST phase, Phase C).
 """
@@ -464,13 +462,11 @@ def _apply_rebuild_investigation_composite(
 # ---------------------------------------------------------------------------
 #
 # Batch 28: clone a workspace-catalog composite into a fresh study.
-# The git-committing legacy server keeps its heavy pre-wrapper (catalog scan,
-# match-by-name-then-id-stem, generator-vs-file resolution, uuid auto-name and
-# 409 collision), its ``commit_msg``, its ``try/_commit_or_run/except`` and the
-# ``{"name": auto_name}`` post-wrapper VERBATIM — delegating ONLY the file
-# writes to ``_apply_create_from_composite`` (which receives the
-# already-computed values). The public ``create_from_composite`` re-does the
-# full validation+compute+_apply for the FastAPI path.
+# The public ``create_from_composite`` does the full validation+compute (catalog
+# scan, match-by-name-then-id-stem, generator-vs-file resolution, uuid auto-name
+# and 409 collision) for the FastAPI path, delegating ONLY the file writes to
+# ``_apply_create_from_composite`` (which receives the already-computed values).
+# The git-commit wrapper is not yet wired under the FastAPI path.
 
 
 def create_from_composite(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
