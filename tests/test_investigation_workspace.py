@@ -184,8 +184,9 @@ def test_dag_node_click_selects_then_opens():
     acc_body = JS[acc:acc + 700]
     assert "dataset.canvasH" in acc_body
     assert "layoutCanvasH" in acc_body
-    # The "Open study →" navigation is preserved inside the expanded detail.
-    assert "aig-open-study" in JS
+    # The redundant inline "Open study →" button was removed from the expanded
+    # detail — opening is the card's own second-click gesture.
+    assert "aig-open-study" not in JS
 
 
 def test_floating_graph_hides_prose_when_study_open():

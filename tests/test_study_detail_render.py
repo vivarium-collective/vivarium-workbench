@@ -680,17 +680,17 @@ def test_tests_merged_single_concept(tmp_path, dashboard_client):
     assert 'id="panel-report-cards"' not in html
     assert '_setStudyTab(\'report-cards\')' not in html
     # 5-tab layout (Phase 1): Tests is no longer its own tab — its content is
-    # the FIRST section inside the Audit panel ("Tests — the bar"). Scope to the
-    # Audit panel; the report-cards mount + "The bar" framing live there now.
+    # folded into the Audit panel. The "Tests — the bar" heading + "The bar"
+    # explainer were later removed (presentation cleanup); the report-cards mount
+    # still lives in the Audit panel. Scope to the Audit panel.
     assert 'id="panel-tests"' not in html
     assert 'data-kind="tests"' not in html
     tests_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
     assert 'id="report-cards-panel"' in tests_panel
-    assert '<h3>Tests — the bar</h3>' in tests_panel
-    # The redundant "<h2>Tests</h2>" heading was removed (the tab bar names it);
-    # the useful "The bar" subtitle stays as the top-of-section framing.
+    assert 'Tests — the bar' not in tests_panel
+    # Neither the redundant "<h2>Tests</h2>" heading nor the removed "Tests — the
+    # bar" subtitle remain.
     assert '<h2>Tests</h2>' not in tests_panel
-    assert 'The bar' in tests_panel
 
 
 # ---------------------------------------------------------------------------
@@ -1609,10 +1609,11 @@ def test_quality_check_group_mount_renders_in_audit_panel(tmp_path, dashboard_cl
     assert resp.status_code == 200
     html = resp.text
 
-    # 5-tab layout: the Audit panel now starts with the folded-in Tests section,
-    # then the audit intro ("Is the bar sound?") + its check groups.
+    # 5-tab layout: the Audit panel now leads with the readiness-gaps mount, then
+    # the folded-in Tests section, then the Checks band with its check groups.
+    # (The "Is the bar sound?" explainer was removed, so split on the checks band.)
     audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
-    tests_section = audit_panel[:audit_panel.index('Is the bar sound?')]
+    tests_section = audit_panel[:audit_panel.index('class="checks-band"')]
 
     # Quality mount is NOT in the Tests section — it lives in the audit body.
     assert 'id="check-group-quality"' not in tests_section
@@ -1643,9 +1644,10 @@ def test_reproducibility_check_group_mount_renders_in_audit_panel(tmp_path, dash
     assert resp.status_code == 200
     html = resp.text
 
-    # 5-tab layout: Audit panel = folded Tests section + audit body.
+    # 5-tab layout: Audit panel = readiness mount + folded Tests section + audit
+    # body. (The "Is the bar sound?" explainer was removed; split on checks band.)
     audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
-    tests_section = audit_panel[:audit_panel.index('Is the bar sound?')]
+    tests_section = audit_panel[:audit_panel.index('class="checks-band"')]
 
     assert 'id="check-group-reproducibility"' not in tests_section
     assert 'id="check-group-reproducibility"' in audit_panel
@@ -1677,24 +1679,67 @@ def test_audit_is_the_assurance_pillar(tmp_path):
     assert "_setStudyTab('build')" not in html
 
 
-def test_panel_audit_folds_tests_and_build_folds_into_model(tmp_path):
-    """5-tab layout: Audit panel exists (with Tests folded in as its first
-    section); the Build panel is gone and its #build-loop-state mount now lives
-    inside the Model (compose) panel's Advanced section."""
+def test_panel_audit_folds_tests_and_build_removed_from_model(tmp_path):
+    """5-tab layout: Audit panel exists with the Tests content folded in (the
+    "Tests — the bar" heading was later removed as presentation cleanup). The
+    Build panel is gone, and the "Advanced — build provenance" section that had
+    been folded into the Model panel was removed entirely."""
     from vivarium_workbench.lib.study_page import render_study_detail_html
     html = render_study_detail_html(tmp_path, "spine-study", {"name": "spine-study"})
 
     assert 'data-kind="audit" id="panel-audit"' in html
     assert 'id="panel-build"' not in html
     assert 'id="audit-sufficiency"' in html
-    # Tests folded into Audit (first section).
+    # Tests folded into Audit; the "Tests — the bar" heading was removed.
     audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
-    assert '<h3>Tests — the bar</h3>' in audit_panel
+    assert 'Tests — the bar' not in audit_panel
     assert 'id="report-cards-panel"' in audit_panel or 'id="tests-list"' in audit_panel
-    # Build provenance folded into Model.
+    # The Advanced build-provenance section was removed from the Model panel.
     compose = html[html.index('id="panel-compose"'):html.index('id="panel-simulate"')]
-    assert 'id="build-loop-state"' in compose
-    assert 'model-advanced' in compose
+    assert 'id="build-loop-state"' not in compose
+    assert 'model-advanced' not in compose
+    assert 'build provenance' not in compose
+
+
+# ---------------------------------------------------------------------------
+# Readiness-gaps placement: the readiness block (#audit-readiness) renders FIRST
+# in the Audit panel (above the gates/behavioral tests), and the Decide panel no
+# longer duplicates it (#decide-readiness mount removed).
+# ---------------------------------------------------------------------------
+
+def test_readiness_gaps_at_top_of_audit_and_absent_from_decide(tmp_path, dashboard_client):
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "readiness-placement-study"
+    sd.mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "readiness-placement-study",
+        "kind": "biological",
+        "baseline": [{"name": "core", "composite": "pkg.composites.core"}],
+        "variants": [],
+        "purpose": {"question": "Does the demo composite run correctly?"},
+        "status": "in_progress",
+    }))
+
+    client = dashboard_client(ws)
+    resp = client.get("/studies/readiness-placement-study")
+    assert resp.status_code == 200
+    html = resp.text
+
+    audit_panel = html[html.index('id="panel-audit"'):html.index('id="panel-conclusions"')]
+    decide_panel = html[html.index('id="panel-conclusions"'):]
+
+    # Readiness mount is in Audit, and renders ABOVE the folded-in Tests section
+    # and the Checks band.
+    assert 'id="audit-readiness"' in audit_panel
+    readiness_i = audit_panel.index('id="audit-readiness"')
+    assert readiness_i < audit_panel.index('id="audit-tests-section"')
+    assert readiness_i < audit_panel.index('class="checks-band"')
+
+    # The Decide panel no longer carries the duplicate readiness block.
+    assert 'id="decide-readiness"' not in decide_panel
+    assert 'decide-readiness-section' not in decide_panel
 
 
 # ---------------------------------------------------------------------------

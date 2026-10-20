@@ -12684,16 +12684,13 @@
               '</span>' +
             '</button>' +
           '</div>') +
-        // In-place full detail (hidden until expanded): full Asks / Finds / plan +
-        // an "Open study →" affordance. Grows the card downward from its anchored
-        // top; replaces the removed floating pop-out.
+        // In-place full detail (hidden until expanded): full Asks / Finds / plan.
+        // Grows the card downward from its anchored top; replaces the removed
+        // floating pop-out. (The redundant inline "Open study →" button was
+        // removed — a second click on the selected card opens the study.)
         ('<div class="aig-full-details" style="display:none;margin-top:8px;padding-top:8px;' +
             'border-top:1px solid #eef2f7;font-size:0.78em;line-height:1.5;color:#1e293b">' +
             _aigCardDetailHtml(s) +
-            '<div style="margin-top:12px;text-align:right">' +
-              '<button type="button" class="aig-open-study" data-study="' + _esc(s.name) + '" ' +
-                'title="Open the full study detail">Open study &rarr;</button>' +
-            '</div>' +
           '</div>') +
         // Full-magnification Plan layer: declared contract + mechanisms +
         // models/methods + success criteria (semantic-zoom band 2 only). Wrapped
@@ -12747,15 +12744,8 @@
           if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _toggleExpandInPlace(ev); }
         });
       });
-      // "Open study →" inside the expanded detail → open the full study (the
-      // navigation the old pop-out preserved). stopPropagation so the card's own
-      // select/open click doesn't also fire.
-      node.querySelectorAll('.aig-open-study').forEach(function (el) {
-        el.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          _openStudyInsideInvestigation(el.getAttribute('data-study') || s.name);
-        });
-      });
+      // (The inline "Open study →" button was removed — opening is the card's own
+      // second-click gesture, _aigNodeClick → _openStudyInsideInvestigation.)
       if (chainsBySlug && window._groupClaims && window._openInvestigationDrawer) {
         (function (study, chain) {
           var claims = window._groupClaims(chain);

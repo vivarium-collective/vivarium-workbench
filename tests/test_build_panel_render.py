@@ -20,16 +20,20 @@ def test_assurance_subtitles_reframed():
     assert 'id="panel-tests"' not in TPL
     assert 'id="panel-build"' not in TPL
     audit_panel = TPL[TPL.index('id="panel-audit"'):TPL.index('id="panel-conclusions"')]
-    # Tests "The bar" framing is now the first section of Audit; the audit body
-    # keeps its "Is the bar sound?" framing. The old "does this study pass its
-    # own bar" collision stays gone.
-    assert "The bar" in audit_panel
-    assert "Is the bar sound?" in audit_panel
+    # Tests content is still the Audit tab's first section, but the "Tests — the
+    # bar" heading + "The bar"/"Is the bar sound?" explainer prose were removed
+    # (presentation cleanup). The readiness-gaps mount now leads the panel.
+    assert "Tests — the bar" not in audit_panel
+    assert "Is the bar sound?" not in audit_panel
+    assert 'id="audit-readiness"' in audit_panel
     assert "does this study pass its own bar" not in audit_panel
-    # Build intro ("How the model was built") now lives inside the Model panel.
+    # The "Advanced — build provenance" section (with its "How the model was
+    # built" intro) was removed from the Model panel as presentation cleanup.
     compose_panel = TPL[TPL.index('id="panel-compose"'):TPL.index('id="panel-simulate"')]
-    assert "How the model was built" in compose_panel
-    # The "was it earned?" verdict framing lives in the rendered panel (JS).
+    assert "How the model was built" not in compose_panel
+    assert "build provenance" not in compose_panel
+    # The build-loop rendering code (the "was it earned?" verdict framing) still
+    # exists in the JS — it is simply no longer mounted in the template.
     assert "Was it earned?" in JS
 
 
