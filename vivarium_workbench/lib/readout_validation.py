@@ -146,7 +146,47 @@ def available_observables(
     catalogs: dict[str, list] = {}
     if schema is not None:
         _walk_catalogs(core, schema, (), catalogs)
-    return {"leaves": leaves, "catalogs": catalogs}
+    # PR-A: per-leaf type metadata (type/units/bounds) resolved from the schema,
+    # so a study readout can be checked against the composite's typed contract —
+    # not just "does the path exist". Units via core._port_units (same primitive
+    # composite_audit uses), falling back to inline `_units`. Additive key.
+    types: dict[str, dict] = {}
+    if schema is not None:
+        for path in leaves:
+            node = _schema_node_at(schema, path)
+            if isinstance(node, dict):
+                types[path] = {
+                    "type": node.get("_type"),
+                    "units": _leaf_units(core, node),
+                    "min": node.get("_min"),
+                    "max": node.get("_max"),
+                }
+    return {"leaves": leaves, "catalogs": catalogs, "types": types}
+
+
+def _schema_node_at(schema: Any, dotted: str) -> Any:
+    """Navigate a composition schema to the node at a dotted leaf path."""
+    node = schema
+    for part in dotted.split("."):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return None
+    return node
+
+
+def _leaf_units(core: Any, node: dict) -> str | None:
+    """A leaf's declared units — via ``core._port_units`` when a core is present
+    (mirrors ``composite_audit._safe_units``), else the inline ``_units``. Never
+    fabricates: returns None when no units are declared."""
+    try:
+        if core is not None and hasattr(core, "_port_units"):
+            u = core._port_units(node)
+            if u:
+                return u
+    except Exception:  # noqa: BLE001
+        pass
+    return node.get("_units") if isinstance(node, dict) else None
 
 
 # ---------------------------------------------------------------------------
@@ -287,12 +327,47 @@ def _validate_element(
     )
 
 
+def _port_units_of(available: dict, path: str | None) -> str | None:
+    """The declared units of the composite leaf a scalar readout points at."""
+    return ((available.get("types") or {}).get(path) or {}).get("units")
+
+
+def _units_compatible(u1: str, u2: str) -> bool | None:
+    """True/False if two unit strings are dimensionally (in)compatible; None when
+    the check can't be made (no unit registry, or an unparseable unit) — so a
+    missing capability never fabricates a mismatch."""
+    try:
+        from bigraph_schema.units import get_quantity_registry
+        reg = get_quantity_registry()
+        return reg(u1).dimensionality == reg(u2).dimensionality
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _unit_check(name: str, declared: str | None, port: str | None) -> dict | None:
+    """Return a ``unit_mismatch`` result iff a study readout DECLARES a unit that
+    is dimensionally incompatible with the port's declared unit. Either side
+    missing, or an un-checkable unit, → None (never fabricate)."""
+    if not declared or not port:
+        return None
+    if _units_compatible(declared, port) is False:
+        return _result(
+            name, "unit_mismatch",
+            f"readout units {declared!r} are dimensionally incompatible with the "
+            f"port units {port!r}",
+        )
+    return None
+
+
 def _validate_resolved(r: ResolvedReadout, available: dict) -> dict:
     """Validate a ResolvedReadout against the available structure."""
     leaves: list[str] = available.get("leaves", [])
 
     if r.kind == "scalar":
         if r.observable in leaves:
+            mism = _unit_check(r.name, r.units, _port_units_of(available, r.observable))
+            if mism is not None:
+                return mism
             return _result(r.name, "ok", f"scalar {r.observable!r} is an emittable leaf")
         return _result(
             r.name, "not_in_structure",
@@ -356,7 +431,7 @@ def validate_readouts(
 
     Returns:
         One ``{name, status, detail}`` per readout.  ``status`` ∈
-        ``{ok, unresolved, not_in_structure, aspirational}``.
+        ``{ok, unresolved, not_in_structure, aspirational, unit_mismatch}``.
     """
     if available is None:
         if state is None:
