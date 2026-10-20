@@ -2,7 +2,82 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text(encoding="utf-8")
+GP = (ROOT / "vivarium_workbench/static/graph-panel.js").read_text(encoding="utf-8")
 TPL = (ROOT / "vivarium_workbench/templates/index.html.j2").read_text(encoding="utf-8")
+
+
+def _gp_fn(name):
+    i = GP.index("function %s" % name)
+    j = GP.find("\n  function ", i + 1)
+    return GP[i:j] if j != -1 else GP[i:]
+
+
+def _js_fn(name):
+    k = JS.index("function %s" % name)
+    j = JS.find("\n  function ", k + 1)
+    return JS[k:j] if j != -1 else JS[k:]
+
+
+def test_dock_resize_keeps_zoom_fixed():
+    """Dragging the docked Graph panel's resize GRIP/edge must reflow the viewport
+    at the CURRENT zoom — never recompute it with _aigFit (the "resize snaps the
+    graph to fit on release" bug). onResize is wired to the zoom-preserving reflow."""
+    assert "function _aigReflowKeepZoom" in JS and "window._aigReflowKeepZoom" in JS
+    assert "function _aigFitOrKeep" in JS and "window._aigFitOrKeep" in JS
+    # reflow() keeps zoom; the resize (grip-release) callback uses it, not fit.
+    assert "_aigReflowKeepZoom" in _gp_fn("reflow")
+    assert "onResize: reflow" in GP
+    assert "onResize: fit" not in GP                 # the snap-on-release bug path is gone
+
+
+def test_top_dock_fills_panel_without_dead_space():
+    """Entering / switching to a dock must FILL the panel cleanly, not leave the
+    graph small in a mostly-empty box (the top-dock "Overview shoved down by dead
+    space" bug). _aigFitDockPanel fills the band HEIGHT (top/bottom) or the column
+    WIDTH (left/right) at a sensible zoom, honoring the _aigUserZoomed lever."""
+    assert "function _aigFitDockPanel" in JS and "window._aigFitDockPanel" in JS
+    f = _js_fn("_aigFitDockPanel")
+    assert "dock === 'top' || dock === 'bottom'" in f and "(availH - 16) / ch" in f  # fill band height
+    assert "dock === 'left' || dock === 'right'" in f and "(availW - 16) / cw" in f  # fill column width
+    assert "_aigUserZoomed" in f                      # a manual zoom is respected (kept)
+    # graph-panel.js: dock enter + dock-switch/expand fill the panel (not reflow).
+    assert "_aigFitDockPanel" in _gp_fn("dockFill")
+    assert "dockFill()" in _gp_fn("relayout")         # dock switch / expand → fill
+    assert "orientForDock(); dockFill();" in GP       # dock ENTER (onOpen) → orient + fill
+
+
+def test_orientation_is_auto_by_aspect_with_transient_manual_override():
+    """Revised LAYOUT model: orientation is AUTO from the container aspect (wide →
+    LR, tall → TB; dock side when docked) on load AND on every dock switch. The ⇄/⇅
+    buttons are a TRANSIENT manual override (in-memory, not persisted) that the next
+    dock switch clears. No separate "auto" button."""
+    # The auto/reset button is gone from the toolbar.
+    assert 'id="aig-orient-auto"' not in TPL
+    assert "_resetGraphOrientation()" not in TPL      # no auto-reset onclick in the template
+    # The ⇄/⇅ manual buttons remain.
+    assert 'id="aig-orient-lr"' in TPL and 'id="aig-orient-tb"' in TPL
+
+    # Aspect-derived AUTO: dock side (L/R → TB, T/B → LR) and inline wide → LR.
+    ao = _js_fn("_aigAutoOrient")
+    assert "dock === 'left' || dock === 'right'" in ao and "return 'TB'" in ao
+    assert "dock === 'top' || dock === 'bottom'" in ao and "return 'LR'" in ao
+    assert "availW >= availH ? 'LR' : 'TB'" in ao     # inline/un-docked: wide → LR
+
+    # Manual override is IN-MEMORY (no localStorage), holds in _aigManualOrient.
+    assert "var _aigManualOrient = null" in JS
+    assert "aig-orientation" not in JS                # orientation is no longer persisted
+    sm = _js_fn("_setGraphOrientation")
+    assert "_aigManualOrient = o" in sm and "_aigUserLayout = true" in sm
+    assert "localStorage" not in sm
+
+    # A dock switch RE-AUTOS: clears the manual override (does NOT respect it).
+    d = _js_fn("_setGraphOrientationForDock")
+    assert "_aigManualOrient = null" in d and "_aigUserLayout = false" in d
+    assert "if (_aigUserLayout) return" not in d      # old "respect manual" behavior removed
+
+    # The render prefers the manual override, else aspect auto, else the heuristic.
+    assert "_aigManualOrient === 'LR' || _aigManualOrient === 'TB'" in JS
+    assert "_aigAutoOrient()" in JS
 
 
 def test_studies_grouped_by_investigation():

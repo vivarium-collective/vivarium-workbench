@@ -198,36 +198,68 @@
 
   // -------------------------------------------------------------------------
   // Investigation DAG orientation (LR = left-to-right, TB = top-to-bottom).
-  // Auto-picked per investigation shape (see chooseGraphOrientation in
-  // aig-graph.js) unless the user has manually toggled it, in which case the
-  // choice is persisted per-investigation in localStorage and wins over auto.
   // -------------------------------------------------------------------------
-  function _graphOrientationKey(name) {
-    return 'aig-orientation:' + (name || 'default');
-  }
-  function _getStoredGraphOrientation(name) {
-    try {
-      var v = window.localStorage.getItem(_graphOrientationKey(name));
-      if (v === 'LR' || v === 'TB') return v;
-    } catch (e) { /* private mode / no localStorage */ }
-    return null;
-  }
+  // MODEL: AUTO by default. The orientation is derived from the container's
+  // ASPECT — a wide area reads best LEFT-RIGHT, a tall/narrow area TOP-BOTTOM:
+  //   • docked left/right  (tall, narrow column) → TB
+  //   • docked top/bottom  (wide, short band)    → LR
+  //   • inline / un-docked (wide main area)       → LR (tall window → TB)
+  // Auto is (re)applied on the INITIAL render AND on EVERY dock-position switch —
+  // the dock switch itself IS the "reset to auto", so there is no separate auto
+  // button. The ⇄/⇅ LAYOUT buttons are a TRANSIENT manual override that holds only
+  // within the current dock state (it survives zoom/band re-renders); the next
+  // dock switch clears it and re-autos. The manual choice is in-memory, not
+  // persisted — a reload re-autos too.
+  var _aigManualOrient = null;   // 'LR' | 'TB' manual override for the current dock, else null
+  var _aigUserLayout = false;    // true while a manual override is in effect (drives the toggle UI)
   function _setGraphOrientation(o) {
     if (o !== 'LR' && o !== 'TB') return;
-    try { window.localStorage.setItem(_graphOrientationKey(window._currentIset), o); } catch (e) { /* ignore */ }
+    _aigManualOrient = o;        // transient manual override — holds until the next dock switch
+    _aigUserLayout = true;
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
   }
   window._setGraphOrientation = _setGraphOrientation;
+  // Clear the manual override → back to the aspect-derived auto. Called on dock
+  // close (return to inline) and reused by the dock-switch re-auto below.
   function _resetGraphOrientation() {
-    try { window.localStorage.removeItem(_graphOrientationKey(window._currentIset)); } catch (e) { /* ignore */ }
+    _aigManualOrient = null;
+    _aigUserLayout = false;
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
   }
   window._resetGraphOrientation = _resetGraphOrientation;
-  // Reflect the active/override state on the toggle control, if present.
+  // A dock-position switch RE-AUTOS the orientation: clear any transient manual
+  // override so the aspect-derived default (computed in the render from the new
+  // dock side) applies. The `o` arg is advisory — the render recomputes from the
+  // live dock aspect — so a stale value can't fight the measured layout.
+  function _setGraphOrientationForDock(o) {
+    _aigManualOrient = null;
+    _aigUserLayout = false;
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+  }
+  window._setGraphOrientationForDock = _setGraphOrientationForDock;
+  // The aspect-derived AUTO direction for the current placement (dock side when the
+  // graph is hosted in the side panel, else the inline container aspect). Returns
+  // null when nothing can be measured (caller falls back to the shape heuristic).
+  function _aigAutoOrient() {
+    var fsEl = document.getElementById('investigation-dag-fs');
+    if (!fsEl) return null;
+    if (fsEl.closest && fsEl.closest('#viv-graph-panel')) {
+      var gp = document.getElementById('viv-graph-panel');
+      var dock = gp && gp.dataset ? gp.dataset.dock : '';
+      if (dock === 'left' || dock === 'right') return 'TB';
+      if (dock === 'top' || dock === 'bottom') return 'LR';
+      return null;
+    }
+    var r = fsEl.getBoundingClientRect();
+    var availW = r.width || fsEl.clientWidth || 0;
+    var availH = Math.max(0, (window.innerHeight || 900) - r.top);
+    if (availW > 1 && availH > 1) return availW >= availH ? 'LR' : 'TB';
+    return null;
+  }
+  // Reflect the active (LR/TB) state on the toggle control, if present.
   function _syncGraphOrientToggleUI(orient, isOverride) {
     var lrBtn = document.getElementById('aig-orient-lr');
     var tbBtn = document.getElementById('aig-orient-tb');
-    var autoBtn = document.getElementById('aig-orient-auto');
     function _mark(btn, active) {
       if (!btn) return;
       btn.style.background = active ? '#e0e7ff' : 'transparent';
@@ -237,7 +269,6 @@
     }
     _mark(lrBtn, orient === 'LR');
     _mark(tbBtn, orient === 'TB');
-    if (autoBtn) autoBtn.style.visibility = isOverride ? 'visible' : 'hidden';
   }
 
   // -------------------------------------------------------------------------
@@ -12461,32 +12492,25 @@
       byDepth[d].sort(function(a, b) { return a.name.localeCompare(b.name); });
     });
 
-    // Orientation: auto-pick from the graph's shape (wide/shallow -> TB,
-    // deep/narrow -> LR) unless the user manually toggled it for this
-    // investigation, in which case the stored choice wins.
+    // Orientation. A transient MANUAL override (the ⇄/⇅ buttons, in-memory, held
+    // only within the current dock) wins; otherwise AUTO from the container aspect
+    // (_aigAutoOrient: dock side when docked, else the inline area's width≥height).
+    // The shape heuristic (chooseGraphOrientation) is a last-resort fallback for
+    // when nothing can be measured (e.g. a headless/test render). Auto is recomputed
+    // every render, so an initial load and every dock switch re-auto; a manual pick
+    // survives zoom/band re-renders because _aigManualOrient holds until the next
+    // dock switch clears it.
     var depthCounts = {};
     Object.keys(byDepth).forEach(function(d) { depthCounts[d] = byDepth[d].length; });
-    var _storedOrient = _getStoredGraphOrientation(window._currentIset);
-    var orient = _storedOrient ||
-      (window.chooseGraphOrientation ? window.chooseGraphOrientation(depthCounts) : 'LR');
-    // When the graph is hosted in the dockable side panel, the DOCK SIDE sets the
-    // DEFAULT orientation (left/right → vertical TB, top/bottom → horizontal LR)
-    // and keeps it stable across re-renders (a zoom/band change re-renders, which
-    // must not flip an auto value — the "docked on the side, then zoom → jumps to
-    // the top layout" bug). But a MANUAL choice via the LAYOUT ⇄/↕ buttons
-    // (_storedOrient) still wins, so the toggle keeps working while docked — the
-    // dock side only changes the default, it doesn't lock the orientation.
-    if (!_storedOrient) {
-      var _fsEl = document.getElementById('investigation-dag-fs');
-      if (_fsEl && _fsEl.closest && _fsEl.closest('#viv-graph-panel')) {
-        var _gp = document.getElementById('viv-graph-panel');
-        var _dock = _gp && _gp.dataset ? _gp.dataset.dock : '';
-        if (_dock === 'left' || _dock === 'right') orient = 'TB';
-        else if (_dock === 'top' || _dock === 'bottom') orient = 'LR';
-      }
+    var orient;
+    if (_aigManualOrient === 'LR' || _aigManualOrient === 'TB') {
+      orient = _aigManualOrient;
+    } else {
+      orient = _aigAutoOrient()
+        || (window.chooseGraphOrientation ? window.chooseGraphOrientation(depthCounts) : 'LR');
     }
     if (shellEl) { shellEl.classList.remove('aig-orient-lr', 'aig-orient-tb'); shellEl.classList.add(orient === 'TB' ? 'aig-orient-tb' : 'aig-orient-lr'); }
-    _syncGraphOrientToggleUI(orient, !!_storedOrient);
+    _syncGraphOrientToggleUI(orient, _aigUserLayout);
 
     // Card HEIGHT is NOT fixed: each card grows to fit its full text. We render
     // once, measure each card, then stack + center by the measured heights
@@ -13240,6 +13264,56 @@
     _applyAigZoom();
     shell.scrollLeft = 0; shell.scrollTop = 0;
   }
+  // Reflow the graph viewport at the CURRENT zoom — re-apply the transform and
+  // resize the scroll spacer to match the (unchanged) scale, WITHOUT recomputing
+  // the zoom to fit. Relocating or resizing the dockable Graph panel then pans /
+  // reflows the view but never changes the zoom level the user set. This is the
+  // fix for "resize or re-dock snaps the graph to fit": the dock callbacks used to
+  // call _aigFit (which overwrites aigZoom); they now call this.
+  function _aigReflowKeepZoom() {
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell) return;
+    _applyAigZoom();   // re-apply the current aigZoom + re-size the scroll extent
+  }
+  window._aigReflowKeepZoom = _aigReflowKeepZoom;
+  // Fit to the container UNLESS the user has taken the zoom over (_aigUserZoomed),
+  // in which case keep their zoom and just reflow. Used when the graph ENTERS or
+  // LEAVES the dock (an initial-ish fit) so the first dock view is sized sensibly,
+  // while still honoring the user's zoom intent lever.
+  function _aigFitOrKeep() {
+    if (_aigUserZoomed) { _aigReflowKeepZoom(); return; }
+    _aigFit();
+  }
+  window._aigFitOrKeep = _aigFitOrKeep;
+  // Fill the DOCKED Graph panel cleanly: zoom the graph to fill the panel's
+  // CONSTRAINED dimension so it doesn't sit small in a mostly-empty box (the
+  // top-dock "graph floats at the top, dead space below → Overview shoved down"
+  // bug). A top/bottom BAND is short, so fill its HEIGHT (the long chain scrolls
+  // horizontally); a left/right COLUMN is narrow, so fill its WIDTH (scrolls
+  // vertically). The panel itself is a bounded CSS band (--viv-graph-h) — this
+  // only sizes the GRAPH to it, it never grows the panel. Honors the zoom-intent
+  // lever: once the user has driven the zoom (_aigUserZoomed) we keep it. Used on
+  // dock enter / dock-position switch / expand, not on edge-resize (that reflows).
+  function _aigFitDockPanel() {
+    var shell = document.getElementById('investigation-dag-shell');
+    if (!shell) return;
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs || !fs.closest || !fs.closest('#viv-graph-panel')) { _aigReflowKeepZoom(); return; }
+    if (_aigUserZoomed) { _aigReflowKeepZoom(); return; }   // respect a manual zoom
+    var cw = parseFloat(shell.dataset.canvasW) || 1, ch = parseFloat(shell.dataset.canvasH) || 1;
+    var gp = document.getElementById('viv-graph-panel');
+    var dock = gp && gp.dataset ? gp.dataset.dock : '';
+    var availW = shell.clientWidth || 1, availH = shell.clientHeight || 1;
+    var z;
+    if (dock === 'left' || dock === 'right') z = (availW - 16) / cw;       // fill column width
+    else if (dock === 'top' || dock === 'bottom') z = (availH - 16) / ch;  // fill band height
+    else z = Math.min((availW - 16) / cw, (availH - 16) / ch);             // fallback: fit both
+    aigZoom = Math.max(0.3, Math.min(2, z || 1));
+    _applyAigZoom();
+    shell.scrollLeft = 0; shell.scrollTop = 0;
+    try { _aigSyncZoomUI(aigBand, aigZoom); } catch (e) { /* ignore */ }
+  }
+  window._aigFitDockPanel = _aigFitDockPanel;
   // Default pre-study INLINE view: after _applyAigZoom has sized the pane to the
   // full viewport height, zoom the graph UP to fill that height (as large as it
   // goes, capped at 2×). The wide study chain scrolls horizontally. Skipped when
