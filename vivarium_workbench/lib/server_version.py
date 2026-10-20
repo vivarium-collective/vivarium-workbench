@@ -9,6 +9,8 @@ the ``git_rev`` field to ``"unknown"``, never raises.
 from __future__ import annotations
 
 import subprocess
+
+from vivarium_workbench.lib.git_io import git_text
 import uuid
 from pathlib import Path
 
@@ -41,17 +43,7 @@ def _git_rev() -> str:
     """Short git SHA of the served tree (the directory this module lives in),
     or ``"unknown"`` when git is unavailable or the tree is not a repo."""
     here = Path(__file__).resolve().parent
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(here), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except Exception:  # noqa: BLE001 — git missing / timeout / OS error
-        return "unknown"
-    if out.returncode != 0:
-        return "unknown"
-    rev = (out.stdout or "").strip()
-    return rev or "unknown"
+    return git_text(here, "rev-parse", "--short", "HEAD", default="unknown") or "unknown"
 
 
 def boot_id() -> str:
