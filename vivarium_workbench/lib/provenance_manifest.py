@@ -9,19 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
+
+from vivarium_workbench.lib.git_io import git_text
 from pathlib import Path
 
 
 def _git(ws_root: Path, *args: str) -> str:
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(ws_root), *args],
-            capture_output=True, text=True, timeout=5,
-        )
-        return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception:
-        return ""
+    return git_text(ws_root, *args)
 
 
 def git_full_commit(ws_root: Path) -> str:

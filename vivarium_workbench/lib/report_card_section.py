@@ -13,9 +13,9 @@ published static bundle; returns ``""`` when a study has no report cards.
 """
 from __future__ import annotations
 
-import html as _html
 import json
 from pathlib import Path
+from vivarium_workbench.lib.html_render import esc as _e
 
 _COLOR = {"within_tol": "#16a34a", "drift": "#d97706",
           "mismatch": "#dc2626", "ungraded": "#6b7280"}
@@ -30,8 +30,6 @@ _CHANGE = {"fixed": ("#16a34a", "✓ fixed"), "broke": ("#dc2626", "✗ broke"),
            "new": ("#2563eb", "＋ new"), "gone": ("#6b7280", "－ gone")}
 
 
-def _e(s) -> str:
-    return _html.escape(str(s if s is not None else ""))
 
 
 def _norm(v) -> str:
