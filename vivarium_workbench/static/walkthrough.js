@@ -10060,7 +10060,9 @@
     window._wsInvestigation = name;
     _showWorkspace();
     var title = document.getElementById('ws-title');
-    if (title) title.textContent = 'Investigation: ' + name;
+    if (title) { title.textContent = name; title.title = name; }
+    var kicker = document.getElementById('ws-title-kicker');
+    if (kicker) kicker.textContent = 'Investigation';
     var status = document.getElementById('ws-status');
     if (status) { status.textContent = ''; status.className = ''; }
     // Entering an investigation (no study yet): show the overview OPEN at the top,
@@ -11978,7 +11980,7 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      btn.textContent = (collapsed ? '▸' : '▾') + ' Investigation overview';
+      btn.textContent = (collapsed ? '▸' : '▾') + ' Overview';
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
   }
@@ -15079,7 +15081,8 @@
       var view = document.getElementById('investigation-detail-view');
       if (view && view.parentNode === ctx) view.style.display = 'none';
       else if (ctx) ctx.innerHTML = '';
-      var t = document.getElementById('ws-title'); if (t) t.textContent = 'Study: ' + name;
+      var t = document.getElementById('ws-title'); if (t) { t.textContent = name; t.title = name; }
+      var tk = document.getElementById('ws-title-kicker'); if (tk) tk.textContent = 'Study';
       var a = document.getElementById('ws-actions'); if (a) a.innerHTML = '';
       _wsResetStudyTabs(null);
       _wsOpenStudyTab(name, tab);

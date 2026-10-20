@@ -1443,17 +1443,26 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   </div>
 
   <div id="iset-workspace" style="display:none">
-    <div class="inv-header-bar" style="display:flex;align-items:center;gap:8px;margin:0 0 10px">
-      <button id="ws-back" class="btn-mini" onclick="_showExplore()">← All investigations</button>
-      <strong id="ws-title" style="font-size:1.1em;color:#0f172a"></strong>
+    <div class="inv-header-bar" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin:0 0 10px">
+      {# Investigation name: a small muted kicker label + the display name, shown
+         prominently on the left now that the nav controls are grouped on the right.
+         _showInvestigationWorkspace sets #ws-title (name) and #ws-title-kicker. #}
+      <span id="ws-title-wrap" style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1 1 auto;line-height:1.15">
+        <span id="ws-title-kicker" style="font-size:0.68em;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;color:#94a3b8">Investigation</span>
+        <strong id="ws-title" style="font-size:1.35em;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></strong>
+      </span>
       <span id="ws-status"></span>
-      {# Investigation-level controls live in the header (not the graph toolbar):
-         the "Investigation overview" collapse toggle + the all-clear/needs-attention
-         chip. Wired by _toggleInvOverview / _renderInvNeedsAttention (by id). #}
-      <button type="button" id="inv-overview-toggle" class="btn-mini" aria-expanded="false"
-              onclick="window._toggleInvOverview()">▸ Overview</button>
       <span id="aig-needs-attention-chip" class="aig-na-chip-host"></span>
-      <span id="ws-actions" style="margin-left:auto"></span>
+      {# The three investigation-level nav controls — "All investigations" (back),
+         the "Overview" collapse toggle, and the "Export" dropdown (#ws-actions) —
+         clustered together as one tidy group on the right. Wired by _showExplore /
+         _toggleInvOverview / _wsSetInvestigationActions (by id). #}
+      <span class="inv-header-nav" style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;margin-left:auto">
+        <button id="ws-back" class="btn-mini" onclick="_showExplore()">← All investigations</button>
+        <button type="button" id="inv-overview-toggle" class="btn-mini" aria-expanded="false"
+                onclick="window._toggleInvOverview()">▸ Overview</button>
+        <span id="ws-actions"></span>
+      </span>
     </div>
     <!-- slim collapsed bar (hidden until a study is open) -->
     <button id="ws-context-bar" onclick="_setInvestigationContextCollapsed(false)"
