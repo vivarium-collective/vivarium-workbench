@@ -3,15 +3,15 @@
 Usage in a per-study ``tests/conftest.py``::
 
     from vivarium_workbench.testing.study_fixtures import (  # noqa: F401
-        baseline_history,
-        variant_history_factory,
+        baseline_history_for,
+        variant_history_for,
         bulk_count,
         listener_value,
     )
 
 Pattern: per-study conftest.py shrinks to a thin re-export (≤ 10 lines)
 plus any study-specific variant fixtures that delegate to
-:func:`_load_history_for_variant`.
+:func:`variant_history_for`.
 
 DB schema assumed
 -----------------

@@ -3051,23 +3051,6 @@ class StudyGradeRequest(BaseModel):
     study: str
 
 
-class RerunResult(BaseModel):
-    """Result of ``POST /api/study-reproduce`` — the new run's launch result plus
-    rerun provenance (``origin``, and on success the replayed ``reran`` run_id).
-
-    ``extra="allow"``: the wrapped launcher (``study_runs.launch_into_study``
-    / ``cli_runs.run_composite``) contributes a variable result shape
-    (``run_id``, ``status``, ...); only the fields both callers control here
-    are typed.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    run_id: Optional[str] = None
-    origin: Optional[str] = None
-    status: Optional[str] = None
-    error: Optional[str] = None
-
 
 class StudyReproduceRequest(BaseModel):
     """POST /api/study-reproduce request body — ``{"study", "run_id"}``.
@@ -3102,23 +3085,6 @@ class InvestigationRerunRequest(BaseModel):
 
     investigation: str = ""
 
-
-class InvestigationRerunResult(BaseModel):
-    """Result of ``POST /api/investigation-rerun`` — the batch outcome across
-    an investigation's member studies: the topological execution ``order``
-    computed over the ``inputs.from`` DAG (reproducible-rerun-spine Task 7 /
-    G2), which launched, which were ``skipped`` because an upstream failed or
-    was itself skipped, which errored, and how many succeeded.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    investigation: Optional[str] = None
-    order: Optional[list] = None
-    launched: Optional[list] = None
-    skipped: Optional[list] = None
-    errors: Optional[list] = None
-    count: Optional[int] = None
 
 
 class InvestigationResolveRequest(BaseModel):
