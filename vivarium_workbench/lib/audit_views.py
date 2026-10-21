@@ -90,14 +90,19 @@ def build_audit(ws_root) -> tuple[dict, int]:
         err = err or f"study_audit unavailable: {exc}"
 
     if report is None:
+        # The structural audit could not run (dependency missing/broken). Do NOT
+        # report every study as worst="pass" — that silently hides non-compliance
+        # behind false green. Mark each block "unavailable" with worst="unknown"
+        # so the UI shows the audit couldn't run, not that everything passed.
         report = {
             "error": err,
-            "studies": [{"slug": s, "worst": "pass", "checks": []} for s in grades["studies"]],
-            "investigations": [{"slug": s, "worst": "pass", "checks": []}
+            "studies": [{"slug": s, "worst": "unknown", "unavailable": True, "checks": []}
+                        for s in grades["studies"]],
+            "investigations": [{"slug": s, "worst": "unknown", "unavailable": True, "checks": []}
                                for s in grades["investigations"]],
             "summary": {"n_studies": len(grades["studies"]),
                         "n_investigations": len(grades["investigations"]),
-                        "hard_failures": 0},
+                        "hard_failures": 0, "unavailable": True},
         }
 
     for blk in report.get("studies", []):
@@ -115,6 +120,8 @@ def build_audit(ws_root) -> tuple[dict, int]:
     # check is tier "soft" and self-skips when a study declares no readouts or
     # its baseline composite won't resolve, so this never 500s and never fabricates.
     for blk in report.get("studies", []):
+        if blk.get("unavailable"):
+            continue  # audit couldn't run — don't paint partial green over it
         _augment_with_observable_contract(blk, ws_root, blk.get("slug"))
 
     # The ladder's top rung: grade each investigation's closed-check (every
@@ -122,6 +129,8 @@ def build_audit(ws_root) -> tuple[dict, int]:
     # computed fresh. Soft-tier + self-skipping (no criteria / unloadable), so
     # it never 500s and never fabricates.
     for blk in report.get("investigations", []):
+        if blk.get("unavailable"):
+            continue  # audit couldn't run — don't paint partial green over it
         _augment_with_acceptance_closed(blk, ws_root, blk.get("slug"))
 
     report.setdefault("summary", {})["grade_distribution"] = grades.get("distribution", {})

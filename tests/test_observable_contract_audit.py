@@ -102,3 +102,25 @@ def test_build_audit_skips_study_with_no_readouts(tmp_path, monkeypatch):
     _stub_obs(monkeypatch, [])  # no readouts -> nothing appended
     report, _ = audit_views.build_audit(tmp_path)
     assert [c["name"] for c in report["studies"][0]["checks"]] == []
+
+
+def test_build_audit_unavailable_is_not_false_pass(tmp_path, monkeypatch):
+    # When the structural audit can't run (e.g. a missing dep like ruamel),
+    # build_audit must NOT report every study as worst="pass" — that silently
+    # hides non-compliance behind false green (the lumenoid trap).
+    import viva_superpowers.study_audit as sa
+    from vivarium_workbench.lib import audit_grade
+
+    def _boom(ws_root, extra_packages=None):
+        raise ImportError("No module named 'ruamel'")
+    monkeypatch.setattr(sa, "audit_workspace", _boom)
+    monkeypatch.setattr(audit_grade, "grade_workspace",
+                        lambda ws_root: {"studies": {"s1": {}},
+                                         "investigations": {"inv1": {}}, "distribution": {}})
+    report, code = audit_views.build_audit(tmp_path)
+    assert code == 200
+    assert report.get("error")  # the failure is surfaced, not swallowed
+    sblk = report["studies"][0]
+    iblk = report["investigations"][0]
+    assert sblk["worst"] != "pass" and sblk.get("unavailable") is True
+    assert iblk["worst"] != "pass" and iblk.get("unavailable") is True
