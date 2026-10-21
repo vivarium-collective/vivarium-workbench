@@ -1004,6 +1004,65 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
    Keeps a long study list cheap to lay out on large workspaces. */
 .viv-rail-sublink { content-visibility: auto; contain-intrinsic-size: 0 30px; }
 .viv-rail-sublink:hover { background:#f3f4f6; }
+
+/* The study currently open in the porthole: a clear accent so you always know
+   where you are while stepping through the list. */
+.viv-rail-sublink.rail-study-active {
+  background: #e0e7ff;
+  font-weight: 600;
+  color: #3730a3 !important;
+  box-shadow: inset 3px 0 0 #4f46e5;
+}
+.viv-rail-sublink.rail-study-active:hover { background: #dbe1fe; }
+:root[data-theme="dark"] .viv-rail-sublink.rail-study-active {
+  background: #312e81; color: #c7d2fe !important; box-shadow: inset 3px 0 0 #818cf8;
+}
+
+/* Prev/next study stepper — a full-width opaque band that STAYS PINNED at the
+   top of the Studies rail (position:sticky) so the study list scrolls beneath it
+   and you can't scroll past the stepper. The bordered card sits inside the band. */
+#viv-rail-study-stepper {
+  position: sticky; top: 0; z-index: 6;
+  padding: 2px 12px 6px; background: #fafafa; box-shadow: 0 1px 0 #ececec;
+}
+.viv-rail-step-card {
+  display: flex; align-items: center; gap: 8px; padding: 3px 6px;
+  border: 1px solid #e5e7eb; border-radius: 7px; background: #f8fafc;
+}
+#viv-rail-study-stepper button {
+  flex: none; width: 24px; height: 22px; line-height: 1; padding: 0;
+  border: 1px solid #d1d5db; border-radius: 5px; background: #fff;
+  color: #4f46e5; font-size: 0.8em; cursor: pointer;
+}
+#viv-rail-study-stepper button:hover:not(:disabled) { background: #eef2ff; border-color: #a5b4fc; }
+#viv-rail-study-stepper button:disabled { color: #cbd5e1; cursor: default; }
+#viv-rail-study-stepper #viv-rail-step-pos {
+  flex: 1; text-align: center; font-size: 0.78em; color: #64748b; font-variant-numeric: tabular-nums;
+}
+:root[data-theme="dark"] #viv-rail-study-stepper { background: var(--rail); box-shadow: 0 1px 0 var(--border-faint); }
+:root[data-theme="dark"] .viv-rail-step-card { background: #1e293b; border-color: #334155; }
+:root[data-theme="dark"] #viv-rail-study-stepper button { background: #0f172a; border-color: #334155; color: #a5b4fc; }
+
+/* Opening a study docks its detail view in #ws-study-panel. A one-shot flash
+   (indigo ring + fade) cues that the study just opened; _wsOpenStudyTab also
+   nudges the panel up only when it's crammed at the very bottom (otherwise the
+   scroll position is left untouched). */
+#ws-study-panel.ws-study-panel-flash {
+  animation: wsStudyPanelFlash 1.3s ease-out 1;
+}
+@keyframes wsStudyPanelFlash {
+  0%   { box-shadow: 0 0 0 3px rgba(99,102,241,0.55), 0 10px 28px rgba(79,70,229,0.28); }
+  60%  { box-shadow: 0 0 0 3px rgba(99,102,241,0.30), 0 10px 28px rgba(79,70,229,0.14); }
+  100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+}
+:root[data-theme="dark"] #ws-study-panel.ws-study-panel-flash {
+  animation: wsStudyPanelFlashDark 1.3s ease-out 1;
+}
+@keyframes wsStudyPanelFlashDark {
+  0%   { box-shadow: 0 0 0 3px rgba(129,140,248,0.65), 0 10px 28px rgba(79,70,229,0.4); }
+  60%  { box-shadow: 0 0 0 3px rgba(129,140,248,0.35), 0 10px 28px rgba(79,70,229,0.2); }
+  100% { box-shadow: 0 0 0 0 rgba(129,140,248,0); }
+}
 /* Live study-search filters by showing/hiding rows (walkthrough.js
    _applyRailStudyFilter) instead of rebuilding the list. */
 .viv-rail-hidden { display: none !important; }
@@ -1046,9 +1105,6 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 /* The item being dragged fades; a dragged group also shows a dashed outline. */
 .viv-rail-dragging { opacity: 0.45; }
 .viv-rail-investigations-group.viv-rail-dragging { outline: 1px dashed #94a3b8; outline-offset: -1px; }
-/* Header magnifier lit while the search field is open. */
-.viv-rail-search-btn.viv-rail-search-active { color: #2563eb; }
-
 .viv-rail-section-subheader {
   font-size: 0.68em;
   text-transform: uppercase;
@@ -1131,10 +1187,6 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 .viv-rail-toggle:hover{
   background:#f3f4f6; color:#1f2937; border-color:#e5e7eb;
 }
-/* Search magnifier sits just left of the collapse toggle (both are absolutely
-   positioned in the header); it's irrelevant when the rail is collapsed. */
-.viv-rail-search-btn{ right:40px; }
-.viv-rail.viv-rail-collapsed .viv-rail-search-btn{ display:none; }
 .viv-rail-toggle-svg{
   width:16px; height:16px;
   display:block;

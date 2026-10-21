@@ -136,6 +136,13 @@
     // Textareas measured 0 while their tab was hidden; re-fit the now-visible
     // panel's auto-grow boxes so they show all content without a scrollbar.
     if (window._autoGrowTextareas) window._autoGrowTextareas();
+    // Tell the parent workspace which tab is open, so stepping to the prev/next
+    // study (rail arrows / graph nav) can re-open it on the SAME tab.
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ _vwStudyTab: kind }, window.location.origin);
+      }
+    } catch (e) { /* cross-origin / no parent — ignore */ }
   }
   window._setStudyTab = _setStudyTab;
 
