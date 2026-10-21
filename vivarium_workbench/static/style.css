@@ -1042,6 +1042,29 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 :root[data-theme="dark"] #viv-rail-study-stepper { background: var(--rail); box-shadow: 0 1px 0 var(--border-faint); }
 :root[data-theme="dark"] .viv-rail-step-card { background: #1e293b; border-color: #334155; }
 :root[data-theme="dark"] #viv-rail-study-stepper button { background: #0f172a; border-color: #334155; color: #a5b4fc; }
+
+/* Opening a study docks its detail view in #ws-study-panel. It used to appear
+   flush at the very bottom and was easy to miss, so _wsOpenStudyTab now scrolls
+   it into view: scroll-margin-top keeps a strip of the investigation graph
+   visible above it, and a one-shot flash (indigo ring + fade) cues that the
+   study just opened. */
+#ws-study-panel { scroll-margin-top: 84px; }
+#ws-study-panel.ws-study-panel-flash {
+  animation: wsStudyPanelFlash 1.3s ease-out 1;
+}
+@keyframes wsStudyPanelFlash {
+  0%   { box-shadow: 0 0 0 3px rgba(99,102,241,0.55), 0 10px 28px rgba(79,70,229,0.28); }
+  60%  { box-shadow: 0 0 0 3px rgba(99,102,241,0.30), 0 10px 28px rgba(79,70,229,0.14); }
+  100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+}
+:root[data-theme="dark"] #ws-study-panel.ws-study-panel-flash {
+  animation: wsStudyPanelFlashDark 1.3s ease-out 1;
+}
+@keyframes wsStudyPanelFlashDark {
+  0%   { box-shadow: 0 0 0 3px rgba(129,140,248,0.65), 0 10px 28px rgba(79,70,229,0.4); }
+  60%  { box-shadow: 0 0 0 3px rgba(129,140,248,0.35), 0 10px 28px rgba(79,70,229,0.2); }
+  100% { box-shadow: 0 0 0 0 rgba(129,140,248,0); }
+}
 /* Live study-search filters by showing/hiding rows (walkthrough.js
    _applyRailStudyFilter) instead of rebuilding the list. */
 .viv-rail-hidden { display: none !important; }

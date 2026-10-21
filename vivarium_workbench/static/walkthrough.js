@@ -10002,15 +10002,48 @@
     // iframe also re-asserts this via postMessage once it finishes loading).
     window._wsStudyTabs = window._wsStudyTabs || {};
     window._wsStudyTabs.tab = tab || 'overview';
-    // Do NOT scroll the page down to the study. Instead keep the investigation
-    // graph's TOP where it is and SHRINK the graph pane (via _aigStudyActive in
-    // the height block) so the study card below rises into view on its own — the
-    // graph stays clickable above it for quick navigation.
+    // Shrink the graph pane (via _aigStudyActive in the height block) so the
+    // study card below rises up, and then bring the study panel clearly into
+    // view: docked at the very bottom it was easy to miss ("I didn't know it
+    // was showing"). scroll-margin-top on #ws-study-panel leaves a strip of the
+    // graph above so you can still scroll up into it; a brief flash cues the
+    // change. _embedLandingUntil shields the smooth scroll from the fit
+    // observer's height:0 measure + scroll-restore (would otherwise snap back).
     _setInvestigationContextCollapsed(false);
     _aigStudyActive = true;
     try { _applyAigZoom(); _aigAutoFillInline(); } catch (e) { /* ignore */ }
     if (typeof _fitEmbedToContent === 'function') _fitEmbedToContent(frame);
     else if (typeof _fitEmbedToViewport === 'function') _fitEmbedToViewport(frame, panel, 560);
+    if (panel) {
+      // The iframe loads async: at open time the panel is ~10px tall and the
+      // container isn't scrollable yet, so an immediate scrollIntoView is a
+      // no-op. Poll until the panel has real height, THEN smooth-scroll it to
+      // the top (scroll-margin-top leaves a strip of graph above), re-asserting
+      // a couple of times to catch late content growth. _embedLandingUntil
+      // shields it from the fit observer's scroll-restore for the whole window.
+      if (panel._bringT) clearTimeout(panel._bringT);
+      // 1) Wait until the frame has actually sized the panel (it can take a
+      //    couple of seconds), then 2) smooth-scroll it to the top and re-assert
+      //    twice to catch late content growth. Each scroll refreshes the landing
+      //    window so the fit observer's scroll-restore doesn't fight the motion.
+      var _scrollNow = function (n) {
+        window._embedLandingUntil = Date.now() + 700;
+        try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        catch (e) { try { panel.scrollIntoView(); } catch (_) { /* ignore */ } }
+        if (n > 0) panel._bringT = setTimeout(function () { _scrollNow(n - 1); }, 500);
+      };
+      var _whenSized = function (left) {
+        if (panel.getBoundingClientRect().height > 120) { _scrollNow(2); }
+        else if (left > 0) panel._bringT = setTimeout(function () { _whenSized(left - 1); }, 160);
+      };
+      window._embedLandingUntil = Date.now() + 2000;
+      panel._bringT = setTimeout(function () { _whenSized(44); }, 80);
+      panel.classList.remove('ws-study-panel-flash');
+      void panel.offsetWidth;                 // restart the flash animation
+      panel.classList.add('ws-study-panel-flash');
+      if (panel._flashT) clearTimeout(panel._flashT);
+      panel._flashT = setTimeout(function () { panel.classList.remove('ws-study-panel-flash'); }, 1500);
+    }
   }
   window._wsOpenStudyTab = _wsOpenStudyTab;
 
