@@ -9998,6 +9998,10 @@
       if (tab) href += (href.indexOf('?') >= 0 ? '&' : '?') + 'tab=' + encodeURIComponent(tab);
       frame.src = href;
     }
+    // Remember the tab we opened on, so the next prev/next step keeps it (the
+    // iframe also re-asserts this via postMessage once it finishes loading).
+    window._wsStudyTabs = window._wsStudyTabs || {};
+    window._wsStudyTabs.tab = tab || 'overview';
     // Do NOT scroll the page down to the study. Instead keep the investigation
     // graph's TOP where it is and SHRINK the graph pane (via _aigStudyActive in
     // the height block) so the study card below rises into view on its own — the
@@ -12251,7 +12255,7 @@
     var jumpMenu = document.getElementById('aig-study-jump-menu');
     nav.style.display = '';
 
-    var go = function (slug) { if (slug && slug !== current && window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(slug); };
+    var go = function (slug) { if (slug && slug !== current && window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(slug, (typeof _currentStudyTab === 'function' ? _currentStudyTab() : undefined)); };
     if (prevBtn) {
       prevBtn.disabled = !prev; prevBtn.title = prev ? ('Previous: ' + prev) : 'No previous study';
       prevBtn.onclick = prev ? function () { go(prev); } : null;
@@ -15219,9 +15223,8 @@
     var sel = '.viv-rail-sublink[data-study-name="' +
       (window.CSS && CSS.escape ? CSS.escape(name) : name) + '"]';
     var leaf = document.querySelector(sel);
-    if (!leaf) return;
+    if (!leaf) { _renderRailStudyStepper(null); return; }
     leaf.classList.add('rail-study-active');
-    leaf.style.background = '#eef2ff';
     // If its investigation group is collapsed, expand it so the leaf is visible.
     var grp = leaf.closest('[data-rail-group], .viv-rail-investigations-group');
     if (grp && grp.classList.contains('collapsed') &&
@@ -15230,6 +15233,100 @@
       if (hdr) _vivToggleInvGroup(hdr);
     }
     try { leaf.scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignore */ }
+    _renderRailStudyStepper(leaf);
+  }
+
+  // The tab currently open in the study porthole, so stepping to another study
+  // re-opens it on the SAME tab. _setStudyTab (study-detail.js) postMessages the
+  // active tab up on every switch; fall back to reading the iframe directly.
+  window._wsStudyTabs = window._wsStudyTabs || {};
+  function _currentStudyTab() {
+    if (window._wsStudyTabs && window._wsStudyTabs.tab) return window._wsStudyTabs.tab;
+    try {
+      var f = document.getElementById('ws-study-frame');
+      var p = f && f.contentWindow && f.contentWindow.document.querySelector('.study-pillar.active');
+      if (p && p.dataset && p.dataset.kind) return p.dataset.kind;
+    } catch (e) { /* cross-frame — ignore */ }
+    return undefined;
+  }
+  window._currentStudyTab = _currentStudyTab;
+  window.addEventListener('message', function (ev) {
+    if (ev && ev.data && typeof ev.data === 'object' && ev.data._vwStudyTab) {
+      window._wsStudyTabs = window._wsStudyTabs || {};
+      window._wsStudyTabs.tab = ev.data._vwStudyTab;
+      _updateRailStepperPosition();   // keep the stepper's tab hint fresh
+    }
+  });
+  // Keyboard: Alt+↑ / Alt+↓ step through studies (keeping the open tab), as long
+  // as a study is open and you're not typing in a field.
+  document.addEventListener('keydown', function (ev) {
+    if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+    var t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (!document.querySelector('.viv-rail-sublink.rail-study-active')) return;
+    ev.preventDefault();
+    window._railStepStudy(ev.key === 'ArrowUp' ? -1 : 1);
+  });
+
+  // The study leaves of the currently-open study's rail group, in display order.
+  function _railStudySiblings(activeLeaf) {
+    if (!activeLeaf) return [];
+    var grp = activeLeaf.closest('.viv-rail-investigations-group') ||
+              document.getElementById('viv-rail-investigations') || document;
+    return Array.prototype.slice.call(grp.querySelectorAll('.viv-rail-sublink[data-study-name]'));
+  }
+  // Step to the previous (dir<0) / next (dir>0) study within the current
+  // investigation group, keeping the same open tab.
+  window._railStepStudy = function (dir) {
+    var active = document.querySelector('.viv-rail-sublink.rail-study-active[data-study-name]');
+    if (!active) return;
+    var leaves = _railStudySiblings(active);
+    var i = leaves.indexOf(active);
+    if (i < 0) return;
+    var j = i + (dir < 0 ? -1 : 1);
+    if (j < 0 || j >= leaves.length) return;
+    var slug = leaves[j].getAttribute('data-study-name');
+    if (slug && window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(slug, _currentStudyTab());
+  };
+
+  // A compact prev/next stepper pinned at the top of the Studies rail whenever a
+  // study is open: ▲/▼ walk the current investigation's studies (keeping the open
+  // tab), with an "n / N" position readout.
+  function _renderRailStudyStepper(activeLeaf) {
+    var host = document.getElementById('viv-rail-investigations');
+    if (!host) return;
+    var bar = document.getElementById('viv-rail-study-stepper');
+    if (!activeLeaf) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'viv-rail-study-stepper';
+      // Full-width opaque band (sticky, pins to the top of the scroll region);
+      // the bordered card lives inside so the study list scrolls cleanly beneath.
+      bar.innerHTML =
+        '<div class="viv-rail-step-card">' +
+          '<button type="button" id="viv-rail-step-prev" title="Previous study (keeps the open tab)" aria-label="Previous study">▲</button>' +
+          '<span id="viv-rail-step-pos" title="Study position in this investigation"></span>' +
+          '<button type="button" id="viv-rail-step-next" title="Next study (keeps the open tab)" aria-label="Next study">▼</button>' +
+        '</div>';
+      host.parentNode.insertBefore(bar, host);
+      bar.querySelector('#viv-rail-step-prev').addEventListener('click', function () { window._railStepStudy(-1); });
+      bar.querySelector('#viv-rail-step-next').addEventListener('click', function () { window._railStepStudy(1); });
+    }
+    _updateRailStepperPosition();
+  }
+  function _updateRailStepperPosition() {
+    var bar = document.getElementById('viv-rail-study-stepper');
+    if (!bar) return;
+    var active = document.querySelector('.viv-rail-sublink.rail-study-active[data-study-name]');
+    var leaves = _railStudySiblings(active);
+    var i = active ? leaves.indexOf(active) : -1;
+    var prev = bar.querySelector('#viv-rail-step-prev');
+    var next = bar.querySelector('#viv-rail-step-next');
+    var pos = bar.querySelector('#viv-rail-step-pos');
+    if (prev) prev.disabled = !(i > 0);
+    if (next) next.disabled = !(i >= 0 && i < leaves.length - 1);
+    if (pos) pos.textContent = (i >= 0) ? (i + 1) + ' / ' + leaves.length : '';
   }
   window._selectStudyInRail = _selectStudyInRail;
 

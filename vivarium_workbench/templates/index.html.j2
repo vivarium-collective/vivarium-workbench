@@ -835,15 +835,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <small>workbench</small>
         </div>
       </a>
-      <!-- Global search — a magnifier next to the collapse toggle; opens the
-           pop-out search window across studies, catalog, registry, runs and
-           resources (see search-palette.js; ⌘K / Ctrl-K also opens it). -->
-      <button class="viv-rail-toggle viv-rail-search-btn" id="viv-rail-search-btn" type="button" aria-label="Search the workbench" title="Search everything (⌘K)" onclick="(window._vivOpenGlobalSearch||_vivToggleRailSearch)()">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">
-          <circle cx="11" cy="11" r="7"/>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-      </button>
+      <!-- Global search moved to a "Search" nav tab above Resources (see below);
+           the header now holds only the collapse toggle. ⌘K still opens search. -->
       <!-- Rail collapse/expand toggle. Lives in the header so, when collapsed, it
            can overlay the logo and reveal on hover (see .viv-rail-collapsed CSS). -->
       <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar" onclick="_vivToggleRail()">
@@ -915,6 +908,21 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
     <!-- Primary nav -->
     <nav class="viv-rail-section" role="tablist">
+      <!-- Search: opens the global search palette (studies, catalog, registry,
+           runs, resources). Not a page — an action styled as a nav tab, so it
+           carries no data-page and never takes the active state. ⌘K also opens
+           it. Moved here from the header magnifier. -->
+      <a href="#" id="rail-search" class="viv-rail-link viv-rail-search-link" role="button"
+         title="Search everything (⌘K)" aria-label="Search the workbench"
+         onclick="event.preventDefault();(window._vivOpenGlobalSearch||_vivToggleRailSearch)();return false;">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="11" cy="11" r="7"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Search</span>
+      </a>
       <!-- Resources: the workspace's source material. A single tab with two
            sub-tabs — "Datasets & references" (the /api/inputs datasets,
            references and expert docs) and "Scientific resources" (the curated
