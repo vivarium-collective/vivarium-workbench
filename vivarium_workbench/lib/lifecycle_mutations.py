@@ -41,15 +41,16 @@ def _sync_parent_investigation(ws_root: Any, study_dir: Any) -> None:
     acceptance so the verdict on disk tracks the member study's new outcome.
 
     No-op when the study has no owning investigation, or when the installed
-    viva_superpowers predates ``sync_investigation``. Never raises — a record
-    error must not fail a successful sync.
+    viva_superpowers predates ``write_investigation_acceptance``. Never raises —
+    a record error must not fail a successful sync.
     """
     try:
-        from viva_superpowers import study_outcomes
+        from viva_superpowers import investigation_status
         from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
-        sync_investigation = getattr(study_outcomes, "sync_investigation", None)
-        if sync_investigation is None:
+        write_acceptance = getattr(
+            investigation_status, "write_investigation_acceptance", None)
+        if write_acceptance is None:
             return
         wp = WorkspacePaths.load(Path(ws_root))
         owner = wp.study_owner(Path(study_dir).name)
@@ -57,9 +58,10 @@ def _sync_parent_investigation(ws_root: Any, study_dir: Any) -> None:
             return
         inv_dir = wp.investigations / owner
         if (inv_dir / "investigation.yaml").is_file():
-            sync_investigation(inv_dir, Path(ws_root))
+            write_acceptance(inv_dir, Path(ws_root))
     except Exception as exc:  # never fail a successful run on a record error
-        print(f"[study_outcomes] sync_investigation failed: {exc}", file=sys.stderr)
+        print(f"[investigation_status] write_investigation_acceptance "
+              f"failed: {exc}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
