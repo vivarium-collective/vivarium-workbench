@@ -11409,6 +11409,7 @@
       param_drift: 'A run’s applied parameters still match the study’s enforced/pinned values.',
       unregistered_confirmatory: 'Confirmatory studies are registered against the claim they confirm.',
       stale_finding: 'No finding is stale relative to the run it was derived from.',
+      unresolved_composite: 'Every study\'s declared composite resolves to a registered composite id — so it can build and run.',
       env_stale: 'Run environments (deps/image) are current, not stale.',
       nondeterministic: 'Runs are reproducible (seeded / deterministic where required).',
       phantom_observable: 'Every declared observable actually exists in the built composite’s structure.'
@@ -11428,10 +11429,18 @@
           + byKindItems[c.kind].map(function (it) {
               var ref = (it.study || it.ref || '').toString();
               var label = _esc((it.title || it.ref || it.kind || '').toString());
-              return '<li style="margin-top:3px;font-size:0.95em">'
+              // Surface the CONCRETE issue (detail) + what to do (action_hint),
+              // not just a link — e.g. "composite not found in registry: <ref>".
+              var detail = it.detail ? _esc(it.detail.toString()) : '';
+              var hint = it.action_hint ? _esc(it.action_hint.toString()) : '';
+              var studyTag = (it.study && it.title && it.title.indexOf(it.study) < 0)
+                ? ' <span class="muted" style="font-size:0.88em">· ' + _esc(it.study) + '</span>' : '';
+              return '<li style="margin-top:6px;font-size:0.95em">'
                 + (ref
                     ? '<a href="#" onclick="_openStudyInsideInvestigation(\'' + _esc(ref) + '\',\'conclusions\');return false;" style="color:#2563eb;text-decoration:none">' + label + ' →</a>'
-                    : label)
+                    : label) + studyTag
+                + (detail ? '<div style="color:#475569;margin:1px 0 0 2px;word-break:break-word">' + detail + '</div>' : '')
+                + (hint ? '<div style="color:#94a3b8;margin:0 0 0 2px">↳ ' + hint + '</div>' : '')
                 + '</li>';
             }).join('')
           + '</ul>';

@@ -506,6 +506,28 @@ def _member_studies(wp: WorkspacePaths, inv_spec: dict) -> list[tuple[str, dict]
     return out
 
 
+def _unresolved_composite_items(slug: str, spec: dict, known_ids: set) -> list[dict]:
+    """Studies whose declared composite ref does NOT resolve to a registered
+    composite id — a hard readiness blocker: the study cannot build or run. The
+    concrete ref (e.g. ``viva_lumenoid.growth_runs.run_sheet_growth_2d``) is put
+    in ``detail`` so the needs-attention surface shows what is wrong, not just a
+    link to the study."""
+    from vivarium_workbench.lib import composite_lookup
+    out: list[dict] = []
+    try:
+        unresolved = composite_lookup.unresolved_study_composite_refs(spec, known_ids)
+    except Exception:  # noqa: BLE001
+        return out
+    for ref in unresolved:
+        out.append(_item(
+            "unresolved_composite", "high", slug, ref,
+            f"Study '{slug}' references an unregistered composite",
+            f"composite not found in registry: {ref}",
+            "declare a real .composite.yaml / fix the composite ref so the study can build + run",
+        ))
+    return out
+
+
 def scan_investigation(
     ws_root: Path | str,
     inv_slug: str,
@@ -559,7 +581,19 @@ def scan_investigation(
 
     # Per member study: signals 2,3,5,6 (+4 when opted in). Each in its own
     # try/except so one failing source never sinks the whole scan.
+    # Composite-resolution readiness: the set of registered composite ids, computed
+    # once (cached/tolerant). A study whose composite ref is not in it cannot run.
+    try:
+        from vivarium_workbench.lib import composite_lookup
+        _known_ids = composite_lookup.known_composite_ids(ws_root)
+    except Exception:  # noqa: BLE001
+        _known_ids = set()
+
     for slug, spec in member_pairs:
+        try:
+            items.extend(_unresolved_composite_items(slug, spec, _known_ids))
+        except Exception:  # noqa: BLE001
+            pass
         try:
             items.extend(_verdict_divergence_items(slug, spec))
         except Exception:  # noqa: BLE001
@@ -635,6 +669,7 @@ def scan_investigation(
 # (member_count - flagged)/member_count passing. Order = how they're shown.
 _CHECK_CATALOG = [
     ("uncovered_ac",             "Acceptance criteria covered",              "coverage"),
+    ("unresolved_composite",     "Composites resolve in the registry",       "studies"),
     ("verdict_divergence",       "Verdicts match the authored gate",         "studies"),
     ("hard_gate",                "Hard gates passing",                        "studies"),
     ("test_regression",          "No behavior-test regressions",             "studies"),
