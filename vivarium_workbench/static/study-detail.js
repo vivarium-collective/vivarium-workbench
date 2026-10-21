@@ -104,13 +104,6 @@
     document.querySelectorAll('.study-tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.dataset.kind === kind);
     });
-    // Tell the parent workspace which tab is open, so stepping to the prev/next
-    // study (rail arrows / graph nav) can re-open it on the SAME tab.
-    try {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ _vwStudyTab: kind }, window.location.origin);
-      }
-    } catch (e) { /* cross-origin / no parent — ignore */ }
     // 5-tab study layout (Phase 1): removed tabs' loaders now fire from the tab
     // that re-homed them, so every re-homed panel's content loads when its new
     // home opens (and never shows an empty box on a subtab switch).
@@ -143,6 +136,13 @@
     // Textareas measured 0 while their tab was hidden; re-fit the now-visible
     // panel's auto-grow boxes so they show all content without a scrollbar.
     if (window._autoGrowTextareas) window._autoGrowTextareas();
+    // Tell the parent workspace which tab is open, so stepping to the prev/next
+    // study (rail arrows / graph nav) can re-open it on the SAME tab.
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ _vwStudyTab: kind }, window.location.origin);
+      }
+    } catch (e) { /* cross-origin / no parent — ignore */ }
   }
   window._setStudyTab = _setStudyTab;
 
