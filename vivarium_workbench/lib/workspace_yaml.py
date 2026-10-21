@@ -1,13 +1,21 @@
-"""Read, write, validate workspace.yaml."""
+"""Read, write, validate workspace.yaml.
+
+Thin wrapper over :mod:`viva_workspace.workspace_yaml`, which holds the shared
+load/validate/save logic. The only workbench-specific part is where the schema
+lives: it is resolved from the live workspace's ``.pbg/schemas/``.
+"""
 from __future__ import annotations
-import json
+
 from pathlib import Path
-import yaml
-from jsonschema import Draft7Validator, FormatChecker, ValidationError
 
+from viva_workspace.workspace_yaml import (
+    WorkspaceValidationError,
+    load_workspace as _load,
+    save_workspace as _save,
+    validate_workspace as _validate,
+)
 
-class WorkspaceValidationError(Exception):
-    """Raised when workspace.yaml does not conform to the schema."""
+__all__ = ["WorkspaceValidationError", "validate_workspace", "load_workspace", "save_workspace"]
 
 
 def _schema_path() -> Path:
@@ -16,26 +24,13 @@ def _schema_path() -> Path:
     return WorkspacePaths.load(workspace_root()).pbg / "schemas" / "workspace.schema.json"
 
 
-def _validator() -> Draft7Validator:
-    return Draft7Validator(
-        json.loads(_schema_path().read_text(encoding="utf-8")),
-        format_checker=FormatChecker(),
-    )
-
-
 def validate_workspace(data: dict) -> None:
-    try:
-        _validator().validate(data)
-    except ValidationError as e:
-        raise WorkspaceValidationError(str(e)) from e
+    _validate(data, _schema_path())
 
 
 def load_workspace(path: Path | str) -> dict:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    validate_workspace(data)
-    return data
+    return _load(path, _schema_path())
 
 
 def save_workspace(path: Path | str, data: dict) -> None:
-    validate_workspace(data)
-    Path(path).write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    _save(path, data, _schema_path())
