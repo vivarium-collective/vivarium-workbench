@@ -1043,12 +1043,10 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 :root[data-theme="dark"] .viv-rail-step-card { background: #1e293b; border-color: #334155; }
 :root[data-theme="dark"] #viv-rail-study-stepper button { background: #0f172a; border-color: #334155; color: #a5b4fc; }
 
-/* Opening a study docks its detail view in #ws-study-panel. It used to appear
-   flush at the very bottom and was easy to miss, so _wsOpenStudyTab now scrolls
-   it into view: scroll-margin-top keeps a strip of the investigation graph
-   visible above it, and a one-shot flash (indigo ring + fade) cues that the
-   study just opened. */
-#ws-study-panel { scroll-margin-top: 84px; }
+/* Opening a study docks its detail view in #ws-study-panel. A one-shot flash
+   (indigo ring + fade) cues that the study just opened; _wsOpenStudyTab also
+   nudges the panel up only when it's crammed at the very bottom (otherwise the
+   scroll position is left untouched). */
 #ws-study-panel.ws-study-panel-flash {
   animation: wsStudyPanelFlash 1.3s ease-out 1;
 }

@@ -10015,28 +10015,35 @@
     if (typeof _fitEmbedToContent === 'function') _fitEmbedToContent(frame);
     else if (typeof _fitEmbedToViewport === 'function') _fitEmbedToViewport(frame, panel, 560);
     if (panel) {
-      // The iframe loads async: at open time the panel is ~10px tall and the
-      // container isn't scrollable yet, so an immediate scrollIntoView is a
-      // no-op. Poll until the panel has real height, THEN smooth-scroll it to
-      // the top (scroll-margin-top leaves a strip of graph above), re-asserting
-      // a couple of times to catch late content growth. _embedLandingUntil
-      // shields it from the fit observer's scroll-restore for the whole window.
+      // Reveal the study panel ONLY when it's crammed near the very bottom
+      // (mostly off-screen). If it's already reasonably visible — which includes
+      // stepping between studies, where the panel's position doesn't change — do
+      // NOT scroll: leave the view exactly where it is. The iframe sizes async,
+      // so wait until the panel has real height before judging its position.
       if (panel._bringT) clearTimeout(panel._bringT);
-      // 1) Wait until the frame has actually sized the panel (it can take a
-      //    couple of seconds), then 2) smooth-scroll it to the top and re-assert
-      //    twice to catch late content growth. Each scroll refreshes the landing
-      //    window so the fit observer's scroll-restore doesn't fight the motion.
-      var _scrollNow = function (n) {
-        window._embedLandingUntil = Date.now() + 700;
-        try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-        catch (e) { try { panel.scrollIntoView(); } catch (_) { /* ignore */ } }
-        if (n > 0) panel._bringT = setTimeout(function () { _scrollNow(n - 1); }, 500);
+      var _maybeReveal = function () {
+        var r = panel.getBoundingClientRect();
+        var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        // Already visible enough (top in the upper ~80% of the viewport)? Leave it.
+        if (!vh || r.top <= vh * 0.80) return;
+        // It's at the very bottom — pop it up just enough to reveal a good chunk,
+        // not all the way to the top.
+        var delta = Math.round(r.top - vh * 0.45);
+        if (delta < 24) return;
+        var sc = panel.parentElement;
+        while (sc) {
+          var oy = getComputedStyle(sc).overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && sc.scrollHeight - sc.clientHeight > 1) break;
+          sc = sc.parentElement;
+        }
+        window._embedLandingUntil = Date.now() + 700;   // shield from the fit observer's scroll-restore
+        if (sc) { try { sc.scrollBy({ top: delta, behavior: 'smooth' }); } catch (e) { sc.scrollTop += delta; } }
+        else { try { window.scrollBy({ top: delta, behavior: 'smooth' }); } catch (e) { window.scrollBy(0, delta); } }
       };
       var _whenSized = function (left) {
-        if (panel.getBoundingClientRect().height > 120) { _scrollNow(2); }
+        if (panel.getBoundingClientRect().height > 120) { _maybeReveal(); }
         else if (left > 0) panel._bringT = setTimeout(function () { _whenSized(left - 1); }, 160);
       };
-      window._embedLandingUntil = Date.now() + 2000;
       panel._bringT = setTimeout(function () { _whenSized(44); }, 80);
       panel.classList.remove('ws-study-panel-flash');
       void panel.offsetWidth;                 // restart the flash animation
