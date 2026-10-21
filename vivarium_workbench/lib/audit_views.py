@@ -108,6 +108,15 @@ def build_audit(ws_root) -> tuple[dict, int]:
         g = grades["investigations"].get(blk.get("slug"))
         if g:
             blk["grade"] = g
+
+    # Fold the observable-contract check (readouts ⊆ composite observables) into
+    # every study block, so the workspace-wide Audit tab grades readout coverage
+    # exactly as the single-study Tests tab does (via build_study_audit). The
+    # check is tier "soft" and self-skips when a study declares no readouts or
+    # its baseline composite won't resolve, so this never 500s and never fabricates.
+    for blk in report.get("studies", []):
+        _augment_with_observable_contract(blk, ws_root, blk.get("slug"))
+
     report.setdefault("summary", {})["grade_distribution"] = grades.get("distribution", {})
     return report, 200
 

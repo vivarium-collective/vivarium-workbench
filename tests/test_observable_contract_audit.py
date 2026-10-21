@@ -65,3 +65,40 @@ def test_augment_noop_when_skipped(tmp_path, monkeypatch):
     block = {"slug": "s", "worst": "pass", "checks": []}
     out = audit_views._augment_with_observable_contract(block, tmp_path, "s")
     assert out["checks"] == [] and out["worst"] == "pass"
+
+
+def _stub_workspace_audit(monkeypatch, studies):
+    """Make build_audit's upstream study_audit return a fixed report."""
+    import viva_superpowers.study_audit as sa
+
+    class _FakeReport:
+        def as_dict(self):
+            return {"studies": studies, "investigations": [],
+                    "summary": {"n_studies": len(studies), "n_investigations": 0,
+                                "hard_failures": 0}}
+
+    monkeypatch.setattr(sa, "audit_workspace",
+                        lambda ws_root, extra_packages=None: _FakeReport())
+
+
+def test_build_audit_folds_observable_contract_into_each_study_block(tmp_path, monkeypatch):
+    # The workspace-wide Audit tab must carry the SAME observable-contract check
+    # the single-study Tests tab shows — not leave it only on build_study_audit.
+    _stub_workspace_audit(monkeypatch, [
+        {"slug": "s1", "worst": "pass",
+         "checks": [{"level": "L0", "name": "contract-face-wellformed",
+                     "status": "pass", "tier": "hard"}]}])
+    _stub_obs(monkeypatch, [{"name": "phantom", "status": "not_in_structure"}])
+
+    report, code = audit_views.build_audit(tmp_path)
+    assert code == 200
+    blk = report["studies"][0]
+    assert "observable-contract" in [c["name"] for c in blk["checks"]]
+    assert blk["worst"] == "fail"  # the soft fail dominates the prior pass
+
+
+def test_build_audit_skips_study_with_no_readouts(tmp_path, monkeypatch):
+    _stub_workspace_audit(monkeypatch, [{"slug": "s1", "worst": "pass", "checks": []}])
+    _stub_obs(monkeypatch, [])  # no readouts -> nothing appended
+    report, _ = audit_views.build_audit(tmp_path)
+    assert [c["name"] for c in report["studies"][0]["checks"]] == []
