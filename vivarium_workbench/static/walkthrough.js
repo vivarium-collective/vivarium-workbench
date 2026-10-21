@@ -11409,6 +11409,7 @@
       param_drift: 'A run’s applied parameters still match the study’s enforced/pinned values.',
       unregistered_confirmatory: 'Confirmatory studies are registered against the claim they confirm.',
       stale_finding: 'No finding is stale relative to the run it was derived from.',
+      unresolved_composite: 'Every study\'s declared composite resolves to a registered composite id — so it can build and run.',
       env_stale: 'Run environments (deps/image) are current, not stale.',
       nondeterministic: 'Runs are reproducible (seeded / deterministic where required).',
       phantom_observable: 'Every declared observable actually exists in the built composite’s structure.'
@@ -11424,19 +11425,27 @@
       else metric = '<span class="muted" style="font-size:0.9em">none to check</span>';
       var sub = '';
       if (flagged > 0 && byKindItems[c.kind]) {
-        sub = '<ul style="margin:3px 0 0 24px;padding:0;list-style:none">'
+        sub = '<ul style="margin:2px 0 0 17px;padding:0;list-style:none">'
           + byKindItems[c.kind].map(function (it) {
               var ref = (it.study || it.ref || '').toString();
               var label = _esc((it.title || it.ref || it.kind || '').toString());
-              return '<li style="margin-top:3px;font-size:0.95em">'
+              // Surface the CONCRETE issue (detail) + what to do (action_hint),
+              // not just a link — e.g. "composite not found in registry: <ref>".
+              var detail = it.detail ? _esc(it.detail.toString()) : '';
+              var hint = it.action_hint ? _esc(it.action_hint.toString()) : '';
+              var studyTag = (it.study && it.title && it.title.indexOf(it.study) < 0)
+                ? ' <span class="muted" style="font-size:0.85em">· ' + _esc(it.study) + '</span>' : '';
+              return '<li style="margin-top:4px;font-size:0.9em;line-height:1.28">'
                 + (ref
                     ? '<a href="#" onclick="_openStudyInsideInvestigation(\'' + _esc(ref) + '\',\'conclusions\');return false;" style="color:#2563eb;text-decoration:none">' + label + ' →</a>'
-                    : label)
+                    : label) + studyTag
+                + (detail ? '<span style="color:#475569;word-break:break-word"> — ' + detail + '</span>' : '')
+                + (hint ? '<span style="color:#aab4c0;font-size:0.92em"> · ' + hint + '</span>' : '')
                 + '</li>';
             }).join('')
           + '</ul>';
       }
-      return '<li style="margin-top:8px"' + (help ? ' title="' + _esc(help) + '"' : '') + '>'
+      return '<li style="margin-top:5px"' + (help ? ' title="' + _esc(help) + '"' : '') + '>'
         + '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between">'
           + '<span style="display:flex;gap:8px;align-items:flex-start">'
             + '<span style="color:' + (flagged ? '#b45309' : '#16a34a') + ';font-weight:700;flex:none">' + (flagged ? '•' : '✓') + '</span>'
@@ -11452,8 +11461,8 @@
     pop.setAttribute('role', 'dialog');
     pop.setAttribute('aria-label', 'Needs-attention scan');
     pop.style.cssText = 'position:absolute;z-index:80;background:#fff;border:1px solid #e2e8f0;border-radius:8px;'
-      + 'box-shadow:0 8px 28px rgba(0,0,0,0.16);padding:12px 14px;min-width:300px;max-width:400px;text-align:left;'
-      + 'font-size:0.85em;color:#334155;line-height:1.45';
+      + 'box-shadow:0 8px 28px rgba(0,0,0,0.16);padding:10px 12px;min-width:320px;max-width:440px;text-align:left;'
+      + 'max-height:78vh;overflow:auto;font-size:0.85em;color:#334155;line-height:1.32';
     pop.innerHTML =
       '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px">'
         + '<span style="font-weight:700;color:' + (clear ? '#166534' : '#b45309') + '">'
