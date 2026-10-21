@@ -399,73 +399,44 @@ def _investigation_studies(ws_root, investigation):
 
 
 def _investigation_execution_order(ws_root, investigation, studies):
-    """Best-effort topological execution order of ``studies`` (this
-    investigation's own declared members) over the ``inputs.from`` DAG
-    (reproducible-rerun-spine Task 7 / G2).
+    """Topological execution order of ``studies`` (this investigation's declared
+    members) over the canonical upstream relation — ``pipeline_gate.prerequisites``
+    ∪ ``inputs[].from`` — so a member that depends on another is never launched
+    before it.
 
-    Delegates the toposort to ``viva_superpowers.study_audit.
-    investigation_execution_order`` — the SAME DAG-building the L5 audit
-    already checks (``_member_slugs`` + ``_study_inputs_from`` + graphlib),
-    single-sourced there so this and the audit can never disagree. That
-    helper itself degrades to the declared member order on a DAG cycle; this
-    wrapper degrades the same way on any import/read failure (viva_superpowers
-    absent, ``investigation.yaml`` missing/malformed) — a toposort failure
-    must never 500 an investigation rerun.
-
-    Restricted to ``studies``: the pbg helper's order may include a producer
-    that is not a declared member of THIS investigation (an external
-    upstream study) — that must never be launched as if it were a member, so
-    it's filtered out here. Any declared member the order happens to omit
-    (e.g. it isn't reachable in the DAG at all) is appended at the end, in
-    declared order, so nothing in ``studies`` is ever dropped.
+    Delegates to :func:`run_jobs.order_slugs_by_upstreams`, the SAME slug-ordering
+    the live "Run unblocked" path and the investigation-as-composite builder use,
+    so an investigation can no longer be ordered one way by Run and a different
+    way by rerun. (This previously read only the ``inputs.from`` DAG, silently
+    dropping the ``pipeline_gate.prerequisites`` that builds like viva-genesis
+    actually declare.) ``order_slugs_by_upstreams`` restricts edges to the given
+    member set, keeps every member, and degrades to declared order on a cycle;
+    this wrapper degrades the same way on any import/read failure — a toposort
+    failure must never 500 an investigation rerun.
     """
     try:
-        import yaml
-        from viva_superpowers import study_audit
-        from viva_superpowers.workspace_paths import WorkspacePaths as PbgWorkspacePaths
+        from vivarium_workbench.lib.run_jobs import order_slugs_by_upstreams
 
-        wp = PbgWorkspacePaths.load(Path(ws_root))
-        inv_yaml = wp.investigations / str(investigation) / "investigation.yaml"
-        inv_spec = {}
-        if inv_yaml.is_file():
-            inv_spec = yaml.safe_load(inv_yaml.read_text(encoding="utf-8")) or {}
-        order = study_audit.investigation_execution_order(wp, inv_spec)
+        return order_slugs_by_upstreams(list(studies), WorkspacePaths.load(Path(ws_root)))
     except Exception:  # noqa: BLE001 — best-effort; degrade to declared order
         return list(studies)
 
-    member_set = set(studies)
-    filtered = [s for s in order if s in member_set]
-    missing = [s for s in studies if s not in filtered]
-    return filtered + missing
-
 
 def _study_upstreams(ws_root, slug) -> list:
-    """Best-effort read of study ``slug``'s declared ``inputs[].from``
-    upstream producer slugs — used only for the rerun-batch gating in
-    ``rerun_investigation`` below (Task 7 / G2). Mirrors the shape
-    ``viva_superpowers.study_audit._study_inputs_from`` reads but stays
-    local: both packages already agree on the on-disk shape
-    (``inputs: [{from: <slug>}, ...]``), so there's no need to reach into a
-    pbg-private symbol for it. Never raises — a missing/malformed
-    ``study.yaml`` degrades to no upstreams (nothing to gate on).
+    """Study ``slug``'s upstream producer slugs — used for the rerun-batch gating
+    in ``rerun_investigation`` below. Delegates to
+    :func:`run_jobs.study_upstreams` (``pipeline_gate.prerequisites`` ∪
+    ``inputs[].from``), the SAME relation the execution ordering uses, so gating
+    and ordering can never disagree about what a study waits on. Never raises — a
+    missing/malformed ``study.yaml`` degrades to no upstreams (nothing to gate
+    on).
     """
     try:
-        import yaml
-        sd = study_spec.study_dir(Path(ws_root), slug)
-        spec_file = study_spec.study_spec_file(sd)
-        if not spec_file.is_file():
-            return []
-        spec = yaml.safe_load(spec_file.read_text(encoding="utf-8")) or {}
+        from vivarium_workbench.lib.run_jobs import study_upstreams
+
+        return study_upstreams(WorkspacePaths.load(Path(ws_root)), slug)
     except Exception:  # noqa: BLE001 — best-effort; never block a rerun
         return []
-    if not isinstance(spec, dict):
-        return []
-    out = []
-    inputs = spec.get("inputs")
-    for e in (inputs if isinstance(inputs, list) else []):
-        if isinstance(e, dict) and e.get("from"):
-            out.append(str(e["from"]))
-    return out
 
 
 def rerun_investigation(ws_root, investigation):

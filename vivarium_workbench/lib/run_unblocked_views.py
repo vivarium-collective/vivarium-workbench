@@ -37,7 +37,7 @@ import yaml as _yaml
 from vivarium_workbench.lib import comparative_runs
 from vivarium_workbench.lib import study_runs
 from vivarium_workbench.lib.run_jobs import (
-    WAITING, enumerate_unblocked, manager, order_items_by_prereqs, study_prereqs,
+    WAITING, enumerate_unblocked, manager, order_items_by_prereqs, study_upstreams,
 )
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
@@ -163,8 +163,8 @@ def investigation_run_unblocked(ws_root: Path, body: dict) -> tuple[dict, int]:
     # this a dependent starts while its prerequisite is still running on Batch.
     _paths = WorkspacePaths.load(ws_root)
     _present = {it.get("study") for it in items if it.get("study")}
-    _prereqs = {
-        s: [p for p in study_prereqs(_paths, s) if p in _present and p != s]
+    _upstreams = {
+        s: [p for p in study_upstreams(_paths, s) if p in _present and p != s]
         for s in _present
     }
 
@@ -184,7 +184,7 @@ def investigation_run_unblocked(ws_root: Path, body: dict) -> tuple[dict, int]:
         for it in job.items:
             by_study.setdefault(it.get("study"), []).append(it.get("status"))
         dead, pending = [], []
-        for pre in _prereqs.get(study, ()):
+        for pre in _upstreams.get(study, ()):
             statuses = by_study.get(pre) or []
             if any(st in ("failed", "skipped") for st in statuses):
                 dead.append(pre)

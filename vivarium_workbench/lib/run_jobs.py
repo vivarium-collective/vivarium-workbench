@@ -336,15 +336,102 @@ def study_prereqs(ws, slug: str) -> list[str]:
     return out
 
 
+def study_inputs_from(ws, slug: str) -> list[str]:
+    """Study slugs ``slug`` consumes output from, read from ``inputs[].from`` —
+    the data-provenance edges the L5 reproducibility audit validates (and the
+    source ``rerun`` historically ordered by). Total, exactly like
+    :func:`study_prereqs`: an unreadable or malformed study.yaml yields no edges
+    rather than raising, so one bad file cannot break ordering for the rest.
+    """
+    import yaml
+
+    from vivarium_workbench.lib.path_safety import is_plain_name
+
+    if not is_plain_name(slug):
+        return []
+    p = ws.study_dir(slug) / "study.yaml"
+    if not p.exists():
+        return []
+    try:
+        spec = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 — see study_prereqs: never break ordering
+        return []
+    out: list[str] = []
+    for e in spec.get("inputs") or []:
+        if isinstance(e, dict) and e.get("from"):
+            out.append(str(e["from"]))
+    return out
+
+
+def study_upstreams(ws, slug: str) -> list[str]:
+    """The canonical "studies ``slug`` must run after" relation: the UNION of
+    ``pipeline_gate.prerequisites`` (:func:`study_prereqs`, an explicit launch
+    gate) and ``inputs[].from`` (:func:`study_inputs_from`, the data-provenance
+    DAG). Both are real constraints — a study that consumes another's output must
+    run after it, and an explicitly declared gate must be honored — so every
+    ordering and gating decision for an investigation's member studies reads
+    through THIS function, not one source alone. Order-preserving and
+    deduplicated, prerequisites first.
+
+    Before this, the run_jobs/composite paths ordered by prerequisites only and
+    ``rerun`` ordered by inputs.from only. A build using one source (viva-genesis
+    declares prerequisites, no inputs.from) was ordered correctly on "Run" and in
+    flat declared order on "rerun", silently dropping its prerequisites. Reading
+    the union is what makes the paths agree.
+    """
+    seen: dict[str, None] = {}
+    for s in (*study_prereqs(ws, slug), *study_inputs_from(ws, slug)):
+        if s:
+            seen.setdefault(s, None)
+    return list(seen)
+
+
+def order_slugs_by_upstreams(slugs, ws) -> list[str]:
+    """Stable topological sort of study slugs so each study's upstreams
+    (:func:`study_upstreams`, filtered to the given set) come first.
+
+    Declared order — the order of ``slugs`` — is the only tiebreak and also what
+    a cycle degrades to: refusing to order a cyclic investigation would turn a
+    metadata typo into an outage, and the composite path does not refuse either.
+    This is THE single slug-ordering used by run items, the composite builder's
+    wiring, and ``rerun``, so those paths can no longer disagree.
+    """
+    present = list(dict.fromkeys(s for s in slugs if s))
+    present_set = set(present)
+    order = {s: i for i, s in enumerate(present)}
+    deps = {
+        s: [u for u in study_upstreams(ws, s) if u in present_set and u != s]
+        for s in present
+    }
+    ranked: list[str] = []
+    seen: set[str] = set()
+    visiting: set[str] = set()
+
+    def visit(s: str) -> None:
+        if s in seen or s in visiting:
+            return  # already placed, or a cycle — leave declared order to win
+        visiting.add(s)
+        for d in sorted(deps.get(s, ()), key=lambda x: order.get(x, 0)):
+            visit(d)
+        visiting.discard(s)
+        seen.add(s)
+        ranked.append(s)
+
+    for s in present:
+        visit(s)
+    return ranked
+
+
 def order_items_by_prereqs(items: list[dict], ws) -> list[dict]:
     """Stable topological sort of run items so a study's prerequisites come first.
 
     Items carry a ``study`` slug; several items (baseline + variants) can share
-    one. Edges come from :func:`study_prereqs`, **filtered to studies actually
-    present in this batch** — a prerequisite outside the investigation (or
-    excluded by the request's ``studies`` filter) cannot be waited for here, so
-    it is not an edge. That mirrors ``build_investigation_composite``, which
-    filters prereqs to ``member_set`` for the same reason.
+    one. The slug ordering is delegated to :func:`order_slugs_by_upstreams`,
+    whose edges come from :func:`study_upstreams` (prerequisites ∪ inputs.from),
+    **filtered to studies actually present in this batch** — a dependency outside
+    the investigation (or excluded by the request's ``studies`` filter) cannot be
+    waited for here, so it is not an edge. That mirrors
+    ``build_investigation_composite``, which filters to ``member_set`` likewise.
 
     Stable: studies with no ordering constraint between them keep their declared
     order, which is the investigation's own member order and the only
@@ -364,32 +451,8 @@ def order_items_by_prereqs(items: list[dict], ws) -> list[dict]:
     """
     if not items:
         return items
-    present = {it.get("study") for it in items if it.get("study")}
-    order: dict[str, int] = {}
-    for i, it in enumerate(items):
-        order.setdefault(it.get("study"), i)
-    deps = {
-        s: [p for p in study_prereqs(ws, s) if p in present and p != s]
-        for s in present
-    }
-
-    ranked: list[str] = []
-    seen: set[str] = set()
-    visiting: set[str] = set()
-
-    def visit(s: str) -> None:
-        if s in seen or s in visiting:
-            return  # already placed, or a cycle — leave declared order to win
-        visiting.add(s)
-        for d in sorted(deps.get(s, ()), key=lambda x: order.get(x, 0)):
-            visit(d)
-        visiting.discard(s)
-        seen.add(s)
-        ranked.append(s)
-
-    for s in sorted(present, key=lambda x: order.get(x, 0)):
-        visit(s)
-
+    ranked = order_slugs_by_upstreams(
+        [it.get("study") for it in items if it.get("study")], ws)
     rank = {s: i for i, s in enumerate(ranked)}
     return sorted(items, key=lambda it: rank.get(it.get("study"), len(rank)))
 

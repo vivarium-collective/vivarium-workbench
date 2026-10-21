@@ -31,23 +31,22 @@ from vivarium_workbench.lib.investigation_members import (
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
-def _study_prereqs(ws: WorkspacePaths, slug: str) -> list[str]:
-    """Study-slugs ``slug`` must run after, read STRICTLY from
-    ``pipeline_gate.prerequisites`` — NOT the legacy ``parent_studies`` fallback.
+def _study_upstreams(ws: WorkspacePaths, slug: str) -> list[str]:
+    """Studies ``slug`` must run after — the canonical union of
+    ``pipeline_gate.prerequisites`` and ``inputs[].from``.
 
-    Now a thin delegation to :func:`run_jobs.study_prereqs`, which is the same
-    function lifted so the ``run_jobs`` path can read prerequisites too (plan
-    §A3′). Kept as a module-level name because this module's own tests and
-    readers refer to it, and because the composite path's call site reads better
-    with the private alias.
+    A thin delegation to :func:`run_jobs.study_upstreams`, the one relation the
+    run_jobs "Run" path and ``rerun`` also read, so the composite wiring built
+    here can never order studies differently from how they are run or replayed.
+    Kept as a module-level name because this module's own readers refer to it.
 
-    Behaviour is unchanged, with one deliberate widening: the lifted version
-    treats a MALFORMED study.yaml as "no prerequisites" instead of raising, so
-    one bad file cannot take down the ordering of every other study.
+    Total: a malformed study.yaml yields no edges rather than raising (see
+    :func:`run_jobs.study_upstreams`), so one bad file cannot take down the
+    ordering of every other study.
     """
-    from vivarium_workbench.lib.run_jobs import study_prereqs
+    from vivarium_workbench.lib.run_jobs import study_upstreams
 
-    return study_prereqs(ws, slug)
+    return study_upstreams(ws, slug)
 
 
 def build_investigation_composite(ws_root: Path | str, inv_slug: str) -> dict:
@@ -59,8 +58,9 @@ def build_investigation_composite(ws_root: Path | str, inv_slug: str) -> dict:
     Ordering has two mechanisms, both expressed purely as input wires (no explicit
     scheduling code — ``process_bigraph``'s ``determine_steps`` reads the wires):
 
-    1. **Real prerequisites** — a study's ``pipeline_gate.prerequisites``, filtered
-       to entries that are members of THIS investigation.
+    1. **Real upstreams** — a study's :func:`run_jobs.study_upstreams`
+       (``pipeline_gate.prerequisites`` ∪ ``inputs[].from``), filtered to entries
+       that are members of THIS investigation.
     2. **Synthetic serial edges** — confirmed necessary in Task 1: independent
        steps (no wiring between them) run in NONDETERMINISTIC engine order, not
        declared order. A study with no real prerequisite is wired instead to the
@@ -89,7 +89,7 @@ def build_investigation_composite(ws_root: Path | str, inv_slug: str) -> dict:
 
     for i, slug in enumerate(members):
         real_prereqs = [
-            p for p in _study_prereqs(ws, slug) if p in member_set and p != slug
+            p for p in _study_upstreams(ws, slug) if p in member_set and p != slug
         ]
         if real_prereqs:
             prereqs = real_prereqs
