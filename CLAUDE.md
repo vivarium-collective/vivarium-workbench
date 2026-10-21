@@ -83,7 +83,7 @@ will run it. Note `bigraph-loom` and `pbg-superpowers` are direct git/path deps.
 ### HTTP server (`vivarium_workbench/api/app.py`, FastAPI)
 The dashboard is served by a **FastAPI app** under uvicorn: `vivarium-workbench
 serve` → `cli.py` → `lib/startup.serve_fastapi` → `uvicorn.run(app, ...)`. All
-~178 `/api/*` routes (read and write), static/SPA serving, and the SSE stream are
+~257 `/api/*` routes (read and write), static/SPA serving, and the SSE stream are
 defined in `api/app.py` via `@app.get`/`@app.post` decorators; each backs onto a
 `lib/` function. Non-GET routes are guarded by the CSRF/origin middleware (see
 below). When adding an endpoint: add the route in `api/app.py`, put the real logic
@@ -117,7 +117,7 @@ Each module owns one concern and is independently testable. Key ones:
   simulation run subsystem (see below).
 - `single_study_report.py` (~2.4k lines), `study_charts.py`, `report.py`,
   `comparative_viz.py` — rendering studies/investigations to HTML and charts.
-- `investigations.py` (~1.8k lines), `simulations_index.py`, `study_seed.py`,
+- `investigations.py` (~2.1k lines), `simulations_index.py`, `study_seed.py`,
   `scaffold_yaml.py` — investigation/study data model, scaffolding, and gating.
 - `github_auth.py` — GitHub device-flow auth for the Branches tab.
 - `spec_migration.py` / `investigation_migrate.py` — schema version migrations.

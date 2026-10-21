@@ -1,8 +1,10 @@
 """Migrate a legacy single-composite Investigation to the new composites: list shape.
 
-Run-once per investigation. Triggered automatically on dashboard open of an
-investigation whose spec.yaml has the old `composite:` field instead of
-`composites:`. The migration:
+Run-once per investigation, for an investigation whose spec.yaml has the old
+`composite:` field instead of `composites:`. (No longer auto-triggered on
+dashboard open, and not wired to a CLI command — retained as a standalone
+migration helper; the `vwb migrate-investigations` CLI is a separate v2→v3
+studies migration.) The migration:
   1. Resolves the legacy `composite:` ref (e.g. `pkg.composites.foo`) to its
      source YAML at `<pkg>/composites/<foo>.composite.yaml`.
   2. Copies that document to `investigations/<name>/composites/<foo>.yaml`.
