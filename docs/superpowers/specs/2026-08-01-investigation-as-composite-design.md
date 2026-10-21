@@ -86,6 +86,18 @@ bypassing the parquet-coupled `run_analyses` path. (Confirmed viable:
 
 ### 3. `InvestigationComposite` generator (`@composite_generator`)
 
+> **Status (as shipped):** this shipped as a **plain build function**, not a
+> registered `@composite_generator`:
+> `vivarium_workbench/lib/investigation_execution.py` `build_investigation_composite(ws_root, inv_slug) -> dict`
+> returns the composite state dict, and `run_investigation_composite(...)` runs it as
+> `Composite({"state": …, "run_steps_on_init": True})`. The `StudyStep` /
+> `InvestigationAnalysisStep` classes live in `lib/investigation_steps.py` (referenced by
+> `local:<Class>` address). The design's engine mechanics held up — synthetic serial
+> edges for no-prereq members, store nodes, `"node"` port type, `run_steps_on_init: True`,
+> prerequisite wiring ordering steps are all as described below. The rest of this section
+> is accurate to the shipped graph; only the "registered generator" framing changed to a
+> direct function.
+
 Compiles `investigation.yaml` (members + `pipeline_gate.prerequisites`) into a
 composite **state dict**:
 
@@ -121,6 +133,20 @@ Returns `{state, run_steps_on_init: True}` (the ParCa pattern), or the runner
 constructs `Composite({state}, core)` and calls `.run()`.
 
 ### 4. Runner unification
+
+> **Status (as shipped):** the runners were **not** unified onto the composite. Only
+> **`prepare_investigation`'s full-run branch** builds and runs the `StudyStep` composite
+> in-process. **`run_investigation` / `vwb run investigation` route to the inline
+> `subprocess` path instead**, not to the composite. And the **canonical** investigation
+> orchestrator today is neither: it is the **`run_jobs`** manager behind
+> `POST /api/investigation-run-unblocked` (async 202 + poll, via `study_runs`), made
+> canonical by `docs/run-orchestration-consolidation.md` Decision 1. The composite path
+> is reachable only via `prepare-investigation` and the tests — it is **non-default**,
+> serial-only, fail-loud, not UI-wired, and **refuses on the `deployment` run target**.
+> So three orchestrators coexist (`run_jobs` canonical · inline-subprocess
+> `/api/investigation-run` · `prepare-investigation` composite); "one execution path" is
+> design intent, not the shipped state. The design below is preserved as the original
+> intent.
 
 `run_investigation` and `prepare_investigation` both **build the
 InvestigationComposite and run it in-process** (`Composite({state}, core).run()`
