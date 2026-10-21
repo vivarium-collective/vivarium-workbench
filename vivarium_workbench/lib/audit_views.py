@@ -112,6 +112,76 @@ def build_audit(ws_root) -> tuple[dict, int]:
     return report, 200
 
 
+_SEVERITY = {"pass": 0, "warn": 1, "fail": 2}
+
+
+def _worst_status(checks: list) -> str:
+    """The worst status across a block's checks (fail > warn > pass)."""
+    worst = 0
+    for c in checks:
+        worst = max(worst, _SEVERITY.get(c.get("status", "pass"), 0))
+    return {0: "pass", 1: "warn", 2: "fail"}[worst]
+
+
+def _observable_contract_check(ws_root: Path, slug: str) -> "dict | None":
+    """A graded *observable-contract* check: a study's declared readouts must
+    resolve to real observables of its baseline composite(s) -- the readout-level
+    analogue of ``contract-face-wellformed``, one layer up.
+
+    Reuses :func:`observables_views.build_study_observable_check` (the SAME
+    resolver the readouts picker and needs-attention use), so this adds no new
+    resolution logic. Maps each per-readout status to a verdict:
+    ``not_in_structure``/``unresolved`` (a selector no baseline composite
+    exposes) -> ``fail``; ``aspirational`` (declared, intentionally not yet
+    available) -> ``warn``; all ``ok`` -> ``pass``.
+
+    Returns the check dict, or ``None`` to skip -- the study declares no readouts
+    (nothing to grade), or the resolver could not run (non-200, e.g. no baseline
+    composite builds; that is a composite-resolution problem graded elsewhere).
+    Degrade, never fabricate.
+    """
+    try:
+        from vivarium_workbench.lib.observables_views import (
+            build_study_observable_check,
+        )
+        payload, code = build_study_observable_check(ws_root, slug)
+    except Exception:  # noqa: BLE001 — degrade; the audit must never 500
+        return None
+    if code != 200 or not isinstance(payload, dict):
+        return None
+    readouts = payload.get("readouts") or []
+    if not readouts:
+        return None
+    failed = [r for r in readouts
+              if r.get("status") in ("not_in_structure", "unresolved")]
+    warned = [r for r in readouts if r.get("status") == "aspirational"]
+    base = {"level": "L3", "name": "observable-contract", "tier": "soft"}
+    if failed:
+        names = ", ".join(str(r.get("name")) for r in failed[:5])
+        return {**base, "status": "fail",
+                "detail": f"{len(failed)} declared readout(s) resolve to no "
+                          f"composite observable: {names}"}
+    if warned:
+        names = ", ".join(str(r.get("name")) for r in warned[:5])
+        return {**base, "status": "warn",
+                "detail": f"{len(warned)} readout(s) aspirational (declared, not "
+                          f"yet available): {names}"}
+    return {**base, "status": "pass",
+            "detail": f"all {len(readouts)} declared readouts resolve to a "
+                      f"composite observable"}
+
+
+def _augment_with_observable_contract(block: dict, ws_root: Path, slug: str) -> dict:
+    """Fold the observable-contract check into a study-audit ``block`` in place
+    (append to ``checks``, recompute ``worst``), then return it. A no-op when
+    :func:`_observable_contract_check` skips."""
+    chk = _observable_contract_check(ws_root, slug)
+    if chk is not None:
+        block.setdefault("checks", []).append(chk)
+        block["worst"] = _worst_status(block.get("checks") or [])
+    return block
+
+
 def build_study_audit(ws_root: Path, study: Optional[str]) -> dict:
     """Build the GET /api/study-audit payload for one study (Fable G6).
 
@@ -155,6 +225,6 @@ def build_study_audit(ws_root: Path, study: Optional[str]) -> dict:
 
     for blk in report.studies:
         if blk.slug == study:
-            return blk.as_dict()
+            return _augment_with_observable_contract(blk.as_dict(), ws_root, study)
     return {"unavailable": True,
             "reason": f"study_audit reported no block for {study!r}"}
