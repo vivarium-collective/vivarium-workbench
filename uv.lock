@@ -3569,7 +3569,7 @@ dependencies = [
 [[package]]
 name = "viva-catalog"
 version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?branch=main#4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
+source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?rev=4e72e3b7f6c88d9683ae113a58e59bcafc5efb65#4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
 
 [[package]]
 name = "viva-emitters"
@@ -3729,7 +3729,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "uvicorn", specifier = ">=0.29" },
     { name = "viva-basic-processes", git = "https://github.com/vivarium-collective/viva-basic-processes.git?branch=main" },
-    { name = "viva-catalog", git = "https://github.com/vivarium-collective/viva-marketplace.git?branch=main" },
+    { name = "viva-catalog", git = "https://github.com/vivarium-collective/viva-marketplace.git?rev=4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" },
     { name = "viva-emitters", extras = ["sqlite", "xarray", "parquet"], specifier = ">=0.4.3" },
     { name = "viva-superpowers", extras = ["evaluator"], git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main" },
     { name = "viva-workspace", git = "https://github.com/vivarium-collective/viva-workspace.git?branch=main" },
