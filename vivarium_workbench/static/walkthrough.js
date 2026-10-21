@@ -11458,7 +11458,10 @@
       '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px">'
         + '<span style="font-weight:700;color:' + (clear ? '#166534' : '#b45309') + '">'
           + (clear ? '✓ All clear' : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention') + '</span>'
-        + (memberCount != null ? '<span class="muted" style="font-size:0.9em;white-space:nowrap">' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') + ' scanned</span>' : '')
+        + '<span style="display:flex;gap:8px;align-items:baseline;white-space:nowrap">'
+          + (memberCount != null ? '<span class="muted" style="font-size:0.9em">' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') + ' scanned</span>' : '')
+          + (clear ? '' : '<button type="button" onclick="window._copyNeedsAttention(this)" title="Copy every flagged item as plain text" style="font-size:0.82em;padding:2px 8px;border:1px solid #e2e8f0;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex:none">⧉ Copy</button>')
+        + '</span>'
       + '</div>'
       + '<ul style="margin:4px 0 0;padding:0;list-style:none">' + rows + '</ul>'
       + '<div style="margin-top:9px;padding-top:7px;border-top:1px solid #f1f5f9">'
@@ -11474,6 +11477,46 @@
     pop.style.left = Math.max(8, left) + 'px';
   }
   window._aigShowAllClearInfo = _aigShowAllClearInfo;
+  // Copy every flagged needs-attention item as plain text (so the whole list can
+  // be pasted elsewhere without clicking into each study). Reads the same live
+  // scan the popover renders (window._lastNeedsAttention); groups by check.
+  function _copyNeedsAttention(btn) {
+    var d = window._lastNeedsAttention || {};
+    var items = d.items || [], checks = d.checks || [], sum = d.summary || {};
+    var mc = (sum.member_count != null) ? sum.member_count : null;
+    var lines = ['⚠ ' + (sum.total || items.length) + ' need attention'
+      + (mc != null ? ' — ' + mc + ' member studies scanned' : ''), ''];
+    var byKind = {};
+    items.forEach(function (it) { (byKind[it.kind] = byKind[it.kind] || []).push(it); });
+    var order = checks.map(function (c) { return c.kind; });
+    Object.keys(byKind).forEach(function (k) { if (order.indexOf(k) < 0) order.push(k); });
+    order.forEach(function (k) {
+      var its = byKind[k]; if (!its || !its.length) return;
+      var c = checks.filter(function (x) { return x.kind === k; })[0];
+      lines.push((c && c.label ? c.label : k) + ' (' + its.length + ')');
+      its.forEach(function (it) {
+        var s = '  • ' + (it.title || it.ref || it.kind || '');
+        if (it.study) s += '  [study: ' + it.study + ']';
+        lines.push(s);
+        if (it.detail) lines.push('      ' + it.detail);
+        if (it.action_hint) lines.push('      → ' + it.action_hint);
+      });
+      lines.push('');
+    });
+    var text = lines.join('\n').replace(/\n+$/, '') + '\n';
+    var done = function () {
+      var o = btn.getAttribute('data-label') || btn.textContent;
+      btn.setAttribute('data-label', o); btn.textContent = '✓ Copied';
+      setTimeout(function () { btn.textContent = o; }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { window.prompt('Copy the needs-attention items:', text); });
+    } else {
+      try { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done(); }
+      catch (e) { window.prompt('Copy the needs-attention items:', text); }
+    }
+  }
+  window._copyNeedsAttention = _copyNeedsAttention;
   // "What are these checks?" -> open the investigation's Decisions tab, where the
   // needs-attention / decisions items live with their full context. Makes sure the
   // investigation overview is expanded first so the brief tabs are visible.
