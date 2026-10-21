@@ -194,7 +194,15 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # viva-superpowers ships a release that requires viva-emitters.
 viva-superpowers = { git = "https://github.com/vivarium-collective/viva-superpowers.git", branch = "main" }
 viva-basic-processes = { git = "https://github.com/vivarium-collective/viva-basic-processes.git", branch = "main" }
-viva-catalog = { git = "https://github.com/vivarium-collective/viva-marketplace.git", branch = "main" }
+# Pinned to a REV, not `branch = "main"`: a fresh `uv lock` resolved
+# viva-marketplace.git@main to a stale ancestor (3e43bc60) whose package name was
+# still the pre-rename `viva-marketplace`, failing "metadata name
+# `viva-marketplace` does not match given name `viva-catalog`" and blocking every
+# repo that locks workbench. Pin to 4e72e3b7 — the post-rename commit this repo's
+# own lock already resolved to and whose registry CI verifies (contains v2ecoli;
+# test_catalog_install_source). (The newest HEAD a0bb822 is post-rename too, but a
+# bot `refresh registry` commit dropped v2ecoli from its index.) Bump deliberately.
+viva-catalog = { git = "https://github.com/vivarium-collective/viva-marketplace.git", rev = "4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
 viva-workspace = { git = "https://github.com/vivarium-collective/viva-workspace.git", branch = "main" }
 # investigation-contracts is declared bare in [project.dependencies] (kept out
 # of published metadata) and is not on PyPI; supply its git URL here so `uv
