@@ -8125,7 +8125,13 @@
     if (!headerEl) return;
     var group = headerEl.closest ? headerEl.closest('.viv-rail-investigations-group')
                                  : headerEl.parentNode;
-    if (group) group.classList.toggle('collapsed');
+    if (!group) return;
+    group.classList.toggle('collapsed');
+    // Persist the user's choice so it survives the next rail re-render (opening a
+    // study, a data refresh, a pin toggle, …) instead of snapping back to the
+    // active-only default.
+    var _iset = group.getAttribute('data-iset');
+    if (_iset) _saveInvExpanded(_iset, !group.classList.contains('collapsed'));
   }
   window._vivToggleInvGroup = _vivToggleInvGroup;
 
@@ -8161,6 +8167,25 @@
     var mru = _loadInvMru();
     mru[name] = new Date().getTime();
     try { window.localStorage.setItem('viv.invMru', JSON.stringify(mru)); } catch (e) { /* private mode */ }
+  }
+  // Per-investigation rail expand/collapse state, persisted so a group the user
+  // opened (or collapsed) STAYS that way across rail re-renders — navigating to
+  // a study no longer re-collapses the other open investigations. Map is
+  // {invName: true(open)|false(collapsed)}; absent = use the default (the active
+  // investigation opens, the rest stay collapsed).
+  function _loadInvExpanded() {
+    if (!window._invExpanded || typeof window._invExpanded !== 'object') {
+      try { window._invExpanded = JSON.parse(window.localStorage.getItem('viv.invExpanded') || '{}') || {}; }
+      catch (e) { window._invExpanded = {}; }
+      if (!window._invExpanded || typeof window._invExpanded !== 'object') window._invExpanded = {};
+    }
+    return window._invExpanded;
+  }
+  function _saveInvExpanded(name, open) {
+    if (!name || name === '__ungrouped__') return;
+    var m = _loadInvExpanded();
+    m[name] = !!open;
+    try { window.localStorage.setItem('viv.invExpanded', JSON.stringify(m)); } catch (e) { /* private mode */ }
   }
   function _loadPinnedInvestigations() {
     if (!Array.isArray(window._pinnedInvestigations)) {
@@ -15455,9 +15480,33 @@
     // falls back to most-recently-opened, then topological depth / title.
     var _mru = _loadInvMru();
     var _invOrder = _loadInvOrder();
+    // Preserve the CURRENT on-screen order AND open/collapsed state across a
+    // re-render: a group already in the rail keeps its position and its
+    // expanded-ness, so navigating to a study never reshuffles the list or closes
+    // another open investigation ("stay where I put them"). Only groups new to the
+    // rail (first load, a freshly-created investigation) fall back to the saved /
+    // default state below.
+    var _domOrder = {};
+    var _domCollapsed = {};
+    (function () {
+      var _i = 0;
+      var _host = document.getElementById('viv-rail-investigations');
+      if (_host) {
+        _host.querySelectorAll('.viv-rail-investigations-group[data-iset]').forEach(function (el) {
+          var k = el.getAttribute('data-iset');
+          if (k && !(k in _domOrder)) {
+            _domOrder[k] = _i++;
+            _domCollapsed[k] = el.classList.contains('collapsed');
+          }
+        });
+      }
+    })();
     var ordered = _applyUserOrder(groups, _invOrder, function(a, b) {
+      var ao = (a.name in _domOrder) ? _domOrder[a.name] : Infinity;
+      var bo = (b.name in _domOrder) ? _domOrder[b.name] : Infinity;
+      if (ao !== bo) return ao - bo;   // keep the order the user is already seeing
       var am = _mru[a.name] || 0, bm = _mru[b.name] || 0;
-      if (am !== bm) return bm - am;   // most-recently-opened first
+      if (am !== bm) return bm - am;   // new groups: most-recently-opened first
       var da = railDepthMap[a.name] || 0, db = railDepthMap[b.name] || 0;
       return da - db || String(a.title || a.name).localeCompare(String(b.title || b.name));
     });
@@ -15470,11 +15519,25 @@
 
     var hasActive = ordered.some(function(g) { return g.name === currentSlug; });
 
+    var _invExpandedState = _loadInvExpanded();
     function _railGroupHtml(g, forceOpen) {
       var isActive = g.name === currentSlug;
-      // Collapsed unless active, or the caller forces it open (first group when
-      // there is no active investigation), so the rail opens on something.
-      var collapsed = (isActive || forceOpen) ? '' : ' collapsed';
+      // Open/collapsed precedence, most-authoritative first:
+      //   1. the ACTIVE investigation always opens — navigating to it must reveal
+      //      its studies;
+      //   2. any OTHER group keeps its CURRENT on-screen state — so navigating
+      //      never closes another open investigation or reopens a collapsed one
+      //      ("stay where I put them");
+      //   3. on a fresh load (nothing on screen yet) restore the user's PERSISTED
+      //      toggle (localStorage);
+      //   4. otherwise the default: open the forced-first group, else collapsed.
+      var _dom = _domCollapsed[g.name];
+      var _saved = _invExpandedState[g.name];
+      var _open = isActive ? true
+                : (_dom !== undefined) ? !_dom
+                : (_saved !== undefined) ? _saved
+                : forceOpen;
+      var collapsed = _open ? '' : ' collapsed';
       // Remember the default collapse state so the live filter can restore it when
       // the search is cleared (it force-opens matching groups while searching).
       var defaultCollapsed = collapsed ? ' data-default-collapsed="1"' : '';
