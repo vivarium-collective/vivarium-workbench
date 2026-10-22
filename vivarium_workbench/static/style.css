@@ -840,6 +840,41 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 }
 .viv-workspace-switcher .viv-ws-caret{ color:#9ca3af; font-size:0.78em }
 
+/* ── Workspace identity chip: avatar (profile pic or name monogram) + name link ─ */
+.viv-wsp-trigger{ display:flex; align-items:center; gap:9px; width:100%; min-width:0; cursor:pointer; position:relative; }
+.viv-ws-avatar{
+  position:relative; flex:0 0 28px; width:28px; height:28px; border-radius:7px;
+  display:flex; align-items:center; justify-content:center; background:#eef2ff;
+}
+.viv-ws-avatar-img{ width:28px; height:28px; border-radius:7px; object-fit:cover; display:block; }
+.viv-ws-avatar .viv-ws-mono{ display:none; }
+.viv-ws-avatar-mono .viv-ws-avatar-img{ display:none; }
+.viv-ws-avatar-mono .viv-ws-mono{
+  display:flex; align-items:center; justify-content:center; width:28px; height:28px;
+  border-radius:7px; font-size:12px; font-weight:700; color:#fff; letter-spacing:0.02em;
+  background:#6366f1;   /* per-workspace hue set in the inline init from the name */
+}
+/* Status dot as a small corner badge on the avatar (white ring so it reads on any art). */
+.viv-wsp-dot{
+  position:absolute; right:-3px; bottom:-3px; font-size:11px; line-height:1; color:#22c55e;
+  filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1px #fff);
+}
+.viv-wsp-dot.viv-wsp-remote{ color:#f59e0b; }
+.viv-wsp-trigger-current{ min-width:0; flex:1 1 auto; display:flex; }
+.viv-wsp-trigger-names{ min-width:0; display:flex; flex-direction:column; line-height:1.2; }
+.viv-wsp-trigger-names strong{ font-size:0.9em; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.viv-ws-home-link{ color:#111827; text-decoration:none; }
+.viv-ws-home-link:hover{ color:#4f46e5; text-decoration:underline; }
+.viv-wsp-trigger-branch{ font-size:0.74em; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.viv-ws-remote-tag{ font-size:0.7em; color:#b45309; background:#fef3c7; border-radius:4px; padding:0 4px; }
+.viv-wsp-trigger-caret{ flex:0 0 auto; color:#9ca3af; font-size:0.72em; }
+.viv-wsp-source-btn{ flex:0 0 auto; border:none; background:transparent; color:#9ca3af; cursor:pointer; font-size:0.92em; padding:2px 5px; border-radius:5px; }
+.viv-wsp-source-btn:hover{ color:#4f46e5; background:#eef2ff; }
+.viv-ws-flyout{ display:none; }
+:root[data-theme="dark"] .viv-ws-avatar{ background:#1e293b; }
+:root[data-theme="dark"] .viv-ws-home-link{ color:#e5e7eb; }
+:root[data-theme="dark"] .viv-wsp-trigger-names strong{ color:#e5e7eb; }
+
 /* The single scroll region: everything from the Workspace nav down lives here
    and scrolls as one, so a long study list pushes the nav up off the top rather
    than clipping. Only the brand + workspace chip above stay fixed. */
@@ -1212,12 +1247,31 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 }
 .viv-rail.viv-rail-collapsed .viv-rail-logo{ transition:opacity 0.12s }
 .viv-rail.viv-rail-collapsed .viv-rail-brand{ display:none }
-/* A short stand-in for the workspace-name chip: just the status dot, centered.
-   Still opens the Branch page on click. */
-.viv-rail.viv-rail-collapsed .viv-workspace-switcher{ display:flex; justify-content:center; margin:10px 0 2px; }
-.viv-rail.viv-rail-collapsed .viv-workspace-name{ padding:0; justify-content:center; }
-.viv-rail.viv-rail-collapsed .viv-ws-text{ display:none }
-.viv-rail.viv-rail-collapsed .viv-workspace-name .viv-workspace-switcher-glyph{ font-size:12px; margin-top:0; }
+/* Collapsed: the workspace identity is the AVATAR (profile pic or name monogram),
+   centered — so you always know which workspace you're in. Name/branch/caret are
+   hidden; hovering the avatar reveals a flyout naming the workspace (name links to
+   its home). */
+.viv-rail.viv-rail-collapsed .viv-workspace-switcher{ display:flex; justify-content:center; margin:12px 0 4px; position:relative; overflow:visible; }
+.viv-rail.viv-rail-collapsed .viv-wsp-trigger{ justify-content:center; gap:0; }
+.viv-rail.viv-rail-collapsed .viv-wsp-trigger-current,
+.viv-rail.viv-rail-collapsed .viv-wsp-trigger-caret,
+.viv-rail.viv-rail-collapsed .viv-wsp-source-btn{ display:none; }
+.viv-rail.viv-rail-collapsed .viv-ws-avatar{ flex-basis:30px; width:30px; height:30px; }
+.viv-rail.viv-rail-collapsed .viv-ws-avatar-img,
+.viv-rail.viv-rail-collapsed .viv-ws-avatar-mono .viv-ws-mono{ width:30px; height:30px; }
+.viv-rail.viv-rail-collapsed .viv-ws-flyout{
+  display:none; position:absolute; left:calc(100% + 8px); top:50%; transform:translateY(-50%);
+  z-index:80; background:#111827; color:#fff; border-radius:8px; padding:8px 12px;
+  white-space:nowrap; box-shadow:0 6px 20px rgba(0,0,0,0.22);
+  flex-direction:column; gap:2px; align-items:flex-start;
+}
+.viv-rail.viv-rail-collapsed .viv-wsp-trigger:hover .viv-ws-flyout,
+.viv-rail.viv-rail-collapsed .viv-wsp-trigger:focus-within .viv-ws-flyout{ display:flex; }
+.viv-rail.viv-rail-collapsed .viv-ws-flyout strong{ font-size:0.9em; font-weight:600; }
+.viv-rail.viv-rail-collapsed .viv-ws-flyout .viv-ws-home-link{ color:#fff; text-decoration:none; }
+.viv-rail.viv-rail-collapsed .viv-ws-flyout .viv-ws-home-link:hover{ text-decoration:underline; }
+.viv-rail.viv-rail-collapsed .viv-ws-flyout-branch{ font-size:0.76em; color:#cbd5e1; }
+.viv-rail.viv-rail-collapsed .viv-ws-flyout-hint{ font-size:0.7em; color:#94a3b8; }
 .viv-rail.viv-rail-collapsed .viv-rail-section-label{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-link{
   /* Keep the SAME left padding + accent border as expanded so each icon sits at

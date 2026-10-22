@@ -629,6 +629,14 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # GitHub repository this workspace is associated with (from `git remote
     # origin`) — rendered as a link in the rail header.
     _repo_slug = _detect_github_repo(ws_root)
+    # Per-workspace identity shown in the rail (expanded + collapsed): an optional
+    # profile picture (`avatar:`/`icon:` in workspace.yaml, a URL) and the home
+    # page the workspace name links to (`homepage:` else the GitHub repo). With no
+    # avatar the rail falls back to a name-derived monogram (client-side), which
+    # distinguishes workspaces better than the shared org avatar would.
+    _ws_avatar = str(ws.get("avatar") or ws.get("icon") or "").strip()
+    _ws_home = str(ws.get("homepage") or "").strip() or (
+        f"https://github.com/{_repo_slug}" if _repo_slug else "")
     # Rail-chip subtitle describing the ACTIVE source. A materialized remote
     # build (.../build-cache/sim<id>-<commit>) carries a .viv-build.json with its
     # branch/commit/id (stamped at switch time) and isn't a git repo; a local
@@ -666,6 +674,8 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         workspace_branch=_workspace_subtitle,
         workspace_is_remote=_workspace_is_remote,
         repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
+        workspace_avatar=_ws_avatar,
+        workspace_home=_ws_home,
         dashboard_name=dashboard_name,
         dashboard_logo=dashboard_logo,
         active_investigation_name=active_investigation_name,
