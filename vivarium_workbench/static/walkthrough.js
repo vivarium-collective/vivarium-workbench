@@ -15416,6 +15416,11 @@
       bar.querySelector('#viv-rail-step-prev').addEventListener('click', function () { window._railStepStudy(-1); });
       bar.querySelector('#viv-rail-step-next').addEventListener('click', function () { window._railStepStudy(1); });
     }
+    // Prefer to sit on the SAME row as the search field (one compact bar); fall
+    // back to a band above the list when there's no search head.
+    var searchHead = document.getElementById('viv-rail-studies-head');
+    if (searchHead && bar.parentNode !== searchHead) searchHead.appendChild(bar);
+    else if (!searchHead && bar.parentNode !== host.parentNode) host.parentNode.insertBefore(bar, host);
     _updateRailStepperPosition();
   }
   // Exposed so the Studies panel can mount the stepper as soon as the list renders

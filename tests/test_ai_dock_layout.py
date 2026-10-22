@@ -265,3 +265,26 @@ def test_popout_returns_window_and_studies_routes_to_opener():
     assert "return window.open(url" in (STATIC / "panel-dock.js").read_text()
     wk = (STATIC / "walkthrough.js").read_text()
     assert "window.opener._openStudyEmbeddedNewTab(name, tab)" in wk
+
+
+def test_search_and_stepper_share_one_row():
+    """The Studies search field and the nav stepper sit on one compact bar (the
+    stepper is appended into the search head), saving a row."""
+    js = (STATIC / "walkthrough.js").read_text()
+    assert "searchHead.appendChild(bar)" in js
+    css = (STATIC / "style.css").read_text()
+    assert ".viv-studies-body .viv-rail-studies-head{" in css
+    assert "display:flex" in css.split(".viv-studies-body .viv-rail-studies-head{")[1].split("}")[0]
+
+
+def test_dockable_panel_headers_reveal_on_hover():
+    """studies / code / chat panels drop the full-width header bar; the dock/close
+    controls float top-right and appear only on hover (saves the header row)."""
+    css = (STATIC / "style.css").read_text()
+    for sel in (".viv-studies-panel .vp-head", ".viv-code-rail .vp-head", "#viv-ai-panel .vp-head"):
+        assert sel in css, f"{sel} float rule missing"
+    # hidden by default, shown on hover/focus-within
+    assert "opacity:0; pointer-events:none;" in css
+    assert ".viv-studies-panel:hover .vp-head" in css and ".viv-code-rail:hover .vp-head" in css and "#viv-ai-panel:hover .vp-head" in css
+    # only icon controls remain (title dropped)
+    assert ".viv-studies-panel .vp-head > :not(.vp-icon)" in css
