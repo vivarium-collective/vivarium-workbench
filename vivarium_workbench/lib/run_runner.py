@@ -265,6 +265,13 @@ def _generator_emitter_defaults(spec_id: str) -> list:
     return emitter_defaults(entry)
 
 
+def _declared_emit_paths(spec_id: str) -> list:
+    """The paths a generator composite declares it emits (``[]`` when it declares none or is not one)."""
+    from vivarium_workbench.lib.composite_resolve import declared_emit_paths
+
+    return declared_emit_paths(_generator_emitter_defaults(spec_id))
+
+
 def _emitter_decl_source(spec: dict | None, spec_id: str):
     """The object carrying the composite's emitter declaration.
 
@@ -1075,6 +1082,11 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
             # committed code (git+repo@commit), not the local tree (no push needed).
             if req.build_ref:
                 run_remote_kwargs["build_ref"] = req.build_ref
+            # A backend that records the run's paths itself (compose-api) adds an emitter for them: the
+            # explicit selection, else the composite's declaration (the local run's first two rungs).
+            remote_emit_paths = list(req.emit_paths) or _declared_emit_paths(req.spec_id)
+            if remote_emit_paths:
+                run_remote_kwargs["emit_paths"] = remote_emit_paths
             results_path = remote_run.run_remote(req.workspace, req.spec_id, **run_remote_kwargs)
             landed_steps = None
             if results_path is not None and zipfile.is_zipfile(results_path):
@@ -1082,8 +1094,13 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
                 # run DID complete, so a zip that cannot be landed (no emitter history, several emitters) does
                 # not make it failed -- the reason goes in the run log, where the run's page shows it.
                 try:
+                    from vivarium_workbench.lib.remote_run_compose import STUDY_EMITTER
+
+                    # The emitter compose-api's dispatch added for emit_paths, when it is in the archive;
+                    # otherwise the archive's one emitter.
                     landed_steps = remote_run_landing.land_composite_results(
-                        results_path, Path(req.db_file), req.run_id)
+                        results_path, Path(req.db_file), req.run_id,
+                        emitter=STUDY_EMITTER if remote_emit_paths else None)
                 except (ValueError, zipfile.BadZipFile) as land_exc:
                     _write_log(req, f"\nREMOTE RESULTS NOT LANDED: {land_exc}\n")
             elif results_path is not None:

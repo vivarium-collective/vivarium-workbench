@@ -2872,7 +2872,7 @@
     el.style.display = '';
     if (d.phase === 'unreachable') {
       track.style.display = 'none';
-      label.textContent = '⚠ progress unavailable (sms-api unreachable)';
+      label.textContent = '⚠ progress unavailable (remote backend unreachable)';
       return;
     }
     var e = escapeHtmlForTests;

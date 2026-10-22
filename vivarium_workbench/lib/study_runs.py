@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from pathlib import Path
 
 import yaml
 
@@ -56,6 +57,39 @@ def _study_runtime_emitter(runtime_cfg):
     """
     runtime_cfg = runtime_cfg or {}
     return runtime_cfg.get("emitter") or runtime_cfg.get("default_emitter")
+
+
+def _migrated_study_spec(spec_file) -> dict:
+    """``study.yaml`` as a run reads it: the raw file, legacy v2 shapes (``baseline: <str>``, ``variants: [...]``)
+    migrated to the v3 lists. In memory only; the file is not rewritten."""
+    from vivarium_workbench.lib.spec_migration import migrate_v2_to_v3
+
+    return migrate_v2_to_v3(yaml.safe_load(Path(spec_file).read_text(encoding="utf-8")) or {})
+
+
+def _projected_study_spec(spec: dict) -> dict:
+    """The v4-redesign projection: legacy fields (baseline list, variants list, behavior_tests, simulation_set)
+    synthesised from a v4 ``conditions`` block. Idempotent on v3 (no-op when ``conditions`` is absent)."""
+    if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
+        from vivarium_workbench.lib.investigations import _project_v4_redesign_to_legacy_view
+        return _project_v4_redesign_to_legacy_view(spec)
+    return spec
+
+
+def _study_emit_paths(study_dir, spec: dict) -> list:
+    """What a run of the study records: the paths its observables name (v2ecoli friction #14), else the baseline
+    composite's own ``emitters:`` declaration, so a composite that says what it emits is honored without the
+    study restating it. ``spec`` is :func:`_projected_study_spec`'s."""
+    from vivarium_workbench.lib import composite_runs as cr
+
+    return cr.collect_emit_paths_from_spec(spec) or _composite_declared_emit_paths(study_dir, spec)
+
+
+def study_emit_paths(study_dir) -> list:
+    """:func:`_study_emit_paths` for the study in ``study_dir``, read from its ``study.yaml`` the way a run reads
+    it (a remote dispatch records what a local run of the study records)."""
+    spec_file = study_spec.study_spec_file(Path(study_dir))
+    return _study_emit_paths(study_dir, _projected_study_spec(_migrated_study_spec(spec_file)))
 
 
 def _composite_declared_emit_paths(study_dir, spec) -> list:
@@ -624,7 +658,6 @@ def run_study_baseline(ws_root, body):
     which takes those as explicit replay inputs and stamps them into the
     run's manifest.
     """
-    from vivarium_workbench.lib import composite_runs as cr
 
     skip_analyses = bool(body.get("skip_analyses"))
     name = _study_name_from_body(body)
@@ -639,12 +672,7 @@ def run_study_baseline(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    # Auto-migrate legacy v2-shape specs (baseline: <str>, variants: [...]) to
-    # the v3 list shape this handler expects. In-memory only; doesn't rewrite
-    # the file. Keeps legacy investigations/spec.yaml usable.
-    from vivarium_workbench.lib.spec_migration import migrate_v2_to_v3
-    spec = migrate_v2_to_v3(spec)
+    spec = _migrated_study_spec(sf)
     # A declared per-condition environment pin (dual-engine W1) must be read
     # from the RAW v4 spec BEFORE the legacy projection below — the projection
     # synthesises legacy fields and is not guaranteed to carry `conditions`
@@ -654,12 +682,7 @@ def run_study_baseline(ws_root, body):
         declared_env = study_spec.condition_environment(spec, "baseline")
     except ValueError as e:
         return {"error": str(e)}, 400
-    # v4-redesign projection: synthesises legacy fields (baseline list,
-    # variants list, behavior_tests, simulation_set) from a v4 conditions
-    # block. Idempotent on v3 (no-op when conditions is absent).
-    if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
-        from vivarium_workbench.lib.investigations import _project_v4_redesign_to_legacy_view
-        spec = _project_v4_redesign_to_legacy_view(spec)
+    spec = _projected_study_spec(spec)
     baseline = spec.get("baseline") or []
     if not isinstance(baseline, list) or not baseline:
         return {"error": "study has no baseline composites"}, 400
@@ -702,9 +725,7 @@ def run_study_baseline(ws_root, body):
     # declares no observable-driven paths, fall back to the baseline composite's
     # own ``emitters:`` declaration — so a composite that says what it emits
     # (positions, counts, …) is honored without the study restating it.
-    emit_paths = cr.collect_emit_paths_from_spec(spec)
-    if not emit_paths:
-        emit_paths = _composite_declared_emit_paths(study_dir, spec)
+    emit_paths = _study_emit_paths(study_dir, spec)
     # Per-study overrides — all win over workspace defaults. Emitter precedence:
     # study runtime.emitter/default_emitter > investigation runtime.default_emitter > workspace.
     study_emitter = _study_runtime_emitter(runtime_cfg) or study_run_state.investigation_emitter_for_study(ws_root, spec.get("name"))
@@ -718,10 +739,10 @@ def run_study_baseline(ws_root, body):
     }
     dry_run = bool(body.get("dry_run"))
 
-    # A backend the operator NAMED (serve --backend-base-url) that runs documents via
-    # POST /viva/v1/composites: ANY baseline composite runs there, keyed by the workspace's
+    # A backend the operator NAMED (serve --backend-base-url) that runs documents (POST
+    # /viva/v1/composites, or compose-api's POST /simulation/run): ANY baseline composite runs there, keyed by the workspace's
     # composite (no simulator id exists to pin, and none is needed).
-    if not dry_run and remote_pinned.uses_viva_v1_dispatch(ws_root):
+    if not dry_run and remote_pinned.uses_named_backend_dispatch(ws_root):
         from vivarium_workbench.lib.remote_run_views import remote_run_submit
         return remote_run_submit(ws_root, {
             "study": name, "composite": spec_id,
@@ -1007,7 +1028,7 @@ def run_study_variant(ws_root, body):
             return {"error": str(e)}, 409
         # Remote-build guard — same as the baseline path above (SP-D2/G1, item 18).
         if plan.target == "deployment":
-            if remote_pinned.uses_viva_v1_dispatch(ws_root):
+            if remote_pinned.uses_named_backend_dispatch(ws_root):
                 from vivarium_workbench.lib.remote_run_views import remote_run_submit
                 return remote_run_submit(ws_root, {
                     "study": name, "composite": spec_id,
