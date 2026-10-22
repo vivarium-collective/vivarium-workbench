@@ -38,7 +38,7 @@ def test_render_dag_computes_and_applies_orientation():
     fn = dag_render_fn()
     # AUTO default comes from the container aspect (_aigAutoOrient); the pure shape
     # helper is only the last-resort fallback when nothing can be measured.
-    assert "_aigAutoOrient()" in fn
+    assert "_aigAutoOrient(depthCounts)" in fn
     assert "window.chooseGraphOrientation" in fn
     assert "depthCounts" in fn
     # A transient in-memory manual override wins over auto when present.
@@ -54,11 +54,16 @@ def test_orientation_is_auto_by_aspect_with_in_memory_override():
     assert "aig-orientation" not in JS                    # no persistence key
     assert "function _graphOrientationKey" not in JS
     assert "function _getStoredGraphOrientation" not in JS
-    # Aspect-derived auto: dock side (L/R → TB, T/B → LR) + inline wide → LR.
-    assert "function _aigAutoOrient()" in JS
-    assert "dock === 'left' || dock === 'right'" in JS and "return 'TB'" in JS
-    assert "dock === 'top' || dock === 'bottom'" in JS and "return 'LR'" in JS
-    assert "availW >= availH ? 'LR' : 'TB'" in JS
+    # Aspect-derived auto (two factors): STEP 1 sets `wide` — the pane's long axis —
+    # from the dock side (L/R → narrow/tall, T/B → short/wide) or the inline area's
+    # measured aspect; STEP 2 derives breadth-vs-depth from `depthCounts`; STEP 3
+    # lays the graph's dominant axis along the pane's long axis.
+    assert "function _aigAutoOrient(depthCounts)" in JS
+    assert "dock === 'left' || dock === 'right') wide = false" in JS
+    assert "dock === 'top' || dock === 'bottom') wide = true" in JS
+    assert "wide = availW >= availH" in JS
+    assert "breadthHeavy = maxBreadth > maxDepth" in JS
+    assert "wide ? (breadthHeavy ? 'TB' : 'LR') : (breadthHeavy ? 'LR' : 'TB')" in JS
     # Manual override: in-memory, not persisted; exposed as before.
     assert "var _aigManualOrient = null" in JS
     assert "function _setGraphOrientation(o)" in JS
