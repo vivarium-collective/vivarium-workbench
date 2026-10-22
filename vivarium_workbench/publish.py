@@ -1524,11 +1524,18 @@ def _do_build(
     # ------------------------------------------------------------------
     # 5. Render per-study shells → bundle/studies/<slug>/index.html
     # ------------------------------------------------------------------
+    # Studies whose shell could not be rendered. We still render every other
+    # study (one bad study must not abort the batch), but a MISSING shell means
+    # the snapshot 404s when the SPA opens that study (_studyHref →
+    # studies/<slug>/index.html), so we fail the whole publish at the end rather
+    # than silently ship a broken bundle to the read-only dashboard.
+    _shell_failures: list[tuple[str, str]] = []
     for slug in studies:
         try:
             spec = _study_detail_spec(ws_root, slug)
         except Exception as exc:  # noqa: BLE001 — one bad study must not abort
             print(f"  warn: study-shell export failed for {slug!r}: {exc}")
+            _shell_failures.append((slug, f"spec load: {exc}"))
             continue
         if spec is None:
             continue
@@ -1550,10 +1557,19 @@ def _do_build(
             )
         except Exception as exc:  # noqa: BLE001 — one bad study must not abort the whole publish
             print(f"  warn: study-shell render failed for {slug!r}: {exc}")
+            _shell_failures.append((slug, str(exc)))
             continue
         shell_dir = out_dir / "studies" / slug
         shell_dir.mkdir(parents=True, exist_ok=True)
         (shell_dir / "index.html").write_text(study_html, encoding="utf-8")
+
+    # Fail loudly: a study without its shell would 404 in the live snapshot. We
+    # render all studies first (above) so the error lists every failure at once.
+    if _shell_failures:
+        _detail = "; ".join(f"{slug} ({err})" for slug, err in _shell_failures)
+        raise RuntimeError(
+            f"study-shell render failed for {len(_shell_failures)} "
+            f"study/studies — the snapshot would 404 on opening them: {_detail}")
 
     # ------------------------------------------------------------------
     # 6. Write config.json
