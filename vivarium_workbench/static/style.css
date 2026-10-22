@@ -1026,7 +1026,9 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
   padding: 1px 8px 3px; background: #fafafa; box-shadow: 0 1px 0 #ececec;
 }
 .viv-rail-step-card {
-  display: flex; align-items: center; gap: 4px; padding: 1px 4px;
+  /* A tight pill that hugs its contents and sits LEFT — not a full-width bar
+     (which stretched absurdly wide when the panel is docked along the bottom). */
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 3px;
   border: 1px solid #e5e7eb; border-radius: 6px; background: #f8fafc;
 }
 #viv-rail-study-stepper button {
@@ -1037,7 +1039,8 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 #viv-rail-study-stepper button:hover:not(:disabled) { background: #eef2ff; border-color: #a5b4fc; }
 #viv-rail-study-stepper button:disabled { color: #cbd5e1; cursor: default; }
 #viv-rail-study-stepper #viv-rail-step-pos {
-  flex: 1; text-align: center; font-size: 0.73em; color: #64748b; font-variant-numeric: tabular-nums;
+  flex: none; min-width: 40px; padding: 0 8px; text-align: center;
+  font-size: 0.73em; color: #64748b; font-variant-numeric: tabular-nums;
 }
 :root[data-theme="dark"] #viv-rail-study-stepper { background: var(--rail); box-shadow: 0 1px 0 var(--border-faint); }
 :root[data-theme="dark"] .viv-rail-step-card { background: #1e293b; border-color: #334155; }
@@ -6234,8 +6237,10 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 .viv-studies-panel .viv-studies-head .vp-icon svg{ width:14px; height:14px; }
 /* Tighten the sticky search band + stepper so the top section is compact. */
 .viv-studies-body .viv-rail-studies-head{ padding-top:2px; }
-.viv-studies-body #viv-rail-study-search{ margin:2px 8px !important; }
-.viv-studies-body #viv-rail-study-stepper{ padding:1px 8px 2px; }
+/* Cap + left-align the search and stepper so they stay compact when the panel is
+   docked along the bottom (wide); on a narrow side dock they still fill. */
+.viv-studies-body #viv-rail-study-search{ margin:2px 8px !important; max-width:420px; }
+.viv-studies-body #viv-rail-study-stepper{ padding:1px 8px 2px; text-align:left; }
 body.vp-dragging .viv-studies-head{ cursor:grabbing; }
 .viv-studies-title{ min-width:0; }
 .viv-studies-title strong{ display:block; font-size:0.9rem; }
