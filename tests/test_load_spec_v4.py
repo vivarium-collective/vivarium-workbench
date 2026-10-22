@@ -210,3 +210,35 @@ def test_load_spec_v3_baseline_requires_composite_step_or_process(tmp_path):
     p = _v3_with_baseline(tmp_path, {"name": "b"})
     with pytest.raises(InvestigationSpecError, match="composite.*step.*process"):
         load_spec(p)
+
+
+def test_load_spec_v4_multi_arm_baseline_list_accepted(tmp_path):
+    # A multi-arm study: conditions.baseline is a LIST of arms, each with a
+    # composite. load_spec must accept it (not raise), and study_interface
+    # returns the headline (first) arm's composite.
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "schema_version": 4,
+        "name": "multi-arm-study",
+        "question": "Does X behave across arms?",
+        "conditions": {"baseline": [
+            {"name": "arm-a", "composite": "pkg.a"},
+            {"name": "arm-b", "composite": "pkg.b"}]},
+    }))
+    spec = load_spec(spec_path)  # must not raise
+    from vivarium_workbench.lib.study_spec import study_interface
+    assert study_interface(spec)["composite"] == "pkg.a"
+
+
+def test_load_spec_v4_multi_arm_armless_arm_rejected(tmp_path):
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "schema_version": 4,
+        "name": "multi-arm-armless",
+        "question": "Does X?",
+        "conditions": {"baseline": [
+            {"name": "arm-a", "composite": "pkg.a"},
+            {"name": "arm-b"}]},
+    }))
+    with pytest.raises(InvestigationSpecError, match="composite"):
+        load_spec(spec_path)

@@ -488,8 +488,9 @@ def enumerate_unblocked(spec: dict) -> tuple[list[dict], list[dict]]:
     runnable: list[dict] = []
     blocked: list[dict] = []
 
-    # Baseline as the implicit first item.
-    baseline = cond.get("baseline") or {}
+    # Baseline as the implicit first item (headline arm for a multi-arm study).
+    from vivarium_workbench.lib.study_spec import baseline_head
+    baseline = baseline_head(cond.get("baseline"))
     variants = cond.get("variants") or []
     if not baseline.get("composite"):
         # The top-level form (``baseline: [{name, composite, params}, ...]``, ``variants: [...]``): the study

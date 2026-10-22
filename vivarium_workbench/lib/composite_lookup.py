@@ -425,6 +425,11 @@ def _study_composite_refs(spec: dict) -> list[str]:
         bl = conds.get("baseline")
         if isinstance(bl, dict):
             _add(bl.get("composite"))
+        elif isinstance(bl, list):
+            # Multi-arm study: every arm is a baseline composite in its own right.
+            for arm in bl:
+                if isinstance(arm, dict):
+                    _add(arm.get("composite"))
         for v in (conds.get("variants") or []):
             if isinstance(v, dict):
                 _add(v.get("composite"))

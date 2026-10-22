@@ -215,6 +215,26 @@ def study_spec_path(ws_root: Path, name: str) -> Path:
 # Normalized interface (composite/config/inputs/outputs/emitter)
 # ---------------------------------------------------------------------------
 
+def baseline_head(baseline) -> dict:
+    """The representative (headline) baseline model dict.
+
+    ``conditions.baseline`` is normally a single mapping, but a **multi-arm
+    study** (several baseline arms, each a distinct composite) declares it as a
+    *list* of arm mappings. Callers that want the primary baseline model — for
+    the study shell's headline composite/config — use this to treat both shapes
+    uniformly: it returns the mapping as-is, the first arm mapping of a list, or
+    ``{}`` for anything else. Call sites that must cover *every* arm (composite
+    collection, catalog impact) iterate the list directly instead.
+    """
+    if isinstance(baseline, dict):
+        return baseline
+    if isinstance(baseline, list):
+        for arm in baseline:
+            if isinstance(arm, dict):
+                return arm
+    return {}
+
+
 def study_interface(spec: dict) -> dict:
     """Normalize a study spec's execution interface.
 
@@ -266,7 +286,7 @@ def study_interface(spec: dict) -> dict:
     # Fall back to conditions.baseline for composite and config if not defined
     # at the top level. This handles Phase 2 migration where models moved under
     # conditions.baseline.{composite, params}.
-    cond_baseline = ((spec.get("conditions") or {}).get("baseline")) or {}
+    cond_baseline = baseline_head((spec.get("conditions") or {}).get("baseline"))
     composite = spec.get("composite") or cond_baseline.get("composite")
     config = spec.get("config")
     if not config:

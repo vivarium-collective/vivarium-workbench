@@ -261,13 +261,21 @@ def _validate_study_v4_redesign(spec: dict) -> None:
         raise InvestigationSpecError("v4 study: 'conditions' must be a mapping")
 
     baseline = cond.get("baseline")
-    if not isinstance(baseline, dict) or not (
-        baseline.get("composite") or baseline.get("step") or baseline.get("process")
-    ):
+    # conditions.baseline is normally a single mapping, but a multi-arm study
+    # (several baseline arms, each a distinct composite) declares it as a list
+    # of arm mappings. Accept both; every arm must carry a composite/step/process.
+    arms = baseline if isinstance(baseline, list) else [baseline]
+
+    def _arm_ok(a):
+        return isinstance(a, dict) and (
+            a.get("composite") or a.get("step") or a.get("process"))
+
+    if not arms or not all(_arm_ok(a) for a in arms):
         raise InvestigationSpecError(
-            "v4 study: conditions.baseline must be a mapping with at least a "
-            "'composite' key (dotted path to the composite function) — or a "
-            "'step'/'process' dotted address for a bare Step/Process baseline"
+            "v4 study: conditions.baseline must be a mapping — or, for a "
+            "multi-arm study, a non-empty list of arm mappings — each with at "
+            "least a 'composite' key (dotted path to the composite function), "
+            "or a 'step'/'process' dotted address for a bare Step/Process baseline"
         )
 
     variants = cond.get("variants", [])
@@ -392,8 +400,10 @@ def _project_v4_redesign_to_legacy_view(spec: dict) -> dict:
     ):
         out["expert_decisions_needed"] = out["design_pivot_required"]
 
-    # baseline — synthesise the v3 single-baseline list shape
-    bl = cond.get("baseline") or {}
+    # baseline — synthesise the v3 single-baseline list shape (headline arm
+    # for a multi-arm study)
+    from vivarium_workbench.lib.study_spec import baseline_head
+    bl = baseline_head(cond.get("baseline"))
     if bl.get("composite") and not out.get("baseline"):
         out["baseline"] = [{
             "name": out.get("name") or "baseline",
@@ -820,7 +830,10 @@ def _resolve_condition_config_files(spec: dict, study_path: Path) -> None:
     study_dir = Path(study_path).parent
     cond = spec.get("conditions")
     if isinstance(cond, dict):
-        _fold_config_file_into_params(cond.get("baseline") or {}, study_dir)
+        bl = cond.get("baseline")
+        # Multi-arm: fold config for every arm; single-baseline: the one mapping.
+        for arm in (bl if isinstance(bl, list) else [bl]):
+            _fold_config_file_into_params(arm or {}, study_dir)
         for v in (cond.get("variants") or []):
             _fold_config_file_into_params(v, study_dir)
     for b in (spec.get("baseline") or []) if isinstance(spec.get("baseline"), list) else []:
