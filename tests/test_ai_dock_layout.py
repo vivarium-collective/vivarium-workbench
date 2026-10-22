@@ -296,4 +296,4 @@ def test_popout_close_returns_to_inline_docking():
     docking in the opener and closes the popout window."""
     js = (STATIC / "studies-panel.js").read_text()
     assert "function returnInline" in js and "window.opener._openStudiesPanel()" in js
-    assert "if (inPopout()) returnInline();" in js
+    assert "if (initDone && inPopout()) returnInline();" in js
