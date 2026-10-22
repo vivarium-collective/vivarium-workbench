@@ -823,7 +823,12 @@ def _build_synthesis(inv, studies, spine):
         fnds = []
         for m in members:
             for f in (m["_s"].get("findings") or [])[:3]:
-                ev = (f or {}).get("evidence") or {}
+                # evidence may be a plain string (a prose description) rather than
+                # a {observed, units} dict; guard before .get() so _build_synthesis
+                # doesn't crash the whole report on `'str' object has no attribute
+                # 'get'`. A string evidence simply has no structured observed/units.
+                ev = (f or {}).get("evidence")
+                ev = ev if isinstance(ev, dict) else {}
                 fnds.append({
                     "study": m["slug"], "title": m["title"], "grade": m["grade"],
                     "status": (f or {}).get("status"),

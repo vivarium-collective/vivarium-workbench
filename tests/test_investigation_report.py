@@ -579,3 +579,31 @@ def test_report_builder_stamps_display_intent_onto_figures():
     # distinct names do not collide
     assert _norm_fig_name("growth-division") != _norm_fig_name("growth-division-map")
     assert _norm_fig_name(None) == ""
+
+
+def test_string_evidence_in_finding_does_not_crash_report(tmp_path):
+    """A finding whose ``evidence`` is a prose STRING (not a {observed, units}
+    dict) must not crash the whole report. ``_build_synthesis`` reads
+    ``evidence.get("observed")``; before the isinstance guard a string evidence
+    raised ``'str' object has no attribute 'get'`` and zeroed out every report
+    for the investigation."""
+    _write(tmp_path / "workspace.yaml", {"schema_version": 2, "name": "tw", "package_path": "pkg"})
+    _write(tmp_path / "investigations" / "syn" / "investigation.yaml", {
+        "name": "syn", "title": "Synthesis", "status": "complete",
+        "question": "Does string evidence render?",
+        "executive": {"what_is_this": "x", "verdict": "ok", "verdict_status": "passed"},
+        "studies": ["s1"],
+    })
+    _write(tmp_path / "studies" / "s1" / "study.yaml", {
+        "name": "s1", "title": "S1", "confidence": "Accepted", "gate_status": "passed",
+        "claim": "c",
+        "findings": [{"id": "F1", "status": "confirms",
+                      "statement": "a finding whose evidence is a plain string.",
+                      "evidence": "measured qualitatively; no structured observed/units"}],
+        "runs": [{"name": "s1", "status": "completed",
+                  "outcomes": {"G": {"result": "PASS", "detail": "ok"}}}],
+        "conclusion": "ok.",
+    })
+    data = build_report_data(tmp_path, "syn")  # must not raise
+    html = render_html(data)
+    assert len(html) > 0
