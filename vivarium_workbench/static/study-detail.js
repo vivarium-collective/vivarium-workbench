@@ -547,7 +547,14 @@
         + '></iframe>'
       : (c.img
         ? '<img class="chart-img figure-media" src="' + c.img + '" alt="' + (c.key || 'chart') + '" loading="lazy">'
-        : (c.svg ? _svgImg(c) : '')));
+        : (c.svg ? _svgImg(c)
+        : (c.snapshot_unavailable
+          // A declared interactive figure that couldn't be materialized into
+          // this static snapshot (publish._inline_declared_iframe_figures). Show
+          // a placeholder instead of a dead iframe that 404s.
+          ? '<div class="figure-media figure-unavailable"><p class="empty-message">'
+            + 'Interactive visualization — available in the live workbench.</p></div>'
+          : ''))));
     var desc = c.caption ? '<div class="chart-caption">' + c.caption + '</div>' : '';
     var runLink = c.run_id
       ? '<a href="#" class="figure-run-link" data-run-id="' + escapeHtmlForTests(String(c.run_id)) + '">from run '
