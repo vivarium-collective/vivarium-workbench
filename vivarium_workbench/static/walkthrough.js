@@ -15623,7 +15623,7 @@
     var _sm = _verdictMeta(s) || _execMeta(s);
     var status = _sm.label;
     var color = _sm.color;
-    var indent = opts.indent ? '28px' : '12px';
+    var indent = opts.indent ? '16px' : '8px';
     var fontSize = opts.indent ? '0.85em' : '0.86em';
     var nameColor = opts.indent ? '#64748b' : '#374151';
     var tip = _esc(s.name) + ' — ' + _esc(status) + (s.blocked ? ' (blocked)' : '');

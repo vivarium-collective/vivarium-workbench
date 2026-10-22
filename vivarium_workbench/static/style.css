@@ -17,7 +17,7 @@ main{padding:20px;margin:0 auto}
 #page-composite-explore, .viv-content > #page-composite-explore
   {max-width:none;width:auto}
 .viv-content:has(> #page-investigations.active){
-  padding:8px 24px !important;   /* 24px horizontal = same left inset as Registry/Modules */
+  padding:8px 14px !important;   /* tighter side margins around the investigation content */
   width:100% !important;
   max-width:none !important;
 }
@@ -72,7 +72,7 @@ main{padding:20px;margin:0 auto}
   display: block;
   min-height: 600px;
 }
-main.study-page{max-width:none;padding:12px 16px;width:100%;box-sizing:border-box}
+main.study-page{max-width:none;padding:10px 12px;width:100%;box-sizing:border-box}
 
 /* ─────────────────────────────────────────────────────────────────────
  * Studies-tab fullscreen layout.
@@ -1389,7 +1389,7 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
   /* Always reserve the scrollbar gutter so switching between a short tab and a
      long one (e.g. Registry Modules -> Discovered) doesn't shift the content. */
   scrollbar-gutter: stable;
-  padding:24px;
+  padding:16px 14px;
   background:var(--bg);
 }
 /* Pages fill the full content width (up to the scrollbar) instead of a centered
@@ -2644,7 +2644,7 @@ body.pcard-splitting iframe{ pointer-events:none; }
   gap: 20px;
   overflow-x: auto;
   border-bottom: 1px solid #e5e7eb;
-  margin: 0 0 20px;
+  margin: 0 0 10px;
   position: -webkit-sticky;
   position: sticky;
   top: 0;
@@ -4877,10 +4877,10 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 .inv-header-bar { gap: 8px; flex-wrap: wrap; }
 .inv-header-bar .btn-mini,
 .inv-header-bar .aig-na-chip {
-  font-size: 0.82em;
+  font-size: 0.75em;
   font-weight: 600;
-  line-height: 1.4;
-  padding: 4px 11px;
+  line-height: 1.25;
+  padding: 3px 8px;
   margin: 0;                        /* spacing comes from the flex gap */
   border-radius: 6px;
   border: 1px solid #e5e7eb;
@@ -6225,8 +6225,8 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 .viv-studies-panel .vp-head,
 .viv-code-rail .vp-head,
 #viv-ai-panel .vp-head{
-  position:absolute; top:5px; right:6px; left:auto; bottom:auto; z-index:30;
-  width:auto; min-height:0; padding:0; margin:0; gap:1px;
+  position:absolute; top:7px; right:6px; left:auto; bottom:auto; z-index:30;
+  width:auto; min-height:0; padding:0; margin:0; gap:2px;
   border:none; border-bottom:none; background:transparent; box-shadow:none; cursor:default;
 }
 /* Only the control icons remain in the floating cluster (drop title / spacer),
@@ -6257,15 +6257,19 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
   flex:0 0 var(--viv-studies-h, 280px); width:auto; height:var(--viv-studies-h, 280px); min-height:0;
   border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
 }
-/* Search + navigation stepper share ONE compact bar (saves a row): the search
-   field flexes to fill (capped), the stepper pill sits at the right, and the
-   top-right corner is reserved for the always-present dock/close controls. */
+/* Search + navigation stepper share ONE uniform bar (saves a row): every control
+   is the same height and vertically centered — search field (flexes to fill),
+   stepper pill, and the dock/close controls in the reserved top-right corner. */
 .viv-studies-body .viv-rail-studies-head{
-  display:flex; align-items:center; gap:6px; padding:3px 49px 4px 8px;
+  display:flex; align-items:center; gap:6px; min-height:34px; padding:0 50px 0 8px;
 }
 .viv-studies-body #viv-rail-study-search{
   flex:1 1 auto; width:auto; min-width:0; max-width:420px; margin:0;
+  height:26px; box-sizing:border-box; padding:0 8px;
 }
+/* Stepper pill: same height as the search field, buttons centered within it. */
+.viv-studies-body #viv-rail-study-stepper{ display:inline-flex; align-items:center; }
+.viv-studies-body .viv-rail-step-card{ height:26px; box-sizing:border-box; }
 /* Stepper now lives INSIDE that bar → just the pill (drop its own band/sticky). */
 .viv-studies-body .viv-rail-studies-head #viv-rail-study-stepper{
   position:static; flex:none; padding:0; margin:0; background:transparent; box-shadow:none;
