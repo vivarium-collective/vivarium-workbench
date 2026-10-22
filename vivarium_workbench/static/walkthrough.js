@@ -199,11 +199,17 @@
   // -------------------------------------------------------------------------
   // Investigation DAG orientation (LR = left-to-right, TB = top-to-bottom).
   // -------------------------------------------------------------------------
-  // MODEL: AUTO by default. The orientation is derived from the container's
-  // ASPECT — a wide area reads best LEFT-RIGHT, a tall/narrow area TOP-BOTTOM:
-  //   • docked left/right  (tall, narrow column) → TB
-  //   • docked top/bottom  (wide, short band)    → LR
-  //   • inline / un-docked (wide main area)       → LR (tall window → TB)
+  // MODEL: AUTO by default. The orientation ANALYSES THE GRAPH and fits it to the
+  // pane: it lays the graph's dominant axis (breadth vs depth) along the pane's
+  // long axis so the cards fill the space instead of cramming into one line.
+  //   • breadth-heavy graph (a gallery — many cards, ~1 depth):
+  //       wide pane (inline/top/bottom dock) → TB  (cards in a row along the top)
+  //       tall pane (left/right dock)         → LR  (cards in a column)
+  //   • depth-heavy graph (a dependency chain):
+  //       wide pane → LR  (chain flows left→right)
+  //       tall pane → TB  (chain flows top→down)
+  // So the dock side only sets the pane's long axis; the graph shape decides which
+  // axis the cards spread along. (See _aigAutoOrient for the full table.)
   // Auto is (re)applied on the INITIAL render AND on EVERY dock-position switch —
   // the dock switch itself IS the "reset to auto", so there is no separate auto
   // button. The ⇄/⇅ LAYOUT buttons are a TRANSIENT manual override that holds only
@@ -240,21 +246,46 @@
   // The aspect-derived AUTO direction for the current placement (dock side when the
   // graph is hosted in the side panel, else the inline container aspect). Returns
   // null when nothing can be measured (caller falls back to the shape heuristic).
-  function _aigAutoOrient() {
+  function _aigAutoOrient(depthCounts) {
+    // STEP 1 — the pane's LONG axis: is the available area wide (horizontal) or
+    // tall (vertical)? From the dock side when hosted in the side panel, else the
+    // inline container's measured aspect.
+    var wide = null;
     var fsEl = document.getElementById('investigation-dag-fs');
-    if (!fsEl) return null;
-    if (fsEl.closest && fsEl.closest('#viv-graph-panel')) {
-      var gp = document.getElementById('viv-graph-panel');
-      var dock = gp && gp.dataset ? gp.dataset.dock : '';
-      if (dock === 'left' || dock === 'right') return 'TB';
-      if (dock === 'top' || dock === 'bottom') return 'LR';
-      return null;
+    if (fsEl) {
+      if (fsEl.closest && fsEl.closest('#viv-graph-panel')) {
+        var gp = document.getElementById('viv-graph-panel');
+        var dock = gp && gp.dataset ? gp.dataset.dock : '';
+        if (dock === 'left' || dock === 'right') wide = false;       // narrow side column → tall
+        else if (dock === 'top' || dock === 'bottom') wide = true;   // short band → wide
+      } else {
+        var r = fsEl.getBoundingClientRect();
+        var availW = r.width || fsEl.clientWidth || 0;
+        var availH = Math.max(0, (window.innerHeight || 900) - r.top);
+        if (availW > 1 && availH > 1) wide = availW >= availH;
+      }
     }
-    var r = fsEl.getBoundingClientRect();
-    var availW = r.width || fsEl.clientWidth || 0;
-    var availH = Math.max(0, (window.innerHeight || 900) - r.top);
-    if (availW > 1 && availH > 1) return availW >= availH ? 'LR' : 'TB';
-    return null;
+    if (wide === null) return null;   // unmeasurable → caller falls back to the shape heuristic
+
+    // STEP 2 — the graph's SHAPE: breadth-heavy (gallery-like — many cards at few
+    // depths, i.e. a wide row of independent studies) vs depth-heavy (chain-like —
+    // a long dependency column). `depthCounts` maps depth level → node count.
+    var counts = depthCounts || {};
+    var levels = Object.keys(counts);
+    var maxDepth = levels.length || 1;                  // how DEEP (number of dependency levels)
+    var maxBreadth = 0;                                 // how WIDE (most cards at any one level)
+    levels.forEach(function (d) { var n = counts[d] || 0; if (n > maxBreadth) maxBreadth = n; });
+    var breadthHeavy = maxBreadth > maxDepth;
+
+    // STEP 3 — lay the graph's DOMINANT axis along the pane's LONG axis, so the
+    // cards fill the space instead of cramming into a single line. In this
+    // layout TB spreads same-depth cards HORIZONTALLY (a row) and stacks depth
+    // vertically; LR is the opposite.
+    //   breadth-heavy + wide pane → breadth horizontal → TB  (a row of cards along the top)
+    //   breadth-heavy + tall pane → breadth vertical   → LR  (a column — fits a side dock)
+    //   depth-heavy  + wide pane  → depth horizontal    → LR  (a chain flowing left→right)
+    //   depth-heavy  + tall pane  → depth vertical      → TB  (a chain flowing top→down)
+    return wide ? (breadthHeavy ? 'TB' : 'LR') : (breadthHeavy ? 'LR' : 'TB');
   }
   // Reflect the active (LR/TB) state on the toggle control, if present.
   function _syncGraphOrientToggleUI(orient, isOverride) {
@@ -12584,7 +12615,7 @@
     if (_aigManualOrient === 'LR' || _aigManualOrient === 'TB') {
       orient = _aigManualOrient;
     } else {
-      orient = _aigAutoOrient()
+      orient = _aigAutoOrient(depthCounts)
         || (window.chooseGraphOrientation ? window.chooseGraphOrientation(depthCounts) : 'LR');
     }
     if (shellEl) { shellEl.classList.remove('aig-orient-lr', 'aig-orient-tb'); shellEl.classList.add(orient === 'TB' ? 'aig-orient-tb' : 'aig-orient-lr'); }
