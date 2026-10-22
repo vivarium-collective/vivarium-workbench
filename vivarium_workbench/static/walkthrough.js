@@ -15632,7 +15632,7 @@
     // show/hide this row by a substring scan without rebuilding any DOM.
     var hay = _esc(_studyHay(s, opts.groupTitle));
     return '<a class="viv-rail-sublink" data-study-name="' + _esc(s.name) + '" data-rail-hay="' + hay + '" draggable="false" ' +
-           'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
+           'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\', (document.querySelector(\'.viv-rail-sublink.rail-study-active\') && typeof _currentStudyTab===\'function\') ? _currentStudyTab() : undefined);return false;" ' +
            'href="#" title="' + tip + '" ' +
            'style="display:flex;align-items:center;gap:6px;padding:4px 14px 4px ' + indent + ';color:' + nameColor + ';text-decoration:none;font-size:' + fontSize + ';">' +
              grip +
