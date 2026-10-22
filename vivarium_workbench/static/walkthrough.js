@@ -13474,8 +13474,16 @@
       return;
     }
 
-    // Band is right for the space -> fit the view zoom to fill the pane height.
-    var z = Math.max(0.3, Math.min(2, (h - 16) / ch));
+    // Band is right for the space -> fit the view zoom to the pane. Fit BOTH
+    // dimensions (like the Fit button) so a WIDE multi-study network shows the
+    // whole graph on first paint instead of overflowing horizontally (filling
+    // height alone left a wide chain zoomed-in, needing a horizontal scroll to
+    // see it). Fall back to the height fit when the canvas width isn't measured.
+    var cw = parseFloat(shell.dataset.canvasW) || 0;
+    var w = shell.clientWidth || 0;
+    var zH = (h - 16) / ch;
+    var zFit = (cw > 1 && w > 40) ? Math.min(zH, (w - 16) / cw) : zH;
+    var z = Math.max(0.3, Math.min(2, zFit));
     if (Math.abs(z - aigZoom) < 0.02) { _aigSyncZoomUI(aigBand, aigZoom); return; }
     aigZoom = z;
     _applyAigZoom();
