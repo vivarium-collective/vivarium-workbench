@@ -1481,9 +1481,11 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          clustered together as one tidy group on the right. Wired by _showExplore /
          _toggleInvOverview / _wsSetInvestigationActions (by id). #}
       <span class="inv-header-nav" style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;margin-left:auto">
-        <button id="ws-back" class="btn-mini" onclick="_showExplore()">← All investigations</button>
+        <button id="ws-back" class="btn-mini" onclick="_showExplore()"
+                title="All investigations" aria-label="All investigations">←</button>
         <button type="button" id="inv-overview-toggle" class="btn-mini" aria-expanded="false"
-                onclick="window._toggleInvOverview()">▸ Overview</button>
+                title="Overview" aria-label="Toggle overview"
+                onclick="window._toggleInvOverview()">▸</button>
         <span id="ws-actions"></span>
       </span>
     </div>
