@@ -596,11 +596,22 @@ def test_initmenunav_snapshot_whitelists_include_simulations_and_visualizations(
 # QA fixes — BUG 2: Studies rail section hidden in snapshot
 # ---------------------------------------------------------------------------
 
-def test_snapshot_css_hides_studies_rail_section():
-    """snapshot-readonly.css must hide #viv-rail-studies-section in snapshot."""
-    text = (STATIC_DIR / "snapshot-readonly.css").read_text()
-    assert "viv-rail-studies-section" in text, \
-        "snapshot-readonly.css missing rule to hide #viv-rail-studies-section"
+def test_snapshot_keeps_studies_browser_available():
+    """The per-investigation study browser stays available in the read-only
+    snapshot. It now lives in the dockable Studies panel (studies-panel.js),
+    relocated there from the rail. (This test previously asserted the rail
+    section was HIDDEN in snapshot; that stopped being true when the
+    per-investigation studies rail was intentionally made visible — see the
+    "Studies rail section: SHOWN in snapshot" note in snapshot-readonly.css — so
+    it is rewritten here to the current design.)"""
+    html = (TEMPLATES_DIR / "index.html.j2").read_text()
+    assert 'id="viv-studies-panel"' in html, \
+        "dockable Studies panel missing from index.html.j2"
+    assert 'id="viv-rail-studies-section"' in html, \
+        "study-browser section missing from index.html.j2"
+    css = (STATIC_DIR / "snapshot-readonly.css").read_text()
+    assert "viv-studies-panel" not in css, \
+        "snapshot-readonly.css should not special-case (hide) the Studies panel"
 
 
 def test_template_has_studies_rail_section_id():

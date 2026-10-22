@@ -690,9 +690,11 @@
   // window size.
   function clampDock(dock, size, vw, vh) {
     var n = Math.round(+size) || 0;
-    if (dock === 'bottom' || dock === 'top') return Math.max(160, Math.min(n, Math.max(160, Math.floor(vh * 0.7))));
+    if (dock === 'bottom' || dock === 'top') return Math.max(110, Math.min(n, Math.max(110, Math.floor(vh * 0.7))));
     var cap = Math.floor(vw * 0.6);                              // never more than 60% of the window...
-    return Math.max(Math.min(340, cap), Math.min(n, Math.min(720, cap)));   // ...even below 340px on a phone-width window
+    // Allow docked panels to shrink down near the collapse threshold (drag past
+    // COLLAPSE_AT in panel-dock.js to collapse to a strip); min ~80px, max 720.
+    return Math.max(Math.min(80, cap), Math.min(n, Math.min(720, cap)));
   }
 
   var api = {

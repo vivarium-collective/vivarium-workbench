@@ -16,10 +16,65 @@
 
   var ctl = null;            // the VivPanelDock controller
   var placeholder = null;    // marks the graph's inline home while it lives in the panel
+  var popoutWin = null;      // the ?popout=graph window opened from THIS (main) window
+  var initDone = false;      // guards onClose→returnInline against the init-time close
+  var popoutArmed = false;   // true once the popout's panel has settled open — only
+                             // THEN does a close mean "user wants the graph back inline"
+                             // (setup fires programmatic GraphPanel.close()s we must ignore)
 
   function el(id) { return document.getElementById(id); }
   function graphEl() { return el(GRAPH_ID); }
   function bodyEl() { return el(BODY_ID); }
+
+  // True when THIS page is the popped-out graph window (?popout=graph).
+  function inPopout() {
+    try { return !!(document.body && document.body.classList.contains('viv-popout')); }
+    catch (e) { return false; }
+  }
+
+  // Popout window → tell the opener (main window) to restore the inline graph,
+  // then close this window. Mirrors the studies panel's returnInline.
+  function returnInline() {
+    try {
+      if (window.opener && !window.opener.closed &&
+          typeof window.opener._graphReturnInline === 'function') {
+        window.opener._graphReturnInline();
+      }
+    } catch (e) { /* cross-origin / closed opener */ }
+    try { window.close(); } catch (e) { /* ignore */ }
+  }
+
+  // --- Main-window side: while the graph is popped out it VACATES the inset; a
+  // slim "popped out" bar takes its place, and closing the popout restores it. ---
+  function poppedBar() {
+    var g = graphEl(); if (!g || !g.parentNode) return null;
+    var bar = el('aig-poppedout-bar');
+    if (!bar) {
+      bar = document.createElement('button');
+      bar.id = 'aig-poppedout-bar';
+      bar.type = 'button';
+      bar.className = 'aig-poppedout-bar';
+      bar.textContent = '⧉ Investigation graph is open in a pop-out window — click to bring it back';
+      bar.addEventListener('click', bringBackGraph);
+      g.parentNode.insertBefore(bar, g);
+    }
+    return bar;
+  }
+  function setMainPoppedOut(on) {
+    var g = graphEl(); if (!g) return;
+    if (on) { poppedBar(); g.classList.add('aig-poppedout-hidden'); }
+    else {
+      g.classList.remove('aig-poppedout-hidden');
+      var bar = el('aig-poppedout-bar');
+      if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
+    }
+  }
+  // Bring the graph back inline from the main window (also closes the popout).
+  function bringBackGraph() {
+    setMainPoppedOut(false);
+    try { if (popoutWin && !popoutWin.closed) popoutWin.close(); } catch (e) { /* ignore */ }
+    popoutWin = null;
+  }
 
   // Fit on dock ENTER/EXIT (an initial-ish fit) but honor the user's zoom intent:
   // _aigFitOrKeep keeps the current zoom once the user has driven it, else fits.
@@ -125,7 +180,18 @@
   }
 
   function onClose() {
+    // In the popped-out window, SETUP fires programmatic GraphPanel.close()s
+    // (page-switch / _showInvestigationWorkspace) before the user has touched
+    // anything. Those must NOT hide the graph or close the window — keep the panel
+    // open until the user actually interacts (popoutArmed, set on first input).
+    if (inPopout() && !popoutArmed) {
+      setTimeout(function () { if (ctl && !ctl.isOpen()) ctl.open(); }, 0);
+      return;   // bounce back open; don't move the graph inline
+    }
     graphToInline();
+    // A USER close inside the popped-out window returns the graph inline in the
+    // opener and closes this window.
+    if (initDone && inPopout()) { returnInline(); return; }
     // Back inline == the full-page graph. Clearing the manual override re-renders,
     // and the inline render re-autos the orientation (wide → LR) and runs its own
     // height auto-fill — so no explicit fit here (a fit-both would shrink a wide
@@ -169,13 +235,23 @@
         }
         return false;
       },
+      onOpen: onOpen,
       resizeHandle: 'viv-graph-resize-handle',
       // No header to drag; the hosted graph toolbar is bound as the drag handle
       // in onOpen (once it's relocated into the panel) via ctl.addDragHandle.
       dragHandles: [],
-      popout: function () { global.VivPanelDock.popout('graph'); },
+      // Carry the current investigation so the popped window renders ITS graph
+      // (a fresh popout has no investigation open, so the hosted #investigation-dag-fs
+      // would otherwise be empty — see panel-dock.js initPopout). The inline graph
+      // then VACATES the inset (a slim bar takes its place) until the popout closes.
+      popout: function () {
+        var inv = global._wsInvestigation || global._currentIset || '';
+        if (ctl && ctl.isOpen()) ctl.close();   // if docked, return the graph inline first
+        popoutWin = global.VivPanelDock.popout('graph', inv ? { investigation: inv } : null);
+        setTimeout(function () { setMainPoppedOut(true); }, 90);
+      },
       defaultDock: 'right', defaultSize: { side: 480, bottom: 340 },
-      onOpen: onOpen, onClose: onClose,
+      onClose: onClose,
       // Resize / re-dock / expand must NOT recompute the zoom — reflow the viewport
       // at the user's current zoom instead (relayout/reflow keep the scale).
       onResize: reflow,
@@ -197,6 +273,14 @@
     };
     // Used by panel-dock.js initPopout when this page is a ?popout=graph window.
     global._openGraphPanel = function () { if (ctl) ctl.open(); };
+    // Called by the popped-out window (via opener) when it closes: restore the
+    // inline graph in the inset. Also exposed so other code can bring it back.
+    global._graphReturnInline = function () { setMainPoppedOut(false); popoutWin = null; };
+    global._graphBringBack = bringBackGraph;
+    // If the user closes the popout window directly (OS chrome), restore the inset.
+    global.setInterval(function () {
+      if (popoutWin && popoutWin.closed) { setMainPoppedOut(false); popoutWin = null; }
+    }, 1500);
 
     // Default to INLINE on load: the graph lives inline below the investigation
     // overview, and the panel is opt-in (◧). Don't auto-restore a persisted
@@ -204,6 +288,22 @@
     var isPopout = false;
     try { isPopout = /(?:^|[?&])popout=graph(?:&|$)/.test(global.location.search || ''); } catch (e) { /* ignore */ }
     if (!isPopout && ctl.isOpen()) ctl.close();
+
+    // In the popout, "arm" returnInline on the FIRST real user interaction — setup
+    // (page render, _showInvestigationWorkspace) is all programmatic and never fires
+    // input events, so this cleanly tells a user-close apart from a setup-close
+    // regardless of how long the async graph render takes.
+    if (isPopout) {
+      var arm = function () {
+        popoutArmed = true;
+        window.removeEventListener('pointerdown', arm, true);
+        window.removeEventListener('keydown', arm, true);
+      };
+      window.addEventListener('pointerdown', arm, true);
+      window.addEventListener('keydown', arm, true);
+    }
+
+    initDone = true;   // from here, a close inside a popout returns the graph inline
   }
 
   if (typeof document !== 'undefined') {

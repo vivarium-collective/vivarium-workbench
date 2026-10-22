@@ -17,7 +17,7 @@ main{padding:20px;margin:0 auto}
 #page-composite-explore, .viv-content > #page-composite-explore
   {max-width:none;width:auto}
 .viv-content:has(> #page-investigations.active){
-  padding:8px 24px !important;   /* 24px horizontal = same left inset as Registry/Modules */
+  padding:8px 14px !important;   /* tighter side margins around the investigation content */
   width:100% !important;
   max-width:none !important;
 }
@@ -72,7 +72,7 @@ main{padding:20px;margin:0 auto}
   display: block;
   min-height: 600px;
 }
-main.study-page{max-width:none;padding:12px 16px;width:100%;box-sizing:border-box}
+main.study-page{max-width:none;padding:10px 12px;width:100%;box-sizing:border-box}
 
 /* ─────────────────────────────────────────────────────────────────────
  * Studies-tab fullscreen layout.
@@ -1023,21 +1023,24 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
    and you can't scroll past the stepper. The bordered card sits inside the band. */
 #viv-rail-study-stepper {
   position: sticky; top: 0; z-index: 6;
-  padding: 2px 12px 6px; background: #fafafa; box-shadow: 0 1px 0 #ececec;
+  padding: 1px 8px 3px; background: #fafafa; box-shadow: 0 1px 0 #ececec;
 }
 .viv-rail-step-card {
-  display: flex; align-items: center; gap: 8px; padding: 3px 6px;
-  border: 1px solid #e5e7eb; border-radius: 7px; background: #f8fafc;
+  /* A tight pill that hugs its contents and sits LEFT, kept as small as possible
+     so the search field gets the rest of the bar. */
+  display: inline-flex; align-items: center; gap: 1px; padding: 1px 2px;
+  border: 1px solid #e5e7eb; border-radius: 6px; background: #f8fafc;
 }
 #viv-rail-study-stepper button {
-  flex: none; width: 24px; height: 22px; line-height: 1; padding: 0;
-  border: 1px solid #d1d5db; border-radius: 5px; background: #fff;
-  color: #4f46e5; font-size: 0.8em; cursor: pointer;
+  flex: none; width: 16px; height: 15px; line-height: 1; padding: 0;
+  border: 1px solid #d1d5db; border-radius: 4px; background: #fff;
+  color: #4f46e5; font-size: 0.56em; cursor: pointer;
 }
 #viv-rail-study-stepper button:hover:not(:disabled) { background: #eef2ff; border-color: #a5b4fc; }
 #viv-rail-study-stepper button:disabled { color: #cbd5e1; cursor: default; }
 #viv-rail-study-stepper #viv-rail-step-pos {
-  flex: 1; text-align: center; font-size: 0.78em; color: #64748b; font-variant-numeric: tabular-nums;
+  flex: none; min-width: 22px; padding: 0 2px; text-align: center;
+  font-size: 0.68em; color: #64748b; font-variant-numeric: tabular-nums;
 }
 :root[data-theme="dark"] #viv-rail-study-stepper { background: var(--rail); box-shadow: 0 1px 0 var(--border-faint); }
 :root[data-theme="dark"] .viv-rail-step-card { background: #1e293b; border-color: #334155; }
@@ -1195,22 +1198,9 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 /* Collapsed: the Vivarium logo shows clean by default and is NOT covered; the
    collapse/expand toggle is hidden and REVEALS on hover over the header (or when
    keyboard-focused). On hover the logo dims so the expand icon reads over it. */
-.viv-rail.viv-rail-collapsed .viv-rail-toggle{
-  top:0; left:0; right:0; bottom:0; transform:none;
-  width:auto; height:auto;
-  border-radius:8px;
-  opacity:0; pointer-events:none;
-  transition:opacity 0.12s, background 0.12s, color 0.12s;
-  z-index:3; color:#64748b;
-}
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-toggle,
-.viv-rail.viv-rail-collapsed .viv-rail-toggle:focus-visible{
-  opacity:1; pointer-events:auto;
-  background:rgba(238,242,255,0.96);
-  border-color:#c7d2fe; color:#3730a3;
-}
+/* The collapse/expand toggle button was removed — the rail is resized/collapsed
+   by dragging its right edge. The Vivarium logo stays fully visible. */
 .viv-rail.viv-rail-collapsed .viv-rail-logo{ opacity:1 }
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.12 }
 
 /* Collapsed-rail state ----------------------------------------------------- */
 .viv-rail.viv-rail-collapsed{
@@ -1236,6 +1226,30 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 }
 .viv-rail.viv-rail-collapsed .viv-rail-link-label{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-link-badge{ display:none }
+
+/* Collapsed rail: on hover, reveal each tab's name as a clickable button-like
+   flyout to the right of its icon (and keep it there until the pointer leaves).
+   The flyout is a child of the <a>, so hovering/clicking it still targets the
+   tab. The collapsed rail is icon-only (short), so visible overflow is safe and
+   lets the flyout escape the rail's clipping. */
+.viv-rail.viv-rail-collapsed{ overflow:visible; }
+.viv-rail.viv-rail-collapsed .viv-rail-scroll{ overflow:visible; }
+.viv-rail.viv-rail-collapsed .viv-rail-link{ position:relative; }
+.viv-rail.viv-rail-collapsed .viv-rail-link:hover > .viv-rail-link-label,
+.viv-rail.viv-rail-collapsed .viv-rail-link:focus-visible > .viv-rail-link-label{
+  display:block; position:absolute; left:100%; top:50%; transform:translateY(-50%);
+  white-space:nowrap; overflow:visible; text-overflow:clip; z-index:70;
+  /* Abuts the icon (no gap) so moving the pointer onto it keeps the tab hovered;
+     the left padding gives the text visual breathing room. */
+  padding:6px 12px 6px 14px; border-radius:0 8px 8px 0; border-left:none;
+  background:#fff; color:#1e293b; font-size:0.84rem; font-weight:500; line-height:1;
+  border:1px solid #d9d8d4; box-shadow:0 6px 18px rgba(15,23,42,0.16);
+  pointer-events:auto; cursor:pointer;
+}
+:root[data-theme="dark"] .viv-rail.viv-rail-collapsed .viv-rail-link:hover > .viv-rail-link-label,
+:root[data-theme="dark"] .viv-rail.viv-rail-collapsed .viv-rail-link:focus-visible > .viv-rail-link-label{
+  background:#1e293b; color:#e2e8f0; border-color:#334155; box-shadow:0 6px 18px rgba(0,0,0,0.45);
+}
 .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-header{
   justify-content:center; padding:6px 0;
 }
@@ -1375,7 +1389,7 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
   /* Always reserve the scrollbar gutter so switching between a short tab and a
      long one (e.g. Registry Modules -> Discovered) doesn't shift the content. */
   scrollbar-gutter: stable;
-  padding:24px;
+  padding:16px 14px;
   background:var(--bg);
 }
 /* Pages fill the full content width (up to the scrollbar) instead of a centered
@@ -2630,7 +2644,7 @@ body.pcard-splitting iframe{ pointer-events:none; }
   gap: 20px;
   overflow-x: auto;
   border-bottom: 1px solid #e5e7eb;
-  margin: 0 0 20px;
+  margin: 0 0 10px;
   position: -webkit-sticky;
   position: sticky;
   top: 0;
@@ -4842,6 +4856,16 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   padding: 8px 12px; color: #475569; font-weight: 600; font-size: 0.9em;
 }
 #investigation-dag-fs.aig-collapsed .aig-collapsed-bar:hover { background: #eef2ff; color: #3730a3; }
+/* While the graph is popped out, the inline graph VACATES the inset and this bar
+   stands in its place (click to bring it back). Styled like the collapsed bar. */
+#investigation-dag-fs.aig-poppedout-hidden { display: none !important; }
+.aig-poppedout-bar {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: #f8fafc; border: 1px dashed #c7d2fe; border-radius: 6px;
+  padding: 8px 12px; color: #4f46e5; font-weight: 600; font-size: 0.9em;
+}
+.aig-poppedout-bar:hover { background: #eef2ff; color: #3730a3; border-color: #a5b4fc; }
+:root[data-theme="dark"] .aig-poppedout-bar { background: #1e293b; border-color: #334155; color: #a5b4fc; }
 /* Needs-attention: a compact chip in the toolbar (no big banner). All-clear is a
    quiet green pill; the needs state is an amber/red clickable pill. */
 .aig-na-chip-host { display: inline-flex; align-items: center; }
@@ -4863,10 +4887,10 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 .inv-header-bar { gap: 8px; flex-wrap: wrap; }
 .inv-header-bar .btn-mini,
 .inv-header-bar .aig-na-chip {
-  font-size: 0.82em;
+  font-size: 0.75em;
   font-weight: 600;
-  line-height: 1.4;
-  padding: 4px 11px;
+  line-height: 1.25;
+  padding: 3px 8px;
   margin: 0;                        /* spacing comes from the flex gap */
   border-radius: 6px;
   border: 1px solid #e5e7eb;
@@ -6185,6 +6209,141 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 }
 .viv-graph-panel.vp-collapsed .viv-graph-expand:hover{ background:#eef2ff; color:#3730a3; }
 
+/* ── Dockable Studies panel (studies-panel.js) — same VivPanelDock chrome as the
+   Graph panel, but its body hosts the relocated study-browser section and scrolls. */
+.viv-studies-panel{
+  --viv-studies-w:300px;
+  flex:0 0 var(--viv-studies-w); width:var(--viv-studies-w);
+  /* min-width:0 lets the panel shrink BELOW its content's natural width (the
+     flex-item default min-width:auto would otherwise clamp it ~content-wide and
+     stop a narrow drag). Content ellipsizes; drag past COLLAPSE_AT to collapse. */
+  min-width:0;
+  display:flex; flex-direction:column;
+  background:var(--panel, #fff); border-left:1px solid var(--border, #e2e6eb);
+  position:relative; overflow:hidden;
+  transition:flex-basis .18s ease, width .18s ease;
+}
+/* Same shrink-all-the-way behavior for the other dockable tool panels. */
+.viv-graph-panel, .viv-code-rail, #viv-ai-panel{ min-width:0; }
+
+/* ── Inline dock/close controls (studies / code / chat) ────────────────────
+   The header BAR is taken out of the flow (content moves up a row); its dock /
+   close controls sit permanently in the top-right corner, in line with the
+   panel's first row. Only the icon buttons show — the title is dropped. The
+   panels are positioned so the control cluster anchors to them. */
+.viv-code-rail, #viv-ai-panel{ position:relative; }
+.viv-studies-panel .vp-head,
+.viv-code-rail .vp-head,
+#viv-ai-panel .vp-head{
+  position:absolute; top:7px; right:6px; left:auto; bottom:auto; z-index:30;
+  width:auto; min-height:0; padding:0; margin:0; gap:2px;
+  border:none; border-bottom:none; background:transparent; box-shadow:none; cursor:default;
+}
+/* Only the control icons remain in the floating cluster (drop title / spacer),
+   sized small so the reserved corner can stay compact. */
+.viv-studies-panel .vp-head > :not(.vp-icon),
+.viv-code-rail .vp-head > :not(.vp-icon),
+#viv-ai-panel .vp-head > :not(.vp-icon){ display:none; }
+.viv-studies-panel .vp-head .vp-icon,
+.viv-code-rail .vp-head .vp-icon,
+#viv-ai-panel .vp-head .vp-icon{ width:20px; height:18px; }
+.viv-studies-panel .vp-head .vp-icon svg,
+.viv-code-rail .vp-head .vp-icon svg,
+#viv-ai-panel .vp-head .vp-icon svg{ width:13px; height:13px; }
+/* Reserve the top-right corner of each panel's first visible row so the floating
+   dock/close controls never occlude existing buttons (chat's toolbar, code's
+   meta row) — the same technique the Studies search bar uses. */
+#viv-ai-panel .vp-toolbar{ padding-right:58px; }
+.viv-code-rail .viv-code-meta,
+.viv-code-rail .viv-code-newbar{ padding-right:58px; }
+.viv-studies-panel .viv-studies-panel-inner{ display:flex; flex-direction:column; height:100%; min-width:0; flex:1; }
+.viv-studies-panel[hidden]{ display:none !important; }
+.viv-studies-panel[data-dock="left"]{ border-left:none; border-right:1px solid var(--border, #e2e6eb); }
+.viv-studies-panel[data-dock="bottom"]{
+  flex:0 0 var(--viv-studies-h, 280px); width:auto; height:var(--viv-studies-h, 280px); min-height:0;
+  border-left:none; border-top:1px solid var(--border, #e2e6eb);
+}
+.viv-studies-panel[data-dock="top"]{
+  flex:0 0 var(--viv-studies-h, 280px); width:auto; height:var(--viv-studies-h, 280px); min-height:0;
+  border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
+}
+/* Search + navigation stepper + dock/close share ONE uniform bar: every control
+   is 30px tall, vertically centered, with the same 8px radius and border family,
+   so the row reads as a single set — search field (flexes to fill), stepper pill,
+   then the dock/close controls in the reserved top-right corner. */
+.viv-studies-body .viv-rail-studies-head{
+  display:flex; align-items:center; gap:8px; min-height:46px; padding:8px 84px 8px 10px;
+}
+.viv-studies-body #viv-rail-study-search{
+  flex:1 1 auto; width:auto; min-width:0; max-width:none; margin:0;
+  height:30px; box-sizing:border-box; padding:0 10px;
+  border:1px solid #e2e8f0; border-radius:8px; background:#fff;
+  font-size:0.9em; color:#334155; transition:border-color .12s ease, box-shadow .12s ease;
+}
+.viv-studies-body #viv-rail-study-search:focus{
+  outline:none; border-color:#a5b4fc; box-shadow:0 0 0 3px rgba(99,102,241,0.12);
+}
+/* Stepper pill: same height/radius/border family as the search field. */
+.viv-studies-body #viv-rail-study-stepper{ display:inline-flex; align-items:center; }
+.viv-studies-body .viv-rail-step-card{
+  height:30px; box-sizing:border-box; gap:3px; padding:0 5px;
+  border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;
+}
+.viv-studies-body #viv-rail-study-stepper button{
+  width:22px; height:22px; border-radius:6px; font-size:0.6em;
+}
+.viv-studies-body #viv-rail-study-stepper #viv-rail-step-pos{
+  font-size:0.72em; min-width:34px;
+}
+/* Stepper now lives INSIDE that bar → just the pill (drop its own band/sticky). */
+.viv-studies-body .viv-rail-studies-head #viv-rail-study-stepper{
+  position:static; flex:none; padding:0; margin:0; background:transparent; box-shadow:none;
+}
+/* Dock + close: match the pill/search — a 30px rounded control, vertically
+   centered in the bar so the whole row lines up. (Studies-only; chat/code keep
+   their compact corner cluster.) */
+.viv-studies-panel .vp-head{
+  top:12px; right:8px; gap:4px;   /* line the 30px controls up with the search/stepper row */
+}
+.viv-studies-panel .vp-head .vp-icon{
+  width:30px; height:30px; border:1px solid transparent; border-radius:8px;
+}
+.viv-studies-panel .vp-head .vp-icon svg{ width:15px; height:15px; }
+.viv-studies-panel .vp-head .vp-icon:hover{ background:#eef2ff; border-color:#c7d2fe; }
+body.vp-dragging .viv-studies-head{ cursor:grabbing; }
+.viv-studies-title{ min-width:0; }
+.viv-studies-title strong{ display:block; font-size:0.9rem; }
+.viv-studies-resize-handle{
+  position:absolute; top:0; left:0; bottom:0; width:6px;
+  cursor:col-resize; z-index:6; background:transparent; transition:background .12s ease;
+}
+.viv-studies-resize-handle:hover{ background:#c7d2fe; }
+.viv-studies-panel[data-dock="left"] .viv-studies-resize-handle{ left:auto; right:0; }
+.viv-studies-panel[data-dock="bottom"] .viv-studies-resize-handle{
+  left:0; right:0; top:0; bottom:auto; width:auto; height:6px; cursor:row-resize;
+}
+.viv-studies-panel[data-dock="top"] .viv-studies-resize-handle{
+  left:0; right:0; top:auto; bottom:0; width:auto; height:6px; cursor:row-resize;
+}
+/* Body hosts the relocated study-browser section; it scrolls when the study list
+   is long. The hosted section keeps its own .viv-rail-* styling. */
+.viv-studies-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:auto; position:relative; }
+.viv-studies-body #viv-rail-studies-section{ display:block; }
+/* Collapsed: shrink to a thin edge strip showing only the expand handle. */
+.viv-studies-expand{ display:none; }
+.viv-studies-panel.vp-collapsed{ flex:0 0 auto !important; }
+.viv-studies-panel.vp-collapsed[data-dock="left"],
+.viv-studies-panel.vp-collapsed[data-dock="right"]{ width:16px !important; }
+.viv-studies-panel.vp-collapsed[data-dock="top"],
+.viv-studies-panel.vp-collapsed[data-dock="bottom"]{ height:16px !important; min-height:0 !important; }
+.viv-studies-panel.vp-collapsed .viv-studies-head,
+.viv-studies-panel.vp-collapsed .viv-studies-body{ display:none !important; }
+.viv-studies-panel.vp-collapsed .viv-studies-expand{
+  display:block; width:100%; height:100%; border:none; background:transparent;
+  cursor:pointer; color:#64748b; font-size:0.95em; line-height:1; padding:0;
+}
+.viv-studies-panel.vp-collapsed .viv-studies-expand:hover{ background:#eef2ff; color:#3730a3; }
+
 /* ── Pop-out window (?popout=<kind>): show only the popped panel, full-window ──
    panel-dock.js adds body.viv-popout + .viv-popout-<kind> and opens that panel.
    A fixed, opaque, full-window panel (z-index) simply covers the rest of the SPA
@@ -6192,6 +6351,7 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 body.viv-popout{ overflow:hidden; }
 body.viv-popout-chat #viv-ai-panel,
 body.viv-popout-code #viv-code-rail,
+body.viv-popout-studies #viv-studies-panel,
 body.viv-popout-graph #viv-graph-panel{
   display:flex !important; position:fixed !important; inset:0 !important;
   width:auto !important; height:auto !important; max-width:none !important;
@@ -6202,6 +6362,7 @@ body.viv-popout [data-act="dock"],
 body.viv-popout [data-act="popout"],
 body.viv-popout .vp-resize,
 body.viv-popout .viv-code-resize-handle,
+body.viv-popout .viv-studies-resize-handle,
 body.viv-popout .viv-graph-resize-handle{ display:none !important; }
 
 /* Shared dock dropdown (panel-dock.js) — reuses the chat's .vp-pop / .vp-pop-item

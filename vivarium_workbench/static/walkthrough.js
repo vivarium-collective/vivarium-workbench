@@ -7897,7 +7897,9 @@
   function _vivRestoreRailState() {
     var stored = null;
     try { stored = localStorage.getItem('vivarium.rail-collapsed'); } catch (e) {}
-    var collapsed = stored === '1';
+    // Default view is the COLLAPSED icon rail (drag the edge to widen); once the
+    // user sets it either way, their stored choice wins.
+    var collapsed = (stored === null) ? true : (stored === '1');
     var rail = document.getElementById('viv-rail');
     if (rail) {
       // Apply the saved expanded width (the collapsed rule overrides it via
@@ -10158,7 +10160,7 @@
     var _exportDd =
       '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
         '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
-          'title="Download the report, a runnable notebook, or all figures" onclick="_toggleInvReportMenu(event)">↓ Export ▾</button>' +
+          'aria-label="Export" title="Export — report, notebook, or figures" onclick="_toggleInvReportMenu(event)">↓</button>' +
         '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
           'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:170px;padding:4px">' +
           '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
@@ -10171,7 +10173,8 @@
       _exportDd +
       (isSnapshot ? '' :
       ' <button class="btn-mini" onclick="_rerunInvestigation()" ' +
-        'title="Re-run every member study\'s CURRENT baseline spec (re-derives from each study\'s study.yaml)">▶ Run current spec</button>');
+        'aria-label="Run current spec" ' +
+        'title="Run current spec — re-run every member study\'s CURRENT baseline (re-derives from each study.yaml)">▶</button>');
     if (name) {
       (window.DataSource
         ? window.DataSource.loadIsetList()
@@ -11729,7 +11732,7 @@
     apiFetch('POST', '/api/investigation-rerun', { investigation: name }).then(function(r) {
       return r.json().then(function(j) { return { ok: r.ok, body: j, status: r.status }; });
     }).then(function(res) {
-      if (btn) { btn.disabled = false; btn.textContent = '▶ Run current spec'; }
+      if (btn) { btn.disabled = false; btn.textContent = '▶'; }
       if (!res.ok) {
         var errMsg = 'Rerun failed: ' + ((res.body && res.body.error) || res.status);
         if (typeof _showToast === 'function') _showToast(errMsg, { danger: true }); else alert(errMsg);
@@ -11759,7 +11762,7 @@
         setTimeout(function() { _openInvestigationDetail(name); }, 500);
       }
     }).catch(function(err) {
-      if (btn) { btn.disabled = false; btn.textContent = '▶ Run current spec'; }
+      if (btn) { btn.disabled = false; btn.textContent = '▶'; }
       var netMsg = 'Network error: ' + err;
       if (typeof _showToast === 'function') _showToast(netMsg, { danger: true }); else alert(netMsg);
       if (panel) panel.innerHTML = '<div class="inv-run-progress-banner inv-run-error">' + _h(netMsg) + '</div>';
@@ -12137,7 +12140,8 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      btn.textContent = (collapsed ? '▸' : '▾') + ' Overview';
+      btn.textContent = (collapsed ? '▸' : '▾');
+      btn.setAttribute('title', 'Overview');
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
   }
@@ -15275,6 +15279,27 @@
   window._investigationForStudy = _investigationForStudy;
 
   function _openStudyEmbeddedNewTab(name, tab) {
+    // In a popped-out Studies panel window there is no investigation content to
+    // show here — route the navigation to the opener (the main window) so the
+    // popped-out list CONTROLS the main window's selected study, and reflect the
+    // selection in this window's own list.
+    try {
+      if (document.body && document.body.classList.contains('viv-popout') &&
+          window.opener && !window.opener.closed &&
+          typeof window.opener._openStudyEmbeddedNewTab === 'function') {
+        window.opener._openStudyEmbeddedNewTab(name, tab);
+        // Opening a study from the GRAPH popout surfaces it in the opener (main
+        // window), which now has room since the graph vacated the inset — bring
+        // that window forward so the open is visible. (Studies popout keeps its
+        // quiet "controls the main window" behavior and does NOT steal focus.)
+        try {
+          if (document.body.classList.contains('viv-popout-graph') &&
+              window.opener && window.opener.focus) window.opener.focus();
+        } catch (e) { /* ignore */ }
+        _selectStudyInRail(name);
+        return;
+      }
+    } catch (e) { /* cross-origin / closed opener — fall back to local nav */ }
     // Single router: show the study's OWN investigation workspace, then
     // open/focus its study tab. Never the legacy icon view, never full-window nav.
     // Optional `tab` deep-links the porthole to a study sub-tab (e.g. conclusions).
@@ -15364,33 +15389,38 @@
 
   // The study leaves of the currently-open study's rail group, in display order.
   function _railStudySiblings(activeLeaf) {
-    if (!activeLeaf) return [];
-    var grp = activeLeaf.closest('.viv-rail-investigations-group') ||
-              document.getElementById('viv-rail-investigations') || document;
+    // The active study's group; with none selected, fall back to the first
+    // investigation group (else every study leaf in the rail) so the stepper can
+    // start from the top.
+    var grp = activeLeaf ? activeLeaf.closest('.viv-rail-investigations-group') : null;
+    if (!grp) {
+      grp = document.querySelector('#viv-rail-investigations .viv-rail-investigations-group') ||
+            document.getElementById('viv-rail-investigations');
+    }
+    if (!grp) return [];
     return Array.prototype.slice.call(grp.querySelectorAll('.viv-rail-sublink[data-study-name]'));
   }
-  // Step to the previous (dir<0) / next (dir>0) study within the current
-  // investigation group, keeping the same open tab.
+  // Step to the previous (dir<0) / next (dir>0) study, keeping the same open tab.
+  // With no study selected, ▼ opens the first study and ▲ opens the last.
   window._railStepStudy = function (dir) {
     var active = document.querySelector('.viv-rail-sublink.rail-study-active[data-study-name]');
-    if (!active) return;
     var leaves = _railStudySiblings(active);
-    var i = leaves.indexOf(active);
-    if (i < 0) return;
-    var j = i + (dir < 0 ? -1 : 1);
+    if (!leaves.length) return;
+    var i = active ? leaves.indexOf(active) : -1;
+    var j = (i < 0) ? (dir < 0 ? leaves.length - 1 : 0) : i + (dir < 0 ? -1 : 1);
     if (j < 0 || j >= leaves.length) return;
     var slug = leaves[j].getAttribute('data-study-name');
     if (slug && window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(slug, _currentStudyTab());
   };
 
-  // A compact prev/next stepper pinned at the top of the Studies rail whenever a
-  // study is open: ▲/▼ walk the current investigation's studies (keeping the open
-  // tab), with an "n / N" position readout.
+  // A compact prev/next stepper pinned at the top of the Studies rail. Always
+  // visible once the study list is present (not only when a study is selected):
+  // ▲/▼ walk the current investigation's studies (keeping the open tab), with an
+  // "n / N" position readout ("– / N" when nothing is selected yet).
   function _renderRailStudyStepper(activeLeaf) {
     var host = document.getElementById('viv-rail-investigations');
     if (!host) return;
     var bar = document.getElementById('viv-rail-study-stepper');
-    if (!activeLeaf) { if (bar) bar.remove(); return; }
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'viv-rail-study-stepper';
@@ -15406,20 +15436,30 @@
       bar.querySelector('#viv-rail-step-prev').addEventListener('click', function () { window._railStepStudy(-1); });
       bar.querySelector('#viv-rail-step-next').addEventListener('click', function () { window._railStepStudy(1); });
     }
+    // Prefer to sit on the SAME row as the search field (one compact bar); fall
+    // back to a band above the list when there's no search head.
+    var searchHead = document.getElementById('viv-rail-studies-head');
+    if (searchHead && bar.parentNode !== searchHead) searchHead.appendChild(bar);
+    else if (!searchHead && bar.parentNode !== host.parentNode) host.parentNode.insertBefore(bar, host);
     _updateRailStepperPosition();
   }
+  // Exposed so the Studies panel can mount the stepper as soon as the list renders
+  // (independent of any study being selected).
+  window._renderRailStudyStepper = _renderRailStudyStepper;
   function _updateRailStepperPosition() {
     var bar = document.getElementById('viv-rail-study-stepper');
     if (!bar) return;
     var active = document.querySelector('.viv-rail-sublink.rail-study-active[data-study-name]');
     var leaves = _railStudySiblings(active);
     var i = active ? leaves.indexOf(active) : -1;
+    var n = leaves.length;
     var prev = bar.querySelector('#viv-rail-step-prev');
     var next = bar.querySelector('#viv-rail-step-next');
     var pos = bar.querySelector('#viv-rail-step-pos');
-    if (prev) prev.disabled = !(i > 0);
-    if (next) next.disabled = !(i >= 0 && i < leaves.length - 1);
-    if (pos) pos.textContent = (i >= 0) ? (i + 1) + ' / ' + leaves.length : '';
+    // With nothing selected (i<0) both arrows are live (▼ → first, ▲ → last).
+    if (prev) prev.disabled = (n === 0) || (i === 0);
+    if (next) next.disabled = (n === 0) || (i >= 0 && i >= n - 1);
+    if (pos) pos.textContent = n ? ((i >= 0 ? (i + 1) : '–') + ' / ' + n) : '';
   }
   window._selectStudyInRail = _selectStudyInRail;
 
@@ -15603,7 +15643,7 @@
     var _sm = _verdictMeta(s) || _execMeta(s);
     var status = _sm.label;
     var color = _sm.color;
-    var indent = opts.indent ? '28px' : '12px';
+    var indent = opts.indent ? '16px' : '8px';
     var fontSize = opts.indent ? '0.85em' : '0.86em';
     var nameColor = opts.indent ? '#64748b' : '#374151';
     var tip = _esc(s.name) + ' — ' + _esc(status) + (s.blocked ? ' (blocked)' : '');
@@ -15612,7 +15652,7 @@
     // show/hide this row by a substring scan without rebuilding any DOM.
     var hay = _esc(_studyHay(s, opts.groupTitle));
     return '<a class="viv-rail-sublink" data-study-name="' + _esc(s.name) + '" data-rail-hay="' + hay + '" draggable="false" ' +
-           'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
+           'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\', (document.querySelector(\'.viv-rail-sublink.rail-study-active\') && typeof _currentStudyTab===\'function\') ? _currentStudyTab() : undefined);return false;" ' +
            'href="#" title="' + tip + '" ' +
            'style="display:flex;align-items:center;gap:6px;padding:4px 14px 4px ' + indent + ';color:' + nameColor + ';text-decoration:none;font-size:' + fontSize + ';">' +
              grip +
