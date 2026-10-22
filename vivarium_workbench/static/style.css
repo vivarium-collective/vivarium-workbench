@@ -6257,23 +6257,49 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
   flex:0 0 var(--viv-studies-h, 280px); width:auto; height:var(--viv-studies-h, 280px); min-height:0;
   border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
 }
-/* Search + navigation stepper share ONE uniform bar (saves a row): every control
-   is the same height and vertically centered — search field (flexes to fill),
-   stepper pill, and the dock/close controls in the reserved top-right corner. */
+/* Search + navigation stepper + dock/close share ONE uniform bar: every control
+   is 30px tall, vertically centered, with the same 8px radius and border family,
+   so the row reads as a single set — search field (flexes to fill), stepper pill,
+   then the dock/close controls in the reserved top-right corner. */
 .viv-studies-body .viv-rail-studies-head{
-  display:flex; align-items:center; gap:6px; min-height:34px; padding:0 50px 0 8px;
+  display:flex; align-items:center; gap:8px; min-height:46px; padding:8px 62px 8px 10px;
 }
 .viv-studies-body #viv-rail-study-search{
-  flex:1 1 auto; width:auto; min-width:0; max-width:420px; margin:0;
-  height:26px; box-sizing:border-box; padding:0 8px;
+  flex:1 1 auto; width:auto; min-width:0; max-width:none; margin:0;
+  height:30px; box-sizing:border-box; padding:0 10px;
+  border:1px solid #e2e8f0; border-radius:8px; background:#fff;
+  font-size:0.9em; color:#334155; transition:border-color .12s ease, box-shadow .12s ease;
 }
-/* Stepper pill: same height as the search field, buttons centered within it. */
+.viv-studies-body #viv-rail-study-search:focus{
+  outline:none; border-color:#a5b4fc; box-shadow:0 0 0 3px rgba(99,102,241,0.12);
+}
+/* Stepper pill: same height/radius/border family as the search field. */
 .viv-studies-body #viv-rail-study-stepper{ display:inline-flex; align-items:center; }
-.viv-studies-body .viv-rail-step-card{ height:26px; box-sizing:border-box; }
+.viv-studies-body .viv-rail-step-card{
+  height:30px; box-sizing:border-box; gap:3px; padding:0 5px;
+  border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;
+}
+.viv-studies-body #viv-rail-study-stepper button{
+  width:22px; height:22px; border-radius:6px; font-size:0.6em;
+}
+.viv-studies-body #viv-rail-study-stepper #viv-rail-step-pos{
+  font-size:0.72em; min-width:34px;
+}
 /* Stepper now lives INSIDE that bar → just the pill (drop its own band/sticky). */
 .viv-studies-body .viv-rail-studies-head #viv-rail-study-stepper{
   position:static; flex:none; padding:0; margin:0; background:transparent; box-shadow:none;
 }
+/* Dock + close: match the pill/search — a 30px rounded control, vertically
+   centered in the bar so the whole row lines up. (Studies-only; chat/code keep
+   their compact corner cluster.) */
+.viv-studies-panel .vp-head{
+  top:12px; right:8px; gap:4px;   /* line the 30px controls up with the search/stepper row */
+}
+.viv-studies-panel .vp-head .vp-icon{
+  width:30px; height:30px; border:1px solid transparent; border-radius:8px;
+}
+.viv-studies-panel .vp-head .vp-icon svg{ width:15px; height:15px; }
+.viv-studies-panel .vp-head .vp-icon:hover{ background:#eef2ff; border-color:#c7d2fe; }
 body.vp-dragging .viv-studies-head{ cursor:grabbing; }
 .viv-studies-title{ min-width:0; }
 .viv-studies-title strong{ display:block; font-size:0.9rem; }
