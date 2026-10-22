@@ -825,7 +825,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
 
     <!-- Brand: fixed Vivarium logo + name (no per-workspace icon/name override). -->
     <div class="viv-rail-header">
-      <a class="viv-rail-brand-link" href="#about" title="About Vivarium Workbench">
+      <a class="viv-rail-brand-link" href="#about" title="About Vivarium Workbench"
+         onclick="window.location.hash='#about'; if(window._switchPage){_switchPage('about');}">
         <img class="viv-rail-logo" src="assets/vivarium-logo.png{% if asset_version %}?v={{ asset_version }}{% endif %}" alt="Vivarium" loading="lazy"
              data-light-src="assets/vivarium-logo.png{% if asset_version %}?v={{ asset_version }}{% endif %}"
              data-dark-src="assets/vivarium-logo-dark.png{% if asset_version %}?v={{ asset_version }}{% endif %}"
@@ -1639,8 +1640,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          investigation header row (#iset-workspace), so the graph toolbar is only
          about the graph. Study prev/next/jump navigator removed — clicking a study
          node in the graph is the navigation now. #}
-      <span id="aig-layout-group" class="aig-tb-group" role="group" aria-label="Graph orientation">
-        <span class="aig-tb-label">Layout</span>
+      <span id="aig-layout-group" class="aig-tb-group" role="group" aria-label="Graph orientation" title="Layout">
         {# Orientation is AUTO by default (derived from the container aspect) and
            re-autos on every dock switch. The ⇄/⇅ buttons are a transient manual
            override for the current dock; the next dock switch re-autos — so there
@@ -1657,8 +1657,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
            right — it drives semantic detail AND view zoom together. The fine-
            grained Detail / Width / view-Zoom sliders live in the ⚙ Display
            popover (kept in sync by _aigSyncZoomUI). -->
-      <span class="aig-tb-group">
-        <label class="aig-tb-label" for="aig-unified-zoom">Zoom</label>
+      <span class="aig-tb-group" title="Zoom">
         <input id="aig-unified-zoom" class="aig-tb-slider aig-tb-slider-wide" type="range"
                min="0" max="100" step="1" value="50"
                oninput="window._setAigUnifiedZoom(parseInt(this.value,10), true)"
@@ -1669,10 +1668,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <button id="aig-fill-btn" type="button" class="aig-tb-btn"
                 title="Fill to screen — fit the whole investigation graph to the view and centre it"
                 aria-label="Fill the investigation graph to the screen"
-                onclick="window._aigFillToScreen&&window._aigFillToScreen()">&#10530; Fit</button>
+                onclick="window._aigFillToScreen&&window._aigFillToScreen()">&#10530;</button>
       </span>
-      <span class="aig-tb-group aig-settings-ctl" style="position:relative">
-        <span class="aig-tb-label">Display</span>
+      <span class="aig-tb-group aig-settings-ctl" style="position:relative" title="Display">
         <button id="aig-settings-btn" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false"
                 title="Display settings — fine-tune detail, card width, and zoom"
                 aria-label="Display settings" onclick="window._aigToggleSettings(event)">⚙</button>
@@ -1704,14 +1702,12 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       {# Legend lives in the toolbar with the other graph utilities. The "?" button
          opens a click popover with the key (Progress / Verdict / Evidence / Edges),
          filled + wired by _wireDagLegendPopover (walkthrough.js); outside-click closes. #}
-      <span class="aig-tb-group dag-legend-wrap" style="position:relative">
-        <span class="aig-tb-label">Legend</span>
+      <span class="aig-tb-group dag-legend-wrap" style="position:relative" title="Legend">
         <button id="dag-legend-chip" type="button" class="aig-tb-btn" aria-haspopup="true" aria-expanded="false"
                 aria-label="Legend" title="Legend — node Progress/Verdict markers and edge types">?</button>
         <div id="dag-legend-popover" role="dialog" aria-label="Investigation graph legend" style="display:none;position:absolute;right:0;top:100%;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:240px;max-width:360px;padding:10px 12px;text-align:left"></div>
       </span>
-      <span class="aig-tb-group aig-dl-ctl" style="position:relative">
-        <span class="aig-tb-label">Export</span>
+      <span class="aig-tb-group aig-dl-ctl" style="position:relative" title="Export">
         <button id="aig-dl-btn" type="button" class="aig-tb-btn" title="Download the investigation graph as an image (PNG) or PDF"
                 aria-label="Export graph" aria-haspopup="true" aria-expanded="false" onclick="window._aigToggleDownloadMenu(event)">⬇</button>
         <div id="aig-dl-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.14);z-index:70;min-width:132px;overflow:hidden">
@@ -1722,8 +1718,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <!-- Dock control: choose a side (left/right/bottom/top), pop out, or go back
            inline. Placed after the Display/Legend/Export trio so those three stay
            grouped together. -->
-      <span class="aig-tb-group" role="group" aria-label="Graph panel">
-        <span class="aig-tb-label">Dock</span>
+      <span class="aig-tb-group" role="group" aria-label="Graph panel" title="Dock">
         <button id="aig-dock-panel-btn" type="button" class="aig-tb-btn"
                 title="Dock the investigation graph — choose a side, pop out, or go back inline"
                 aria-haspopup="menu" aria-label="Dock the investigation graph"

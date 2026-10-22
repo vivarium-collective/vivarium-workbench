@@ -7897,7 +7897,9 @@
   function _vivRestoreRailState() {
     var stored = null;
     try { stored = localStorage.getItem('vivarium.rail-collapsed'); } catch (e) {}
-    var collapsed = stored === '1';
+    // Default view is the COLLAPSED icon rail (drag the edge to widen); once the
+    // user sets it either way, their stored choice wins.
+    var collapsed = (stored === null) ? true : (stored === '1');
     var rail = document.getElementById('viv-rail');
     if (rail) {
       // Apply the saved expanded width (the collapsed rule overrides it via
