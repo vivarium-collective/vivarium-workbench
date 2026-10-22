@@ -242,3 +242,35 @@ def test_load_spec_v4_multi_arm_armless_arm_rejected(tmp_path):
     }))
     with pytest.raises(InvestigationSpecError, match="composite"):
         load_spec(spec_path)
+
+
+def test_load_spec_v4_planned_study_allows_composite_less_arms(tmp_path):
+    # A `status: planned` study is a Design-phase artifact whose models have not
+    # been built yet; its baseline arms may legitimately carry no composite.
+    # load_spec must accept it so it renders as a design-only shell (not 404).
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "schema_version": 4,
+        "name": "planned-study",
+        "status": "planned",
+        "question": "Can a vesicle grow and divide?",
+        "conditions": {"baseline": [
+            {"name": "control", "params": {"supply": 0}},
+            {"name": "supplied", "params": {"supply": 1}}]},
+    }))
+    spec = load_spec(spec_path)  # must not raise despite composite-less arms
+    assert spec["status"] == "planned"
+
+
+def test_load_spec_non_planned_study_still_requires_composite(tmp_path):
+    # Guard: the relaxation is scoped to planned studies only.
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "schema_version": 4,
+        "name": "active-study",
+        "status": "running",
+        "question": "Does X?",
+        "conditions": {"baseline": [{"name": "b", "params": {}}]},
+    }))
+    with pytest.raises(InvestigationSpecError, match="composite"):
+        load_spec(spec_path)

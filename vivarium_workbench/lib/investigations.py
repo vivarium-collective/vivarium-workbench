@@ -147,7 +147,11 @@ def _validate_study_v3_or_v4(spec: dict) -> None:
         # A baseline is executable as a full composite OR as a single bare
         # process-bigraph Step/Process referenced directly (baseline.step /
         # baseline.process) — the workbench runs any of the three; require one.
-        if not (c.get("composite") or c.get("step") or c.get("process")):
+        # Exception: a `status: planned` study is a Design-phase artifact whose
+        # models have not been built yet, so its arms may legitimately carry no
+        # composite — it renders as a design-only shell rather than running.
+        if not (c.get("composite") or c.get("step") or c.get("process")) \
+                and spec.get("status") != "planned":
             raise InvestigationSpecError(
                 f"v3 study: baseline[{i}] requires one of 'composite', 'step', or 'process'")
 
@@ -265,10 +269,17 @@ def _validate_study_v4_redesign(spec: dict) -> None:
     # (several baseline arms, each a distinct composite) declares it as a list
     # of arm mappings. Accept both; every arm must carry a composite/step/process.
     arms = baseline if isinstance(baseline, list) else [baseline]
+    # A `status: planned` study is a Design-phase artifact whose models have not
+    # been built yet; its arms may legitimately carry no composite (it renders as
+    # a design-only shell rather than running).
+    planned = spec.get("status") == "planned"
 
     def _arm_ok(a):
-        return isinstance(a, dict) and (
-            a.get("composite") or a.get("step") or a.get("process"))
+        if not isinstance(a, dict):
+            return False
+        if planned:
+            return True
+        return bool(a.get("composite") or a.get("step") or a.get("process"))
 
     if not arms or not all(_arm_ok(a) for a in arms):
         raise InvestigationSpecError(
