@@ -83,10 +83,18 @@
   // Open iff the workspace has studies — but only while the user hasn't taken
   // explicit control of the panel. The study list loads asynchronously, so this
   // is re-run as the rail renders (see the MutationObserver in init).
+  // On a phone the Studies panel opens as a full-screen sheet (responsive.css),
+  // so auto-opening it on load would bury the Investigations page behind it.
+  // Leave it closed by default there — the rail's Studies tab still opens it.
+  function isMobile() {
+    try { return window.matchMedia && window.matchMedia('(max-width:640px)').matches; }
+    catch (e) { return false; }
+  }
+
   function applyDefault() {
     // Never auto-open/close in a popped-out window — it IS the panel, and a
     // transient close there would trigger returnInline (closing the window).
-    if (!ctl || inPopout() || lsGet(K_USERSET, '0') === '1') return;
+    if (!ctl || inPopout() || isMobile() || lsGet(K_USERSET, '0') === '1') return;
     if (hasStudies()) { if (!ctl.isOpen()) ctl.open(); }
     else { if (ctl.isOpen()) ctl.close(); }
   }

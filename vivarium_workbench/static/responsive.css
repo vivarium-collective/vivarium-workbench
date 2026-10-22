@@ -242,4 +242,44 @@
 
   /* Keep the AI chat dock from covering the whole screen if it's open. */
   .chat-dock, #chat-dock { max-width: 100vw; }
+
+  /* ---- Dockable side panels → full-screen overlay sheets ----------------- *
+   * On a phone there is no room to dock/split: a docked Studies / Chat / Code /
+   * Graph panel would crush the content to nothing. So docking is off here —
+   * each panel instead opens as a full-screen sheet OVER the content, below the
+   * mobile topbar (so the hamburger stays reachable). Its own × closes it.
+   * Edge-resize, dock-to-a-side and pop-out are all hidden (meaningless at this
+   * width). The desktop docking experience above 640px is untouched. */
+  #viv-ai-panel:not([hidden]),
+  #viv-code-rail:not([hidden]),
+  #viv-graph-panel:not([hidden]),
+  #viv-studies-panel:not([hidden]) {
+    position: fixed !important;
+    inset: 48px 0 0 0 !important;   /* top:48px (clears the topbar) → fills the rest */
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    flex: none !important;
+    z-index: 600 !important;        /* over content + topbar(40); under the rail drawer(1000) + its backdrop(900) */
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: auto !important;
+  }
+  /* Panel inners fill the sheet. */
+  #viv-code-rail .viv-code-panel,
+  #viv-graph-panel .viv-graph-panel-inner,
+  #viv-studies-panel .viv-studies-panel-inner { height: 100% !important; }
+
+  /* Hide docking / pop-out / edge-resize affordances on a phone. */
+  .vp-resize,
+  #viv-ai-resize,
+  #viv-code-resize-handle,
+  #viv-graph-resize-handle,
+  #viv-studies-resize-handle,
+  .vp-dock-menu,
+  .vp-icon[data-act="dock"],
+  #aig-dock-panel-btn,
+  #aig-dock-ctl { display: none !important; }
 }
