@@ -348,7 +348,27 @@
     var tries = 0;
     (function openWhenReady() {
       if (kind === 'chat' && typeof window._openAiPanel === 'function') { window._openAiPanel(); return; }
-      if (kind === 'graph' && typeof window._openGraphPanel === 'function') { window._openGraphPanel(); return; }
+      if (kind === 'graph' && typeof window._openGraphPanel === 'function') {
+        // Render the investigation's graph first (a fresh popout has none open),
+        // then host the RENDERED graph in the panel. Opening the panel before the
+        // DAG renders hosts an empty node, and the async detail render then rebuilds
+        // #investigation-dag-fs inline — leaving the popout blank. So wait for the
+        // DAG nodes to appear, then relocate it into the panel.
+        var ginv = p.get('investigation');
+        if (ginv && typeof window._openInvestigationDetail === 'function') {
+          try { window._openInvestigationDetail(ginv); } catch (e) { /* ignore */ }
+          var gt = 0;
+          (function openGraphWhenRendered() {
+            var fs = document.getElementById('investigation-dag-fs');
+            var ready = fs && fs.querySelector('.aig-node, [data-study-name], [data-aig-node]');
+            if (ready || gt++ > 100) { window._openGraphPanel(); return; }
+            setTimeout(openGraphWhenRendered, 60);
+          })();
+        } else {
+          window._openGraphPanel();
+        }
+        return;
+      }
       if (kind === 'studies' && typeof window._openStudiesPanel === 'function') { window._openStudiesPanel(); return; }
       if (kind === 'code' && window.ProcessCode) {
         var addr = p.get('address'), comp = p.get('composite');

@@ -173,7 +173,13 @@
       // No header to drag; the hosted graph toolbar is bound as the drag handle
       // in onOpen (once it's relocated into the panel) via ctl.addDragHandle.
       dragHandles: [],
-      popout: function () { global.VivPanelDock.popout('graph'); },
+      // Carry the current investigation so the popped window renders ITS graph
+      // (a fresh popout has no investigation open, so the hosted #investigation-dag-fs
+      // would otherwise be empty — see panel-dock.js initPopout).
+      popout: function () {
+        var inv = global._wsInvestigation || global._currentIset || '';
+        global.VivPanelDock.popout('graph', inv ? { investigation: inv } : null);
+      },
       defaultDock: 'right', defaultSize: { side: 480, bottom: 340 },
       onOpen: onOpen, onClose: onClose,
       // Resize / re-dock / expand must NOT recompute the zoom — reflow the viewport
