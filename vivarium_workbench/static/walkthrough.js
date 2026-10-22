@@ -15280,6 +15280,14 @@
           window.opener && !window.opener.closed &&
           typeof window.opener._openStudyEmbeddedNewTab === 'function') {
         window.opener._openStudyEmbeddedNewTab(name, tab);
+        // Opening a study from the GRAPH popout surfaces it in the opener (main
+        // window), which now has room since the graph vacated the inset — bring
+        // that window forward so the open is visible. (Studies popout keeps its
+        // quiet "controls the main window" behavior and does NOT steal focus.)
+        try {
+          if (document.body.classList.contains('viv-popout-graph') &&
+              window.opener && window.opener.focus) window.opener.focus();
+        } catch (e) { /* ignore */ }
         _selectStudyInRail(name);
         return;
       }

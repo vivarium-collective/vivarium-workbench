@@ -4856,6 +4856,16 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   padding: 8px 12px; color: #475569; font-weight: 600; font-size: 0.9em;
 }
 #investigation-dag-fs.aig-collapsed .aig-collapsed-bar:hover { background: #eef2ff; color: #3730a3; }
+/* While the graph is popped out, the inline graph VACATES the inset and this bar
+   stands in its place (click to bring it back). Styled like the collapsed bar. */
+#investigation-dag-fs.aig-poppedout-hidden { display: none !important; }
+.aig-poppedout-bar {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: #f8fafc; border: 1px dashed #c7d2fe; border-radius: 6px;
+  padding: 8px 12px; color: #4f46e5; font-weight: 600; font-size: 0.9em;
+}
+.aig-poppedout-bar:hover { background: #eef2ff; color: #3730a3; border-color: #a5b4fc; }
+:root[data-theme="dark"] .aig-poppedout-bar { background: #1e293b; border-color: #334155; color: #a5b4fc; }
 /* Needs-attention: a compact chip in the toolbar (no big banner). All-clear is a
    quiet green pill; the needs state is an amber/red clickable pill. */
 .aig-na-chip-host { display: inline-flex; align-items: center; }
