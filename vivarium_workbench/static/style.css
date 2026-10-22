@@ -6237,10 +6237,23 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 #viv-ai-panel:hover .vp-head, #viv-ai-panel:focus-within .vp-head{
   opacity:1; pointer-events:auto;
 }
-/* Only the control icons remain in the floating cluster (drop title / spacer). */
+/* Only the control icons remain in the floating cluster (drop title / spacer),
+   sized small so the reserved corner can stay compact. */
 .viv-studies-panel .vp-head > :not(.vp-icon),
 .viv-code-rail .vp-head > :not(.vp-icon),
 #viv-ai-panel .vp-head > :not(.vp-icon){ display:none; }
+.viv-studies-panel .vp-head .vp-icon,
+.viv-code-rail .vp-head .vp-icon,
+#viv-ai-panel .vp-head .vp-icon{ width:22px; height:20px; }
+.viv-studies-panel .vp-head .vp-icon svg,
+.viv-code-rail .vp-head .vp-icon svg,
+#viv-ai-panel .vp-head .vp-icon svg{ width:14px; height:14px; }
+/* Reserve the top-right corner of each panel's first visible row so the floating
+   dock/close controls never occlude existing buttons (chat's toolbar, code's
+   meta row) — the same technique the Studies search bar uses. */
+#viv-ai-panel .vp-toolbar{ padding-right:58px; }
+.viv-code-rail .viv-code-meta,
+.viv-code-rail .viv-code-newbar{ padding-right:58px; }
 :root[data-theme="dark"] .viv-studies-panel .vp-head,
 :root[data-theme="dark"] .viv-code-rail .vp-head,
 :root[data-theme="dark"] #viv-ai-panel .vp-head{
