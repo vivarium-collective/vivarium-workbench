@@ -95,7 +95,7 @@ def test_native_gallery_card_uses_figure_card_and_conditional_run_link():
 
 def test_chart_card_uses_figure_card_not_chart_card_box():
     i = JS.index("function _renderChartCard")
-    block = JS[i:i + 1800]
+    block = JS[i:JS.index("\n  function ", i + 10)]  # the full _renderChartCard fn
     assert '"figure-card"' in block
     assert 'class="chart-card"' not in block
     assert 'figure-caption-row' in block and 'figure-source-chip' in block
@@ -126,7 +126,7 @@ def test_loadcharts_wires_figure_run_links():
 
 def test_chart_card_renders_iframe_for_declared_interactive_figure():
     i = JS.index("function _renderChartCard")
-    block = JS[i:i + 1800]
+    block = JS[i:JS.index("\n  function ", i + 10)]  # the full _renderChartCard fn
     # A declared interactive figure renders as an iframe by EITHER c.iframe_url
     # (workspace-served, live dashboard) OR c.srcdoc (self-contained + inlined
     # Plotly, static publish snapshot — publish._inline_declared_iframe_figures).
@@ -146,7 +146,7 @@ def test_chart_card_renders_iframe_for_declared_interactive_figure():
 
 def test_chart_card_static_image_path_unchanged():
     i = JS.index("function _renderChartCard")
-    block = JS[i:i + 1800]
+    block = JS[i:JS.index("\n  function ", i + 10)]  # the full _renderChartCard fn
     # The img branch (PNG/GIF) is still reachable and unconditioned on
     # iframe_url — a static image record still renders <img>, not an iframe.
     assert "'<img class=\"chart-img figure-media\"" in block
