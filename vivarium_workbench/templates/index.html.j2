@@ -1085,7 +1085,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
                autocomplete="off" spellcheck="false" aria-label="Search studies"
                oninput="window._filterRailStudies && window._filterRailStudies(this.value)"
                onkeydown="if(event.key==='Escape'){_vivToggleRailSearch(false);}"
-               style="width:calc(100% - 24px);margin:2px 12px 6px;padding:4px 8px;font-size:0.82em;
+               style="width:calc(100% - 16px);margin:4px 8px 3px;padding:2px 7px;font-size:0.78em;
                       color:#374151;border:1px solid #e5e7eb;border-radius:4px;background:#fff;box-sizing:border-box;" />
       </div>
       <div id="viv-rail-investigations">
@@ -2442,10 +2442,10 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <div class="viv-studies-resize-handle" id="viv-studies-resize-handle"
            role="separator" aria-orientation="vertical" aria-label="Resize studies panel"
            title="Drag to resize"></div>
-      <!-- Header doubles as the drag-to-dock handle; the icon controls mirror the
-           Code / Chat panel header (same .vp-head / .vp-icon chrome). -->
+      <!-- A thin drag-to-dock strip carrying only the move / close controls (no
+           "Studies" title banner — the rail tab already names it). The icon
+           controls mirror the Code / Chat panel header (.vp-head / .vp-icon). -->
       <div class="viv-studies-head vp-head" title="Drag to dock left / right / bottom / top">
-        <div class="viv-studies-title"><strong>Studies</strong></div>
         <span class="vp-spacer"></span>
         <button class="vp-icon" type="button" data-act="dock" title="Move or pop out panel" aria-label="Move or pop out panel"
                 onclick="window.StudiesPanel&&StudiesPanel.dockMenu(this)">

@@ -24,8 +24,19 @@
   var K_USERSET = 'viv.studies.userset';         // '1' once the user toggles it
 
   var ctl = null;
+  var popoutWin = null;   // the ?popout=studies window, while one is open
 
   function el(id) { return document.getElementById(id); }
+
+  // The rail "Studies" tab stays highlighted while the panel is open OR popped
+  // out into its own window (VivPanelDock only reflects the docked-open state).
+  function reflectLauncher() {
+    var tog = el(TOGGLE_ID);
+    if (!tog) return;
+    var active = (ctl && ctl.isOpen()) || !!(popoutWin && !popoutWin.closed);
+    tog.classList.toggle('active', active);
+    tog.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
   function lsGet(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
 
@@ -76,9 +87,17 @@
       docks: ['left', 'right', 'bottom', 'top'],
       resizeHandle: 'viv-studies-resize-handle',
       dragHandles: head ? [head] : [],
-      popout: function () { global.VivPanelDock.popout('studies'); },
+      // Pop out into a window; the docked panel then closes (it lives in the
+      // window now), but the rail tab stays highlighted while that window is open.
+      popout: function () {
+        popoutWin = global.VivPanelDock.popout('studies');
+        userToggled();
+        if (ctl) ctl.close();
+        setTimeout(reflectLauncher, 60);
+      },
       defaultDock: 'left', defaultSize: { side: 300, bottom: 280 },
-      onOpen: function () { sectionIntoPanel(); },
+      onOpen: function () { sectionIntoPanel(); reflectLauncher(); },
+      onClose: function () { reflectLauncher(); },
     });
 
     // Public API — mirrors window.GraphPanel.* / window.ProcessCode.* so the panel
@@ -108,22 +127,28 @@
       ctl.toggle();
     });
 
-    // A ?popout=studies window always opens the panel.
+    // Mount the always-visible study stepper as soon as the list renders, and
+    // (until the user takes control) keep the default-open heuristic fresh. The
+    // study list loads asynchronously, so run on every rail re-render.
+    function onListRender() {
+      if (typeof global._renderRailStudyStepper === 'function') global._renderRailStudyStepper();
+      if (lsGet(K_USERSET, '0') !== '1') applyDefault();
+    }
+
+    // A ?popout=studies window always opens the panel (and still mounts the stepper).
     var isPopout = false;
     try { isPopout = /(?:^|[?&])popout=studies(?:&|$)/.test(global.location.search || ''); } catch (e) { /* ignore */ }
-    if (isPopout) { ctl.open(); return; }
+    if (isPopout) { ctl.open(); onListRender(); }
 
-    // Default-open when studies exist; keep re-checking as the (async) study list
-    // renders, until the user takes control.
-    applyDefault();
+    onListRender();
     var host = el(LIST_ID);
     if (host && global.MutationObserver) {
-      var obs = new global.MutationObserver(function () {
-        if (lsGet(K_USERSET, '0') === '1') { obs.disconnect(); return; }
-        applyDefault();
-      });
-      obs.observe(host, { childList: true, subtree: true });
+      new global.MutationObserver(onListRender).observe(host, { childList: true, subtree: true });
     }
+    // Deactivate the rail tab when the popped-out window is closed.
+    global.setInterval(function () {
+      if (popoutWin && popoutWin.closed) { popoutWin = null; reflectLauncher(); }
+    }, 1500);
   }
 
   if (typeof document !== 'undefined') {

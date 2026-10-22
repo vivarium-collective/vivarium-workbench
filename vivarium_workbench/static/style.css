@@ -1023,21 +1023,21 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
    and you can't scroll past the stepper. The bordered card sits inside the band. */
 #viv-rail-study-stepper {
   position: sticky; top: 0; z-index: 6;
-  padding: 2px 12px 6px; background: #fafafa; box-shadow: 0 1px 0 #ececec;
+  padding: 1px 8px 3px; background: #fafafa; box-shadow: 0 1px 0 #ececec;
 }
 .viv-rail-step-card {
-  display: flex; align-items: center; gap: 8px; padding: 3px 6px;
-  border: 1px solid #e5e7eb; border-radius: 7px; background: #f8fafc;
+  display: flex; align-items: center; gap: 4px; padding: 1px 4px;
+  border: 1px solid #e5e7eb; border-radius: 6px; background: #f8fafc;
 }
 #viv-rail-study-stepper button {
-  flex: none; width: 24px; height: 22px; line-height: 1; padding: 0;
-  border: 1px solid #d1d5db; border-radius: 5px; background: #fff;
-  color: #4f46e5; font-size: 0.8em; cursor: pointer;
+  flex: none; width: 22px; height: 17px; line-height: 1; padding: 0;
+  border: 1px solid #d1d5db; border-radius: 4px; background: #fff;
+  color: #4f46e5; font-size: 0.68em; cursor: pointer;
 }
 #viv-rail-study-stepper button:hover:not(:disabled) { background: #eef2ff; border-color: #a5b4fc; }
 #viv-rail-study-stepper button:disabled { color: #cbd5e1; cursor: default; }
 #viv-rail-study-stepper #viv-rail-step-pos {
-  flex: 1; text-align: center; font-size: 0.78em; color: #64748b; font-variant-numeric: tabular-nums;
+  flex: 1; text-align: center; font-size: 0.73em; color: #64748b; font-variant-numeric: tabular-nums;
 }
 :root[data-theme="dark"] #viv-rail-study-stepper { background: var(--rail); box-shadow: 0 1px 0 var(--border-faint); }
 :root[data-theme="dark"] .viv-rail-step-card { background: #1e293b; border-color: #334155; }
@@ -1236,6 +1236,30 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 }
 .viv-rail.viv-rail-collapsed .viv-rail-link-label{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-link-badge{ display:none }
+
+/* Collapsed rail: on hover, reveal each tab's name as a clickable button-like
+   flyout to the right of its icon (and keep it there until the pointer leaves).
+   The flyout is a child of the <a>, so hovering/clicking it still targets the
+   tab. The collapsed rail is icon-only (short), so visible overflow is safe and
+   lets the flyout escape the rail's clipping. */
+.viv-rail.viv-rail-collapsed{ overflow:visible; }
+.viv-rail.viv-rail-collapsed .viv-rail-scroll{ overflow:visible; }
+.viv-rail.viv-rail-collapsed .viv-rail-link{ position:relative; }
+.viv-rail.viv-rail-collapsed .viv-rail-link:hover > .viv-rail-link-label,
+.viv-rail.viv-rail-collapsed .viv-rail-link:focus-visible > .viv-rail-link-label{
+  display:block; position:absolute; left:100%; top:50%; transform:translateY(-50%);
+  white-space:nowrap; overflow:visible; text-overflow:clip; z-index:70;
+  /* Abuts the icon (no gap) so moving the pointer onto it keeps the tab hovered;
+     the left padding gives the text visual breathing room. */
+  padding:6px 12px 6px 14px; border-radius:0 8px 8px 0; border-left:none;
+  background:#fff; color:#1e293b; font-size:0.84rem; font-weight:500; line-height:1;
+  border:1px solid #d9d8d4; box-shadow:0 6px 18px rgba(15,23,42,0.16);
+  pointer-events:auto; cursor:pointer;
+}
+:root[data-theme="dark"] .viv-rail.viv-rail-collapsed .viv-rail-link:hover > .viv-rail-link-label,
+:root[data-theme="dark"] .viv-rail.viv-rail-collapsed .viv-rail-link:focus-visible > .viv-rail-link-label{
+  background:#1e293b; color:#e2e8f0; border-color:#334155; box-shadow:0 6px 18px rgba(0,0,0,0.45);
+}
 .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-header{
   justify-content:center; padding:6px 0;
 }
@@ -6190,11 +6214,17 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 .viv-studies-panel{
   --viv-studies-w:300px;
   flex:0 0 var(--viv-studies-w); width:var(--viv-studies-w);
+  /* min-width:0 lets the panel shrink BELOW its content's natural width (the
+     flex-item default min-width:auto would otherwise clamp it ~content-wide and
+     stop a narrow drag). Content ellipsizes; drag past COLLAPSE_AT to collapse. */
+  min-width:0;
   display:flex; flex-direction:column;
   background:var(--panel, #fff); border-left:1px solid var(--border, #e2e6eb);
   position:relative; overflow:hidden;
   transition:flex-basis .18s ease, width .18s ease;
 }
+/* Same shrink-all-the-way behavior for the other dockable tool panels. */
+.viv-graph-panel, .viv-code-rail, #viv-ai-panel{ min-width:0; }
 .viv-studies-panel .viv-studies-panel-inner{ display:flex; flex-direction:column; height:100%; min-width:0; flex:1; }
 .viv-studies-panel[hidden]{ display:none !important; }
 .viv-studies-panel[data-dock="left"]{ border-left:none; border-right:1px solid var(--border, #e2e6eb); }
@@ -6207,8 +6237,8 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
   border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
 }
 .viv-studies-head{
-  cursor:grab; display:flex; align-items:center; gap:8px;
-  padding:8px 8px 8px 14px; border-bottom:1px solid var(--c-border, #e2e6eb);
+  cursor:grab; display:flex; align-items:center; gap:6px;
+  padding:3px 6px; min-height:0; border-bottom:1px solid var(--c-border, #e2e6eb);
 }
 body.vp-dragging .viv-studies-head{ cursor:grabbing; }
 .viv-studies-title{ min-width:0; }

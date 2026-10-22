@@ -15267,6 +15267,19 @@
   window._investigationForStudy = _investigationForStudy;
 
   function _openStudyEmbeddedNewTab(name, tab) {
+    // In a popped-out Studies panel window there is no investigation content to
+    // show here — route the navigation to the opener (the main window) so the
+    // popped-out list CONTROLS the main window's selected study, and reflect the
+    // selection in this window's own list.
+    try {
+      if (document.body && document.body.classList.contains('viv-popout') &&
+          window.opener && !window.opener.closed &&
+          typeof window.opener._openStudyEmbeddedNewTab === 'function') {
+        window.opener._openStudyEmbeddedNewTab(name, tab);
+        _selectStudyInRail(name);
+        return;
+      }
+    } catch (e) { /* cross-origin / closed opener — fall back to local nav */ }
     // Single router: show the study's OWN investigation workspace, then
     // open/focus its study tab. Never the legacy icon view, never full-window nav.
     // Optional `tab` deep-links the porthole to a study sub-tab (e.g. conclusions).
@@ -15356,33 +15369,38 @@
 
   // The study leaves of the currently-open study's rail group, in display order.
   function _railStudySiblings(activeLeaf) {
-    if (!activeLeaf) return [];
-    var grp = activeLeaf.closest('.viv-rail-investigations-group') ||
-              document.getElementById('viv-rail-investigations') || document;
+    // The active study's group; with none selected, fall back to the first
+    // investigation group (else every study leaf in the rail) so the stepper can
+    // start from the top.
+    var grp = activeLeaf ? activeLeaf.closest('.viv-rail-investigations-group') : null;
+    if (!grp) {
+      grp = document.querySelector('#viv-rail-investigations .viv-rail-investigations-group') ||
+            document.getElementById('viv-rail-investigations');
+    }
+    if (!grp) return [];
     return Array.prototype.slice.call(grp.querySelectorAll('.viv-rail-sublink[data-study-name]'));
   }
-  // Step to the previous (dir<0) / next (dir>0) study within the current
-  // investigation group, keeping the same open tab.
+  // Step to the previous (dir<0) / next (dir>0) study, keeping the same open tab.
+  // With no study selected, ▼ opens the first study and ▲ opens the last.
   window._railStepStudy = function (dir) {
     var active = document.querySelector('.viv-rail-sublink.rail-study-active[data-study-name]');
-    if (!active) return;
     var leaves = _railStudySiblings(active);
-    var i = leaves.indexOf(active);
-    if (i < 0) return;
-    var j = i + (dir < 0 ? -1 : 1);
+    if (!leaves.length) return;
+    var i = active ? leaves.indexOf(active) : -1;
+    var j = (i < 0) ? (dir < 0 ? leaves.length - 1 : 0) : i + (dir < 0 ? -1 : 1);
     if (j < 0 || j >= leaves.length) return;
     var slug = leaves[j].getAttribute('data-study-name');
     if (slug && window._openStudyEmbeddedNewTab) window._openStudyEmbeddedNewTab(slug, _currentStudyTab());
   };
 
-  // A compact prev/next stepper pinned at the top of the Studies rail whenever a
-  // study is open: ▲/▼ walk the current investigation's studies (keeping the open
-  // tab), with an "n / N" position readout.
+  // A compact prev/next stepper pinned at the top of the Studies rail. Always
+  // visible once the study list is present (not only when a study is selected):
+  // ▲/▼ walk the current investigation's studies (keeping the open tab), with an
+  // "n / N" position readout ("– / N" when nothing is selected yet).
   function _renderRailStudyStepper(activeLeaf) {
     var host = document.getElementById('viv-rail-investigations');
     if (!host) return;
     var bar = document.getElementById('viv-rail-study-stepper');
-    if (!activeLeaf) { if (bar) bar.remove(); return; }
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'viv-rail-study-stepper';
@@ -15400,18 +15418,23 @@
     }
     _updateRailStepperPosition();
   }
+  // Exposed so the Studies panel can mount the stepper as soon as the list renders
+  // (independent of any study being selected).
+  window._renderRailStudyStepper = _renderRailStudyStepper;
   function _updateRailStepperPosition() {
     var bar = document.getElementById('viv-rail-study-stepper');
     if (!bar) return;
     var active = document.querySelector('.viv-rail-sublink.rail-study-active[data-study-name]');
     var leaves = _railStudySiblings(active);
     var i = active ? leaves.indexOf(active) : -1;
+    var n = leaves.length;
     var prev = bar.querySelector('#viv-rail-step-prev');
     var next = bar.querySelector('#viv-rail-step-next');
     var pos = bar.querySelector('#viv-rail-step-pos');
-    if (prev) prev.disabled = !(i > 0);
-    if (next) next.disabled = !(i >= 0 && i < leaves.length - 1);
-    if (pos) pos.textContent = (i >= 0) ? (i + 1) + ' / ' + leaves.length : '';
+    // With nothing selected (i<0) both arrows are live (▼ → first, ▲ → last).
+    if (prev) prev.disabled = (n === 0) || (i === 0);
+    if (next) next.disabled = (n === 0) || (i >= 0 && i >= n - 1);
+    if (pos) pos.textContent = n ? ((i >= 0 ? (i + 1) : '–') + ' / ' + n) : '';
   }
   window._selectStudyInRail = _selectStudyInRail;
 

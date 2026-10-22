@@ -222,3 +222,46 @@ def test_studies_is_a_dockable_rail_tab_like_chat_and_code():
     assert "hasStudies" in js and "K_USERSET" in js
     # Pop-out is wired through panel-dock for the 'studies' kind.
     assert "kind === 'studies'" in (STATIC / "panel-dock.js").read_text()
+
+
+def test_docked_panels_can_shrink_narrow_then_collapse():
+    """Docked side panels shrink well below the old 340px floor (down toward the
+    collapse threshold) so they can be dragged narrow and collapsed."""
+    core = (STATIC / "chat-core.js").read_text()
+    assert "Math.min(80, cap)" in core, "side-dock min width not lowered to ~80px"
+    # Flex items must allow shrinking below content width.
+    css = (STATIC / "style.css").read_text()
+    assert ".viv-graph-panel, .viv-code-rail, #viv-ai-panel{ min-width:0; }" in css
+    assert "min-width:0;" in css.split(".viv-studies-panel{")[1].split("}")[0]
+
+
+def test_collapsed_rail_shows_hover_label_flyouts():
+    """A fully-collapsed rail reveals each tab's name as a button-like flyout on
+    hover (and lets it escape the rail's clipping)."""
+    css = (STATIC / "style.css").read_text()
+    assert ".viv-rail.viv-rail-collapsed .viv-rail-link:hover > .viv-rail-link-label" in css
+    assert ".viv-rail.viv-rail-collapsed{ overflow:visible; }" in css
+
+
+def test_study_stepper_is_always_present_and_steps_from_none():
+    """The rail study stepper is always mounted (▼ opens the first study even with
+    nothing selected) rather than only appearing once a study is open."""
+    js = (STATIC / "walkthrough.js").read_text()
+    assert "window._renderRailStudyStepper = _renderRailStudyStepper;" in js
+    # stepping with nothing selected picks the first (▼) / last (▲) study
+    assert "(i < 0) ? (dir < 0 ? leaves.length - 1 : 0)" in js
+
+
+def test_studies_panel_title_banner_removed():
+    """The Studies panel header no longer shows a redundant 'Studies' title."""
+    html = TEMPLATE.read_text()
+    head = html[html.index('class="viv-studies-head'):][:400]
+    assert "viv-studies-title" not in head, "Studies panel still has a title banner"
+
+
+def test_popout_returns_window_and_studies_routes_to_opener():
+    """popout() returns the opened window (so the launcher can stay highlighted),
+    and a popped-out Studies list routes study selection to the opener window."""
+    assert "return window.open(url" in (STATIC / "panel-dock.js").read_text()
+    wk = (STATIC / "walkthrough.js").read_text()
+    assert "window.opener._openStudyEmbeddedNewTab(name, tab)" in wk

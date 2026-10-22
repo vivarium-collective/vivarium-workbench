@@ -327,7 +327,7 @@
       if (params[k] != null && params[k] !== '') qs.set(k, params[k]);
     });
     var url = window.location.origin + window.location.pathname + '?' + qs.toString();
-    window.open(url, 'viv-popout-' + kind,
+    return window.open(url, 'viv-popout-' + kind,
       'width=560,height=820,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
   }
 
