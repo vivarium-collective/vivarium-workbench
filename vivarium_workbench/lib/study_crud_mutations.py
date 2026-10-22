@@ -65,7 +65,7 @@ def _v4_baseline_not_yet_materialized(spec: dict) -> bool:
         return False
     if spec.get("baseline"):
         return False  # already materialized as real data — safe to edit directly
-    return bool((spec["conditions"].get("baseline") or {}).get("composite"))
+    return bool(_study_spec_lib.baseline_head(spec["conditions"].get("baseline")).get("composite"))
 
 
 # ---------------------------------------------------------------------------
