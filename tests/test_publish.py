@@ -1059,3 +1059,31 @@ def test_build_bundle_fails_loudly_when_a_shell_cannot_render(
     out = tmp_path / "bundle"
     with pytest.raises(RuntimeError, match="study-shell render failed"):
         publish.build_bundle(tmp_workspace, out)
+
+
+def test_study_shell_renders_launch_card_for_module_embed(tmp_path):
+    """An embed marked `mode: launch` (a deeper Explore module like the Corpus
+    Explorer) renders as a full-size launch card, NOT a cramped inline iframe."""
+    from vivarium_workbench import publish
+    from vivarium_workbench.lib import _root
+
+    ws = tmp_path / "ws"
+    (ws / "studies" / "delta").mkdir(parents=True)
+    (ws / "workspace.yaml").write_text(yaml.safe_dump({"name": "t", "description": "d"}))
+    (ws / "studies" / "delta" / "study.yaml").write_text(yaml.safe_dump({
+        "name": "delta", "schema_version": 3,
+        "baseline": [{"name": "core", "composite": "pkg.delta.Core"}],
+        "variants": [], "objective": "o", "status": "draft",
+        "embed_visualizations": [
+            {"name": "Corpus Explorer", "url": "https://example.com/explorer.html",
+             "mode": "launch", "description": "deep interactive module"},
+        ],
+    }))
+    _root.set_workspace_root(ws)
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(ws, out)
+    shell = (out / "studies" / "delta" / "index.html").read_text(encoding="utf-8")
+    assert "explore-module-launch" in shell, "module embed should render a launch card"
+    # ...and not an iframe pointing at the module URL.
+    assert '<iframe src="https://example.com/explorer.html"' not in shell

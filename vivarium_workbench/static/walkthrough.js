@@ -2258,8 +2258,22 @@
         '<button class="btn-mini tool-open" onclick="_openTool(\'' + id + '\', this)">' +
         'Open &#8599;</button></div>';
     }
+    // Explore → study back-link: a module's targets carry the study they belong
+    // to, so link back to each distinct study's detail page (works live + snapshot
+    // via _studyHref). This is the "reach the study results from Explore" direction.
+    var _seenStudy = {}, _studyLinks = '';
+    items.forEach(function (m) {
+      var s = m && m.study;
+      if (s && !_seenStudy[s]) {
+        _seenStudy[s] = 1;
+        _studyLinks += '<a class="tool-study-link" href="' + _esc(_studyHref(s)) +
+          '" target="_blank" rel="noopener" title="Open this study">&#8592; ' +
+          _esc(m.study_label || s) + '</a>';
+      }
+    });
+    var studies = _studyLinks ? '<div class="tool-studies">' + _studyLinks + '</div>' : '';
     return '<div class="analyses-card tool-card" data-tool="' + id + '">' +
-      head + desc + body + '</div>';
+      head + desc + body + studies + '</div>';
   }
 
   // Open a tool's selected result full-window in a new tab. Per kind:

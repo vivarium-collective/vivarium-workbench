@@ -15,7 +15,7 @@
 (function () {
   "use strict";
 
-  var GROUP_ORDER = ["Studies", "Investigations", "Catalog", "Registry", "Runs", "Resources", "Analysis"];
+  var GROUP_ORDER = ["Studies", "Investigations", "Catalog", "Registry", "Runs", "Resources", "Explore"];
   var PER_GROUP = 6; // cap rows shown per group (with a "+N more" note)
 
   var overlay, input, resultsEl, loadingEl;
@@ -179,7 +179,7 @@
       var title = x.title || x.name || x.id;
       if (!title) return;
       out.push({
-        group: "Analysis", tag: "Analysis",
+        group: "Explore", tag: "Explore",
         title: title, sub: x.description || x.summary || "",
         hay: hayOf([title, x.description, x.summary, x.id]),
         open: function () { goPage("visualizations"); }
