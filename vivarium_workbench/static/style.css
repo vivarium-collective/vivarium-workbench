@@ -1195,22 +1195,9 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 /* Collapsed: the Vivarium logo shows clean by default and is NOT covered; the
    collapse/expand toggle is hidden and REVEALS on hover over the header (or when
    keyboard-focused). On hover the logo dims so the expand icon reads over it. */
-.viv-rail.viv-rail-collapsed .viv-rail-toggle{
-  top:0; left:0; right:0; bottom:0; transform:none;
-  width:auto; height:auto;
-  border-radius:8px;
-  opacity:0; pointer-events:none;
-  transition:opacity 0.12s, background 0.12s, color 0.12s;
-  z-index:3; color:#64748b;
-}
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-toggle,
-.viv-rail.viv-rail-collapsed .viv-rail-toggle:focus-visible{
-  opacity:1; pointer-events:auto;
-  background:rgba(238,242,255,0.96);
-  border-color:#c7d2fe; color:#3730a3;
-}
+/* The collapse/expand toggle button was removed — the rail is resized/collapsed
+   by dragging its right edge. The Vivarium logo stays fully visible. */
 .viv-rail.viv-rail-collapsed .viv-rail-logo{ opacity:1 }
-.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.12 }
 
 /* Collapsed-rail state ----------------------------------------------------- */
 .viv-rail.viv-rail-collapsed{
@@ -6240,6 +6227,15 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
   cursor:grab; display:flex; align-items:center; gap:6px;
   padding:3px 6px; min-height:0; border-bottom:1px solid var(--c-border, #e2e6eb);
 }
+/* Compact the Studies panel's top chrome (overrides the shared .vp-head
+   padding, which is otherwise too tall for this list panel). */
+.viv-studies-panel .viv-studies-head{ padding:2px 6px; gap:4px; }
+.viv-studies-panel .viv-studies-head .vp-icon{ width:22px; height:20px; }
+.viv-studies-panel .viv-studies-head .vp-icon svg{ width:14px; height:14px; }
+/* Tighten the sticky search band + stepper so the top section is compact. */
+.viv-studies-body .viv-rail-studies-head{ padding-top:2px; }
+.viv-studies-body #viv-rail-study-search{ margin:2px 8px !important; }
+.viv-studies-body #viv-rail-study-stepper{ padding:1px 8px 2px; }
 body.vp-dragging .viv-studies-head{ cursor:grabbing; }
 .viv-studies-title{ min-width:0; }
 .viv-studies-title strong{ display:block; font-size:0.9rem; }
