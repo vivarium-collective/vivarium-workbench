@@ -57,11 +57,16 @@ def test_orientation_is_auto_by_aspect_with_transient_manual_override():
     # The ⇄/⇅ manual buttons remain.
     assert 'id="aig-orient-lr"' in TPL and 'id="aig-orient-tb"' in TPL
 
-    # Aspect-derived AUTO: dock side (L/R → TB, T/B → LR) and inline wide → LR.
+    # Aspect-derived AUTO (two factors): STEP 1 sets `wide` (the pane's long axis)
+    # from the dock side (L/R → narrow/tall, T/B → short/wide) or the inline area's
+    # measured aspect; STEP 2 derives breadth-vs-depth from depthCounts; STEP 3 lays
+    # the graph's dominant axis along the pane's long axis.
     ao = _js_fn("_aigAutoOrient")
-    assert "dock === 'left' || dock === 'right'" in ao and "return 'TB'" in ao
-    assert "dock === 'top' || dock === 'bottom'" in ao and "return 'LR'" in ao
-    assert "availW >= availH ? 'LR' : 'TB'" in ao     # inline/un-docked: wide → LR
+    assert "dock === 'left' || dock === 'right') wide = false" in ao
+    assert "dock === 'top' || dock === 'bottom') wide = true" in ao
+    assert "wide = availW >= availH" in ao
+    assert "breadthHeavy = maxBreadth > maxDepth" in ao
+    assert "wide ? (breadthHeavy ? 'TB' : 'LR') : (breadthHeavy ? 'LR' : 'TB')" in ao
 
     # Manual override is IN-MEMORY (no localStorage), holds in _aigManualOrient.
     assert "var _aigManualOrient = null" in JS
@@ -77,7 +82,7 @@ def test_orientation_is_auto_by_aspect_with_transient_manual_override():
 
     # The render prefers the manual override, else aspect auto, else the heuristic.
     assert "_aigManualOrient === 'LR' || _aigManualOrient === 'TB'" in JS
-    assert "_aigAutoOrient()" in JS
+    assert "_aigAutoOrient(depthCounts)" in JS
 
 
 def test_studies_grouped_by_investigation():
