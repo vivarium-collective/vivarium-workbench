@@ -329,7 +329,7 @@ def _inline_plotly_src(html: str, plotly_js: "str | None") -> str:
     return _PLOTLY_SRC_LOADER_RE.sub(lambda _m: inline, html)
 
 
-def _inline_declared_iframe_figures(payload: dict, ws_root: Path) -> None:
+def _inline_declared_iframe_figures(payload: dict, ws_root: Path) -> "list[str]":
     """Make a study-charts payload's declared interactive figures self-contained
     for the static snapshot.
 
@@ -347,16 +347,21 @@ def _inline_declared_iframe_figures(payload: dict, ws_root: Path) -> None:
     relative/root-absolute URL, so it renders correctly under ANY hosting base
     path — the reason this is preferred over copying the file into the bundle.
 
-    Mutates ``payload`` in place. Best-effort per chart: an unreadable, missing,
-    or oversized file leaves that record's ``iframe_url`` untouched rather than
-    aborting the publish. Plotly source is read at most once per payload."""
+    Mutates ``payload`` in place and returns the list of figure keys that could
+    NOT be materialized. Best-effort per chart: when the referenced HTML is
+    unreadable, missing, or oversized we do NOT leave the dead root-absolute
+    ``iframe_url`` (it would 404 under the hosting base path — the Visualizations
+    tab's blank-404 bug). Instead we drop it and flag ``snapshot_unavailable`` so
+    the frontend shows an "available in the live workbench" placeholder rather
+    than a broken iframe. Plotly source is read at most once per payload."""
     charts = payload.get("charts")
     if not isinstance(charts, list):
-        return
+        return []
     from vivarium_workbench.lib.investigation_report import _find_plotly_js
 
     plotly_js = None
     plotly_loaded = False
+    unresolved: "list[str]" = []
     for c in charts:
         if not isinstance(c, dict):
             continue
@@ -364,20 +369,28 @@ def _inline_declared_iframe_figures(payload: dict, ws_root: Path) -> None:
         if not url or c.get("srcdoc") or c.get("media") not in _IFRAME_MEDIA:
             continue
         rel = str(url).lstrip("/")
-        if not rel or ".." in rel.split("/"):
-            continue  # never resolve a traversal outside the workspace
-        src = ws_root / rel
-        try:
-            if not src.is_file() or src.stat().st_size > _IFRAME_HTML_MAX:
-                continue
-            html = src.read_text(encoding="utf-8")
-        except Exception:
-            continue
-        if not plotly_loaded:
-            plotly_js = _find_plotly_js(ws_root)
-            plotly_loaded = True
-        c["srcdoc"] = _inline_plotly_src(html, plotly_js)
-        c.pop("iframe_url", None)
+        html = None
+        if rel and ".." not in rel.split("/"):   # never resolve a traversal out
+            src = ws_root / rel
+            try:
+                if src.is_file() and src.stat().st_size <= _IFRAME_HTML_MAX:
+                    html = src.read_text(encoding="utf-8")
+            except Exception:
+                html = None
+        if html is not None:
+            if not plotly_loaded:
+                plotly_js = _find_plotly_js(ws_root)
+                plotly_loaded = True
+            c["srcdoc"] = _inline_plotly_src(html, plotly_js)
+            c.pop("iframe_url", None)
+        else:
+            # Not materializable in the static snapshot: drop the dead
+            # root-absolute iframe_url and flag it so the frontend degrades
+            # gracefully instead of 404-ing on a missing file.
+            c.pop("iframe_url", None)
+            c["snapshot_unavailable"] = True
+            unresolved.append(str(c.get("key") or c.get("title") or "figure"))
+    return unresolved
 
 
 def _rewrite_pack_mesh_urls(obj, pack_dir_rel: str, base_no_slash: str) -> None:
@@ -1362,7 +1375,11 @@ def _do_build(
         # Declared html:/threejs: figures point at an `iframe_url` the static
         # bundle never serves. Inline each as a self-contained `srcdoc` so the
         # interactive panels render on the read-only snapshot under any base path.
-        _inline_declared_iframe_figures(payload, ws_root)
+        _missing_viz = _inline_declared_iframe_figures(payload, ws_root)
+        if _missing_viz:
+            print(f"  warn: study {slug!r}: {len(_missing_viz)} interactive figure(s) "
+                  f"not materializable in the snapshot, shown as unavailable: "
+                  f"{', '.join(_missing_viz)}")
         _write_json(charts_api_dir / f"{slug}.json", payload)
 
     # api/study-results/<slug>.json — the Results tab's per-store PREVIEW of the

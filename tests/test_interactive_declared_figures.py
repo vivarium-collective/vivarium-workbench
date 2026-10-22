@@ -212,24 +212,28 @@ def test_publish_srcdoc_is_base_path_independent(tmp_path):
     assert "PLOTLY-LIB-MARKER" in rec.get("srcdoc", "")
 
 
-def test_publish_helper_leaves_non_iframe_and_missing_untouched(tmp_path):
+def test_publish_helper_leaves_non_iframe_untouched_and_flags_missing(tmp_path):
     """`_inline_declared_iframe_figures` only rewrites html:/threejs: iframe
-    records with a readable source; image/svg records and dangling refs are
-    left exactly as-is (no crash, no spurious srcdoc)."""
+    records with a readable source; image/svg records are left exactly as-is.
+    A dangling iframe ref does NOT keep its dead root-absolute iframe_url (it
+    would 404 on the static snapshot) — it is dropped and flagged
+    `snapshot_unavailable`, and returned as unresolved."""
     from vivarium_workbench.publish import _inline_declared_iframe_figures
 
     payload = {"charts": [
         {"media": "png", "img": "data:image/png;base64,AAAA", "source": "declared"},
         {"media": "svg", "svg": "<svg/>", "source": "declared"},
         {"media": "html", "iframe_url": "/studies/demo/viz/gone.html",
-         "source": "declared"},  # file does not exist → untouched
+         "key": "gone", "source": "declared"},  # file does not exist → unavailable
     ]}
-    _inline_declared_iframe_figures(payload, tmp_path)
+    unresolved = _inline_declared_iframe_figures(payload, tmp_path)
     png, svg, missing = payload["charts"]
     assert png == {"media": "png", "img": "data:image/png;base64,AAAA", "source": "declared"}
     assert svg == {"media": "svg", "svg": "<svg/>", "source": "declared"}
-    assert missing["iframe_url"] == "/studies/demo/viz/gone.html"
+    assert "iframe_url" not in missing            # dead URL dropped (no 404)
+    assert missing.get("snapshot_unavailable") is True
     assert "srcdoc" not in missing
+    assert unresolved == ["gone"]
 
 
 def test_study_charts_api_carries_iframe_url_and_media(tmp_path, dashboard_client):
