@@ -286,7 +286,7 @@ def test_dockable_panel_headers_are_inline_corner_controls():
     css = (STATIC / "style.css").read_text()
     for sel in (".viv-studies-panel .vp-head", ".viv-code-rail .vp-head", "#viv-ai-panel .vp-head"):
         assert sel in css, f"{sel} corner-control rule missing"
-    assert "position:absolute; top:5px; right:6px;" in css
+    assert "position:absolute; top:7px; right:6px;" in css
     assert ".viv-studies-panel .vp-head > :not(.vp-icon)" in css          # title dropped
     assert "#viv-ai-panel .vp-toolbar{ padding-right" in css              # chat reserves its corner
 
