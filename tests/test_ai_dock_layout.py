@@ -195,3 +195,30 @@ def test_code_panel_can_browse_processes_and_composites():
     assert "/api/registry" in js and "/api/composites" in js
     assert "openProcess(" in js and "openComposite(" in js
     assert "vp-browse-menu" in (STATIC / "style.css").read_text()  # styled dropdown
+
+
+def test_studies_is_a_dockable_rail_tab_like_chat_and_code():
+    """The 'Studies' rail tab toggles a dockable VivPanelDock panel (like Chat /
+    Code / Graph), separate from the 'Investigations' overview page, and the
+    study-browser section is hosted in it."""
+    html = TEMPLATE.read_text()
+    # Rename: the overview page tab is now 'Investigations' (still data-page=investigations).
+    assert 'data-page="investigations"' in html and '>Investigations<' in html
+    # New launcher tab + panel.
+    assert 'id="viv-studies-toggle"' in html, "Studies rail launcher missing"
+    assert 'id="viv-studies-panel"' in html and 'id="viv-studies-body"' in html
+    # Both study tabs sit at the top of the nav, under Search.
+    search_i = html.index('viv-rail-search-link')
+    inv_i = html.index('data-page="investigations"')
+    studies_i = html.index('id="viv-studies-toggle"')
+    resources_i = html.index('id="rail-resources"')
+    assert search_i < inv_i < studies_i < resources_i, "Investigations+Studies not under Search"
+
+    js = (STATIC / "studies-panel.js").read_text()
+    assert "VivPanelDock.make" in js and "key: 'studies'" in js
+    assert "docks: ['left', 'right', 'bottom', 'top']" in js        # docks on any side
+    assert "defaultDock: 'left'" in js
+    # Default-open when the workspace has studies, until the user toggles it.
+    assert "hasStudies" in js and "K_USERSET" in js
+    # Pop-out is wired through panel-dock for the 'studies' kind.
+    assert "kind === 'studies'" in (STATIC / "panel-dock.js").read_text()

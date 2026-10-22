@@ -1,0 +1,133 @@
+// studies-panel.js — a dockable "Studies" panel built on VivPanelDock, the same
+// engine the Chat (#viv-ai-panel), Code (#viv-code-rail) and Graph
+// (#viv-graph-panel) panels use.
+//
+// Rather than live permanently in the left rail, the per-investigation study
+// browser (#viv-rail-studies-section — its search field + the dependency-ordered
+// study tree with select / reorder / browse) is RELOCATED into #viv-studies-body
+// and shown through this panel. So the study browser gains docking (left / right
+// / bottom / top), edge-resize, drag-to-re-dock and pop-out for free, and can be
+// turned on/off from the rail's "Studies" tab — separate from the "Investigations"
+// overview page.
+//
+// Default state: the panel opens automatically when the workspace has any studies
+// (so the browser is there when it's useful), until the user expresses an explicit
+// intent by toggling it — after which their choice is remembered.
+(function (global) {
+  'use strict';
+
+  var PANEL_ID = 'viv-studies-panel';
+  var BODY_ID = 'viv-studies-body';
+  var SECTION_ID = 'viv-rail-studies-section';   // the hosted study-browser section
+  var TOGGLE_ID = 'viv-studies-toggle';          // the rail launcher tab
+  var LIST_ID = 'viv-rail-investigations';       // where study leaves render
+  var K_USERSET = 'viv.studies.userset';         // '1' once the user toggles it
+
+  var ctl = null;
+
+  function el(id) { return document.getElementById(id); }
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
+
+  // Move the study-browser section into the panel body (it starts life in the
+  // rail markup). Idempotent. Reveal the study search field, which is hidden by
+  // default in the rail (toggled by a magnifier that doesn't exist in the panel).
+  function sectionIntoPanel() {
+    var s = el(SECTION_ID), b = el(BODY_ID);
+    if (!s || !b) return false;
+    if (s.parentNode !== b) b.appendChild(s);
+    s.hidden = false;
+    var head = el('viv-rail-studies-head');
+    if (head) head.hidden = false;
+    return true;
+  }
+
+  function hasStudies() {
+    var host = el(LIST_ID);
+    // Study leaves are rendered as `a[data-study-name]` (the .viv-rail-sublink
+    // rows under each investigation group).
+    return !!(host && host.querySelector('[data-study-name], .viv-rail-sublink'));
+  }
+
+  function userToggled() { lsSet(K_USERSET, '1'); }
+
+  // Open iff the workspace has studies — but only while the user hasn't taken
+  // explicit control of the panel. The study list loads asynchronously, so this
+  // is re-run as the rail renders (see the MutationObserver in init).
+  function applyDefault() {
+    if (!ctl || lsGet(K_USERSET, '0') === '1') return;
+    if (hasStudies()) { if (!ctl.isOpen()) ctl.open(); }
+    else { if (ctl.isOpen()) ctl.close(); }
+  }
+
+  function init() {
+    var panel = el(PANEL_ID);
+    var layout = document.querySelector('.viv-layout');
+    var mainEl = document.querySelector('.viv-main');
+    if (!panel || !layout || !mainEl || !global.VivPanelDock) return;
+
+    sectionIntoPanel();
+    var head = panel.querySelector('.viv-studies-head');
+
+    ctl = global.VivPanelDock.make({
+      panel: panel, layout: layout, mainEl: mainEl, key: 'studies',
+      label: 'Studies',
+      launcher: el(TOGGLE_ID),
+      docks: ['left', 'right', 'bottom', 'top'],
+      resizeHandle: 'viv-studies-resize-handle',
+      dragHandles: head ? [head] : [],
+      popout: function () { global.VivPanelDock.popout('studies'); },
+      defaultDock: 'left', defaultSize: { side: 300, bottom: 280 },
+      onOpen: function () { sectionIntoPanel(); },
+    });
+
+    // Public API — mirrors window.GraphPanel.* / window.ProcessCode.* so the panel
+    // header buttons and the rail tab can call it. The user-facing entry points
+    // record an explicit intent so applyDefault() stops overriding them.
+    global.StudiesPanel = {
+      toggle: function () { userToggled(); if (ctl) ctl.toggle(); },
+      open: function () { userToggled(); if (ctl) ctl.open(); },
+      close: function () { userToggled(); if (ctl) ctl.close(); },
+      dockMenu: function (anchor) { if (ctl) ctl.openDockMenu(anchor); },
+      collapse: function () { if (ctl) ctl.collapse(); },
+      expand: function () { if (ctl) ctl.expand(); },
+      toggleCollapsed: function () { if (ctl) ctl.toggleCollapsed(); },
+      isOpen: function () { return !!(ctl && ctl.isOpen()); },
+    };
+    // Used by panel-dock.js initPopout when this page is a ?popout=studies window.
+    global._openStudiesPanel = function () { if (ctl) ctl.open(); };
+
+    // The rail "Studies" tab toggles the panel (VivPanelDock does not bind the
+    // launcher itself — each panel owns its click, like process-code.js). Record
+    // the explicit intent so the default-open heuristic yields to the user.
+    var tog = el(TOGGLE_ID);
+    if (tog) tog.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      if (ctl.didDrag && ctl.didDrag()) return;   // a drag-to-dock isn't a toggle
+      userToggled();
+      ctl.toggle();
+    });
+
+    // A ?popout=studies window always opens the panel.
+    var isPopout = false;
+    try { isPopout = /(?:^|[?&])popout=studies(?:&|$)/.test(global.location.search || ''); } catch (e) { /* ignore */ }
+    if (isPopout) { ctl.open(); return; }
+
+    // Default-open when studies exist; keep re-checking as the (async) study list
+    // renders, until the user takes control.
+    applyDefault();
+    var host = el(LIST_ID);
+    if (host && global.MutationObserver) {
+      var obs = new global.MutationObserver(function () {
+        if (lsGet(K_USERSET, '0') === '1') { obs.disconnect(); return; }
+        applyDefault();
+      });
+      obs.observe(host, { childList: true, subtree: true });
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+  }
+})(typeof window !== 'undefined' ? window : globalThis);

@@ -923,6 +923,42 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Search</span>
       </a>
+      <!-- Investigations: the overview page — and the DEFAULT landing view on
+           workbench load ('investigations', set in walkthrough.js). Moved to the
+           TOP of the nav, directly under Search. Branching-fan (DAG) icon. -->
+      <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="2.5" y="9" width="6" height="6"/>
+            <rect x="16" y="3" width="5.5" height="4"/>
+            <rect x="16" y="10" width="5.5" height="4"/>
+            <rect x="16" y="17" width="5.5" height="4"/>
+            <path d="M8.5 12L16 5"/>
+            <path d="M8.5 12h7.5"/>
+            <path d="M8.5 12L16 19"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Investigations</span>
+      </a>
+      <!-- Studies: toggles the dockable Studies panel — the per-investigation study
+           browser (search / select / reorder), relocated out of the rail into a
+           panel that docks left / right / bottom / top (studies-panel.js, built on
+           panel-dock.js like the Chat / Code / Graph panels). NOT a .menu-link, so
+           page switches leave its open state alone. Opens by default when the
+           workspace has any studies. List-with-bullets icon. -->
+      <a href="#" id="viv-studies-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Studies browser">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="4.5" cy="6"  r="1.2" fill="currentColor" stroke="none"/>
+            <path d="M9 6 H20"/>
+            <circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+            <path d="M9 12 H20"/>
+            <circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/>
+            <path d="M9 18 H20"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Studies</span>
+      </a>
       <!-- Resources: the workspace's source material. A single tab with two
            sub-tabs — "Datasets & references" (the /api/inputs datasets,
            references and expert docs) and "Scientific resources" (the curated
@@ -1032,25 +1068,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           </svg>
         </span>
         <span class="viv-rail-link-label">Code</span>
-      </a>
-      <!-- Studies: the investigations overview. The LAST rail item (moved to the
-           bottom of the menu), but still the DEFAULT landing view on workbench
-           load (the default page is 'investigations', set in walkthrough.js —
-           independent of this menu position). The per-investigation study list
-           lives in the search section below. Branching-fan (DAG) icon. -->
-      <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="2.5" y="9" width="6" height="6"/>
-            <rect x="16" y="3" width="5.5" height="4"/>
-            <rect x="16" y="10" width="5.5" height="4"/>
-            <rect x="16" y="17" width="5.5" height="4"/>
-            <path d="M8.5 12L16 5"/>
-            <path d="M8.5 12h7.5"/>
-            <path d="M8.5 12L16 19"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">Studies</span>
       </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
@@ -2414,6 +2431,40 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     </div>
   </aside>
 
+  <!-- Dockable Studies panel. The per-investigation study browser
+       (#viv-rail-studies-section — search + the dependency-ordered study tree)
+       is RELOCATED into #viv-studies-body by studies-panel.js and shown through
+       this panel. Built on VivPanelDock exactly like the Chat / Code / Graph
+       panels — docks left / right / bottom / top, resizes, pops out. Opens by
+       default when the workspace has studies; toggled from the rail "Studies" tab. -->
+  <aside id="viv-studies-panel" class="viv-studies-panel" aria-label="Studies" hidden>
+    <div class="viv-studies-panel-inner">
+      <div class="viv-studies-resize-handle" id="viv-studies-resize-handle"
+           role="separator" aria-orientation="vertical" aria-label="Resize studies panel"
+           title="Drag to resize"></div>
+      <!-- Header doubles as the drag-to-dock handle; the icon controls mirror the
+           Code / Chat panel header (same .vp-head / .vp-icon chrome). -->
+      <div class="viv-studies-head vp-head" title="Drag to dock left / right / bottom / top">
+        <div class="viv-studies-title"><strong>Studies</strong></div>
+        <span class="vp-spacer"></span>
+        <button class="vp-icon" type="button" data-act="dock" title="Move or pop out panel" aria-label="Move or pop out panel"
+                onclick="window.StudiesPanel&&StudiesPanel.dockMenu(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+        </button>
+        <button class="vp-icon" type="button" title="Close" aria-label="Close studies panel"
+                onclick="window.StudiesPanel&&StudiesPanel.toggle()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <!-- Expand handle: the only thing visible when the panel is collapsed to a
+           thin edge strip (CSS .vp-collapsed). Click it to expand. -->
+      <button type="button" class="viv-studies-expand" title="Expand the studies panel"
+              aria-label="Expand the studies panel"
+              onclick="window.StudiesPanel&&StudiesPanel.expand()">⟩</button>
+      <div class="viv-studies-body" id="viv-studies-body"></div>
+    </div>
+  </aside>
+
 </div> <!-- /.viv-layout -->
 
 <!-- ============================================================ -->
@@ -2781,6 +2832,10 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <!-- graph-panel.js: the dockable investigation-graph panel (VivPanelDock). Loads
      AFTER panel-dock.js (the engine) and walkthrough.js (the DAG renderer it hosts). -->
 <script src="assets/graph-panel.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* graph panel unavailable */"></script>
+<!-- studies-panel.js: the dockable Studies-browser panel (VivPanelDock). Loads
+     AFTER panel-dock.js (the engine) and walkthrough.js (which renders the study
+     tree it hosts). -->
+<script src="assets/studies-panel.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* studies panel unavailable */"></script>
 <script src="assets/mobile-nav.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile-nav unavailable */"></script>
 <script src="assets/search-palette.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* global search unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>

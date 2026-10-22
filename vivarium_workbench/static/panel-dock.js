@@ -344,6 +344,7 @@
     (function openWhenReady() {
       if (kind === 'chat' && typeof window._openAiPanel === 'function') { window._openAiPanel(); return; }
       if (kind === 'graph' && typeof window._openGraphPanel === 'function') { window._openGraphPanel(); return; }
+      if (kind === 'studies' && typeof window._openStudiesPanel === 'function') { window._openStudiesPanel(); return; }
       if (kind === 'code' && window.ProcessCode) {
         var addr = p.get('address'), comp = p.get('composite');
         if (addr) window.ProcessCode.open(addr);

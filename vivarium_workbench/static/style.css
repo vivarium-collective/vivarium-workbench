@@ -6185,6 +6185,65 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 }
 .viv-graph-panel.vp-collapsed .viv-graph-expand:hover{ background:#eef2ff; color:#3730a3; }
 
+/* ── Dockable Studies panel (studies-panel.js) — same VivPanelDock chrome as the
+   Graph panel, but its body hosts the relocated study-browser section and scrolls. */
+.viv-studies-panel{
+  --viv-studies-w:300px;
+  flex:0 0 var(--viv-studies-w); width:var(--viv-studies-w);
+  display:flex; flex-direction:column;
+  background:var(--panel, #fff); border-left:1px solid var(--border, #e2e6eb);
+  position:relative; overflow:hidden;
+  transition:flex-basis .18s ease, width .18s ease;
+}
+.viv-studies-panel .viv-studies-panel-inner{ display:flex; flex-direction:column; height:100%; min-width:0; flex:1; }
+.viv-studies-panel[hidden]{ display:none !important; }
+.viv-studies-panel[data-dock="left"]{ border-left:none; border-right:1px solid var(--border, #e2e6eb); }
+.viv-studies-panel[data-dock="bottom"]{
+  flex:0 0 var(--viv-studies-h, 280px); width:auto; height:var(--viv-studies-h, 280px); min-height:0;
+  border-left:none; border-top:1px solid var(--border, #e2e6eb);
+}
+.viv-studies-panel[data-dock="top"]{
+  flex:0 0 var(--viv-studies-h, 280px); width:auto; height:var(--viv-studies-h, 280px); min-height:0;
+  border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
+}
+.viv-studies-head{
+  cursor:grab; display:flex; align-items:center; gap:8px;
+  padding:8px 8px 8px 14px; border-bottom:1px solid var(--c-border, #e2e6eb);
+}
+body.vp-dragging .viv-studies-head{ cursor:grabbing; }
+.viv-studies-title{ min-width:0; }
+.viv-studies-title strong{ display:block; font-size:0.9rem; }
+.viv-studies-resize-handle{
+  position:absolute; top:0; left:0; bottom:0; width:6px;
+  cursor:col-resize; z-index:6; background:transparent; transition:background .12s ease;
+}
+.viv-studies-resize-handle:hover{ background:#c7d2fe; }
+.viv-studies-panel[data-dock="left"] .viv-studies-resize-handle{ left:auto; right:0; }
+.viv-studies-panel[data-dock="bottom"] .viv-studies-resize-handle{
+  left:0; right:0; top:0; bottom:auto; width:auto; height:6px; cursor:row-resize;
+}
+.viv-studies-panel[data-dock="top"] .viv-studies-resize-handle{
+  left:0; right:0; top:auto; bottom:0; width:auto; height:6px; cursor:row-resize;
+}
+/* Body hosts the relocated study-browser section; it scrolls when the study list
+   is long. The hosted section keeps its own .viv-rail-* styling. */
+.viv-studies-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:auto; position:relative; }
+.viv-studies-body #viv-rail-studies-section{ display:block; }
+/* Collapsed: shrink to a thin edge strip showing only the expand handle. */
+.viv-studies-expand{ display:none; }
+.viv-studies-panel.vp-collapsed{ flex:0 0 auto !important; }
+.viv-studies-panel.vp-collapsed[data-dock="left"],
+.viv-studies-panel.vp-collapsed[data-dock="right"]{ width:16px !important; }
+.viv-studies-panel.vp-collapsed[data-dock="top"],
+.viv-studies-panel.vp-collapsed[data-dock="bottom"]{ height:16px !important; min-height:0 !important; }
+.viv-studies-panel.vp-collapsed .viv-studies-head,
+.viv-studies-panel.vp-collapsed .viv-studies-body{ display:none !important; }
+.viv-studies-panel.vp-collapsed .viv-studies-expand{
+  display:block; width:100%; height:100%; border:none; background:transparent;
+  cursor:pointer; color:#64748b; font-size:0.95em; line-height:1; padding:0;
+}
+.viv-studies-panel.vp-collapsed .viv-studies-expand:hover{ background:#eef2ff; color:#3730a3; }
+
 /* ── Pop-out window (?popout=<kind>): show only the popped panel, full-window ──
    panel-dock.js adds body.viv-popout + .viv-popout-<kind> and opens that panel.
    A fixed, opaque, full-window panel (z-index) simply covers the rest of the SPA
@@ -6192,6 +6251,7 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 body.viv-popout{ overflow:hidden; }
 body.viv-popout-chat #viv-ai-panel,
 body.viv-popout-code #viv-code-rail,
+body.viv-popout-studies #viv-studies-panel,
 body.viv-popout-graph #viv-graph-panel{
   display:flex !important; position:fixed !important; inset:0 !important;
   width:auto !important; height:auto !important; max-width:none !important;
@@ -6202,6 +6262,7 @@ body.viv-popout [data-act="dock"],
 body.viv-popout [data-act="popout"],
 body.viv-popout .vp-resize,
 body.viv-popout .viv-code-resize-handle,
+body.viv-popout .viv-studies-resize-handle,
 body.viv-popout .viv-graph-resize-handle{ display:none !important; }
 
 /* Shared dock dropdown (panel-dock.js) — reuses the chat's .vp-pop / .vp-pop-item
