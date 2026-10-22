@@ -327,8 +327,13 @@
       if (params[k] != null && params[k] !== '') qs.set(k, params[k]);
     });
     var url = window.location.origin + window.location.pathname + '?' + qs.toString();
-    return window.open(url, 'viv-popout-' + kind,
-      'width=560,height=820,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
+    var w = window.open(url, 'viv-popout-' + kind,
+      'width=440,height=840,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
+    // Some browsers ignore the width feature (open at a remembered / large size);
+    // nudge it to a sensible narrow default — the user can still resize freely.
+    try { if (w && w.resizeTo) w.resizeTo(440, Math.min(840, (window.screen && screen.availHeight) || 840)); }
+    catch (e) { /* ignore */ }
+    return w;
   }
 
   // In a popped window (?popout=<kind>): mark <body> and open that one panel, which

@@ -1026,21 +1026,21 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
   padding: 1px 8px 3px; background: #fafafa; box-shadow: 0 1px 0 #ececec;
 }
 .viv-rail-step-card {
-  /* A tight pill that hugs its contents and sits LEFT — not a full-width bar
-     (which stretched absurdly wide when the panel is docked along the bottom). */
-  display: inline-flex; align-items: center; gap: 3px; padding: 1px 3px;
+  /* A tight pill that hugs its contents and sits LEFT, kept as small as possible
+     so the search field gets the rest of the bar. */
+  display: inline-flex; align-items: center; gap: 1px; padding: 1px 2px;
   border: 1px solid #e5e7eb; border-radius: 6px; background: #f8fafc;
 }
 #viv-rail-study-stepper button {
-  flex: none; width: 22px; height: 17px; line-height: 1; padding: 0;
+  flex: none; width: 16px; height: 15px; line-height: 1; padding: 0;
   border: 1px solid #d1d5db; border-radius: 4px; background: #fff;
-  color: #4f46e5; font-size: 0.68em; cursor: pointer;
+  color: #4f46e5; font-size: 0.56em; cursor: pointer;
 }
 #viv-rail-study-stepper button:hover:not(:disabled) { background: #eef2ff; border-color: #a5b4fc; }
 #viv-rail-study-stepper button:disabled { color: #cbd5e1; cursor: default; }
 #viv-rail-study-stepper #viv-rail-step-pos {
-  flex: none; min-width: 40px; padding: 0 8px; text-align: center;
-  font-size: 0.73em; color: #64748b; font-variant-numeric: tabular-nums;
+  flex: none; min-width: 22px; padding: 0 2px; text-align: center;
+  font-size: 0.68em; color: #64748b; font-variant-numeric: tabular-nums;
 }
 :root[data-theme="dark"] #viv-rail-study-stepper { background: var(--rail); box-shadow: 0 1px 0 var(--border-faint); }
 :root[data-theme="dark"] .viv-rail-step-card { background: #1e293b; border-color: #334155; }
@@ -6216,26 +6216,18 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 /* Same shrink-all-the-way behavior for the other dockable tool panels. */
 .viv-graph-panel, .viv-code-rail, #viv-ai-panel{ min-width:0; }
 
-/* ── Hover-reveal header (studies / code / chat) ───────────────────────────
+/* ── Inline dock/close controls (studies / code / chat) ────────────────────
    The header BAR is taken out of the flow (content moves up a row); its dock /
-   close controls float in the top-right corner and appear only on hover, so no
-   full-width header line is reserved. Only the icon buttons show — the title is
-   dropped. The panels are positioned so the floating cluster anchors to them. */
+   close controls sit permanently in the top-right corner, in line with the
+   panel's first row. Only the icon buttons show — the title is dropped. The
+   panels are positioned so the control cluster anchors to them. */
 .viv-code-rail, #viv-ai-panel{ position:relative; }
 .viv-studies-panel .vp-head,
 .viv-code-rail .vp-head,
 #viv-ai-panel .vp-head{
-  position:absolute; top:6px; right:8px; left:auto; bottom:auto; z-index:30;
-  width:auto; min-height:0; padding:2px; margin:0; gap:1px;
-  border:none; border-bottom:none; border-radius:8px; cursor:default;
-  background:rgba(255,255,255,0.92); box-shadow:0 1px 7px rgba(15,23,42,0.16);
-  -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
-  opacity:0; pointer-events:none; transition:opacity .12s ease;
-}
-.viv-studies-panel:hover .vp-head, .viv-studies-panel:focus-within .vp-head,
-.viv-code-rail:hover .vp-head, .viv-code-rail:focus-within .vp-head,
-#viv-ai-panel:hover .vp-head, #viv-ai-panel:focus-within .vp-head{
-  opacity:1; pointer-events:auto;
+  position:absolute; top:5px; right:6px; left:auto; bottom:auto; z-index:30;
+  width:auto; min-height:0; padding:0; margin:0; gap:1px;
+  border:none; border-bottom:none; background:transparent; box-shadow:none; cursor:default;
 }
 /* Only the control icons remain in the floating cluster (drop title / spacer),
    sized small so the reserved corner can stay compact. */
@@ -6244,21 +6236,16 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 #viv-ai-panel .vp-head > :not(.vp-icon){ display:none; }
 .viv-studies-panel .vp-head .vp-icon,
 .viv-code-rail .vp-head .vp-icon,
-#viv-ai-panel .vp-head .vp-icon{ width:22px; height:20px; }
+#viv-ai-panel .vp-head .vp-icon{ width:20px; height:18px; }
 .viv-studies-panel .vp-head .vp-icon svg,
 .viv-code-rail .vp-head .vp-icon svg,
-#viv-ai-panel .vp-head .vp-icon svg{ width:14px; height:14px; }
+#viv-ai-panel .vp-head .vp-icon svg{ width:13px; height:13px; }
 /* Reserve the top-right corner of each panel's first visible row so the floating
    dock/close controls never occlude existing buttons (chat's toolbar, code's
    meta row) — the same technique the Studies search bar uses. */
 #viv-ai-panel .vp-toolbar{ padding-right:58px; }
 .viv-code-rail .viv-code-meta,
 .viv-code-rail .viv-code-newbar{ padding-right:58px; }
-:root[data-theme="dark"] .viv-studies-panel .vp-head,
-:root[data-theme="dark"] .viv-code-rail .vp-head,
-:root[data-theme="dark"] #viv-ai-panel .vp-head{
-  background:rgba(30,41,59,0.94); box-shadow:0 1px 7px rgba(0,0,0,0.5);
-}
 .viv-studies-panel .viv-studies-panel-inner{ display:flex; flex-direction:column; height:100%; min-width:0; flex:1; }
 .viv-studies-panel[hidden]{ display:none !important; }
 .viv-studies-panel[data-dock="left"]{ border-left:none; border-right:1px solid var(--border, #e2e6eb); }
@@ -6270,22 +6257,11 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
   flex:0 0 var(--viv-studies-h, 280px); width:auto; height:var(--viv-studies-h, 280px); min-height:0;
   border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
 }
-.viv-studies-head{
-  cursor:grab; display:flex; align-items:center; gap:6px;
-  padding:3px 6px; min-height:0; border-bottom:1px solid var(--c-border, #e2e6eb);
-}
-/* Compact the Studies panel's top chrome (overrides the shared .vp-head
-   padding, which is otherwise too tall for this list panel). */
-.viv-studies-panel .viv-studies-head{ padding:2px 6px; gap:4px; }
-.viv-studies-panel .viv-studies-head .vp-icon{ width:22px; height:20px; }
-.viv-studies-panel .viv-studies-head .vp-icon svg{ width:14px; height:14px; }
-/* Tighten the sticky search band + stepper so the top section is compact. */
 /* Search + navigation stepper share ONE compact bar (saves a row): the search
-   field flexes to fill (capped), the stepper pill sits at the right. */
+   field flexes to fill (capped), the stepper pill sits at the right, and the
+   top-right corner is reserved for the always-present dock/close controls. */
 .viv-studies-body .viv-rail-studies-head{
-  /* right padding reserves the top-right corner for the hover-revealed dock/close
-     controls, so they never cover the search field or stepper. */
-  display:flex; align-items:center; gap:6px; padding:3px 70px 4px 8px;
+  display:flex; align-items:center; gap:6px; padding:3px 49px 4px 8px;
 }
 .viv-studies-body #viv-rail-study-search{
   flex:1 1 auto; width:auto; min-width:0; max-width:420px; margin:0;

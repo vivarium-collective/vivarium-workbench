@@ -262,7 +262,8 @@ def test_studies_panel_title_banner_removed():
 def test_popout_returns_window_and_studies_routes_to_opener():
     """popout() returns the opened window (so the launcher can stay highlighted),
     and a popped-out Studies list routes study selection to the opener window."""
-    assert "return window.open(url" in (STATIC / "panel-dock.js").read_text()
+    pdjs = (STATIC / "panel-dock.js").read_text()
+    assert "var w = window.open(url" in pdjs and "return w;" in pdjs
     wk = (STATIC / "walkthrough.js").read_text()
     assert "window.opener._openStudyEmbeddedNewTab(name, tab)" in wk
 
@@ -277,14 +278,22 @@ def test_search_and_stepper_share_one_row():
     assert "display:flex" in css.split(".viv-studies-body .viv-rail-studies-head{")[1].split("}")[0]
 
 
-def test_dockable_panel_headers_reveal_on_hover():
+def test_dockable_panel_headers_are_inline_corner_controls():
     """studies / code / chat panels drop the full-width header bar; the dock/close
-    controls float top-right and appear only on hover (saves the header row)."""
+    controls sit in the top-right corner, in line with the first row (not a
+    separate bar). Only the icon controls remain (title dropped), and each panel's
+    first row reserves a corner so the controls never occlude existing buttons."""
     css = (STATIC / "style.css").read_text()
     for sel in (".viv-studies-panel .vp-head", ".viv-code-rail .vp-head", "#viv-ai-panel .vp-head"):
-        assert sel in css, f"{sel} float rule missing"
-    # hidden by default, shown on hover/focus-within
-    assert "opacity:0; pointer-events:none;" in css
-    assert ".viv-studies-panel:hover .vp-head" in css and ".viv-code-rail:hover .vp-head" in css and "#viv-ai-panel:hover .vp-head" in css
-    # only icon controls remain (title dropped)
-    assert ".viv-studies-panel .vp-head > :not(.vp-icon)" in css
+        assert sel in css, f"{sel} corner-control rule missing"
+    assert "position:absolute; top:5px; right:6px;" in css
+    assert ".viv-studies-panel .vp-head > :not(.vp-icon)" in css          # title dropped
+    assert "#viv-ai-panel .vp-toolbar{ padding-right" in css              # chat reserves its corner
+
+
+def test_popout_close_returns_to_inline_docking():
+    """Closing the Studies panel inside its popped-out window returns it to inline
+    docking in the opener and closes the popout window."""
+    js = (STATIC / "studies-panel.js").read_text()
+    assert "function returnInline" in js and "window.opener._openStudiesPanel()" in js
+    assert "if (inPopout()) returnInline();" in js

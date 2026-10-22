@@ -25,6 +25,7 @@
 
   var ctl = null;
   var popoutWin = null;   // the ?popout=studies window, while one is open
+  var initDone = false;   // guards returnInline against init-time close events
 
   function el(id) { return document.getElementById(id); }
 
@@ -62,11 +63,30 @@
 
   function userToggled() { lsSet(K_USERSET, '1'); }
 
+  // True when THIS page is the popped-out Studies window (?popout=studies).
+  function inPopout() {
+    try { return !!(document.body && document.body.classList.contains('viv-popout')); }
+    catch (e) { return false; }
+  }
+  // Close the popped-out window and bring the panel back to inline docking in the
+  // opener (main) window.
+  function returnInline() {
+    try {
+      if (window.opener && !window.opener.closed &&
+          typeof window.opener._openStudiesPanel === 'function') {
+        window.opener._openStudiesPanel();
+      }
+    } catch (e) { /* cross-origin / closed opener */ }
+    try { window.close(); } catch (e) { /* ignore */ }
+  }
+
   // Open iff the workspace has studies — but only while the user hasn't taken
   // explicit control of the panel. The study list loads asynchronously, so this
   // is re-run as the rail renders (see the MutationObserver in init).
   function applyDefault() {
-    if (!ctl || lsGet(K_USERSET, '0') === '1') return;
+    // Never auto-open/close in a popped-out window — it IS the panel, and a
+    // transient close there would trigger returnInline (closing the window).
+    if (!ctl || inPopout() || lsGet(K_USERSET, '0') === '1') return;
     if (hasStudies()) { if (!ctl.isOpen()) ctl.open(); }
     else { if (ctl.isOpen()) ctl.close(); }
   }
@@ -97,7 +117,10 @@
       },
       defaultDock: 'left', defaultSize: { side: 300, bottom: 280 },
       onOpen: function () { sectionIntoPanel(); reflectLauncher(); },
-      onClose: function () { reflectLauncher(); },
+      // A USER-initiated close inside the popped-out window returns it to inline
+      // docking in the opener and closes this window. (Guarded against the
+      // init-time setOpen(false) that make() performs from stored state.)
+      onClose: function () { reflectLauncher(); if (initDone && inPopout()) returnInline(); },
     });
 
     // Public API — mirrors window.GraphPanel.* / window.ProcessCode.* so the panel
@@ -149,6 +172,8 @@
     global.setInterval(function () {
       if (popoutWin && popoutWin.closed) { popoutWin = null; reflectLauncher(); }
     }, 1500);
+
+    initDone = true;   // from here, a close in a popout returns the panel inline
   }
 
   if (typeof document !== 'undefined') {
