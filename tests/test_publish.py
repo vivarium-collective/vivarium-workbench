@@ -1000,3 +1000,62 @@ def test_chat_is_not_a_routable_page_in_walkthrough():
     for snapshot_pages, live_pages in pairs:
         assert "'chat'" not in snapshot_pages and "'chat'" not in live_pages
     assert "_loadChat" not in js
+
+
+# ---------------------------------------------------------------------------
+# Regression + hardening: per-study shells must render, and a shell that
+# CANNOT render must fail the whole publish (not silently 404 in the snapshot).
+# ---------------------------------------------------------------------------
+
+def test_study_shell_renders_with_string_outcome(tmp_path):
+    """A behavior test whose latest outcome is a plain string (not a dict) must
+    not break the per-study shell. Regression: study-detail.html did
+    `_out.items()` on a str → UndefinedError → shell silently skipped → 404.
+    """
+    from vivarium_workbench import publish
+    from vivarium_workbench.lib import _root
+
+    ws = tmp_path / "ws"
+    (ws / "studies" / "gamma").mkdir(parents=True)
+    (ws / "workspace.yaml").write_text(yaml.safe_dump({"name": "t", "description": "d"}))
+    (ws / "studies" / "gamma" / "study.yaml").write_text(yaml.safe_dump({
+        "name": "gamma",
+        "schema_version": 3,
+        "baseline": [{"name": "core", "composite": "pkg.gamma.Core"}],
+        "variants": [],
+        "objective": "Objective.",
+        "status": "draft",
+        "behavior_tests": [{"name": "bt_str", "description": "a test"}],
+        # latest_outcomes derives from the last run's outcomes; a STRING value
+        # for the behavior test is the bug trigger.
+        "runs": [{"name": "r1", "outcomes": {"bt_str": "converged cleanly"}}],
+    }))
+    _root.set_workspace_root(ws)
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(ws, out)
+    shell = out / "studies" / "gamma" / "index.html"
+    assert shell.is_file(), "per-study shell missing (string-outcome regression)"
+    assert "converged cleanly" in shell.read_text(encoding="utf-8")
+
+
+def test_build_bundle_fails_loudly_when_a_shell_cannot_render(
+        tmp_workspace, tmp_path, monkeypatch):
+    """If any per-study shell fails to render, build_bundle must raise — a missing
+    shell would 404 when the snapshot opens that study, so we never ship it.
+    """
+    from vivarium_workbench import publish
+    from vivarium_workbench.lib import study_page
+
+    real = study_page.render_study_detail_html
+
+    def boom(ws_root, name, spec, **kw):
+        if name == "alpha":
+            raise ValueError("synthetic render failure")
+        return real(ws_root, name, spec, **kw)
+
+    monkeypatch.setattr(study_page, "render_study_detail_html", boom)
+
+    out = tmp_path / "bundle"
+    with pytest.raises(RuntimeError, match="study-shell render failed"):
+        publish.build_bundle(tmp_workspace, out)

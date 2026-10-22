@@ -1593,9 +1593,17 @@
       {% if _out %}
       <div style="margin-top:6px;font-size:0.85em;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:3px">
         <strong>Latest result:</strong>
-        {% for k, v in _out.items() if k != 'result' %}
+        {# `_out` is usually a mapping of observable -> value, but some studies
+           record a plain string/scalar. Guard `.items()` so a string result
+           renders as-is instead of raising UndefinedError and aborting the
+           whole per-study shell render (which silently 404s the snapshot). #}
+        {% if _out is mapping %}
+          {% for k, v in _out.items() if k != 'result' %}
           <code style="font-family:ui-monospace,monospace;color:#475569;margin-right:8px">{{ k }}: {{ v }}</code>
-        {% endfor %}
+          {% endfor %}
+        {% else %}
+          <code style="font-family:ui-monospace,monospace;color:#475569;margin-right:8px">{{ _out }}</code>
+        {% endif %}
       </div>
       {% endif %}
       {% if b.measure or b.pass_if or b.given or b.expect %}
