@@ -257,6 +257,19 @@
 .figure-media-frame{display:block;width:100%;border:0;background:#fff}
 .figure-media-frame--native{height:auto;min-height:320px}  /* JS (_autosizeNativeFrames) grows this to the figure's full content height */
 .figure-media-frame--embed{min-height:200px}
+/* Explore-module launch card: a deeper interactive module (Corpus Explorer, 3D
+   viewers, …) is linked out full-size rather than squeezed into an iframe. */
+.explore-module-card{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:14px 18px;border:1px solid #c7d2fe;background:linear-gradient(0deg,#f5f7ff,#fff)}
+.explore-module-main{min-width:0}
+.explore-module-badge{display:inline-block;font-size:0.68rem;font-weight:700;letter-spacing:0.04em;
+  text-transform:uppercase;color:#4338ca;background:#e0e7ff;border-radius:9999px;padding:2px 9px;margin-right:8px}
+.explore-module-launch{flex:none;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+  text-decoration:none;font-weight:600;font-size:0.9rem;color:#fff;background:#4f46e5;
+  border-radius:7px;padding:9px 16px;transition:background .12s}
+.explore-module-launch:hover{background:#4338ca}
+:root[data-theme="dark"] .explore-module-card{border-color:#3730a3;background:linear-gradient(0deg,#1e1b4b,var(--surface))}
+:root[data-theme="dark"] .explore-module-badge{color:#c7d2fe;background:#312e81}
 /* SVGs/PNGs scale to fit their card; preserves aspect ratio so a 1400×484
    chart shrinks instead of overflowing horizontally + clipping. */
 .figure-card svg,.figure-card img.chart-img{display:block;width:100%;max-width:100%;height:auto}
@@ -822,6 +835,19 @@
     #}
     {% if study.embed_visualizations %}
     {% for v in study.embed_visualizations %}
+    {% if v.mode == 'launch' or v.module %}
+    {# A deeper interactive Explore module (e.g. the Corpus Explorer): too rich to
+       cram into an inline iframe, so link out to it full-size. These are the same
+       modules the Explore tab lists; this is the study→module connection. #}
+    <div class="figure-card explore-module-card">
+      <div class="explore-module-main">
+        <span class="explore-module-badge">Explore module</span>
+        <span class="figure-title">{{ v.name }}</span>
+        {% if v.description %}<p class="figure-desc muted">{{ v.description }}</p>{% endif %}
+      </div>
+      <a href="{{ v.url }}" target="_blank" rel="noopener" class="explore-module-launch">Open {{ v.name }} <span aria-hidden="true">→</span></a>
+    </div>
+    {% else %}
     <div class="figure-card embed-viz-card">
       <iframe src="{{ v.url }}"
               class="figure-media-frame figure-media-frame--embed"
@@ -840,6 +866,7 @@
         <a href="{{ v.url }}" target="_blank" class="figure-open-link">Open in new tab ↗</a>
       </div>
     </div>
+    {% endif %}
     {% endfor %}
     {% endif %}
 
