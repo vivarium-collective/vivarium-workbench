@@ -6225,7 +6225,14 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
 /* Body hosts the relocated graph, which FILLS the panel (no fixed-height box that
    leaves dead space / a cut-off graph). The toolbar takes its natural height and
    the shell flexes to fill the rest; the graph pans/zooms inside it. */
-.viv-graph-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; position:relative; display:flex; }
+/* Column, not row: the captured investigation header (.inv-header-bar) stacks
+   ABOVE the graph. As a row, the header's nowrap title ate the width and collapsed
+   the graph shell to a sliver, pushing every node off-screen. */
+.viv-graph-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+/* The captured header takes its natural height; keep its long title from forcing
+   the column wider than the docked panel (ellipsize instead). */
+.viv-graph-body .inv-header-bar{ flex:0 0 auto; width:100%; min-width:0; margin:0 0 8px !important; }
+.viv-graph-body .inv-header-bar #ws-title{ font-size:1.05em; }
 .viv-graph-body #investigation-dag-fs{
   display:flex; flex-direction:column; flex:1 1 auto; min-height:0; min-width:0;
 }

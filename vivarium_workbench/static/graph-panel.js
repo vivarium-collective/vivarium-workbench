@@ -142,9 +142,12 @@
   // together instead of leaving the title behind in the main view.
   var HEADER_ID = 'iset-workspace';
   var hdrPlaceholder = null;
+  // Find the single investigation header wherever it currently lives — under
+  // #iset-workspace inline, OR relocated into #viv-graph-body while the window is
+  // open. (Querying only #iset-workspace lost it once moved, stranding the header
+  // in the hidden window on close.)
   function headerEl() {
-    var ws = el(HEADER_ID);
-    return ws ? ws.querySelector('.inv-header-bar') : null;
+    return document.querySelector('.inv-header-bar');
   }
 
   // Move the graph (and the investigation header) into the panel body, leaving
@@ -245,7 +248,7 @@
     // inline. So there is no rail tab for it.
     ctl = global.VivPanelDock.make({
       panel: panel, layout: layout, mainEl: mainEl, key: 'graph',
-      label: 'Graph',
+      label: 'Investigation',
       launcher: null,
       // All four edges — the dock menu and the drag drop-zones both offer
       // left / right / bottom / top (unified). Top docks as a band (default height

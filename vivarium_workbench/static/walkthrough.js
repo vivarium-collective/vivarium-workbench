@@ -9855,6 +9855,9 @@
     // behind the "▸ Investigation overview" toggle (so ⛶ "back to graph" shows the
     // graph on top, not a wall of prose).
     _setInvProseForStudy(false);
+    // No study open -> the graph returns inline and fills the centre, so close the
+    // docked "Investigation" window (study-open opens it; see _wsOpenStudyTab).
+    if (window.GraphPanel && GraphPanel.isOpen && GraphPanel.isOpen()) GraphPanel.close();
     _aigExitDock();
     _applyInvOverviewState();
     _renderGraphBarNav();
@@ -10034,8 +10037,11 @@
     // Fully collapses (not just scrolled out of view) — click the toggle to show.
     try { localStorage.setItem('inv-overview-collapsed', '1'); } catch (e) { /* ignore */ }
     if (typeof _applyInvOverviewState === 'function') _applyInvOverviewState();
-    // The overview collapse above hides the prose/cockpit; keep the FULL graph in
-    // place (no strip, no float) so studies can be clicked through quickly.
+    // Opening a study moves the investigation header+graph into the docked, movable
+    // "Investigation" window (narrowing the graph to a side column) so the study page
+    // becomes the big centered main. No study open → the graph lives inline and fills
+    // the centre (see _wsResetStudyTabs / _showInvestigationWorkspace, which close it).
+    if (window.GraphPanel && GraphPanel.open) GraphPanel.open();
     _renderGraphBarNav();
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');
