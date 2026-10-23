@@ -108,8 +108,36 @@
     });
   }
 
+  // The repo a workspace belongs to — the git-origin repo from the backend, else
+  // a sensible fallback (remote rows carry it in `path` as "remote:<repo>"; local
+  // rows without a git remote fall back to their catalog name).
+  function _repoKey(ws) {
+    if (ws.repo) return ws.repo;
+    if (ws.path && ws.path.indexOf("remote:") === 0) return ws.path.slice(7);
+    return ws.name || ws.label || ws.path || "";
+  }
+  // Collapse to ONE row per repo — the first of each group (the list is pre-sorted
+  // current → pinned → most-recently-used, so the kept row is the "most relevant"
+  // worktree). Returns {rows, hidden}. The current workspace is always kept.
+  function collapseByRepo(list) {
+    var seen = {}, out = [], hidden = 0;
+    list.forEach(function (ws) {
+      var k = _repoKey(ws);
+      if (ws.status === "current" || !seen[k]) { seen[k] = true; out.push(ws); }
+      else hidden++;
+    });
+    return { rows: out, hidden: hidden };
+  }
+  function _showAll() {
+    try { return localStorage.getItem("viv.wsShowAll") === "1"; } catch (e) { return false; }
+  }
+  function _setShowAll(v) {
+    try { localStorage.setItem("viv.wsShowAll", v ? "1" : "0"); } catch (e) { /* private mode */ }
+  }
+
   var api = { filterWorkspaces: filterWorkspaces, statusMeta: statusMeta,
-              normalizeRemoteBuilds: normalizeRemoteBuilds };
+              normalizeRemoteBuilds: normalizeRemoteBuilds,
+              collapseByRepo: collapseByRepo, repoKey: _repoKey };
   if (typeof module !== "undefined" && module.exports) { module.exports = api; return; }
   if (typeof window !== "undefined") window.vivWorkspacePicker = api;
 
@@ -208,10 +236,21 @@
       rs[activeIdx].scrollIntoView({ block: "nearest" });
     }
 
+    var _hiddenDupes = 0;   // worktrees collapsed under their repo (for the footer toggle)
+    var _syncFoot = null;   // refreshes the footer toggle + stale-cleanup control
     function render() {
       if (!listEl) return;
       listEl.innerHTML = "";
       var list = _sortWorkspaces(filterWorkspaces(all, searchEl ? searchEl.value : ""));
+      // Default to one row per repo (the most relevant worktree); a footer toggle
+      // reveals every worktree. Searching always shows all matches.
+      _hiddenDupes = 0;
+      if (!_showAll() && !(searchEl && searchEl.value.trim())) {
+        var c = collapseByRepo(list);
+        _hiddenDupes = c.hidden;
+        list = c.rows;
+      }
+      if (typeof _syncFoot === "function") _syncFoot();
       if (!list.length) {
         var e = document.createElement("li");
         e.className = "viv-wsp-empty";
@@ -353,10 +392,54 @@
 
       var foot = document.createElement("div");
       foot.className = "viv-wsp-foot";
-      foot.innerHTML = '<span class="viv-wsp-legend"><b class="viv-wsp-ready">●</b> ready ' +
-        '<b class="viv-wsp-stopped">○</b> stopped <b class="viv-wsp-stale">⚠</b> stale</span>' +
-        '<a href="#github" class="viv-wsp-settings" title="Repo / branch / GitHub settings">Branch settings ↗</a>';
+      foot.innerHTML =
+        '<span class="viv-wsp-legend">' +
+          '<b class="viv-wsp-ready" title="running or current">●</b> ready ' +
+          '<b class="viv-wsp-stopped" title="not running (no server) — click Switch/Open to start">○</b> stopped ' +
+          '<b class="viv-wsp-stale" title="a crashed/killed server left a dead record — safe to clean up">⚠</b> stale' +
+        '</span>' +
+        '<span class="viv-wsp-foot-actions">' +
+          '<button type="button" class="viv-wsp-cleanstale" hidden></button>' +
+          '<button type="button" class="viv-wsp-showall"></button>' +
+          '<a href="#github" class="viv-wsp-settings" title="Repo / branch / GitHub settings">Branch settings ↗</a>' +
+        '</span>';
       menu.appendChild(foot);
+
+      var showAllBtn = foot.querySelector(".viv-wsp-showall");
+      showAllBtn.addEventListener("click", function () { _setShowAll(!_showAll()); render(); });
+      var cleanBtn = foot.querySelector(".viv-wsp-cleanstale");
+      cleanBtn.addEventListener("click", function () {
+        var stale = all.filter(function (w) { return w.status === "stale" && w.path; });
+        if (!stale.length) return;
+        cleanBtn.disabled = true; cleanBtn.textContent = "Cleaning…";
+        Promise.all(stale.map(function (w) {
+          return fetch("/api/workspaces/cleanup-stale", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: w.path }),
+          }).then(function (r) {
+            // Dead record removed → the workspace is now just "stopped".
+            if (r.ok) w.status = "stopped";
+            return r.ok;
+          }).catch(function () { return false; });
+        })).then(function () { render(); });
+      });
+      // Keep the footer controls in sync with the current render (hidden count + stale count).
+      _syncFoot = function () {
+        var staleN = all.filter(function (w) { return w.status === "stale"; }).length;
+        if (_showAll()) {
+          showAllBtn.textContent = "Show one per repo";
+          showAllBtn.title = "Collapse to the most relevant worktree per repository";
+        } else {
+          showAllBtn.textContent = _hiddenDupes ? ("Show all worktrees (+" + _hiddenDupes + ")") : "Showing one per repo";
+          showAllBtn.disabled = !_hiddenDupes;
+          showAllBtn.title = "Reveal every worktree/branch (not just one per repository)";
+        }
+        showAllBtn.disabled = _showAll() ? false : !_hiddenDupes;
+        cleanBtn.hidden = staleN === 0;
+        cleanBtn.textContent = "Clean up stale (" + staleN + ")";
+        cleanBtn.disabled = false;
+        cleanBtn.title = "Remove " + staleN + " dead server record(s) (⚠ stale)";
+      };
 
       // Mount on <body> and position at the trigger (fixed) so the rail's
       // overflow-x:hidden can't clip/squish it — the menu can be wider than the

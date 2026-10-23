@@ -67,6 +67,22 @@ function run() {
     'a build record with no repo is skipped, not crashed on'
   );
 
+  // collapseByRepo — one row per repo (first of each group), current always kept.
+  var rows = [
+    { name: 'a', repo: 'r1', status: 'current', path: '/a' },
+    { name: 'b', repo: 'r1', status: 'stopped', path: '/b' },
+    { name: 'c', repo: 'r1', status: 'stopped', path: '/c' },
+    { name: 'd', repo: 'r2', status: 'stopped', path: '/d' },
+  ];
+  var col = wp.collapseByRepo(rows);
+  assert.strictEqual(col.rows.length, 2, 'two repos → two rows');
+  assert.strictEqual(col.hidden, 2, 'two extra r1 worktrees hidden');
+  assert.ok(col.rows.some(function (w) { return w.path === '/a'; }), 'current r1 worktree kept');
+  assert.ok(col.rows.some(function (w) { return w.path === '/d'; }), 'r2 kept');
+  // repoKey falls back to remote:<repo> path, then name
+  assert.strictEqual(wp.repoKey({ path: 'remote:foo' }), 'foo', 'remote path → repo key');
+  assert.strictEqual(wp.repoKey({ name: 'bar' }), 'bar', 'name fallback');
+
   console.log('test_workspace_picker.js: all assertions passed');
 }
 

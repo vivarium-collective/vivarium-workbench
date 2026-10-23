@@ -356,6 +356,17 @@ body.snapshot .viv-wsp-trigger .viv-wsp-dot { color: #94a3b8; }
 .viv-wsp-legend b { font-weight: 700; }
 .viv-wsp-settings { color: #6366f1; text-decoration: none; font-weight: 600; }
 .viv-wsp-settings:hover { text-decoration: underline; }
+.viv-wsp-foot-actions { display: flex; align-items: center; gap: 10px; }
+.viv-wsp-showall, .viv-wsp-cleanstale {
+  border: none; background: none; cursor: pointer; font: inherit; font-weight: 600; padding: 0;
+}
+.viv-wsp-showall { color: #6366f1; }
+.viv-wsp-showall:hover:not(:disabled) { text-decoration: underline; }
+.viv-wsp-showall:disabled { color: #cbd5e1; cursor: default; }
+.viv-wsp-cleanstale { color: #d97706; }
+.viv-wsp-cleanstale:hover:not(:disabled) { text-decoration: underline; }
+.viv-wsp-cleanstale[hidden] { display: none; }
+:root[data-theme="dark"] .viv-wsp-showall { color: var(--link); }
 /* Dark theme. The picker's a fixed-position popover (escapes the rail's own
    dark styling context), so it needs its own coverage — same token/hex idiom
    as everywhere else, indigo accents via the rgba(hue,alpha) idiom already
