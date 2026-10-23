@@ -983,7 +983,14 @@
       state.scope = state.currentSimId != null ? "remote" : "local";
       state.repo = null; state.branch = null;
     }
-    state.current = cur ? { repo: cur.name } : null;
+    // `cur` (from /api/workspaces) carries only {name, path} — the DISPLAY name,
+    // not the repo name — so seeding state.current.repo from cur.name made the
+    // Repo selector's seed (repos.indexOf(seed)) miss whenever a workspace's
+    // display name differs from its repo (biomodels→viva-biomodels,
+    // lumenoid→viva-lumenoid, …), falling back to the alphabetically-first repo
+    // (e.g. "3d-ecoli"). Seed from the matching workspaces-list entry (curEntry,
+    // computed above) which carries the real repo name.
+    state.current = cur ? { repo: (curEntry && curEntry.repo) || cur.name } : null;
     await _loadEntries();
     state.loading = false;
     // Seed the selectors from the active remote build so it shows as current.
