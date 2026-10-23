@@ -363,7 +363,7 @@ body.vp-dragging .vp-titlebar{ cursor:grabbing; }
 /* Panels inside a stack fill their share; override each panel's own fixed-basis /
    width / height rules (flex:0 0 var(--viv-*-w|h), width:var(...), etc.). flex-grow
    is set inline per panel to carry the split ratio. */
-.vp-stack > .vp-dockable{ flex:1 1 0 !important; width:auto !important; height:auto !important; min-width:0; min-height:0; }
+.vp-stack > .vp-dockable{ flex:var(--vp-grow, 1) 1 0 !important; width:auto !important; height:auto !important; min-width:0; min-height:0; }
 /* Split handle between two stacked panels. */
 .vp-stack-sizer{ flex:0 0 6px; align-self:stretch; background:transparent; z-index:6; }
 .vp-stack-left > .vp-stack-sizer, .vp-stack-right > .vp-stack-sizer{ cursor:row-resize; }

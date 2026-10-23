@@ -140,8 +140,8 @@
         s.appendChild(z); initSizer(z, side);
       }
       e.panel.dataset.dock = side;
-      e.panel.style.flex = '1 1 0';
-      e.panel.style.flexGrow = String(grows[e.key] > 0 ? grows[e.key] : 1);
+      e.panel.style.flex = '';   // let the CSS (flex:var(--vp-grow) 1 0 !important) drive it
+      e.panel.style.setProperty('--vp-grow', String(grows[e.key] > 0 ? grows[e.key] : 1));
       s.appendChild(e.panel);                     // moves it here from wherever it was
       if (e.onPlaced) e.onPlaced(side);
     });
@@ -153,7 +153,7 @@
   function persistGrows(side) {
     var o = stackGrows(side);
     REGISTRY.forEach(function (e) {
-      if (e.isOpen() && e.getDock() === side) o[e.key] = parseFloat(e.panel.style.flexGrow) || 1;
+      if (e.isOpen() && e.getDock() === side) o[e.key] = parseFloat(e.panel.style.getPropertyValue('--vp-grow')) || 1;
     });
     try { localStorage.setItem(stackGrowKey(side), JSON.stringify(o)); } catch (ex) { /* private mode */ }
   }
@@ -171,13 +171,13 @@
       var rp = prev.getBoundingClientRect(), rn = next.getBoundingClientRect();
       var sizeP = vert ? rp.width : rp.height;
       var total = sizeP + (vert ? rn.width : rn.height);
-      var gP = parseFloat(prev.style.flexGrow) || 1, gN = parseFloat(next.style.flexGrow) || 1, gSum = gP + gN;
+      var gP = parseFloat(prev.style.getPropertyValue('--vp-grow')) || 1, gN = parseFloat(next.style.getPropertyValue('--vp-grow')) || 1, gSum = gP + gN;
       var start = vert ? ev.clientX : ev.clientY;
       function move(m) {
         var d = (vert ? m.clientX : m.clientY) - start;
         var frac = Math.max(0.1, Math.min(0.9, (sizeP + d) / total));
-        prev.style.flexGrow = String(gSum * frac);
-        next.style.flexGrow = String(gSum * (1 - frac));
+        prev.style.setProperty('--vp-grow', String(gSum * frac));
+        next.style.setProperty('--vp-grow', String(gSum * (1 - frac)));
       }
       function up() {
         document.body.classList.remove('vp-dragging');
