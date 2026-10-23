@@ -68,7 +68,7 @@ def test_shared_panel_dock_engine_exists_and_reuses_the_dock_math():
     assert "'--viv-' + key + '-' + suffix" in js                # per-key footprint vars on <html>
     for call in ("V('left')", "V('right')", "V('rw')", "V('bottom')"):
         assert call in js
-    assert "C.dropZone" in js and "C.clampDock" in js           # reuses chat-core's dock math
+    assert "C.dropTarget" in js and "C.clampDock" in js         # reuses chat-core's dock math (iTerm drop targets)
     assert "draggable', 'false'" in js and "pointercancel" in js   # same anti-strand guards as the chat
 
 
