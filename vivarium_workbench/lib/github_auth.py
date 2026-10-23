@@ -211,7 +211,7 @@ def _gh_auth_ok() -> bool:
     try:
         r = subprocess.run(
             ["gh", "auth", "status", "--hostname", "github.com"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         return r.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
@@ -224,7 +224,7 @@ def _gh_token() -> str | None:
     try:
         r = subprocess.run(
             ["gh", "auth", "token", "--hostname", "github.com"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if r.returncode != 0:
             return None
@@ -241,7 +241,7 @@ def _gh_login() -> str | None:
     try:
         r = subprocess.run(
             ["gh", "api", "user", "--jq", ".login"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if r.returncode != 0:
             return None
