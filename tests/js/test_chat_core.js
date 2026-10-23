@@ -390,6 +390,19 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(C.clampDock('bottom', 'junk', 1400, 900), 110);
   assert.strictEqual(C.clampDock('top', 9999, 1400, 900), 630, 'top is height-sized like bottom');
   assert.strictEqual(C.clampDock('top', 50, 1400, 900), 110);
+
+  // dropTarget — iTerm-style: over a panel's center = swap, its edges = insert, empty band = edge dock.
+  var panelsR = [{ key: 'chat', side: 'right', left: 1100, top: 100, right: 1400, bottom: 800 }];
+  assert.deepStrictEqual(C.dropTarget(1250, 450, W, H, panelsR), { kind: 'swap', otherKey: 'chat', side: 'right' },
+    'center of a right-docked panel → swap');
+  assert.deepStrictEqual(C.dropTarget(1250, 150, W, H, panelsR), { kind: 'insert', side: 'right', relKey: 'chat', after: false },
+    'top of a right panel → insert before');
+  assert.deepStrictEqual(C.dropTarget(1250, 750, W, H, panelsR), { kind: 'insert', side: 'right', relKey: 'chat', after: true },
+    'bottom of a right panel → insert after');
+  assert.deepStrictEqual(C.dropTarget(50, 300, W, H, panelsR), { kind: 'edge', side: 'left' },
+    'empty left band → edge dock');
+  assert.strictEqual(C.dropTarget(500, 300, W, H, panelsR), null, 'dead middle → no target');
+  assert.strictEqual(C.dropTarget(500, 300, W, H, []), null, 'no panels + middle → null');
 }
 
 console.log('test_chat_core: all passed');
