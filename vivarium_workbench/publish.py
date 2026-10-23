@@ -706,11 +706,26 @@ def _render_home_html(ws_root: Path) -> str:
     except Exception:
         _branch = ""
 
+    # Per-workspace rail identity (same as the live server): an optional avatar
+    # (workspace.yaml `avatar:`/`icon:`; a workspace-relative path is inlined as a
+    # data URI so it survives in the static bundle) and the home the name links to.
+    _ws_avatar = str(ws.get("avatar") or ws.get("icon") or "").strip()
+    if _ws_avatar and not _ws_avatar.lower().startswith(("http://", "https://", "data:")):
+        try:
+            from vivarium_workbench.lib.report import _inline_avatar_data_uri
+            _ws_avatar = _inline_avatar_data_uri(ws_root, _ws_avatar)
+        except Exception:
+            _ws_avatar = ""
+    _ws_home = str(ws.get("homepage") or "").strip() or (
+        f"https://github.com/{_repo_slug}" if _repo_slug else "")
+
     tpl = env.get_template("index.html.j2")
     return tpl.render(
         workspace_name=ws.get("name", ws_root.name),
         workspace_branch=_branch,
         repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
+        workspace_avatar=_ws_avatar,
+        workspace_home=_ws_home,
         dashboard_name=dash_cfg.get("name", ""),
         dashboard_logo="assets/vivarium-logo.png",
         active_investigation_name="",

@@ -1087,3 +1087,19 @@ def test_study_shell_renders_launch_card_for_module_embed(tmp_path):
     assert "explore-module-launch" in shell, "module embed should render a launch card"
     # ...and not an iframe pointing at the module URL.
     assert '<iframe src="https://example.com/explorer.html"' not in shell
+
+
+def test_render_home_inlines_workspace_avatar(tmp_path):
+    """publish's index render inlines a workspace-relative `avatar:` as a data URI
+    (so the rail profile picture survives in the static bundle) and links the name."""
+    from vivarium_workbench import publish
+    ws = tmp_path / "ws"
+    (ws / "workspace").mkdir(parents=True)
+    (ws / "workspace" / "icon.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8"/></svg>')
+    (ws / "workspace.yaml").write_text(
+        "schema_version: 2\nname: demo\navatar: workspace/icon.svg\nhomepage: https://example.org/demo\n")
+    html = publish._render_home_html(ws)
+    assert "data:image/svg" in html, "workspace avatar should be inlined as a data URI"
+    assert "viv-ws-avatar-img" in html, "avatar <img> should render when an avatar is set"
+    assert "https://example.org/demo" in html, "workspace name should link to its homepage"
