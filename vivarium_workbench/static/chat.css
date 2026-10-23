@@ -321,6 +321,10 @@ body.vp-dragging iframe{ pointer-events:none; }
 :root[data-theme="dark"] .vp-swap-hi span{ background:#1e293b; color:#a5b4fc; }
 
 /* ── Slim iTerm-style panel title bar (drag handle + × close) ─────────────── */
+/* While dragging a panel, suppress text selection across every window the cursor
+   crosses, and keep a grab cursor. */
+body.vp-dragging{ cursor:grabbing !important; }
+body.vp-dragging, body.vp-dragging *{ user-select:none !important; -webkit-user-select:none !important; }
 .vp-titlebar{ display:flex; align-items:center; gap:6px; height:24px; padding:0 4px 0 10px; box-sizing:border-box;
   background:var(--vw-surface-2,#f1f3f5); border-bottom:1px solid var(--vw-border,#e3e3e6);
   cursor:grab; user-select:none; flex:0 0 auto; }

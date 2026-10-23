@@ -290,6 +290,7 @@
         // their own interactions.
         if (ev.target.closest && ev.target.closest(
             'button, a[href], input, select, textarea, label, [role="slider"], [contenteditable=""], [contenteditable="true"]')) return;
+        ev.preventDefault();   // don't begin a native text selection from the drag handle
         var x0 = ev.clientX, y0 = ev.clientY, ghost = null, zones = null, insEl = null, swapEl = null;
         var target = null, panels = null, active = false;
         function mk() {
