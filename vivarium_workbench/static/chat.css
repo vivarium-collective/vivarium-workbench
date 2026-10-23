@@ -345,6 +345,25 @@ body.vp-dragging .vp-titlebar{ cursor:grabbing; }
 .vp-has-titlebar .vp-head{ display:none !important; }
 .vp-has-titlebar [data-act="dock"], .vp-has-titlebar #aig-dock-panel-btn, .vp-has-titlebar .aig-tb-group[title="Dock"]{ display:none !important; }
 
+/* ── iTerm-style same-side stacking ──────────────────────────────────────────
+   A .vp-stack holds every panel docked on one side. Left/right stack as a COLUMN
+   (panels split top↔bottom); top/bottom as a ROW (split left↔right). The container
+   carries the side's outer size (set inline by the dock engine); its panels flex to
+   fill and split by flex-grow, with a .vp-stack-sizer bar dragging the ratio. */
+.vp-stack{ display:flex; min-width:0; min-height:0; position:relative; }
+.vp-stack[hidden]{ display:none !important; }
+.vp-stack-left, .vp-stack-right{ flex:0 0 auto; flex-direction:column; height:100%; }   /* width set inline */
+.vp-stack-top, .vp-stack-bottom{ flex:0 0 auto; flex-direction:row; width:100%; }         /* height set inline */
+/* Panels inside a stack fill their share; override each panel's own fixed-basis /
+   width / height rules (flex:0 0 var(--viv-*-w|h), width:var(...), etc.). flex-grow
+   is set inline per panel to carry the split ratio. */
+.vp-stack > .vp-dockable{ flex:1 1 0 !important; width:auto !important; height:auto !important; min-width:0; min-height:0; }
+/* Split handle between two stacked panels. */
+.vp-stack-sizer{ flex:0 0 6px; align-self:stretch; background:transparent; z-index:6; }
+.vp-stack-left > .vp-stack-sizer, .vp-stack-right > .vp-stack-sizer{ cursor:row-resize; }
+.vp-stack-top > .vp-stack-sizer, .vp-stack-bottom > .vp-stack-sizer{ cursor:col-resize; }
+.vp-stack-sizer:hover, .vp-stack-sizer.dragging{ background:color-mix(in srgb, var(--c-accent,#4f46e5) 35%, transparent); }
+
 /* ── marimo-style model picker: providers → submenu of models → info card ── */
 .vp-mm{ padding:4px; }
 .vp-mm-cur{ display:flex; align-items:center; gap:8px; padding:6px 8px; }

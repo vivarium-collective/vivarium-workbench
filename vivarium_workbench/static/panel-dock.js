@@ -80,16 +80,115 @@
     if (changed) saveOrder(o);
   }
   function registryFor(key) { for (var i = 0; i < REGISTRY.length; i++) if (REGISTRY[i].key === key) return REGISTRY[i]; return null; }
-  // Re-place every OPEN panel docked on `side`, in persisted order.
-  function replaceSide(side) {
-    var mates = REGISTRY.filter(function (e) { return e.isOpen() && e.getDock() === side; });
-    mates.sort(function (a, b) { return orderIndex(side, a.key) - orderIndex(side, b.key) || String(a.key).localeCompare(b.key); });
-    mates.forEach(function (e) { e.placeInFlow(side); });
-  }
   // Rects of the OTHER open docked panels (for the drop-target hit test).
   function otherPanelRects(exceptKey) {
     return REGISTRY.filter(function (e) { return e.key !== exceptKey && e.isOpen(); })
       .map(function (e) { var r = e.panel.getBoundingClientRect(); return { key: e.key, side: e.getDock(), left: r.left, top: r.top, right: r.right, bottom: r.bottom }; });
+  }
+
+  // ── Per-side stack containers (iTerm-style same-side splitting) ──────────────
+  // A dock side with ≥1 open panel holds a .vp-stack flex container. On a vertical
+  // side (left / right) the stack is a COLUMN — its panels split top↔bottom; on a
+  // horizontal band (top / bottom) it is a ROW — its panels split left↔right. The
+  // container carries the side's OUTER size (column width / band height); each
+  // panel's flex-grow carries its share of the split, and a .vp-stack-sizer bar
+  // between two panels drags that ratio. One panel on a side → the container is
+  // simply a sized wrapper (same footprint as before stacking existed).
+  var STACKS = {};                 // side -> container element
+  var _layout = null, _main = null, _topPlacer = null;
+  function layoutEl() { return (_layout && _layout.isConnected) ? _layout : (_layout = document.querySelector('.viv-layout')); }
+  function mainElGet() { return (_main && _main.isConnected) ? _main : (_main = document.querySelector('.viv-main')); }
+  function isVertSide(side) { return side === 'bottom' || side === 'top'; }   // height-sized band (row stack)
+  function stackSizeKey(side) { return 'viv.stack.' + side + '.size'; }
+  function stackGrowKey(side) { return 'viv.stack.' + side + '.grows'; }
+  function stackGrows(side) { try { return JSON.parse(lsGet(stackGrowKey(side), '{}')) || {}; } catch (e) { return {}; } }
+  function defaultSideSize(side) { return isVertSide(side) ? 320 : 440; }
+
+  function ensureStack(side) {
+    var s = STACKS[side];
+    if (!s || !s.isConnected) {
+      if (!s) { s = document.createElement('div'); s.className = 'vp-stack vp-stack-' + side; s.dataset.side = side; STACKS[side] = s; }
+    }
+    var L = layoutEl(), M = mainElGet();
+    if (!L || !M) return s;
+    // Place the container in the correct layout slot (idempotent).
+    if (side === 'left') { if (s.parentNode !== L || s.nextSibling !== M) L.insertBefore(s, M); }
+    else if (side === 'right') { if (s.parentNode !== L || L.lastElementChild !== s) L.appendChild(s); }
+    else if (side === 'top') {
+      var placed = _topPlacer && _topPlacer(s);
+      if (!placed && (s.parentNode !== M || M.firstChild !== s)) M.insertBefore(s, M.firstChild);
+    } else { if (s.parentNode !== M || M.lastElementChild !== s) M.appendChild(s); }   // bottom
+    var n = parseInt(lsGet(stackSizeKey(side), ''), 10);
+    var sz = C.clampDock(side, (n > 0 ? n : defaultSideSize(side)), innerWidth, innerHeight);
+    s.style.setProperty(isVertSide(side) ? 'height' : 'width', sz + 'px');
+    return s;
+  }
+
+  // Re-place every OPEN panel docked on `side` into that side's stack, in persisted
+  // order, interleaving fresh sizer bars. A side with no open panels hides its
+  // (possibly non-empty, but all-hidden) container so it reserves no space.
+  function replaceSide(side) {
+    var mates = REGISTRY.filter(function (e) { return e.isOpen() && e.getDock() === side; });
+    mates.sort(function (a, b) { return orderIndex(side, a.key) - orderIndex(side, b.key) || String(a.key).localeCompare(b.key); });
+    var s = ensureStack(side);
+    if (!s) return;
+    // Drop stale sizers, then (re)attach panels in order with a sizer between each.
+    Array.prototype.slice.call(s.querySelectorAll(':scope > .vp-stack-sizer')).forEach(function (z) { z.remove(); });
+    var grows = stackGrows(side);
+    mates.forEach(function (e, i) {
+      if (i > 0) {
+        var z = document.createElement('div');
+        z.className = 'vp-stack-sizer'; z.dataset.side = side;
+        s.appendChild(z); initSizer(z, side);
+      }
+      e.panel.dataset.dock = side;
+      e.panel.style.flex = '1 1 0';
+      e.panel.style.flexGrow = String(grows[e.key] > 0 ? grows[e.key] : 1);
+      s.appendChild(e.panel);                     // moves it here from wherever it was
+      if (e.onPlaced) e.onPlaced(side);
+    });
+    s.hidden = !mates.length;
+  }
+  function replaceAllSides() { ['left', 'right', 'top', 'bottom'].forEach(replaceSide); }
+
+  // Persist the live flex-grow of each open panel on `side` (after a split drag).
+  function persistGrows(side) {
+    var o = stackGrows(side);
+    REGISTRY.forEach(function (e) {
+      if (e.isOpen() && e.getDock() === side) o[e.key] = parseFloat(e.panel.style.flexGrow) || 1;
+    });
+    try { localStorage.setItem(stackGrowKey(side), JSON.stringify(o)); } catch (ex) { /* private mode */ }
+  }
+
+  // Drag a .vp-stack-sizer to transfer flex-grow between the panel before it and the
+  // panel after it (the two it separates), keeping their combined share constant.
+  function initSizer(z, side) {
+    var vert = isVertSide(side);   // top/bottom band → row → drag horizontally (x); left/right column → drag vertically (y)
+    z.addEventListener('mousedown', function (ev) {
+      if (ev.button !== undefined && ev.button !== 0) return;
+      var prev = z.previousElementSibling, next = z.nextElementSibling;
+      if (!prev || !next) return;
+      ev.preventDefault();
+      document.body.classList.add('vp-dragging');
+      var rp = prev.getBoundingClientRect(), rn = next.getBoundingClientRect();
+      var sizeP = vert ? rp.width : rp.height;
+      var total = sizeP + (vert ? rn.width : rn.height);
+      var gP = parseFloat(prev.style.flexGrow) || 1, gN = parseFloat(next.style.flexGrow) || 1, gSum = gP + gN;
+      var start = vert ? ev.clientX : ev.clientY;
+      function move(m) {
+        var d = (vert ? m.clientX : m.clientY) - start;
+        var frac = Math.max(0.1, Math.min(0.9, (sizeP + d) / total));
+        prev.style.flexGrow = String(gSum * frac);
+        next.style.flexGrow = String(gSum * (1 - frac));
+      }
+      function up() {
+        document.body.classList.remove('vp-dragging');
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        persistGrows(side);
+        REGISTRY.forEach(function (e) { if (e.isOpen() && e.getDock() === side && e.syncVars) e.syncVars(); });
+      }
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    });
   }
 
   // opts: {
@@ -130,43 +229,21 @@
 
     function isVertical(d) { return d === 'bottom' || d === 'top'; }   // height-sized docks
     function sizeKey(d) { return isVertical(d) ? K.h : K.w; }
-    function applySize() {
-      var n = parseInt(lsGet(sizeKey(dock), ''), 10);
-      var fallback = isVertical(dock)
-        ? ((opts.defaultSize && opts.defaultSize.bottom) || 320)
-        : ((opts.defaultSize && opts.defaultSize.side) || 440);
-      var size = C.clampDock(dock, n || fallback, innerWidth, innerHeight);
-      panel.style.setProperty(isVertical(dock) ? V('h') : V('w'), size + 'px');
-    }
-    // Placement in the flex row: left → before <main>, right → end of the row, bottom →
-    // inside <main>'s column below the content, top → inside <main> above the content.
-    // Two right-docked panels stack by order.
-    // Raw DOM insertion for this one panel on `zone` (no ordering logic). Called
-    // in order by replaceSide so same-side panels land in their persisted order.
-    function placeInFlow(zone) {
-      if (!layout || !mainEl) return;
-      panel.dataset.dock = zone;
-      if (zone === 'left') layout.insertBefore(panel, mainEl);
-      else if (zone === 'right') layout.appendChild(panel);
-      else if (zone === 'top') {
-        // opts.placeTop lets a panel keep something (e.g. the investigation menu
-        // bar) ABOVE it when docked top. It returns true if it placed the panel;
-        // otherwise fall back to the default (above all of <main>'s content).
-        if (!(opts.placeTop && opts.placeTop(panel))) mainEl.insertBefore(panel, mainEl.firstChild);
-      }
-      else mainEl.appendChild(panel);                                  // bottom
-      applySize();
-    }
-    // Place this panel on `zone`, keeping every same-side panel in persisted order.
+    // Place this panel on `zone` and (re)lay out every side's stack. The per-side
+    // .vp-stack container (see module scope) owns the outer size + ordering now, so
+    // placing one panel re-flows all sides (a move vacates the old side's stack).
     function place(zone) {
       ensureInOrder(zone, key);
-      replaceSide(zone);
+      replaceAllSides();
     }
     function isOpen() { return !panel.hidden; }
     // Publish the panel's footprint on <html> so fixed / 100vh layouts leave room for it.
+    // The reserved space for a side is the whole stack (all same-side panels), so read
+    // the side's .vp-stack rect when present, falling back to this panel's own rect.
     function syncVars() {
       var on = isOpen();
-      var r = panel.getBoundingClientRect();
+      var st = STACKS[dock];
+      var r = (on && st && st.isConnected && !st.hidden) ? st.getBoundingClientRect() : panel.getBoundingClientRect();
       var root = document.documentElement.style;
       root.setProperty(V('left'),   on && dock === 'left'   ? Math.round(r.width) + 'px' : '0px');
       root.setProperty(V('right'),  on && dock === 'right'  ? Math.round(innerWidth - r.left) + 'px' : '0px');
@@ -207,7 +284,7 @@
       var at = ks.indexOf(relKey); if (at < 0) at = ks.length - 1;
       ks.splice(after ? at + 1 : at, 0, key);
       setSideKeys(side, ks);
-      if (!isOpen()) setOpen(true); else { replaceSide(side); syncVars(); }
+      if (!isOpen()) setOpen(true); else { replaceAllSides(); syncVars(); }
       if (opts.onDock) opts.onDock(side);
     }
     // Swap this panel's position (side + order slot + size) with another panel's.
@@ -215,7 +292,7 @@
       var other = registryFor(otherKey); if (!other || other.key === key) return;
       var aSide = dock, bSide = other.getDock();
       if (!isAllowed(bSide) || !other.allows(aSide)) return;    // respect each panel's dock limits
-      var aSize = lsGet(sizeKey(aSide), ''), bSize = other.sizeStr(bSide);
+      var aSize = lsGet(stackSizeKey(aSide), ''), bSize = other.sizeStr(bSide);
       // Exchange order slots: put this where other was, and vice versa.
       if (aSide === bSide) {
         var ks = sideKeys(aSide), ia = ks.indexOf(key), ib = ks.indexOf(otherKey);
@@ -227,10 +304,9 @@
         setSideKeys(aSide, a); setSideKeys(bSide, b);
       }
       // Exchange sides + sizes.
-      dock = bSide; lsSet(K.dock, bSide); if (bSize !== '') lsSet(sizeKey(bSide), bSize);
+      dock = bSide; lsSet(K.dock, bSide); if (bSize !== '') lsSet(stackSizeKey(bSide), bSize);
       other.setSideAndSize(aSide, aSize);
-      replaceSide(bSide); if (aSide !== bSide) replaceSide(aSide);
-      applySize(); syncVars();
+      replaceAllSides(); syncVars();
       if (opts.onDock) opts.onDock(bSide);
     }
     // Dropdown of Dock left / right / bottom, anchored under the header's dock button.
@@ -361,50 +437,62 @@
       handle.setAttribute('draggable', 'false');
       handle.addEventListener('dragstart', function (ev) { ev.preventDefault(); });   // no native drag stranding the ghost
     }
+    // The edge resize handle drags the whole SIDE (its .vp-stack) bigger/smaller —
+    // outer column width (left/right) or band height (top/bottom), shared by every
+    // panel stacked there. Collapse-to-a-strip only applies when this panel is the
+    // lone occupant of the side (collapsing one of a split is ambiguous).
+    function soloOnSide() {
+      return REGISTRY.filter(function (e) { return e.isOpen() && e.getDock() === dock; }).length <= 1;
+    }
     function initResize() {
       var h = typeof opts.resizeHandle === 'string' ? document.getElementById(opts.resizeHandle) : opts.resizeHandle;
       if (!h) return;
       h.addEventListener('mousedown', function (ev) {
         ev.preventDefault(); h.classList.add('dragging'); document.body.classList.add('vp-dragging');
-        var r0 = panel.getBoundingClientRect();
+        var st = STACKS[dock] || panel;
+        var r0 = st.getBoundingClientRect();
+        var canCollapse = soloOnSide();
         function move(m) {
           var raw = dock === 'left' ? m.clientX - r0.left
                   : dock === 'right' ? r0.right - m.clientX
                   : dock === 'top' ? m.clientY - r0.top
                   : r0.bottom - m.clientY;                              // bottom
           // Drag the resize edge toward the dock edge, past the threshold, to
-          // collapse to a thin strip; drag back out to expand.
-          if (raw < COLLAPSE_AT) { if (!collapsed) setCollapsed(true); return; }
+          // collapse to a thin strip; drag back out to expand (solo panels only).
+          if (canCollapse && raw < COLLAPSE_AT) { if (!collapsed) setCollapsed(true); return; }
           if (collapsed) setCollapsed(false);
-          panel.style.setProperty(isVertical(dock) ? V('h') : V('w'), C.clampDock(dock, raw, innerWidth, innerHeight) + 'px');
+          var px = C.clampDock(dock, raw, innerWidth, innerHeight);
+          if (STACKS[dock]) STACKS[dock].style.setProperty(isVertical(dock) ? 'height' : 'width', px + 'px');
         }
         function up() {
           h.classList.remove('dragging'); document.body.classList.remove('vp-dragging');
           document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
           if (collapsed) { lsSet(K.collapsed, '1'); syncVars(); if (opts.onResize) opts.onResize(); return; }
           lsSet(K.collapsed, '0');
-          var r = panel.getBoundingClientRect();
-          lsSet(sizeKey(dock), String(Math.round(dock === 'bottom' ? r.height : r.width)));
+          var r = (STACKS[dock] || panel).getBoundingClientRect();
+          lsSet(stackSizeKey(dock), String(Math.round(isVertical(dock) ? r.height : r.width)));
           syncVars(); if (opts.onResize) opts.onResize();
         }
         document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
       });
     }
 
-    // Set this panel's side + persisted size in one step (used by a swap).
+    // Set this panel's side + the side's persisted outer size in one step (swap).
     function setSideAndSize(side, sizeStr) {
       dock = side; lsSet(K.dock, side);
-      if (sizeStr !== undefined && sizeStr !== '') lsSet(sizeKey(side), sizeStr);
-      applySize();
+      if (sizeStr !== undefined && sizeStr !== '') lsSet(stackSizeKey(side), sizeStr);
     }
     // Register so sibling panels' drags can see + reorder/swap this one.
     REGISTRY.push({
       key: key, panel: panel,
       getDock: function () { return dock; },
-      isOpen: isOpen, placeInFlow: placeInFlow, allows: isAllowed,
-      sizeStr: function (side) { return lsGet(isVertical(side) ? K.h : K.w, ''); },
+      isOpen: isOpen, allows: isAllowed, syncVars: syncVars,
+      sizeStr: function (side) { return lsGet(stackSizeKey(side), ''); },
       setSideAndSize: setSideAndSize,
     });
+    panel.classList.add('vp-dockable');
+    panel.dataset.vpKey = key;
+    if (typeof opts.placeTop === 'function') _topPlacer = opts.placeTop;
 
     // Slim iTerm-style title bar: the whole bar is the drag handle (move → dock /
     // insert / swap) and carries the × close (+ ↗ pop-out when available). It
@@ -433,7 +521,7 @@
     });
     initResize();
     if (window.ResizeObserver) { var ro = new ResizeObserver(syncVars); ro.observe(panel); }
-    window.addEventListener('resize', function () { applySize(); syncVars(); });
+    window.addEventListener('resize', function () { if (isOpen()) ensureStack(dock); syncVars(); });
 
     setOpen(lsGet(K.open, '0') === '1');            // render the initial open/closed state
 
