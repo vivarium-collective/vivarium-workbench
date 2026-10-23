@@ -860,23 +860,17 @@
   function _autosizeNativeFrames(host) {
     var frames = host.querySelectorAll('iframe.figure-media-frame--native');
     Array.prototype.forEach.call(frames, function (ifr) {
-      function fit() {
-        try {
-          var doc = ifr.contentDocument || (ifr.contentWindow && ifr.contentWindow.document);
-          if (!doc || !doc.body) return;
-          var h = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
-          if (h > 40) ifr.style.height = (h + 6) + 'px';
-        } catch (e) { /* cross-origin shouldn't happen for srcdoc */ }
-      }
+      // Reuse the ONE hardened fitter (_fitFigureFrame): one-shot measure, body
+      // margin zeroed, documentElement overflow hidden. The old per-frame fit here
+      // used `scrollHeight + 6` AND a ResizeObserver — the exact two things
+      // _fitFigureFrame was written to avoid: on an elastic (html,body{height:100%})
+      // Plotly figure, body.scrollHeight equals the iframe's own height, so each
+      // observer tick grew it by 6px forever (endless white space + a runaway
+      // scrollbar). Staggered one-shot re-measures still catch late lazy renders.
+      function fit() { if (window.__fitFigureFrame) window.__fitFigureFrame(ifr); }
       ifr.addEventListener('load', function () {
         fit();
         [150, 450, 1000, 2000].forEach(function (ms) { setTimeout(fit, ms); });
-        try {
-          var doc = ifr.contentDocument;
-          if (doc && doc.body && window.ResizeObserver) {
-            new ResizeObserver(fit).observe(doc.body);
-          }
-        } catch (e) { /* no-op */ }
       });
       // Already-complete (e.g. cached) frames never fire a fresh load event.
       try {
