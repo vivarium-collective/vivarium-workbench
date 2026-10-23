@@ -6251,7 +6251,11 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
 .viv-graph-body #investigation-detail-view{
   display:flex; flex-direction:column; flex:1 1 auto; min-height:0; min-width:0;
   overflow:auto; margin:0 !important;
+  /* Keep the scroll, hide the bar — avoids a second visible scrollbar sitting next
+     to the study/page scrollbar when the investigation is docked. */
+  scrollbar-width:none; -ms-overflow-style:none;
 }
+.viv-graph-body #investigation-detail-view::-webkit-scrollbar{ display:none; }
 /* Keep the graph usably tall even with the overview expanded above it. */
 .viv-graph-body #investigation-dag-fs{ flex:0 0 auto; min-height:320px; }
 .viv-graph-body #investigation-dag-shell{
