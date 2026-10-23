@@ -52,6 +52,7 @@
   const mainEl = layout && layout.querySelector('.viv-main');
   const codeRail = document.getElementById('viv-code-rail');
   let dock = C.validDock(lsGet('viv.ai.dock', 'right')) ? lsGet('viv.ai.dock', 'right') : 'right';
+  var ctl = null;   // shared VivPanelDock controller (slim titlebar + drag/dock/insert/swap)
 
   function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (x) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (x) { /* private mode */ } }
@@ -863,16 +864,12 @@
   }
 
   // ── Panel: open/close, resize, settings sheet ─────────────────────────────
+  // Dock mechanics live in the shared VivPanelDock controller now; this is a thin
+  // wrapper so chat's many setOpen() call sites keep working. Content side-effects
+  // (status refresh, focus, closePop, rail-tab highlight) ride on ctl's onOpen/onClose.
   function setOpen(open) {
-    panel.hidden = !open;
-    document.body.classList.toggle('viv-ai-open', open);
-    el.toggle.classList.toggle('viv-ai-on', open);
-    el.toggle.setAttribute('aria-pressed', open ? 'true' : 'false');
-    lsSet('viv.ai.open', open ? '1' : '0');
-    syncDockVars();
-    if (open) {
-      refreshStatus().then(function () { if (el.card.hidden) { el.input.focus(); scrollDown(true); } });
-    } else closePop();
+    if (!ctl) { panel.hidden = !open; return; }
+    if (open) ctl.open(); else ctl.close();
   }
   function openSettings() {
     closePop();
@@ -1171,14 +1168,29 @@
       }
     }, true);
 
-    el.toggle.addEventListener('click', function (ev) { ev.preventDefault(); if (justDragged) return; setOpen(panel.hidden); });
-    el.toggle.title = 'Chat — click to toggle, drag to dock left, right or bottom';
+    el.toggle.addEventListener('click', function (ev) { ev.preventDefault(); if (ctl && ctl.didDrag && ctl.didDrag()) return; setOpen(panel.hidden); });
+    el.toggle.title = 'Chat — click to toggle';
     document.getElementById('viv-ai-back').addEventListener('click', closeSettings);
     window.addEventListener('viv:ai-changed', function () { refreshStatus(); });
-    initResize();
-    initChipDrag();
-    if (window.ResizeObserver) { const ro = new ResizeObserver(syncDockVars); ro.observe(panel); if (codeRail) ro.observe(codeRail); }
-    window.addEventListener('resize', function () { applySize(); syncDockVars(); });
+    // Dock via the shared engine: slim iTerm-style title bar (× + ↗ + drag to
+    // dock / insert / swap, incl. reordering with the code rail on the same side),
+    // shared resize + footprint vars (--viv-ai-*). Replaces chat's own dock engine.
+    ctl = window.VivPanelDock.make({
+      panel: panel, layout: layout, mainEl: mainEl, key: 'ai', label: 'Chat',
+      launcher: el.toggle, docks: ['left', 'right', 'bottom'],
+      resizeHandle: 'viv-ai-resize', ghostIcon: ICON.bot,
+      popout: function () { if (window.VivPanelDock) window.VivPanelDock.popout('chat'); if (ctl) ctl.close(); },
+      defaultDock: 'right', defaultSize: { side: 440, bottom: 320 },
+      layoutEvent: 'viv:ai-layout',
+      onOpen: function () {
+        el.toggle.classList.add('viv-ai-on'); el.toggle.setAttribute('aria-pressed', 'true');
+        refreshStatus().then(function () { if (el.card.hidden) { el.input.focus(); scrollDown(true); } });
+      },
+      onClose: function () {
+        el.toggle.classList.remove('viv-ai-on'); el.toggle.setAttribute('aria-pressed', 'false');
+        closePop();
+      },
+    });
   }
 
   build();
@@ -1186,7 +1198,7 @@
     // A corrupted stored transcript must not take the panel down.
     store = C.newStore(); state = C.restore(store.chats[store.active].snap); save(); renderAll();
   }
-  dockTo(dock, false);
-  window._openAiPanel = function () { setOpen(true); };
-  if (lsGet('viv.ai.open', '0') === '1') setOpen(true);
+  // Initial placement + restore of the open/closed state are handled by
+  // VivPanelDock.make() (built in build()); no separate dockTo/open needed.
+  window._openAiPanel = function () { if (ctl) ctl.open(); };
 })();

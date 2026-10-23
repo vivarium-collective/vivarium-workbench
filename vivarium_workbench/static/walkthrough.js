@@ -10034,8 +10034,10 @@
     // Fully collapses (not just scrolled out of view) — click the toggle to show.
     try { localStorage.setItem('inv-overview-collapsed', '1'); } catch (e) { /* ignore */ }
     if (typeof _applyInvOverviewState === 'function') _applyInvOverviewState();
-    // The overview collapse above hides the prose/cockpit; keep the FULL graph in
-    // place (no strip, no float) so studies can be clicked through quickly.
+    // The study opens INLINE below the investigation graph (the original behavior),
+    // with the graph↔study resize bar between them so the graph pane can be resized.
+    // The investigation carries its slim title bar and can be dragged to a side
+    // window manually; opening a study no longer forces that.
     _renderGraphBarNav();
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');

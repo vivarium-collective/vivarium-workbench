@@ -1516,7 +1516,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          prominently on the left now that the nav controls are grouped on the right.
          _showInvestigationWorkspace sets #ws-title (name) and #ws-title-kicker. #}
       <span id="ws-title-wrap" style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1 1 auto;line-height:1.15">
-        <span id="ws-title-kicker" style="font-size:0.68em;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;color:#94a3b8">Investigation</span>
+        {# The "INVESTIGATION" kicker was removed — the slim Investigation title bar
+           above this header already names the pane. #}
         <strong id="ws-title" style="font-size:1.35em;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></strong>
       </span>
       <span id="ws-status"></span>
@@ -1762,15 +1763,11 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <button type="button" role="menuitem" onclick="window._aigDownloadMenuPick('pdf')" style="display:block;width:100%;text-align:left;border:none;border-top:1px solid #f1f5f9;background:transparent;padding:7px 12px;cursor:pointer;font-size:0.95em;color:#334155">↓ PDF</button>
         </div>
       </span>
-      <!-- Dock control: choose a side (left/right/bottom/top), pop out, or go back
-           inline. Placed after the Display/Legend/Export trio so those three stay
-           grouped together. -->
-      <span class="aig-tb-group" role="group" aria-label="Graph panel" title="Dock">
-        <button id="aig-dock-panel-btn" type="button" class="aig-tb-btn"
-                title="Dock the investigation graph — choose a side, pop out, or go back inline"
-                aria-haspopup="menu" aria-label="Dock the investigation graph"
-                onclick="window.GraphPanel&&GraphPanel.dockMenu(this)">◧</button>
-      </span>
+      {# The graph's manual dock (◧) button was removed: the investigation header +
+         graph now travel together as the movable "Investigation" window, which docks
+         automatically when a study opens (narrowing the graph) and returns inline
+         when no study is open. The window's own slim title bar is its drag/close
+         handle; the "Investigations" rail tab is its home. #}
       {# Compact interaction hint — how clicking a study node behaves. Pushed to the
          end so it wraps to its own line before it crowds the controls. #}
       <span class="aig-tb-hint" aria-hidden="true" title="Single-click a study to select it; double-click to open it">click: select · double-click: open</span>

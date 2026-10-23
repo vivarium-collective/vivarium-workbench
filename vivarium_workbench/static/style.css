@@ -2697,6 +2697,11 @@ body.pcard-splitting iframe{ pointer-events:none; }
   align-items: flex-end;
   gap: 20px;
   overflow-x: auto;
+  /* Keep the sideways scroll (narrow / docked study columns) but hide the bar —
+     a visible horizontal scrollbar under the tab row reads as a stray "extra"
+     scrollbar. Wheel / trackpad still scroll the clusters. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   border-bottom: 1px solid #e5e7eb;
   margin: 0 0 10px;
   position: -webkit-sticky;
@@ -2709,6 +2714,7 @@ body.pcard-splitting iframe{ pointer-events:none; }
    * users can tell at a glance whether they've scrolled past it. */
   box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.04);
 }
+.study-tabs::-webkit-scrollbar { display: none; }
 .study-tab {
   background: transparent;
   border: 0;
@@ -6225,13 +6231,33 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
 /* Body hosts the relocated graph, which FILLS the panel (no fixed-height box that
    leaves dead space / a cut-off graph). The toolbar takes its natural height and
    the shell flexes to fill the rest; the graph pans/zooms inside it. */
-.viv-graph-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; position:relative; display:flex; }
+/* Column, not row: the captured investigation header (.inv-header-bar) stacks
+   ABOVE the graph. As a row, the header's nowrap title ate the width and collapsed
+   the graph shell to a sliver, pushing every node off-screen. */
+.viv-graph-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+/* The captured header takes its natural height; keep its long title from forcing
+   the column wider than the docked panel (ellipsize instead). */
+.viv-graph-body .inv-header-bar{ flex:0 0 auto; width:100%; min-width:0; margin:0 0 8px !important; }
+.viv-graph-body .inv-header-bar #ws-title{ font-size:1.05em; }
 .viv-graph-body #investigation-dag-fs{
   display:flex; flex-direction:column; flex:1 1 auto; min-height:0; min-width:0;
 }
 /* The inline "Investigation graph" lead is redundant in the panel (its header
    already says "Graph"); drop it so the graph gets the space. */
 .viv-graph-body #investigation-dag-lead{ display:none; }
+/* The whole investigation detail (overview brief + tabs, then the graph) travels
+   into the window; it scrolls as a column so the overview sits ABOVE the graph
+   rather than taking the study's centre. */
+.viv-graph-body #investigation-detail-view{
+  display:flex; flex-direction:column; flex:1 1 auto; min-height:0; min-width:0;
+  overflow:auto; margin:0 !important;
+  /* Keep the scroll, hide the bar — avoids a second visible scrollbar sitting next
+     to the study/page scrollbar when the investigation is docked. */
+  scrollbar-width:none; -ms-overflow-style:none;
+}
+.viv-graph-body #investigation-detail-view::-webkit-scrollbar{ display:none; }
+/* Keep the graph usably tall even with the overview expanded above it. */
+.viv-graph-body #investigation-dag-fs{ flex:0 0 auto; min-height:320px; }
 .viv-graph-body #investigation-dag-shell{
   flex:1 1 auto; height:auto !important; min-height:0 !important; max-height:none !important;
   resize:none;
@@ -6403,6 +6429,14 @@ body.vp-dragging .viv-studies-head{ cursor:grabbing; }
    A fixed, opaque, full-window panel (z-index) simply covers the rest of the SPA
    that loaded behind it, so no per-element hiding is needed. */
 body.viv-popout{ overflow:hidden; }
+/* Show ONLY the popped panel: hide the rail, the SPA content, and every OTHER
+   dockable panel (another panel left open — e.g. the investigation window — must
+   not ride along into the popout). The kind's own panel is re-shown full-window
+   below. */
+body.viv-popout .viv-rail,
+body.viv-popout .viv-content,
+body.viv-popout .viv-topbar,
+body.viv-popout .vp-dockable{ display:none !important; }
 body.viv-popout-chat #viv-ai-panel,
 body.viv-popout-code #viv-code-rail,
 body.viv-popout-studies #viv-studies-panel,

@@ -686,6 +686,31 @@
     if (x > w * 0.67) return 'right';
     return null;
   }
+  // iTerm2-style drop target during a panel drag. Given the pointer, the window
+  // size, and the OTHER open docked panels (each {key, side, left, top, right,
+  // bottom}), decide where a drop would land:
+  //   {kind:'swap',   otherKey}        — over the CENTER of a panel → swap places
+  //   {kind:'insert', side, relKey, after} — over a panel's edge → slot before/after it
+  //   {kind:'edge',   side}            — over an empty edge band → dock to that side
+  //   null                             — the dead middle → no-op
+  // Pure + deterministic for unit tests. Panels are stacked vertically on left/
+  // right (reorder by Y) and horizontally on top/bottom (reorder by X).
+  function dropTarget(x, y, w, h, panels) {
+    panels = panels || [];
+    for (var i = 0; i < panels.length; i++) {
+      var p = panels[i];
+      if (x >= p.left && x <= p.right && y >= p.top && y <= p.bottom) {
+        var vertical = (p.side === 'left' || p.side === 'right');
+        var span = vertical ? (p.bottom - p.top) : (p.right - p.left);
+        var frac = span > 0 ? (vertical ? (y - p.top) : (x - p.left)) / span : 0.5;
+        if (frac > 0.30 && frac < 0.70) return { kind: 'swap', otherKey: p.key, side: p.side };
+        return { kind: 'insert', side: p.side, relKey: p.key, after: frac >= 0.5 };
+      }
+    }
+    var z = dropZone(x, y, w, h);
+    return z ? { kind: 'edge', side: z } : null;
+  }
+
   // Panel thickness (width for left/right, height for bottom/top), kept usable at any
   // window size.
   function clampDock(dock, size, vw, vh) {
@@ -709,7 +734,7 @@
     findTool: findTool, storeRestore: storeRestore, storeOpen: storeOpen, storeMerge: storeMerge, storeDelete: storeDelete, storeList: storeList, storePrune: storePrune, titleOf: titleOf,
     mentionQuery: mentionQuery, insertMention: insertMention, contextItems: contextItems,
     PROVIDERS: PROVIDERS, providerMeta: providerMeta, mergeModels: mergeModels, modelTree: modelTree, parseQualified: parseQualified,
-    DOCKS: DOCKS, validDock: validDock, dropZone: dropZone, clampDock: clampDock,
+    DOCKS: DOCKS, validDock: validDock, dropZone: dropZone, dropTarget: dropTarget, clampDock: clampDock,
     nextIndex: nextIndex, loadKnown: loadKnown, addKnown: addKnown, removeKnown: removeKnown,
     filterItems: filterItems, ATTACH: ATTACH, attachError: attachError, composePrompt: composePrompt,
   };
