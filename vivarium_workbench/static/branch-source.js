@@ -319,7 +319,12 @@
 
     var repos = _distinct(state.entries, "repo");
     if (state.repo == null || repos.indexOf(state.repo) < 0) {
-      var seed = (state.current && state.current.repo);
+      // Seed from the entry flagged `current` — it carries the same git-origin
+      // `repo` key the dropdown lists. (state.current.repo is the workspace.yaml
+      // NAME, which can differ from the git-origin repo; then indexOf misses and
+      // the default wrongly falls through to the alphabetically-first repo.)
+      var curEntry = state.entries.filter(function (e) { return e.current; })[0];
+      var seed = (curEntry && curEntry.repo) || (state.current && state.current.repo);
       state.repo = (seed && repos.indexOf(seed) >= 0) ? seed : (repos[0] || null);
     }
 
