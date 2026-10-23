@@ -510,6 +510,16 @@ wheels = [
 ]
 
 [[package]]
+name = "compose-api-client"
+version = "0.7.35"
+source = { git = "https://github.com/biosimulations/compose-api.git?subdirectory=clients%2Fpython&tag=0.7.35#367ccb293a490b81bb6c38e34b61aa355d6b5701" }
+dependencies = [
+    { name = "attrs" },
+    { name = "httpx" },
+    { name = "python-dateutil" },
+]
+
+[[package]]
 name = "contourpy"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1212,7 +1222,7 @@ name = "importlib-metadata"
 version = "9.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp", marker = "python_full_version < '3.12'" },
+    { name = "zipp" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6f/7e/1e7e8dc30634b93ebb3d58a3dea569ad146e656218d3960ab04f62047b29/importlib_metadata-9.0.1.tar.gz", hash = "sha256:ab830580bc0ef3db61ce8fae716389e5462b67e033018bab6d8f80ef17172f99", size = 59124, upload-time = "2026-08-28T15:30:34.646Z" }
 wheels = [
@@ -3641,6 +3651,7 @@ source = { editable = "." }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "boto3" },
+    { name = "compose-api-client" },
     { name = "fastapi" },
     { name = "investigation-contracts" },
     { name = "jinja2" },
@@ -3698,6 +3709,7 @@ viz = [
 requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
     { name = "boto3", specifier = ">=1.34" },
+    { name = "compose-api-client", git = "https://github.com/biosimulations/compose-api.git?subdirectory=clients%2Fpython&tag=0.7.35" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },

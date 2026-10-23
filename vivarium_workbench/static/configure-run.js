@@ -270,6 +270,14 @@
     // (Local pipeline runs sync; reload the Runs tab on done.)
     function _reenableBtn() { var b = el.querySelector(".cfg-run-btn"); if (b) b.disabled = false; }
     _post("/api/study-run-baseline", { study: ctxState.study, overrides: overrides, steps: steps }).then(function (res) {
+      if (res.status === 202 && res.body && res.body.run_id) {
+        // Dispatched to the named backend: the run is tracked (and landed) from the Runs tab.
+        var warning = res.body.warning || res.body.manifest_warning;
+        _status(el, '<strong>✓ Dispatched</strong> remote run ' + esc(res.body.run_id) + ' — track it in the Runs tab.'
+          + (warning ? ' <span class="inv-run-err">' + esc(warning) + '</span>' : ''));
+        _reenableBtn();
+        return;
+      }
       if (res.status !== 200) { _status(el, '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>'); _reenableBtn(); return; }
       _status(el, '<strong>✓ Run complete</strong> — refresh the Runs tab.');
     }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); _reenableBtn(); });

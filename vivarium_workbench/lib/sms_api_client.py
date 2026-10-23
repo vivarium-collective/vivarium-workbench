@@ -835,6 +835,18 @@ class SmsApiClient:
             return self._get("/core/v1/simulator/versions")
         return {"versions": environments_as_simulators(self._environment_pages({"temporary": "any"}))}
 
+    def openapi_operations(self) -> "tuple[str | None, frozenset[str]]":
+        """The server's ``GET /openapi.json`` (FastAPI's default document): its ``info.version`` and every
+        ``operationId``."""
+        doc = self._get("/openapi.json")
+        doc = doc if isinstance(doc, dict) else {}
+        info = doc.get("info") if isinstance(doc.get("info"), dict) else {}
+        operations = frozenset(
+            str(op["operationId"])
+            for item in (doc.get("paths") or {}).values() if isinstance(item, dict)
+            for op in item.values() if isinstance(op, dict) and op.get("operationId"))
+        return (str(info["version"]) if info.get("version") else None), operations
+
     def capabilities(self) -> dict:
         """The deployment's capability advertisement: ``{version, capabilities: [str, ...]}``.
 

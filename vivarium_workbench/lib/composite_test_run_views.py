@@ -401,7 +401,19 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     from vivarium_workbench.lib import remote_pinned
     from vivarium_workbench.lib import remote_run as _remote_run
 
-    if remote_pinned.uses_viva_v1_dispatch(ws_root):
+    if remote_pinned.uses_compose_dispatch(ws_root):
+        # The named backend is compose-api: run_remote sends the composite to the environment its registry
+        # lists for this workspace (remote_run_compose.run_composite). No cloud image to resolve, and no git
+        # preflight: the environment's image runs, not this checkout.
+        from vivarium_workbench.lib import remote_run_compose
+
+        try:
+            remote_run_compose.checked_steps(steps)
+        except remote_run_compose.ComposeDispatchError as e:
+            return {**e.body, "run_target": "deployment"}, e.status
+        target = "deployment"
+        cloud = None
+    elif remote_pinned.uses_viva_v1_dispatch(ws_root):
         # The named backend runs this composite as a document (run_remote ->
         # POST /viva/v1/composites): no cloud image to resolve. A named environment
         # installs the workspace FROM GIT, so the clean+pushed preflight still applies.

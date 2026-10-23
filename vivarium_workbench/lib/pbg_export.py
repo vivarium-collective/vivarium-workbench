@@ -7,6 +7,10 @@ to full import-path form (``local:!<module>.<qualname>``).
 Full-path form is required so the sms-api container runner can resolve
 process classes via ``importlib`` without needing the workspace's
 ``build_core()`` registry.
+
+The ``registry`` address form (``local:<module>.<qualname>``, no ``!``) is for a
+runner that resolves classes through its own core's link registry by their dotted
+names and refuses arbitrary imports -- compose-api's (``docs/backend-compose-api.md``).
 """
 from __future__ import annotations
 
@@ -14,13 +18,20 @@ import copy
 import json
 import sys
 from pathlib import Path
+from typing import Callable
 
 
 # ---------------------------------------------------------------------------
 # C1: Address rewriter
 # ---------------------------------------------------------------------------
 
-def rewrite_local_addresses(document: dict, core) -> dict:
+#: How a class is named in an exported address: ``import`` is ``local:!<module>.<qualname>``
+#: (the runner imports it), ``registry`` is ``local:<module>.<qualname>`` (the runner's core
+#: resolves it by that dotted name in its link registry; compose-api accepts only this form).
+ADDRESS_FORMS = {"import": "!", "registry": ""}
+
+
+def rewrite_local_addresses(document: dict, core, *, address_form: str = "import") -> dict:
     """Return a deep-copy of *document* with short ``local:<Name>`` addresses
     rewritten to ``local:!<module>.<qualname>``.
 
@@ -35,11 +46,17 @@ def rewrite_local_addresses(document: dict, core) -> dict:
     unresolvable, lives in ``__main__``, or has ``<locals>`` in its
     ``__qualname__`` (such classes cannot be imported by dotted path).
 
+    With ``address_form="registry"`` every class is written ``local:<module>.<qualname>``
+    instead, and an address already in ``local:!`` form loses its ``!``.
+
     The original *document* is never mutated.
     """
+    if address_form not in ADDRESS_FORMS:
+        raise ValueError(f"address_form must be one of {sorted(ADDRESS_FORMS)}, got {address_form!r}")
+    marker = ADDRESS_FORMS[address_form]
     doc = copy.deepcopy(document)
     errors: list[str] = []
-    _walk(doc, core, errors)
+    _walk(doc, core, errors, marker)
     if errors:
         raise ValueError(
             "Cannot export non-importable process addresses:\n" + "\n".join(errors)
@@ -75,21 +92,21 @@ def strip_realized_edge_fields(node: object) -> object:
     return node
 
 
-def _walk(node: object, core, errors: list[str]) -> None:
+def _walk(node: object, core, errors: list[str], marker: str = "!") -> None:
     """Recursively walk *node*; rewrite any ``address`` key in-place."""
     if not isinstance(node, dict):
         return
     if "address" in node:
-        _rewrite_address(node, core, errors)
+        _rewrite_address(node, core, errors, marker)
     for v in node.values():
         if isinstance(v, dict):
-            _walk(v, core, errors)
+            _walk(v, core, errors, marker)
         elif isinstance(v, list):
             for item in v:
-                _walk(item, core, errors)
+                _walk(item, core, errors, marker)
 
 
-def _rewrite_address(node: dict, core, errors: list[str]) -> None:
+def _rewrite_address(node: dict, core, errors: list[str], marker: str = "!") -> None:
     """Rewrite ``node["address"]`` in-place if it is a short local address."""
     addr = node["address"]
     if not isinstance(addr, str):
@@ -98,6 +115,8 @@ def _rewrite_address(node: dict, core, errors: list[str]) -> None:
         return  # non-local protocol — untouched
     rest = addr[len("local:"):]
     if rest.startswith("!"):
+        if marker != "!":
+            node["address"] = f"local:{marker}{rest[1:]}"  # already a full path: only the form changes
         return  # already full-path form — untouched
 
     # Dotted full path (``local:<module>.<Class>``): the importable full address
@@ -122,7 +141,7 @@ def _rewrite_address(node: dict, core, errors: list[str]) -> None:
             qualname = getattr(imported, "__qualname__", None)
             if (module and qualname and module != "__main__"
                     and "<locals>" not in qualname):
-                node["address"] = f"local:!{module}.{qualname}"
+                node["address"] = f"local:{marker}{module}.{qualname}"
                 return
 
     # Short name: look up in registry
@@ -148,7 +167,7 @@ def _rewrite_address(node: dict, core, errors: list[str]) -> None:
         )
         return
 
-    node["address"] = f"local:!{module}.{qualname}"
+    node["address"] = f"local:{marker}{module}.{qualname}"
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +180,8 @@ def export_composite_pbg(
     out_path: "Path | str",
     core=None,
     overrides: "dict | None" = None,
+    address_form: str = "import",
+    document_hook: "Callable[[dict], dict] | None" = None,
 ) -> Path:
     """Build a named composite, rewrite its process addresses, and write JSON.
 
@@ -177,6 +198,12 @@ def export_composite_pbg(
         Optional pre-built process-bigraph core.  If *None*, the workspace's
         own ``build_core()`` is called after ensuring *ws_root* is on
         ``sys.path``.
+    address_form:
+        ``import`` (``local:!<module>.<qualname>``) or ``registry``
+        (``local:<module>.<qualname>``); see :data:`ADDRESS_FORMS`.
+    document_hook:
+        Applied to the built document before its addresses are rewritten
+        (e.g. to add an emitter by its short registry name).
 
     Returns
     -------
@@ -200,19 +227,27 @@ def export_composite_pbg(
         core = _build_core_for_workspace(ws_root)
 
     # Resolve spec: generator branch first, then static-file branch
+    ws_yaml = ws_root / "workspace.yaml"
+    ws_data = (
+        yaml.safe_load(ws_yaml.read_text(encoding="utf-8"))
+        if ws_yaml.is_file()
+        else {}
+    )
+    pkg = ws_data.get("package_path") or (
+        "pbg_" + str(ws_data.get("name", "")).replace("-", "_")
+    )
     spec = _get_spec(composite_id)
+    if spec is None:
+        # A generator registers when its module is imported, and nothing above imports the workspace's
+        # composites (build_core need not). Discover them as every other spec-id lookup does
+        # (run_runner._generator_entry), the workspace's own package included.
+        from process_bigraph.composite_generator import discover_generators
+
+        discover_generators([pkg])
+        spec = _get_spec(composite_id)
     if spec is None:
         from vivarium_workbench.lib.composite_lookup import find_composite_path
 
-        ws_yaml = ws_root / "workspace.yaml"
-        ws_data = (
-            yaml.safe_load(ws_yaml.read_text(encoding="utf-8"))
-            if ws_yaml.is_file()
-            else {}
-        )
-        pkg = ws_data.get("package_path") or (
-            "pbg_" + str(ws_data.get("name", "")).replace("-", "_")
-        )
         path = find_composite_path(ws_root, pkg, composite_id)
         if path is None:
             raise ValueError(f"Composite {composite_id!r} not found in workspace {ws_root}")
@@ -235,11 +270,32 @@ def export_composite_pbg(
     # anyway, strip them up front so the deepcopy only ever copies plain spec
     # data. See ``strip_realized_edge_fields`` / ``_REALIZED_EDGE_FIELDS``.
     document = strip_realized_edge_fields(document)
-    document = rewrite_local_addresses(document, core)
+    if document_hook is not None:
+        document = document_hook(document)
+    document = rewrite_local_addresses(document, core, address_form=address_form)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(document, default=str), encoding="utf-8")
+    # Only a registry-form document is strict: the import form's runners (viva-v1, SMS) have always read the
+    # ``str`` of a value JSON has no type for, and their exports must not start failing.
+    default = _document_value if address_form == "registry" else str
+    out_path.write_text(json.dumps(document, default=default), encoding="utf-8")
     return out_path
+
+
+def _document_value(o: object) -> object:
+    """A document value JSON has no type for, as the value a runner rebuilds it from.
+
+    A numpy array becomes its nested list (bigraph-schema realizes an ``array``
+    with ``np.array`` of it) and a numpy scalar its Python scalar. Anything else
+    is refused: writing its ``str`` would export a document that no longer runs
+    (an array's repr is not an array).
+    """
+    if isinstance(o, Path):
+        return str(o)
+    tolist = getattr(o, "tolist", None)
+    if callable(tolist) and getattr(getattr(o, "dtype", None), "names", None) is None:
+        return tolist()
+    raise TypeError(f"cannot export a {type(o).__module__}.{type(o).__qualname__} value into a composite document")
 
 
 def _build_core_for_workspace(ws_root: Path):

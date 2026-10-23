@@ -1,0 +1,6533 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "compose-api",
+    "version": "0.7.35"
+  },
+  "paths": {
+    "/curated/copasi": {
+      "post": {
+        "tags": [
+          "Curated"
+        ],
+        "summary": "Use the tool copasi.",
+        "operationId": "run-copasi",
+        "parameters": [
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Start Time"
+            }
+          },
+          {
+            "name": "duration",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Duration"
+            }
+          },
+          {
+            "name": "num_data_points",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Num Data Points"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_run-copasi"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationExperiment"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/curated/tellurium": {
+      "post": {
+        "tags": [
+          "Curated"
+        ],
+        "summary": "Use the tool tellurium.",
+        "operationId": "run-tellurium",
+        "parameters": [
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Start Time"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "End Time"
+            }
+          },
+          {
+            "name": "num_data_points",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Num Data Points"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_run-tellurium"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationExperiment"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/simulation/run": {
+      "post": {
+        "tags": [
+          "Simulation"
+        ],
+        "summary": "Run a simulation",
+        "description": "`simulator` names an owner-published image this deployment lists (settings.prebuilt_simulators);\nthe job then runs in that image instead of the shared container. Omitted: the shared container.\n\nThe run is labelled `source=upload` and `environment=<simulator or registry_env>`; `tags` and `description` are\nstored with it as given (compose_api/simulation/labels.py) and filter `GET /simulations`.",
+        "operationId": "run-simulation",
+        "parameters": [
+          {
+            "name": "interval_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 1.0,
+              "title": "Interval Time"
+            }
+          },
+          {
+            "name": "batch_submission",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Batch Submission"
+            }
+          },
+          {
+            "name": "simulator",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Simulator"
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags to find the run by later; at most 20, each up to 64 characters",
+              "title": "Tags"
+            },
+            "description": "Tags to find the run by later; at most 20, each up to 64 characters"
+          },
+          {
+            "name": "description",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the run is for; up to 2000 characters",
+              "title": "Description"
+            },
+            "description": "What the run is for; up to 2000 characters"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_run-simulation"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationExperiment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The submission cannot run. For a problem with the request itself (empty file, unsupported type, interval out of range) `detail` is a string. For a problem with its contents (unreadable archive, or processes the registry does not allow) `detail` is an object with a `message` and a `violations` list naming each address."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/simulations": {
+      "get": {
+        "tags": [
+          "Simulations"
+        ],
+        "summary": "List simulations, newest first, each with its latest SLURM job",
+        "operationId": "list-simulations",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "submitting",
+                    "waiting",
+                    "queued",
+                    "pending",
+                    "running",
+                    "completed",
+                    "failed",
+                    "cancelled",
+                    "out_of_memory",
+                    "suspended",
+                    "timeout",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only simulations in this state",
+              "title": "Status"
+            },
+            "description": "Only simulations in this state"
+          },
+          {
+            "name": "simulator",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this prebuilt simulator (by name), or container definitions with this hash prefix",
+              "title": "Simulator"
+            },
+            "description": "Only this prebuilt simulator (by name), or container definitions with this hash prefix"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only simulations created at or after this time",
+              "title": "Since"
+            },
+            "description": "Only simulations created at or after this time"
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only simulations with this label, as key:value; repeatable, all must match. Keys: source, environment, solver, model, project, sedml_task, comparison, collection, suite_run",
+              "title": "Label"
+            },
+            "description": "Only simulations with this label, as key:value; repeatable, all must match. Keys: source, environment, solver, model, project, sedml_task, comparison, collection, suite_run"
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only simulations with this tag; repeatable, all must match",
+              "title": "Tag"
+            },
+            "description": "Only simulations with this tag; repeatable, all must match"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/simulations/{simulation_id}": {
+      "get": {
+        "tags": [
+          "Simulations"
+        ],
+        "summary": "Describe one simulation: its latest SLURM job, and how many events and datasets its run recorded",
+        "operationId": "get-simulation",
+        "parameters": [
+          {
+            "name": "simulation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The simulation does not exist, or the caller may not read it"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Simulations"
+        ],
+        "summary": "Cancel a run: withdraw it from the queue, or ask SLURM to cancel its job",
+        "description": "Any signed-in caller who may read the simulation may cancel it, while no simulation has an owner (every one is\npublic until submissions stamp one, docs/plan-observability.md step 5); then its owner and configured admins.",
+        "operationId": "cancel-simulation",
+        "parameters": [
+          {
+            "name": "simulation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulation Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationCancellation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Cancelling needs a signed-in caller"
+          },
+          "404": {
+            "description": "The simulation does not exist, or the caller may not read it"
+          },
+          "409": {
+            "description": "The run has finished, or is being submitted to SLURM right now"
+          },
+          "502": {
+            "description": "SLURM could not be asked to cancel the job; try again"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/simulations/status/batch": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get simulation status records for a list of IDs",
+        "operationId": "get-simulations-status-batch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array",
+                "title": "Ids"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HpcRun"
+                  },
+                  "type": "array",
+                  "title": "Response Get-Simulations-Status-Batch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/simulation/status": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get the simulation status record by its ID",
+        "operationId": "get-simulation-status",
+        "parameters": [
+          {
+            "name": "simulation_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HpcRun"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource does not exist"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/simulation/results/file": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get simulation results as a zip file",
+        "operationId": "get-simulation-results-file",
+        "parameters": [
+          {
+            "name": "simulation_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Simulation result zip file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The simulation does not exist, or its results are not available"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/simulator/build/status": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get the simulator build status record by its ID",
+        "operationId": "get-simulator-build-status",
+        "parameters": [
+          {
+            "name": "simulator_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulator Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HpcRun"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource does not exist"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/simulator/build/log": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "The SLURM log of a simulator's newest container build (its last 200 KB)",
+        "operationId": "get-simulator-build-log",
+        "parameters": [
+          {
+            "name": "simulator_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulator Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource does not exist"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/simulation/events": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get a page of a simulation's events, in the order they were recorded",
+        "operationId": "get-simulation-events",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return events after this cursor (a previous page's next)",
+              "title": "After"
+            },
+            "description": "Return events after this cursor (a previous page's next)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 500,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events at this level (debug, info, warning, error)",
+              "title": "Level"
+            },
+            "description": "Only events at this level (debug, info, warning, error)"
+          },
+          {
+            "name": "event",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events with this name, e.g. job.end",
+              "title": "Event"
+            },
+            "description": "Only events with this name, e.g. job.end"
+          },
+          {
+            "name": "span_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events inside this span",
+              "title": "Span Id"
+            },
+            "description": "Only events inside this span"
+          },
+          {
+            "name": "simulation_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunEventPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource does not exist"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/simulation/trace": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get a simulation's spans as a tree, each span with its own events",
+        "operationId": "get-simulation-trace",
+        "parameters": [
+          {
+            "name": "simulation_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTraceTree"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource does not exist"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/simulation/trace/chrome": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get a simulation's trace as a Chrome Trace Event document (open it in ui.perfetto.dev)",
+        "operationId": "get-simulation-trace-chrome",
+        "parameters": [
+          {
+            "name": "simulation_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get-Simulation-Trace-Chrome"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource does not exist"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/core/simulator/list": {
+      "get": {
+        "tags": [
+          "Compute"
+        ],
+        "summary": "Get the list of simulators",
+        "operationId": "get-simulator-list",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredSimulators"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/core/processes/list": {
+      "get": {
+        "tags": [
+          "Compute"
+        ],
+        "summary": "Get the list of processes",
+        "operationId": "get-processes-list",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BiGraphProcess"
+                  },
+                  "type": "array",
+                  "title": "Response Get-Processes-List"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/core/steps/list": {
+      "get": {
+        "tags": [
+          "Compute"
+        ],
+        "summary": "Get the list of processes",
+        "operationId": "get-steps-list",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BiGraphStep"
+                  },
+                  "type": "array",
+                  "title": "Response Get-Steps-List"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/datasets": {
+      "get": {
+        "tags": [
+          "Datasets"
+        ],
+        "summary": "List the datasets runs advertised, newest simulations first",
+        "operationId": "list-datasets",
+        "parameters": [
+          {
+            "name": "simulation_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this simulation's datasets",
+              "title": "Simulation Id"
+            },
+            "description": "Only this simulation's datasets"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this kind, e.g. results, table, figure, archive",
+              "title": "Kind"
+            },
+            "description": "Only this kind, e.g. results, table, figure, archive"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only datasets whose path or name contains this",
+              "title": "Q"
+            },
+            "description": "Only datasets whose path or name contains this"
+          },
+          {
+            "name": "available",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only files that still exist (false: only missing)",
+              "default": true,
+              "title": "Available"
+            },
+            "description": "Only files that still exist (false: only missing)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The simulation does not exist, or the caller may not read it"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{dataset_id}": {
+      "get": {
+        "tags": [
+          "Datasets"
+        ],
+        "summary": "Describe one dataset",
+        "operationId": "get-dataset",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dataset"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The dataset does not exist, or the caller may not read it"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{dataset_id}/content": {
+      "get": {
+        "tags": [
+          "Datasets"
+        ],
+        "summary": "Read a dataset's file (supports HTTP Range requests)",
+        "operationId": "get-dataset-content",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The dataset does not exist, the caller may not read it, or its file is gone"
+          },
+          "409": {
+            "description": "The dataset is a directory (a zarr store): read its files with get-dataset-file"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{dataset_id}/files/{subpath}": {
+      "get": {
+        "tags": [
+          "Datasets"
+        ],
+        "summary": "Read one file inside a directory dataset, e.g. a zarr store's metadata or chunk (supports HTTP Range)",
+        "description": "A directory dataset (a ``*.fenics`` results bundle, a ``*.zarr`` store) is read file by file, so a browser\ncan fetch one chunk at a time with no server-side reduction (docs/plan-viewers.md F1). ``no-cache``: a live\nrun rewrites the bundle's manifest after every row, so clients revalidate (the ETag makes that cheap).",
+        "operationId": "get-dataset-file",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "subpath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Subpath"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The dataset does not exist, the caller may not read it, it is not a directory, or it has no such file"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/environments": {
+      "get": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "The environments documents run in, with what their interface manifests hold",
+        "operationId": "list-environments",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EnvironmentSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List-Environments"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/environments/{name}/manifest": {
+      "get": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "An environment's interface manifest (pbg-interfaces/1), each component with its registry entry",
+        "operationId": "get-environment-manifest",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceManifest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such environment here, or no manifest has been generated for it"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/environments/{name}/headers": {
+      "get": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "An environment's interfaces as .pblang header files (one per module), and each class's declaration",
+        "operationId": "get-environment-headers",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentHeaders"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such environment here, or no manifest has been generated for it"
+          },
+          "503": {
+            "description": "process-bigraph-lang is not installed in this deployment"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/entries": {
+      "get": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "The catalog: every registry entry with its curation level, pin and evidence, and the environments that provide its classes",
+        "operationId": "list-registry-entries",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogEntry"
+                  },
+                  "type": "array",
+                  "title": "Response List-Registry-Entries"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/solvers": {
+      "get": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "The solvers SED-ML runs can use: each one's class, environment, KiSAO algorithms and what it returns",
+        "operationId": "list-solvers",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Solver"
+                  },
+                  "type": "array",
+                  "title": "Response List-Solvers"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/environments/{name}/images": {
+      "get": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "Whether an environment's current image is built, with its image records and newest build run",
+        "operationId": "get-environment-images",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such environment here"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/environments/{name}/build": {
+      "post": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "Make an environment's current image available: 200 if it is, 202 once its pull or build has started",
+        "operationId": "build-environment",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageStatus"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Its pull or build has started (or was already under way)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such environment here"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/simulators/{simulator_id}/images": {
+      "get": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "Whether a simulator's image is built, with its image records and newest build run",
+        "operationId": "get-simulator-images",
+        "parameters": [
+          {
+            "name": "simulator_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulator Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such simulator"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registry/simulators/{simulator_id}/build": {
+      "post": {
+        "tags": [
+          "Registry"
+        ],
+        "summary": "Make a simulator's image available: 200 if it is, 202 once its pull or build has started",
+        "operationId": "build-simulator",
+        "parameters": [
+          {
+            "name": "simulator_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Simulator Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageStatus"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Its pull or build has started (or was already under way)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such simulator"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sedml/preview": {
+      "post": {
+        "tags": [
+          "SED-ML"
+        ],
+        "summary": "Translate a SED-ML archive without running it: its tasks, and what each solver would run or why not",
+        "operationId": "preview-sedml",
+        "parameters": [
+          {
+            "name": "solvers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solvers to run (registry/solvers.yaml); all when omitted",
+              "title": "Solvers"
+            },
+            "description": "Solvers to run (registry/solvers.yaml); all when omitted"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_preview-sedml"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SedmlPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sedml/run": {
+      "post": {
+        "tags": [
+          "SED-ML"
+        ],
+        "summary": "Run each task of a SED-ML archive on several solvers, one run per solver, grouped by a comparison",
+        "operationId": "run-sedml",
+        "parameters": [
+          {
+            "name": "solvers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solvers to run (registry/solvers.yaml); all when omitted",
+              "title": "Solvers"
+            },
+            "description": "Solvers to run (registry/solvers.yaml); all when omitted"
+          },
+          {
+            "name": "task",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only these SED-ML task ids; all when omitted",
+              "title": "Task"
+            },
+            "description": "Only these SED-ML task ids; all when omitted"
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for every run",
+              "title": "Tags"
+            },
+            "description": "Tags for every run"
+          },
+          {
+            "name": "description",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Description"
+            }
+          },
+          {
+            "name": "rel_tol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "default": 0.0001,
+              "title": "Rel Tol"
+            }
+          },
+          {
+            "name": "abs_tol_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.001,
+              "title": "Abs Tol Min"
+            }
+          },
+          {
+            "name": "abs_tol_scale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "default": 1e-05,
+              "title": "Abs Tol Scale"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_run-sedml"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SedmlRunResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not an archive, an unknown solver, a bad tag, or no task any solver accepted"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comparisons": {
+      "get": {
+        "tags": [
+          "SED-ML"
+        ],
+        "summary": "List comparisons, newest first",
+        "operationId": "list-comparisons",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this source, e.g. upload:x.omex or biomodels:BIOMD\u2026",
+              "title": "Source"
+            },
+            "description": "Only this source, e.g. upload:x.omex or biomodels:BIOMD\u2026"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComparisonPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comparisons/{comparison_id}": {
+      "get": {
+        "tags": [
+          "SED-ML"
+        ],
+        "summary": "One comparison: its runs, and per report and data set each solver pair's score",
+        "operationId": "get-comparison",
+        "parameters": [
+          {
+            "name": "comparison_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Comparison Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comparison"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such comparison"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comparisons/{comparison_id}/series": {
+      "get": {
+        "tags": [
+          "SED-ML"
+        ],
+        "summary": "One report's columns from each run and each reference, for overlays",
+        "operationId": "get-comparison-series",
+        "parameters": [
+          {
+            "name": "comparison_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Comparison Id"
+            }
+          },
+          {
+            "name": "report",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Report"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComparisonSeries"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such comparison or report"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comparisons/{comparison_id}/verify": {
+      "post": {
+        "tags": [
+          "SED-ML"
+        ],
+        "summary": "Check a comparison against BioSimulators' simulators through biosim's /verify (queued; 201 when new)",
+        "operationId": "verify-comparison",
+        "parameters": [
+          {
+            "name": "comparison_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Comparison Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/VerifyRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Verification"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "A verification for the same simulators is already queued or running; it is returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Verification"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such comparison"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comparisons/{comparison_id}/verifications": {
+      "get": {
+        "tags": [
+          "SED-ML"
+        ],
+        "summary": "A comparison's verifications against biosim's /verify, oldest first",
+        "operationId": "list-comparison-verifications",
+        "parameters": [
+          {
+            "name": "comparison_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Comparison Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Verification"
+                  },
+                  "title": "Response List-Comparison-Verifications"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such comparison"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biomodels/search": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Search EBI BioModels (manually curated models unless curated=false)",
+        "operationId": "search-biomodels",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "curated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Curated"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BiomodelHit"
+                  },
+                  "title": "Response Search-Biomodels"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biomodels/{model_id}": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "One BioModels entry: name, curation status, latest revision",
+        "operationId": "get-biomodel",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BiomodelInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such model or project upstream"
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biomodels/{model_id}/omex": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "The entry's COMBINE archive (its latest revision)",
+        "operationId": "get-biomodel-omex",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such model or project upstream"
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biomodels/{model_id}/run": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Run a BioModels entry's SED-ML on several solvers (as /sedml/run)",
+        "operationId": "run-biomodel",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          },
+          {
+            "name": "solvers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solvers to run (registry/solvers.yaml); all when omitted",
+              "title": "Solvers"
+            },
+            "description": "Solvers to run (registry/solvers.yaml); all when omitted"
+          },
+          {
+            "name": "task",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only these SED-ML task ids; all when omitted",
+              "title": "Task"
+            },
+            "description": "Only these SED-ML task ids; all when omitted"
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for every run",
+              "title": "Tags"
+            },
+            "description": "Tags for every run"
+          },
+          {
+            "name": "description",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Description"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SedmlRunResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such model or project upstream"
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biosimulations/projects": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "biosimulations.org projects whose id contains q",
+        "operationId": "search-biosimulations-projects",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectInfo"
+                  },
+                  "title": "Response Search-Biosimulations-Projects"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biosimulations/{project_id}": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "One biosimulations.org project: its run and the simulator that ran it",
+        "operationId": "get-biosimulations-project",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such model or project upstream"
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biosimulations/{project_id}/omex": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "The project's archive",
+        "operationId": "get-biosimulations-omex",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such model or project upstream"
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biosimulations/{project_id}/reference": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "The project's original results: each report as {label: values}",
+        "operationId": "get-biosimulations-reference",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "title": "Response Get-Biosimulations-Reference"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such model or project upstream"
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/biosimulations/{project_id}/run": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Run a project's SED-ML on several solvers, its original results as the reference",
+        "operationId": "run-biosimulations-project",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "solvers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solvers to run (registry/solvers.yaml); all when omitted",
+              "title": "Solvers"
+            },
+            "description": "Solvers to run (registry/solvers.yaml); all when omitted"
+          },
+          {
+            "name": "task",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only these SED-ML task ids; all when omitted",
+              "title": "Task"
+            },
+            "description": "Only these SED-ML task ids; all when omitted"
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for every run",
+              "title": "Tags"
+            },
+            "description": "Tags for every run"
+          },
+          {
+            "name": "description",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Description"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SedmlRunResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such model or project upstream"
+          },
+          "502": {
+            "description": "The upstream service did not answer as expected"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/suites": {
+      "get": {
+        "tags": [
+          "Suites"
+        ],
+        "summary": "The suites",
+        "operationId": "list-suites",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Suite"
+                  },
+                  "type": "array",
+                  "title": "Response List-Suites"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/suites/{name}/runs": {
+      "get": {
+        "tags": [
+          "Suites"
+        ],
+        "summary": "A suite's runs, newest first",
+        "operationId": "list-suite-runs",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SuiteRunInfo"
+                  },
+                  "title": "Response List-Suite-Runs"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such suite"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/suites/{name}/runs/{number}": {
+      "get": {
+        "tags": [
+          "Suites"
+        ],
+        "summary": "One suite run: per source, agreement, references, and drift from the baseline run",
+        "operationId": "get-suite-run",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuiteRunView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such suite or run"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/suites/{name}/run": {
+      "post": {
+        "tags": [
+          "Suites"
+        ],
+        "summary": "Run every source of the suite on its solvers (submitted in the background)",
+        "operationId": "run-suite",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuiteRunInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such suite"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/suites/{name}/runs/{number}/verify": {
+      "post": {
+        "tags": [
+          "Suites"
+        ],
+        "summary": "Queue a verification against biosim's /verify for a suite run's finished comparisons",
+        "operationId": "verify-suite-run",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Number"
+            }
+          },
+          {
+            "name": "which",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "failing",
+                "all"
+              ],
+              "type": "string",
+              "description": "failing: those that differ, are incomplete, or no agreeing reference settles; all: every one",
+              "default": "failing",
+              "title": "Which"
+            },
+            "description": "failing: those that differ, are incomplete, or no agreeing reference settles; all: every one"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuiteVerifyResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such suite or run"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get the authenticated caller's identity",
+        "operationId": "get-current-principal",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPrincipalResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer credentials"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "BIOSIM API"
+        ],
+        "summary": "Check Health",
+        "operationId": "check_health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Check Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "tags": [
+          "BIOSIM API"
+        ],
+        "summary": "Get Version",
+        "operationId": "get_version_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "title": "Response Get Version Version Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BiGraphComputeType": {
+        "type": "string",
+        "enum": [
+          "process",
+          "step"
+        ],
+        "title": "BiGraphComputeType"
+      },
+      "BiGraphProcess": {
+        "properties": {
+          "module": {
+            "type": "string",
+            "title": "Module"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "compute_type": {
+            "$ref": "#/components/schemas/BiGraphComputeType"
+          },
+          "inputs": {
+            "type": "string",
+            "title": "Inputs"
+          },
+          "outputs": {
+            "type": "string",
+            "title": "Outputs"
+          },
+          "database_id": {
+            "type": "integer",
+            "title": "Database Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "module",
+          "name",
+          "compute_type",
+          "inputs",
+          "outputs",
+          "database_id"
+        ],
+        "title": "BiGraphProcess"
+      },
+      "BiGraphStep": {
+        "properties": {
+          "module": {
+            "type": "string",
+            "title": "Module"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "compute_type": {
+            "$ref": "#/components/schemas/BiGraphComputeType"
+          },
+          "inputs": {
+            "type": "string",
+            "title": "Inputs"
+          },
+          "outputs": {
+            "type": "string",
+            "title": "Outputs"
+          },
+          "database_id": {
+            "type": "integer",
+            "title": "Database Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "module",
+          "name",
+          "compute_type",
+          "inputs",
+          "outputs",
+          "database_id"
+        ],
+        "title": "BiGraphStep"
+      },
+      "BiomodelHit": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "BiomodelHit"
+      },
+      "BiomodelInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "curation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curation"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "publication": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url"
+        ],
+        "title": "BiomodelInfo"
+      },
+      "Body_preview-sedml": {
+        "properties": {
+          "archive": {
+            "type": "string",
+            "title": "Archive",
+            "format": "binary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "archive"
+        ],
+        "title": "Body_preview-sedml"
+      },
+      "Body_run-copasi": {
+        "properties": {
+          "sbml": {
+            "type": "string",
+            "title": "Sbml",
+            "format": "binary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sbml"
+        ],
+        "title": "Body_run-copasi"
+      },
+      "Body_run-sedml": {
+        "properties": {
+          "archive": {
+            "type": "string",
+            "title": "Archive",
+            "format": "binary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "archive"
+        ],
+        "title": "Body_run-sedml"
+      },
+      "Body_run-simulation": {
+        "properties": {
+          "uploaded_file": {
+            "type": "string",
+            "title": "Uploaded File",
+            "format": "binary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "uploaded_file"
+        ],
+        "title": "Body_run-simulation"
+      },
+      "Body_run-tellurium": {
+        "properties": {
+          "sbml": {
+            "type": "string",
+            "title": "Sbml",
+            "format": "binary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sbml"
+        ],
+        "title": "Body_run-tellurium"
+      },
+      "CatalogEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "package": {
+            "type": "string",
+            "title": "Package"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "level": {
+            "$ref": "#/components/schemas/CurationLevel"
+          },
+          "module_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Module Roots"
+          },
+          "bundles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Bundles"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          },
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/EntryEnvironment"
+            },
+            "type": "array",
+            "title": "Environments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "package",
+          "source",
+          "level",
+          "module_roots"
+        ],
+        "title": "CatalogEntry",
+        "description": "A registry entry as the catalog shows it (docs/plan-sedml.md, \"Concepts\"): what it is, how far it is trusted,\nand which of this deployment's environments provide its classes. Most `listed` entries are in none."
+      },
+      "Comparison": {
+        "properties": {
+          "comparison_id": {
+            "type": "integer",
+            "title": "Comparison Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "sedml": {
+            "type": "string",
+            "title": "Sedml"
+          },
+          "task": {
+            "type": "string",
+            "title": "Task"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "complete",
+              "incomplete"
+            ],
+            "title": "Status"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Settings"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonMember"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "close": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close",
+            "description": "every compared data set close, every member completed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comparison_id",
+          "name",
+          "source",
+          "sedml",
+          "task",
+          "status",
+          "settings",
+          "members"
+        ],
+        "title": "Comparison",
+        "description": "One SED-ML task run on several solvers. `result` is filled once every member has finished: per report and\ndata set label, each solver pair's score and whether it is close."
+      },
+      "ComparisonMember": {
+        "properties": {
+          "solver": {
+            "type": "string",
+            "title": "Solver"
+          },
+          "simulation_id": {
+            "type": "integer",
+            "title": "Simulation Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "solver",
+          "simulation_id"
+        ],
+        "title": "ComparisonMember"
+      },
+      "ComparisonPage": {
+        "properties": {
+          "comparisons": {
+            "items": {
+              "$ref": "#/components/schemas/Comparison"
+            },
+            "type": "array",
+            "title": "Comparisons"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comparisons",
+          "total"
+        ],
+        "title": "ComparisonPage"
+      },
+      "ComparisonSeries": {
+        "properties": {
+          "report": {
+            "type": "string",
+            "title": "Report"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Labels"
+          },
+          "solvers": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Solvers"
+          },
+          "references": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "References"
+          }
+        },
+        "type": "object",
+        "required": [
+          "report",
+          "labels",
+          "solvers",
+          "references"
+        ],
+        "title": "ComparisonSeries",
+        "description": "One report's columns from each member (by solver) and each reference (by origin), for overlays."
+      },
+      "ContainerizationEngine": {
+        "type": "integer",
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "title": "ContainerizationEngine"
+      },
+      "ContainerizationFileRepr": {
+        "properties": {
+          "representation": {
+            "type": "string",
+            "title": "Representation"
+          },
+          "containerization_engine": {
+            "$ref": "#/components/schemas/ContainerizationEngine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "representation",
+          "containerization_engine"
+        ],
+        "title": "ContainerizationFileRepr"
+      },
+      "CurationLevel": {
+        "type": "string",
+        "enum": [
+          "listed",
+          "installable",
+          "tested",
+          "validated",
+          "curated"
+        ],
+        "title": "CurationLevel",
+        "description": "The curation ladder, lowest first. Order matters: comparisons use the declaration order."
+      },
+      "CurrentPrincipalResponse": {
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "audience": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Audience"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issuer",
+          "subject",
+          "audience",
+          "roles",
+          "scopes",
+          "permissions"
+        ],
+        "title": "CurrentPrincipalResponse"
+      },
+      "Dataset": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "simulation_id": {
+            "type": "integer",
+            "title": "Simulation Id"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Span Id"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "default": true
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "simulation_id",
+          "path",
+          "kind",
+          "media_type",
+          "display_name",
+          "origin"
+        ],
+        "title": "Dataset",
+        "description": "A file a run produced, readable by anyone who may read its simulation (O7)."
+      },
+      "DatasetPage": {
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/Dataset"
+            },
+            "type": "array",
+            "title": "Datasets"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasets",
+          "total"
+        ],
+        "title": "DatasetPage"
+      },
+      "Drift": {
+        "properties": {
+          "close": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close"
+          },
+          "worst_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Label"
+          },
+          "worst_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "close"
+        ],
+        "title": "Drift",
+        "description": "One solver's result against its own result in the suite's baseline run."
+      },
+      "EntryEnvironment": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "components": {
+            "type": "integer",
+            "title": "Components"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "components"
+        ],
+        "title": "EntryEnvironment",
+        "description": "An environment that provides some of a registry entry's classes, and how many."
+      },
+      "EntryRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "level": {
+            "$ref": "#/components/schemas/CurationLevel"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "level"
+        ],
+        "title": "EntryRef",
+        "description": "The registry entry a component belongs to (by module root), and its curation level."
+      },
+      "EnvironmentHeaders": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "modules": {
+            "items": {
+              "$ref": "#/components/schemas/HeaderModule"
+            },
+            "type": "array",
+            "title": "Modules"
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Components",
+            "description": "Each class's declaration, by address"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "modules",
+          "components"
+        ],
+        "title": "EnvironmentHeaders"
+      },
+      "EnvironmentImage": {
+        "properties": {
+          "database_id": {
+            "type": "integer",
+            "title": "Database Id"
+          },
+          "simulator_id": {
+            "type": "integer",
+            "title": "Simulator Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ImageKind"
+          },
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "hpcrun_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hpcrun Id"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "default": true
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "database_id",
+          "simulator_id",
+          "kind",
+          "location"
+        ],
+        "title": "EnvironmentImage",
+        "description": "A built or pulled image of a simulator's definition (docs/plan-environment-builds.md, E3).\n\nImages are write-once (E4): one that turns out missing is marked unavailable, never replaced in place."
+      },
+      "EnvironmentSummary": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "prebuilt"
+            ],
+            "title": "Kind"
+          },
+          "simulator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulator",
+            "description": "The value of /simulation/run's `simulator` for this environment"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image",
+            "description": "The image this deployment runs it in"
+          },
+          "manifest_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifest Image",
+            "description": "The image the manifest was read from"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "description": "The manifest was read from another image than the one deployed"
+          },
+          "process_bigraph": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Bigraph"
+          },
+          "components": {
+            "type": "integer",
+            "title": "Components"
+          },
+          "errors": {
+            "type": "integer",
+            "title": "Errors"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/EntryRef"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "simulator",
+          "image",
+          "manifest_image",
+          "stale",
+          "components",
+          "errors",
+          "entries"
+        ],
+        "title": "EnvironmentSummary"
+      },
+      "ExpectedFailure": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "solver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solver"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "reason"
+        ],
+        "title": "ExpectedFailure"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HeaderModule": {
+        "properties": {
+          "module": {
+            "type": "string",
+            "title": "Module"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "The module's header file (`module \u2026;` and one declaration per class)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "module",
+          "text"
+        ],
+        "title": "HeaderModule"
+      },
+      "HpcRun": {
+        "properties": {
+          "database_id": {
+            "type": "integer",
+            "title": "Database Id"
+          },
+          "slurmjobid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slurmjobid"
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "default": "slurm"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id"
+          },
+          "job_type": {
+            "$ref": "#/components/schemas/JobType"
+          },
+          "sim_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sim Id"
+          },
+          "simulator_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulator Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "database_id",
+          "slurmjobid",
+          "correlation_id",
+          "job_type",
+          "sim_id",
+          "simulator_id"
+        ],
+        "title": "HpcRun"
+      },
+      "ImageKind": {
+        "type": "string",
+        "enum": [
+          "sif",
+          "oci"
+        ],
+        "title": "ImageKind"
+      },
+      "ImageState": {
+        "type": "string",
+        "enum": [
+          "available",
+          "building",
+          "failed",
+          "missing"
+        ],
+        "title": "ImageState"
+      },
+      "ImageStatus": {
+        "properties": {
+          "simulator_id": {
+            "type": "integer",
+            "title": "Simulator Id"
+          },
+          "container_def_hash": {
+            "type": "string",
+            "title": "Container Def Hash"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment",
+            "description": "The environment whose current definition this is"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ImageState"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnvironmentImage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The available image runs use"
+          },
+          "build": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HpcRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The newest build run of the definition"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/EnvironmentImage"
+            },
+            "type": "array",
+            "title": "Images",
+            "description": "Every image recorded, newest first"
+          }
+        },
+        "type": "object",
+        "required": [
+          "simulator_id",
+          "container_def_hash",
+          "state"
+        ],
+        "title": "ImageStatus",
+        "description": "Whether a simulator's image is there to run from, and the records behind that answer."
+      },
+      "InterfaceComponent": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "module": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "config_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config Schema"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "outputs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputs"
+          },
+          "dynamic_ports": {
+            "type": "boolean",
+            "title": "Dynamic Ports",
+            "default": false
+          },
+          "registry_entry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntryRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "address"
+        ],
+        "title": "InterfaceComponent",
+        "description": "One step or process class, as `pbg-interfaces/1` describes it; unknown keys pass through."
+      },
+      "InterfaceManifest": {
+        "properties": {
+          "$schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "$Schema"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/InterfaceComponent"
+            },
+            "type": "array",
+            "title": "Components"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "components"
+        ],
+        "title": "InterfaceManifest",
+        "description": "An environment's interface manifest (`pbg-interfaces/1`), with each component's registry entry added."
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "waiting",
+          "queued",
+          "running",
+          "completed",
+          "failed",
+          "pending",
+          "cancelled",
+          "out_of_memory",
+          "suspended",
+          "timeout",
+          "unknown"
+        ],
+        "title": "JobStatus"
+      },
+      "JobType": {
+        "type": "string",
+        "enum": [
+          "simulation",
+          "build_container"
+        ],
+        "title": "JobType"
+      },
+      "PackageType": {
+        "type": "string",
+        "enum": [
+          "pypi",
+          "conda"
+        ],
+        "title": "PackageType"
+      },
+      "ProjectInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "run": {
+            "type": "string",
+            "title": "Run"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "simulator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulator"
+          },
+          "simulator_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulator Version"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "run",
+          "url"
+        ],
+        "title": "ProjectInfo"
+      },
+      "RegisteredPackage": {
+        "properties": {
+          "database_id": {
+            "type": "integer",
+            "title": "Database Id"
+          },
+          "package_type": {
+            "$ref": "#/components/schemas/PackageType"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "processes": {
+            "items": {
+              "$ref": "#/components/schemas/BiGraphProcess"
+            },
+            "type": "array",
+            "title": "Processes"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/BiGraphStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "database_id",
+          "package_type",
+          "name",
+          "processes",
+          "steps"
+        ],
+        "title": "RegisteredPackage"
+      },
+      "RegisteredSimulators": {
+        "properties": {
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/SimulatorVersion"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "versions"
+        ],
+        "title": "RegisteredSimulators"
+      },
+      "RunEvent": {
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "ts": {
+            "type": "string",
+            "title": "Ts"
+          },
+          "component": {
+            "type": "string",
+            "title": "Component"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "level": {
+            "type": "string",
+            "title": "Level",
+            "default": "info"
+          },
+          "baggage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baggage"
+          },
+          "global_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Time"
+          },
+          "wall_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Time"
+          },
+          "span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Span Id"
+          },
+          "parent_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Span Id"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "source",
+          "ts",
+          "component",
+          "event"
+        ],
+        "title": "RunEvent",
+        "description": "One structured event of a run, from the API, the job script or the simulator's engine."
+      },
+      "RunEventPage": {
+        "properties": {
+          "simulation_id": {
+            "type": "integer",
+            "title": "Simulation Id"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RunEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "simulation_id",
+          "trace_id",
+          "events"
+        ],
+        "title": "RunEventPage",
+        "description": "A page of a simulation's events, in the order they were recorded.\n\n``next_cursor`` is the ``after`` for the next page, None at the end."
+      },
+      "RunSpan": {
+        "properties": {
+          "span_id": {
+            "type": "string",
+            "title": "Span Id"
+          },
+          "parent_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Span Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "attrs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attrs"
+          },
+          "start_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ts"
+          },
+          "end_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Ts"
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "span_id",
+          "name"
+        ],
+        "title": "RunSpan",
+        "description": "A node of a run's trace tree, folded from ``span.start`` / ``span.end`` events. ``end_ts`` is None while open."
+      },
+      "RunTraceTree": {
+        "properties": {
+          "simulation_id": {
+            "type": "integer",
+            "title": "Simulation Id"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "roots": {
+            "items": {
+              "$ref": "#/components/schemas/SpanTree"
+            },
+            "type": "array",
+            "title": "Roots"
+          }
+        },
+        "type": "object",
+        "required": [
+          "simulation_id",
+          "trace_id",
+          "roots"
+        ],
+        "title": "RunTraceTree",
+        "description": "A simulation's spans as a forest, each span carrying its own events."
+      },
+      "SedmlFinding": {
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "solver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solver"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "severity",
+          "code",
+          "message"
+        ],
+        "title": "SedmlFinding",
+        "description": "A finding of the translation (process-bigraph-lang's `X4xx`) or of the checker on a solver's instance."
+      },
+      "SedmlPreview": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/SedmlTask"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/SedmlFinding"
+            },
+            "type": "array",
+            "title": "Findings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "tasks",
+          "findings"
+        ],
+        "title": "SedmlPreview"
+      },
+      "SedmlRunResult": {
+        "properties": {
+          "comparisons": {
+            "items": {
+              "$ref": "#/components/schemas/Comparison"
+            },
+            "type": "array",
+            "title": "Comparisons"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/SedmlFinding"
+            },
+            "type": "array",
+            "title": "Findings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comparisons",
+          "findings"
+        ],
+        "title": "SedmlRunResult"
+      },
+      "SedmlTask": {
+        "properties": {
+          "sedml": {
+            "type": "string",
+            "title": "Sedml"
+          },
+          "task": {
+            "type": "string",
+            "title": "Task"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "template": {
+            "type": "string",
+            "title": "Template"
+          },
+          "solvers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Solvers",
+            "description": "the solvers whose instance compiled"
+          },
+          "refused": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Refused",
+            "description": "the solvers refused by an error finding"
+          },
+          "reports": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reports"
+          },
+          "plots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Plots"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sedml",
+          "task",
+          "name",
+          "template",
+          "solvers"
+        ],
+        "title": "SedmlTask",
+        "description": "One SED-ML task: its translation's template text, the solvers that accept it, and its reports and plots."
+      },
+      "SimulationCancellation": {
+        "properties": {
+          "simulation_id": {
+            "type": "integer",
+            "title": "Simulation Id"
+          },
+          "withdrawn": {
+            "type": "boolean",
+            "title": "Withdrawn"
+          },
+          "slurm_job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slurm Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "simulation_id",
+          "withdrawn"
+        ],
+        "title": "SimulationCancellation",
+        "description": "A cancellation accepted. ``withdrawn``: the run was taken off the queue before SLURM had it, and is cancelled\nnow. Otherwise SLURM was asked to cancel ``slurm_job_id``, and the run's status reads ``cancelled`` once the job\nmonitor sees SLURM report it."
+      },
+      "SimulationDetail": {
+        "properties": {
+          "simulation_id": {
+            "type": "integer",
+            "title": "Simulation Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "experiment_id": {
+            "type": "string",
+            "title": "Experiment Id"
+          },
+          "simulator_id": {
+            "type": "integer",
+            "title": "Simulator Id"
+          },
+          "simulator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulator"
+          },
+          "container_def_hash": {
+            "type": "string",
+            "title": "Container Def Hash"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility",
+            "default": "public"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "slurm_job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slurm Job Id"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "submission": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubmissionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count",
+            "default": 0
+          },
+          "dataset_count": {
+            "type": "integer",
+            "title": "Dataset Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "simulation_id",
+          "experiment_id",
+          "simulator_id",
+          "container_def_hash",
+          "status"
+        ],
+        "title": "SimulationDetail",
+        "description": "A simulation with what its run recorded."
+      },
+      "SimulationExperiment": {
+        "properties": {
+          "simulation_database_id": {
+            "type": "integer",
+            "title": "Simulation Database Id"
+          },
+          "simulator_database_id": {
+            "type": "integer",
+            "title": "Simulator Database Id"
+          },
+          "last_updated": {
+            "type": "string",
+            "title": "Last Updated"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "simulation_database_id",
+          "simulator_database_id"
+        ],
+        "title": "SimulationExperiment"
+      },
+      "SimulationPage": {
+        "properties": {
+          "simulations": {
+            "items": {
+              "$ref": "#/components/schemas/SimulationSummary"
+            },
+            "type": "array",
+            "title": "Simulations"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "simulations",
+          "total"
+        ],
+        "title": "SimulationPage"
+      },
+      "SimulationSummary": {
+        "properties": {
+          "simulation_id": {
+            "type": "integer",
+            "title": "Simulation Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "experiment_id": {
+            "type": "string",
+            "title": "Experiment Id"
+          },
+          "simulator_id": {
+            "type": "integer",
+            "title": "Simulator Id"
+          },
+          "simulator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulator"
+          },
+          "container_def_hash": {
+            "type": "string",
+            "title": "Container Def Hash"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility",
+            "default": "public"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "slurm_job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slurm Job Id"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "submission": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubmissionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "simulation_id",
+          "experiment_id",
+          "simulator_id",
+          "container_def_hash",
+          "status"
+        ],
+        "title": "SimulationSummary",
+        "description": "One simulation as a listing shows it: what ran, where, and how it went (its latest SLURM job)."
+      },
+      "SimulatorVersion": {
+        "properties": {
+          "container_def": {
+            "$ref": "#/components/schemas/ContainerizationFileRepr"
+          },
+          "container_def_hash": {
+            "type": "string",
+            "title": "Container Def Hash"
+          },
+          "packages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RegisteredPackage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Packages"
+          },
+          "database_id": {
+            "type": "integer",
+            "title": "Database Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "container_def",
+          "container_def_hash",
+          "packages",
+          "database_id"
+        ],
+        "title": "SimulatorVersion"
+      },
+      "Solver": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "type": "string",
+            "const": "TimeCourseSolver",
+            "title": "Role"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "address": {
+            "type": "string",
+            "pattern": "^local:[A-Za-z_][\\w.]*\\.[A-Za-z_]\\w*$",
+            "title": "Address"
+          },
+          "algorithms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Algorithms",
+            "description": "KiSAO terms it implements, its default first"
+          },
+          "provides": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Provides"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "role",
+          "environment",
+          "address",
+          "algorithms"
+        ],
+        "title": "Solver"
+      },
+      "SpanTree": {
+        "properties": {
+          "span": {
+            "$ref": "#/components/schemas/RunSpan"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RunEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/SpanTree"
+            },
+            "type": "array",
+            "title": "Children"
+          }
+        },
+        "type": "object",
+        "required": [
+          "span"
+        ],
+        "title": "SpanTree",
+        "description": "A span with its own events (those whose ``span_id`` is the span's) and its children, by start time."
+      },
+      "SubmissionInfo": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/SubmissionState"
+          },
+          "queue": {
+            "type": "string",
+            "title": "Queue"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts",
+            "default": 0
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "queue"
+        ],
+        "title": "SubmissionInfo",
+        "description": "Where a run is on its way to SLURM (docs/plan-durable-submission.md): the detail behind `submitting`."
+      },
+      "SubmissionState": {
+        "type": "string",
+        "enum": [
+          "requested",
+          "preparing",
+          "submitting",
+          "submitted",
+          "failed"
+        ],
+        "title": "SubmissionState",
+        "description": "Where a run is on its way to SLURM (docs/plan-durable-submission.md, Q1). The public status stays\n``submitting`` until the run has a SLURM job; this is the detail behind it."
+      },
+      "Suite": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Sources"
+          },
+          "solvers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solvers"
+          },
+          "tolerances": {
+            "$ref": "#/components/schemas/Tolerances"
+          },
+          "baseline": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline",
+            "description": "the accepted suite run that later runs are compared with"
+          },
+          "expected": {
+            "items": {
+              "$ref": "#/components/schemas/ExpectedFailure"
+            },
+            "type": "array",
+            "title": "Expected"
+          },
+          "verify": {
+            "type": "string",
+            "enum": [
+              "none",
+              "failing",
+              "all"
+            ],
+            "title": "Verify",
+            "description": "check comparisons against biosim's /verify once they finish: those that differ, are incomplete or have no reference that agrees (failing), or every one (docs/plan-verify-oracle.md, D3)",
+            "default": "none"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "sources"
+        ],
+        "title": "Suite"
+      },
+      "SuiteRunInfo": {
+        "properties": {
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "number",
+          "created_at",
+          "status"
+        ],
+        "title": "SuiteRunInfo"
+      },
+      "SuiteRunRow": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          },
+          "comparison_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "close": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close"
+          },
+          "close_to_references": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close To References"
+          },
+          "worst_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Label"
+          },
+          "worst_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Score"
+          },
+          "drift": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Drift"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drift"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure"
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification"
+          },
+          "verify_close": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verify Close"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "status"
+        ],
+        "title": "SuiteRunRow"
+      },
+      "SuiteRunView": {
+        "properties": {
+          "suite": {
+            "type": "string",
+            "title": "Suite"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "baseline": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/SuiteRunRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "summary": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suite",
+          "number",
+          "created_at",
+          "status",
+          "baseline",
+          "rows",
+          "summary"
+        ],
+        "title": "SuiteRunView"
+      },
+      "SuiteVerifyResult": {
+        "properties": {
+          "queued": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Queued",
+            "description": "comparisons a verification was queued for"
+          },
+          "already": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Already",
+            "description": "comparisons with a verification already queued or running"
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running",
+            "description": "comparisons still running, not yet looked at"
+          }
+        },
+        "type": "object",
+        "required": [
+          "queued",
+          "already",
+          "running"
+        ],
+        "title": "SuiteVerifyResult",
+        "description": "Verifications queued for a suite run's comparisons."
+      },
+      "Tolerances": {
+        "properties": {
+          "rel_tol": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Rel Tol",
+            "default": 0.0001
+          },
+          "abs_tol_min": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Abs Tol Min",
+            "default": 0.001
+          },
+          "abs_tol_scale": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Abs Tol Scale",
+            "default": 1e-05
+          }
+        },
+        "type": "object",
+        "title": "Tolerances",
+        "description": "The platform's closeness score: close when `max |a-b| / (atol + rtol*|b|) < 1`, with\n`atol = max(abs_tol_min, max|a|*abs_tol_scale, max|b|*abs_tol_scale)` (docs/plan-sedml.md, D4)."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Verification": {
+        "properties": {
+          "verification_id": {
+            "type": "integer",
+            "title": "Verification Id"
+          },
+          "comparison_id": {
+            "type": "integer",
+            "title": "Comparison Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "submitted",
+              "completed",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "simulators": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Simulators"
+          },
+          "workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Id"
+          },
+          "workflow_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Status"
+          },
+          "verify_close": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verify Close",
+            "description": "BioSimulators' simulators agree on every report"
+          },
+          "references": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "References",
+            "description": "the reference origins it added"
+          },
+          "failed_simulators": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Failed Simulators",
+            "description": "simulators whose runs at biosimulations.org produced no results"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts",
+            "default": 0
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verification_id",
+          "comparison_id",
+          "state",
+          "simulators"
+        ],
+        "title": "Verification",
+        "description": "One request to biosim's /verify API about a comparison: the archive the comparison ran, on BioSimulators'\nsimulators (docs/plan-verify-oracle.md). Once `completed`, each simulator's reports are a reference on the\ncomparison, and `verify_close` says whether the simulators agree with each other."
+      },
+      "VerifyRequest": {
+        "properties": {
+          "simulators": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*(:[A-Za-z0-9_.+-]+)?$"
+                },
+                "type": "array",
+                "maxItems": 10,
+                "minItems": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulators",
+            "description": "`name` or `name:version`; by default the service's (amici, copasi, pysces, tellurium, vcell)"
+          }
+        },
+        "type": "object",
+        "title": "VerifyRequest",
+        "description": "Which BioSimulators simulators to verify a comparison with (docs/plan-verify-oracle.md, V4)."
+      },
+      "Visibility": {
+        "type": "string",
+        "enum": [
+          "public",
+          "private"
+        ],
+        "title": "Visibility",
+        "description": "Who may read a simulation and everything it produced (plan-observability O7)."
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Optional Auth0 access token for this API. Omit it to call anonymously."
+      }
+    }
+  },
+  "security": [
+    {},
+    {
+      "BearerAuth": []
+    }
+  ]
+}
