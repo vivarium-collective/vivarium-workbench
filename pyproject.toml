@@ -208,9 +208,9 @@ viva-basic-processes = { git = "https://github.com/vivarium-collective/viva-basi
 # bot `refresh registry` commit dropped v2ecoli from its index.) Bump deliberately.
 viva-catalog = { git = "https://github.com/vivarium-collective/viva-marketplace.git", rev = "4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
 viva-workspace = { git = "https://github.com/vivarium-collective/viva-workspace.git", branch = "main" }
-# compose-api-client >= 0.7.34 is not on PyPI yet (it is at 0.7.6): pinned to the compose-api release tag that
-# compose.cam.uchc.edu runs, in the repository's clients/python. Drop this source once it is published, keeping
-# the PyPI floor above.
+# compose-api-client >= 0.7.34 is not on PyPI yet (it is at 0.7.6): pinned to a compose-api release tag whose
+# contract the workbench is verified against (tests/_contracts), in the repository's clients/python. Drop this
+# source once it is published, keeping the PyPI floor above.
 compose-api-client = { git = "https://github.com/biosimulations/compose-api.git", subdirectory = "clients/python", tag = "0.7.35" }
 # investigation-contracts is declared bare in [project.dependencies] (kept out
 # of published metadata) and is not on PyPI; supply its git URL here so `uv

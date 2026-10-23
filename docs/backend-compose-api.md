@@ -10,7 +10,7 @@ stay in place and are reached only when the named backend advertises `/viva/v1`.
 
 | Claim | Source |
 |---|---|
-| Routes, parameters, schemas | compose-api 0.7.35's OpenAPI (what compose.cam.uchc.edu runs), the `openapi.json` shipped in the locked `compose-api-client` (git tag `0.7.35`); snapshot at `tests/_contracts/compose_api_openapi_0.7.35.json`, which a test keeps equal to the shipped one. It equals the live `/openapi.json` except that file uploads read `format: binary` instead of `contentMediaType`, compose-api's deliberate rewrite for its client generator (`compose_api/api/openapi_spec.py`) |
+| Routes, parameters, schemas | compose-api 0.7.35's OpenAPI, the `openapi.json` shipped in the locked `compose-api-client` (git tag `0.7.35`); snapshot at `tests/_contracts/compose_api_openapi_0.7.35.json`, which a test keeps equal to the shipped one. It equals compose.cam.uchc.edu's live `/openapi.json` (0.7.36 on 2026-10-22, whose spec is unchanged from 0.7.35) except that file uploads read `format: binary` instead of `contentMediaType`, compose-api's deliberate rewrite for its client generator (`compose_api/api/openapi_spec.py`) |
 | Environments, registry entries, the pilot's interface manifest | `GET /registry/environments`, `/registry/entries`, `/registry/environments/viva-pde-particle/manifest` on compose.cam.uchc.edu 0.7.33, 2026-10-22 (`tests/_fixtures/compose_api/`) |
 | What a run's archive holds | a real export run by viva-pde-particle's real runner in its own image, and production simulation 4706 (`tests/_fixtures/compose_api/README.md`) |
 | Address rules | compose-api `compose_api/registry/validation.py`: only `local:<module>.<Class>`; `local:!` and other protocols are always refused |

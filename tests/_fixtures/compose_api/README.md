@@ -12,5 +12,5 @@ workbench against what compose-api and its runners actually produce.
 | `environments.json`, `entries.json` | the registry's environments and entries | `GET /registry/environments`, `GET /registry/entries` on the same deployment |
 
 `../../_contracts/compose_api_openapi_0.7.35.json` is the `openapi.json` shipped in the locked `compose-api-client`
-(biosimulations/compose-api tag `0.7.35`, `367ccb2`, which compose.cam.uchc.edu runs); `test_backend_dispatch_compose.py`
+(biosimulations/compose-api tag `0.7.35`, `367ccb2`; production's 0.7.36 serves the same spec); `test_backend_dispatch_compose.py`
 fails when the two differ.
