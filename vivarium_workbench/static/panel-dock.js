@@ -253,7 +253,10 @@
     }
     function setOpen(open) {
       panel.hidden = !open;
-      if (open) place(dock);
+      // Re-flow every side on open AND close: closing must collapse this side's
+      // stack (hide it so it reserves no space) and let <main> reclaim the room —
+      // otherwise the closed panel's column stays as an empty gap.
+      if (open) place(dock); else replaceAllSides();
       panel.classList.toggle('vp-collapsed', open && collapsed);
       document.body.classList.toggle('viv-' + key + '-open', open);
       lsSet(K.open, open ? '1' : '0');
