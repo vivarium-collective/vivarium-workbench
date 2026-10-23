@@ -217,8 +217,7 @@
       tb.id = 'inv-inline-titlebar';
       tb.className = 'vp-titlebar vp-titlebar-inline';
       tb.innerHTML = '<span class="vp-tb-label">Investigation</span>' +
-        '<span class="vp-tb-spacer"></span>' +
-        '<span class="vp-tb-hint" aria-hidden="true">drag to dock</span>';
+        '<span class="vp-tb-spacer"></span>';
       if (ws.firstChild) ws.insertBefore(tb, ws.firstChild); else ws.appendChild(tb);
     }
     if (ctl && ctl.addDragHandle) ctl.addDragHandle(tb);   // guards double-binding
