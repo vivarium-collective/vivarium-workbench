@@ -6429,6 +6429,14 @@ body.vp-dragging .viv-studies-head{ cursor:grabbing; }
    A fixed, opaque, full-window panel (z-index) simply covers the rest of the SPA
    that loaded behind it, so no per-element hiding is needed. */
 body.viv-popout{ overflow:hidden; }
+/* Show ONLY the popped panel: hide the rail, the SPA content, and every OTHER
+   dockable panel (another panel left open — e.g. the investigation window — must
+   not ride along into the popout). The kind's own panel is re-shown full-window
+   below. */
+body.viv-popout .viv-rail,
+body.viv-popout .viv-content,
+body.viv-popout .viv-topbar,
+body.viv-popout .vp-dockable{ display:none !important; }
 body.viv-popout-chat #viv-ai-panel,
 body.viv-popout-code #viv-code-rail,
 body.viv-popout-studies #viv-studies-panel,

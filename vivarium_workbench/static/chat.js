@@ -1179,7 +1179,7 @@
       panel: panel, layout: layout, mainEl: mainEl, key: 'ai', label: 'Chat',
       launcher: el.toggle, docks: ['left', 'right', 'bottom'],
       resizeHandle: 'viv-ai-resize', ghostIcon: ICON.bot,
-      popout: function () { if (window.VivPanelDock) window.VivPanelDock.popout('chat'); },
+      popout: function () { if (window.VivPanelDock) window.VivPanelDock.popout('chat'); if (ctl) ctl.close(); },
       defaultDock: 'right', defaultSize: { side: 440, bottom: 320 },
       layoutEvent: 'viv:ai-layout',
       onOpen: function () {
