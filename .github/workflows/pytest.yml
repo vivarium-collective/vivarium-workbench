@@ -81,12 +81,17 @@ jobs:
     name: quarantine watch
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Reports on the known-failing set. Deliberately GREEN when they all still
-    # fail, because a check that is red on every PR by design teaches everyone
-    # to ignore red — which would defeat the gate above. It surfaces the
-    # actionable case instead: a quarantined test that starts PASSING, and can
-    # therefore be deleted from tests/known_failures.txt. Details land in the
-    # job summary.
+    # Non-blocking by design (continue-on-error): this job reports on the
+    # known-failing set and must never red the `pytest` workflow, because a
+    # check that is red on every PR by design teaches everyone to ignore red —
+    # which would defeat the gate above. It surfaces two actionable cases in
+    # its job summary instead: a quarantined test that starts PASSING (can be
+    # deleted from tests/known_failures.txt), and a stale id (names a test that
+    # no longer exists). pytest_gate.sh --only-known exits 1 on the stale case,
+    # but continue-on-error keeps that out of the required-check rollup — note
+    # its isolated collection can even mis-flag a still-present failing test as
+    # stale, so the exit code is advisory, not a gate.
+    continue-on-error: true
     env:
       UV_PYTHON: "3.12.12"
     steps:
