@@ -59,6 +59,39 @@
   function _onDoc(ev) { if (openMenu && !openMenu.contains(ev.target)) closeMenu(); }
   function _onKey(ev) { if (ev.key === 'Escape') closeMenu(); }
 
+  // ── Shared dock registry + per-side order ──────────────────────────────────
+  // Panels are independent instances; to reorder/swap two panels docked on the
+  // same side (iTerm-style) a drag must see its siblings and a shared order. Each
+  // make() registers its instance; order persists in localStorage per side.
+  var REGISTRY = [];
+  function loadOrder() { try { return JSON.parse(localStorage.getItem('viv.dock.order') || '{}') || {}; } catch (e) { return {}; } }
+  function saveOrder(o) { try { localStorage.setItem('viv.dock.order', JSON.stringify(o)); } catch (e) { /* private mode */ } }
+  function sideKeys(side) { var a = loadOrder()[side]; return Array.isArray(a) ? a.slice() : []; }
+  function setSideKeys(side, keys) { var o = loadOrder(); o[side] = keys; saveOrder(o); }
+  function orderIndex(side, key) { var i = sideKeys(side).indexOf(key); return i < 0 ? 1e6 : i; }
+  function ensureInOrder(side, key) { var ks = sideKeys(side); if (ks.indexOf(key) < 0) { ks.push(key); setSideKeys(side, ks); } }
+  function dropFromAllSides(key, exceptSide) {
+    var o = loadOrder(), changed = false;
+    Object.keys(o).forEach(function (s) {
+      if (s === exceptSide || !Array.isArray(o[s])) return;
+      var n = o[s].filter(function (k) { return k !== key; });
+      if (n.length !== o[s].length) { o[s] = n; changed = true; }
+    });
+    if (changed) saveOrder(o);
+  }
+  function registryFor(key) { for (var i = 0; i < REGISTRY.length; i++) if (REGISTRY[i].key === key) return REGISTRY[i]; return null; }
+  // Re-place every OPEN panel docked on `side`, in persisted order.
+  function replaceSide(side) {
+    var mates = REGISTRY.filter(function (e) { return e.isOpen() && e.getDock() === side; });
+    mates.sort(function (a, b) { return orderIndex(side, a.key) - orderIndex(side, b.key) || String(a.key).localeCompare(b.key); });
+    mates.forEach(function (e) { e.placeInFlow(side); });
+  }
+  // Rects of the OTHER open docked panels (for the drop-target hit test).
+  function otherPanelRects(exceptKey) {
+    return REGISTRY.filter(function (e) { return e.key !== exceptKey && e.isOpen(); })
+      .map(function (e) { var r = e.panel.getBoundingClientRect(); return { key: e.key, side: e.getDock(), left: r.left, top: r.top, right: r.right, bottom: r.bottom }; });
+  }
+
   // opts: {
   //   panel, layout, mainEl,            required DOM nodes (.viv-layout + .viv-main)
   //   key,                              'ai' | 'code' — namespaces storage + CSS vars
@@ -108,7 +141,9 @@
     // Placement in the flex row: left → before <main>, right → end of the row, bottom →
     // inside <main>'s column below the content, top → inside <main> above the content.
     // Two right-docked panels stack by order.
-    function place(zone) {
+    // Raw DOM insertion for this one panel on `zone` (no ordering logic). Called
+    // in order by replaceSide so same-side panels land in their persisted order.
+    function placeInFlow(zone) {
       if (!layout || !mainEl) return;
       panel.dataset.dock = zone;
       if (zone === 'left') layout.insertBefore(panel, mainEl);
@@ -121,6 +156,11 @@
       }
       else mainEl.appendChild(panel);                                  // bottom
       applySize();
+    }
+    // Place this panel on `zone`, keeping every same-side panel in persisted order.
+    function place(zone) {
+      ensureInOrder(zone, key);
+      replaceSide(zone);
     }
     function isOpen() { return !panel.hidden; }
     // Publish the panel's footprint on <html> so fixed / 100vh layouts leave room for it.
@@ -154,8 +194,44 @@
       if (!isAllowed(zone)) return;
       dock = zone;
       if (persist) lsSet(K.dock, zone);
+      dropFromAllSides(key, zone);           // moving sides → drop stale order entries
       if (isOpen()) { place(zone); syncVars(); }
       if (opts.onDock) opts.onDock(zone);
+    }
+    // Insert this panel on `side` before/after `relKey` (reorder / co-dock from a drag).
+    function insertRelativeTo(side, relKey, after) {
+      if (!isAllowed(side)) return;
+      dock = side; lsSet(K.dock, side);
+      dropFromAllSides(key, side);
+      var ks = sideKeys(side).filter(function (k) { return k !== key; });
+      var at = ks.indexOf(relKey); if (at < 0) at = ks.length - 1;
+      ks.splice(after ? at + 1 : at, 0, key);
+      setSideKeys(side, ks);
+      if (!isOpen()) setOpen(true); else { replaceSide(side); syncVars(); }
+      if (opts.onDock) opts.onDock(side);
+    }
+    // Swap this panel's position (side + order slot + size) with another panel's.
+    function swapWith(otherKey) {
+      var other = registryFor(otherKey); if (!other || other.key === key) return;
+      var aSide = dock, bSide = other.getDock();
+      if (!isAllowed(bSide) || !other.allows(aSide)) return;    // respect each panel's dock limits
+      var aSize = lsGet(sizeKey(aSide), ''), bSize = other.sizeStr(bSide);
+      // Exchange order slots: put this where other was, and vice versa.
+      if (aSide === bSide) {
+        var ks = sideKeys(aSide), ia = ks.indexOf(key), ib = ks.indexOf(otherKey);
+        if (ia >= 0 && ib >= 0) { ks[ia] = otherKey; ks[ib] = key; setSideKeys(aSide, ks); }
+      } else {
+        var a = sideKeys(aSide), b = sideKeys(bSide);
+        var ia2 = a.indexOf(key), ib2 = b.indexOf(otherKey);
+        if (ia2 >= 0) a[ia2] = otherKey; if (ib2 >= 0) b[ib2] = key;
+        setSideKeys(aSide, a); setSideKeys(bSide, b);
+      }
+      // Exchange sides + sizes.
+      dock = bSide; lsSet(K.dock, bSide); if (bSize !== '') lsSet(sizeKey(bSide), bSize);
+      other.setSideAndSize(aSide, aSize);
+      replaceSide(bSide); if (aSide !== bSide) replaceSide(aSide);
+      applySize(); syncVars();
+      if (opts.onDock) opts.onDock(bSide);
     }
     // Dropdown of Dock left / right / bottom, anchored under the header's dock button.
     function openDockMenu(anchor) {
@@ -214,7 +290,8 @@
         // their own interactions.
         if (ev.target.closest && ev.target.closest(
             'button, a[href], input, select, textarea, label, [role="slider"], [contenteditable=""], [contenteditable="true"]')) return;
-        var x0 = ev.clientX, y0 = ev.clientY, ghost = null, zones = null, zone = null, active = false;
+        var x0 = ev.clientX, y0 = ev.clientY, ghost = null, zones = null, insEl = null, swapEl = null;
+        var target = null, panels = null, active = false;
         function mk() {
           ghost = document.createElement('div');
           ghost.className = 'vp-ghost'; ghost.innerHTML = (opts.ghostIcon || '') + '<span>' + (opts.label || 'Panel') + '</span>';
@@ -222,26 +299,58 @@
           zones.innerHTML = ['left', 'right', 'top', 'bottom'].filter(isAllowed).map(function (z) {
             return '<div class="vp-zone vp-zone-' + z + '" data-zone="' + z + '"><span>Dock ' + z + '</span></div>';
           }).join('');
-          document.body.appendChild(zones); document.body.appendChild(ghost);
+          insEl = document.createElement('div'); insEl.className = 'vp-insert-line'; insEl.hidden = true;
+          swapEl = document.createElement('div'); swapEl.className = 'vp-swap-hi'; swapEl.hidden = true; swapEl.innerHTML = '<span>swap</span>';
+          document.body.appendChild(zones); document.body.appendChild(insEl); document.body.appendChild(swapEl); document.body.appendChild(ghost);
+        }
+        function rectFor(k) { for (var i = 0; i < panels.length; i++) if (panels[i].key === k) return panels[i]; return null; }
+        function render() {
+          // Edge zones highlight only for an 'edge' target.
+          Array.prototype.forEach.call(zones.children, function (z) {
+            z.classList.toggle('on', !!target && target.kind === 'edge' && z.getAttribute('data-zone') === target.side);
+          });
+          insEl.hidden = !(target && target.kind === 'insert');
+          swapEl.hidden = !(target && target.kind === 'swap');
+          if (target && target.kind === 'insert') {
+            var r = rectFor(target.relKey); if (r) {
+              var vert = (target.side === 'left' || target.side === 'right');
+              if (vert) { var yy = target.after ? r.bottom : r.top;
+                insEl.style.cssText = 'left:' + r.left + 'px;top:' + (yy - 2) + 'px;width:' + (r.right - r.left) + 'px;height:4px;'; }
+              else { var xx = target.after ? r.right : r.left;
+                insEl.style.cssText = 'left:' + (xx - 2) + 'px;top:' + r.top + 'px;width:4px;height:' + (r.bottom - r.top) + 'px;'; }
+            }
+          } else if (target && target.kind === 'swap') {
+            var s = rectFor(target.otherKey); if (s) {
+              swapEl.style.cssText = 'left:' + s.left + 'px;top:' + s.top + 'px;width:' + (s.right - s.left) + 'px;height:' + (s.bottom - s.top) + 'px;';
+            }
+          }
+        }
+        function compute(mx, my) {
+          target = C.dropTarget(mx, my, innerWidth, innerHeight, panels);
+          // Honor this panel's dock limits (e.g. graph forbids 'top').
+          if (target && target.kind === 'edge' && !isAllowed(target.side)) target = null;
+          if (target && (target.kind === 'insert') && !isAllowed(target.side)) target = null;
         }
         function move(m) {
-          if (!active) { if (Math.hypot(m.clientX - x0, m.clientY - y0) < THRESH) return; active = true; mk(); document.body.classList.add('vp-dragging'); }
+          if (!active) { if (Math.hypot(m.clientX - x0, m.clientY - y0) < THRESH) return; active = true; panels = otherPanelRects(key); mk(); document.body.classList.add('vp-dragging'); }
           ghost.style.left = (m.clientX + 10) + 'px'; ghost.style.top = (m.clientY + 10) + 'px';
-          zone = C.dropZone(m.clientX, m.clientY, innerWidth, innerHeight);
-          if (!isAllowed(zone)) zone = null;   // forbidden edge (e.g. top) — no drop
-          Array.prototype.forEach.call(zones.children, function (z) { z.classList.toggle('on', z.getAttribute('data-zone') === zone); });
+          compute(m.clientX, m.clientY); render();
         }
         function end(commit) {
           document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up, true);
           document.removeEventListener('pointercancel', cancel, true); window.removeEventListener('blur', cancel);
           document.removeEventListener('keydown', keyf, true);
           if (!active) return;
-          document.body.classList.remove('vp-dragging'); ghost.remove(); zones.remove();
+          document.body.classList.remove('vp-dragging'); ghost.remove(); zones.remove(); insEl.remove(); swapEl.remove();
           justDragged = true; setTimeout(function () { justDragged = false; }, 0);   // swallow the click after a drag
-          if (commit && zone) { dockTo(zone, true); if (!isOpen()) setOpen(true); }
+          if (commit && target) {
+            if (target.kind === 'edge') { dockTo(target.side, true); if (!isOpen()) setOpen(true); }
+            else if (target.kind === 'insert') { insertRelativeTo(target.side, target.relKey, target.after); }
+            else if (target.kind === 'swap') { swapWith(target.otherKey); }
+          }
         }
         // The release position is authoritative (a fast flick may end far from the last move).
-        function up(u) { if (active && u && u.clientX !== undefined) { zone = C.dropZone(u.clientX, u.clientY, innerWidth, innerHeight); if (!isAllowed(zone)) zone = null; } end(true); }
+        function up(u) { if (active && u && u.clientX !== undefined) { compute(u.clientX, u.clientY); } end(true); }
         function cancel() { end(false); }
         function keyf(k) { if (k.key === 'Escape') { k.preventDefault(); end(false); } }
         document.addEventListener('pointermove', move); document.addEventListener('pointerup', up, true);
@@ -279,6 +388,42 @@
         }
         document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
       });
+    }
+
+    // Set this panel's side + persisted size in one step (used by a swap).
+    function setSideAndSize(side, sizeStr) {
+      dock = side; lsSet(K.dock, side);
+      if (sizeStr !== undefined && sizeStr !== '') lsSet(sizeKey(side), sizeStr);
+      applySize();
+    }
+    // Register so sibling panels' drags can see + reorder/swap this one.
+    REGISTRY.push({
+      key: key, panel: panel,
+      getDock: function () { return dock; },
+      isOpen: isOpen, placeInFlow: placeInFlow, allows: isAllowed,
+      sizeStr: function (side) { return lsGet(isVertical(side) ? K.h : K.w, ''); },
+      setSideAndSize: setSideAndSize,
+    });
+
+    // Slim iTerm-style title bar: the whole bar is the drag handle (move → dock /
+    // insert / swap) and carries the × close (+ ↗ pop-out when available). It
+    // replaces the old dock-menu button and the floating × corner controls.
+    if (opts.titleBar !== false && panel) {
+      var titlebar = document.createElement('div');
+      titlebar.className = 'vp-titlebar';
+      var tPop = (typeof opts.popout === 'function')
+        ? '<button type="button" class="vp-tb-btn vp-tb-pop" title="Pop out" aria-label="Pop out">' + POPOUT_GLYPH + '</button>' : '';
+      titlebar.innerHTML =
+        '<span class="vp-tb-label">' + (opts.label || 'Panel') + '</span>' +
+        '<span class="vp-tb-spacer"></span>' + tPop +
+        '<button type="button" class="vp-tb-btn vp-tb-close" title="Close" aria-label="Close">' +
+          svg('<path d="M6 6l12 12M18 6L6 18"/>') + '</button>';
+      panel.insertBefore(titlebar, panel.firstChild);
+      panel.classList.add('vp-has-titlebar');
+      var _pop = titlebar.querySelector('.vp-tb-pop');
+      if (_pop) _pop.addEventListener('click', function (e) { e.stopPropagation(); if (!justDragged) opts.popout(); });
+      titlebar.querySelector('.vp-tb-close').addEventListener('click', function (e) { e.stopPropagation(); setOpen(false); });
+      initDrag(titlebar);
     }
 
     (opts.dragHandles || []).forEach(function (hh) {
