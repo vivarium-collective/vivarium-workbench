@@ -150,21 +150,29 @@
     return document.querySelector('.inv-header-bar');
   }
 
-  // Move the graph (and the investigation header) into the panel body, leaving
-  // hidden placeholders at their inline homes so they can be put back exactly.
+  // What travels into the window: the whole investigation detail view
+  // (#investigation-detail-view = the overview brief + Overview/Verdict/Background…
+  // tabs, THEN the graph) so the overview opens ABOVE the graph in the window rather
+  // than hijacking the study's centre. Falls back to just the graph if the detail
+  // view isn't present.
+  var RELOC_ID = 'investigation-detail-view';
+  function relocEl() { return el(RELOC_ID) || graphEl(); }
+
+  // Move the investigation detail (overview + graph) and header into the panel body,
+  // leaving hidden placeholders at their inline homes so they can be put back exactly.
   function graphIntoPanel() {
-    var g = graphEl(), b = bodyEl();
-    if (!g || !b) return false;
-    if (g.parentNode === b && headerEl() && headerEl().parentNode === b) return true;  // already hosted
+    var node = relocEl(), b = bodyEl();
+    if (!node || !b) return false;
+    var hdr = headerEl();
+    if (node.parentNode === b && hdr && hdr.parentNode === b) return true;  // already hosted
     if (!placeholder) {
       placeholder = document.createElement('div');
       placeholder.className = 'viv-graph-home';
       placeholder.style.display = 'none';
     }
-    if (g.parentNode && g.parentNode !== b) g.parentNode.insertBefore(placeholder, g);
-    b.appendChild(g);
-    // Header above the graph in the pane.
-    var hdr = headerEl();
+    if (node.parentNode && node.parentNode !== b) node.parentNode.insertBefore(placeholder, node);
+    b.appendChild(node);
+    // Header above the detail view in the pane.
     if (hdr && hdr.parentNode !== b) {
       if (!hdrPlaceholder) {
         hdrPlaceholder = document.createElement('div');
@@ -172,13 +180,13 @@
         hdrPlaceholder.style.display = 'none';
       }
       hdr.parentNode.insertBefore(hdrPlaceholder, hdr);
-      b.insertBefore(hdr, g);
+      b.insertBefore(hdr, node);
       hdr.classList.add('inv-header-bar-docked');
     }
     return true;
   }
 
-  // Return the graph + header to their inline homes for the full-page view.
+  // Return the detail view + header to their inline homes for the full-page view.
   function graphToInline() {
     var hdr = headerEl();
     if (hdr && hdrPlaceholder && hdrPlaceholder.parentNode) {
@@ -187,15 +195,42 @@
       hdrPlaceholder.parentNode.removeChild(hdrPlaceholder);
     }
     hdrPlaceholder = null;
-    var g = graphEl();
-    if (g && placeholder && placeholder.parentNode) {
-      placeholder.parentNode.insertBefore(g, placeholder);
+    var node = relocEl();
+    if (node && placeholder && placeholder.parentNode) {
+      placeholder.parentNode.insertBefore(node, placeholder);
       placeholder.parentNode.removeChild(placeholder);
     }
     placeholder = null;
   }
 
+  // Inline slim title bar — shown ABOVE the investigation header while the graph is
+  // inline (window closed), so the whole header+graph reads as one movable window
+  // even before a study is open. The bar IS the drag handle: dragging it to an edge
+  // opens the Investigation window docked there (same drag-to-dock the window's own
+  // title bar uses, wired via ctl.addDragHandle). Hidden while the window is open
+  // (the window then carries its own title bar).
+  function ensureInlineTitlebar() {
+    var ws = el(HEADER_ID); if (!ws) return null;
+    var tb = el('inv-inline-titlebar');
+    if (!tb) {
+      tb = document.createElement('div');
+      tb.id = 'inv-inline-titlebar';
+      tb.className = 'vp-titlebar vp-titlebar-inline';
+      tb.innerHTML = '<span class="vp-tb-label">Investigation</span>' +
+        '<span class="vp-tb-spacer"></span>' +
+        '<span class="vp-tb-hint" aria-hidden="true">drag to dock</span>';
+      if (ws.firstChild) ws.insertBefore(tb, ws.firstChild); else ws.appendChild(tb);
+    }
+    if (ctl && ctl.addDragHandle) ctl.addDragHandle(tb);   // guards double-binding
+    return tb;
+  }
+  function setInlineTitlebar(show) {
+    var tb = ensureInlineTitlebar();
+    if (tb) tb.hidden = !show;
+  }
+
   function onOpen() {
+    setInlineTitlebar(false);   // the docked window carries its own title bar now
     if (graphIntoPanel()) {
       showEmptyHint(false);
       // The graph's own toolbar is now the panel's single bar + drag-to-dock
@@ -221,6 +256,7 @@
       return;   // bounce back open; don't move the graph inline
     }
     graphToInline();
+    setInlineTitlebar(true);   // back inline → the inline drag bar reappears above the header
     // A USER close inside the popped-out window returns the graph inline in the
     // opener and closes this window.
     if (initDone && inPopout()) { returnInline(); return; }
@@ -320,6 +356,9 @@
     var isPopout = false;
     try { isPopout = /(?:^|[?&])popout=graph(?:&|$)/.test(global.location.search || ''); } catch (e) { /* ignore */ }
     if (!isPopout && ctl.isOpen()) ctl.close();
+    // Create + bind the inline drag bar now (ctl exists) so the investigation always
+    // carries the slim title bar — inline above the header, or on the docked window.
+    if (!isPopout) setInlineTitlebar(!ctl.isOpen());
 
     // In the popout, "arm" returnInline on the FIRST real user interaction — setup
     // (page render, _showInvestigationWorkspace) is all programmatic and never fires

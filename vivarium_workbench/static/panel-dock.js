@@ -95,7 +95,7 @@
   // between two panels drags that ratio. One panel on a side → the container is
   // simply a sized wrapper (same footprint as before stacking existed).
   var STACKS = {};                 // side -> container element
-  var _layout = null, _main = null, _topPlacer = null;
+  var _layout = null, _main = null;
   function layoutEl() { return (_layout && _layout.isConnected) ? _layout : (_layout = document.querySelector('.viv-layout')); }
   function mainElGet() { return (_main && _main.isConnected) ? _main : (_main = document.querySelector('.viv-main')); }
   function isVertSide(side) { return side === 'bottom' || side === 'top'; }   // height-sized band (row stack)
@@ -114,10 +114,8 @@
     // Place the container in the correct layout slot (idempotent).
     if (side === 'left') { if (s.parentNode !== L || s.nextSibling !== M) L.insertBefore(s, M); }
     else if (side === 'right') { if (s.parentNode !== L || L.lastElementChild !== s) L.appendChild(s); }
-    else if (side === 'top') {
-      var placed = _topPlacer && _topPlacer(s);
-      if (!placed && (s.parentNode !== M || M.firstChild !== s)) M.insertBefore(s, M.firstChild);
-    } else { if (s.parentNode !== M || M.lastElementChild !== s) M.appendChild(s); }   // bottom
+    else if (side === 'top') { if (s.parentNode !== M || M.firstChild !== s) M.insertBefore(s, M.firstChild); }
+    else { if (s.parentNode !== M || M.lastElementChild !== s) M.appendChild(s); }   // bottom
     var n = parseInt(lsGet(stackSizeKey(side), ''), 10);
     var sz = C.clampDock(side, (n > 0 ? n : defaultSideSize(side)), innerWidth, innerHeight);
     s.style.setProperty(isVertSide(side) ? 'height' : 'width', sz + 'px');
@@ -492,7 +490,6 @@
     });
     panel.classList.add('vp-dockable');
     panel.dataset.vpKey = key;
-    if (typeof opts.placeTop === 'function') _topPlacer = opts.placeTop;
 
     // Slim iTerm-style title bar: the whole bar is the drag handle (move → dock /
     // insert / swap) and carries the × close (+ ↗ pop-out when available). It

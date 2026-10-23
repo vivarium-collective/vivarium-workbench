@@ -6239,6 +6239,15 @@ body.vp-dragging .viv-graph-head{ cursor:grabbing; }
 /* The inline "Investigation graph" lead is redundant in the panel (its header
    already says "Graph"); drop it so the graph gets the space. */
 .viv-graph-body #investigation-dag-lead{ display:none; }
+/* The whole investigation detail (overview brief + tabs, then the graph) travels
+   into the window; it scrolls as a column so the overview sits ABOVE the graph
+   rather than taking the study's centre. */
+.viv-graph-body #investigation-detail-view{
+  display:flex; flex-direction:column; flex:1 1 auto; min-height:0; min-width:0;
+  overflow:auto; margin:0 !important;
+}
+/* Keep the graph usably tall even with the overview expanded above it. */
+.viv-graph-body #investigation-dag-fs{ flex:0 0 auto; min-height:320px; }
 .viv-graph-body #investigation-dag-shell{
   flex:1 1 auto; height:auto !important; min-height:0 !important; max-height:none !important;
   resize:none;

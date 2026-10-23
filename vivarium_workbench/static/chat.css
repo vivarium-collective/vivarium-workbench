@@ -341,6 +341,13 @@ body.vp-dragging .vp-titlebar{ cursor:grabbing; }
 :root[data-theme="dark"] .vp-titlebar{ background:var(--vw-surface-2,#1e293b); border-bottom-color:var(--vw-border,#334155); }
 :root[data-theme="dark"] .vp-tb-btn:hover{ background:var(--vw-hover,#334155); color:#e5e7eb; }
 
+/* Inline investigation title bar: the slim drag-to-dock bar shown above the
+   investigation header when the graph is inline (window closed). Rounded top, a
+   little breathing room below, and a muted "drag to dock" hint on the right. */
+.vp-titlebar-inline{ border:1px solid var(--vw-border,#e3e3e6); border-radius:7px 7px 0 0; margin:0 0 -1px; }
+.vp-titlebar-inline[hidden]{ display:none !important; }
+.vp-tb-hint{ font:500 11px/1 -apple-system,"Segoe UI",sans-serif; color:var(--vw-muted,#9ca3af); margin-right:6px; white-space:nowrap; }
+
 /* The title bar supersedes the old dock-menu button + floating × corner controls. */
 .vp-has-titlebar .vp-head{ display:none !important; }
 .vp-has-titlebar [data-act="dock"], .vp-has-titlebar #aig-dock-panel-btn, .vp-has-titlebar .aig-tb-group[title="Dock"]{ display:none !important; }
