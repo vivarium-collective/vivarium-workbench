@@ -853,16 +853,29 @@ a.viv-bs-commit:hover { text-decoration: underline; }
            dropdown and the standalone Branch rail item. -->
       <div class="viv-wsp-trigger" id="viv-workspace-picker-trigger" role="button" tabindex="0"
            title="Switch workspace — pick from your workspaces">
+        <span class="viv-ws-avatar{% if not workspace_avatar %} viv-ws-avatar-mono{% endif %}"
+              data-ws-name="{{ workspace_name }}" aria-hidden="true">
+          {% if workspace_avatar %}<img class="viv-ws-avatar-img" src="{{ workspace_avatar }}" alt="" loading="lazy"
+               onerror="this.remove(); this.parentNode.classList.add('viv-ws-avatar-mono');">{% endif %}
+          <span class="viv-ws-mono"></span>
+          <span class="viv-wsp-dot viv-wsp-ready{% if workspace_is_remote %} viv-wsp-remote{% endif %}" title="workspace loaded">●</span>
+        </span>
         <span class="viv-wsp-trigger-current">
-          <span class="viv-wsp-dot viv-wsp-ready{% if workspace_is_remote %} viv-wsp-remote{% endif %}">●</span>
           <span class="viv-wsp-trigger-names">
-            <strong>{{ workspace_name }}{% if workspace_is_remote %} <span class="viv-ws-remote-tag">remote</span>{% endif %}</strong>
+            <strong>{% if workspace_home %}<a class="viv-ws-home-link" href="{{ workspace_home }}" target="_blank" rel="noopener"
+                 title="Open {{ workspace_name }} home" onclick="event.stopPropagation()">{{ workspace_name }}</a>{% else %}{{ workspace_name }}{% endif %}{% if workspace_is_remote %} <span class="viv-ws-remote-tag">remote</span>{% endif %}</strong>
             {% if workspace_branch %}<span class="viv-wsp-trigger-branch" title="branch: {{ workspace_branch }}">{{ workspace_branch }}</span>{% endif %}
           </span>
         </span>
         <span class="viv-wsp-trigger-caret" aria-hidden="true">▾</span>
         <button class="viv-wsp-source-btn" id="viv-wsp-source-btn" type="button"
                 title="Open Source — repository · branch · commit" aria-label="Open Source page">↗</button>
+        <!-- Shown only when the rail is collapsed: a hover flyout naming the workspace. -->
+        <span class="viv-ws-flyout" aria-hidden="true">
+          <strong>{% if workspace_home %}<a class="viv-ws-home-link" href="{{ workspace_home }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">{{ workspace_name }}</a>{% else %}{{ workspace_name }}{% endif %}</strong>
+          {% if workspace_branch %}<span class="viv-ws-flyout-branch">{{ workspace_branch }}</span>{% endif %}
+          <span class="viv-ws-flyout-hint">click to switch workspace</span>
+        </span>
       </div>
     </div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
@@ -893,6 +906,27 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          to link it to its real GitHub URL. */
       window._workspaceName = {{ workspace_name|tojson }};
       window._workspaceRepoUrl = {{ (repo_url or '')|tojson }};
+
+      /* Workspace avatar: fill the monogram (initials + a hue derived from the
+         name) when there's no profile picture, so each workspace looks distinct —
+         in the expanded chip and the collapsed rail alike. */
+      (function () {
+        function initAvatars() {
+          document.querySelectorAll('.viv-ws-avatar').forEach(function (a) {
+            var name = (a.getAttribute('data-ws-name') || '').trim();
+            var mono = a.querySelector('.viv-ws-mono');
+            if (!mono || !name) return;
+            var toks = name.split(/[-_ /.]+/).filter(Boolean);
+            var initials = ((toks[0] || name).charAt(0) + ((toks[1] || '').charAt(0))).toUpperCase();
+            mono.textContent = initials || name.charAt(0).toUpperCase() || '?';
+            var h = 0;
+            for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+            mono.style.background = 'hsl(' + (h % 360) + ', 50%, 52%)';
+          });
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAvatars);
+        else initAvatars();
+      })();
     </script>
 
     <!-- Everything from the Workspace nav down scrolls as ONE region, so a long

@@ -621,6 +621,20 @@ def test_template_has_studies_rail_section_id():
         "index.html.j2 missing id='viv-rail-studies-section' on the Studies rail section"
 
 
+def test_template_has_workspace_avatar_identity():
+    """The rail shows a per-workspace avatar (profile pic or name monogram) with a
+    home link + collapsed flyout, so the current workspace is always identifiable."""
+    text = (TEMPLATES_DIR / "index.html.j2").read_text()
+    assert "viv-ws-avatar" in text, "rail missing the workspace avatar element"
+    assert "viv-ws-home-link" in text, "workspace name should link to its home page"
+    assert "viv-ws-flyout" in text, "collapsed rail missing the workspace-name flyout"
+    assert "workspace_avatar" in text and "workspace_home" in text, \
+        "template missing the workspace_avatar/workspace_home context"
+    src = (STATIC_DIR.parent / "lib" / "report.py").read_text()
+    assert "workspace_avatar=" in src and "workspace_home=" in src, \
+        "report.py must pass workspace_avatar + workspace_home to the template"
+
+
 # ---------------------------------------------------------------------------
 # QA fixes — BUG 3: has_wiring in composites.json + graceful 404 message
 # ---------------------------------------------------------------------------
