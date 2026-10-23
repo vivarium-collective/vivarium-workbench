@@ -137,24 +137,53 @@
     }
   }
 
-  // Move the graph into the panel body, leaving a hidden placeholder at its inline
-  // home so it can be put back exactly where it was.
+  // The investigation title header ("INVESTIGATION / <name>" + nav) — captured into
+  // the docked pane along with the graph, so the whole investigation tab travels
+  // together instead of leaving the title behind in the main view.
+  var HEADER_ID = 'iset-workspace';
+  var hdrPlaceholder = null;
+  function headerEl() {
+    var ws = el(HEADER_ID);
+    return ws ? ws.querySelector('.inv-header-bar') : null;
+  }
+
+  // Move the graph (and the investigation header) into the panel body, leaving
+  // hidden placeholders at their inline homes so they can be put back exactly.
   function graphIntoPanel() {
     var g = graphEl(), b = bodyEl();
     if (!g || !b) return false;
-    if (g.parentNode === b) return true;      // already hosted here
+    if (g.parentNode === b && headerEl() && headerEl().parentNode === b) return true;  // already hosted
     if (!placeholder) {
       placeholder = document.createElement('div');
       placeholder.className = 'viv-graph-home';
       placeholder.style.display = 'none';
     }
-    if (g.parentNode) g.parentNode.insertBefore(placeholder, g);
+    if (g.parentNode && g.parentNode !== b) g.parentNode.insertBefore(placeholder, g);
     b.appendChild(g);
+    // Header above the graph in the pane.
+    var hdr = headerEl();
+    if (hdr && hdr.parentNode !== b) {
+      if (!hdrPlaceholder) {
+        hdrPlaceholder = document.createElement('div');
+        hdrPlaceholder.className = 'viv-graph-header-home';
+        hdrPlaceholder.style.display = 'none';
+      }
+      hdr.parentNode.insertBefore(hdrPlaceholder, hdr);
+      b.insertBefore(hdr, g);
+      hdr.classList.add('inv-header-bar-docked');
+    }
     return true;
   }
 
-  // Return the graph to its inline home (before the placeholder) for full-page view.
+  // Return the graph + header to their inline homes for the full-page view.
   function graphToInline() {
+    var hdr = headerEl();
+    if (hdr && hdrPlaceholder && hdrPlaceholder.parentNode) {
+      hdr.classList.remove('inv-header-bar-docked');
+      hdrPlaceholder.parentNode.insertBefore(hdr, hdrPlaceholder);
+      hdrPlaceholder.parentNode.removeChild(hdrPlaceholder);
+    }
+    hdrPlaceholder = null;
     var g = graphEl();
     if (g && placeholder && placeholder.parentNode) {
       placeholder.parentNode.insertBefore(g, placeholder);
