@@ -1320,17 +1320,44 @@
     var html = '<div class="model-source">';
     procs.forEach(function (p) {
       var addr = String(p.address).split(':').pop();
+      var cfg = (p.config && typeof p.config === 'object') ? p.config : {};
+      // Inline model SOURCE — surface it as a readable code block instead of a
+      // giant escaped string buried in the JSON config view. Applies when a
+      // process carries its model text in config.model (e.g. viva-tellurium:
+      // config.model = Antimony source, config.model_format = 'antimony'|'sbml').
+      var modelFmt = (typeof cfg.model_format === 'string' && cfg.model_format) ? cfg.model_format : '';
+      var modelStr = (typeof cfg.model === 'string') ? cfg.model : '';
+      // Treat config.model as a renderable model SOURCE only when it's clearly
+      // one: an explicit model_format is set, or the text is multi-line (a real
+      // model body) — not a short scalar that merely happens to be named "model".
+      var modelSrc = (modelStr.trim() && (modelFmt || modelStr.indexOf('\n') !== -1)) ? modelStr : '';
+      var restCfg = cfg;
+      if (modelSrc) {
+        restCfg = {};
+        Object.keys(cfg).forEach(function (k) { if (k !== 'model') restCfg[k] = cfg[k]; });
+      }
+      var modelBlock = '';
+      if (modelSrc) {
+        modelBlock = '<div class="model-source-code">' +
+          '<div class="model-source-code-head">' + esc((modelFmt ? modelFmt.toUpperCase() : 'MODEL') + ' MODEL') + '</div>' +
+          '<pre class="model-source-pre model-source-code-pre">' + esc(modelSrc) + '</pre>' +
+          '</div>';
+      }
+      var hasRest = restCfg && Object.keys(restCfg).length;
       // Structured, scannable config view (chip grids for scalar dicts, tables
       // for uniform-object arrays like a CPM contact matrix, type-colored
       // values) — falls back to the flat YAML <pre> if composite-card.js's
       // _configView isn't loaded.
-      var cfgBody = (typeof window._jsonViewer === 'function')
-        ? window._jsonViewer(p.config)
-        : '<pre class="model-source-pre">' + esc(_yamlish(p.config, 0)) + '</pre>';
+      var cfgBody = hasRest
+        ? ((typeof window._jsonViewer === 'function')
+            ? window._jsonViewer(restCfg)
+            : '<pre class="model-source-pre">' + esc(_yamlish(restCfg, 0)) + '</pre>')
+        : '';
       html += '<div class="model-source-block">' +
         '<div class="model-source-head"><strong>' + esc(p.name) + '</strong>' +
         (addr ? ' <span class="muted">— ' + esc(addr) + '</span>' : '') + '</div>' +
-        '<div class="model-source-body">' + cfgBody + '</div>' +
+        modelBlock +
+        (hasRest ? '<div class="model-source-body">' + cfgBody + '</div>' : '') +
         '</div>';
     });
     html += '</div>';
