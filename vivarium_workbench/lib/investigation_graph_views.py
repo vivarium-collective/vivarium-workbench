@@ -197,3 +197,83 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
 
     return {"investigation": inv_slug, "studies": studies_out,
             "study_edges": study_edges, "chains": chains}, 200
+
+
+def _member_slug(entry):
+    """Normalize one member-list entry (bare slug or {study|slug|name: ...})."""
+    if isinstance(entry, str):
+        return entry or None
+    if isinstance(entry, dict):
+        return entry.get("study") or entry.get("slug") or entry.get("name")
+    return None
+
+
+def _empty_argument_overlay(inv_slug: str) -> tuple[dict, int]:
+    return {"investigation": inv_slug, "claims": {}, "edges": [],
+            "narrative": {"units": [], "limitations": [], "open_questions": []},
+            "gaps": [], "available": False}, 200
+
+
+def build_argument_overlay(ws_root, inv_slug, *, derive_fn=None, narrate_fn=None,
+                           audit_fn=None):
+    """Server-side Argument/Narrative projection for one investigation (RFC-0005).
+
+    Loads the investigation + its member study specs and projects the argument
+    graph (`derive_argument`), the ordered narrative (`narrate`), and the audit
+    gaps (`audit`) from the ``viva_superpowers`` knowledge layer. Read-only and
+    tolerant: unknown investigation -> 404; a missing/raising derivation layer ->
+    an empty ``available: False`` payload with 200 (the UI degrades gracefully).
+    The derivation functions are injectable for testing without the dependency.
+    """
+    ws_root = Path(ws_root)
+    wp = WorkspacePaths.load(ws_root)
+    spec_path = wp.investigations / inv_slug / "investigation.yaml"
+    if not spec_path.is_file():
+        return {"error": f"no investigation.yaml for {inv_slug!r}"}, 404
+    try:
+        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        return {"error": f"unreadable investigation.yaml for {inv_slug!r}"}, 404
+
+    if derive_fn is None or narrate_fn is None or audit_fn is None:
+        try:
+            from viva_superpowers.argument_store import derive_argument
+            from viva_superpowers.narrative import audit as _audit, narrate as _narrate
+        except Exception:  # noqa: BLE001 — derivation layer absent: degrade, never 500
+            return _empty_argument_overlay(inv_slug)
+        derive_fn = derive_fn or derive_argument
+        narrate_fn = narrate_fn or _narrate
+        audit_fn = audit_fn or _audit
+
+    members = spec.get("members") if spec.get("members") is not None else (spec.get("studies") or [])
+    studies_by_slug: dict[str, dict] = {}
+    for entry in members:
+        slug = _member_slug(entry)
+        if not slug:
+            continue
+        try:
+            sp = wp.study_dir(slug, must_exist=True) / "study.yaml"
+        except FileNotFoundError:
+            continue
+        if not sp.is_file():
+            continue
+        try:
+            studies_by_slug[slug] = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001 — skip an unloadable study, never fatal
+            continue
+
+    try:
+        graph = derive_fn(spec, studies_by_slug)
+        narrative = narrate_fn(graph, question=spec.get("question"))
+        gaps = audit_fn(narrative, graph)
+    except Exception:  # noqa: BLE001 — a derivation failure degrades, never 500s
+        return _empty_argument_overlay(inv_slug)
+
+    return {
+        "investigation": inv_slug,
+        "claims": graph.get("claims", {}),
+        "edges": graph.get("edges", []),
+        "narrative": narrative,
+        "gaps": gaps,
+        "available": True,
+    }, 200

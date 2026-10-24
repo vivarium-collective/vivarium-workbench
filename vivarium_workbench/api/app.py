@@ -2975,6 +2975,21 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=status, content=body)
 
     @app.get(
+        "/api/argument-overlay",
+        tags=["Data, inputs & references"],
+        summary="Argument graph + ordered narrative + audit gaps for an investigation",
+    )
+    def argument_overlay(investigation: str = "", ws: Path = Depends(get_workspace)):
+        """The RFC-0005 Argument/Narrative projection for one investigation: the
+        derived Claim graph (claims + epistemic edges), the ordered narrative, and
+        the audit gaps (unsupported transitions, each with a candidate follow-up).
+        Dynamic/nested payload -> passthrough JSONResponse. 404 when the
+        investigation.yaml is absent; an empty ``available: false`` payload (200)
+        when the viva_superpowers derivation layer isn't importable."""
+        body, status = _ig_views.build_argument_overlay(ws, investigation)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
         "/api/audit",
         tags=["Data, inputs & references"],
         summary="Read-only L0-L5 study-reproducibility audit report",
