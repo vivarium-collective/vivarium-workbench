@@ -15713,7 +15713,13 @@
     // Need both: window._investigations (all studies) AND window._isetIndex (groups).
     // If either isn't loaded yet, fall back to a loading message + kick the missing one.
     if (!Array.isArray(window._isetIndex)) window._isetIndex = [];
-    if (!Array.isArray(window._investigations) || !window._investigations.length) {
+    // Studies not FETCHED yet (still undefined, not an array) → show the spinner
+    // and kick the load. A loaded-but-EMPTY array ([]) is NOT "still loading": it
+    // means the workspace genuinely has no studies, so fall through and render the
+    // (empty) groups below — which show a proper "No studies" state. Treating []
+    // as "not loaded" re-fetched forever and spun on "Loading…" (e.g. an
+    // investigation with zero studies).
+    if (!Array.isArray(window._investigations)) {
       // No studies in memory yet → fall back to the legacy render until they arrive.
       if (typeof _renderRailInvestigationsLegacy === 'function') return _renderRailInvestigationsLegacy();
       if (window.ProgressTrack) {
