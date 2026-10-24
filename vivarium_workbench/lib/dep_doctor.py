@@ -100,9 +100,12 @@ def _check_loom_bundle() -> dict[str, Any]:
     launched from an editable install whose source dir was later moved/deleted).
     Never raises."""
     why = "the bigraph-loom viewer bundle every composite graph view embeds"
-    fix = ("the loom bundle is missing — composite graph views will not render. "
-           "Reinstall vivarium-workbench and restart the server from a live checkout "
-           "(a built wheel always ships it; an editable install needs loom/_dist built).")
+    fix = ("no built loom bundle found anywhere — composite graph views will not "
+           "render. Build it with scripts/build_loom.sh (needs Node) and restart, "
+           "reinstall vivarium-workbench from a wheel (wheels ship a built bundle), "
+           "or set VIVARIUM_WORKBENCH_LOOM_DIST to an existing built _dist. "
+           "(asset_dir() already falls back to an installed copy or sibling "
+           "worktree when one is built.)")
     try:
         from vivarium_workbench.lib import static_serving as _ss
         from vivarium_workbench.loom_assets import asset_dir

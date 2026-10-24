@@ -159,11 +159,13 @@ def resolve_loom_asset(rel: str) -> Path:
 def loom_bundle_present() -> bool:
     """True when the vendored bigraph-loom bundle (``_dist/index.html``) exists.
 
-    False means the server is running against a package whose ``loom/_dist`` is
-    absent — e.g. an editable install whose source worktree was deleted/moved out
-    from under a long-lived server, or a build that never vendored the bundle. In
-    that state ``/bigraph-loom/index.html`` 404s and every composite-card loom
-    EMBED renders as a blank iframe pane with no error (see
+    ``asset_dir()`` already falls back to any built bundle it can find (an
+    installed wheel shadowed on ``sys.path``, a sibling worktree, the
+    ``VIVARIUM_WORKBENCH_LOOM_DIST`` override), so False here means NO built
+    bundle exists anywhere reachable — e.g. a clean clone / editable install whose
+    ``loom/_dist`` was never built and that has no other copy to borrow. In that
+    state ``/bigraph-loom/index.html`` 404s and every composite-card loom EMBED
+    renders as a blank iframe pane with no error (see
     :func:`loom_bundle_missing_html`)."""
     from vivarium_workbench.loom_assets import asset_dir
     try:
@@ -201,14 +203,18 @@ def loom_bundle_missing_html() -> str:
         "@media (prefers-color-scheme:dark){code{background:rgba(252,217,182,.12)}}"
         "</style></head><body><div class=\"box\">"
         "<h1>⚠ The bigraph-loom viewer bundle is missing</h1>"
-        "<p>This server cannot find its vendored loom build, so the graph view "
+        "<p>This server cannot find a built loom bundle, so the graph view "
         "cannot render. The bundle was expected at:</p>"
         f"<p><code>{where}</code></p>"
-        "<p>This usually means the running server was launched from a "
-        "<code>vivarium_workbench</code> install whose source directory was later "
-        "moved or deleted (e.g. a git worktree removed out from under a long-lived "
-        "server). Reinstall the workbench and restart the server from a live "
-        "checkout — then reload this view.</p>"
+        "<p><code>loom/_dist</code> is a build artifact that is not committed to "
+        "git, so a fresh checkout or worktree does not have it until it is built. "
+        "The server already falls back to a bundle from any other installed copy "
+        "or sibling worktree it can find — this page means none was built "
+        "anywhere reachable.</p>"
+        "<p>Build it with <code>scripts/build_loom.sh</code> (needs Node) and "
+        "restart, reinstall the workbench from a wheel (wheels ship a built "
+        "bundle), or point <code>VIVARIUM_WORKBENCH_LOOM_DIST</code> at an "
+        "existing built <code>_dist</code>. Then reload this view.</p>"
         "</div></body></html>"
     )
 
