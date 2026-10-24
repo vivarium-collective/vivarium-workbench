@@ -1,11 +1,11 @@
-"""The light/dark theme toggle in the rail footer is HOVER-REVEALED (per an
-explicit user request): hidden by default to keep the footer uncluttered, and
-shown on hover of the footer (or when the toggle itself is keyboard-focused).
+"""The light/dark theme toggle is a STANDARD, always-visible icon button in the
+rail's grouped well (per an explicit user request — it must NOT hide). It shows
+the mode you'll switch to (a moon in light mode, a sun in dark mode) and gains a
+hover/focus highlight.
 
-This test guards that the hiding is always PAIRED with a reveal rule, so the
-control is never *permanently* hidden / unreachable (the earlier failure mode),
-and that it is hidden via opacity (recoverable) rather than display:none /
-visibility:hidden.
+This test guards that the control is never *hard-hidden* (display:none /
+visibility:hidden on the button itself, which would make it unreachable), and
+that a focus-visible rule exists so keyboard users get a visible affordance.
 """
 from __future__ import annotations
 
