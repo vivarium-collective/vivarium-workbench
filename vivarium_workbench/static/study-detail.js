@@ -1135,8 +1135,41 @@
       + chips.join('<span class="muted">·</span>') + '</div>';
   }
 
+  // Gate results (Simulations › Results): each acceptance test's figureless
+  // readout — a derived-scalar value ("Computed scalar readout …") or an
+  // "unresolved: no measure.path" stub. These are run-derived RESULTS, split
+  // out of the Visualizations charts payload server-side (build_study_charts_
+  // payload → `gate_results`) so they no longer clutter the Visualizations tab.
+  var _gateResultsLoaded = false;
+  function _loadGateResults(force) {
+    var section = document.getElementById('gate-results-section');
+    var mount = document.getElementById('gate-results');
+    if (!section || !mount) return;
+    if (_gateResultsLoaded && !force) return;
+    _gateResultsLoaded = true;
+    window.DataSource.loadStudyCharts(studyName())
+      .then(function (d) {
+        var gr = (d && d.gate_results) || [];
+        if (!gr.length) { section.hidden = true; return; }
+        section.hidden = false;
+        mount.innerHTML = gr.map(function (g) {
+          var unresolved = g.status === 'unresolved' || g.status === 'refused';
+          var badge = unresolved
+            ? '<span style="flex:none;font-size:0.72em;font-weight:600;padding:2px 8px;border-radius:10px;background:#fef3c7;color:#92400e">unresolved</span>'
+            : '<span style="flex:none;font-size:0.72em;font-weight:600;padding:2px 8px;border-radius:10px;background:#e0e7ff;color:#3730a3">scalar readout</span>';
+          return '<div style="display:flex;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--border,#eceff3)">'
+            + '<div style="min-width:0;flex:1">'
+            + '<div style="font-weight:600;font-size:0.9em">' + escapeHtmlForTests(g.title || g.key || 'gate') + '</div>'
+            + '<div class="muted" style="font-size:0.82em;line-height:1.4">' + escapeHtmlForTests(g.caption || '') + '</div>'
+            + '</div>' + badge + '</div>';
+        }).join('');
+      })
+      .catch(function () { section.hidden = true; });
+  }
+
   function _loadResults(force) {
     _loadResultsPreview(force);
+    _loadGateResults(force);
     var mount = document.getElementById('raw-data-list');
     if (!mount) return;
     if (_rawDataLoaded && !force) return;

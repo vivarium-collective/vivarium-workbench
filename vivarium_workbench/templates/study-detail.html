@@ -1347,6 +1347,15 @@
      emitter · size) — auto-filled by _loadResultsSummary from the runs list. #}
   <div id="results-summary" data-study="{{ name }}" style="margin:0 0 16px"></div>
 
+  {# Gate results — each acceptance test's graded scalar readout (or an
+     unresolved stub). These are run-derived RESULTS, so they live here, not in
+     the Visualizations tab (which holds only rendered figures). Filled by
+     _loadGateResults from the study-charts payload's `gate_results`. #}
+  <div id="gate-results-section" data-study="{{ name }}" style="margin:0 0 22px" hidden>
+    <h4>Gate results <span class="muted" style="font-size:0.8em;font-weight:normal">— each acceptance test's value, graded from run data</span></h4>
+    <div id="gate-results"></div>
+  </div>
+
   <h4>Latest run preview <span class="muted" style="font-size:0.8em;font-weight:normal">— downsampled sparkline + first/last/min/max per store</span></h4>
   <div id="results-preview" data-study="{{ name }}">
     <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading results preview…</span></div>

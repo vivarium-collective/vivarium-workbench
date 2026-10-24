@@ -210,10 +210,15 @@ class StudyChartsPayload(BaseModel):
     study: str
     schema_version: Optional[Any] = None
     charts: list[ChartPayload]
+    # Figureless per-test cards (derived-scalar readouts / unresolved gates) —
+    # gate RESULTS graded from run data, surfaced under Simulations › Results
+    # rather than the Visualizations tab.
+    gate_results: list[ChartPayload] = []
     db_exists: bool
     data_store: Optional[str] = None
     static_count: int
     live_count: int
+    gate_result_count: int = 0
 
 
 class InvestigationSummary(BaseModel):

@@ -1735,6 +1735,17 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
             live_charts = render_study_charts(runs_db, run_name=None)
     for c in live_charts:
         c.setdefault("source", "live")
+    # The Visualizations tab holds VISUALIZATIONS. A live per-test card that
+    # carries no rendered figure (no svg/img/iframe) is not one: it is either a
+    # derived-scalar "Computed scalar readout (no time series)" or an
+    # "unresolved: no measure.path" stub — a gate RESULT graded from run data.
+    # Split those out into `gate_results` so the UI can surface them under
+    # Simulations › Results, where run-derived results belong, instead of
+    # cluttering Visualizations with figureless cards.
+    def _is_figure(c: dict) -> bool:
+        return bool(c.get("svg") or c.get("img") or c.get("srcdoc") or c.get("iframe_url"))
+    gate_results = [c for c in live_charts if not _is_figure(c)]
+    live_charts = [c for c in live_charts if _is_figure(c)]
     static_charts = discover_static_study_charts(charts_dir, hide_superseded=hide_superseded)
     # Declared figure visualizations resolved to self-contained chart records so
     # they embed in both the live dashboard and the static report snapshot.
@@ -1820,8 +1831,10 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
         "study": name,
         "schema_version": (spec or {}).get("schema_version"),
         "charts": live_charts + static_charts,
+        "gate_results": gate_results,
         "db_exists": db_exists,
         "data_store": data_store,
         "static_count": len(static_charts),
         "live_count": len(live_charts),
+        "gate_result_count": len(gate_results),
     }
