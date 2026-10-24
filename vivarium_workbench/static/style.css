@@ -6162,6 +6162,14 @@ body.col-resizing .registry-table.reg-table-fill th, body.col-resizing .registry
   max-height:460px; overflow:auto;
 }
 :root[data-theme="dark"] .model-source-body{ background:#0f141b; }
+/* Inline model source (Antimony / SBML) shown as its own labeled code block in
+   the Model tab, so an authored model reads clearly instead of as an escaped
+   string inside the JSON config view. Reuses .model-source-pre for the frame. */
+.model-source-code{ margin-top:2px; }
+.model-source-code-head{
+  font-size:0.72em; font-weight:600; letter-spacing:0.04em; text-transform:uppercase;
+  color:var(--text-muted, #6b7280); margin-bottom:4px;
+}
 
 /* ── Right rail: editable process code panel (process-code.js) ─────────────── */
 .viv-code-rail{
