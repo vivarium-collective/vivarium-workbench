@@ -152,33 +152,13 @@ def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
     here). Mirrors the resolution the old _post_composite_test_run handler did.
     Raises a clear error if neither path yields a state.
     """
-    # Generator-kind branch.
+    # Generator-kind branch. resolve_generator_entry handles the editable-workspace
+    # case (import the pkg to register its @composite_generator composites) AND the
+    # key/name mismatch (_REGISTRY is keyed by full module path, spec_id is short).
     try:
-        from process_bigraph.composite_generator import (
-            _REGISTRY, build_generator, discover_generators,
-        )
-        if not _REGISTRY:
-            discover_generators()
-        entry = _REGISTRY.get(req.spec_id)
-        if entry is None and req.pkg:
-            # An editable workspace whose import package isn't auto-discovered
-            # (packages_distributions() misses it — a known uv/hatchling editable
-            # gap, e.g. dist 'genesis' vs import package 'viva_genesis') registers
-            # its @composite_generator composites only as a side effect of
-            # importing the package. discover_generators() can't reach it, so
-            # import it explicitly (then prefer its build_core, which is the
-            # convention's registration hook) and retry the lookup.
-            try:
-                __import__(req.pkg)
-                try:
-                    core_mod = __import__(f"{req.pkg}.core", fromlist=["build_core"])
-                    if hasattr(core_mod, "build_core"):
-                        core_mod.build_core()
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            entry = _REGISTRY.get(req.spec_id)
+        from process_bigraph.composite_generator import build_generator
+        from vivarium_workbench.lib.composite_lookup import resolve_generator_entry
+        entry = resolve_generator_entry(req.spec_id, req.pkg)
         if entry is not None:
             doc = build_generator(entry, overrides=req.overrides)
             if isinstance(doc, dict) and isinstance(doc.get("state"), dict):
