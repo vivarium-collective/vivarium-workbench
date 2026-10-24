@@ -987,13 +987,11 @@ def inject_declared_emitter(state: dict, *, spec_id: str, run_id: str,
     interface than this task's tuple return.
     """
     try:
-        from process_bigraph.composite_generator import (
-            _REGISTRY, discover_generators, install_default_emitters)
+        from process_bigraph.composite_generator import install_default_emitters
+        from vivarium_workbench.lib.composite_lookup import resolve_generator_entry
     except Exception:
         return state, None
-    if not _REGISTRY:
-        discover_generators()
-    entry = _REGISTRY.get(spec_id)
+    entry = resolve_generator_entry(spec_id)
     if entry is None:
         return state, None
     # install_default_emitters returns state unchanged (no "emitter" key)
