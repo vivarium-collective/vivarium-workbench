@@ -2870,6 +2870,9 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      tree it hosts). -->
 <script src="assets/studies-panel.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* studies panel unavailable */"></script>
 <script src="assets/mobile-nav.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile-nav unavailable */"></script>
+<!-- mobile-panels.js: phone-only bottom bar that launches + switches the dockable
+     panels (Studies/Chat/Code/Graph). Loads AFTER the panels it drives. -->
+<script src="assets/mobile-panels.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile panel switcher unavailable */"></script>
 <script src="assets/search-palette.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* global search unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
 <!-- chat-core.js already loaded above (shared by panel-dock.js + process-code.js). -->
