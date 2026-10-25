@@ -330,8 +330,8 @@ body.vp-dragging, body.vp-dragging *{ user-select:none !important; -webkit-user-
   cursor:grab; user-select:none; flex:0 0 auto; }
 .vp-titlebar:active{ cursor:grabbing; }
 body.vp-dragging .vp-titlebar{ cursor:grabbing; }
-.vp-tb-label{ font:600 11.5px/1 -apple-system,"Segoe UI",sans-serif; color:var(--vw-muted,#6b7280);
-  letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.vp-tb-label{ font:600 11.5px/1.5 -apple-system,"Segoe UI",sans-serif; color:var(--vw-muted,#6b7280);
+  letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; padding-bottom:1px; }
 .vp-tb-spacer{ flex:1 1 auto; }
 .vp-tb-btn{ flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
   border:none; background:transparent; color:var(--vw-muted,#9ca3af); cursor:pointer; border-radius:5px; padding:0; }

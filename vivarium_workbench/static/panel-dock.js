@@ -604,6 +604,7 @@
         return;
       }
       if (kind === 'studies' && typeof window._openStudiesPanel === 'function') { window._openStudiesPanel(); return; }
+      if (kind === 'registry' && typeof window._openRegistryPanel === 'function') { window._openRegistryPanel(); return; }
       if (kind === 'code' && window.ProcessCode) {
         var addr = p.get('address'), comp = p.get('composite');
         if (addr) window.ProcessCode.open(addr);

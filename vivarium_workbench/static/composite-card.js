@@ -1080,22 +1080,15 @@
           tags.map(function (t) { return '<span style="font-size:10px;color:#6d28d9;background:#f5f3ff;border:1px solid #e9d5ff;border-radius:4px;padding:1px 6px">' + _esc(t) + '</span>'; }).join('') +
         '</div>' : '';
     var actions = '<div class="reg-card-actions" style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">' +
-      '<button type="button" onclick="event.stopPropagation();_enterMaxcardMode(\'' + idA + '\',\'composite\')" ' +
-        'title="Open maximized with the interactive bigraph (Explore) pinned at the top" ' +
-        'style="height:26px;padding:0 11px;font-size:12px;font-weight:600;background:#2563eb;color:#fff;border:1px solid #2563eb;border-radius:5px;cursor:pointer">🔍 Explore</button>' +
-      '<button type="button" onclick="event.stopPropagation();_cardPopout(this,\'' + idA + '\',\'composite\')" ' +
-        'title="Pop out into its own window" ' +
-        'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">⧉ Pop out</button>' +
-      '<button type="button" onclick="event.stopPropagation();_setRegistryZoom(\'full\')" ' +
-        'title="Open the full card (Configure · Inputs · Run)" ' +
-        'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">Full card</button>' +
+      '<button type="button" class="reg-explore-btn" onclick="event.stopPropagation();_showRegistryCard(\'' + idA + '\',\'composite\')" ' +
+        'title="Open the full card in the Process view">🔍 Explore</button>' +
       '<button type="button" onclick="event.stopPropagation();_openCompositeCode(\'' + idA + '\')" ' +
         'title="View / edit this composite\'s source (spec YAML or its generator)" ' +
         'style="height:26px;padding:0 9px;font-size:12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer">&lt;/&gt; Code</button>' +
     '</div>';
     return '<div class="registry-card' + selCls + '" data-address="' + idA + '" data-kind="composite"' + _nprocAttr(c) +
-        ' onclick="_selectRegistryEntry(\'' + idA + '\')" ondblclick="_enterMaxcardMode(\'' + idA + '\',\'composite\')"' +
-        ' title="Double-click to Explore (maximized bigraph)">' +
+        ' onclick="_selectRegistryEntry(\'' + idA + '\')" ondblclick="_showRegistryCard(\'' + idA + '\',\'composite\')"' +
+        ' title="Double-click to Explore (open the full card)">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
           '<div class="reg-card-head"><strong class="reg-card-name">' + _esc(c.name) + '</strong></div>' +
