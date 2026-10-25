@@ -33,6 +33,7 @@ import { placeNewNodesNoOverlap } from './layouts/incremental';
 import {
   collapseRedundantProcesses, collapseRedundantStores, processesToHyperedges, relaxHyperedgePositions,
 } from './collapseRedundant';
+import { chooseInitialView } from './layoutPolicy';
 import { prefetchInner, setInnerCompositeOverrides } from './nodes/InnerCompositePreview';
 import { isHiddenByAncestor, retargetEdgesToVisible, hiddenNodeIds } from './panels/filterHidden';
 import ViewsMenu from './panels/ViewsMenu';
@@ -1706,6 +1707,12 @@ export default function App() {
       // (e.g. after a renderer change) instead of stale saved positions.
       const fresh = params.get('fresh') === '1';
       if (fresh) freshLayoutRef.current = true;
+      // Embed (?embed=1) keeps its own compact 'hierarchy' default (set in the
+      // useLayoutMode initializer) — the adaptive policy below is skipped for it.
+      const embed = params.get('embed') === '1';
+      // Whether a saved/committed view was applied below; if not, the adaptive
+      // layout policy seeds the initial mode + collapse from the graph's shape.
+      let view: View | null = null;
       // ?compact=1 — a print-figure preset for BUSY multi-process composites:
       // narrow the cards, drop config/symbols/address/figures so the science
       // (name + role + governing equation) leads, and tell the layout to pack
@@ -1722,7 +1729,7 @@ export default function App() {
         setDetailOverrides((o) => ({ ...o, config: 'off', address: 'off', figures: 'off' }));
       }
       if (!fresh) {
-        let view: View | null = decodeView(params.get('view'));
+        view = decodeView(params.get('view'));
         const viewUrl = params.get('viewUrl');
         if (!view && viewUrl) view = await fetchView(viewUrl);
         if (!view) view = getDefaultView(compositeId);
@@ -1746,6 +1753,16 @@ export default function App() {
           } catch { /* offline / static — no server default */ }
         }
         if (view) applyView(view);
+      }
+      // No saved/committed view → adaptive default: read the graph's shape and
+      // pick the initial layout mode + collapse-repeats (big/wide graphs get
+      // Grid + collapse so they don't render as an unreadable flat band). Only
+      // seeds the initial view; the first Layout-menu interaction replaces it.
+      // Skipped in embed mode; the explicit ?layout / ?collapse below still win.
+      if (!view && !embed) {
+        const init = chooseInitialView(state);
+        layoutMode.setModeId(init.modeId);
+        setCollapseRedundant(init.collapseRedundant);
       }
       // Explicit URL params OVERRIDE the applied view: a headless
       // `?hyperedges=1` / `?collapse=1` / `?detail=` render must win over a
