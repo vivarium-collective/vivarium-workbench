@@ -247,13 +247,13 @@ def _margin_bar_html(row: dict) -> str:
     sev = row.get("severity")
     label = ""
     if isinstance(margin, (int, float)):
-        label = (f'<span style="color:#475569;font-size:0.82em;'
+        label = (f'<span style="color:var(--text-muted, #475569);font-size:0.82em;'
                  f'font-variant-numeric:tabular-nums">Δ-to-pass {margin:+.3g}'
                  + (f' · {_html.escape(str(sev))}' if sev else "") + '</span>')
     return (
         '<div style="display:flex;align-items:center;gap:8px;margin-top:4px">'
         '<div style="position:relative;height:9px;flex:1;max-width:220px;'
-        'background:#eef2f7;border-radius:5px" title="pass boundary at centre">'
+        'background:var(--subtle, #eef2f7);border-radius:5px" title="pass boundary at centre">'
         '<div style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;'
         'background:#94a3b8"></div>'
         f'<div style="position:absolute;left:{left:.1f}%;width:{max(width, 1.5):.1f}%;'
@@ -280,7 +280,7 @@ def render_behavior_tests_html(verdict: dict, spec: dict) -> str:
     body_rows = []
     for r in rows:
         en_html = (
-            '<div style="color:#334155;font-size:0.9em">'
+            '<div style="color:var(--text-muted, #334155);font-size:0.9em">'
             f'{_html.escape(str(r.get("en") or ""))}</div>' if r.get("en") else ""
         )
         # Pre-registered band + measured, both carrying the declared units.
@@ -298,13 +298,13 @@ def render_behavior_tests_html(verdict: dict, spec: dict) -> str:
         unit_tag = (f' <span style="color:#94a3b8">· {_html.escape(units)}</span>'
                     if (units and dimless) else "")
         band_html = (
-            '<div style="color:#475569;font-size:0.85em;margin-top:3px">'
+            '<div style="color:var(--text-muted, #475569);font-size:0.85em;margin-top:3px">'
             + " · ".join(band_parts) + unit_tag + "</div>"
         )
         # Grading detail (only when it adds over the band line).
         detail = (r.get("detail") or "").strip()
         detail_html = (
-            '<div style="color:#64748b;font-size:0.8em;margin-top:2px">'
+            '<div style="color:var(--text-muted, #64748b);font-size:0.8em;margin-top:2px">'
             f'{_html.escape(detail)}</div>' if detail else ""
         )
         # Pre-registration provenance: basis (why the band) + citations.
@@ -314,11 +314,11 @@ def render_behavior_tests_html(verdict: dict, spec: dict) -> str:
         if r.get("cites"):
             ev.append(f'<span style="color:#94a3b8">cites:</span> {_html.escape("; ".join(r["cites"]))}')
         ev_html = (
-            '<div style="color:#64748b;font-size:0.8em;margin-top:2px">'
+            '<div style="color:var(--text-muted, #64748b);font-size:0.8em;margin-top:2px">'
             + " · ".join(ev) + "</div>" if ev else ""
         )
         body_rows.append(
-            '<div style="padding:8px 0;border-top:1px solid #f1f5f9">'
+            '<div style="padding:8px 0;border-top:1px solid var(--border-faint, #f1f5f9)">'
             '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'
             + _result_pill(r) +
             '<span style="font-weight:600;color:#1e293b">'
@@ -329,7 +329,7 @@ def render_behavior_tests_html(verdict: dict, spec: dict) -> str:
 
     if not rows:
         body_rows.append(
-            '<p style="color:#64748b;font-style:italic;margin:8px 0">'
+            '<p style="color:var(--text-muted, #64748b);font-style:italic;margin:8px 0">'
             'No behavior_tests declared yet — add acceptance criteria to grade this study.</p>'
         )
 
@@ -346,13 +346,13 @@ def render_behavior_tests_html(verdict: dict, spec: dict) -> str:
     split = verdict.get("count_split")
     split_label = (split or {}).get("label") if isinstance(split, dict) else None
     if n_total and split_label:
-        summary += (f' · <span style="color:#475569">{_html.escape(split_label)}</span>')
+        summary += (f' · <span style="color:var(--text-muted, #475569)">{_html.escape(split_label)}</span>')
 
     return (
         REPORT_CARD_MARKER + "\n"
         '<div style="font-family:system-ui,-apple-system,sans-serif;max-width:52rem">'
         f'<h3 style="margin:0 0 2px 0;color:#0f172a">Behavior tests — {_html.escape(str(name))}</h3>'
-        f'<div style="color:#64748b;font-size:0.9em;margin-bottom:6px">{summary}</div>'
+        f'<div style="color:var(--text-muted, #64748b);font-size:0.9em;margin-bottom:6px">{summary}</div>'
         + "".join(body_rows)
         + "</div>"
     )
