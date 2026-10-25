@@ -535,3 +535,26 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
   walk(root, []);
   return { nodes, edges };
 }
+
+/**
+ * The DEFAULT overview graph for a fresh open: the full graph with the
+ * depth-gated collapse (`defaultCollapsedIds`) and name-gated hiding
+ * (`defaultHiddenIds`) applied, and edges kept only between survivors. This is
+ * exactly what the canvas lays out before any user interaction — used by the
+ * adaptive layout policy (`layoutPolicy.chooseInitialView`) to size the graph,
+ * and by its tests. (Previously duplicated inline in clusterGrid.test.ts.)
+ */
+export function overviewGraph(state: any): { nodes: RFNode[]; edges: RFEdge[] } {
+  const { nodes, edges } = stateToReactFlow(state);
+  const collapsed = defaultCollapsedIds(state);
+  const hidden = defaultHiddenIds(state);
+  const isHidden = (n: RFNode) => {
+    const path: string[] = (n.data as { path?: string[] }).path ?? [];
+    for (let i = 1; i < path.length; i++) if (collapsed.has(path.slice(0, i).join('.'))) return true;
+    for (let i = 1; i <= path.length; i++) if (hidden.has(path.slice(0, i).join('.'))) return true;
+    return false;
+  };
+  const vis = nodes.filter((n) => !isHidden(n));
+  const ids = new Set(vis.map((n) => n.id));
+  return { nodes: vis, edges: edges.filter((e) => ids.has(e.source) && ids.has(e.target)) };
+}
