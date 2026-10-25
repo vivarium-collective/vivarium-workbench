@@ -867,10 +867,26 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                 (e or {}).get("url")
                 for e in (spec.get("embed_visualizations") or [])
             }
+            # The study-detail "native gallery" already renders the latest run's
+            # viz.json panels inline. An auto-discovered viz/<name>.html is the
+            # SAME declared visualization rendered post-run, so surfacing it as an
+            # embed too shows every figure twice. Skip an auto-embed whose viz name
+            # (the file stem) the native gallery already renders.
+            try:
+                from vivarium_workbench.lib.study_native_gallery import (
+                    build_study_native_gallery,
+                )
+                native_names = set(
+                    (build_study_native_gallery(ws_root, name) or {}).get("panels") or {})
+            except Exception:  # noqa: BLE001 — native gallery is best-effort here
+                native_names = set()
             merged_embeds = list(spec.get("embed_visualizations") or [])
             for e in auto_embeds:
-                if e.get("url") not in existing_urls:
-                    merged_embeds.append(e)
+                if e.get("url") in existing_urls:
+                    continue
+                if Path(str(e.get("url") or "")).stem in native_names:
+                    continue
+                merged_embeds.append(e)
             spec["embed_visualizations"] = merged_embeds
 
         # Param-enforcement gate (expert-feedback D.2): if the study declares
