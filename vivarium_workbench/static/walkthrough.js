@@ -774,14 +774,18 @@
   // UI feature flags (ui.composite_view, ui.auto_results)
   // -------------------------------------------------------------------------
   window._uiConfig = null;
-  apiFetch('GET', '/api/ui-config').then(function(r) { return r.json(); }).then(function(cfg) {
+  // Guard the body parse: /api/ui-config is a LIVE-server endpoint not baked into
+  // the static snapshot, so it 404s there with an HTML page. Without the r.ok check
+  // a `.json()` on that HTML throws an UNCAUGHT SyntaxError rejection (no .catch),
+  // which cascades and leaves the UI half-wired in published bundles. Degrade to {}.
+  apiFetch('GET', '/api/ui-config').then(function(r) { return r && r.ok ? r.json() : null; }).then(function(cfg) {
     window._uiConfig = cfg || {};
     // Read-only / remote-only mode: hide authoring controls (.js-authoring) via
     // CSS; the Source panel reads this flag at render time to go remote-only.
     if (window._uiConfig.readonly) document.body.classList.add('readonly');
     _applyCompositeViewMode();
     _applyAutoResultsCheckbox();
-  });
+  }).catch(function () { /* snapshot / offline: ui-config unavailable — use defaults */ });
 
   function _applyCompositeViewMode() {
     var cfg = window._uiConfig || {};
@@ -19981,7 +19985,11 @@
   }
 
   function _refreshGitStatus() {
-    apiFetch('GET', '/api/git-status').then(function (r) { return r.json(); }).then(function (s) {
+    // Guard the body parse: /api/git-status is a LIVE-server endpoint not baked into
+    // the static snapshot (404s with an HTML page there). Without the r.ok check a
+    // `.json()` on that HTML throws an UNCAUGHT SyntaxError rejection (no .catch) —
+    // the cascade that leaves panels half-wired in published bundles. Degrade to null.
+    apiFetch('GET', '/api/git-status').then(function (r) { return r && r.ok ? r.json() : null; }).then(function (s) {
       // Legacy single-string box (still populated for any consumer that
       // reads it). The GitHub-tab settings page renders the same data into
       // individual rows via _renderGitStatusRows below.
@@ -19990,7 +19998,7 @@
       // so it doesn't duplicate that section.
       var box = document.getElementById('viv-git-status');
       if (box) { box.hidden = true; }
-      if (!s.branch) {
+      if (!s || !s.branch) {
         _renderGitStatusRows(null);
         return;
       }
