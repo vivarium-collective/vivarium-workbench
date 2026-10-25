@@ -391,10 +391,10 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
   assert.strictEqual(C.clampDock('top', 9999, 1400, 900), 630, 'top is height-sized like bottom');
   assert.strictEqual(C.clampDock('top', 50, 1400, 900), 110);
 
-  // dropTarget — iTerm-style: over a panel's center = swap, its edges = insert, empty band = edge dock.
+  // dropTarget — over a panel's main-axis area = stack (insert), cross edges = new lane (split), empty band = edge dock.
   var panelsR = [{ key: 'chat', side: 'right', left: 1100, top: 100, right: 1400, bottom: 800 }];
-  assert.deepStrictEqual(C.dropTarget(1250, 450, W, H, panelsR), { kind: 'swap', otherKey: 'chat', side: 'right' },
-    'center of a right-docked panel → swap');
+  assert.deepStrictEqual(C.dropTarget(1250, 450, W, H, panelsR), { kind: 'insert', side: 'right', relKey: 'chat', after: true },
+    'center of a right-docked panel → stack (insert), not swap');
   assert.deepStrictEqual(C.dropTarget(1250, 150, W, H, panelsR), { kind: 'insert', side: 'right', relKey: 'chat', after: false },
     'top of a right panel → insert before');
   assert.deepStrictEqual(C.dropTarget(1250, 750, W, H, panelsR), { kind: 'insert', side: 'right', relKey: 'chat', after: true },
@@ -403,6 +403,23 @@ const C = require('../../vivarium_workbench/static/chat-core.js');
     'empty left band → edge dock');
   assert.strictEqual(C.dropTarget(500, 300, W, H, panelsR), null, 'dead middle → no target');
   assert.strictEqual(C.dropTarget(500, 300, W, H, []), null, 'no panels + middle → null');
+
+  // split — cross-axis edge of a docked panel → a NEW LANE (column on left/right).
+  // panelsR[chat] spans x 1100..1400 (w 300): left strip x<1166, right strip x>1334.
+  assert.deepStrictEqual(C.dropTarget(1130, 450, W, H, panelsR), { kind: 'split', side: 'right', relKey: 'chat', after: false },
+    'left edge of a right panel → new column before');
+  assert.deepStrictEqual(C.dropTarget(1370, 450, W, H, panelsR), { kind: 'split', side: 'right', relKey: 'chat', after: true },
+    'right edge of a right panel → new column after');
+  assert.deepStrictEqual(C.dropTarget(1250, 450, W, H, panelsR), { kind: 'insert', side: 'right', relKey: 'chat', after: true },
+    'center is a stack insert, not split');
+  // On a bottom band the cross axis is Y → split makes a new ROW (above/below).
+  var panelsB = [{ key: 'term', side: 'bottom', left: 0, top: 700, right: 1400, bottom: 900 }];   // h 200: top strip y<744, bottom strip y>856
+  assert.deepStrictEqual(C.dropTarget(700, 720, W, H, panelsB), { kind: 'split', side: 'bottom', relKey: 'term', after: false },
+    'top edge of a bottom band → new row before');
+  assert.deepStrictEqual(C.dropTarget(700, 880, W, H, panelsB), { kind: 'split', side: 'bottom', relKey: 'term', after: true },
+    'bottom edge of a bottom band → new row after');
+  assert.deepStrictEqual(C.dropTarget(100, 800, W, H, panelsB), { kind: 'insert', side: 'bottom', relKey: 'term', after: false },
+    'left end of a bottom band (center Y) → insert before in the lane');
 }
 
 console.log('test_chat_core: all passed');

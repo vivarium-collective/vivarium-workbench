@@ -6676,3 +6676,126 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 .fc-tag{ font-size:11px; padding:1px 6px; border-radius:8px; }
 .fc-full{ background:#d8f3dc; color:#1b4332; }
 .fc-near{ background:#fff3cd; color:#664d03; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Registry panel (dockable registry browser) + Process-page focus mode
+   The "Registry" inset panel (VivPanelDock key 'registry') lists every registry
+   item; clicking one focuses it as a full card in the main "Process" view
+   (#page-modules.registry-focus), with a "Back to full registry" escape that
+   mirrors the investigation detail ↔ list pattern.
+   ════════════════════════════════════════════════════════════════════════════ */
+.viv-registry-panel{
+  --viv-registry-w:300px;
+  flex:0 0 var(--viv-registry-w); width:var(--viv-registry-w);
+  min-width:0;
+  display:flex; flex-direction:column;
+  background:var(--panel, #fff); border-left:1px solid var(--border, #e2e6eb);
+  position:relative; overflow:hidden;
+  transition:flex-basis .18s ease, width .18s ease;
+}
+.viv-registry-panel .vp-head{
+  position:absolute; top:7px; right:6px; left:auto; bottom:auto; z-index:30;
+  width:auto; min-height:0; padding:0; margin:0; gap:2px;
+  border:none; border-bottom:none; background:transparent; box-shadow:none; cursor:default;
+}
+.viv-registry-panel .vp-head > :not(.vp-icon){ display:none; }
+.viv-registry-panel .vp-head .vp-icon{ width:20px; height:18px; }
+.viv-registry-panel .vp-head .vp-icon svg{ width:13px; height:13px; }
+.viv-registry-panel .viv-registry-panel-inner{ display:flex; flex-direction:column; height:100%; min-width:0; flex:1; }
+.viv-registry-panel[hidden]{ display:none !important; }
+.viv-registry-panel[data-dock="left"]{ border-left:none; border-right:1px solid var(--border, #e2e6eb); }
+.viv-registry-panel[data-dock="bottom"]{
+  flex:0 0 var(--viv-registry-h, 280px); width:auto; height:var(--viv-registry-h, 280px); min-height:0;
+  border-left:none; border-top:1px solid var(--border, #e2e6eb);
+}
+.viv-registry-panel[data-dock="top"]{
+  flex:0 0 var(--viv-registry-h, 280px); width:auto; height:var(--viv-registry-h, 280px); min-height:0;
+  border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
+}
+.viv-registry-resize-handle{
+  position:absolute; top:0; left:0; bottom:0; width:6px;
+  cursor:col-resize; z-index:6; background:transparent; transition:background .12s ease;
+}
+.viv-registry-resize-handle:hover{ background:#c7d2fe; }
+.viv-registry-panel[data-dock="left"] .viv-registry-resize-handle{ left:auto; right:0; }
+.viv-registry-panel[data-dock="bottom"] .viv-registry-resize-handle{ left:0; right:0; top:0; bottom:auto; width:auto; height:6px; cursor:row-resize; }
+.viv-registry-panel[data-dock="top"] .viv-registry-resize-handle{ left:0; right:0; top:auto; bottom:0; width:auto; height:6px; cursor:row-resize; }
+.viv-registry-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+.viv-registry-expand{ display:none; }
+.viv-registry-panel.vp-collapsed{ flex:0 0 auto !important; }
+.viv-registry-panel.vp-collapsed[data-dock="left"],
+.viv-registry-panel.vp-collapsed[data-dock="right"]{ width:16px !important; }
+.viv-registry-panel.vp-collapsed[data-dock="top"],
+.viv-registry-panel.vp-collapsed[data-dock="bottom"]{ height:16px !important; min-height:0 !important; }
+.viv-registry-panel.vp-collapsed .viv-registry-head,
+.viv-registry-panel.vp-collapsed .viv-registry-body{ display:none !important; }
+.viv-registry-panel.vp-collapsed .viv-registry-expand{
+  display:block; width:100%; height:100%; border:none; background:transparent;
+  cursor:pointer; color:#64748b; font-size:0.95em; line-height:1; padding:0;
+}
+.viv-registry-panel.vp-collapsed .viv-registry-expand:hover{ background:#eef2ff; color:#3730a3; }
+
+/* Registry list content (inside the panel body) */
+.viv-reg-head{ display:flex; align-items:center; gap:8px; min-height:46px; padding:8px 10px; flex:none; }
+.viv-reg-search{ flex:1 1 auto; width:auto; min-width:0; height:30px; box-sizing:border-box; padding:0 10px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; font-size:0.9em; color:#334155; }
+.viv-reg-search:focus{ outline:none; border-color:#a5b4fc; box-shadow:0 0 0 3px rgba(99,102,241,0.12); }
+.viv-reg-refresh{ flex:none; height:30px; min-width:30px; }
+.viv-reg-list{ flex:1 1 auto; min-height:0; overflow:auto; padding:0 6px 10px; }
+/* Collapsible top-level category (Composites / Processes / …). */
+.viv-reg-cat{ margin-top:4px; }
+.viv-reg-cat-head{
+  display:flex; align-items:center; gap:7px; width:100%; box-sizing:border-box;
+  padding:6px 8px; margin:0; border:none; background:transparent; cursor:pointer;
+  font-size:0.68em; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;
+  color:#64748b; text-align:left; position:sticky; top:0; z-index:1;
+  background:var(--panel, #fff);
+}
+.viv-reg-cat-head:hover{ color:#3730a3; }
+.viv-reg-chev{ flex:none; font-size:0.9em; transition:transform .12s ease; transform:rotate(90deg); color:#94a3b8; }
+.viv-reg-cat.collapsed .viv-reg-chev{ transform:rotate(0deg); }
+.viv-reg-cat-label{ flex:1 1 auto; }
+.viv-reg-count{ font-weight:600; color:#cbd5e1; }
+/* Source-package sub-group label within a category. */
+.viv-reg-sub{
+  font-size:0.66em; font-weight:600; color:#b4bcc8; padding:5px 8px 1px 14px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-family:var(--mono, ui-monospace, monospace);
+}
+.viv-reg-subcount{ color:#d4dae2; }
+/* Two-line item row: name on top, provenance (module path + source chip) below. */
+.viv-reg-row{ display:block; padding:4px 8px 5px 14px; border-radius:6px; color:#334155; text-decoration:none; cursor:pointer; }
+.viv-reg-row:hover{ background:#f1f5f9; }
+.viv-reg-row:focus-visible{ outline:2px solid #a5b4fc; outline-offset:-2px; }
+.viv-reg-row.active{ background:#eef2ff; }
+.viv-reg-row.active .viv-reg-name{ color:#3730a3; font-weight:600; }
+.viv-reg-row-main{ display:flex; align-items:center; gap:6px; }
+.viv-reg-ws{ color:#10b981; font-size:0.7em; flex:none; line-height:1; }
+.viv-reg-name{ font-size:0.86em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.viv-reg-prov{ display:flex; align-items:center; gap:5px; margin-top:1px; min-width:0; }
+.viv-reg-mod{ font-size:0.66em; color:#94a3b8; font-family:var(--mono, ui-monospace, monospace); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; min-width:0; }
+.viv-reg-chip{ flex:none; font-size:0.6em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; padding:1px 5px; border-radius:999px; line-height:1.4; }
+.viv-reg-chip-ws{ background:#dcfce7; color:#166534; }
+.viv-reg-chip-fw{ background:#e0e7ff; color:#3730a3; }
+.viv-reg-chip-env{ background:#f1f5f9; color:#64748b; }
+.viv-reg-chip-other{ background:#f1f5f9; color:#64748b; }
+.viv-reg-empty{ padding:16px 10px; font-size:0.86em; }
+
+/* "Process" page focus mode: a single card vs the full-registry list browser. */
+#page-modules .registry-focus-host{ display:none; }
+#page-modules.registry-focus .registry-focus-host{ display:block; }
+#page-modules.registry-focus .registry-sticky,
+#page-modules.registry-focus .registry-tab-panel,
+#page-modules.registry-focus #registry-status{ display:none !important; }
+.registry-focus-host{ padding:4px 0 24px; }
+.registry-focus-empty{ max-width:560px; margin:48px auto; text-align:center; }
+.registry-focus-empty-title{ font-size:1.15em; font-weight:700; color:#475569; margin-bottom:6px; }
+.registry-focus-bar{ display:flex; align-items:center; gap:12px; padding:4px 2px 12px; flex-wrap:wrap; }
+.registry-back-all{ font-size:0.9em; }
+.registry-focus-crumb{ font-size:0.82em; color:#94a3b8; font-family:var(--mono, ui-monospace, monospace); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Unified "Explore" action — opens the item's full card in the single Process view. */
+.reg-explore-btn{ height:26px; padding:0 11px; font-size:12px; font-weight:600; background:#2563eb; color:#fff; border:1px solid #2563eb; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
+.reg-explore-btn:hover{ background:#1d4ed8; }
+.reg-explore-btn-sm{ height:22px; padding:0 8px; font-size:11px; font-weight:600; background:#2563eb; color:#fff; border:1px solid #2563eb; border-radius:4px; cursor:pointer; margin-right:5px; vertical-align:middle; }
+.reg-explore-btn-sm:hover{ background:#1d4ed8; }
+.reg-td-actions{ white-space:nowrap; }

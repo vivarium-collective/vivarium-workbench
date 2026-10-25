@@ -701,9 +701,18 @@
       var p = panels[i];
       if (x >= p.left && x <= p.right && y >= p.top && y <= p.bottom) {
         var vertical = (p.side === 'left' || p.side === 'right');
-        var span = vertical ? (p.bottom - p.top) : (p.right - p.left);
-        var frac = span > 0 ? (vertical ? (y - p.top) : (x - p.left)) / span : 0.5;
-        if (frac > 0.30 && frac < 0.70) return { kind: 'swap', otherKey: p.key, side: p.side };
+        var pw = p.right - p.left, ph = p.bottom - p.top;
+        var fx = pw > 0 ? (x - p.left) / pw : 0.5;
+        var fy = ph > 0 ? (y - p.top) / ph : 0.5;
+        // Cross-axis edge strips → a NEW LANE (a column beside this panel on a
+        // left/right side, a row above/below it on a top/bottom band). The cross
+        // axis is x for a vertical side, y for a horizontal band.
+        var SPLIT = 0.22;
+        var cross = vertical ? fx : fy;
+        if (cross < SPLIT) return { kind: 'split', side: p.side, relKey: p.key, after: false };
+        if (cross > 1 - SPLIT) return { kind: 'split', side: p.side, relKey: p.key, after: true };
+        // Main axis → stack into this panel's lane, before (first half) or after it.
+        var frac = vertical ? fy : fx;
         return { kind: 'insert', side: p.side, relKey: p.key, after: frac >= 0.5 };
       }
     }

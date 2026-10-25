@@ -32,39 +32,21 @@ def _workspace_name(workspace: Path) -> str:
 
 
 def _warn_if_loom_dist_stale() -> None:
-    """Warn when the built loom bundle is missing or older than its source.
+    """Ensure the loom viewer bundle is available before serving, building or
+    resolving a fallback when needed.
 
-    `vivarium_workbench/loom/_dist` is a gitignored build artifact. On an editable
-    / source checkout, pulling loom source changes does NOT rebuild it, so the
-    server silently keeps serving the OLD bundle — the only symptom is a stale
-    loom (e.g. a new render flag doing nothing). Surface it loudly at startup so
-    the fix (`scripts/build_loom.sh` + restart) is obvious. Best-effort; a wheel
-    install ships only `_dist` (no `src`), so this never false-warns there.
+    `vivarium_workbench/loom/_dist` is a gitignored build artifact (built by
+    `scripts/build_loom.sh`, baked into wheels by hatch_build.py). A source
+    checkout or git worktree may not have it locally — which showed as the
+    "viewer bundle is missing" card. `loom_assets.ensure_built()` now heals that
+    at startup: it reuses a fresh vendored build, inherits a git worktree's MAIN
+    checkout bundle, rebuilds a stale one, or builds a standalone source checkout
+    (when Node is present) — degrading gracefully (a warning, not a crash) only
+    when genuinely impossible. Best-effort; a wheel install ships `_dist`.
     """
     try:
-        from vivarium_workbench.loom_assets import asset_dir
-        dist = asset_dir()
-        src = dist.parent / "src"
-        if not dist.is_dir():
-            print("warning: loom bundle (loom/_dist) is missing — run "
-                  "scripts/build_loom.sh, or the Explorer / render-loom will 404.",
-                  file=sys.stderr)
-            return
-        if not src.is_dir():
-            return  # a wheel install: no source tree to compare against
-        def _newest(p: Path) -> float:
-            m = 0.0
-            for f in p.rglob("*"):
-                if f.is_file():
-                    try:
-                        m = max(m, f.stat().st_mtime)
-                    except OSError:
-                        pass
-            return m
-        if _newest(src) > _newest(dist) + 1:
-            print("warning: loom/_dist is OLDER than loom/src — the served loom "
-                  "bundle is stale. Rebuild it (scripts/build_loom.sh) and restart "
-                  "so renderer changes take effect.", file=sys.stderr)
+        from vivarium_workbench import loom_assets
+        loom_assets.ensure_built(require=False)
     except Exception:
         pass
 

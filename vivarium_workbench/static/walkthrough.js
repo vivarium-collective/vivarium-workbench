@@ -2990,7 +2990,10 @@
   // Persists in localStorage.
   window._registryZoom = (function () {
     var z; try { z = localStorage.getItem('viv.registryZoom'); } catch (e) { z = null; }
-    return (z === 'table' || z === 'grid' || z === 'full') ? z : 'grid';
+    // Only the two lower views remain as browse modes; the "full" in-place zoom
+    // was replaced by the single-card Process view (reached via "Explore"), so a
+    // stored 'full' coerces to the Cards grid.
+    return (z === 'table' || z === 'grid') ? z : 'grid';
   })();
 
   // ── Cards-grid column control (shared: registry / composites / modules) ──
@@ -3348,8 +3351,8 @@
       : '';
     var selCls = (window._registrySelected && window._registrySelected === p.address) ? ' reg-selected' : '';
     return '<div class="registry-card' + selCls + '"' + sourceAttr + ' data-address="' + addr + '"' +
-        ' onclick="_selectRegistryEntry(\'' + addr + '\')" ondblclick="_zoomInOn(\'' + addr + '\')"' +
-        ' title="Double-click to zoom in on this ' + (p.kind || 'process') + '">' +
+        ' onclick="_selectRegistryEntry(\'' + addr + '\')" ondblclick="_showRegistryCard(\'' + addr + '\',\'' + esc(p.kind || 'process') + '\')"' +
+        ' title="Double-click to Explore (open the full card)">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
           '<div class="reg-card-head"><strong class="reg-card-name">' + esc(p.name) + '</strong>' + _procKindBadge(p.kind) + _procBridgeBadge(p) + defaultBadge + _regUseBadge(p) + _contractBadge(p.contract_audit) + '</div>' +
@@ -3360,7 +3363,10 @@
       '</div>' +
       _successBar(sp) +
       cfgPortsBtn +
-      codeBtnGrid +
+      '<div class="reg-card-actions" style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">' +
+        '<button type="button" class="reg-explore-btn" onclick="event.stopPropagation();_showRegistryCard(\'' + addr + '\',\'' + esc(p.kind || 'process') + '\')" title="Open the full card in the Process view">🔍 Explore</button>' +
+        codeBtnGrid +
+      '</div>' +
       _runCmdChip(p.run_command) +
     '</div>';
   }
@@ -3600,6 +3606,75 @@
   }
   window._enterMaxcardMode = _enterMaxcardMode;
 
+  // ── "Process" page focus mode (driven by the Registry panel) ───────────────
+  // Show a SINGLE registry item as a full semantic-zoom card in the main Process
+  // view (#page-modules), hiding the full-list browser. Mirrors the investigation
+  // detail ↔ list pattern: a "Back to full registry" control returns to the list.
+  // Reuses the same card renderers + lazy hydration as _enterMaxcardMode.
+  function _showRegistryCard(address, kind) {
+    if (!address) return;
+    function _escAddr(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    var page = document.getElementById('page-modules');
+    if (page) page.classList.add('registry-focus');
+    window._registrySelected = address;
+    if (typeof _switchPage === 'function') _switchPage('modules');
+    var isComposite = (kind === 'composite');
+    var host = document.getElementById('registry-focus-host');
+    if (!host) return;
+    host.innerHTML = '<div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading…</span></div>';
+    var tries = 0;
+    (function attempt() {
+      // the card may be requested before the registry/composites load completes;
+      // (re)trigger the loader and retry, exactly as the popcard/maxcard paths do.
+      var html = null;
+      if (isComposite) {
+        var c = (window._compositesById || {})[address];
+        if (c) html = _renderCompositeCardFull(c);
+      } else {
+        var e = _registryEntryByAddress(address);
+        if (e) html = _renderRegistryEntryFull(e);
+      }
+      if (html) {
+        var bar = '<div class="registry-focus-bar">' +
+          '<button type="button" class="btn-link registry-back-all" onclick="_registryBrowseAll()" title="Show the full registry list">◂ Back to full registry</button>' +
+          '<span class="registry-focus-crumb" title="' + _escAddr(address) + '">' + _escAddr(address) + '</span></div>';
+        host.innerHTML = bar + '<div class="reg-cards reg-cards-full popcard-single">' + html + '</div>';
+        if (typeof _observeRunnableCards === 'function') _observeRunnableCards(host);
+        if (isComposite) {
+          // Open with the bigraph graph fully showing (not the compact run/outputs
+          // strip): data-graph="open" → the loom mounts with ?graph=open. The user
+          // can still collapse it. Mirrors the "fill the pane" / pop-out behavior.
+          var lembed = host.querySelector('.ccard-loom-embed');
+          if (lembed) lembed.setAttribute('data-graph', 'open');
+          var expBtn = host.querySelector('.pcard-graph-bar');
+          if (expBtn && typeof _toggleLoomCard === 'function') _toggleLoomCard(expBtn);
+        }
+        try { host.scrollIntoView({ block: 'start' }); } catch (e2) { /* ignore */ }
+        return;
+      }
+      if (tries % 6 === 0) {
+        if (isComposite) { if (typeof _loadComposites === 'function') _loadComposites(); }
+        else { window._registryLoaded = false; if (typeof _loadRegistry === 'function') _loadRegistry(false); }
+      }
+      if (tries++ < 120) setTimeout(attempt, 200);
+    })();
+  }
+  window._showRegistryCard = _showRegistryCard;
+
+  // Leave focus mode → the classic full-registry list browser (all items). The
+  // "go back to full registry" affordance the Process page keeps.
+  function _registryBrowseAll() {
+    var page = document.getElementById('page-modules');
+    if (page) page.classList.remove('registry-focus');
+    // the full in-place zoom was replaced by the single-card Process view, so the
+    // browse list only ever shows one of the two lower views.
+    if (window._registryZoom === 'full') window._registryZoom = 'grid';
+    if (typeof _switchPage === 'function') _switchPage('modules');
+    if (!window._registryLoaded && typeof _loadRegistry === 'function') _loadRegistry(false);
+    if (typeof _loadComposites === 'function') _loadComposites();
+  }
+  window._registryBrowseAll = _registryBrowseAll;
+
   // "Pop back in" from a pop-out window: return to the full workbench (rail
   // visible) with this composite maximized. Prefer navigating the opener so the
   // pop-out closes; fall back to navigating this window.
@@ -3729,19 +3804,22 @@
       var np = (c.parameters && typeof c.parameters === 'object') ? Object.keys(c.parameters).length : 0;
       var nr = (c.requires && c.requires.processes) ? c.requires.processes.length : 0;
       var sel = (window._registrySelected === c.id) ? ' reg-selected' : '';
-      return '<tr class="reg-tr' + sel + '" data-address="' + _esc(c.id) + '" onclick="_selectRegistryEntry(\'' + _esc(c.id) + '\')" ondblclick="_setRegistryZoom(\'full\')" title="Double-click to open the full card">' +
+      return '<tr class="reg-tr' + sel + '" data-address="' + _esc(c.id) + '" onclick="_selectRegistryEntry(\'' + _esc(c.id) + '\')" ondblclick="_showRegistryCard(\'' + _esc(c.id) + '\',\'composite\')" title="Double-click to Explore (open the full card)">' +
         '<td class="reg-td-name"><strong>' + _esc(c.name) + '</strong> <code>' + _esc(c.id) + '</code></td>' +
         '<td>' + _esc(mod(c)) + '</td>' +
         '<td class="num">' + np + '</td>' +
         '<td class="num">' + nr + '</td>' +
         '<td class="num">' + (sp.studies || 0) + '</td>' +
         '<td class="num">' + _successCell(sp) + '</td>' +
-        '<td><button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this composite\'s source"' +
-          ' onclick="event.stopPropagation();_openCompositeCode(\'' + _esc(c.id) + '\')">&lt;/&gt; Code</button></td>' +
+        '<td class="reg-td-actions">' +
+          '<button type="button" class="reg-explore-btn-sm" title="Open the full card in the Process view"' +
+            ' onclick="event.stopPropagation();_showRegistryCard(\'' + _esc(c.id) + '\',\'composite\')">🔍 Explore</button>' +
+          '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this composite\'s source"' +
+            ' onclick="event.stopPropagation();_openCompositeCode(\'' + _esc(c.id) + '\')">&lt;/&gt; Code</button></td>' +
       '</tr>';
     }).join('');
     return '<div class="registry-table-wrap"><table class="registry-table"><thead><tr>' +
-      '<th>Name</th><th>Module</th><th class="num">Params</th><th class="num">Needs</th><th class="num">Studies</th><th class="num">Success</th><th>Code</th>' +
+      '<th>Name</th><th>Module</th><th class="num">Params</th><th class="num">Needs</th><th class="num">Studies</th><th class="num">Success</th><th>Actions</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
@@ -4638,8 +4716,8 @@
     var body = rows.map(function (p) {
       var sel = (window._registrySelected && window._registrySelected === p.address) ? ' reg-selected' : '';
       return '<tr class="reg-tr' + sel + '" data-source="' + _esc(p.source || '') + '" data-address="' + _esc(p.address || '') +
-          '" onclick="_selectRegistryEntry(\'' + _esc(p.address || '') + '\')" ondblclick="_zoomInOn(\'' + _esc(p.address || '') + '\')"' +
-          ' title="Click to select · double-click to zoom in on this process">' +
+          '" onclick="_selectRegistryEntry(\'' + _esc(p.address || '') + '\')" ondblclick="_showRegistryCard(\'' + _esc(p.address || '') + '\',\'' + _esc(p.kind || 'process') + '\')"' +
+          ' title="Click to select · double-click to Explore (open the full card)">' +
         '<td class="reg-td-name" title="' + _esc(p.address || p.name || '') + '"><strong>' + _esc(p.name) + '</strong> <code>' + _esc(p.address || '') + '</code></td>' +
         '<td class="reg-td-kind">' + (_procKindBadge(p.kind) || _esc(_procKindLabel(p.kind))) + _procBridgeBadge(p) + '</td>' +
         '<td title="' + _esc(mod(p)) + '">' + _esc(mod(p)) + '</td>' +
@@ -4649,16 +4727,19 @@
         '<td class="num">' + _nPorts(p.inputs) + '</td>' +
         '<td class="num">' + _nPorts(p.outputs) + '</td>' +
         '<td class="reg-td-src">' + _esc(p.source || '') + '</td>' +
-        '<td>' + (/^(process|step)$/.test(p.kind || 'process') && p.address
-          ? '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this process\'s source"' +
-            ' onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + _esc(p.address) + '\')">&lt;/&gt; Code</button>'
-          : '') + '</td>' +
+        '<td class="reg-td-actions">' +
+          (p.address ? '<button type="button" class="reg-explore-btn-sm" title="Open the full card in the Process view"' +
+            ' onclick="event.stopPropagation();_showRegistryCard(\'' + _esc(p.address) + '\',\'' + _esc(p.kind || 'process') + '\')">🔍 Explore</button>' : '') +
+          (/^(process|step)$/.test(p.kind || 'process') && p.address
+            ? '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this process\'s source"' +
+              ' onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + _esc(p.address) + '\')">&lt;/&gt; Code</button>'
+            : '') + '</td>' +
       '</tr>';
     }).join('');
     el.innerHTML = '<div class="registry-table-wrap"><table class="registry-table reg-table-fill">' + colgroup + '<thead><tr>' +
       th('name', 'Name', '', 0) + th('kind', 'Type', '', 1) + th('module', 'Module', '', 2) + th('use', 'Uses', 'num', 3) +
       th('studies', 'Studies', 'num', 4) + th('success', 'Success', 'num', 5) +
-      th('in', 'In', 'num', 6) + th('out', 'Out', 'num', 7) + th('source', 'Source', '', 8) + th('code', 'Code', '', 9) +
+      th('in', 'In', 'num', 6) + th('out', 'Out', 'num', 7) + th('source', 'Source', '', 8) + th('code', 'Actions', '', 9) +
       '</tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
@@ -4774,6 +4855,9 @@
   function _renderRegistryGrid(containerId, entries) {
     // In a pop-out window the single card owns its container — don't clobber it.
     if (document.body.classList.contains('popcard-mode')) return;
+    // The browse list keeps only the two lower views (table / grid); the full
+    // in-place zoom is now the single-card Process view (via "Explore").
+    if (window._registryZoom === 'full') window._registryZoom = 'grid';
     var el = document.getElementById(containerId);
     if (!el) return;
     if (!entries || !entries.length) {
@@ -5445,7 +5529,9 @@
       .map(function (c, i) { return { c: c, i: i, n: _figNum(c) }; })
       .sort(function (a, b) { return (a.n - b.n) || (a.i - b.i); })
       .map(function (x) { return x.c; });
-    // Semantic zoom: Table (dense) → Cards (grid + usage) → Full (accordion).
+    // Semantic zoom: the two lower views only (Table / Cards) — the full in-place
+    // zoom is replaced by the single-card Process view, reached via "Explore".
+    if (window._registryZoom === 'full') window._registryZoom = 'grid';
     var zoom = window._registryZoom || 'grid';
     if (zoom === 'table') { el.innerHTML = _renderCompositeTableHtml(list); return; }
     var cardsCls = 'reg-cards reg-cards-' + (zoom === 'full' ? 'full' : 'grid');
@@ -18614,6 +18700,9 @@
   // instead of the old standalone bigraph-loom composite-explore page.
   function _openCompositeCardView(spec_id) {
     if (!spec_id) return;
+    // Unified: open the composite as a single full card in the Process view
+    // (same destination as every "Explore" action), not the removed full zoom.
+    if (typeof window._showRegistryCard === 'function') { window._showRegistryCard(spec_id, 'composite'); return; }
     if (typeof _openCompositesTab === 'function') _openCompositesTab();
     window._registryZoom = 'full';
     try { localStorage.setItem('viv.registryZoom', 'full'); } catch (e) { /* private mode */ }

@@ -142,6 +142,21 @@ class RunRequest:
         )
 
 
+def _strip_figure_keys(obj):
+    """Recursively drop ``_figure`` keys from a composite state before it is
+    realized for a RUN. ``_figure`` is a cosmetic bigraph-loom icon annotation
+    (an SVG string), not runtime schema. On stores whose ``_type`` routes the
+    realizer through ``access_type``/``reify_schema``, a non-``_type`` key is
+    parsed as a type expression — and a full SVG string is not a parseable type,
+    so realize raises ``unable to parse type "<svg …>"``. The loom DIAGRAM path
+    keeps ``_figure`` (it needs the icons); only the run path strips it here."""
+    if isinstance(obj, dict):
+        return {k: _strip_figure_keys(v) for k, v in obj.items() if k != "_figure"}
+    if isinstance(obj, list):
+        return [_strip_figure_keys(x) for x in obj]
+    return obj
+
+
 def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
     """Resolve the composite state — generator entry first, then file spec.
 
@@ -162,7 +177,7 @@ def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
         if entry is not None:
             doc = build_generator(entry, overrides=req.overrides)
             if isinstance(doc, dict) and isinstance(doc.get("state"), dict):
-                return doc["state"], None
+                return _strip_figure_keys(doc["state"]), None
             return doc, None
     except ImportError:
         pass
@@ -183,7 +198,7 @@ def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
     state = substitute_parameters(spec.get("state") or {},
                                   spec.get("parameters") or {},
                                   req.overrides)
-    return state, spec
+    return _strip_figure_keys(state), spec
 
 
 def _apply_seed_state(base: dict, seed: dict) -> dict:
