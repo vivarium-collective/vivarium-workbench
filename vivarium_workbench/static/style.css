@@ -5577,6 +5577,15 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   --accent:#6366f1;
   /* map the light-mode var names so existing var(--panel)/var(--gray) rules follow */
   --panel:var(--surface); --gray:var(--text-muted);
+  /* Semantic tokens for report panels rendered with inline styles. Call sites pass
+     the original light hex as the var() fallback, so LIGHT mode is byte-identical and
+     only DARK mode picks these up. Backgrounds/borders/text for cards, subtle
+     sections, chips, and notice (warn/ok/err/info) callouts. */
+  --card:var(--surface); --subtle:var(--surface-2); --chip:var(--surface-3);
+  --warn-bg:#2a2410; --warn-border:#4a3d18; --warn-fg:#fcd34d;
+  --ok-bg:#122a1c; --ok-border:#1e4631; --ok-fg:#4ade80;
+  --err-bg:#2c1618; --err-border:#4a2327; --err-fg:#f87171;
+  --info-bg:#132037; --info-border:#1e3a5f; --info-fg:#93c5fd;
 }
 :root[data-theme="dark"] body{ color:var(--text); background:var(--bg); }
 :root[data-theme="dark"] a{ color:var(--link); }

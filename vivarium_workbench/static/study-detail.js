@@ -243,10 +243,10 @@
       : ('every ' + e(String(em.interval)) + ' ticks');
     var scope = (em.scope === 'declared') ? 'declared observables' : e(em.scope || 'declared observables');
     var out = em.output_dir ? (' <span class="muted">&rarr;</span> <code style="font-size:0.82em">' + e(em.output_dir) + '</code>') : '';
-    var errNote = em.error ? ' <span class="muted" style="color:#92400e">(' + e(em.error) + ')</span>' : '';
+    var errNote = em.error ? ' <span class="muted" style="color:var(--warn-fg, #92400e)">(' + e(em.error) + ')</span>' : '';
     var sep = '<span class="muted">·</span>';
-    return '<div style="font-size:0.9em;color:#475569;display:flex;align-items:center;gap:7px;flex-wrap:wrap">'
-      + '<span style="font-weight:600;color:#334155">Emitter</span>'
+    return '<div style="font-size:0.9em;color:var(--text-muted, #475569);display:flex;align-items:center;gap:7px;flex-wrap:wrap">'
+      + '<span style="font-weight:600;color:var(--text-muted, #334155)">Emitter</span>'
       + '<code style="font-size:0.82em">' + e(kind) + '</code>'
       + sep + '<span>' + every + '</span>'
       + sep + '<span>' + scope + '</span>'
@@ -324,7 +324,7 @@
         html += '<tr style="border-top:1px solid #eef2f6">'
           + '<td style="padding:5px 8px"><a href="' + e(f.download_url) + '">'
           + e(f.name) + '</a></td>'
-          + '<td style="padding:5px 8px;text-align:right;color:#64748b;white-space:nowrap">'
+          + '<td style="padding:5px 8px;text-align:right;color:var(--text-muted, #64748b);white-space:nowrap">'
           + e(_fmtBytes(f.size)) + '</td></tr>';
       });
       html += '</table></div>';
@@ -418,8 +418,8 @@
     var e = escapeHtmlForTests;
     var styles = {
       emitted:          {bg: '#d1fae5', fg: '#065f46', bd: '#6ee7b7', glyph: '✓', label: 'emitted'},
-      not_in_emit_plan: {bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5', glyph: '✗', label: 'not in emit plan'},
-      derived:          {bg: '#f1f5f9', fg: '#475569', bd: '#cbd5e1', glyph: '⏳', label: 'derived'},
+      not_in_emit_plan: {bg: 'var(--err-bg, #fee2e2)', fg: 'var(--err-fg, #991b1b)', bd: '#fca5a5', glyph: '✗', label: 'not in emit plan'},
+      derived:          {bg: 'var(--chip, #f1f5f9)', fg: 'var(--text-muted, #475569)', bd: 'var(--border, #cbd5e1)', glyph: '⏳', label: 'derived'},
     };
     var s = styles[status] || styles.derived;
     return '<span style="display:inline-block;padding:2px 8px;border-radius:9999px;background:'
@@ -428,7 +428,7 @@
 
   function _renderReadoutsTable(j) {
     var e = escapeHtmlForTests;
-    var note = j.note ? '<p class="muted" style="color:#92400e">' + e(j.note) + '</p>' : '';
+    var note = j.note ? '<p class="muted" style="color:var(--warn-fg, #92400e)">' + e(j.note) + '</p>' : '';
     var rows = j.rows || [];
     var idxHtml = function (o) {
       return o.index_by ? '<code style="font-size:0.85em;">' + e(o.index_by.type) + '=' + e(o.index_by.value) + '</code>'
@@ -453,7 +453,7 @@
     cols.forEach(function (c) { keep[c.id] = true; });
     var head = '<table class="observables-table" style="width:100%; border-collapse: collapse;"><thead><tr>'
       + cols.map(function(c) {
-          return '<th style="text-align:left; padding:6px; border-bottom:1px solid #e2e8f0;">' + c.label + '</th>';
+          return '<th style="text-align:left; padding:6px; border-bottom:1px solid var(--border, #e2e8f0);">' + c.label + '</th>';
         }).join('') + '</tr></thead><tbody>';
     var body = rows.map(function(o) {
       var tds = '';
@@ -463,7 +463,7 @@
       if (keep.indexed_by) tds += '<td style="padding:6px; vertical-align:top;">' + idxHtml(o) + '</td>';
       if (keep.units) tds += '<td style="padding:6px; vertical-align:top; font-size:0.9em;">' + e(o.units || '') + '</td>';
       if (keep.description) tds += '<td style="padding:6px; vertical-align:top; max-width:380px; font-size:0.9em;">' + e(o.description || '') + '</td>';
-      return '<tr style="border-bottom:1px solid #f1f5f9;" data-readout="' + e(o.name) + '">' + tds + '</tr>';
+      return '<tr style="border-bottom:1px solid var(--chip, #f1f5f9);" data-readout="' + e(o.name) + '">' + tds + '</tr>';
     }).join('');
     return note + head + body + '</tbody></table>';
   }
@@ -1075,7 +1075,7 @@
         '<p class="muted" style="font-size:0.85em;margin:0 0 8px">From run <code>' +
         escapeHtmlForTests(String(d.run_label || d.run_id || '')) + '</code></p>' +
         '<table style="width:100%;border-collapse:collapse;font-size:0.86em">' +
-        '<thead><tr style="text-align:left;border-bottom:1px solid #e5e7eb">' +
+        '<thead><tr style="text-align:left;border-bottom:1px solid var(--border, #e5e7eb)">' +
         '<th style="padding:5px 8px">Path</th><th style="padding:5px 8px">dtype</th>' +
         '<th style="padding:5px 8px">Sparkline</th>' +
         '<th style="padding:5px 8px;text-align:right">First</th>' +
@@ -1122,7 +1122,7 @@
     var emList = Object.keys(emitters);
     var chips = [];
     chips.push('<strong>' + rows.length + '</strong> run' + (rows.length === 1 ? '' : 's'));
-    chips.push('<span style="color:#059669;font-weight:600">' + done + '</span> completed');
+    chips.push('<span style="color:var(--ok-fg, #059669);font-weight:600">' + done + '</span> completed');
     if (latest) {
       var lbl = latest.sim_name || latest.label || latest.run_id || '';
       chips.push('latest <code style="font-size:0.82em">' + esc(lbl) + '</code>');
@@ -1131,7 +1131,7 @@
       if (latest.n_steps != null) chips.push(esc(String(latest.n_steps)) + ' steps');
     }
     if (emList.length) chips.push('emitter <code style="font-size:0.82em">' + esc(emList.join(', ')) + '</code>');
-    return '<div style="font-size:0.9em;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    return '<div style="font-size:0.9em;color:var(--text-muted, #475569);display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
       + chips.join('<span class="muted">·</span>') + '</div>';
   }
 
@@ -1171,8 +1171,8 @@
       }
       function _statusOf(row) { return String(row.status || '').toLowerCase() || 'unknown'; }
       function _stColor(st) {
-        return st === 'completed' ? '#059669' : st === 'failed' ? '#dc2626'
-          : st === 'running' ? '#2563eb' : st === 'cancelled' ? '#b45309' : '#9ca3af';
+        return st === 'completed' ? 'var(--ok-fg, #059669)' : st === 'failed' ? 'var(--err-fg, #dc2626)'
+          : st === 'running' ? 'var(--info-fg, #2563eb)' : st === 'cancelled' ? 'var(--warn-fg, #b45309)' : '#9ca3af';
       }
       var byStatus = {};
       rows.forEach(function (r) { var s = _statusOf(r); byStatus[s] = (byStatus[s] || 0) + 1; });
@@ -1208,7 +1208,7 @@
         '<div style="display:flex;align-items:center;gap:12px;margin:6px 0 10px;flex-wrap:wrap">' +
         '<strong>' + rows.length + ' runs</strong><span class="muted" style="font-size:0.88em">' + statusSummary + '</span>' +
         '<input id="rawdata-search" placeholder="filter runs…" ' +
-        'style="margin-left:auto;padding:4px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:0.85em">' +
+        'style="margin-left:auto;padding:4px 8px;border:1px solid var(--border, #d1d5db);border-radius:5px;font-size:0.85em">' +
         '</div>' + groupsHtml;
       var _search = document.getElementById('rawdata-search');
       if (_search) _search.addEventListener('input', function () {
@@ -1746,19 +1746,19 @@
           'data-param-type="' + esc(def.type || '') + '" value="' + esc(shown === '—' ? '' : shown) + '" ' +
           'style="width:100%;min-width:80px;font-family:monospace;font-size:0.85em;padding:2px 4px;box-sizing:border-box" />'
         : '<code>' + esc(shown) + '</code>';
-      return '<tr' + (overridden ? ' style="background:#eff6ff"' : '') + '>' +
+      return '<tr' + (overridden ? ' style="background:var(--info-bg, #eff6ff)"' : '') + '>' +
         '<td style="padding:3px 8px"><code>' + esc(k) + '</code></td>' +
-        '<td style="padding:3px 8px;color:#6b7280">' + esc(def.type || '') + '</td>' +
+        '<td style="padding:3px 8px;color:var(--text-muted, #6b7280)">' + esc(def.type || '') + '</td>' +
         '<td style="padding:3px 8px">' + valueCell +
-        (overridden ? ' <span style="color:#2563eb;font-size:0.72em;font-weight:600">override</span>' : '') + '</td>' +
-        '<td style="padding:3px 8px;color:#6b7280">' + esc(def.description || '') + '</td></tr>';
+        (overridden ? ' <span style="color:var(--info-fg, #2563eb);font-size:0.72em;font-weight:600">override</span>' : '') + '</td>' +
+        '<td style="padding:3px 8px;color:var(--text-muted, #6b7280)">' + esc(def.description || '') + '</td></tr>';
     }).join('');
     mount.innerHTML =
       '<div style="font-size:0.85em;color:#374151;margin-bottom:4px"><strong>Config that runs</strong> ' +
       '<span class="muted">— resolved parameters (composite defaults ⊕ this study\'s overrides)</span></div>' +
       '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.85em">' +
       '<thead><tr>' + ['Parameter', 'Type', 'Value', 'Description'].map(function (h) {
-        return '<th style="text-align:left;padding:3px 8px;border-bottom:1px solid #e5e7eb;color:#6b7280;">' + h + '</th>';
+        return '<th style="text-align:left;padding:3px 8px;border-bottom:1px solid var(--border, #e5e7eb);color:var(--text-muted, #6b7280);">' + h + '</th>';
       }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
       (editable
         ? '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">' +
@@ -1766,7 +1766,7 @@
           '<span class="model-config-status muted" style="font-size:0.8em"></span></div>'
         : '') +
       '<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:0.82em">Full resolved config (JSON)</summary>' +
-      '<pre style="font-size:0.78em;background:#f8fafc;padding:8px;border-radius:4px;overflow-x:auto;margin:4px 0 0">' +
+      '<pre style="font-size:0.78em;background:var(--subtle, #f8fafc);padding:8px;border-radius:4px;overflow-x:auto;margin:4px 0 0">' +
       esc(JSON.stringify(effective, null, 2)) + '</pre></details>';
     if (!editable) return;
     mount.querySelectorAll('.model-param-input').forEach(function (input) {
@@ -1830,7 +1830,7 @@
     // composite is a registered composite; otherwise we surface the gap.
     var explore = (runId && row.spec_id && row.composite_registered)
       ? '<a class="action-btn" href="' + (window.__BASE_PATH__ || '') + '/?focus=composite-explore&id=' + encodeURIComponent(row.spec_id) + '&run_id=' + encodeURIComponent(runId) + '#composite-explore">↗ Open run in Composite Explorer</a>'
-      : '<span style="color:#b91c1c;font-size:0.85em">⚠ ' + (row.spec_id
+      : '<span style="color:var(--err-fg, #b91c1c);font-size:0.85em">⚠ ' + (row.spec_id
           ? 'composite <code>' + e(row.spec_id) + '</code> is not registered — cannot open in the Explorer'
           : 'no composite associated with this run') + '</span>';
     var kv = function (k, v) {
@@ -1927,7 +1927,7 @@
         }
       })
       .catch(function(e) {
-        panel.innerHTML = '<p class="muted" style="color:#dc2626">Chart load failed: ' + (e && e.message || e) + '</p>';
+        panel.innerHTML = '<p class="muted" style="color:var(--err-fg, #dc2626)">Chart load failed: ' + (e && e.message || e) + '</p>';
         if (panelId === 'viz-charts-panel') {
           _figuresSourceState.charts = false;
           _updateFiguresEmptyState();
@@ -2447,7 +2447,7 @@
       + 'e.g. injected_processes/variants/config_overrides/emitter_arg/cache_dir/out_dir/media)</span>'
       + '<textarea id="cp-params-json" rows="5" placeholder="{}" '
       + 'style="width:100%;box-sizing:border-box;margin-top:2px;font-family:monospace;font-size:11px"></textarea></label>'
-      + '<div id="cp-error" style="color:#dc2626;margin-top:4px;display:none"></div>'
+      + '<div id="cp-error" style="color:var(--err-fg, #dc2626);margin-top:4px;display:none"></div>'
       + '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'
       + '<button type="button" id="cp-cancel" class="btn-mini">Cancel</button>'
       + '<button type="button" id="cp-dispatch" class="btn-mini">Dispatch</button>'
@@ -3455,10 +3455,10 @@
       return;
     }
     host.innerHTML = '<details open style="margin:0">'
-      + '<summary style="cursor:pointer;font-weight:700;color:#111827;font-size:1.02em">'
+      + '<summary style="cursor:pointer;font-weight:700;color:var(--text, #111827);font-size:1.02em">'
       + 'Interactive comparison — v2ecoli vs vEcoli (plotly)</summary>'
       + '<iframe class="viz-embed" src="' + escapeHtmlForTests(pUrl) + '" loading="lazy" '
-      + 'style="width:100%;height:900px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;margin-top:8px"></iframe>'
+      + 'style="width:100%;height:900px;border:1px solid var(--border, #e2e8f0);border-radius:8px;background:var(--card, #fff);margin-top:8px"></iframe>'
       + '</details>';
   }
 
@@ -3574,11 +3574,11 @@
     var barStyle = 'position:absolute;top:0;bottom:0;background:' + color + ';'
       + (m >= 0 ? 'left:50%;width:' + pct + '%' : 'right:50%;width:' + pct + '%');
     return '<div class="axis-margin-bar-track" style="position:relative;width:100%;'
-      + 'height:' + (soft ? '4px' : '8px') + ';background:#eef2f7;border-radius:3px;overflow:hidden">'
+      + 'height:' + (soft ? '4px' : '8px') + ';background:var(--subtle, #eef2f7);border-radius:3px;overflow:hidden">'
       + '<div class="axis-margin-bar" style="' + barStyle + '"></div>'
-      + '<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#cbd5e1"></div>'
+      + '<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--border, #cbd5e1)"></div>'
       + '</div>'
-      + '<div style="font-size:0.72em;color:#94a3b8;margin-top:2px">' + m.toFixed(2) + '</div>';
+      + '<div style="font-size:0.72em;color:var(--text-muted, #94a3b8);margin-top:2px">' + m.toFixed(2) + '</div>';
   }
 
   // The graded-scorecard look (dark header + overall pill w/ tally + per-group
@@ -3613,23 +3613,23 @@
         var val = (a.value != null && typeof a.value === 'number') ? a.value.toPrecision(4) : '';
         var chg = _axisChange(card, gname, a.id);
         return '<tr class="rc-row-' + (a.verdict || 'ungraded') + '">'
-          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;border-left:3px solid ' + (_RC_GL[a.verdict] || _RC_GL.ungraded)[0] + '">'
-          + '<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:#1f2937">'
+          + '<td style="padding:7px 10px;border-bottom:1px solid var(--subtle, #eef2f7);border-left:3px solid ' + (_RC_GL[a.verdict] || _RC_GL.ungraded)[0] + '">'
+          + '<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:var(--text, #1f2937)">'
           + e(String(a.label || a.id || '')) + '</span>' + _rcPill(a.verdict)
           + (chg ? _changeBadge(chg.change) : '') + '</div></td>'
-          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;font-variant-numeric:tabular-nums;color:#334155">' + e(val) + '</td>'
-          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;color:#475569;font-size:0.9em">' + e(String(meter)) + '</td>'
-          + '<td style="padding:7px 10px;border-bottom:1px solid #eef2f7;min-width:90px">' + _marginBar(a) + '</td>'
+          + '<td style="padding:7px 10px;border-bottom:1px solid var(--subtle, #eef2f7);font-variant-numeric:tabular-nums;color:var(--text-muted, #334155)">' + e(val) + '</td>'
+          + '<td style="padding:7px 10px;border-bottom:1px solid var(--subtle, #eef2f7);color:var(--text-muted, #475569);font-size:0.9em">' + e(String(meter)) + '</td>'
+          + '<td style="padding:7px 10px;border-bottom:1px solid var(--subtle, #eef2f7);min-width:90px">' + _marginBar(a) + '</td>'
           + '</tr>';
       }).join('');
-      return '<section style="background:#fff;border:1px solid #e5e7eb;border-top:0;padding:12px 14px">'
+      return '<section style="background:var(--card, #fff);border:1px solid var(--border, #e5e7eb);border-top:0;padding:12px 14px">'
         + '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">'
-        + '<h4 style="margin:0;font-size:0.98em;color:#111827">' + e(gname.replace(/_/g, ' ')) + '</h4>'
+        + '<h4 style="margin:0;font-size:0.98em;color:var(--text, #111827)">' + e(gname.replace(/_/g, ' ')) + '</h4>'
         + _rcGroupChip('within_tol', gc.within_tol) + _rcGroupChip('drift', gc.drift)
         + _rcGroupChip('mismatch', gc.mismatch) + _rcGroupChip('ungraded', gc.ungraded) + '</div>'
         + (axes.length
           ? '<table style="width:100%;border-collapse:collapse;font-size:0.9em">'
-            + '<thead><tr style="text-align:left;color:#94a3b8;font-size:0.78em">'
+            + '<thead><tr style="text-align:left;color:var(--text-muted, #94a3b8);font-size:0.78em">'
             + '<th style="padding:4px 10px">Axis</th><th style="padding:4px 10px">Value</th>'
             + '<th style="padding:4px 10px">Summary</th><th style="padding:4px 10px">Δ / Margin</th>'
             + '</tr></thead><tbody>' + rows + '</tbody></table>'
@@ -3699,9 +3699,9 @@
   var _RIGOR_SEVERITY_PROXY = { ok: 'PASS', warn: 'PARTIAL', gap: 'FAIL', not_applicable: 'SKIP' };
   var _RIGOR_OUTCOME_COLORS = {
     'met':            { bg: '#d1fae5', fg: '#065f46' },
-    'conditional':    { bg: '#fef3c7', fg: '#92400e' },
-    'not-met':        { bg: '#fee2e2', fg: '#991b1b' },
-    'not-assessable': { bg: '#f1f5f9', fg: '#475569' }
+    'conditional':    { bg: 'var(--warn-bg, #fef3c7)', fg: 'var(--warn-fg, #92400e)' },
+    'not-met':        { bg: 'var(--err-bg, #fee2e2)', fg: 'var(--err-fg, #991b1b)' },
+    'not-assessable': { bg: 'var(--chip, #f1f5f9)', fg: 'var(--text-muted, #475569)' }
   };
 
   function _renderQualityDimension(d) {
@@ -3714,7 +3714,7 @@
     var oc = _RIGOR_OUTCOME_COLORS[cls] || _RIGOR_OUTCOME_COLORS['not-assessable'];
     var comments = ((d && d.comments) || []).join(' ');
     return '<li class="quality-check-item outcome-' + cls + '" data-severity="' + e(sev) + '" '
-      + 'style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid #f1f5f9">'
+      + 'style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--chip, #f1f5f9)">'
       + '<span class="outcome-chip outcome-' + cls + '" title="rigor severity: ' + e(sev || 'unknown') + '" '
       + 'style="font-size:0.75em;font-weight:600;padding:2px 9px;border-radius:9999px;flex-shrink:0;'
       + 'background:' + oc.bg + ';color:' + oc.fg + '">' + glyph + '&nbsp;' + e(label) + '</span>'
@@ -3873,7 +3873,7 @@
     var label = tok ? outcomeLabel(tok) : 'not assessable';
     var oc = _RIGOR_OUTCOME_COLORS[cls] || _RIGOR_OUTCOME_COLORS['not-assessable'];
     return '<li class="audit-check-item outcome-' + cls + '" data-status="' + e(status) + '" '
-      + 'style="display:flex;gap:10px;align-items:flex-start;padding:5px 0 5px 20px;border-top:1px solid #f8fafc">'
+      + 'style="display:flex;gap:10px;align-items:flex-start;padding:5px 0 5px 20px;border-top:1px solid var(--subtle, #f8fafc)">'
       + '<span class="outcome-chip outcome-' + cls + '" title="audit status: ' + e(status || 'unknown') + '" '
       + 'style="font-size:0.72em;font-weight:600;padding:1px 8px;border-radius:9999px;flex-shrink:0;'
       + 'background:' + oc.bg + ';color:' + oc.fg + '">' + glyph + '&nbsp;' + e(label) + '</span>'
@@ -3892,7 +3892,7 @@
     var label = tok ? outcomeLabel(tok) : 'not assessable';
     var oc = _RIGOR_OUTCOME_COLORS[cls] || _RIGOR_OUTCOME_COLORS['not-assessable'];
     return '<li class="audit-level-item outcome-' + cls + '" data-level="' + e(g.level) + '" '
-      + 'style="padding:7px 0;border-top:1px solid #f1f5f9">'
+      + 'style="padding:7px 0;border-top:1px solid var(--chip, #f1f5f9)">'
       + '<div style="display:flex;gap:10px;align-items:center">'
       + '<strong style="min-width:26px">' + e(g.level) + '</strong>'
       + '<span class="outcome-chip outcome-' + cls + '" title="' + e(g.level) + ' status: ' + e(status || 'unknown') + '" '
@@ -4004,7 +4004,7 @@
       });
     }
     return '<li class="audit-axis-item outcome-' + cls + '" data-axis="' + e((ax && ax.id) || '') + '" '
-      + 'style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid #f1f5f9">'
+      + 'style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--chip, #f1f5f9)">'
       + '<span class="outcome-chip outcome-' + cls + '" title="verdict: ' + e((ax && ax.verdict) || 'unknown') + '" '
       + 'style="font-size:0.75em;font-weight:600;padding:2px 9px;border-radius:9999px;flex-shrink:0;'
       + 'background:' + oc.bg + ';color:' + oc.fg + '">' + glyph + '&nbsp;' + e(label) + '</span>'
@@ -4015,8 +4015,8 @@
 
   var _AUDIT_GATE_COLORS = {
     pass: { bg: '#d1fae5', fg: '#065f46' },
-    warn: { bg: '#fef3c7', fg: '#92400e' },
-    fail: { bg: '#fee2e2', fg: '#991b1b' }
+    warn: { bg: 'var(--warn-bg, #fef3c7)', fg: 'var(--warn-fg, #92400e)' },
+    fail: { bg: 'var(--err-bg, #fee2e2)', fg: 'var(--err-fg, #991b1b)' }
   };
 
   // Returns {state, html} for the #audit-sufficiency mount's INNER content —
@@ -4129,7 +4129,7 @@
     var modules = Array.isArray(sourcing.modules) ? sourcing.modules : [];
     var reqs = Array.isArray(requires) ? requires : [];
     var summary = '<div class="sourcing-decision muted" style="font-size:0.9em;margin:6px 0 2px 0">'
-      + '<strong style="color:#334155">' + e(decision) + '</strong>'
+      + '<strong style="color:var(--text-muted, #334155)">' + e(decision) + '</strong>'
       + (modules.length ? ' &middot; ' + e(modules.join(', ')) : '')
       + (reqs.length ? ' &nbsp;<span title="required capabilities">requires: ' + e(reqs.join(', ')) + '</span>' : '')
       + '</div>';
@@ -4206,8 +4206,8 @@
       var findings = (j.findings || []).filter(function (f) { return (f.study || '') === slug; });
       if (!findings.length) {
         _setAll('<div style="display:flex;align-items:center;gap:8px;padding:10px 13px;'
-          + 'border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;font-size:0.9em;color:#166534">'
-          + '<strong>✓ Ready</strong><span style="color:#166534">no readiness gaps — the report '
+          + 'border:1px solid #bbf7d0;background:var(--ok-bg, #f0fdf4);border-radius:8px;font-size:0.9em;color:var(--ok-fg, #166534)">'
+          + '<strong>✓ Ready</strong><span style="color:var(--ok-fg, #166534)">no readiness gaps — the report '
           + 'linter finds nothing to fix.</span></div>');
         return;
       }
@@ -4220,9 +4220,9 @@
       var groups = checks.map(function (c) {
         var items = byCheck[c].map(function (f) {
           var s = f.severity || 'info';
-          var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
+          var dot = s === 'error' ? 'var(--err-fg, #dc2626)' : (s === 'warning' ? '#f59e0b' : 'var(--info-fg, #3b82f6)');
           var fix = f.fix || f.hint || f.suggestion || '';
-          var loc = f.field_path ? ' <code style="font-size:0.78em;color:#94a3b8">' + _esc(f.field_path) + '</code>' : '';
+          var loc = f.field_path ? ' <code style="font-size:0.78em;color:var(--text-muted, #94a3b8)">' + _esc(f.field_path) + '</code>' : '';
           return '<li style="margin-top:5px;line-height:1.4"><span style="color:' + dot + ';font-weight:700">●</span> '
             + _esc(f.message || '') + loc
             + (fix ? '<div class="muted" style="margin:2px 0 0 16px;font-size:0.92em">→ ' + _esc(fix) + '</div>' : '')
@@ -4232,13 +4232,13 @@
           + '<span class="muted" style="font-size:0.82em">(' + byCheck[c].length + ')</span>'
           + '<ul style="margin:3px 0 0 18px;font-size:0.9em;padding:0;list-style:none">' + items + '</ul></div>';
       }).join('');
-      var headColor = sev.error ? '#dc2626' : (sev.warning ? '#92400e' : '#1e40af');
+      var headColor = sev.error ? 'var(--err-fg, #dc2626)' : (sev.warning ? 'var(--warn-fg, #92400e)' : 'var(--info-fg, #1e40af)');
       var counts = [];
       if (sev.error) counts.push(sev.error + ' error' + (sev.error === 1 ? '' : 's'));
       if (sev.warning) counts.push(sev.warning + ' warning' + (sev.warning === 1 ? '' : 's'));
       if (sev.info) counts.push(sev.info + ' note' + (sev.info === 1 ? '' : 's'));
       _setAll(
-        '<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:12px 14px">'
+        '<div style="border:1px solid var(--warn-border, #fde68a);background:var(--warn-bg, #fffbeb);border-radius:8px;padding:12px 14px">'
         + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">'
         + '<strong style="color:' + headColor + ';font-size:1.02em">⚠ ' + gaps + ' readiness gap'
         + (gaps === 1 ? '' : 's') + ' to close</strong>'
@@ -4270,14 +4270,14 @@
   // never run through /viva-model-build — the common case, not an error.
   var _BUILD_STATE_COLORS = {
     DONE: { bg: '#d1fae5', fg: '#065f46' },
-    GIVE_UP: { bg: '#fee2e2', fg: '#991b1b' }
+    GIVE_UP: { bg: 'var(--err-bg, #fee2e2)', fg: 'var(--err-fg, #991b1b)' }
   };
 
   // verdict → colors for per-test margin cells (matches the audit-panel vocabulary)
   var _LOOP_VERDICT_COLORS = {
     within_tol: { bg: '#d1fae5', fg: '#065f46' },
-    drift: { bg: '#fef3c7', fg: '#92400e' },
-    mismatch: { bg: '#fee2e2', fg: '#991b1b' }
+    drift: { bg: 'var(--warn-bg, #fef3c7)', fg: 'var(--warn-fg, #92400e)' },
+    mismatch: { bg: 'var(--err-bg, #fee2e2)', fg: 'var(--err-fg, #991b1b)' }
   };
 
   // The integrity ribbon — the honesty guarantees at a glance.
@@ -4288,8 +4288,8 @@
     var priorHashes = prereg.prior_hashes || [];
     var rb = function (label, val, ok) {
       return '<span style="font-family:ui-monospace,Menlo,monospace;font-size:0.72rem;padding:3px 9px;'
-        + 'border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#64748b">' + e(label)
-        + ' <strong style="color:' + (ok ? '#059669' : '#0f172a') + '">' + e(val) + '</strong></span>';
+        + 'border-radius:8px;border:1px solid var(--border, #e2e8f0);background:var(--card, #fff);color:var(--text-muted, #64748b)">' + e(label)
+        + ' <strong style="color:' + (ok ? 'var(--ok-fg, #059669)' : 'var(--text, #0f172a)') + '">' + e(val) + '</strong></span>';
     };
     var reopens = state.reopen_count != null ? state.reopen_count : 0;
     return '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">'
@@ -4298,7 +4298,7 @@
       + rb('reopens', reopens, reopens === 0)
       + (priorHashes.length ? rb('prior hashes', priorHashes.length, false) : '')
       + '<span style="font-family:ui-monospace,Menlo,monospace;font-size:0.72rem;padding:3px 9px;border-radius:8px;'
-      + 'border:1px solid #e2e8f0;background:#fff;color:#64748b" title="locked-tests hash">'
+      + 'border:1px solid var(--border, #e2e8f0);background:var(--card, #fff);color:var(--text-muted, #64748b)" title="locked-tests hash">'
       + e((state.locked_tests_hash || 'not locked').slice(0, 20)) + '…</span></div>';
   }
 
@@ -4319,15 +4319,15 @@
     var rows = names.map(function (nm) {
       var cells = history.map(function (h) {
         var t = (h.tests || []).filter(function (x) { return x.name === nm; })[0];
-        if (!t) return '<td style="color:#cbd5e1">—</td>';
-        var c = _LOOP_VERDICT_COLORS[t.verdict] || { bg: '#f8fafc', fg: '#64748b' };
+        if (!t) return '<td style="color:var(--border, #cbd5e1)">—</td>';
+        var c = _LOOP_VERDICT_COLORS[t.verdict] || { bg: 'var(--subtle, #f8fafc)', fg: 'var(--text-muted, #64748b)' };
         var m = (t.margin == null) ? '—' : (t.margin >= 0 ? '+' : '') + Number(t.margin).toFixed(2);
         return '<td style="background:' + c.bg + ';color:' + c.fg + ';font-family:ui-monospace,Menlo,monospace">' + e(m) + '</td>';
       }).join('');
       return '<tr><td style="text-align:left;font-weight:600">' + e(nm) + '</td>' + cells + '</tr>';
     }).join('');
     return '<div style="margin-top:12px"><strong style="font-size:0.9em">Iteration trajectory</strong>'
-      + '<div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;margin-top:6px">'
+      + '<div style="overflow-x:auto;border:1px solid var(--border, #e2e8f0);border-radius:10px;margin-top:6px">'
       + '<table style="border-collapse:collapse;width:100%;font-size:0.78rem;text-align:center">'
       + '<thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
       + '<p class="muted" style="font-size:0.78rem;margin:6px 0 0">Each cell is the real signed margin to the band edge; green→met, red→missed. Read a row to watch one test converge.</p></div>';
@@ -4341,10 +4341,10 @@
       var md = (h && h.margin_deltas) || {};
       var deltas = Object.keys(md).map(function (k) {
         var v = md[k]; var s = (typeof v === 'number') ? (v >= 0 ? '+' : '') + v.toFixed(2) : v;
-        return '<code style="font-size:0.75rem;background:#f1f5f9;padding:1px 5px;border-radius:4px;margin-right:4px">' + e(k) + ' ' + e(s) + '</code>';
+        return '<code style="font-size:0.75rem;background:var(--chip, #f1f5f9);padding:1px 5px;border-radius:4px;margin-right:4px">' + e(k) + ' ' + e(s) + '</code>';
       }).join('');
-      var g = _LOOP_VERDICT_COLORS[(h && h.gate) === 'pass' ? 'within_tol' : (h && h.gate) === 'warn' ? 'drift' : 'mismatch'] || { bg: '#f1f5f9', fg: '#475569' };
-      return '<li style="padding:8px 0;border-top:1px solid #f1f5f9;font-size:0.86em">'
+      var g = _LOOP_VERDICT_COLORS[(h && h.gate) === 'pass' ? 'within_tol' : (h && h.gate) === 'warn' ? 'drift' : 'mismatch'] || { bg: 'var(--chip, #f1f5f9)', fg: 'var(--text-muted, #475569)' };
+      return '<li style="padding:8px 0;border-top:1px solid var(--chip, #f1f5f9);font-size:0.86em">'
         + '<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         + '<strong>iter ' + e((h && h.iteration) != null ? h.iteration : '') + '</strong>'
         + '<span>' + e((h && h.edit) || '') + (h && h.target ? ' &rarr; <code>' + e(h.target) + '</code>' : '') + '</span>'
@@ -4372,7 +4372,7 @@
         + '</div>';
     }
     var history = state.history || [];
-    var sc = _BUILD_STATE_COLORS[state.state] || { bg: '#f1f5f9', fg: '#475569' };
+    var sc = _BUILD_STATE_COLORS[state.state] || { bg: 'var(--chip, #f1f5f9)', fg: 'var(--text-muted, #475569)' };
     // header + state chip
     var html = '<div class="check-group-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
       + '<strong>Was it earned?</strong> <span class="muted" style="font-size:0.85em">the model-building loop &mdash; '
@@ -4414,14 +4414,14 @@
     if (notes) {
       var txt = Array.isArray(notes) ? notes.join('\n') : String(notes);
       out += '<div style="margin-top:14px"><strong style="font-size:0.9em">Agent notes</strong>'
-        + '<div style="margin-top:4px;font-size:0.86em;white-space:pre-wrap;color:#475569">' + e(txt) + '</div></div>';
+        + '<div style="margin-top:4px;font-size:0.86em;white-space:pre-wrap;color:var(--text-muted, #475569)">' + e(txt) + '</div></div>';
     }
     var conv = state && state.conversation;
     if (Array.isArray(conv) && conv.length) {
       var turns = conv.map(function (m) {
         var role = (m && m.role) ? m.role : '';
         var text = (m && (m.text || m.content)) ? (m.text || m.content) : (typeof m === 'string' ? m : '');
-        return '<li style="padding:6px 0;border-top:1px solid #f1f5f9;font-size:0.85em">'
+        return '<li style="padding:6px 0;border-top:1px solid var(--chip, #f1f5f9);font-size:0.85em">'
           + (role ? '<strong>' + e(role) + ':</strong> ' : '') + e(text) + '</li>';
       }).join('');
       out += '<details style="margin-top:12px"><summary class="muted" style="cursor:pointer;font-size:0.88em">'
@@ -4544,9 +4544,9 @@
   // by hand; both read the same closed result vocabulary).
   var _TEST_RESULT_PILL = {
     PASS: ['#d1fae5', '#065f46', '✓ PASS'],
-    FAIL: ['#fee2e2', '#991b1b', '✗ FAIL'],
-    SKIP: ['#fef3c7', '#92400e', '⏭ SKIP'],
-    PARTIAL: ['#fde68a', '#92400e', '◐ PARTIAL']
+    FAIL: ['var(--err-bg, #fee2e2)', 'var(--err-fg, #991b1b)', '✗ FAIL'],
+    SKIP: ['var(--warn-bg, #fef3c7)', 'var(--warn-fg, #92400e)', '⏭ SKIP'],
+    PARTIAL: ['var(--warn-border, #fde68a)', 'var(--warn-fg, #92400e)', '◐ PARTIAL']
   };
 
   // Classification badge tint — mirrors the four-way border colour the
@@ -4555,10 +4555,10 @@
   // spelling for this task) mapped onto the same blue as "supporting".
   var _CLASS_BADGE = {
     primary: ['#d1fae5', '#065f46'],
-    secondary: ['#dbeafe', '#1e3a8a'],
-    supporting: ['#dbeafe', '#1e3a8a'],
-    diagnostic: ['#fef3c7', '#92400e'],
-    regression: ['#f1f5f9', '#475569']
+    secondary: ['var(--info-bg, #dbeafe)', '#1e3a8a'],
+    supporting: ['var(--info-bg, #dbeafe)', '#1e3a8a'],
+    diagnostic: ['var(--warn-bg, #fef3c7)', 'var(--warn-fg, #92400e)'],
+    regression: ['var(--chip, #f1f5f9)', 'var(--text-muted, #475569)']
   };
 
   // Format a number for display: integers print bare, everything else is
@@ -4634,14 +4634,14 @@
     width = Math.max(width, 1.5);
     var marginLabel = '';
     if (typeof axis.margin === 'number' && isFinite(axis.margin)) {
-      marginLabel = '<span style="color:#475569;font-size:0.82em;font-variant-numeric:tabular-nums">'
+      marginLabel = '<span style="color:var(--text-muted, #475569);font-size:0.82em;font-variant-numeric:tabular-nums">'
         + 'Δ-to-pass ' + (axis.margin >= 0 ? '+' : '') + axis.margin.toPrecision(3)
         + (axis.severity ? ' · ' + escapeHtmlForTests(String(axis.severity)) : '') + '</span>';
     }
     return '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'
-      + '<div style="position:relative;height:9px;flex:1;max-width:220px;background:#eef2f7;'
+      + '<div style="position:relative;height:9px;flex:1;max-width:220px;background:var(--subtle, #eef2f7);'
         + 'border-radius:5px" title="pass boundary at centre">'
-      + '<div style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:#94a3b8"></div>'
+      + '<div style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--text-muted, #94a3b8)"></div>'
       + '<div style="position:absolute;left:' + left.toFixed(1) + '%;width:' + width.toFixed(1) + '%;'
         + 'top:0;bottom:0;background:' + color + ';border-radius:5px;opacity:0.85"></div>'
       + '</div>' + marginLabel + '</div>';
@@ -4690,7 +4690,7 @@
     test = test || {};
     var name = test.name || '(unnamed)';
     var cls = test.classification || 'unclassified';
-    var clsColor = _CLASS_BADGE[cls] || ['#f1f5f9', '#475569'];
+    var clsColor = _CLASS_BADGE[cls] || ['var(--chip, #f1f5f9)', 'var(--text-muted, #475569)'];
     var axis = (outcome && outcome.axis && typeof outcome.axis === 'object') ? outcome.axis : null;
     var vKey = (axis && axis.verdict) || 'ungraded';
     var vColor = (_RC_GL[vKey] || _RC_GL.ungraded)[0];
@@ -4699,7 +4699,7 @@
 
     // 1. Header — name · classification badge · verdict chip · result pill.
     var header = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-      + '<strong style="font-size:0.95em;color:#111827">' + e(name) + '</strong>'
+      + '<strong style="font-size:0.95em;color:var(--text, #111827)">' + e(name) + '</strong>'
       + '<span style="font-size:0.7em;font-weight:600;padding:2px 9px;border-radius:9999px;'
         + 'background:' + clsColor[0] + ';color:' + clsColor[1] + '">' + e(cls) + '</span>'
       + '<span style="font-size:0.72em;font-family:monospace;padding:2px 10px;border-radius:9999px;'
@@ -4716,7 +4716,7 @@
 
     // 2. What it checks.
     var whatItChecks = test.description
-      ? '<div style="margin-top:6px;font-size:0.92em;color:#334155">' + e(String(test.description)) + '</div>'
+      ? '<div style="margin-top:6px;font-size:0.92em;color:var(--text-muted, #334155)">' + e(String(test.description)) + '</div>'
       : '';
 
     // 3. Band + measured — carry the test's declared UNITS onto both the
@@ -4736,7 +4736,7 @@
     else mvText = String(mv);
     var unitTag = (units && dimless)
       ? ' <span class="muted" style="font-size:0.9em">· ' + e(units) + '</span>' : '';
-    var bandLine = '<div style="margin-top:8px;font-size:0.85em;color:#475569">'
+    var bandLine = '<div style="margin-top:8px;font-size:0.85em;color:var(--text-muted, #475569)">'
       + (bandText ? e(bandText) : '<span class="muted">no pass_if band declared</span>')
       + ' <span style="margin-left:10px"><strong>measured:</strong> ' + e(mvText) + '</span>'
       + unitTag
@@ -4769,8 +4769,8 @@
       evidenceBits.push('<span class="muted">calibration anchor:</span> ' + e(anchorText));
     }
     var evidence = evidenceBits.length
-      ? '<div style="margin-top:8px;font-size:0.82em;color:#475569;padding:6px 8px;'
-        + 'background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px">'
+      ? '<div style="margin-top:8px;font-size:0.82em;color:var(--text-muted, #475569);padding:6px 8px;'
+        + 'background:var(--subtle, #f8fafc);border:1px solid var(--border, #e2e8f0);border-radius:4px">'
         + evidenceBits.join('<br>') + '</div>'
       : '';
 
@@ -4800,7 +4800,7 @@
       runIdent = _canonRun ? (_canonRun.run_id || _canonRun.name) : null;
     }
     var runLink = runIdent
-      ? '<a href="#run-' + e(runIdent) + '" onclick="_setStudyTab(\'simulate\')" style="color:#3b82f6">'
+      ? '<a href="#run-' + e(runIdent) + '" onclick="_setStudyTab(\'simulate\')" style="color:var(--info-fg, #3b82f6)">'
         + 'from run ' + e(runIdent) + ' ↗</a>'
       : '<span class="muted">no run recorded yet</span>';
     var assertionRaw;
@@ -4812,7 +4812,7 @@
     var footer = '<div style="margin-top:8px;font-size:0.82em">' + runLink + '</div>'
       + '<details style="margin-top:6px;font-size:0.82em">'
       + '<summary class="muted" style="cursor:pointer">Assertion</summary>'
-      + '<pre style="background:#fff;padding:8px;margin:4px 0 0 0;border:1px solid #e2e8f0;'
+      + '<pre style="background:var(--card, #fff);padding:8px;margin:4px 0 0 0;border:1px solid var(--border, #e2e8f0);'
         + 'border-radius:3px;overflow-x:auto">' + e(assertionRaw) + '</pre></details>';
 
     return '<div class="test-report-card" data-verdict="' + e(vKey) + '">'
@@ -5063,23 +5063,23 @@
     if (a && (a.result != null)) {
       authoredChip =
         ' <span class="outcome-chip outcome-chip-authored" ' +
-        'style="display:inline-block;padding:4px 8px;border-radius:4px;background:#f8fafc;' +
-        'border:1px solid #e2e8f0;color:#475569;font-size:0.82em">' +
+        'style="display:inline-block;padding:4px 8px;border-radius:4px;background:var(--subtle, #f8fafc);' +
+        'border:1px solid var(--border, #e2e8f0);color:var(--text-muted, #475569);font-size:0.82em">' +
         '<span class="muted" style="font-size:0.85em">authored</span> ' +
         '<strong>' + e(String(a.result)) + '</strong></span>';
     }
 
     var divBadge = divergent
       ? ' <span class="reconcile-divergent" ' +
-        'style="display:inline-block;padding:4px 8px;border-radius:4px;background:#fee2e2;' +
-        'border:1px solid #fca5a5;color:#991b1b;font-weight:600;font-size:0.82em">' +
+        'style="display:inline-block;padding:4px 8px;border-radius:4px;background:var(--err-bg, #fee2e2);' +
+        'border:1px solid #fca5a5;color:var(--err-fg, #991b1b);font-weight:600;font-size:0.82em">' +
         '⚠ reconcile: divergent</span>'
       : '';
 
     var runLink = runIdent
       ? '<div class="muted small" style="margin-top:4px">from run ' +
         '<a href="#run-' + e(runIdent) + '" onclick="_setStudyTab(\'simulate\')" ' +
-        'style="color:#3b82f6">' + e(runIdent) + '</a></div>'
+        'style="color:var(--info-fg, #3b82f6)">' + e(runIdent) + '</a></div>'
       : '';
 
     var bandLine = passIf
@@ -5092,8 +5092,8 @@
       : '';
 
     return '<div class="computed-outcome-row" ' +
-      'style="margin-top:6px;padding:8px 10px;background:#fff;border:1px solid ' +
-      (divergent ? '#fca5a5' : '#e2e8f0') + ';border-radius:4px;font-size:0.85em">' +
+      'style="margin-top:6px;padding:8px 10px;background:var(--card, #fff);border:1px solid ' +
+      (divergent ? '#fca5a5' : 'var(--border, #e2e8f0)') + ';border-radius:4px;font-size:0.85em">' +
       '<div><strong>measured_value:</strong> <code>' + e(mvStr) + '</code></div>' +
       '<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
       codeChip + authoredChip + divBadge + '</div>' +
@@ -5277,7 +5277,7 @@
       '<h2 class="overview-label">' + _esc(title || '§ Contract — declared interface') + '</h2>';
     if (rows) {
       h += '<table class="planned-contract-table" style="width:100%;border-collapse:collapse;font-size:0.9em">' +
-        '<thead><tr style="text-align:left;color:#475569;border-bottom:1px solid #e2e8f0">' +
+        '<thead><tr style="text-align:left;color:var(--text-muted, #475569);border-bottom:1px solid var(--border, #e2e8f0)">' +
         '<th style="padding:3px 6px">port</th><th style="padding:3px 6px">dir</th>' +
         '<th style="padding:3px 6px">type</th><th style="padding:3px 6px">units</th>' +
         '<th style="padding:3px 6px">bounds</th></tr></thead><tbody>' + rows + '</tbody></table>';
@@ -5333,9 +5333,9 @@
 
     // Status badge colours
     var badgeCss = {
-      open:      'background:#fef3c7;color:#92400e;',
+      open:      'background:var(--warn-bg, #fef3c7);color:var(--warn-fg, #92400e);',
       addressed: 'background:#d1fae5;color:#065f46;',
-      dismissed: 'background:#f1f5f9;color:#64748b;text-decoration:line-through;',
+      dismissed: 'background:var(--chip, #f1f5f9);color:var(--text-muted, #64748b);text-decoration:line-through;',
     };
 
     var itemsHtml = '';
@@ -5371,7 +5371,7 @@
         // .responded_at, same source). Always rendered — "unattributed" when
         // no responder is recorded, never silently omitted.
         responseHtml =
-          '<div style="margin:6px 0 0 0;padding:8px 12px;background:#f0fdf4;' +
+          '<div style="margin:6px 0 0 0;padding:8px 12px;background:var(--ok-bg, #f0fdf4);' +
           'border-left:3px solid #10b981;border-radius:4px;font-size:0.88em">' +
           '<strong style="font-size:0.85em;color:#065f46">Response — ' +
           '<span class="actor-glyph" title="actor kind: ' + _esc(actorKind(item.responded_by)) + '">' +
@@ -5384,7 +5384,7 @@
       }
 
       itemsHtml +=
-        '<div style="padding:10px 14px;border-bottom:1px solid #f1f5f9">' +
+        '<div style="padding:10px 14px;border-bottom:1px solid var(--chip, #f1f5f9)">' +
         '<div style="display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap;margin-bottom:4px">' +
         badgeHtml + metaHtml +
         '</div>' +
@@ -5395,9 +5395,9 @@
 
     var summaryHtml =
       '<span style="font-size:0.9em">' +
-      '<span style="color:#92400e">' + openCt + ' open</span>' +
+      '<span style="color:var(--warn-fg, #92400e)">' + openCt + ' open</span>' +
       ' / <span style="color:#065f46">' + addrCt + ' addressed</span>' +
-      ' / <span style="color:#64748b">' + disCt + ' dismissed</span>' +
+      ' / <span style="color:var(--text-muted, #64748b)">' + disCt + ' dismissed</span>' +
       ' <span class="muted">(' + total + ' total)</span>' +
       '</span>';
 
@@ -5411,7 +5411,7 @@
       '<div class="overview-section" style="margin-top:18px">' +
       '<h2 class="overview-label">Expert Feedback</h2>' +
       '<div style="margin-bottom:10px">' + summaryHtml + '</div>' +
-      '<div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">' +
+      '<div style="border:1px solid var(--border, #e2e8f0);border-radius:6px;overflow:hidden">' +
       itemsHtml +
       '</div>' +
       actionsSectionHtml +
@@ -5426,10 +5426,10 @@
   // are no actions to show. Pure render — escapes all text.
   function _actionBadgeCss(status) {
     return ({
-      open:      'background:#fef3c7;color:#92400e;',
+      open:      'background:var(--warn-bg, #fef3c7);color:var(--warn-fg, #92400e);',
       applied:   'background:#d1fae5;color:#065f46;',
-      dismissed: 'background:#f1f5f9;color:#64748b;text-decoration:line-through;',
-    })[status] || 'background:#fef3c7;color:#92400e;';
+      dismissed: 'background:var(--chip, #f1f5f9);color:var(--text-muted, #64748b);text-decoration:line-through;',
+    })[status] || 'background:var(--warn-bg, #fef3c7);color:var(--warn-fg, #92400e);';
   }
 
   function _renderFeedbackActionsSection() {
@@ -5461,7 +5461,7 @@
           'color:#3730a3;border-radius:4px;cursor:pointer">Apply</button>'
         : '';
       rows +=
-        '<div style="padding:8px 14px;border-bottom:1px solid #f1f5f9">' +
+        '<div style="padding:8px 14px;border-bottom:1px solid var(--chip, #f1f5f9)">' +
         '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
         badge + kindChip + target + applyBtn +
         '</div>' +
@@ -5474,8 +5474,8 @@
 
     return (
       '<div style="margin-top:12px">' +
-      '<h3 style="font-size:0.9em;color:#475569;margin:0 0 6px 0">Proposed Actions</h3>' +
-      '<div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">' +
+      '<h3 style="font-size:0.9em;color:var(--text-muted, #475569);margin:0 0 6px 0">Proposed Actions</h3>' +
+      '<div style="border:1px solid var(--border, #e2e8f0);border-radius:6px;overflow:hidden">' +
       rows +
       '</div>' +
       '</div>'
@@ -5524,7 +5524,7 @@
   function _showStudyLoadError(e) {
     var el = document.getElementById('study-root') || document.body;
     el.innerHTML =
-      '<div style="padding:2rem;color:#dc2626">' +
+      '<div style="padding:2rem;color:var(--err-fg, #dc2626)">' +
       'Could not load study data: ' + String(e && e.message || e) +
       '</div>';
   }
@@ -5634,8 +5634,8 @@
       explanatory_gain: { result: 'GAP' }
     };
     var colors = {
-      PASS: ['#dcfce7', '#166534'], PARTIAL: ['#fef3c7', '#92400e'],
-      FAIL: ['#fee2e2', '#991b1b'], GAP: ['#f1f5f9', '#475569'], PENDING: ['#f1f5f9', '#475569']
+      PASS: ['var(--ok-bg, #dcfce7)', 'var(--ok-fg, #166534)'], PARTIAL: ['var(--warn-bg, #fef3c7)', 'var(--warn-fg, #92400e)'],
+      FAIL: ['var(--err-bg, #fee2e2)', 'var(--err-fg, #991b1b)'], GAP: ['var(--chip, #f1f5f9)', 'var(--text-muted, #475569)'], PENDING: ['var(--chip, #f1f5f9)', 'var(--text-muted, #475569)']
     };
     badges.forEach(function(el) {
       var track = el.getAttribute('data-verdict-track');
@@ -5743,8 +5743,8 @@
       + 'title="' + e(axisLabel) + ' — click to interrogate">'
       + '<span style="font-size:1.1em;line-height:1">' + meta.icon + '</span>' + e(meta.label) + '</button>'
       + '<div id="' + id + '-popover" role="dialog" style="display:none;position:absolute;left:0;top:100%;margin-top:6px;'
-      + 'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);'
-      + 'z-index:70;min-width:230px;max-width:340px;padding:10px 12px;font-size:0.82em;color:#334155;'
+      + 'background:var(--card, #fff);border:1px solid var(--border, #e2e8f0);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);'
+      + 'z-index:70;min-width:230px;max-width:340px;padding:10px 12px;font-size:0.82em;color:var(--text-muted, #334155);'
       + 'white-space:normal;text-align:left;font-weight:400">'
       + '<div style="font-weight:700;color:' + meta.color + '">' + meta.icon + ' ' + e(axisLabel) + ': ' + e(meta.label) + '</div>'
       + body + '</div></span>';
