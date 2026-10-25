@@ -1688,6 +1688,19 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          investigation header row (#iset-workspace), so the graph toolbar is only
          about the graph. Study prev/next/jump navigator removed — clicking a study
          node in the graph is the navigation now. #}
+      {# Graph-view toggle (RFC-0005): Studies DAG | Argument claim-graph |
+         Narrative ordered reading. Wired by argument-graph.js; shows nothing
+         different when the derivation layer is unavailable (stays on Studies). #}
+      <span id="aig-view-group" class="aig-tb-group" role="group" aria-label="Graph view" title="Graph view">
+        <span class="aig-tb-seg">
+          <button id="gview-studies" type="button" class="active" title="Study DAG"
+                  onclick="window._setGraphView&&window._setGraphView('studies')">Studies</button>
+          <button id="gview-argument" type="button" title="Claim / argument graph"
+                  onclick="window._setGraphView&&window._setGraphView('argument')">Argument</button>
+          <button id="gview-narrative" type="button" title="Ordered narrative reading"
+                  onclick="window._setGraphView&&window._setGraphView('narrative')">Narrative</button>
+        </span>
+      </span>
       <span id="aig-layout-group" class="aig-tb-group" role="group" aria-label="Graph orientation" title="Layout">
         {# Orientation is AUTO by default (derived from the container aspect) and
            re-autos on every dock switch. The ⇄/⇅ buttons are a transient manual
@@ -2862,6 +2875,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/loom-embed.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* loom-embed unavailable */"></script>
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/argument-graph.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* argument graph view unavailable */"></script>
 <!-- graph-panel.js: the dockable investigation-graph panel (VivPanelDock). Loads
      AFTER panel-dock.js (the engine) and walkthrough.js (the DAG renderer it hosts). -->
 <script src="assets/graph-panel.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* graph panel unavailable */"></script>

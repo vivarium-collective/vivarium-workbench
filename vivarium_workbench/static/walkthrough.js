@@ -13123,6 +13123,11 @@
     } catch (e) { /* document.fonts unsupported — initial + rAF passes stand */ }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
+  // Restore the Studies DAG from its cached data (used by the graph-view toggle
+  // in argument-graph.js to return from Argument/Narrative to Studies).
+  window._restoreStudiesDag = function () {
+    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+  };
   // Re-run the last DAG render (same data) — used after the graph is relocated
   // into / out of the dockable Graph panel so it re-measures + re-lays-out at the
   // new container width. No-op if the graph hasn't been rendered yet.
