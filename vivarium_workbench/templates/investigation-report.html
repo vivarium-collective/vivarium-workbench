@@ -1468,25 +1468,49 @@ function reportMode(inv){
 // into the statements the campaign tests, each with citation chips linking to
 // the References section, plus the competing interpretive frameworks. So the
 // investigation's headline reasoning traces to its sources, not just the studies.
+function _vbadge(v){
+  const M={supported:['#dcfce7','#166534','✓'],qualified:['#fef3c7','#92400e','≈'],
+    refuted:['#fee2e2','#991b1b','✗'],inconclusive:['#f1f5f9','#475569','?'],unassessed:['#f1f5f9','#64748b','·']};
+  const b=M[v]||M.unassessed;
+  return `<span style="font-size:0.78em;padding:1px 7px;border-radius:999px;white-space:nowrap;background:${b[0]};color:${b[1]}">${b[2]} ${esc(v||'unassessed')}</span>`;
+}
 function renderArgument(inv){
-  const sa=inv.scientific_argument||{}; const kc=inv.key_claims||[];
-  if(!sa.main_claim && !kc.length && !(sa.evidence_for||[]).length) return '';
-  let claims='';
-  if(kc.length){
-    claims=kc.map(c=>{
+  const sa=inv.scientific_argument||{}; const kc=inv.key_claims||[]; const arg=inv.argument||null;
+  const hasDerived = arg && Array.isArray(arg.narrative) && arg.narrative.length;
+  if(!sa.main_claim && !kc.length && !(sa.evidence_for||[]).length && !hasDerived) return '';
+  let body='';
+  if(hasDerived){
+    // DERIVED (RFC-0005): the ordered narrative (claims by explanatory dependence)
+    // with canonical verdicts — one consolidated argument, not a parallel authored
+    // list. Gaps / spine / limitations collapse so the section stays lean.
+    body = `<ul class="claimlist">${arg.narrative.map(u=>
+      `<li><span class="ctext">${esc(u.proposition||'')}</span> ${_vbadge(u.verdict)}</li>`).join('')}</ul>`;
+    if((arg.gates||[]).length)
+      body += `<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Synthesis spine</div>`
+        + `<ul class="claimlist">${arg.gates.map(g=>
+            `<li><b>${esc(g.id||'')}</b> ${esc(g.name||'')} ${_vbadge(g.verdict)}`
+            + (g.criterion?`<div style="color:var(--ink-2);font-size:13px">${esc(g.criterion)}</div>`:'')+`</li>`).join('')}</ul></div>`;
+    if((arg.gaps||[]).length)
+      body += `<details class="exp" style="margin-top:10px"><summary>${arg.gaps.length} unsupported transition${arg.gaps.length===1?'':'s'} — open follow-ups</summary>`
+        + `<div class="body"><ul style="margin:0;padding-left:18px">${arg.gaps.map(g=>
+            `<li><span class="mono">${esc(g.from)} → ${esc(g.to)}</span>${g.missing?` — ${esc(g.missing)}`:''}</li>`).join('')}</ul></div></details>`;
+    if((arg.limitations||[]).length)
+      body += `<details class="exp" style="margin-top:8px"><summary>Limitations</summary><div class="body"><ul style="margin:0;padding-left:18px">${arg.limitations.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div></details>`;
+  } else if(kc.length){
+    body = `<ul class="claimlist">${kc.map(c=>{
       const counter=/contest|unfavorab|challenge|less favorab|may be far less/i.test(c.claim||'');
       return `<li class="${counter?'counter':''}"><span class="ctext">${esc(c.claim||c.text||'')}</span> ${citeRow(c.cites)}</li>`;
-    }).join('');
+    }).join('')}</ul>`;
   } else {
-    claims=(sa.evidence_for||[]).map(e=>`<li><span class="ctext">${esc(e)}</span></li>`).join('')
-      + (sa.evidence_against||[]).map(e=>`<li class="counter"><span class="ctext">${esc(e)}</span></li>`).join('');
+    body = `<ul class="claimlist">${(sa.evidence_for||[]).map(e=>`<li><span class="ctext">${esc(e)}</span></li>`).join('')}`
+      + `${(sa.evidence_against||[]).map(e=>`<li class="counter"><span class="ctext">${esc(e)}</span></li>`).join('')}</ul>`;
   }
   const frames=(inv.competing_frameworks||[]).map(f=>
     `<span class="cframe">${esc(f.name||'')}${f.relation?`<span class="rel">${esc(f.relation)}</span>`:''}</span>`).join('');
   return `<div class="argument fbsection measure" id="hypothesis">${fbBubble('argument','The thesis & its evidence')}
     <div class="sec-h"><h2>The thesis &amp; its evidence</h2><span class="rule"></span></div>
     ${sa.main_claim?`<p class="main-claim">${mdLite(sa.main_claim)}</p>`:''}
-    ${claims?`<ul class="claimlist">${claims}</ul>`:''}
+    ${body}
     ${frames?`<div class="cframes">${frames}</div>`:''}
     ${has(sa.caveats)?`<details class="exp" style="margin-top:12px"><summary>Caveats</summary><div class="body"><ul style="margin:0;padding-left:18px">${sa.caveats.map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div></details>`:''}
   </div>`;

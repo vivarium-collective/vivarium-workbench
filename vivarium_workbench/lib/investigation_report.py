@@ -971,6 +971,38 @@ def _build_synthesis(inv, studies, spine):
     return out
 
 
+def _argument_report_data(ws_root, inv_slug: str) -> "dict | None":
+    """Compact RFC-0005 argument projection for the report: the ordered narrative
+    (claim + verdict), audit gaps, and the synthesis spine (gate verdicts). Kept
+    small on purpose; returns None when the derivation layer is unavailable so the
+    report falls back to the authored key_claims. Tolerant — never raises."""
+    try:
+        from vivarium_workbench.lib.investigation_graph_views import build_argument_overlay
+        ov, _ = build_argument_overlay(ws_root, inv_slug)
+    except Exception:  # noqa: BLE001
+        return None
+    if not ov or not ov.get("available"):
+        return None
+    claims = ov.get("claims") or {}
+    nar = ov.get("narrative") or {}
+
+    def _slug(cid):
+        return str(cid or "").replace("claim:", "")
+
+    units = [{"proposition": u.get("proposition") or (claims.get(u.get("claim_id")) or {}).get("proposition"),
+              "verdict": u.get("verdict")} for u in (nar.get("units") or [])]
+    gaps = [{"from": _slug(g.get("from")), "to": _slug(g.get("to")),
+             "missing": g.get("missing_evidence")} for g in (ov.get("gaps") or [])]
+    gates = [{"id": g.get("id"), "name": g.get("name"), "verdict": g.get("verdict"),
+              "criterion": g.get("criterion")} for g in (ov.get("gates") or [])]
+    if not units and not gates:
+        return None
+    return {"narrative": units, "gaps": gaps, "gates": gates,
+            "limitations": nar.get("limitations") or [],
+            "open_questions": [q.get("proposition") or q.get("claim_id")
+                               for q in (nar.get("open_questions") or [])]}
+
+
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
     """Assemble the pure report-data dict for one investigation from existing
     files only. Raises FileNotFoundError if the investigation is missing.
@@ -1143,6 +1175,10 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "how_to_read": inv.get("how_to_read"),
         "created": inv.get("created"),
         "key_claims": inv.get("key_claims"),
+        # RFC-0005 derived argument/narrative — compact projection so the report's
+        # "thesis & evidence" renders the formal claims/verdicts/gaps/spine (the
+        # same structure the live app shows), not a parallel authored list.
+        "argument": _argument_report_data(ws_root, inv_slug),
         "competing_frameworks": inv.get("competing_frameworks"),
         "at_a_glance": inv.get("at_a_glance"),
         "acceptance_criteria": inv.get("acceptance_criteria"),
