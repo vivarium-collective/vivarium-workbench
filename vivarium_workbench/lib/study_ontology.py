@@ -61,8 +61,8 @@ def derive_execution_status(spec: dict, node_status: str = "") -> str:
         return "completed"
     if str(node_status).strip().lower() == "evaluated":
         return "completed"
-    if life in ("ran", "complete", "completed", "decided"):
-        return "completed"
+    if life in ("ran", "complete", "completed", "decided", "evaluated"):
+        return "completed"  # a legacy `status: evaluated` study has executed
     if sim == "running" or life in ("running", "analyzing", "in_progress"):
         return "running"
     if life == "planned":
