@@ -12541,6 +12541,12 @@
 
   function _renderInvestigationDag(studies, chainsBySlug, studyEdges) {
     _lastDagArgs = [studies, chainsBySlug, studyEdges];
+    // When a non-Studies graph view is active (Argument/Narrative, argument-graph.js),
+    // every re-render trigger — initial load, zoom, orientation, fit, band change,
+    // font reflow — must redraw THAT view, not snap back to the Studies DAG.
+    if (window._graphViewMode && window._graphViewMode !== 'studies' && window._reRenderGraphView) {
+      window._reRenderGraphView(); return;
+    }
     // Assigned to _layoutAndDraw below; each card's expand toggle calls it to
     // re-measure + re-stack its column after the card grows/shrinks.
     var _relayoutDag = null;
