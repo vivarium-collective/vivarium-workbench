@@ -66,18 +66,36 @@
   var REGISTRY = [];
   function loadOrder() { try { return JSON.parse(localStorage.getItem('viv.dock.order') || '{}') || {}; } catch (e) { return {}; } }
   function saveOrder(o) { try { localStorage.setItem('viv.dock.order', JSON.stringify(o)); } catch (e) { /* private mode */ } }
-  function sideKeys(side) { var a = loadOrder()[side]; return Array.isArray(a) ? a.slice() : []; }
-  function setSideKeys(side, keys) { var o = loadOrder(); o[side] = keys; saveOrder(o); }
-  function orderIndex(side, key) { var i = sideKeys(side).indexOf(key); return i < 0 ? 1e6 : i; }
-  function ensureInOrder(side, key) { var ks = sideKeys(side); if (ks.indexOf(key) < 0) { ks.push(key); setSideKeys(side, ks); } }
+  // Per-side layout is a list of LANES. On a left/right side a lane is a COLUMN and
+  // lanes sit side by side; on a top/bottom band a lane is a ROW and lanes stack.
+  // Each lane is an ordered list of panel keys stacked along the side's main axis.
+  // Legacy flat ['a','b'] (one column) normalizes to [['a','b']] — one lane renders
+  // exactly like the pre-lanes single-column layout.
+  function sideLanes(side) {
+    var a = loadOrder()[side];
+    if (!Array.isArray(a) || !a.length) return [];
+    if (!Array.isArray(a[0])) return [a.slice()];                 // legacy flat → one lane
+    return a.map(function (l) { return (l || []).slice(); }).filter(function (l) { return l.length; });
+  }
+  function setSideLanes(side, lanes) {
+    var clean = (lanes || []).map(function (l) { return (l || []).slice(); }).filter(function (l) { return l.length; });
+    var o = loadOrder(); if (clean.length) o[side] = clean; else delete o[side]; saveOrder(o);
+  }
+  function sideKeys(side) { return sideLanes(side).reduce(function (acc, l) { return acc.concat(l); }, []); }   // flattened (back-compat)
+  function setSideKeys(side, keys) { setSideLanes(side, keys && keys.length ? [keys] : []); }                    // single-lane setter
+  function laneOf(side, key) { var ls = sideLanes(side); for (var i = 0; i < ls.length; i++) if (ls[i].indexOf(key) >= 0) return i; return -1; }
+  function removeFromSide(side, key) {
+    var ls = sideLanes(side), changed = false;
+    ls = ls.map(function (l) { var n = l.filter(function (k) { return k !== key; }); if (n.length !== l.length) changed = true; return n; });
+    if (changed) setSideLanes(side, ls);
+  }
+  function ensureInOrder(side, key) {
+    if (laneOf(side, key) >= 0) return;
+    var ls = sideLanes(side); if (!ls.length) ls.push([]);
+    ls[ls.length - 1].push(key); setSideLanes(side, ls);          // append to the last lane
+  }
   function dropFromAllSides(key, exceptSide) {
-    var o = loadOrder(), changed = false;
-    Object.keys(o).forEach(function (s) {
-      if (s === exceptSide || !Array.isArray(o[s])) return;
-      var n = o[s].filter(function (k) { return k !== key; });
-      if (n.length !== o[s].length) { o[s] = n; changed = true; }
-    });
-    if (changed) saveOrder(o);
+    ['left', 'right', 'top', 'bottom'].forEach(function (s) { if (s !== exceptSide) removeFromSide(s, key); });
   }
   function registryFor(key) { for (var i = 0; i < REGISTRY.length; i++) if (REGISTRY[i].key === key) return REGISTRY[i]; return null; }
   // Rects of the OTHER open docked panels (for the drop-target hit test).
@@ -102,6 +120,9 @@
   function stackSizeKey(side) { return 'viv.stack.' + side + '.size'; }
   function stackGrowKey(side) { return 'viv.stack.' + side + '.grows'; }
   function stackGrows(side) { try { return JSON.parse(lsGet(stackGrowKey(side), '{}')) || {}; } catch (e) { return {}; } }
+  // Per-lane cross-axis grow share (keyed by lane index; reset on structural change).
+  function stackLaneGrowKey(side) { return 'viv.stack.' + side + '.lanegrows'; }
+  function stackLaneGrows(side) { try { return JSON.parse(lsGet(stackLaneGrowKey(side), '{}')) || {}; } catch (e) { return {}; } }
   function defaultSideSize(side) { return isVertSide(side) ? 320 : 440; }
 
   function ensureStack(side) {
@@ -122,30 +143,52 @@
     return s;
   }
 
-  // Re-place every OPEN panel docked on `side` into that side's stack, in persisted
-  // order, interleaving fresh sizer bars. A side with no open panels hides its
-  // (possibly non-empty, but all-hidden) container so it reserves no space.
+  // Re-place every OPEN panel docked on `side` into that side's stack as LANES, in
+  // persisted order, interleaving fresh within-lane sizers and between-lane sizers.
+  // A side with no open panels hides its container so it reserves no space.
   function replaceSide(side) {
-    var mates = REGISTRY.filter(function (e) { return e.isOpen() && e.getDock() === side; });
-    mates.sort(function (a, b) { return orderIndex(side, a.key) - orderIndex(side, b.key) || String(a.key).localeCompare(b.key); });
+    var openByKey = {};
+    REGISTRY.forEach(function (e) { if (e.isOpen() && e.getDock() === side) openByKey[e.key] = e; });
+    // Persisted lanes, filtered to open panels; any freshly-docked open panel not yet
+    // in a lane joins the last lane (or a first lane if none).
+    var lanes = sideLanes(side).map(function (l) { return l.filter(function (k) { return openByKey[k]; }); })
+                               .filter(function (l) { return l.length; });
+    var placed = {}; lanes.forEach(function (l) { l.forEach(function (k) { placed[k] = 1; }); });
+    Object.keys(openByKey).forEach(function (k) { if (!placed[k]) { if (!lanes.length) lanes.push([]); lanes[lanes.length - 1].push(k); } });
+
     var s = ensureStack(side);
     if (!s) return;
-    // Drop stale sizers, then (re)attach panels in order with a sizer between each.
-    Array.prototype.slice.call(s.querySelectorAll(':scope > .vp-stack-sizer')).forEach(function (z) { z.remove(); });
-    var grows = stackGrows(side);
-    mates.forEach(function (e, i) {
-      if (i > 0) {
-        var z = document.createElement('div');
-        z.className = 'vp-stack-sizer'; z.dataset.side = side;
-        s.appendChild(z); initSizer(z, side);
+    // Tear down the prior lane/sizer wrappers WITHOUT detaching panel nodes: reparent
+    // every panel back onto `s` first (so clearing wrappers never drops one), then drop
+    // the empty wrappers. Hidden same-side panels stay as direct (hidden) children of s.
+    Array.prototype.slice.call(s.querySelectorAll('.vp-dockable')).forEach(function (p) { s.appendChild(p); });
+    Array.prototype.slice.call(s.querySelectorAll(':scope > .vp-stack-lane, :scope > .vp-lane-sizer')).forEach(function (el) { el.remove(); });
+    var grows = stackGrows(side), laneGrows = stackLaneGrows(side);
+    lanes.forEach(function (lane, li) {
+      if (li > 0) {
+        var lz = document.createElement('div');
+        lz.className = 'vp-lane-sizer'; lz.dataset.side = side;
+        s.appendChild(lz); initSizer(lz, side, true);     // cross-axis: resizes lanes
       }
-      e.panel.dataset.dock = side;
-      e.panel.style.flex = '';   // let the CSS (flex:var(--vp-grow) 1 0 !important) drive it
-      e.panel.style.setProperty('--vp-grow', String(grows[e.key] > 0 ? grows[e.key] : 1));
-      s.appendChild(e.panel);                     // moves it here from wherever it was
-      if (e.onPlaced) e.onPlaced(side);
+      var laneEl = document.createElement('div');
+      laneEl.className = 'vp-stack-lane'; laneEl.dataset.side = side;
+      laneEl.style.setProperty('--vp-lane-grow', String(laneGrows[li] > 0 ? laneGrows[li] : 1));
+      lane.forEach(function (k, i) {
+        if (i > 0) {
+          var z = document.createElement('div');
+          z.className = 'vp-stack-sizer'; z.dataset.side = side;
+          laneEl.appendChild(z); initSizer(z, side, false);   // main-axis: resizes panels in the lane
+        }
+        var e = openByKey[k];
+        e.panel.dataset.dock = side;
+        e.panel.style.flex = '';   // let the CSS (flex:var(--vp-grow) 1 0 !important) drive it
+        e.panel.style.setProperty('--vp-grow', String(grows[k] > 0 ? grows[k] : 1));
+        laneEl.appendChild(e.panel);                    // moves it here from wherever it was
+        if (e.onPlaced) e.onPlaced(side);
+      });
+      s.appendChild(laneEl);
     });
-    s.hidden = !mates.length;
+    s.hidden = !lanes.length;
   }
   function replaceAllSides() { ['left', 'right', 'top', 'bottom'].forEach(replaceSide); }
 
@@ -158,31 +201,47 @@
     try { localStorage.setItem(stackGrowKey(side), JSON.stringify(o)); } catch (ex) { /* private mode */ }
   }
 
-  // Drag a .vp-stack-sizer to transfer flex-grow between the panel before it and the
-  // panel after it (the two it separates), keeping their combined share constant.
-  function initSizer(z, side) {
-    var vert = isVertSide(side);   // top/bottom band → row → drag horizontally (x); left/right column → drag vertically (y)
+  // Persist the live cross-axis grow of each lane on `side` (keyed by lane index;
+  // index-based, so a structural change (added/removed lane) resets the ratios).
+  function persistLaneGrows(side) {
+    var s = STACKS[side]; if (!s) return;
+    var o = {};
+    Array.prototype.slice.call(s.querySelectorAll(':scope > .vp-stack-lane')).forEach(function (laneEl, i) {
+      o[i] = parseFloat(laneEl.style.getPropertyValue('--vp-lane-grow')) || 1;
+    });
+    try { localStorage.setItem(stackLaneGrowKey(side), JSON.stringify(o)); } catch (ex) { /* private mode */ }
+  }
+
+  // Drag a sizer to transfer flex-grow between the two siblings it separates, keeping
+  // their combined share constant. A within-lane sizer (cross=false) moves --vp-grow
+  // between two PANELS along the lane's main axis; a between-lane sizer (cross=true)
+  // moves --vp-lane-grow between two LANES along the side's cross axis.
+  function initSizer(z, side, cross) {
+    // Panel sizer drags the side's main axis (vertical for left/right); a lane sizer
+    // drags the cross axis (horizontal for left/right).
+    var dragVertical = cross ? isVertSide(side) : !isVertSide(side);
+    var growVar = cross ? '--vp-lane-grow' : '--vp-grow';
     z.addEventListener('mousedown', function (ev) {
       if (ev.button !== undefined && ev.button !== 0) return;
       var prev = z.previousElementSibling, next = z.nextElementSibling;
       if (!prev || !next) return;
       ev.preventDefault();
-      document.body.classList.add('vp-dragging');
+      document.body.classList.add('vp-dragging'); z.classList.add('dragging');
       var rp = prev.getBoundingClientRect(), rn = next.getBoundingClientRect();
-      var sizeP = vert ? rp.width : rp.height;
-      var total = sizeP + (vert ? rn.width : rn.height);
-      var gP = parseFloat(prev.style.getPropertyValue('--vp-grow')) || 1, gN = parseFloat(next.style.getPropertyValue('--vp-grow')) || 1, gSum = gP + gN;
-      var start = vert ? ev.clientX : ev.clientY;
+      var sizeP = dragVertical ? rp.height : rp.width;
+      var total = sizeP + (dragVertical ? rn.height : rn.width);
+      var gP = parseFloat(prev.style.getPropertyValue(growVar)) || 1, gN = parseFloat(next.style.getPropertyValue(growVar)) || 1, gSum = gP + gN;
+      var start = dragVertical ? ev.clientY : ev.clientX;
       function move(m) {
-        var d = (vert ? m.clientX : m.clientY) - start;
+        var d = (dragVertical ? m.clientY : m.clientX) - start;
         var frac = Math.max(0.1, Math.min(0.9, (sizeP + d) / total));
-        prev.style.setProperty('--vp-grow', String(gSum * frac));
-        next.style.setProperty('--vp-grow', String(gSum * (1 - frac)));
+        prev.style.setProperty(growVar, String(gSum * frac));
+        next.style.setProperty(growVar, String(gSum * (1 - frac)));
       }
       function up() {
-        document.body.classList.remove('vp-dragging');
+        document.body.classList.remove('vp-dragging'); z.classList.remove('dragging');
         document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
-        persistGrows(side);
+        if (cross) persistLaneGrows(side); else persistGrows(side);
         REGISTRY.forEach(function (e) { if (e.isOpen() && e.getDock() === side && e.syncVars) e.syncVars(); });
       }
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
@@ -276,15 +335,32 @@
       if (isOpen()) { place(zone); syncVars(); }
       if (opts.onDock) opts.onDock(zone);
     }
-    // Insert this panel on `side` before/after `relKey` (reorder / co-dock from a drag).
+    // Insert this panel INTO relKey's lane, before/after relKey (stack in the same
+    // column / row — reorder / co-dock from a drag). Other lanes are preserved.
     function insertRelativeTo(side, relKey, after) {
       if (!isAllowed(side)) return;
       dock = side; lsSet(K.dock, side);
       dropFromAllSides(key, side);
-      var ks = sideKeys(side).filter(function (k) { return k !== key; });
-      var at = ks.indexOf(relKey); if (at < 0) at = ks.length - 1;
-      ks.splice(after ? at + 1 : at, 0, key);
-      setSideKeys(side, ks);
+      removeFromSide(side, key);
+      var ls = sideLanes(side);
+      var li = laneOf(side, relKey);
+      if (li < 0) { if (!ls.length) ls.push([]); ls[ls.length - 1].push(key); }
+      else { var at = ls[li].indexOf(relKey); ls[li].splice(after ? at + 1 : at, 0, key); }
+      setSideLanes(side, ls);
+      if (!isOpen()) setOpen(true); else { replaceAllSides(); syncVars(); }
+      if (opts.onDock) opts.onDock(side);
+    }
+    // Place this panel in a NEW lane (column on left/right, row on top/bottom) before/
+    // after relKey's lane — "dock beside" an already-docked panel.
+    function splitLane(side, relKey, after) {
+      if (!isAllowed(side)) return;
+      dock = side; lsSet(K.dock, side);
+      dropFromAllSides(key, side);
+      removeFromSide(side, key);
+      var ls = sideLanes(side);
+      var li = laneOf(side, relKey); if (li < 0) li = ls.length - 1;
+      ls.splice(after ? li + 1 : li, 0, [key]);
+      setSideLanes(side, ls);
       if (!isOpen()) setOpen(true); else { replaceAllSides(); syncVars(); }
       if (opts.onDock) opts.onDock(side);
     }
@@ -294,15 +370,15 @@
       var aSide = dock, bSide = other.getDock();
       if (!isAllowed(bSide) || !other.allows(aSide)) return;    // respect each panel's dock limits
       var aSize = lsGet(stackSizeKey(aSide), ''), bSize = other.sizeStr(bSide);
-      // Exchange order slots: put this where other was, and vice versa.
+      // Exchange order slots IN PLACE — relabel the two keys within the lane
+      // structure so a multi-lane (column/row) layout is preserved on swap.
       if (aSide === bSide) {
-        var ks = sideKeys(aSide), ia = ks.indexOf(key), ib = ks.indexOf(otherKey);
-        if (ia >= 0 && ib >= 0) { ks[ia] = otherKey; ks[ib] = key; setSideKeys(aSide, ks); }
+        setSideLanes(aSide, sideLanes(aSide).map(function (l) {
+          return l.map(function (k) { return k === key ? otherKey : (k === otherKey ? key : k); });
+        }));
       } else {
-        var a = sideKeys(aSide), b = sideKeys(bSide);
-        var ia2 = a.indexOf(key), ib2 = b.indexOf(otherKey);
-        if (ia2 >= 0) a[ia2] = otherKey; if (ib2 >= 0) b[ib2] = key;
-        setSideKeys(aSide, a); setSideKeys(bSide, b);
+        setSideLanes(aSide, sideLanes(aSide).map(function (l) { return l.map(function (k) { return k === key ? otherKey : k; }); }));
+        setSideLanes(bSide, sideLanes(bSide).map(function (l) { return l.map(function (k) { return k === otherKey ? key : k; }); }));
       }
       // Exchange sides + sizes.
       dock = bSide; lsSet(K.dock, bSide); if (bSize !== '') lsSet(stackSizeKey(bSide), bSize);
@@ -368,7 +444,7 @@
         if (ev.target.closest && ev.target.closest(
             'button, a[href], input, select, textarea, label, [role="slider"], [contenteditable=""], [contenteditable="true"]')) return;
         ev.preventDefault();   // don't begin a native text selection from the drag handle
-        var x0 = ev.clientX, y0 = ev.clientY, ghost = null, zones = null, insEl = null, swapEl = null;
+        var x0 = ev.clientX, y0 = ev.clientY, ghost = null, zones = null, insEl = null, lblEl = null;
         var target = null, panels = null, active = false;
         function mk() {
           ghost = document.createElement('div');
@@ -378,8 +454,8 @@
             return '<div class="vp-zone vp-zone-' + z + '" data-zone="' + z + '"><span>Dock ' + z + '</span></div>';
           }).join('');
           insEl = document.createElement('div'); insEl.className = 'vp-insert-line'; insEl.hidden = true;
-          swapEl = document.createElement('div'); swapEl.className = 'vp-swap-hi'; swapEl.hidden = true; swapEl.innerHTML = '<span>swap</span>';
-          document.body.appendChild(zones); document.body.appendChild(insEl); document.body.appendChild(swapEl); document.body.appendChild(ghost);
+          lblEl = document.createElement('div'); lblEl.className = 'vp-drop-label'; lblEl.hidden = true;   // says what the drop does
+          document.body.appendChild(zones); document.body.appendChild(insEl); document.body.appendChild(lblEl); document.body.appendChild(ghost);
         }
         function rectFor(k) { for (var i = 0; i < panels.length; i++) if (panels[i].key === k) return panels[i]; return null; }
         function render() {
@@ -387,19 +463,28 @@
           Array.prototype.forEach.call(zones.children, function (z) {
             z.classList.toggle('on', !!target && target.kind === 'edge' && z.getAttribute('data-zone') === target.side);
           });
-          insEl.hidden = !(target && target.kind === 'insert');
-          swapEl.hidden = !(target && target.kind === 'swap');
-          if (target && target.kind === 'insert') {
+          var showInd = !!(target && (target.kind === 'insert' || target.kind === 'split'));
+          insEl.hidden = !showInd; lblEl.hidden = !showInd;
+          if (showInd) {
             var r = rectFor(target.relKey); if (r) {
               var vert = (target.side === 'left' || target.side === 'right');
-              if (vert) { var yy = target.after ? r.bottom : r.top;
-                insEl.style.cssText = 'left:' + r.left + 'px;top:' + (yy - 2) + 'px;width:' + (r.right - r.left) + 'px;height:4px;'; }
+              // 'insert' = stack in the lane → a line along the MAIN-axis edge;
+              // 'split' = a new lane beside the panel → a line along the CROSS-axis edge.
+              var horizLine = (target.kind === 'insert') ? vert : !vert;   // full-width bar vs full-height bar
+              var lx, ly;
+              if (horizLine) { var yy = target.after ? r.bottom : r.top;
+                insEl.style.cssText = 'left:' + r.left + 'px;top:' + (yy - 2) + 'px;width:' + (r.right - r.left) + 'px;height:4px;';
+                lx = (r.left + r.right) / 2; ly = yy; }
               else { var xx = target.after ? r.right : r.left;
-                insEl.style.cssText = 'left:' + (xx - 2) + 'px;top:' + r.top + 'px;width:4px;height:' + (r.bottom - r.top) + 'px;'; }
-            }
-          } else if (target && target.kind === 'swap') {
-            var s = rectFor(target.otherKey); if (s) {
-              swapEl.style.cssText = 'left:' + s.left + 'px;top:' + s.top + 'px;width:' + (s.right - s.left) + 'px;height:' + (s.bottom - s.top) + 'px;';
+                insEl.style.cssText = 'left:' + (xx - 2) + 'px;top:' + r.top + 'px;width:4px;height:' + (r.bottom - r.top) + 'px;';
+                lx = xx; ly = (r.top + r.bottom) / 2; }
+              // Label says exactly what the drop will do.
+              var txt = (target.kind === 'split')
+                ? (vert ? 'New column' : 'New row')
+                : (vert ? (target.after ? 'Stack below' : 'Stack above')
+                        : (target.after ? 'Stack right' : 'Stack left'));
+              lblEl.textContent = txt;
+              lblEl.style.cssText = 'left:' + Math.round(lx) + 'px;top:' + Math.round(ly) + 'px;';
             }
           }
         }
@@ -407,7 +492,7 @@
           target = C.dropTarget(mx, my, innerWidth, innerHeight, panels);
           // Honor this panel's dock limits (e.g. graph forbids 'top').
           if (target && target.kind === 'edge' && !isAllowed(target.side)) target = null;
-          if (target && (target.kind === 'insert') && !isAllowed(target.side)) target = null;
+          if (target && (target.kind === 'insert' || target.kind === 'split') && !isAllowed(target.side)) target = null;
         }
         function move(m) {
           if (!active) { if (Math.hypot(m.clientX - x0, m.clientY - y0) < THRESH) return; active = true; panels = otherPanelRects(key); mk(); document.body.classList.add('vp-dragging'); }
@@ -419,12 +504,12 @@
           document.removeEventListener('pointercancel', cancel, true); window.removeEventListener('blur', cancel);
           document.removeEventListener('keydown', keyf, true);
           if (!active) return;
-          document.body.classList.remove('vp-dragging'); ghost.remove(); zones.remove(); insEl.remove(); swapEl.remove();
+          document.body.classList.remove('vp-dragging'); ghost.remove(); zones.remove(); insEl.remove(); lblEl.remove();
           justDragged = true; setTimeout(function () { justDragged = false; }, 0);   // swallow the click after a drag
           if (commit && target) {
             if (target.kind === 'edge') { dockTo(target.side, true); if (!isOpen()) setOpen(true); }
             else if (target.kind === 'insert') { insertRelativeTo(target.side, target.relKey, target.after); }
-            else if (target.kind === 'swap') { swapWith(target.otherKey); }
+            else if (target.kind === 'split') { splitLane(target.side, target.relKey, target.after); }
           }
         }
         // The release position is authoritative (a fast flick may end far from the last move).
@@ -604,6 +689,7 @@
         return;
       }
       if (kind === 'studies' && typeof window._openStudiesPanel === 'function') { window._openStudiesPanel(); return; }
+      if (kind === 'registry' && typeof window._openRegistryPanel === 'function') { window._openRegistryPanel(); return; }
       if (kind === 'code' && window.ProcessCode) {
         var addr = p.get('address'), comp = p.get('composite');
         if (addr) window.ProcessCode.open(addr);

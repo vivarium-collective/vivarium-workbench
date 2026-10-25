@@ -314,6 +314,11 @@ body.vp-dragging iframe{ pointer-events:none; }
 :root[data-theme="dark"] .vp-zone{ color:#a5b4fc; border-color:#818cf8; }
 /* Insertion line (reorder/co-dock) + swap highlight shown during a panel drag. */
 .vp-insert-line{ position:fixed; z-index:3002; pointer-events:none; background:#4f46e5; border-radius:3px; box-shadow:0 0 0 1px rgba(255,255,255,.6), 0 2px 8px rgba(79,70,229,.5); }
+/* Floating chip at the drop indicator that names the action (Stack above/below, New column/row). */
+.vp-drop-label{ position:fixed; z-index:3003; pointer-events:none; transform:translate(-50%,-50%);
+  background:#4f46e5; color:#fff; font:600 11px/1.3 -apple-system,"Segoe UI",sans-serif; letter-spacing:.02em;
+  padding:3px 8px; border-radius:5px; white-space:nowrap; box-shadow:0 2px 8px rgba(79,70,229,.5); }
+:root[data-theme="dark"] .vp-drop-label{ background:#4338ca; color:#e0e7ff; }
 .vp-swap-hi{ position:fixed; z-index:3000; pointer-events:none; box-sizing:border-box; border:2px solid #4f46e5; border-radius:8px;
   background:rgba(99,102,241,.14); display:flex; align-items:center; justify-content:center; }
 .vp-swap-hi span{ font:700 12px/1 -apple-system,"Segoe UI",sans-serif; letter-spacing:.08em; text-transform:uppercase; color:#4f46e5;
@@ -330,8 +335,8 @@ body.vp-dragging, body.vp-dragging *{ user-select:none !important; -webkit-user-
   cursor:grab; user-select:none; flex:0 0 auto; }
 .vp-titlebar:active{ cursor:grabbing; }
 body.vp-dragging .vp-titlebar{ cursor:grabbing; }
-.vp-tb-label{ font:600 11.5px/1 -apple-system,"Segoe UI",sans-serif; color:var(--vw-muted,#6b7280);
-  letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.vp-tb-label{ font:600 11.5px/1.5 -apple-system,"Segoe UI",sans-serif; color:var(--vw-muted,#6b7280);
+  letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; padding-bottom:1px; }
 .vp-tb-spacer{ flex:1 1 auto; }
 .vp-tb-btn{ flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
   border:none; background:transparent; color:var(--vw-muted,#9ca3af); cursor:pointer; border-radius:5px; padding:0; }
@@ -351,24 +356,36 @@ body.vp-dragging .vp-titlebar{ cursor:grabbing; }
 .vp-has-titlebar .vp-head{ display:none !important; }
 .vp-has-titlebar [data-act="dock"], .vp-has-titlebar #aig-dock-panel-btn, .vp-has-titlebar .aig-tb-group[title="Dock"]{ display:none !important; }
 
-/* ── iTerm-style same-side stacking ──────────────────────────────────────────
-   A .vp-stack holds every panel docked on one side. Left/right stack as a COLUMN
-   (panels split top↔bottom); top/bottom as a ROW (split left↔right). The container
-   carries the side's outer size (set inline by the dock engine); its panels flex to
-   fill and split by flex-grow, with a .vp-stack-sizer bar dragging the ratio. */
+/* ── iTerm / VS Code-style same-side splitting (lanes) ───────────────────────
+   A .vp-stack holds every panel docked on one side, arranged as one or more
+   LANES. On a left/right side the lanes sit side by side (columns) and each lane
+   stacks its panels top↔bottom; on a top/bottom band the lanes stack (rows) and
+   each lane lays its panels left↔right. ONE lane == the classic single-column
+   layout. The stack carries the side's outer size (set inline by the dock
+   engine); lanes split the cross axis by --vp-lane-grow, panels split a lane's
+   main axis by --vp-grow, and sizer bars drag each ratio. */
 .vp-stack{ display:flex; min-width:0; min-height:0; position:relative; }
 .vp-stack[hidden]{ display:none !important; }
-.vp-stack-left, .vp-stack-right{ flex:0 0 auto; flex-direction:column; height:100%; }   /* width set inline */
-.vp-stack-top, .vp-stack-bottom{ flex:0 0 auto; flex-direction:row; width:100%; }         /* height set inline */
-/* Panels inside a stack fill their share; override each panel's own fixed-basis /
+.vp-stack-left, .vp-stack-right{ flex:0 0 auto; flex-direction:row; height:100%; }    /* lanes side by side; width set inline */
+.vp-stack-top, .vp-stack-bottom{ flex:0 0 auto; flex-direction:column; width:100%; }  /* lanes stacked; height set inline */
+/* A lane splits the cross axis (--vp-lane-grow) and stacks its panels on the main axis. */
+.vp-stack-lane{ display:flex; min-width:0; min-height:0; flex:var(--vp-lane-grow, 1) 1 0; }
+.vp-stack-left .vp-stack-lane, .vp-stack-right .vp-stack-lane{ flex-direction:column; }
+.vp-stack-top .vp-stack-lane, .vp-stack-bottom .vp-stack-lane{ flex-direction:row; }
+/* Panels inside a lane fill their share; override each panel's own fixed-basis /
    width / height rules (flex:0 0 var(--viv-*-w|h), width:var(...), etc.). flex-grow
    is set inline per panel to carry the split ratio. */
-.vp-stack > .vp-dockable{ flex:var(--vp-grow, 1) 1 0 !important; width:auto !important; height:auto !important; min-width:0; min-height:0; }
-/* Split handle between two stacked panels. */
+.vp-stack-lane > .vp-dockable{ flex:var(--vp-grow, 1) 1 0 !important; width:auto !important; height:auto !important; min-width:0; min-height:0; }
+/* Split handle between two stacked panels within a lane (main axis). */
 .vp-stack-sizer{ flex:0 0 6px; align-self:stretch; background:transparent; z-index:6; }
-.vp-stack-left > .vp-stack-sizer, .vp-stack-right > .vp-stack-sizer{ cursor:row-resize; }
-.vp-stack-top > .vp-stack-sizer, .vp-stack-bottom > .vp-stack-sizer{ cursor:col-resize; }
+.vp-stack-left .vp-stack-sizer, .vp-stack-right .vp-stack-sizer{ cursor:row-resize; }
+.vp-stack-top .vp-stack-sizer, .vp-stack-bottom .vp-stack-sizer{ cursor:col-resize; }
 .vp-stack-sizer:hover, .vp-stack-sizer.dragging{ background:color-mix(in srgb, var(--c-accent,#4f46e5) 35%, transparent); }
+/* Split handle between two LANES (cross axis → a new column / row). */
+.vp-lane-sizer{ flex:0 0 6px; align-self:stretch; background:transparent; z-index:6; }
+.vp-stack-left > .vp-lane-sizer, .vp-stack-right > .vp-lane-sizer{ cursor:col-resize; }
+.vp-stack-top > .vp-lane-sizer, .vp-stack-bottom > .vp-lane-sizer{ cursor:row-resize; }
+.vp-lane-sizer:hover, .vp-lane-sizer.dragging{ background:color-mix(in srgb, var(--c-accent,#4f46e5) 50%, transparent); }
 
 /* ── marimo-style model picker: providers → submenu of models → info card ── */
 .vp-mm{ padding:4px; }
