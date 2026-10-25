@@ -112,11 +112,17 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
                     _node_status = "evaluated"
             except Exception:  # noqa: BLE001
                 pass
-        # Authored edge relations (parent_relations): parent-slug -> relation,
-        # consulted below so edges carry the real leads-to/alternative-to/refutes/
+        # Authored edge relations (RFC-0006 Tier 2 — the unified relations: reads
+        # the enriched parent_studies entries, falling back to legacy
+        # parent_relations). Carries the real leads-to/alternative-to/refutes/
         # precedes typing instead of only the synthesized input/prerequisite rel.
+        try:
+            from viva_superpowers.relations import study_relations as _sr
+            _rels = _sr(study_spec)
+        except Exception:  # noqa: BLE001
+            _rels = [r for r in (study_spec.get("parent_relations") or []) if isinstance(r, dict)]
         _rel_by_parent = {r["study"]: r["relation"]
-                          for r in (study_spec.get("parent_relations") or [])
+                          for r in _rels
                           if isinstance(r, dict) and r.get("study") and r.get("relation")}
         _node = {"id": f"study/{slug}", "slug": slug, "type": "study",
                  "label": study_spec.get("title") or study_spec.get("name") or slug,
