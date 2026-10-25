@@ -35,3 +35,9 @@ def test_argument_graph_fills_the_tab_mounts():
     assert "inv-narrative-mount" in AG and "inv-verdict-claims-mount" in AG
     assert "_renderNarrative" in AG and "_renderClaims" in AG
     assert "assets/argument-graph.js" in TMPL
+
+
+def test_plan_and_decisions_mounts_and_renderers():
+    # Plan-progress gets the formalized synthesis spine; Decisions gets derived items.
+    assert "inv-plan-mount" in WALK and "inv-decisions-mount" in WALK
+    assert "_renderGates" in AG and "_renderDecisions" in AG

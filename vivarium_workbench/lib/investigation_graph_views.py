@@ -211,7 +211,7 @@ def _member_slug(entry):
 def _empty_argument_overlay(inv_slug: str) -> tuple[dict, int]:
     return {"investigation": inv_slug, "claims": {}, "edges": [],
             "narrative": {"units": [], "limitations": [], "open_questions": []},
-            "gaps": [], "available": False}, 200
+            "gaps": [], "gates": [], "decisions": [], "available": False}, 200
 
 
 def build_argument_overlay(ws_root, inv_slug, *, derive_fn=None, narrate_fn=None,
@@ -269,11 +269,24 @@ def build_argument_overlay(ws_root, inv_slug, *, derive_fn=None, narrate_fn=None
     except Exception:  # noqa: BLE001 — a derivation failure degrades, never 500s
         return _empty_argument_overlay(inv_slug)
 
+    # Synthesis spine (Plan-progress) + unified open calls (Decisions). Tolerant:
+    # if viva_superpowers.synthesis isn't importable the UI just omits them.
+    gates: list = []
+    decisions: list = []
+    try:
+        from viva_superpowers.synthesis import open_calls, synthesize_gates
+        gates = synthesize_gates(spec, graph.get("claims", {}))
+        decisions = open_calls(spec, graph.get("claims", {}), gaps)
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "investigation": inv_slug,
         "claims": graph.get("claims", {}),
         "edges": graph.get("edges", []),
         "narrative": narrative,
         "gaps": gaps,
+        "gates": gates,
+        "decisions": decisions,
         "available": True,
     }, 200

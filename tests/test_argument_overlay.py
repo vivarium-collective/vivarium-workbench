@@ -97,7 +97,7 @@ class TestArgumentOverlayRoute:
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["investigation"] == "inv1"
-        assert {"claims", "edges", "narrative", "gaps", "available"} <= set(body)
+        assert {"claims", "edges", "narrative", "gaps", "gates", "decisions", "available"} <= set(body)
         assert isinstance(body["available"], bool)
 
     def test_route_unknown_404(self, tmp_path):

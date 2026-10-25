@@ -11186,7 +11186,10 @@
       // evaluated board as no progress. The per-outcome breakdown is in the board tally.
       var _TERMINAL = { passed: 1, met: 1, qualified: 1, refuted: 1 };
       var _evaluated = _pb.filter(function (g) { return _TERMINAL[g.status]; }).length;
-      tabs.push({ id:'plan', label:'Plan progress', html:_planHtml,
+      // The formalized synthesis spine (canonical gate verdicts rolled up from
+      // member claims) replaces this content when argument-graph.js loads the
+      // overlay; _planHtml is the sync fallback if the derivation layer is absent.
+      tabs.push({ id:'plan', label:'Plan progress', html:'<div id="inv-plan-mount">' + _planHtml + '</div>',
         badge: _pb.length ? (_evaluated + '/' + _pb.length + ' evaluated') : '' });
     }
 
@@ -11194,7 +11197,10 @@
     var _decHtml = _invDecisionTabHtml(d);
     if (_decHtml) {
       var _nDec = (((d.executive || {}).decisions_needed) || []).length;
-      tabs.push({ id: 'decisions', label: 'Decisions', html: _decHtml,
+      // The authored decisions keep their interactive Resolve cockpit; the
+      // derived open items (audit gaps, open-question claims, divergences) are
+      // filled below by argument-graph.js from the overlay.
+      tabs.push({ id: 'decisions', label: 'Decisions', html: _decHtml + '<div id="inv-decisions-mount"></div>',
         badge: _nDec ? (_nDec + ' needed') : 'all clear', attention: _nDec > 0 });
     }
 

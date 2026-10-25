@@ -56,7 +56,23 @@
       + ".ag-rel{margin-top:5px;display:flex;flex-wrap:wrap;gap:6px}"
       + ".ag-rel .chip{font-size:0.76em;padding:1px 8px;border-radius:999px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}"
       + ".ag-rel .chip b{font-weight:600;color:#334155}"
-      + ".ag-empty{color:#94a3b8;padding:14px 2px;font-size:0.9em}";
+      + ".ag-empty{color:#94a3b8;padding:14px 2px;font-size:0.9em}"
+      + ".ag-sec-lead{color:#64748b;font-size:0.84em;margin:0 0 10px}"
+      + ".ag-gate{border:1px solid #eef2f7;border-left-width:4px;border-radius:9px;padding:9px 12px;margin:8px 0}"
+      + ".ag-gate-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}"
+      + ".ag-gate-id{font-weight:700;font-size:0.82em;background:#0f172a;color:#fff;border-radius:5px;padding:1px 7px}"
+      + ".ag-gate-name{font-weight:600;flex:0 1 auto}"
+      + ".ag-ext,.ag-branch{font-size:0.74em;color:#64748b;background:#f1f5f9;border-radius:999px;padding:1px 7px}"
+      + ".ag-branch{color:#92400e;background:#fef3c7}"
+      + ".ag-gate-crit{color:#475569;font-size:0.88em;margin:5px 0 0}"
+      + ".ag-gate-mem{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:0.82em;color:#64748b}"
+      + ".ag-mini{font-weight:700;margin-left:3px}"
+      + ".ag-dgroup{margin-top:14px}.ag-dgroup h5{margin:0 0 6px;font-size:0.9em;color:#334155}"
+      + ".ag-dcall{border-left:3px solid #cbd5e1;padding:6px 12px;margin:5px 0;background:#f8fafc;border-radius:0 7px 7px 0}"
+      + ".ag-dc-narrative_gap{border-left-color:#f59e0b;background:#fffbeb}"
+      + ".ag-dc-divergence{border-left-color:#8b5cf6;background:#f5f3ff}"
+      + ".ag-dc-open_question{border-left-color:#0ea5e9;background:#f0f9ff}"
+      + ".ag-dc-title{font-size:0.9em}.ag-dc-act{font-size:0.78em;color:#64748b;margin-top:2px}";
     var el = document.createElement("style"); el.id = "ag-style"; el.textContent = css;
     document.head.appendChild(el);
   }
@@ -128,22 +144,75 @@
     host.innerHTML = out + "</div>";
   }
 
+  function _miniBadge(v) {
+    var k = _vk(v);
+    return '<span class="ag-mini" style="color:' + k.bd + '" title="' + _esc(v || "unassessed") + '">' + k.mk + "</span>";
+  }
+
+  function _renderGates(host, data) {
+    var gates = (data && data.gates) || [];
+    if (!gates.length) { host.insertAdjacentHTML("beforeend", '<i class="ag-spine" hidden></i>'); return; }
+    var out = '<div class="ag-spine"><div class="ag-sec-lead">Synthesis spine — each gate’s verdict is rolled up from its member studies’ claims.</div>';
+    gates.forEach(function (g) {
+      var ext = g.extends ? '<span class="ag-ext">extends ' + _esc(g.extends) + "</span>" : "";
+      var branch = g.off_spine ? '<span class="ag-branch">branch</span>' : "";
+      var mem = (g.members || []).map(function (m) { return '<span>' + _esc(m.slug) + _miniBadge(m.verdict) + "</span>"; }).join("");
+      out += '<div class="ag-gate" style="border-left-color:' + _vk(g.verdict).bd + '">'
+        + '<div class="ag-gate-head"><span class="ag-gate-id">' + _esc(g.id || "") + "</span>"
+        + '<span class="ag-gate-name">' + _esc(g.name || "") + "</span>" + _badge(g.verdict) + ext + branch + "</div>"
+        + (g.criterion ? '<div class="ag-gate-crit">' + _esc(g.criterion) + "</div>" : "")
+        + (mem ? '<div class="ag-gate-mem">' + mem + "</div>" : "") + "</div>";
+    });
+    host.innerHTML = out + "</div>";
+  }
+
+  function _renderDecisions(host, data) {
+    // authored decisions keep their interactive cockpit above; surface the derived items here.
+    var calls = ((data && data.decisions) || []).filter(function (c) { return c.kind !== "decision"; });
+    if (!calls.length) { host.innerHTML = '<div class="ag-dec-empty" hidden></div>'; return; }
+    var groups = {
+      narrative_gap: { label: "Narrative gaps — unsupported transitions", items: [] },
+      divergence: { label: "Verdict divergences — authored vs. coded roll-up", items: [] },
+      open_question: { label: "Open questions — unassessed / inconclusive claims", items: [] }
+    };
+    calls.forEach(function (c) { if (groups[c.kind]) groups[c.kind].items.push(c); });
+    var out = '<div class="ag-sec-lead" style="margin-top:18px">Derived open items — surfaced from the argument graph and the narrative audit.</div>';
+    Object.keys(groups).forEach(function (k) {
+      var g = groups[k]; if (!g.items.length) return;
+      out += '<div class="ag-dgroup"><h5>' + _esc(g.label) + " (" + g.items.length + ")</h5>";
+      g.items.forEach(function (c) {
+        out += '<div class="ag-dcall ag-dc-' + k + '"><div class="ag-dc-title">' + _esc(c.title) + "</div>"
+          + '<div class="ag-dc-act">→ ' + _esc(c.action) + "</div></div>";
+      });
+      out += "</div>";
+    });
+    host.innerHTML = out;
+  }
+
   function _tick() {
-    var nar = document.getElementById("inv-narrative-mount");
-    var ver = document.getElementById("inv-verdict-claims-mount");
-    if (!nar && !ver) return;
+    var m = {
+      nar: document.getElementById("inv-narrative-mount"),
+      ver: document.getElementById("inv-verdict-claims-mount"),
+      plan: document.getElementById("inv-plan-mount"),
+      dec: document.getElementById("inv-decisions-mount")
+    };
+    if (!m.nar && !m.ver && !m.plan && !m.dec) return;
     var slug = window._currentIsetSlug || "";
     if (!slug) return;
-    var narEmpty = nar && !nar.querySelector(".ag-unit, .ag-empty");
-    var verEmpty = ver && !ver.querySelector(".ag-claim, .ag-empty");
-    if (slug === _slug && !narEmpty && !verEmpty) return;      // already filled
+    var unfilled = (m.nar && !m.nar.querySelector(".ag-unit, .ag-empty"))
+      || (m.ver && !m.ver.querySelector(".ag-claim, .ag-empty"))
+      || (m.plan && !m.plan.querySelector(".ag-spine"))
+      || (m.dec && !m.dec.querySelector(".ag-dcall, .ag-dec-empty"));
+    if (slug === _slug && !unfilled) return;
     if (_busy) return;
     _busy = true;
     _fetch(slug).then(function (data) {
       _busy = false; _slug = slug; _ensureStyle();
       var avail = data && data.available !== false;
-      if (nar) { if (avail) _renderNarrative(nar, data); else nar.innerHTML = ""; }
-      if (ver) { if (avail) _renderClaims(ver, data); else ver.innerHTML = ""; }
+      if (m.nar) { if (avail) _renderNarrative(m.nar, data); else m.nar.innerHTML = ""; }
+      if (m.ver) { if (avail) _renderClaims(m.ver, data); else m.ver.innerHTML = ""; }
+      if (m.plan && avail) _renderGates(m.plan, data);      // keeps _planHtml fallback otherwise
+      if (m.dec) { if (avail) _renderDecisions(m.dec, data); else m.dec.innerHTML = ""; }
     }).catch(function () { _busy = false; });
   }
 
