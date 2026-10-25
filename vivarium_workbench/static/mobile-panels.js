@@ -62,6 +62,11 @@
       setOpen: function (want) { if (window.StudiesPanel) { want ? StudiesPanel.open() : StudiesPanel.close(); } },
     },
     {
+      key: "registry", label: "Registry", panelId: "viv-registry-panel",
+      available: function () { return rendered(el("viv-registry-toggle")) && !!el("viv-registry-panel"); },
+      setOpen: function (want) { if (window.RegistryPanel) { want ? RegistryPanel.open() : RegistryPanel.close(); } },
+    },
+    {
       key: "chat", label: "Chat", panelId: "viv-ai-panel",
       available: function () { return rendered(el("viv-ai-toggle")) && !!el("viv-ai-panel"); },
       setOpen: function () { var t = el("viv-ai-toggle"); if (t) t.click(); },
@@ -97,6 +102,7 @@
   var ICON = {
     content: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9 H20.5"/></svg>',
     studies: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><path d="M9 6 H20"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><path d="M9 12 H20"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/><path d="M9 18 H20"/></svg>',
+    registry: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.4"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.4"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.4"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.4"/></svg>',
     chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10" rx="2.5"/><path d="M12 4.5 V8"/><circle cx="12" cy="3.6" r="0.9"/><circle cx="9.5" cy="13" r="1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="13" r="1" fill="currentColor" stroke="none"/><path d="M3 12 V15 M21 12 V15"/></svg>',
     code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
     graph: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="9" r="2.3"/><circle cx="9" cy="18" r="2.3"/><path d="M8 7.2 L16 8.4 M7.5 8 L8.5 16"/></svg>',
@@ -105,7 +111,7 @@
   function btnHTML(key, label, icon) {
     return (
       '<button type="button" class="vpb-btn" data-key="' + key + '" aria-pressed="false">' +
-      '<span class="vpb-ico" aria-hidden="true">' + icon + "</span>" +
+      '<span class="vpb-ico" aria-hidden="true">' + (icon || "") + "</span>" +
       '<span class="vpb-lab">' + label + "</span>" +
       "</button>"
     );
