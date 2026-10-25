@@ -3615,7 +3615,7 @@ xarray = [
 [[package]]
 name = "viva-superpowers"
 version = "0.24.0"
-source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#0165e5ad46a1e93f3464e9ff7d631843c84aaefb" }
+source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#f67ff2b1004021fb9542d2c479961c1d83de00b5" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "click" },
