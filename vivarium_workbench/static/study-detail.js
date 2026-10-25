@@ -509,20 +509,66 @@
   // so continuous re-fitting is circular — a single measure is correct and safe.
   // Exposed on window so the server-rendered embed_visualizations iframes
   // (templates/study-detail.html) share ONE implementation and can't drift.
+  // True content height of a same-origin figure document, measured ROBUSTLY
+  // regardless of how the embedded HTML was written. The recurring runaway-
+  // whitespace bug: Plotly's write_html(full_html=True) injects
+  // `html,body{height:100%}`, so the body FILLS the iframe and body/html
+  // scrollHeight reports the iframe's own (growing) height, never the plot's.
+  // We neutralize that here — in the workbench embed layer — so NO workspace has
+  // to fix its write_html or regenerate charts: force html+body to height:auto
+  // (overriding the injected 100%), then measure the lowest rendered point of the
+  // body's children. documentElement.scrollHeight is deliberately NOT used — in a
+  // standalone figure doc it reports the viewport minimum, not the content.
+  function _measureFigureHeight(d, b, e) {
+    if (e) { e.style.overflow = 'hidden'; e.style.height = 'auto'; }
+    if (b) { b.style.margin = '0'; b.style.height = 'auto'; }
+    var h = 0;
+    if (b) {
+      var kids = b.children;
+      for (var i = 0; i < kids.length; i++) {
+        var bottom = kids[i].getBoundingClientRect().bottom;
+        if (bottom > h) h = bottom;
+      }
+      h = Math.ceil(h);
+      if (!(h > 0)) h = b.scrollHeight || 0;
+    }
+    return h;
+  }
+
   function _fitFigureFrame(f) {
     try {
       var d = f.contentDocument; if (!d) return;
       var b = d.body, e = d.documentElement;
-      if (b) b.style.margin = '0';
-      if (e) e.style.overflow = 'hidden';
       var bStyle = b && d.defaultView && d.defaultView.getComputedStyle ? d.defaultView.getComputedStyle(b) : null;
+      // A figure that DELIBERATELY pins a fixed body height with hidden overflow
+      // is honored as-is (no content measurement).
       var pinnedH = 0;
       if (bStyle && (bStyle.overflow || '').indexOf('hidden') >= 0) {
         var hm = (bStyle.height || '').match(/^(\d+(?:\.\d+)?)px$/);
         if (hm) pinnedH = Math.round(parseFloat(hm[1]));
       }
-      var h = pinnedH > 0 ? pinnedH : Math.max(e ? e.scrollHeight : 0, b ? b.scrollHeight : 0);
-      if (h > 0) f.style.height = h + 'px';
+      if (pinnedH > 0) {
+        if (b) b.style.margin = '0';
+        if (e) e.style.overflow = 'hidden';
+        f.style.height = pinnedH + 'px';
+        return;
+      }
+      // Otherwise neutralize elastic (height:100%) content and fit to the plot.
+      // Re-measure a few times: Plotly/Vega lay out asynchronously, so the onload
+      // measure can precede the final plot height. Forcing height:auto removes the
+      // elasticity, so these re-measures CONVERGE instead of running away (the
+      // reason the earlier one-shot version couldn't use a resizer).
+      var apply = function () {
+        var h = _measureFigureHeight(d, b, e);
+        if (h > 0) f.style.height = h + 'px';
+      };
+      apply();
+      var w = f.ownerDocument && f.ownerDocument.defaultView;
+      if (w) {
+        w.requestAnimationFrame(apply);
+        w.setTimeout(apply, 250);
+        w.setTimeout(apply, 700);
+      }
     } catch (e) {}
   }
   window.__fitFigureFrame = _fitFigureFrame;
