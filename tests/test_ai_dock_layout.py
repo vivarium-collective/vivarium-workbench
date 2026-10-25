@@ -287,16 +287,18 @@ def test_search_and_stepper_share_one_row():
 
 
 def test_dockable_panel_headers_are_inline_corner_controls():
-    """studies / code / chat panels drop the full-width header bar; the dock/close
-    controls sit in the top-right corner, in line with the first row (not a
-    separate bar). Only the icon controls remain (title dropped), and each panel's
-    first row reserves a corner so the controls never occlude existing buttons."""
+    """studies / code / chat panels drop the full-width header bar; the legacy
+    dock/close corner-control rules remain in the stylesheet. The Studies and Chat
+    dock/close controls now live in the panel titlebar (.vp-titlebar), so those two
+    rows no longer reserve a right-hand corner — their buttons fill to the panel's
+    right edge. The code panel's rows still reserve their corner."""
     css = (STATIC / "style.css").read_text()
     for sel in (".viv-studies-panel .vp-head", ".viv-code-rail .vp-head", "#viv-ai-panel .vp-head"):
         assert sel in css, f"{sel} corner-control rule missing"
     assert "position:absolute; top:7px; right:6px;" in css
     assert ".viv-studies-panel .vp-head > :not(.vp-icon)" in css          # title dropped
-    assert "#viv-ai-panel .vp-toolbar{ padding-right" in css              # chat reserves its corner
+    assert "#viv-ai-panel .vp-toolbar{ padding-right" not in css          # chat no longer reserves a corner
+    assert ".viv-code-rail .viv-code-newbar{ padding-right" in css        # code panel still reserves
 
 
 def test_popout_close_returns_to_inline_docking():
