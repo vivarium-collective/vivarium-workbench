@@ -20185,10 +20185,10 @@
     });
     var gaps = sev.error + sev.warning;
     var head, bg, bd, col;
-    if (!findings.length) { head = '✓ Ready'; bg = '#f0fdf4'; bd = '#16a34a'; col = '#166534'; }
-    else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = '#fffbeb'; bd = '#f59e0b'; col = '#92400e'; }
-    else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = '#eff6ff'; bd = '#3b82f6'; col = '#1e40af'; }
-    var lbl = '<span class="small" style="color:#64748b">code-computed by the report linter (deterministic)</span>';
+    if (!findings.length) { head = '✓ Ready'; bg = 'var(--ok-bg, #f0fdf4)'; bd = '#16a34a'; col = 'var(--ok-fg, #166534)'; }
+    else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = 'var(--warn-bg, #fffbeb)'; bd = '#f59e0b'; col = 'var(--warn-fg, #92400e)'; }
+    else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = 'var(--info-bg, #eff6ff)'; bd = '#3b82f6'; col = 'var(--info-fg, #1e40af)'; }
+    var lbl = '<span class="small" style="color:var(--text-muted, #64748b)">code-computed by the report linter (deterministic)</span>';
     // Ready → no dropdown needed.
     if (!findings.length) {
       return '<div class="readiness-banner" style="margin:12px 0;padding:12px 16px;background:' + bg
@@ -20206,14 +20206,14 @@
         return '<li style="margin-top:3px"><span style="color:' + dot + ';font-weight:700">●</span> ' + _h(f.message || '') + '</li>';
       }).join('');
       return '<div style="margin-top:9px"><code>' + _h(c) + '</code> '
-        + '<span class="small" style="color:#94a3b8">(' + byCheck[c].length + ')</span>'
+        + '<span class="small" style="color:var(--text-muted, #94a3b8)">(' + byCheck[c].length + ')</span>'
         + '<ul class="small" style="margin:3px 0 0 18px;padding:0">' + items + '</ul></div>';
     }).join('');
     return '<details class="readiness-banner" style="margin:12px 0;background:' + bg
       + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
       + '<summary style="padding:12px 16px;cursor:pointer;list-style:none;outline:none">'
       + '<strong>Readiness: ' + head + '</strong> ' + lbl
-      + '<div class="small" style="color:#64748b;margin-top:5px">' + breakdown
+      + '<div class="small" style="color:var(--text-muted, #64748b);margin-top:5px">' + breakdown
       + ' &nbsp;·&nbsp; <span style="opacity:.7;font-style:italic">click to expand</span></div>'
       + '</summary>'
       + '<div style="padding:2px 16px 12px 16px">' + groups + '</div>'
