@@ -528,6 +528,44 @@ def _unresolved_composite_items(slug: str, spec: dict, known_ids: set) -> list[d
     return out
 
 
+def _narrative_gap_items(ws_root: Path, inv_slug: str, wp: "WorkspacePaths",
+                         inv_spec: dict) -> list[dict]:
+    """Signal 7 — unsupported narrative transitions (RFC-0005).
+
+    An adjacent pair of claims in the derived narrative with no support/
+    prerequisite path between them is a gap the narrative audit flags; each
+    becomes a needs-attention item carrying its candidate follow-up study. This
+    is where a narrative gap becomes an investigation request. Build-free and
+    tolerant; omitted entirely when the viva_superpowers derivation layer is
+    unavailable (so the scan degrades, never raises).
+    """
+    try:
+        from viva_superpowers.argument_store import derive_argument
+        from viva_superpowers.narrative import audit, narrate
+    except Exception:  # noqa: BLE001
+        return []
+    studies_by_slug = {slug: spec for slug, spec in _member_studies(wp, inv_spec)}
+    try:
+        graph = derive_argument(inv_spec, studies_by_slug)
+        nar = narrate(graph, question=inv_spec.get("question"))
+        gaps = audit(nar, graph)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[dict] = []
+    for g in gaps:
+        fu = g.get("followup") or {}
+        sev = "high" if g.get("verdict_escalation") else "medium"
+        out.append(_item(
+            "narrative_gap", sev, fu.get("parent_study"),
+            f"{g.get('from')}→{g.get('to')}",
+            "Unsupported narrative transition",
+            g.get("missing_evidence") or
+            "The argument moves between claims without a supporting or prerequisite link.",
+            (f"Add the missing evidence, or seed follow-up study {fu.get('id', '')}.").rstrip(),
+        ))
+    return out
+
+
 def scan_investigation(
     ws_root: Path | str,
     inv_slug: str,
@@ -576,6 +614,12 @@ def scan_investigation(
     # Signal 1 — uncovered acceptance criteria (investigation-level).
     try:
         items.extend(_uncovered_ac_items(ws_root, inv_slug))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Signal 7 — unsupported narrative transitions (RFC-0005, investigation-level).
+    try:
+        items.extend(_narrative_gap_items(ws_root, inv_slug, wp, inv_spec))
     except Exception:  # noqa: BLE001
         pass
 
