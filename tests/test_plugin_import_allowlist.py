@@ -64,6 +64,14 @@ ALLOWED: dict[str, str] = {
     "readout_migration": "readout-migration status/apply (endpoint-backed)",
     "investigation_inputs": "investigation input resolution",
     "investigation_status": "investigation acceptance roll-up",
+    # --- RFC-0005/0006 derive-first inquiry layer (pure dict->dict projections;
+    #     workbench-free core the workbench projects into the argument/narrative
+    #     views + the knowledge step) ---
+    "knowledge_store": "core: canonical-verdict + concept projection (derive-first, pure)",
+    "argument_store": "core: claims + argument-graph projection (derive-first, pure)",
+    "narrative": "core: narrate + audit projection over the argument graph (pure)",
+    "synthesis": "core: synthesis spine + open-calls roll-up (pure)",
+    "relations": "core: study-relation projection feeding the argument graph (pure)",
     # --- pre-server bootstrap helpers (structurally cannot be HTTP) ---
     "scaffold": "workspace/investigation scaffolding (backs vwb scaffold-* verbs)",
     "workspace_catalog": "workspace catalog registration (backs vwb catalog-add)",

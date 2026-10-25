@@ -880,6 +880,22 @@ def _do_build(
             payload = {}
         _write_json(api_dir / "inputs" / f"{inv_name}.json", payload)
 
+    # api/argument-overlay/<inv>.json — the RFC-0005 argument/narrative projection
+    # (claims, edges, narrative, gaps, gates, decisions) so the published read-only
+    # bundle's Narrative / Claims / Plan / Decisions tabs match the live app.
+    # data-source.loadArgumentOverlay already resolves /api/argument-overlay/<slug>.json
+    # in snapshot mode; a graceful empty payload when the derivation layer is absent.
+    (api_dir / "argument-overlay").mkdir(parents=True, exist_ok=True)
+    from vivarium_workbench.lib.investigation_graph_views import build_argument_overlay
+    for inv_name in investigations:
+        try:
+            body, _ = build_argument_overlay(ws_root, inv_name)
+        except Exception:  # noqa: BLE001 — never fail the publish on one investigation
+            body = {"investigation": inv_name, "claims": {}, "edges": [],
+                    "narrative": {"units": [], "limitations": [], "open_questions": []},
+                    "gaps": [], "gates": [], "decisions": [], "available": False}
+        _write_json(api_dir / "argument-overlay" / f"{inv_name}.json", body)
+
     # reports/investigation-<slug>.html — pre-rendered investigation reports. In
     # the live app these come from GET /api/investigation-report/<slug>; in the
     # static bundle (no server) the ↓ report button opens these files. Figures +

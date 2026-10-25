@@ -1905,14 +1905,19 @@
         // except the checked-in 'static' charts, which get their own labeled
         // section below. (Previously only 'live'/unset rendered, so 'declared'
         // charts silently vanished in the published snapshot.)
-        var live = d.charts.filter(function(c) { return c.source !== 'static'; });
-        var stat = d.charts.filter(function(c) { return c.source === 'static'; });
+        // Unify under Audit: behavior-test charts (source: 'live') now render
+        // with their verdicts inside the Audit test cards, not here. The
+        // Visualizations gallery shows only study/author figures — study.yaml
+        // 'declared' visualizations and checked-in 'static' charts.
+        var figs = d.charts.filter(function(c) { return c.source !== 'live'; });
+        var declared = figs.filter(function(c) { return c.source !== 'static'; });
+        var stat = figs.filter(function(c) { return c.source === 'static'; });
         var html = '';
-        if (live.length) {
-          html += live.map(_renderChartCard).join('');
+        if (declared.length) {
+          html += declared.map(_renderChartCard).join('');
         }
         if (stat.length) {
-          if (live.length) {
+          if (declared.length) {
             html += '<h3 class="section-title" style="margin-top:24px">Pre-rendered charts <span class="muted" style="font-weight:400;font-size:0.85em">(checked-in under <code>studies/' + studyName() + '/charts/</code>)</span></h3>';
           }
           html += stat.map(_renderChartCard).join('');
@@ -1920,7 +1925,7 @@
         panel.innerHTML = html;
         _wireFigureRunLinks(panel);
         if (panelId === 'viz-charts-panel') {
-          _figuresSourceState.charts = true;
+          _figuresSourceState.charts = figs.length > 0;
           _updateFiguresEmptyState();
           _chartsCache = d.charts;  // Task E3: settled — per-item run_id (V3)
           _notifyFigureDataAvailable();
@@ -4934,6 +4939,32 @@
         }).forEach(function (li) { _testsList.appendChild(li); });
       }
     }
+
+    // Unify under Audit: render each behavior test's chart (source: 'live')
+    // inside its own #bt-<name> card, so a test's verdict and its chart live
+    // together — the Visualizations tab shows only study/author figures. Charts
+    // with no image (a declared observable with no run data) carry no new signal
+    // beyond the test's own verdict, so they are skipped here rather than shown
+    // as empty cards.
+    try {
+      window.DataSource.loadStudyCharts(studyName()).then(function (d) {
+        if (!d || !d.charts) return;
+        d.charts.forEach(function (c) {
+          if (c.source !== 'live' || !c.key) return;
+          if (!(c.svg || c.img || c.iframe_url || c.srcdoc)) return;
+          var li = document.getElementById('bt-' + String(c.key).replace(/^v4-/, ''));
+          if (!li) return;
+          var old = li.querySelector('.bt-chart');
+          if (old && old.parentNode) old.parentNode.removeChild(old);  // idempotent
+          var wrap = document.createElement('div');
+          wrap.className = 'bt-chart';
+          wrap.style.marginTop = '10px';
+          wrap.innerHTML = _renderChartCard(c);
+          li.appendChild(wrap);
+          _wireFigureRunLinks(wrap);
+        });
+      }).catch(function () {});
+    } catch (e) {}
 
     // --- Per-test code-computed outcomes (spine B3) ---------------------
     // NOTE (Task 4.2): this is a SEPARATE, parallel data surface

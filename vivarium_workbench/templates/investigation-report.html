@@ -1644,9 +1644,11 @@ function toc(inv){
     ['#claim-evidence','Claim–evidence map',(syn.claim_evidence||[]).length],
     ['#evidence-register','Evidence register (all studies)',(syn.studies_index||[]).length],
     ['#references','References',inv.references&&Object.keys(inv.references).length],
-    ['#inv-viz','Investigation visualizations',true],
-    ['#glossary','Glossary',true],
-    ['#appendix','Appendix',true],
+    // Only list a section when it actually renders — otherwise the anchor is a
+    // dead button (the section returns '' for an investigation without that data).
+    ['#inv-viz','Investigation visualizations',!!renderInvViz(inv)],
+    ['#glossary','Glossary',has(inv.glossary)],
+    ['#appendix','Appendix',!!inv.catalog],
   ].filter(x=>x[2]).map(x=>_ndl(x[0],x[1])).join('');
   const nStudies=(inv.studies||[]).length;
   const studyLinks=(inv.studies||[]).map(s=>_ndl('#s-'+esc(s.slug), esc(s.title||s.slug))).join('');

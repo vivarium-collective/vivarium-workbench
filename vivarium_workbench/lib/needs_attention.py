@@ -337,6 +337,33 @@ def _diagnostic_already_seeded(spec: dict) -> bool:
     return False
 
 
+#: authored verdicts that read as a documented terminal refutation
+_REFUTED_VERDICTS = {"refuted", "honest-negative", "honest_negative", "negative"}
+
+
+def _is_refuted(spec: dict) -> bool:
+    return str(spec.get("verdict") or "").strip().lower() in _REFUTED_VERDICTS
+
+
+def _primary_test_failed(spec: dict) -> bool:
+    """True when a NON-diagnostic test fails in the canonical run — i.e. a primary
+    or unclassified test (an explicitly ``diagnostic`` test alone is a qualified
+    result, not a primary failure). Unclassified counts as primary so a real
+    failure is never silently missed. Tolerant: missing outcomes → False."""
+    try:
+        from viva_superpowers.study_verdict import canonical_outcomes
+        outcomes = canonical_outcomes(spec)
+    except Exception:  # noqa: BLE001
+        return False
+    cls = {t.get("name"): t.get("classification")
+           for t in spec.get("behavior_tests") or [] if isinstance(t, dict)}
+    for name, row in (outcomes or {}).items():
+        res = row.get("result") if isinstance(row, dict) else row
+        if str(res).upper() in ("FAIL", "FAILED") and cls.get(name) != "diagnostic":
+            return True
+    return False
+
+
 def _diagnostic_branch_items(slug: str, spec: dict) -> list[dict]:
     """A failed / needs-calibration study with no seeded diagnostic child (#19).
 
@@ -353,6 +380,18 @@ def _diagnostic_branch_items(slug: str, spec: dict) -> list[dict]:
         return []
     if _diagnostic_already_seeded(spec):
         return []
+    # ``roll_up_verdict`` returns 'failed' on ANY failing test, but this prompt is
+    # specifically about PRIMARY-test failure (its message + action say so). Don't
+    # flag a study whose primary tests PASS and only a diagnostic/secondary test
+    # failed — that is a *qualified* result, not an undiagnosed primary failure.
+    # And don't flag a study whose authored verdict is a documented terminal
+    # *refutation*: the primary failure IS the recorded conclusion, already
+    # diagnosed. (A 'needs_calibration' roll-up is left untouched.)
+    if result == "failed":
+        if not _primary_test_failed(spec):
+            return []
+        if _is_refuted(spec):
+            return []
     return [_item(
         "diagnostic_branch_needed", "high", slug, slug,
         f"Study '{slug}' verdict is '{result}' with no diagnostic study seeded",
@@ -528,6 +567,44 @@ def _unresolved_composite_items(slug: str, spec: dict, known_ids: set) -> list[d
     return out
 
 
+def _narrative_gap_items(ws_root: Path, inv_slug: str, wp: "WorkspacePaths",
+                         inv_spec: dict) -> list[dict]:
+    """Signal 7 — unsupported narrative transitions (RFC-0005).
+
+    An adjacent pair of claims in the derived narrative with no support/
+    prerequisite path between them is a gap the narrative audit flags; each
+    becomes a needs-attention item carrying its candidate follow-up study. This
+    is where a narrative gap becomes an investigation request. Build-free and
+    tolerant; omitted entirely when the viva_superpowers derivation layer is
+    unavailable (so the scan degrades, never raises).
+    """
+    try:
+        from viva_superpowers.argument_store import derive_argument
+        from viva_superpowers.narrative import audit, narrate
+    except Exception:  # noqa: BLE001
+        return []
+    studies_by_slug = {slug: spec for slug, spec in _member_studies(wp, inv_spec)}
+    try:
+        graph = derive_argument(inv_spec, studies_by_slug)
+        nar = narrate(graph, question=inv_spec.get("question"))
+        gaps = audit(nar, graph)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[dict] = []
+    for g in gaps:
+        fu = g.get("followup") or {}
+        sev = "high" if g.get("verdict_escalation") else "medium"
+        out.append(_item(
+            "narrative_gap", sev, fu.get("parent_study"),
+            f"{g.get('from')}→{g.get('to')}",
+            "Unsupported narrative transition",
+            g.get("missing_evidence") or
+            "The argument moves between claims without a supporting or prerequisite link.",
+            (f"Add the missing evidence, or seed follow-up study {fu.get('id', '')}.").rstrip(),
+        ))
+    return out
+
+
 def scan_investigation(
     ws_root: Path | str,
     inv_slug: str,
@@ -576,6 +653,12 @@ def scan_investigation(
     # Signal 1 — uncovered acceptance criteria (investigation-level).
     try:
         items.extend(_uncovered_ac_items(ws_root, inv_slug))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Signal 7 — unsupported narrative transitions (RFC-0005, investigation-level).
+    try:
+        items.extend(_narrative_gap_items(ws_root, inv_slug, wp, inv_spec))
     except Exception:  # noqa: BLE001
         pass
 

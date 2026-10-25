@@ -1103,3 +1103,18 @@ def test_render_home_inlines_workspace_avatar(tmp_path):
     assert "data:image/svg" in html, "workspace avatar should be inlined as a data URI"
     assert "viv-ws-avatar-img" in html, "avatar <img> should render when an avatar is set"
     assert "https://example.org/demo" in html, "workspace name should link to its homepage"
+
+
+def test_build_bundle_bakes_argument_overlay(tmp_workspace, tmp_path):
+    """build_bundle writes api/argument-overlay/<inv>.json so the published
+    read-only bundle's Narrative/Claims/Plan/Decisions tabs resolve in snapshot
+    mode (data-source.loadArgumentOverlay -> /api/argument-overlay/<slug>.json)."""
+    from vivarium_workbench import publish
+    out = tmp_path / "bundle"
+    publish.build_bundle(tmp_workspace, out)
+    f = out / "api" / "argument-overlay" / "main-inv.json"
+    assert f.is_file(), "argument-overlay/main-inv.json not baked"
+    body = json.loads(f.read_text())
+    # the stable shape the frontend reads (content depends on the derivation layer)
+    assert {"investigation", "claims", "edges", "narrative", "gaps", "gates",
+            "decisions", "available"} <= set(body)

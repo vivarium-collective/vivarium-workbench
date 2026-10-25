@@ -729,19 +729,12 @@ def render_v4_test_charts(spec: dict,
         path = measure.get("path")
         title = f"{t.get('name','(unnamed)')}  ({t.get('classification','test')})"
         if not path:
-            # Honesty fix: a silent `continue` here made a declared test
-            # vanish from the report with no signal — a reviewer would just
-            # see fewer cards than declared tests. Emit a visible stub
-            # instead (mirrors the "default-baseline" warning-caption
-            # pattern below).
-            charts.append({
-                "key": f"v4-{t.get('name','test')}",
-                "title": title,
-                "caption": "⚠ Unresolved: this test declares no measure.path.",
-                "status": "unresolved",
-                "source": "live",
-                "data_source": None,
-            })
+            # A test with no measure.path is a scalar assertion, not a chart: it
+            # has no plottable series. It is shown with its verdict on the Audit
+            # tab (every declared test appears there), so emitting an empty
+            # "no measure.path" stub in the Visualizations gallery is pure
+            # redundancy — a wall of placeholder cards that crowds out the real
+            # figures. Skip it here; the test is not lost, it lives in Audit.
             continue
         idx = measure.get("index")
         key = (path, idx)
@@ -763,22 +756,22 @@ def render_v4_test_charts(spec: dict,
             # "default-baseline"` means data WAS found, just from the
             # fallback db). A refusal names the missing path and what the
             # store DOES carry, replacing the prior silent `continue`.
-            present = _present_leaves()
             # A `kind: derived` measure names a workspace-computed SCALAR
             # (study_evaluator derived-scalar registry), not an emitted series —
-            # so "no image in store" is expected and NOT a data gap. Say so
-            # cleanly instead of a misleading missing-observable refusal.
+            # so it has no time series to plot and is graded + shown on the Audit
+            # tab. Skip it here rather than emit a "no time series" placeholder in
+            # the Visualizations gallery (same redundancy as the no-path case).
             if (measure.get("kind") or "") == "derived":
-                reason = (
-                    f"Computed scalar readout {path!r} (no time series) — graded "
-                    f"from run data via the workspace derived-scalar evaluator."
-                )
-            else:
-                reason = (
-                    f"no image for observable path {path!r} in this run's store"
-                    + (f" (present: {', '.join(present[:8])}"
-                       f"{', …' if len(present) > 8 else ''})" if present else "")
-                )
+                continue
+            # A non-derived measure with no image IS a genuine data gap: a chart
+            # was expected here but no run in any source carries the observable.
+            # Keep this one visible — it is a real signal, not a scalar assertion.
+            present = _present_leaves()
+            reason = (
+                f"no image for observable path {path!r} in this run's store"
+                + (f" (present: {', '.join(present[:8])}"
+                   f"{', …' if len(present) > 8 else ''})" if present else "")
+            )
             refusal = Refusal(reason=reason, missing=[path], present=present)
             charts.append({
                 "key": f"v4-{t.get('name','test')}",
