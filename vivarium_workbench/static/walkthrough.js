@@ -7864,11 +7864,10 @@
   }
 
   function _vivToggleRail() {
+    // The rail is permanently collapsed (icon bar); toggling is a no-op so no
+    // stray caller can expand it back out.
     var rail = document.getElementById('viv-rail');
-    if (!rail) return;
-    var collapsed = rail.classList.toggle('viv-rail-collapsed');
-    _vivSyncRailToggleLabel(collapsed);
-    try { localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    if (rail) rail.classList.add('viv-rail-collapsed');
   }
   window._vivToggleRail = _vivToggleRail;
 
@@ -7895,19 +7894,12 @@
   window._vivToggleRailSearch = _vivToggleRailSearch;
 
   function _vivRestoreRailState() {
-    var stored = null;
-    try { stored = localStorage.getItem('vivarium.rail-collapsed'); } catch (e) {}
-    // Default view is the COLLAPSED icon rail (drag the edge to widen); once the
-    // user sets it either way, their stored choice wins.
-    var collapsed = (stored === null) ? true : (stored === '1');
+    // The rail is now PERMANENTLY collapsed — a fixed icon bar. The expand/resize
+    // mechanism (drag handle + width restore) was removed, so always keep the
+    // collapsed class regardless of any stored width/choice from older builds.
     var rail = document.getElementById('viv-rail');
-    if (rail) {
-      // Apply the saved expanded width (the collapsed rule overrides it via
-      // higher CSS specificity, so this is safe even when collapsed).
-      _vivRailApplyWidth(rail, _vivRailSavedWidth());
-      if (collapsed) rail.classList.add('viv-rail-collapsed');
-    }
-    _vivSyncRailToggleLabel(collapsed);
+    if (rail) rail.classList.add('viv-rail-collapsed');
+    _vivSyncRailToggleLabel(true);
   }
   window._vivRestoreRailState = _vivRestoreRailState;
 
@@ -10162,7 +10154,7 @@
     var _exportDd =
       '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
         '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
-          'aria-label="Export" title="Export — report, notebook, or figures" onclick="_toggleInvReportMenu(event)">↓</button>' +
+          'aria-label="Export" title="Export — report, notebook, or figures" onclick="_toggleInvReportMenu(event)"><span aria-hidden="true">↓</span> Export ▾</button>' +
         '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
           'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:170px;padding:4px">' +
           '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
@@ -10176,7 +10168,7 @@
       (isSnapshot ? '' :
       ' <button class="btn-mini" onclick="_rerunInvestigation()" ' +
         'aria-label="Run current spec" ' +
-        'title="Run current spec — re-run every member study\'s CURRENT baseline (re-derives from each study.yaml)">▶</button>');
+        'title="Run current spec — re-run every member study\'s CURRENT baseline (re-derives from each study.yaml)"><span aria-hidden="true">▶</span> Run</button>');
     if (name) {
       (window.DataSource
         ? window.DataSource.loadIsetList()
@@ -10226,6 +10218,20 @@
     _wsResetStudyTabs(name);   // graph expanded, no study open
     _wsSetInvestigationActions();   // Report/Notebook actions in #ws-actions
     if (typeof _applyInvOverviewState === 'function') _applyInvOverviewState();
+    // The investigation graph shows by DEFAULT (the standalone collapsed bar was
+    // removed, so a stale collapsed state would otherwise leave it invisible with
+    // no affordance). Expand it on open; the header "Graph" button toggles it.
+    if (typeof _aigExpandInline === 'function') {
+      var _fsG = document.getElementById('investigation-dag-fs');
+      if (_fsG && _fsG.classList.contains('aig-collapsed')) _aigExpandInline();
+    }
+    // Sync the header "Graph" button caret after the graph has had a chance to
+    // render + auto-fill (its height, hence "shown", is set asynchronously).
+    if (typeof _aigSyncGraphToggle === 'function') {
+      _aigSyncGraphToggle();
+      setTimeout(_aigSyncGraphToggle, 400);
+      setTimeout(_aigSyncGraphToggle, 1200);
+    }
   }
   window._showInvestigationWorkspace = _showInvestigationWorkspace;
 
@@ -12142,8 +12148,10 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      btn.textContent = (collapsed ? '▸' : '▾');
-      btn.setAttribute('title', 'Overview');
+      // Keep the "Overview" text label beside the caret (iTerm-style labeled
+      // control); only the caret direction reflects collapsed/expanded.
+      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Overview';
+      btn.setAttribute('title', collapsed ? 'Show overview' : 'Hide overview');
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
   }
@@ -13374,6 +13382,7 @@
   function _aigCollapseInline() {
     var fs = document.getElementById('investigation-dag-fs');
     if (fs) fs.classList.add('aig-collapsed');
+    _aigSyncGraphToggle();
   }
   function _aigExpandInline() {
     var fs = document.getElementById('investigation-dag-fs');
@@ -13386,9 +13395,44 @@
       setTimeout(function () { shell._aigProgrammaticResize = false; }, 80);
     }
     try { if (typeof window._aigFit === 'function') window._aigFit(); } catch (e) { /* ignore */ }
+    _aigSyncGraphToggle();
+  }
+  // Is the inline investigation graph actually VISIBLE right now? It can be hidden
+  // either by the collapsed class OR by having zero height (no study / fresh
+  // render before auto-fill), so judge by real visibility, not just the class.
+  function _aigGraphShown() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs || fs.classList.contains('aig-collapsed')) return false;
+    if (fs.classList.contains('aig-dock')) return true;   // docked window counts as shown
+    var sh = document.getElementById('investigation-dag-shell');
+    return !!(sh && sh.offsetParent !== null && sh.getBoundingClientRect().height > 8);
+  }
+  window._aigGraphShown = _aigGraphShown;
+  // Toggle the inline investigation graph from the header-nav "Graph" button
+  // (next to Overview). The standalone slim "Investigation graph" bar was removed;
+  // this header button is the always-available toggle. Expanding always gives the
+  // graph a visible height (_aigExpandInline sets it + fits).
+  function _aigToggleInline() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs) return;
+    if (_aigGraphShown()) _aigCollapseInline();
+    else _aigExpandInline();
+  }
+  // Keep the header "Graph" button's caret + state in sync with the graph,
+  // whatever toggles it (this button, the graph↔study divider drag, the dock
+  // control). Caret ▾ = graph shown, ▸ = graph hidden.
+  function _aigSyncGraphToggle() {
+    var btn = document.getElementById('inv-graph-toggle');
+    if (!btn) return;
+    var shown = _aigGraphShown();
+    btn.innerHTML = '<span class="inv-graph-caret" aria-hidden="true">' + (shown ? '▾' : '▸') + '</span> Graph';
+    btn.setAttribute('aria-expanded', shown ? 'true' : 'false');
+    btn.setAttribute('title', shown ? 'Hide investigation graph' : 'Show investigation graph');
   }
   window._aigCollapseInline = _aigCollapseInline;
   window._aigExpandInline = _aigExpandInline;
+  window._aigToggleInline = _aigToggleInline;
+  window._aigSyncGraphToggle = _aigSyncGraphToggle;
   function _aigFit() {
     var shell = document.getElementById('investigation-dag-shell');
     if (!shell) return;
@@ -15674,7 +15718,13 @@
     // Need both: window._investigations (all studies) AND window._isetIndex (groups).
     // If either isn't loaded yet, fall back to a loading message + kick the missing one.
     if (!Array.isArray(window._isetIndex)) window._isetIndex = [];
-    if (!Array.isArray(window._investigations) || !window._investigations.length) {
+    // Studies not FETCHED yet (still undefined, not an array) → show the spinner
+    // and kick the load. A loaded-but-EMPTY array ([]) is NOT "still loading": it
+    // means the workspace genuinely has no studies, so fall through and render the
+    // (empty) groups below — which show a proper "No studies" state. Treating []
+    // as "not loaded" re-fetched forever and spun on "Loading…" (e.g. an
+    // investigation with zero studies).
+    if (!Array.isArray(window._investigations)) {
       // No studies in memory yet → fall back to the legacy render until they arrive.
       if (typeof _renderRailInvestigationsLegacy === 'function') return _renderRailInvestigationsLegacy();
       if (window.ProgressTrack) {

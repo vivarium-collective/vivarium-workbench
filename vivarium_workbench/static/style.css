@@ -4910,12 +4910,11 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 #investigation-dag-fs.aig-collapsed .aig-toolbar,
 #investigation-dag-fs.aig-collapsed #investigation-dag-shell,
 #investigation-dag-fs.aig-collapsed .aig-dock-grip { display: none !important; }
-#investigation-dag-fs.aig-collapsed .aig-collapsed-bar {
-  display: block; width: 100%; text-align: left; cursor: pointer;
-  background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px;
-  padding: 8px 12px; color: #475569; font-weight: 600; font-size: 0.9em;
-}
-#investigation-dag-fs.aig-collapsed .aig-collapsed-bar:hover { background: #eef2ff; color: #3730a3; }
+/* The standalone collapsed "▸ Investigation graph" bar was removed — collapsing
+   no longer takes its own line. The header-nav "Graph" button (next to Overview)
+   is the always-available toggle instead. (The popout "bring it back" bar is a
+   separate element, .aig-poppedout-bar, and is unaffected.) */
+#investigation-dag-fs.aig-collapsed .aig-collapsed-bar { display: none !important; }
 /* While the graph is popped out, the inline graph VACATES the inset and this bar
    stands in its place (click to bring it back). Styled like the collapsed bar. */
 #investigation-dag-fs.aig-poppedout-hidden { display: none !important; }
@@ -5500,23 +5499,58 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
    untouched. */
 .viv-rail-theme-footer{ padding:0 16px 6px; border-top:none; align-items:center; }
 .viv-rail.viv-rail-collapsed .viv-rail-theme-footer{ padding:0 4px 6px; }
+
+/* ── Dockable-panels group (Studies / Chat / Code) ─────────────────────────────
+   Pinned above the footer and set apart in a subtle bordered "well" so it reads
+   as a different KIND of control — inset windows you dock/resize — from the
+   page-nav tabs above it. The children are ordinary .viv-rail-link items, so the
+   permanently-collapsed rail centers their icons and shows each name as a hover
+   flyout, exactly like the primary nav. */
+.viv-rail-dock-group{
+  flex:0 0 auto;
+  display:flex; flex-direction:column; gap:2px;
+  margin:8px 7px 2px; padding:4px 0;
+  border:1px solid #e5e7eb; border-radius:11px;
+  background:#eef0f3;
+}
+.viv-rail-dock-group .viv-rail-link{ border-radius:8px; }
+.viv-rail-dock-group .viv-rail-link:hover{ background:#e2e6ec; }
+:root[data-theme="dark"] .viv-rail-dock-group{ background:#161d2b; border-color:#2b3647; }
+:root[data-theme="dark"] .viv-rail-dock-group .viv-rail-link:hover{ background:#232c3d; }
+
+/* Footer: just the About button, pinned at the rail bottom. */
+.viv-rail-bottom-footer{ flex-direction:column; align-items:stretch; gap:4px; padding:6px 0 4px; }
+.viv-rail.viv-rail-collapsed .viv-rail-bottom-footer{ align-items:center; padding:6px 4px 4px; }
+
+/* ── Grouped well: center every icon (Studies / Chat / Code + dark-mode) ─────
+   Symmetric padding + centered content so the grouped controls read as a tidy
+   centered column, distinct from the left-aligned page nav above. */
+.viv-rail-dock-group .viv-rail-link{ padding:8px 0; justify-content:center; }
+.viv-rail-dock-group .viv-rail-link .viv-rail-link-icon{ margin:0; }
+.viv-rail-dock-sep{ height:1px; background:#d7dbe2; margin:5px 11px 3px; }
+:root[data-theme="dark"] .viv-rail-dock-sep{ background:#2b3647; }
+.viv-rail-dock-group .viv-rail-theme-footer{ padding:0; border-top:none; display:flex; justify-content:center; }
+
+/* Dark-mode toggle: a STANDARD, always-visible icon button (not a hidden pill).
+   Shows the mode you'll switch TO — a moon in light mode, a sun in dark mode —
+   centered and sized like the other grouped icons. */
 .viv-theme-toggle{
-  position:relative; display:inline-flex; align-items:center; justify-content:space-between;
-  width:56px; height:26px; padding:0 7px; border-radius:14px;
-  border:1px solid #d8dee6; background:#eef1f5; cursor:pointer;
-  /* Hidden until hovered (keeps its box so the footer stays a hover target). */
-  opacity:0; transition:opacity .14s;
+  display:inline-flex; align-items:center; justify-content:center;
+  width:34px; height:30px; padding:0; border:none; background:transparent;
+  border-radius:8px; opacity:1; cursor:pointer; color:#6b7280;
+  transition:background .12s, color .12s;
 }
-.viv-rail-theme-footer:hover .viv-theme-toggle,
-.viv-theme-toggle:focus-visible{ opacity:1; }
-.viv-theme-ico{ display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; z-index:1; }
-.viv-theme-ico svg{ width:13px; height:13px; display:block; }
-.viv-theme-sun{ color:#f59e0b; }
-.viv-theme-moon{ color:#94a3b8; }
-.viv-theme-thumb{
-  position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%;
-  background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.28); transition:left .18s ease;
-}
+.viv-theme-toggle:hover,
+.viv-theme-toggle:focus-visible{ opacity:1; background:#e2e6ec; color:#111827; }
+.viv-theme-thumb{ display:none; }
+.viv-theme-ico{ display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; }
+.viv-theme-ico svg{ width:18px; height:18px; display:block; }
+/* one icon at a time — selectors deliberately target .viv-theme-sun/.moon (not
+   the button) so a single mode-icon shows while the button itself is never hidden. */
+.viv-theme-sun{ display:none; color:#f59e0b; }
+.viv-theme-moon{ display:inline-flex; color:#64748b; }
+:root[data-theme="dark"] .viv-theme-moon{ display:none; }
+:root[data-theme="dark"] .viv-theme-sun{ display:inline-flex; color:#fbbf24; }
 
 /* ── Dark theme (dark-blue) ──────────────────────────────────────────────
    The whole palette lives in the variables below — tweak the look from one
@@ -5546,10 +5580,8 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 }
 :root[data-theme="dark"] body{ color:var(--text); background:var(--bg); }
 :root[data-theme="dark"] a{ color:var(--link); }
-:root[data-theme="dark"] .viv-theme-toggle{ background:#22304a; border-color:var(--border-2); }
-:root[data-theme="dark"] .viv-theme-thumb{ left:32px; background:var(--bg); }
-:root[data-theme="dark"] .viv-theme-moon{ color:#c7d2fe; }
-:root[data-theme="dark"] .viv-theme-sun{ color:#64748b; }
+:root[data-theme="dark"] .viv-theme-toggle:hover,
+:root[data-theme="dark"] .viv-theme-toggle:focus-visible{ background:#232c3d; color:#e2e8f0; }
 
 /* Chrome + content */
 :root[data-theme="dark"] .viv-rail,
@@ -6130,6 +6162,14 @@ body.col-resizing .registry-table.reg-table-fill th, body.col-resizing .registry
   max-height:460px; overflow:auto;
 }
 :root[data-theme="dark"] .model-source-body{ background:#0f141b; }
+/* Inline model source (Antimony / SBML) shown as its own labeled code block in
+   the Model tab, so an authored model reads clearly instead of as an escaped
+   string inside the JSON config view. Reuses .model-source-pre for the frame. */
+.model-source-code{ margin-top:2px; }
+.model-source-code-head{
+  font-size:0.72em; font-weight:600; letter-spacing:0.04em; text-transform:uppercase;
+  color:var(--text-muted, #6b7280); margin-bottom:4px;
+}
 
 /* ── Right rail: editable process code panel (process-code.js) ─────────────── */
 .viv-code-rail{
@@ -6437,6 +6477,11 @@ body.viv-popout .viv-rail,
 body.viv-popout .viv-content,
 body.viv-popout .viv-topbar,
 body.viv-popout .vp-dockable{ display:none !important; }
+/* A popped-out panel is its own window showing ONE panel — the phone-only bottom
+   panel-switcher (Content / Studies / Chat / Code / Graph) is noise there (the
+   popout is narrow enough to trip the phone breakpoint). Switch back via the main
+   window's rail/top menu or by closing the popout, not an in-window switcher. */
+body.viv-popout .viv-mobile-panelbar{ display:none !important; }
 body.viv-popout-chat #viv-ai-panel,
 body.viv-popout-code #viv-code-rail,
 body.viv-popout-studies #viv-studies-panel,

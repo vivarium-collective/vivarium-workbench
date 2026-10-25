@@ -20,10 +20,11 @@
  * pass here; a later pass can refine them.
  * ========================================================================== */
 
-/* Mobile-only chrome is created by mobile-nav.js but stays hidden until the
- * phone breakpoint (and so is inert / absent on desktop). */
+/* Mobile-only chrome is created by mobile-nav.js / mobile-panels.js but stays
+ * hidden until the phone breakpoint (and so is inert / absent on desktop). */
 .viv-mobile-topbar,
-.viv-mobile-backdrop { display: none; }
+.viv-mobile-backdrop,
+.viv-mobile-panelbar { display: none; }
 
 /* The short snapshot-banner message is phone-only (see the breakpoint below). */
 #snapshot-banner .snap-msg-short { display: none; }
@@ -246,8 +247,9 @@
   /* ---- Dockable side panels → full-screen overlay sheets ----------------- *
    * On a phone there is no room to dock/split: a docked Studies / Chat / Code /
    * Graph panel would crush the content to nothing. So docking is off here —
-   * each panel instead opens as a full-screen sheet OVER the content, below the
-   * mobile topbar (so the hamburger stays reachable). Its own × closes it.
+   * each panel instead opens as a full-screen sheet OVER the content, between the
+   * mobile topbar (so the hamburger stays reachable) and the panel-switcher bar
+   * (so the switcher stays reachable to swap/dismiss). Its own × closes it.
    * Edge-resize, dock-to-a-side and pop-out are all hidden (meaningless at this
    * width). The desktop docking experience above 640px is untouched. */
   #viv-ai-panel:not([hidden]),
@@ -255,7 +257,8 @@
   #viv-graph-panel:not([hidden]),
   #viv-studies-panel:not([hidden]) {
     position: fixed !important;
-    inset: 48px 0 0 0 !important;   /* top:48px (clears the topbar) → fills the rest */
+    /* top:48px clears the topbar; bottom clears the switcher bar (+ its safe area). */
+    inset: 48px 0 calc(56px + env(safe-area-inset-bottom)) 0 !important;
     width: auto !important;
     height: auto !important;
     max-width: none !important;
@@ -282,4 +285,79 @@
   .vp-icon[data-act="dock"],
   #aig-dock-panel-btn,
   #aig-dock-ctl { display: none !important; }
+
+  /* ---- Panel-switcher bar (mobile-panels.js) ---------------------------- *
+   * A single persistent bottom bar that is both launcher and switcher for the
+   * dockable panels. Shown only while at least one panel is relevant to the
+   * current page (mobile-panels.js toggles body.viv-has-panelbar + bar[hidden]).
+   * Sits ABOVE the full-screen sheets (z 600) so you can always swap/dismiss a
+   * panel, and BELOW the rail drawer (1000) + its backdrop (900). */
+  .viv-mobile-panelbar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 650;
+    height: 56px;
+    /* Reserve the iOS home-indicator inset below the 56px of tappable height. */
+    padding: 0 4px env(safe-area-inset-bottom);
+    box-sizing: content-box;
+    align-items: stretch;
+    gap: 2px;
+    background: var(--panel, #fff);
+    border-top: 1px solid #e5e7eb;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+  }
+  .viv-mobile-panelbar::-webkit-scrollbar { display: none; }
+  .viv-mobile-panelbar[hidden] { display: none; }
+  :root[data-theme="dark"] .viv-mobile-panelbar {
+    background: var(--card, #1f2937);
+    border-color: var(--border, #374151);
+  }
+
+  .vpb-btn {
+    flex: 1 1 0;
+    min-width: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #6b7280;
+    font: 600 10.5px/1 inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .vpb-btn .vpb-ico { display: inline-flex; width: 22px; height: 22px; }
+  .vpb-btn .vpb-ico svg { width: 22px; height: 22px; }
+  .vpb-btn .vpb-lab {
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .vpb-btn:active { background: #f3f4f6; }
+  .vpb-btn.active {
+    color: var(--accent, #2563eb);
+    background: var(--accent-soft, rgba(37, 99, 235, 0.1));
+  }
+  :root[data-theme="dark"] .vpb-btn { color: var(--muted, #9ca3af); }
+  :root[data-theme="dark"] .vpb-btn:active { background: rgba(255, 255, 255, 0.06); }
+  :root[data-theme="dark"] .vpb-btn.active {
+    color: var(--accent, #60a5fa);
+    background: rgba(96, 165, 250, 0.16);
+  }
+
+  /* When the bar is present, keep page content from hiding behind it. */
+  body.viv-has-panelbar .viv-content {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom) + 14px);
+  }
 }

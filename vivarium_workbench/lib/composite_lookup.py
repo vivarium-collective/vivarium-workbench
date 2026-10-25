@@ -43,6 +43,62 @@ def load_spec(path: Path) -> dict:
     return yaml.safe_load(text)
 
 
+def resolve_generator_entry(spec_id: str, pkg: Optional[str] = None):
+    """Resolve a ``@composite_generator`` entry by its short spec_id.
+
+    Two gaps make a plain ``_REGISTRY.get(spec_id)`` miss for editable-workspace
+    composites, so every run/flush/emitter lookup went through this same hole:
+
+    1. ``_REGISTRY`` is keyed by ``entry.id`` — the fully-qualified module path
+       (e.g. ``mosaic_compose.composites.community.mosaic_glv_vaginal``) — but the
+       rest of the codebase passes the SHORT name (``entry.name``, e.g.
+       ``mosaic_glv_vaginal``). The key never matches the short spec_id, so an
+       import-registered composite is invisible to ``.get(spec_id)``.
+    2. An editable-install workspace package isn't reached by
+       ``discover_generators()`` (``packages_distributions()`` misses it — a
+       known uv/hatchling editable gap, e.g. dist 'genesis' vs import package
+       'viva_genesis'); its composites register only as a side effect of
+       importing the package.
+
+    So: look up by key; if missing and ``pkg`` is given, import it (and prefer
+    its ``build_core``, the convention's registration hook) and retry by key;
+    finally fall back to matching ``entry.name`` across the registry. Returns the
+    ``GeneratorEntry`` or ``None``.
+    """
+    try:
+        from process_bigraph.composite_generator import _REGISTRY, discover_generators
+    except Exception:
+        return None
+    if not _REGISTRY:
+        try:
+            discover_generators()
+        except Exception:
+            pass
+    entry = _REGISTRY.get(spec_id)
+    if entry is not None:
+        return entry
+    if pkg:
+        try:
+            __import__(pkg)
+            try:
+                core_mod = __import__(f"{pkg}.core", fromlist=["build_core"])
+                if hasattr(core_mod, "build_core"):
+                    core_mod.build_core()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        entry = _REGISTRY.get(spec_id)
+        if entry is not None:
+            return entry
+    # Short-name fallback: _REGISTRY is keyed by the full module path (entry.id),
+    # but spec_id is the short entry.name.
+    for candidate in _REGISTRY.values():
+        if getattr(candidate, "name", None) == spec_id:
+            return candidate
+    return None
+
+
 def _spec_record(spec: dict, package: str, stem: str, path: Path,
                  ws_root: Path | None) -> dict | None:
     """Validate + shape one discovered spec into the dict the API returns."""

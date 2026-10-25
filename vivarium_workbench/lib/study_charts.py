@@ -1759,6 +1759,20 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
             e.get("name"): e for e in ((spec or {}).get("visualizations") or [])
             if isinstance(e, dict)
         }
+        # The study-detail baseline native gallery renders the latest run's
+        # viz.json panels inline. A study-DECLARED visualization is rendered into
+        # viz.json by the run AND into viz/<name>.html post-run, so without this
+        # it appears twice (once as a native panel, once as a declared chart).
+        # Drop the declared chart when the native gallery already shows it (matched
+        # by name); a viz not yet in viz.json still renders as a declared chart.
+        try:
+            from vivarium_workbench.lib.study_native_gallery import (
+                build_study_native_gallery,
+            )
+            native_names = set(
+                (build_study_native_gallery(ws_root, name) or {}).get("panels") or {})
+        except Exception:  # noqa: BLE001 — native gallery is best-effort here
+            native_names = set()
 
         def _is_embedded(c):
             key = c.get("key")
@@ -1770,7 +1784,9 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
 
         static_charts = static_charts + [
             c for c in declared_figs
-            if c.get("key") not in static_keys and not _is_embedded(c)
+            if c.get("key") not in static_keys
+            and not _is_embedded(c)
+            and c.get("key") not in native_names
         ]
 
     # Per-chart freshness for static charts, matched on-disk against the spec's

@@ -509,20 +509,66 @@
   // so continuous re-fitting is circular — a single measure is correct and safe.
   // Exposed on window so the server-rendered embed_visualizations iframes
   // (templates/study-detail.html) share ONE implementation and can't drift.
+  // True content height of a same-origin figure document, measured ROBUSTLY
+  // regardless of how the embedded HTML was written. The recurring runaway-
+  // whitespace bug: Plotly's write_html(full_html=True) injects
+  // `html,body{height:100%}`, so the body FILLS the iframe and body/html
+  // scrollHeight reports the iframe's own (growing) height, never the plot's.
+  // We neutralize that here — in the workbench embed layer — so NO workspace has
+  // to fix its write_html or regenerate charts: force html+body to height:auto
+  // (overriding the injected 100%), then measure the lowest rendered point of the
+  // body's children. documentElement.scrollHeight is deliberately NOT used — in a
+  // standalone figure doc it reports the viewport minimum, not the content.
+  function _measureFigureHeight(d, b, e) {
+    if (e) { e.style.overflow = 'hidden'; e.style.height = 'auto'; }
+    if (b) { b.style.margin = '0'; b.style.height = 'auto'; }
+    var h = 0;
+    if (b) {
+      var kids = b.children;
+      for (var i = 0; i < kids.length; i++) {
+        var bottom = kids[i].getBoundingClientRect().bottom;
+        if (bottom > h) h = bottom;
+      }
+      h = Math.ceil(h);
+      if (!(h > 0)) h = b.scrollHeight || 0;
+    }
+    return h;
+  }
+
   function _fitFigureFrame(f) {
     try {
       var d = f.contentDocument; if (!d) return;
       var b = d.body, e = d.documentElement;
-      if (b) b.style.margin = '0';
-      if (e) e.style.overflow = 'hidden';
       var bStyle = b && d.defaultView && d.defaultView.getComputedStyle ? d.defaultView.getComputedStyle(b) : null;
+      // A figure that DELIBERATELY pins a fixed body height with hidden overflow
+      // is honored as-is (no content measurement).
       var pinnedH = 0;
       if (bStyle && (bStyle.overflow || '').indexOf('hidden') >= 0) {
         var hm = (bStyle.height || '').match(/^(\d+(?:\.\d+)?)px$/);
         if (hm) pinnedH = Math.round(parseFloat(hm[1]));
       }
-      var h = pinnedH > 0 ? pinnedH : Math.max(e ? e.scrollHeight : 0, b ? b.scrollHeight : 0);
-      if (h > 0) f.style.height = h + 'px';
+      if (pinnedH > 0) {
+        if (b) b.style.margin = '0';
+        if (e) e.style.overflow = 'hidden';
+        f.style.height = pinnedH + 'px';
+        return;
+      }
+      // Otherwise neutralize elastic (height:100%) content and fit to the plot.
+      // Re-measure a few times: Plotly/Vega lay out asynchronously, so the onload
+      // measure can precede the final plot height. Forcing height:auto removes the
+      // elasticity, so these re-measures CONVERGE instead of running away (the
+      // reason the earlier one-shot version couldn't use a resizer).
+      var apply = function () {
+        var h = _measureFigureHeight(d, b, e);
+        if (h > 0) f.style.height = h + 'px';
+      };
+      apply();
+      var w = f.ownerDocument && f.ownerDocument.defaultView;
+      if (w) {
+        w.requestAnimationFrame(apply);
+        w.setTimeout(apply, 250);
+        w.setTimeout(apply, 700);
+      }
     } catch (e) {}
   }
   window.__fitFigureFrame = _fitFigureFrame;
@@ -1320,17 +1366,44 @@
     var html = '<div class="model-source">';
     procs.forEach(function (p) {
       var addr = String(p.address).split(':').pop();
+      var cfg = (p.config && typeof p.config === 'object') ? p.config : {};
+      // Inline model SOURCE — surface it as a readable code block instead of a
+      // giant escaped string buried in the JSON config view. Applies when a
+      // process carries its model text in config.model (e.g. viva-tellurium:
+      // config.model = Antimony source, config.model_format = 'antimony'|'sbml').
+      var modelFmt = (typeof cfg.model_format === 'string' && cfg.model_format) ? cfg.model_format : '';
+      var modelStr = (typeof cfg.model === 'string') ? cfg.model : '';
+      // Treat config.model as a renderable model SOURCE only when it's clearly
+      // one: an explicit model_format is set, or the text is multi-line (a real
+      // model body) — not a short scalar that merely happens to be named "model".
+      var modelSrc = (modelStr.trim() && (modelFmt || modelStr.indexOf('\n') !== -1)) ? modelStr : '';
+      var restCfg = cfg;
+      if (modelSrc) {
+        restCfg = {};
+        Object.keys(cfg).forEach(function (k) { if (k !== 'model') restCfg[k] = cfg[k]; });
+      }
+      var modelBlock = '';
+      if (modelSrc) {
+        modelBlock = '<div class="model-source-code">' +
+          '<div class="model-source-code-head">' + esc((modelFmt ? modelFmt.toUpperCase() : 'MODEL') + ' MODEL') + '</div>' +
+          '<pre class="model-source-pre model-source-code-pre">' + esc(modelSrc) + '</pre>' +
+          '</div>';
+      }
+      var hasRest = restCfg && Object.keys(restCfg).length;
       // Structured, scannable config view (chip grids for scalar dicts, tables
       // for uniform-object arrays like a CPM contact matrix, type-colored
       // values) — falls back to the flat YAML <pre> if composite-card.js's
       // _configView isn't loaded.
-      var cfgBody = (typeof window._jsonViewer === 'function')
-        ? window._jsonViewer(p.config)
-        : '<pre class="model-source-pre">' + esc(_yamlish(p.config, 0)) + '</pre>';
+      var cfgBody = hasRest
+        ? ((typeof window._jsonViewer === 'function')
+            ? window._jsonViewer(restCfg)
+            : '<pre class="model-source-pre">' + esc(_yamlish(restCfg, 0)) + '</pre>')
+        : '';
       html += '<div class="model-source-block">' +
         '<div class="model-source-head"><strong>' + esc(p.name) + '</strong>' +
         (addr ? ' <span class="muted">— ' + esc(addr) + '</span>' : '') + '</div>' +
-        '<div class="model-source-body">' + cfgBody + '</div>' +
+        modelBlock +
+        (hasRest ? '<div class="model-source-body">' + cfgBody + '</div>' : '') +
         '</div>';
     });
     html += '</div>';

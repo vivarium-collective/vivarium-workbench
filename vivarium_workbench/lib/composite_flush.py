@@ -165,12 +165,10 @@ def _composite_analyses(spec_id: str, core) -> list:
     declarations (each a dict with at least ``name``, optionally ``params``).
     [] when the generator is unregistered or declares none."""
     try:
-        from process_bigraph.composite_generator import _REGISTRY, discover_generators
+        from vivarium_workbench.lib.composite_lookup import resolve_generator_entry
     except ImportError:
         return []
-    if not _REGISTRY:
-        discover_generators()
-    entry = _REGISTRY.get(spec_id)
+    entry = resolve_generator_entry(spec_id)
     return list(getattr(entry, "analyses", []) or []) if entry else []
 
 

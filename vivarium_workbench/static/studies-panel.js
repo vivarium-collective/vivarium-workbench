@@ -97,6 +97,11 @@
     if (!ctl || inPopout() || isMobile() || lsGet(K_USERSET, '0') === '1') return;
     if (hasStudies()) { if (!ctl.isOpen()) ctl.open(); }
     else { if (ctl.isOpen()) ctl.close(); }
+    // Keep the rail "Studies" launcher highlight in sync even when the panel was
+    // ALREADY open (restored from stored state at init) — in that case ctl.open()
+    // isn't called, so onOpen/reflectLauncher never fires and the tab would stay
+    // un-highlighted until the user toggled it off/on.
+    reflectLauncher();
   }
 
   function init() {
@@ -176,6 +181,14 @@
     if (host && global.MutationObserver) {
       new global.MutationObserver(onListRender).observe(host, { childList: true, subtree: true });
     }
+    // Reflect the launcher highlight for the panel's INITIAL open state — whether
+    // it was restored open from stored dock state or default-opened. applyDefault
+    // returns early when the user has toggled before (userset='1'), so it can't be
+    // relied on to sync the highlight at startup; do it unconditionally here (and
+    // once more after the dock state settles asynchronously).
+    reflectLauncher();
+    setTimeout(reflectLauncher, 300);
+
     // Deactivate the rail tab when the popped-out window is closed.
     global.setInterval(function () {
       if (popoutWin && popoutWin.closed) { popoutWin = null; reflectLauncher(); }

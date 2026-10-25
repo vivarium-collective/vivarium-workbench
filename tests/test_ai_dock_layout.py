@@ -207,12 +207,20 @@ def test_studies_is_a_dockable_rail_tab_like_chat_and_code():
     # New launcher tab + panel.
     assert 'id="viv-studies-toggle"' in html, "Studies rail launcher missing"
     assert 'id="viv-studies-panel"' in html and 'id="viv-studies-body"' in html
-    # Both study tabs sit at the top of the nav, under Search.
+    # Investigations sits at the top of the primary nav, under Search.
     search_i = html.index('viv-rail-search-link')
     inv_i = html.index('data-page="investigations"')
-    studies_i = html.index('id="viv-studies-toggle"')
     resources_i = html.index('id="rail-resources"')
-    assert search_i < inv_i < studies_i < resources_i, "Investigations+Studies not under Search"
+    assert search_i < inv_i < resources_i, "Investigations not under Search"
+    # Studies is now grouped with the OTHER dockable-panel launchers (Chat, Code)
+    # in the pinned .viv-rail-dock-group well below the primary nav — a set of
+    # inset-window toggles set apart from the page-nav tabs.
+    dock_i = html.index('viv-rail-dock-group')
+    studies_i = html.index('id="viv-studies-toggle"')
+    ai_i = html.index('id="viv-ai-toggle"')
+    code_i = html.index('id="viv-code-toggle"')
+    assert resources_i < dock_i, "dockable-panels group should sit below the primary nav"
+    assert dock_i < studies_i < ai_i < code_i, "dock group order: Studies, Chat, Code"
 
     js = (STATIC / "studies-panel.js").read_text()
     assert "VivPanelDock.make" in js and "key: 'studies'" in js
