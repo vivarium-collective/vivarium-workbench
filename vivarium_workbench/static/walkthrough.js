@@ -11127,7 +11127,10 @@
       tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vs.toUpperCase() : '',
         html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
           '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
-          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' });
+          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' +
+          // Claims (RFC-0005 synthesis layer): each claim, its verdict, and what
+          // supports/challenges it — filled async by argument-graph.js.
+          '<div id="inv-verdict-claims-mount" class="inv-claims-mount"></div>' });
 
     // 3. Background — the lead intro, the driving Question + Hypothesis, and the
     // structured argument (Hypothesis & evidence folded in here per the owner).
@@ -11144,6 +11147,14 @@
         '<div class="inv-brief-frameworks-label">Hypothesis &amp; evidence</div>' + _evBody + '</div>');
     if (bgParts.length)
       tabs.push({ id:'background', label:'Background', html: bgParts.join('') });
+
+    // Narrative — the ordered scientific reading (RFC-0005): the investigation's
+    // claims arranged by explanatory dependence, with the audit gaps marked
+    // inline. A derived document, next to Background. Filled async by
+    // argument-graph.js; shows nothing if the derivation layer is unavailable.
+    tabs.push({ id:'narrative', label:'Narrative', html:
+      '<div id="inv-narrative-mount" class="inv-narrative-mount">' +
+      '<p class="muted" style="padding:16px">Loading narrative…</p></div>' });
 
     // 4. Biology — the plain-English mechanism narrative (biological_story).
     if (bio)
@@ -12541,12 +12552,6 @@
 
   function _renderInvestigationDag(studies, chainsBySlug, studyEdges) {
     _lastDagArgs = [studies, chainsBySlug, studyEdges];
-    // When a non-Studies graph view is active (Argument/Narrative, argument-graph.js),
-    // every re-render trigger — initial load, zoom, orientation, fit, band change,
-    // font reflow — must redraw THAT view, not snap back to the Studies DAG.
-    if (window._graphViewMode && window._graphViewMode !== 'studies' && window._reRenderGraphView) {
-      window._reRenderGraphView(); return;
-    }
     // Assigned to _layoutAndDraw below; each card's expand toggle calls it to
     // re-measure + re-stack its column after the card grows/shrinks.
     var _relayoutDag = null;
@@ -13137,11 +13142,6 @@
     } catch (e) { /* document.fonts unsupported — initial + rAF passes stand */ }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
-  // Restore the Studies DAG from its cached data (used by the graph-view toggle
-  // in argument-graph.js to return from Argument/Narrative to Studies).
-  window._restoreStudiesDag = function () {
-    if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
-  };
   // Re-run the last DAG render (same data) — used after the graph is relocated
   // into / out of the dockable Graph panel so it re-measures + re-lays-out at the
   // new container width. No-op if the graph hasn't been rendered yet.
