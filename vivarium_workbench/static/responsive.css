@@ -255,7 +255,8 @@
   #viv-ai-panel:not([hidden]),
   #viv-code-rail:not([hidden]),
   #viv-graph-panel:not([hidden]),
-  #viv-studies-panel:not([hidden]) {
+  #viv-studies-panel:not([hidden]),
+  #viv-registry-panel:not([hidden]) {
     position: fixed !important;
     /* top:48px clears the topbar; bottom clears the switcher bar (+ its safe area). */
     inset: 48px 0 calc(56px + env(safe-area-inset-bottom)) 0 !important;
@@ -273,7 +274,8 @@
   /* Panel inners fill the sheet. */
   #viv-code-rail .viv-code-panel,
   #viv-graph-panel .viv-graph-panel-inner,
-  #viv-studies-panel .viv-studies-panel-inner { height: 100% !important; }
+  #viv-studies-panel .viv-studies-panel-inner,
+  #viv-registry-panel .viv-registry-panel-inner { height: 100% !important; }
 
   /* Hide docking / pop-out / edge-resize affordances on a phone. */
   .vp-resize,
@@ -281,6 +283,7 @@
   #viv-code-resize-handle,
   #viv-graph-resize-handle,
   #viv-studies-resize-handle,
+  #viv-registry-resize-handle,
   .vp-dock-menu,
   .vp-icon[data-act="dock"],
   #aig-dock-panel-btn,

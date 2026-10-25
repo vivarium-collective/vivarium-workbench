@@ -62,6 +62,11 @@
       setOpen: function (want) { if (window.StudiesPanel) { want ? StudiesPanel.open() : StudiesPanel.close(); } },
     },
     {
+      key: "registry", label: "Registry", panelId: "viv-registry-panel",
+      available: function () { return rendered(el("viv-registry-toggle")) && !!el("viv-registry-panel"); },
+      setOpen: function (want) { if (window.RegistryPanel) { want ? RegistryPanel.open() : RegistryPanel.close(); } },
+    },
+    {
       key: "chat", label: "Chat", panelId: "viv-ai-panel",
       available: function () { return rendered(el("viv-ai-toggle")) && !!el("viv-ai-panel"); },
       setOpen: function () { var t = el("viv-ai-toggle"); if (t) t.click(); },
