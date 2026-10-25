@@ -30,6 +30,22 @@ def _is_error_panel(html: str) -> bool:
     )
 
 
+def _panel_html(value) -> str | None:
+    """Normalize a viz.json panel value to an HTML string, or None to drop it.
+
+    Canonical visualizations record a bare HTML string. Inline ``Visualization``
+    *step* instances (the spatio-flux / spatial-snapshot pattern) are rendered by
+    ``run_runner._render_viz`` via ``render_results``, which yields the step's
+    output dict ``{'html': '<rendered>'}`` — so accept that shape too and pull
+    the HTML out, otherwise a composite's embedded spatial-snapshot viz would be
+    silently dropped here."""
+    if isinstance(value, dict):
+        value = value.get("html")
+    if isinstance(value, str) and value.strip() and not _is_error_panel(value):
+        return value
+    return None
+
+
 def build_study_native_gallery(ws_root: Path, slug: str) -> dict:
     """``{run_id, panels: {name: html}}`` from the study's latest completed run.
 
@@ -52,8 +68,9 @@ def build_study_native_gallery(ws_root: Path, slug: str) -> dict:
         data = json.loads(viz.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 — a corrupt viz.json must not 500 the page
         return {"run_id": run_id, "panels": {}}
-    panels = {
-        k: v for k, v in data.items()
-        if isinstance(v, str) and v.strip() and not _is_error_panel(v)
-    }
+    panels = {}
+    for k, v in data.items():
+        html = _panel_html(v)
+        if html is not None:
+            panels[k] = html
     return {"run_id": run_id, "panels": panels}
