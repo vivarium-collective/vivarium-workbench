@@ -337,6 +337,33 @@ def _diagnostic_already_seeded(spec: dict) -> bool:
     return False
 
 
+#: authored verdicts that read as a documented terminal refutation
+_REFUTED_VERDICTS = {"refuted", "honest-negative", "honest_negative", "negative"}
+
+
+def _is_refuted(spec: dict) -> bool:
+    return str(spec.get("verdict") or "").strip().lower() in _REFUTED_VERDICTS
+
+
+def _primary_test_failed(spec: dict) -> bool:
+    """True when a NON-diagnostic test fails in the canonical run — i.e. a primary
+    or unclassified test (an explicitly ``diagnostic`` test alone is a qualified
+    result, not a primary failure). Unclassified counts as primary so a real
+    failure is never silently missed. Tolerant: missing outcomes → False."""
+    try:
+        from viva_superpowers.study_verdict import canonical_outcomes
+        outcomes = canonical_outcomes(spec)
+    except Exception:  # noqa: BLE001
+        return False
+    cls = {t.get("name"): t.get("classification")
+           for t in spec.get("behavior_tests") or [] if isinstance(t, dict)}
+    for name, row in (outcomes or {}).items():
+        res = row.get("result") if isinstance(row, dict) else row
+        if str(res).upper() in ("FAIL", "FAILED") and cls.get(name) != "diagnostic":
+            return True
+    return False
+
+
 def _diagnostic_branch_items(slug: str, spec: dict) -> list[dict]:
     """A failed / needs-calibration study with no seeded diagnostic child (#19).
 
@@ -353,6 +380,18 @@ def _diagnostic_branch_items(slug: str, spec: dict) -> list[dict]:
         return []
     if _diagnostic_already_seeded(spec):
         return []
+    # ``roll_up_verdict`` returns 'failed' on ANY failing test, but this prompt is
+    # specifically about PRIMARY-test failure (its message + action say so). Don't
+    # flag a study whose primary tests PASS and only a diagnostic/secondary test
+    # failed — that is a *qualified* result, not an undiagnosed primary failure.
+    # And don't flag a study whose authored verdict is a documented terminal
+    # *refutation*: the primary failure IS the recorded conclusion, already
+    # diagnosed. (A 'needs_calibration' roll-up is left untouched.)
+    if result == "failed":
+        if not _primary_test_failed(spec):
+            return []
+        if _is_refuted(spec):
+            return []
     return [_item(
         "diagnostic_branch_needed", "high", slug, slug,
         f"Study '{slug}' verdict is '{result}' with no diagnostic study seeded",
