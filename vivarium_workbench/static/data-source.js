@@ -156,6 +156,12 @@
       : "/api/investigation-graph?investigation=" + encodeURIComponent(slug);
   }
 
+  function _argumentOverlayUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/argument-overlay/" + encodeURIComponent(slug) + ".json"
+      : "/api/argument-overlay?investigation=" + encodeURIComponent(slug);
+  }
+
   function _auditUrl() {
     return cfg().mode === "snapshot"
       ? _base() + "/api/audit.json"
@@ -326,6 +332,17 @@
      */
     async loadWorkspace() {
       return _get(_workspaceUrl());
+    },
+
+    /**
+     * Load the Argument/Narrative overlay (RFC-0005) for an investigation:
+     * {investigation, claims, edges, narrative, gaps, available}.
+     * Local mode:    GET /api/argument-overlay?investigation=<slug>
+     * Snapshot mode: /api/argument-overlay/<slug>.json
+     * @param {string} slug - the investigation slug.
+     */
+    async loadArgumentOverlay(slug) {
+      return _get(_argumentOverlayUrl(slug));
     },
 
     /**
