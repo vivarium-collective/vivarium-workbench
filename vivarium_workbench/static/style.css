@@ -6370,10 +6370,10 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
 .viv-studies-panel .vp-head .vp-icon svg,
 .viv-code-rail .vp-head .vp-icon svg,
 #viv-ai-panel .vp-head .vp-icon svg{ width:13px; height:13px; }
-/* Reserve the top-right corner of each panel's first visible row so the floating
-   dock/close controls never occlude existing buttons (chat's toolbar, code's
-   meta row) — the same technique the Studies search bar uses. */
-#viv-ai-panel .vp-toolbar{ padding-right:58px; }
+/* The dock/close controls now live in the panel titlebar (.vp-titlebar, built by
+   panel-dock.js), not a floating top-right cluster, so the chat toolbar no longer
+   reserves a right-hand corner — its buttons fill to the panel's right edge (base
+   .vp-toolbar padding applies). The code panel's meta/new rows are left as-is. */
 .viv-code-rail .viv-code-meta,
 .viv-code-rail .viv-code-newbar{ padding-right:58px; }
 .viv-studies-panel .viv-studies-panel-inner{ display:flex; flex-direction:column; height:100%; min-width:0; flex:1; }
@@ -6387,12 +6387,13 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
   flex:0 0 var(--viv-studies-h, 280px); width:auto; height:var(--viv-studies-h, 280px); min-height:0;
   border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
 }
-/* Search + navigation stepper + dock/close share ONE uniform bar: every control
-   is 30px tall, vertically centered, with the same 8px radius and border family,
-   so the row reads as a single set — search field (flexes to fill), stepper pill,
-   then the dock/close controls in the reserved top-right corner. */
+/* Search + navigation stepper share ONE uniform bar: every control is 30px tall,
+   vertically centered, with the same 8px radius and border family, so the row
+   reads as a single set — search field (flexes to fill), then the stepper pill.
+   The dock/close controls now live in the panel titlebar (.vp-titlebar), so this
+   row no longer reserves a right-hand corner — it fills to the panel's right edge. */
 .viv-studies-body .viv-rail-studies-head{
-  display:flex; align-items:center; gap:8px; min-height:46px; padding:8px 84px 8px 10px;
+  display:flex; align-items:center; gap:8px; min-height:46px; padding:8px 10px;
 }
 .viv-studies-body #viv-rail-study-search{
   flex:1 1 auto; width:auto; min-width:0; max-width:none; margin:0;
