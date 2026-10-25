@@ -319,13 +319,19 @@ def _condition_satisfied(parent: Optional[dict], condition: str) -> bool:
     """
     if parent is None:
         return False
-    status = parent.get("status", "planned")
+    # Progress is the single derived execution_status (RFC-0006 Tier 1), not the
+    # removed `status` field. derive_execution_status reads execution_status and
+    # falls back through runs, so a `ran`/`complete` gate still resolves after the
+    # six progress fields collapsed to one.
+    try:
+        from vivarium_workbench.lib.study_ontology import derive_execution_status
+        exec_status = derive_execution_status(parent)
+    except Exception:  # noqa: BLE001
+        exec_status = str(parent.get("execution_status") or parent.get("status") or "planned").lower()
     if condition == "ran":
-        # "evaluated" is a later lifecycle state than "ran"; treat it as
-        # satisfying a "ran" prerequisite too.
-        return status in ("ran", "evaluated", "complete")
+        return exec_status == "completed"       # executed (ran / evaluated)
     if condition == "complete":
-        return status == "complete"
+        return exec_status == "completed"
     if condition == "tests-passed":
         try:
             from viva_superpowers import study_status  # type: ignore[import]
