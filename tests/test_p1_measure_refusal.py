@@ -112,9 +112,11 @@ def test_refusal_chart_carries_caption_and_validates(tmp_path):
     ChartPayload.model_validate(entry)  # must not raise
 
 
-def test_derived_measure_refusal_is_a_clean_computed_scalar_note(tmp_path):
+def test_derived_measure_skipped_from_gallery(tmp_path):
     """A ``kind: derived`` measure names a workspace-computed SCALAR, not an
-    emitted series — the refusal says so cleanly rather than implying a data gap."""
+    emitted series — it has no chart. It is graded with its verdict on the Audit
+    tab, so it is skipped from the Visualizations gallery (not emitted as a
+    placeholder note that would crowd out the real figures)."""
     db = tmp_path / "runs.db"
     _make_runs_db(db, _STATE)
     spec = {
@@ -124,10 +126,8 @@ def test_derived_measure_refusal_is_a_clean_computed_scalar_note(tmp_path):
              "pass_if": {"op": "range", "low": 40, "high": 91}},
         ],
     }
-    entry = render_v4_test_charts(spec, db, fallback_db=None)[0]
-    assert entry["status"] == "refused"
-    assert "Computed scalar readout" in entry["caption"]
-    assert "settled_temperature_c" in entry["caption"]
+    # the derived scalar is not a chart -> no gallery card (it lives in Audit)
+    assert render_v4_test_charts(spec, db, fallback_db=None) == []
 
 
 def test_measure_path_present_still_renders(tmp_path):
