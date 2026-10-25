@@ -60,18 +60,30 @@ schema-deprecated → `execution_status`. The formal layer derives progress from
 - **Derive:** `gate_status` from `verdict` + `runs` (it adds no independent info).
 - **Drop:** `result`/`conclusion` (already deprecated → `result`).
 
-### Move 3 — One typed `relations` list
-Four keys name the same parent studies with different facets:
+### Move 3 — One typed dependency list, in the CANONICAL field
+Four keys named the same parent studies with different facets:
 `parent_studies` (`{study, condition}`) · `parent_relations` (`{study, relation}`) ·
 `builds_on` · `upstream_state_consumed` (`{from, provides}`).
 
-- **New:** `relations: [{study, relation?, condition?, provides?}]` — the three
-  formal relation classes (epistemic / organizational / computational) in one
-  place. Derive the argument edges, the DAG gate, and the dataflow from it.
-- **Deprecate:** `parent_studies`, `parent_relations`, `builds_on`,
-  `upstream_state_consumed` → `relations`.
+The framework already has a canonical home: **`pipeline_gate.prerequisites`**
+(Section 2 of the 8-section structure). `parent_studies` is the *legacy* fallback
+(`investigations.py` reads `pipeline_gate.prerequisites` first with a
+DeprecationWarning; `study_canonicalize` deletes `parent_studies`), and its
+entries already carry `condition` / `required_gate_status` / `outputs_used`.
 
-**4 → 1.**
+- **Enrich `pipeline_gate.prerequisites` entries** to carry all three formal
+  relation classes as distinct facets: `condition` (organizational gate),
+  `relation` (epistemic: builds-on/tests/refutes/…), `provides`/`outputs_used`
+  (computational). The entry is schema-permissive and the DAG normalizer passes
+  extra fields through, so this is additive.
+- **Deprecate → `pipeline_gate.prerequisites`:** `parent_studies` (Tier 2b),
+  `parent_relations`, `builds_on`, `upstream_state_consumed`.
+- **Tier 2a** first merged the four into enriched `parent_studies` entries (one
+  unified accessor, `study_relations`, derive-first); **Tier 2b** moves that home
+  to the canonical `pipeline_gate.prerequisites` and retires `parent_studies`,
+  aligning with the framework instead of inventing a competing `relations` field.
+
+**4 → 1 (canonical).**
 
 ### Move 4 — Drop study-level grouping that is now derived
 `concept` · `plan_id` tie a study to its gate, but the gate↔member mapping lives
