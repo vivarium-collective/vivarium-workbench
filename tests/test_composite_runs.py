@@ -607,3 +607,16 @@ def test_delete_run_removes_row(tmp_path):
     assert delete_run(conn, run_id="s__1__a") is True
     assert query_run_meta(conn, run_id="s__1__a") is None
     assert delete_run(conn, run_id="nope") is False
+
+
+def test_collect_emit_paths_tolerates_string_measure():
+    """A schema-valid STRING behavior_tests[].measure must not crash emit-path
+    collection (regression: 'str' object has no attribute 'get' → 500 on
+    study-run-baseline). String measures carry no path and contribute nothing;
+    dict measures with a path still contribute."""
+    from vivarium_workbench.lib.composite_runs import collect_emit_paths_from_spec
+    assert collect_emit_paths_from_spec(
+        {"behavior_tests": [{"name": "t", "measure": "a prose metric description"}]}) == []
+    out = collect_emit_paths_from_spec(
+        {"behavior_tests": [{"name": "t", "measure": {"path": "species.glucose"}}]})
+    assert "species/glucose" in out
