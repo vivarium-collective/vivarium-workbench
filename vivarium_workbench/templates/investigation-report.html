@@ -1756,7 +1756,7 @@ function _resizeFig(fig){
 function renderPlotlyFigure(fig){
   if(!fig || typeof Plotly==='undefined') return;
   if(fig.dataset.plRendered){ _resizeFig(fig); return; }
-  if(!_isLaidOut(fig)) return;               // not visible yet — wait for a later trigger
+  if(!_isLaidOut(fig)) return;               // not visible yet — never draw at 0px
   fig.dataset.plRendered='1';
   fig.querySelectorAll('script').forEach(old=>{
     try{
@@ -1767,6 +1767,33 @@ function renderPlotlyFigure(fig){
   });
   // one post-layout resize so the plot fills its container exactly
   try{ requestAnimationFrame(()=>_resizeFig(fig)); }catch(e){ _resizeFig(fig); }
+  // a reveal can still be animating/settling: keep the plot fitted as its box changes
+  try{ if(typeof ResizeObserver==='function'){
+    new ResizeObserver(()=>{ if(_isLaidOut(fig)) _resizeFig(fig); }).observe(fig); } }catch(e){}
+}
+// A figure that has been REVEALED (its card was just expanded) but whose layout
+// has not settled yet must not be abandoned: retry on a bounded schedule (two
+// animation frames, then short timeouts up to ~1.2s) until it is laid out, then
+// render once. A figure that is still genuinely hidden (display:none / 0 width)
+// when the schedule ends is left alone — the 0px guard in renderPlotlyFigure
+// stays intact and a later reveal re-arms the retry. Idempotent per figure.
+const _PL_RETRY_MS=[0,50,120,250,450,700,1000,1200];
+function renderPlotlyFigureWhenLaidOut(fig){
+  if(!fig || fig.dataset.plRendered || fig.__plRetrying) return;
+  if(_isLaidOut(fig)){ renderPlotlyFigure(fig); return; }
+  fig.__plRetrying=true;
+  const done=()=>{ fig.__plRetrying=false; };
+  const attempt=()=>{
+    if(fig.dataset.plRendered) return done();
+    if(_isLaidOut(fig)){ renderPlotlyFigure(fig); return done(); }
+    return false;
+  };
+  const step=i=>{
+    if(attempt()!==false) return;
+    if(i>=_PL_RETRY_MS.length) return done();
+    setTimeout(()=>step(i+1), _PL_RETRY_MS[i]);
+  };
+  try{ requestAnimationFrame(()=>requestAnimationFrame(()=>step(0))); }catch(e){ step(0); }
 }
 function setupLazyPlotly(){
   if(typeof Plotly==='undefined') return;    // no shared bundle → leave figures inert
@@ -1775,12 +1802,20 @@ function setupLazyPlotly(){
   // Sweep every figure: render the visible-and-unrendered ones, resize the rest.
   // This is the reliable path for a subnav-tab click / card expand / expand-all —
   // ANY reveal that changes layout — independent of scrolling.
-  const sweep=()=>{ figs.forEach(f=>{ if(_isLaidOut(f)) renderPlotlyFigure(f); }); };
+  // Figures not yet laid out are only retried (bounded) when `reveal` is set —
+  // i.e. a card was just expanded — so collapsed cards never spawn timers.
+  const sweep=(reveal)=>{ figs.forEach(f=>{
+    if(f.dataset.plRendered){ if(_isLaidOut(f)) _resizeFig(f); return; }
+    if(_isLaidOut(f)) renderPlotlyFigure(f);
+    else if(reveal===true && f.closest('.card:not(.collapsed)')) renderPlotlyFigureWhenLaidOut(f);
+  }); };
+  const revealSweep=()=>{
+    try{ requestAnimationFrame(()=>requestAnimationFrame(()=>sweep(true))); }catch(e){ sweep(true); } };
   // Primary: IntersectionObserver renders a figure as it scrolls into view (or
   // becomes visible when its card expands). rootMargin pre-renders slightly early.
   try{
     const io=new IntersectionObserver(entries=>{
-      entries.forEach(en=>{ if(en.isIntersecting){ renderPlotlyFigure(en.target);
+      entries.forEach(en=>{ if(en.isIntersecting){ renderPlotlyFigureWhenLaidOut(en.target);
         if(en.target.dataset.plRendered) io.unobserve(en.target); } });
     }, {root:null, rootMargin:'250px 0px', threshold:0.01});
     figs.forEach(f=>io.observe(f));
@@ -1789,16 +1824,16 @@ function setupLazyPlotly(){
   // expand, subnav tab, expand-all) → sweep on the next frame.
   try{
     const mo=new MutationObserver(ms=>{ if(ms.some(m=>m.attributeName==='class')){
-      try{ requestAnimationFrame(sweep); }catch(e){ sweep(); } } });
+      revealSweep(); } });
     document.querySelectorAll('.card').forEach(c=>mo.observe(c,{attributes:true,attributeFilter:['class']}));
   }catch(e){}
   // Subnav tab / index click expands + scrolls its target card; sweep just after.
   document.addEventListener('click', e=>{ try{ if(e.target.closest('.subnav a')||e.target.id==='expandall'){
-    setTimeout(sweep,60); setTimeout(sweep,220); } }catch(err){} }, true);
+    revealSweep(); setTimeout(()=>sweep(true),60); setTimeout(()=>sweep(true),220); } }catch(err){} }, true);
   // Keep already-drawn figures crisp on viewport resize.
   window.addEventListener('resize', ()=>{ figs.forEach(f=>{ if(f.dataset.plRendered) _resizeFig(f); }); });
   // Anchored deep-link (opening the report at #s-<slug>): render after layout.
-  try{ setTimeout(sweep,120); }catch(e){}
+  try{ setTimeout(()=>sweep(true),120); }catch(e){}
 }
 
 // Print / PDF preparation — called by the server-side PDF renderer (Playwright).
