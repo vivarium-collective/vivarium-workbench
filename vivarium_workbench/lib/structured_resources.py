@@ -38,6 +38,7 @@ _GLOB_REL = "*/data/vg_data/structured_resources.yaml"
 # other type the manifest carries is appended after these (sorted), never
 # dropped.
 TYPE_ORDER: tuple[str, ...] = (
+    "sbml-model",
     "lipid-structure",
     "reaction-pathway",
     "evidence-dataset",
