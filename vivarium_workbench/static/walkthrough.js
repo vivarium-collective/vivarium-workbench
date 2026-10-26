@@ -2294,12 +2294,24 @@
       window.open(_build3dSrc(m), '_blank', 'noopener');
     } else if (t.kind === 'embed-simularium') {
       window.open(_buildSimulariumSrc(m), '_blank', 'noopener');
-    } else if (m.href) {
-      window.open(m.href, '_blank', 'noopener');
     } else {
-      // Contributed launcher viewers are keyed by full uid (package::id) at the
-      // launch endpoint; t.id is the bare id, so prefer t.uid.
-      _launchViewer(t.uid || t.id, m.study || m.ref || '');  // resolves via endpoint / snapshot note
+      // Open the selected item's static export. A workspace-root-absolute href
+      // (/studies/…) MUST carry the hosting base path in the published snapshot,
+      // or it 404s to the domain root; an external (http/protocol-relative) href
+      // opens as-is. Mirrors the picker's _openHref + sim-table.toolsCell. Fall
+      // back to any target's static href before the live launch endpoint so a
+      // launcher whose selected item lacks an href (but whose pack IS baked)
+      // opens in the read-only snapshot instead of hitting the "local only" note.
+      var _bp = window.__BASE_PATH__ || (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || '';
+      var _rawHref = m.href || (((t.targets || []).filter(function (x) { return x && x.href; })[0]) || {}).href;
+      if (_rawHref) {
+        window.open(/^https?:|^\/\//.test(_rawHref) ? _rawHref : (_bp + _rawHref), '_blank', 'noopener');
+      } else {
+        // Live-only launcher (no baked export): keyed by full uid (package::id)
+        // at the launch endpoint; t.id is the bare id, so prefer t.uid. The
+        // snapshot shows a "launch locally" note rather than calling a 404.
+        _launchViewer(t.uid || t.id, m.study || m.ref || '');
+      }
     }
   }
   window._openTool = _openTool;
