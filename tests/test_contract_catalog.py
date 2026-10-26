@@ -78,7 +78,7 @@ def test_composites_data_records_carry_contract_audit(tmp_path, monkeypatch):
     import vivarium_workbench.lib.composite_lookup as cl
     (tmp_path / 'workspace.yaml').write_text('name: x\npackage_path: pbg_x_nonexistent\n')
     monkeypatch.setattr(cl, 'discover_all_composites',
-                        lambda root, pkg: {'a': {'id': 'a', 'name': 'a', 'module': ''}})
+                        lambda root, pkg, scope="all": {'a': {'id': 'a', 'name': 'a', 'module': ''}})
     out = cl.composites_data(tmp_path)
     recs = out['composites']
     assert recs, out
