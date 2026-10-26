@@ -350,6 +350,47 @@ def condition_environment(spec: dict, condition: str = "baseline") -> "dict | No
     return {"repo": repo.strip(), "ref": ref.strip()}
 
 
+def condition_environment_ref(spec: dict, condition: str = "baseline") -> "str | None":
+    """The NAME of the declared environment a study condition runs in, or ``None``.
+
+    Reproducibility declaration (distinct from the dual-engine
+    ``condition.environment: {repo, ref}`` above): a study references a named
+    environment from the workspace's ``environments.yaml`` by name::
+
+        environment_ref: pulse            # study-level default (all conditions)
+        conditions:
+          saline:
+            environment_ref: pulse-vcell  # per-condition override
+
+    Resolution: a per-condition ``conditions.<condition>.environment_ref`` wins;
+    absent that, the study-level ``environment_ref`` default applies; absent both,
+    ``None`` (today's behavior — the workspace's own environment). The name is
+    resolved to an actual environment at launch via
+    ``environments.resolve_environment`` and verified against the run's captured
+    fingerprint.
+
+    A PRESENT-but-non-string declaration raises ``ValueError`` rather than being
+    silently ignored — a user who declared an environment believes their run is
+    pinned to it (the silent-failure class this codebase keeps retiring).
+    """
+    val = None
+    conditions = spec.get("conditions")
+    if isinstance(conditions, dict):
+        cond = conditions.get(condition)
+        if isinstance(cond, dict) and cond.get("environment_ref") is not None:
+            val = cond.get("environment_ref")
+    if val is None:
+        val = spec.get("environment_ref")
+    if val is None:
+        return None
+    if not (isinstance(val, str) and val.strip()):
+        raise ValueError(
+            f"environment_ref must be a non-empty string naming an environment "
+            f"in environments.yaml (got {val!r})"
+        )
+    return val.strip()
+
+
 # ---------------------------------------------------------------------------
 # runs.db reading (ws_root-parameterised)
 # ---------------------------------------------------------------------------
