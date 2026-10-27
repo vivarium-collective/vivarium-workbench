@@ -266,8 +266,19 @@
     if (!d || (d.frontier_size == null && !(d.opportunities || []).length)) { host.innerHTML = ""; return; }
     var H = ['<div class="disc-wrap"><h4>Discovery — what to do next</h4>'];
     var diag = d.diagnosis || {}, flags = diag.flags || [], chips = [];
-    chips.push('<span class="disc-chip ' + (d.closed ? "ok" : "") + '">' + (d.closed ? "closed" : "open")
-      + " · " + _esc(d.frontier_size) + " open</span>");
+    // Closure and the frontier are orthogonal: "closed" means every acceptance
+    // criterion is met, not that the frontier is empty. When closed, the residual
+    // items are hardening/extensions (non-blocking) — say so, rather than imply
+    // they are unfinished work. When open, lead with how many actually block closure.
+    var blk = d.closure_blocking;
+    var label;
+    if (d.closed) {
+      label = "closed · acceptance criteria met"
+        + (d.frontier_size ? " · " + _esc(d.frontier_size) + " residual (hardening, non-blocking)" : "");
+    } else {
+      label = "open · " + (blk != null ? _esc(blk) + " blocking closure · " : "") + _esc(d.frontier_size) + " open";
+    }
+    chips.push('<span class="disc-chip ' + (d.closed ? "ok" : "") + '">' + label + "</span>");
     flags.forEach(function (f) { chips.push('<span class="disc-chip flag">' + _esc(f) + "</span>"); });
     if (diag.validator_pass_rate != null) chips.push('<span class="disc-chip">validator pass ' + Math.round(diag.validator_pass_rate * 100) + "%</span>");
     H.push('<div class="disc-chips">' + chips.join("") + "</div>");

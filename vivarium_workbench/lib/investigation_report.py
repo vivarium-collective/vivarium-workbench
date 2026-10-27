@@ -986,6 +986,13 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
         opps = de.opportunities(cyc, inv_spec)
         diag = de.diagnose(cyc, inv_spec)
         frontier = de.frontier(cyc, inv_spec)
+        # How many frontier items actually BLOCK closure (unaddressed criteria,
+        # narrative gaps, open challenges) vs. are residual hardening/extensions.
+        # When closed this is 0 by construction, so the surfaces can say "closed —
+        # N residual (non-blocking)" rather than imply the open items are unfinished.
+        _blocking_kinds = getattr(de, "_CLOSURE_BLOCKING",
+                                  ("unaddressed_criterion", "narrative_gap", "open_challenge"))
+        closure_blocking = sum(1 for it in frontier if it.get("kind") in _blocking_kinds)
         recs = cyc.get("validations") or []
         census: dict = {}
         for r in recs:
@@ -994,6 +1001,7 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
         return {
             "closed": clo["closed"],
             "frontier_size": clo["open_items"],
+            "closure_blocking": closure_blocking,
             "next_action": ({"op": na["op"], "kind": na["kind"], "target": na["target"]}
                             if na else None),
             "opportunities": [{"source": o["source"], "action": o["action_type"],
