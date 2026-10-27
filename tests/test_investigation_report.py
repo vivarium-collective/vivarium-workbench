@@ -141,6 +141,8 @@ def test_sourcing_data_shape_and_provenance(tmp_path):
                       # Background / "simulated world" prose, glossary, guidelines,
                       # how-to-read, and the creation date for the masthead.
                       "biological_story", "glossary", "guidelines", "how_to_read",
+                      # the discovery engine's "what to do next" projection (RFC-0007)
+                      "discovery",
                       "created",
                       # deterministic cross-study synthesis (finding-first report)
                       "synthesis"}
