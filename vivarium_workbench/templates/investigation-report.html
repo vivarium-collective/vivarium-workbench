@@ -1521,7 +1521,7 @@ function renderDiscovery(inv){
   }).join('');
   return `<div class="fbsection measure" id="discovery">
     <div class="sec-h"><h2>Discovery — what to do next</h2><span class="rule"></span></div>
-    <p style="color:var(--ink-2);font-size:14px">${d.closed?'Closed':'Open'} · frontier ${d.frontier_size} · validator pass-rate ${prTxt} · diagnosis: ${flags}${na?` · next: <b>${esc(na.op)}</b> on ${esc(String(na.target).slice(0,60))}`:''}</p>
+    <p style="color:var(--ink-2);font-size:14px">${d.closed?`Closed — acceptance criteria met${d.frontier_size?` · ${d.frontier_size} residual (hardening, non-blocking)`:''}`:`Open · ${d.closure_blocking!=null?`${d.closure_blocking} blocking closure · `:''}frontier ${d.frontier_size}`} · validator pass-rate ${prTxt} · diagnosis: ${flags}${na?` · next: <b>${esc(na.op)}</b> on ${esc(String(na.target).slice(0,60))}`:''}</p>
     <h3 style="margin:14px 0 6px">Most valuable to investigate <span class="mono" style="color:var(--ink-2);font-weight:400">(value-ranked)</span></h3>
     <table class="ttable"><tbody><tr><th>score</th><th>action</th><th>target</th><th>why</th></tr>${opps}</tbody></table>
     ${awaiting.length?`<h3 style="margin:14px 0 6px">Suggested new studies <span class="mono" style="color:var(--ink-2);font-weight:400">(awaiting expert input)</span></h3><ul style="margin:0;padding-left:18px">${suggRows}</ul>`:''}
