@@ -74,6 +74,25 @@ def test_html_declared_figure_is_interactive_end_to_end(tmp_path):
     assert status["has_interactive"] is True
 
 
+def test_html_iframe_url_keeps_full_path_with_relative_ws_root(tmp_path, monkeypatch):
+    """Regression: `vivarium-workbench-publish --workspace .` passes a RELATIVE
+    ws_root. ``study_dir`` (and the figure path) come back absolute via
+    WorkspacePaths, so ``fig.relative_to(ws_root)`` used to raise and fall back
+    to the bare filename — ``iframe_url == "/page.html"`` — which 404s in the
+    static snapshot and shows every interactive figure as "unavailable". The
+    iframe_url must stay workspace-rooted regardless of the ws_root's form."""
+    ws, name = _build_study(
+        tmp_path, address="html:page.html", fig_name="page.html",
+        fig_bytes_or_text="<html><body>self-contained</body></html>",
+    )
+    # Drive it exactly like the CLI: cwd at the workspace, ws_root == Path(".").
+    monkeypatch.chdir(ws)
+    payload = build_study_charts_payload(Path("."), name)
+    [rec] = [c for c in payload["charts"] if c.get("source") == "declared"]
+    assert rec["iframe_url"] == "/studies/demo/page.html"
+    assert rec.get("iframe_url") != "/page.html"
+
+
 def test_declared_png_figure_still_static_no_regression(tmp_path):
     ws, name = _build_study(
         tmp_path, address="png:fig.png", fig_name="fig.png",

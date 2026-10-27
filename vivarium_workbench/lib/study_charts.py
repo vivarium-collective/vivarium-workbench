@@ -580,7 +580,13 @@ def discover_declared_figure_charts(study_dir: Path,
             try:
                 rel = fig.relative_to(url_base).as_posix()
             except ValueError:
-                rel = fig.name
+                # Robust against a relative url_base or a symlinked workspace
+                # root (/tmp -> /private/tmp): resolve both before falling back
+                # to the bare filename (which 404s under any nested layout).
+                try:
+                    rel = fig.resolve().relative_to(Path(url_base).resolve()).as_posix()
+                except ValueError:
+                    rel = fig.name
             rec = {**meta, "key": key, "iframe_url": f"/{rel}", "media": iframe_media}
         else:
             try:
@@ -1733,8 +1739,14 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
     # Declared figure visualizations resolved to self-contained chart records so
     # they embed in both the live dashboard and the static report snapshot.
     # Deduped against static_charts by key.
+    # Pass the RESOLVED workspace root (_wp.root), not the raw ws_root argument:
+    # study_dir (and the figure paths derived from it) come back absolute/resolved
+    # via WorkspacePaths, so a relative ws_root (e.g. Path('.') under
+    # publish.build_bundle) would make iframe_url's `fig.relative_to(ws_root)`
+    # raise and fall back to a bare `multibody.html` — which 404s in the static
+    # snapshot and shows every interactive figure as "unavailable".
     declared_figs = discover_declared_figure_charts(
-        study_dir, (spec or {}).get("visualizations") or [], ws_root=ws_root)
+        study_dir, (spec or {}).get("visualizations") or [], ws_root=_wp.root)
     if declared_figs:
         static_keys = {c.get("key") for c in static_charts}
         # A study's ``embed_visualizations`` are rendered separately as iframes
