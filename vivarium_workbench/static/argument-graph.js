@@ -220,3 +220,104 @@
   if (document.readyState !== "loading") _tick();
   else document.addEventListener("DOMContentLoaded", _tick);
 })();
+
+/*
+ * discovery-panel — the discovery cycle's "what to do next" on the investigation
+ * Decisions tab (#inv-discovery-mount). Fed by /api/investigation-discovery:
+ * value-ranked opportunities, the productivity diagnosis, the gated Decide
+ * execution plan, and expert-gated study suggestions. A poller fills the mount
+ * when it appears; an empty {} (older viva_superpowers, no discovery engine)
+ * leaves it blank. Mirrors the argument-overlay poller above.
+ */
+(function () {
+  "use strict";
+  var _busy = false;
+  function _esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function _num(x) { return (typeof x === "number" && isFinite(x)) ? (Math.round(x * 100) / 100) : x; }
+  function _strip(s) { return String(s || "").replace(/^claim:/, ""); }
+  function _style() {
+    if (document.getElementById("disc-style")) return;
+    var css =
+      ".disc-wrap{font-size:0.92em;margin:0 0 18px}"
+      + ".disc-wrap h4{margin:0 0 4px;font-size:0.98em;color:#0f172a}"
+      + ".disc-sub{color:#64748b;font-size:0.84em;margin:12px 0 6px;font-weight:600}"
+      + ".disc-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 4px}"
+      + ".disc-chip{font-size:0.76em;padding:1px 9px;border-radius:999px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}"
+      + ".disc-chip.flag{background:#fef3c7;color:#92400e;border-color:#fde68a}"
+      + ".disc-chip.ok{background:#dcfce7;color:#166534;border-color:#bbf7d0}"
+      + ".disc-tbl{width:100%;border-collapse:collapse;font-size:0.86em;margin:2px 0 6px}"
+      + ".disc-tbl th{text-align:left;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;padding:4px 8px}"
+      + ".disc-tbl td{border-bottom:1px solid #f1f5f9;padding:5px 8px;vertical-align:top}"
+      + ".disc-tbl td.sc{font-variant-numeric:tabular-nums;color:#0f172a;white-space:nowrap}"
+      + ".disc-cons{font-size:0.73em;padding:1px 7px;border-radius:999px;white-space:nowrap}"
+      + ".disc-cons.safe{background:#dcfce7;color:#166534}"
+      + ".disc-cons.simulation,.disc-cons.simulationstudy{background:#dbeafe;color:#1e40af}"
+      + ".disc-cons.review{background:#fef3c7;color:#92400e}"
+      + ".disc-cons.humanonly{background:#f3e8ff;color:#6b21a8}"
+      + ".disc-cmd{font-family:ui-monospace,Menlo,monospace;font-size:0.8em;color:#475569;background:#f8fafc;padding:1px 6px;border-radius:5px;word-break:break-all}";
+    var el = document.createElement("style"); el.id = "disc-style"; el.textContent = css;
+    document.head.appendChild(el);
+  }
+  function _render(host, d) {
+    if (!d || (d.frontier_size == null && !(d.opportunities || []).length)) { host.innerHTML = ""; return; }
+    var H = ['<div class="disc-wrap"><h4>Discovery — what to do next</h4>'];
+    var diag = d.diagnosis || {}, flags = diag.flags || [], chips = [];
+    chips.push('<span class="disc-chip ' + (d.closed ? "ok" : "") + '">' + (d.closed ? "closed" : "open")
+      + " · " + _esc(d.frontier_size) + " open</span>");
+    flags.forEach(function (f) { chips.push('<span class="disc-chip flag">' + _esc(f) + "</span>"); });
+    if (diag.validator_pass_rate != null) chips.push('<span class="disc-chip">validator pass ' + Math.round(diag.validator_pass_rate * 100) + "%</span>");
+    H.push('<div class="disc-chips">' + chips.join("") + "</div>");
+    var opps = d.opportunities || [];
+    if (opps.length) {
+      H.push('<div class="disc-sub">Most valuable to investigate</div>');
+      H.push('<table class="disc-tbl"><thead><tr><th>score</th><th>action</th><th>target</th></tr></thead><tbody>');
+      opps.slice(0, 8).forEach(function (o) {
+        H.push('<tr><td class="sc">' + _esc(_num(o.score)) + "</td><td>" + _esc(o.action)
+          + "</td><td>" + _esc(_strip(o.source)) + "</td></tr>");
+      });
+      H.push("</tbody></table>");
+    }
+    var plan = d.execution_plan || [];
+    if (plan && plan.length) {
+      H.push('<div class="disc-sub">Decide — the next action &amp; how it runs (gated)</div>');
+      H.push('<table class="disc-tbl"><thead><tr><th>action</th><th>target</th><th>consequence</th><th>command</th></tr></thead><tbody>');
+      plan.slice(0, 8).forEach(function (p) {
+        var cons = String(p.consequence || "").replace(/[^a-z]/g, "");
+        H.push("<tr><td>" + _esc(p.action) + "</td><td>" + _esc(_strip(p.source))
+          + '</td><td><span class="disc-cons ' + cons + '">' + _esc(p.consequence) + "</span></td><td>"
+          + (p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "—") + "</td></tr>");
+      });
+      H.push("</tbody></table>");
+    }
+    var sugg = (d.suggestions || []).filter(function (s) { return s.status === "awaiting_expert"; });
+    if (sugg.length) {
+      H.push('<div class="disc-sub">Suggested studies (awaiting expert input)</div><ul class="ag-list">');
+      sugg.slice(0, 6).forEach(function (s) {
+        H.push("<li>on <b>" + _esc(s.parent) + "</b>: " + _esc(String(s.needs || "").slice(0, 130)) + "</li>");
+      });
+      H.push("</ul>");
+    }
+    H.push("</div>");
+    host.innerHTML = H.join("");
+  }
+  function _tick() {
+    var host = document.getElementById("inv-discovery-mount");
+    if (!host) return;
+    var slug = window._currentIsetSlug || "";
+    if (!slug || host.getAttribute("data-disc") === slug) return;  // no mount, or already handled this slug
+    if (_busy) return;
+    _busy = true;
+    var base = window.__BASE_PATH__ || "";
+    fetch(base + "/api/investigation-discovery/" + encodeURIComponent(slug))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) { _busy = false; _style(); _render(host, data || {}); host.setAttribute("data-disc", slug); })
+      .catch(function () { _busy = false; });
+  }
+  setInterval(_tick, 700);
+  if (document.readyState !== "loading") _tick();
+  else document.addEventListener("DOMContentLoaded", _tick);
+})();

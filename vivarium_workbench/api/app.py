@@ -1070,6 +1070,25 @@ def create_app() -> FastAPI:
         return Response(content=html, status_code=status, media_type="text/html")
 
     @app.get(
+        "/api/investigation-discovery/{slug}",
+        tags=["Investigations"],
+        summary="Discovery-cycle 'what to do next' for an investigation (JSON)",
+    )
+    def investigation_discovery(
+        slug: str,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """The discovery engine's slim 'what to do next' view for one investigation:
+        value-ranked opportunities, productivity diagnosis, the execution plan (the
+        Decide surface), expert-gated study suggestions, and drift. Lets the live SPA
+        show the cycle output on the Decisions tab without rendering the whole report.
+        Returns ``{}`` when the installed viva_superpowers predates the discovery engine
+        (the SPA then shows nothing extra). Library-backed via
+        ``lib.investigation_report._build_discovery``."""
+        from vivarium_workbench.lib.investigation_report import _build_discovery
+        return _build_discovery(ws, slug) or {}
+
+    @app.get(
         "/api/investigation-report/{slug}",
         tags=["Investigations"],
         summary="Self-contained investigation report (deterministic, data-only)",
