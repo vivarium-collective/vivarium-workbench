@@ -11319,14 +11319,19 @@
         badge: _pb.length ? (_evaluated + '/' + _pb.length + ' evaluated') : '' });
     }
 
-    // 8. Decisions — the open expert decisions, HIGHLIGHTED when any are open.
+    // 8. Decisions — the discovery cycle's "what to do next" (value-ranked
+    //    opportunities, diagnosis, the gated Decide plan) ABOVE the authored expert
+    //    decisions and the derived open items. Shown whenever the investigation has
+    //    studies, so the cycle view is visible even once every decision is resolved.
     var _decHtml = _invDecisionTabHtml(d);
-    if (_decHtml) {
+    var _hasStudies = Array.isArray(d.studies) && d.studies.length;
+    if (_decHtml || _hasStudies) {
       var _nDec = (((d.executive || {}).decisions_needed) || []).length;
-      // The authored decisions keep their interactive Resolve cockpit; the
-      // derived open items (audit gaps, open-question claims, divergences) are
-      // filled below by argument-graph.js from the overlay.
-      tabs.push({ id: 'decisions', label: 'Decisions', html: _decHtml + '<div id="inv-decisions-mount"></div>',
+      // #inv-discovery-mount ← /api/investigation-discovery (argument-graph.js poller);
+      // _decHtml = the authored Resolve cockpit; #inv-decisions-mount ← derived open
+      // items (audit gaps, open-question claims, divergences) from the overlay.
+      tabs.push({ id: 'decisions', label: 'Decisions',
+        html: '<div id="inv-discovery-mount"></div>' + _decHtml + '<div id="inv-decisions-mount"></div>',
         badge: _nDec ? (_nDec + ' needed') : 'all clear', attention: _nDec > 0 });
     }
 
