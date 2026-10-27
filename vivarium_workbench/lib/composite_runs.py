@@ -1267,6 +1267,25 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
                 p = _norm(obs)
                 if p:
                     paths.add(p)
+    # A derived-scalar measure (e.g. `log10_enrichment`) is COMPUTED at evaluation time
+    # from a run observable (e.g. `enrichment_factor`); emitting the derived name captures
+    # nothing (the composite never produces it -> empty readout -> the gate can never
+    # close). Resolve each measure to the observables the run must actually emit via the
+    # viva_superpowers run-readiness mechanism, which reads the workspace's declared source
+    # observables. Falls back to the measure path for direct observables, config measures,
+    # or when the mechanism/declarations are unavailable (no behavior change then).
+    _req_obs = None
+    try:
+        from viva_superpowers.study_evaluator import required_observables_for_measure as _req_obs
+    except ImportError:
+        _req_obs = None
+    _ws = None
+    if _req_obs is not None:
+        try:
+            from vivarium_workbench.lib._root import workspace_root as _wsr
+            _ws = _wsr()
+        except Exception:  # noqa: BLE001 — resolution is best-effort
+            _ws = None
     for t in (spec.get("tests") or []) + (spec.get("behavior_tests") or []):
         if not isinstance(t, dict):
             continue
@@ -1277,9 +1296,20 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
         m = t.get("measure")
         if not isinstance(m, dict):
             continue
-        p = _norm(m.get("path"))
-        if p:
-            paths.add(p)
+        # A derived-scalar measure's own ``path`` is the name of a computed value,
+        # not an emittable observable — resolve it to the SOURCE observables the
+        # computer reads so the run emits those. Fall back to the literal path for
+        # a plain (non-derived) measure.
+        srcs = _req_obs(m, _ws) if _req_obs is not None else None
+        if srcs:
+            for s in srcs:
+                p = _norm(s)
+                if p:
+                    paths.add(p)
+        else:
+            p = _norm(m.get("path"))
+            if p:
+                paths.add(p)
     for v in (spec.get("visualizations") or []):
         if not isinstance(v, dict):
             continue

@@ -609,6 +609,23 @@ def test_delete_run_removes_row(tmp_path):
     assert delete_run(conn, run_id="nope") is False
 
 
+def test_collect_emit_paths_resolves_derived_measure_to_source(monkeypatch):
+    """A derived-scalar measure emits its SOURCE observable, not the (un-produced)
+    derived name — so the run captures what the gate's evaluator reads."""
+    import viva_superpowers.study_evaluator as SE
+    monkeypatch.setattr(
+        SE, "required_observables_for_measure",
+        lambda m, ws: ({"enrichment_factor"} if (m or {}).get("path") == "log10_enrichment"
+                       else ({(m or {}).get("path")} if (m or {}).get("path") else set())),
+        raising=False,
+    )
+    spec = {"behavior_tests": [{"measure": {"kind": "derived", "path": "log10_enrichment"}}]}
+    paths = collect_emit_paths_from_spec(spec)
+    assert "enrichment_factor" in paths          # the real observable the run must emit
+    assert "log10_enrichment" not in paths        # not the un-produced derived name
+    assert "agents/0/enrichment_factor" in paths  # per-agent variant still added
+
+
 def test_collect_emit_paths_tolerates_string_measure():
     """A schema-valid STRING behavior_tests[].measure must not crash emit-path
     collection (regression: 'str' object has no attribute 'get' → 500 on
