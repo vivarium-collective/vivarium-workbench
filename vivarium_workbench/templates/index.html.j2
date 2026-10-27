@@ -964,7 +964,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
             <path d="M8.5 12L16 19"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Investigations</span>
+        <span class="viv-rail-link-label">Investigate</span>
       </a>
       <!-- Resources: the workspace's source material. A single tab with two
            sub-tabs — "Datasets & references" (the /api/inputs datasets,
@@ -991,12 +991,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#market"            class="viv-rail-link menu-link" data-page="market">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="6"  cy="7" r="2.2"/>
-            <circle cx="12" cy="7" r="2.2"/>
-            <circle cx="18" cy="7" r="2.2"/>
-            <rect x="3.8"  y="14.8" width="4.4" height="4.4" rx="0.3"/>
-            <rect x="9.8"  y="14.8" width="4.4" height="4.4" rx="0.3"/>
-            <rect x="15.8" y="14.8" width="4.4" height="4.4" rx="0.3"/>
+            <rect x="3.4" y="9.6" width="6.4" height="6.4" rx="1.3"/>
+            <rect x="12.2" y="3.4" width="5.2" height="5.2" rx="1.1"/>
+            <rect x="12.2" y="10.8" width="5.2" height="5.2" rx="1.1"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Catalog</span>
@@ -1007,11 +1004,13 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#modules"           class="viv-rail-link menu-link" data-page="modules">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="9.5" y="3.5" width="5" height="17" rx="1.5"/>
-            <path d="M1.5 12 H6.5"/>
-            <path d="M4.5 9.5 L7 12 L4.5 14.5"/>
-            <path d="M17.5 12 H22.5"/>
-            <path d="M20 9.5 L22.5 12 L20 14.5"/>
+            <rect x="9" y="9" width="6" height="6" rx="1.8"/>
+            <circle cx="3.7" cy="12" r="2.2"/>
+            <path d="M9 12 H5.9"/>
+            <circle cx="20.3" cy="12" r="2.2"/>
+            <path d="M15 12 H18.1"/>
+            <circle cx="12" cy="20.3" r="2.2"/>
+            <path d="M12 15 V18.1"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Process</span>
@@ -1019,12 +1018,13 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <ellipse cx="12" cy="6" rx="8" ry="3"/>
-            <path d="M4 6v12c0 1.657 3.582 3 8 3s8-1.343 8-3V6"/>
-            <path d="M4 12c0 1.657 3.582 3 8 3s8-1.343 8-3"/>
+            <ellipse cx="9.5" cy="6.5" rx="6" ry="2.5"/>
+            <path d="M3.5 6.5 V17.5 c0 1.4 2.7 2.5 6 2.5 c0.55 0 1.08 -0.016 1.58 -0.047"/>
+            <path d="M3.5 12 c0 1.4 2.7 2.5 6 2.5 c0.6 0 1.18 -0.02 1.72 -0.056"/>
+            <path d="M16.3 8.8 L12.4 14.6 H15.1 L13.5 19.4 L18.6 12.9 H15.5 Z" fill="currentColor" stroke="none"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Runs</span>
+        <span class="viv-rail-link-label">Runs DB</span>
       </a>
       <!-- Visualizations: axes + line-chart polyline + data points.
            Polyline style (vs the previous smooth sigmoid) reads more
@@ -1034,16 +1034,13 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#visualizations"    class="viv-rail-link menu-link" data-page="visualizations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <!-- L-shaped axes -->
-            <path d="M4 4 V20 H20"/>
-            <!-- chart polyline: low-left → peak → dip → higher peak → settle -->
-            <path d="M7 16 L 10 11 L 13 14 L 16 8 L 19 10"/>
-            <!-- data points at each vertex -->
-            <circle cx="7"  cy="16" r="1.05" fill="currentColor" stroke="none"/>
-            <circle cx="10" cy="11" r="1.05" fill="currentColor" stroke="none"/>
-            <circle cx="13" cy="14" r="1.05" fill="currentColor" stroke="none"/>
-            <circle cx="16" cy="8"  r="1.05" fill="currentColor" stroke="none"/>
-            <circle cx="19" cy="10" r="1.05" fill="currentColor" stroke="none"/>
+            <!-- increasing bars along the baseline -->
+            <path d="M5 20.5 V16"/>
+            <path d="M10 20.5 V13.5"/>
+            <path d="M15 20.5 V17"/>
+            <!-- up-trending line with an arrowhead at top-right -->
+            <path d="M4 12.5 L8.5 8 L12 11 L20 4"/>
+            <path d="M15.3 4 H20 V8.7"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Explore</span>
@@ -1098,10 +1095,18 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#" id="viv-registry-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Registry browser — composites, processes, analyses &amp; visualizations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="3.5" y="3.5" width="7" height="7" rx="1.4"/>
-            <rect x="13.5" y="3.5" width="7" height="7" rx="1.4"/>
-            <rect x="3.5" y="13.5" width="7" height="7" rx="1.4"/>
-            <rect x="13.5" y="13.5" width="7" height="7" rx="1.4"/>
+            <!-- three isometric cubes (one atop two) -->
+            <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/>
+            <path d="m7 16.5-4.74-2.85"/>
+            <path d="m7 16.5 5-3"/>
+            <path d="M7 16.5v5.17"/>
+            <path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/>
+            <path d="m17 16.5-5-3"/>
+            <path d="m17 16.5 4.74-2.85"/>
+            <path d="M17 16.5v5.17"/>
+            <path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/>
+            <path d="M7.26 5.15 12 8l4.74-2.85"/>
+            <path d="M12 13.5V8"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Registry</span>
@@ -1109,12 +1114,11 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#" id="viv-ai-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Chat">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="5" y="8" width="14" height="10" rx="2.5"/>
-            <path d="M12 4.5 V8"/>
-            <circle cx="12" cy="3.6" r="0.9"/>
-            <circle cx="9.5" cy="13" r="1" fill="currentColor" stroke="none"/>
-            <circle cx="14.5" cy="13" r="1" fill="currentColor" stroke="none"/>
-            <path d="M3 12 V15 M21 12 V15"/>
+            <rect x="4.5" y="8" width="15" height="10.5" rx="3.5"/>
+            <path d="M12 4.9 V8"/>
+            <circle cx="12" cy="4" r="1.1" fill="currentColor" stroke="none"/>
+            <circle cx="9.3" cy="13.2" r="1.15" fill="currentColor" stroke="none"/>
+            <circle cx="14.7" cy="13.2" r="1.15" fill="currentColor" stroke="none"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Chat</span>
