@@ -72,6 +72,14 @@ ALLOWED: dict[str, str] = {
     "narrative": "core: narrate + audit projection over the argument graph (pure)",
     "synthesis": "core: synthesis spine + open-calls roll-up (pure)",
     "relations": "core: study-relation projection feeding the argument graph (pure)",
+    # --- RFC-0007 discovery engine: the read-only crank the report surfaces as the
+    #     "what to do next" panel (value-ranked opportunities, diagnosis, suggestions,
+    #     drift). Same derive-first family as knowledge_store/argument_store/narrative;
+    #     the report builder calls only the read-only entries (run_cycle / load_cycle_inputs
+    #     / frontier / opportunities / diagnose), never a write verb. ---
+    "discover": "discovery engine: read-only run_cycle + load_cycle_inputs for the report's discovery panel",
+    "discovery_engine": "discovery engine: pure crank/frontier/closure/opportunities/diagnose projection",
+    "validation": "discovery engine: pure validator-layer records run inside run_cycle",
     # --- pre-server bootstrap helpers (structurally cannot be HTTP) ---
     "scaffold": "workspace/investigation scaffolding (backs vwb scaffold-* verbs)",
     "workspace_catalog": "workspace catalog registration (backs vwb catalog-add)",

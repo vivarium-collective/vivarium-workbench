@@ -141,6 +141,8 @@ def test_sourcing_data_shape_and_provenance(tmp_path):
                       # Background / "simulated world" prose, glossary, guidelines,
                       # how-to-read, and the creation date for the masthead.
                       "biological_story", "glossary", "guidelines", "how_to_read",
+                      # the discovery engine's "what to do next" projection (RFC-0007)
+                      "discovery",
                       "created",
                       # deterministic cross-study synthesis (finding-first report)
                       "synthesis"}
@@ -607,3 +609,88 @@ def test_string_evidence_in_finding_does_not_crash_report(tmp_path):
     data = build_report_data(tmp_path, "syn")  # must not raise
     html = render_html(data)
     assert len(html) > 0
+
+
+# --- headless-browser regression: Plotly figures revealed by a card expand -------
+
+def _plotly_fig_html(div_id="figdiv"):
+    return (
+        '<html><head><meta charset="utf-8"></head><body>'
+        f'<div id="{div_id}" class="plotly-graph-div" style="height:320px;width:100%;"></div>'
+        '<script type="text/javascript">window.PLOTLYENV=window.PLOTLYENV||{};'
+        f'Plotly.newPlot("{div_id}",[{{"x":[1,2,3],"y":[2,1,3],"type":"scatter"}}],'
+        '{"height":320},{"responsive":true});</script></body></html>'
+    )
+
+
+# Simulates a reveal whose layout has NOT settled when the class flips (width
+# grows from 0 over 0.5s): the first post-reveal sweep sees a ~0px figure.
+_SLOW_REVEAL_CSS = (
+    "@keyframes g{from{width:0;overflow:hidden}to{width:100%}}"
+    ".card:not(.collapsed) .study-detail{animation:g .5s linear both}"
+)
+
+_DRAWN_JS = """() => { const fs=[...document.querySelectorAll('figure.embedded-plotly')];
+  return fs.length>0 && fs.every(f=>{ const s=f.querySelector('.plotly-holder svg.main-svg');
+    return !!s && s.getBoundingClientRect().width>2; }); }"""
+
+
+def _expand_report(tmp_path, slow_reveal):
+    pytest = __import__("pytest")
+    sync_api = pytest.importorskip("playwright.sync_api")
+    ws = _ws(tmp_path)
+    viz = ws / "studies" / "reuse-ok" / "viz"
+    viz.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        (viz / f"interactive{i}.html").write_text(_plotly_fig_html(f"figdiv{i}"), encoding="utf-8")
+    out = render_investigation_report(ws, "src")
+    assert "embedded-plotly" in out.read_text(encoding="utf-8")
+    p = sync_api.sync_playwright().start()
+    try:
+        try:
+            browser = p.chromium.launch()
+        except Exception as e:  # browser binary not installed
+            pytest.skip(f"chromium unavailable: {e}")
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        errs = []
+        page.on("pageerror", lambda e: errs.append(str(e)))
+        page.goto(out.as_uri())
+        page.wait_for_function("typeof Plotly==='object'")
+        if slow_reveal:
+            page.add_style_tag(content=_SLOW_REVEAL_CSS)
+        card = page.locator("section.card", has=page.locator("figure.embedded-plotly")).first
+        assert "collapsed" in (card.get_attribute("class") or "")
+        # collapsed => 0px: the guard must NOT have rendered anything blank
+        page.wait_for_timeout(400)
+        assert page.evaluate("document.querySelectorAll('figure.embedded-plotly svg.main-svg').length") == 0
+        assert page.evaluate("document.querySelectorAll('figure.embedded-plotly[data-pl-rendered]').length") == 0
+        card.locator(".card-h").click()          # expand as a user would
+        return p, browser, page, errs
+    except BaseException:
+        p.stop()
+        raise
+
+
+def test_collapsed_card_plotly_figures_render_on_expand(tmp_path):
+    """Expanding a collapsed study card must draw its interactive Plotly figures."""
+    p, browser, page, errs = _expand_report(tmp_path, slow_reveal=False)
+    try:
+        page.wait_for_function(_DRAWN_JS, timeout=4000)
+        assert not errs, errs
+    finally:
+        browser.close(); p.stop()
+
+
+def test_plotly_figures_render_when_reveal_layout_settles_late(tmp_path):
+    """Regression: the lazy renderer used to give up permanently on a figure that
+    was revealed but not yet laid out (single rAF / short timeout sweep), leaving
+    a blank box. It must retry until the figure has a real width, then draw once."""
+    p, browser, page, errs = _expand_report(tmp_path, slow_reveal=True)
+    try:
+        page.wait_for_function(_DRAWN_JS, timeout=4000)
+        # each figure drawn exactly once (idempotent)
+        assert page.evaluate(
+            "[...document.querySelectorAll('figure.embedded-plotly')].every(f=>f.querySelectorAll('.plot-container').length===1)")
+        assert not errs, errs
+    finally:
+        browser.close(); p.stop()

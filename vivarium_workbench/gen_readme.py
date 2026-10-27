@@ -100,10 +100,17 @@ def _has_license(ws_root: Path) -> bool:
 
 
 def collect_composites(ws_root: Path) -> list[dict]:
-    """Workspace-local composites (name + description), sorted by name."""
+    """Workspace-local composites (name + description), sorted by name.
+
+    Uses ``scope="workspace"`` so discovery stays IN this workspace (FS docs +
+    its own package's generators, imported in-process) instead of walking +
+    importing every installed bigraph-schema package via the env worker — the
+    env-wide scan is what times out ``readme-check`` in CI, and gen-readme keeps
+    only ``workspace_local`` rows regardless.
+    """
     from vivarium_workbench.lib.composite_lookup import composites_data
 
-    data = composites_data(Path(ws_root))
+    data = composites_data(Path(ws_root), scope="workspace")
     rows = [c for c in (data.get("composites") or []) if c.get("workspace_local")]
     rows.sort(key=lambda c: str(c.get("name") or ""))
     return rows
