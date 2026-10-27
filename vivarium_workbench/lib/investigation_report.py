@@ -971,6 +971,50 @@ def _build_synthesis(inv, studies, spine):
     return out
 
 
+def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
+    """Run one discovery cycle and return a slim, renderable view of *what to do next*:
+    value-ranked opportunities, the productivity diagnosis, expert-gated study
+    suggestions, and drift. Degrades gracefully (returns ``None``) when the installed
+    viva_superpowers predates the discovery engine, so the report never breaks."""
+    try:
+        from viva_superpowers import discover
+        from viva_superpowers import discovery_engine as de
+        _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
+        cyc = discover.run_cycle(inv_spec, studies)
+        clo = de.closure(cyc, inv_spec)
+        na = de.next_action(cyc, inv_spec)
+        opps = de.opportunities(cyc, inv_spec)
+        diag = de.diagnose(cyc, inv_spec)
+        frontier = de.frontier(cyc, inv_spec)
+        recs = cyc.get("validations") or []
+        census: dict = {}
+        for r in recs:
+            st = (r.get("result") or {}).get("execution_status")
+            census[st] = census.get(st, 0) + 1
+        return {
+            "closed": clo["closed"],
+            "frontier_size": clo["open_items"],
+            "next_action": ({"op": na["op"], "kind": na["kind"], "target": na["target"]}
+                            if na else None),
+            "opportunities": [{"source": o["source"], "action": o["action_type"],
+                               "score": o["value"]["score"], "impact": o["value"]["impact"],
+                               "enable": o["value"]["enable"], "question": o.get("question")}
+                              for o in opps[:10]],
+            "diagnosis": {"flags": [f["flag"] for f in diag["flags"]],
+                          "validator_pass_rate": diag["validator_pass_rate"]},
+            "suggestions": [{"id": s.get("id"), "parent": s.get("parent_study"),
+                             "status": s.get("status"),
+                             "needs": (s.get("awaiting_expert") or [None])[0]}
+                            for s in (cyc.get("suggestions") or [])],
+            "validator_census": census,
+            "drift": {"divergences": sum(1 for i in frontier if i["kind"] == "divergence"),
+                      "stale_validations": len(
+                          de.stale_records(recs, inv_spec.get("validation_snapshot")))},
+        }
+    except Exception:
+        return None
+
+
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
     """Assemble the pure report-data dict for one investigation from existing
     files only. Raises FileNotFoundError if the investigation is missing.
@@ -1147,6 +1191,10 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "at_a_glance": inv.get("at_a_glance"),
         "acceptance_criteria": inv.get("acceptance_criteria"),
         "spine": spine,
+        # The discovery engine's live "what to do next" view (value-ranked
+        # opportunities, diagnosis, expert-gated study suggestions, drift). None when
+        # the installed viva_superpowers predates the engine — renders as a no-op.
+        "discovery": _build_discovery(ws_root, inv_slug),
         # Deterministic cross-study synthesis (claim-evidence map, stage-grouped
         # integrated findings, contradictions, continuity, roadmap, figure ranking,
         # run-status/evidence/claim separation) — the finding-first report layer.
