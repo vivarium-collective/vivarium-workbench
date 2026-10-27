@@ -1002,6 +1002,13 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
                               for o in opps[:10]],
             "diagnosis": {"flags": [f["flag"] for f in diag["flags"]],
                           "validator_pass_rate": diag["validator_pass_rate"]},
+            # the recommendation->action bridge (Decide surface): each next move + how
+            # it would be executed + its consequence class. None on an older engine.
+            "execution_plan": ([{"source": p["source"], "action": p["action_type"],
+                                 "score": p["score"], "consequence": p["consequence"],
+                                 "command": p["command"]}
+                                for p in de.execute_plan(cyc, inv_spec)[:8]]
+                               if hasattr(de, "execute_plan") else None),
             "suggestions": [{"id": s.get("id"), "parent": s.get("parent_study"),
                              "status": s.get("status"),
                              "needs": (s.get("awaiting_expert") or [None])[0]}
