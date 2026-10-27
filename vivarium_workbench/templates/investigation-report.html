@@ -1661,6 +1661,7 @@ function toc(inv){
   // background, ground rules, the key-figure gallery) now lives in the
   // Supplement, reached via the single Supplement link.
   const front=['<a href="#exec-summary" class="exec">Summary</a>'];
+  if(inv.discovery) front.push('<a href="#discovery">Discovery</a>');
   if(inv.spine) front.push('<a href="#spine-presentation">Map</a>');
   if((inv.studies||[]).length) front.push('<a href="#studies">Studies</a>');
   if((syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)) front.push('<a href="#synthesis-gaps">Synthesis &amp; gaps</a>');
@@ -1675,6 +1676,7 @@ function toc(inv){
   const _ndl=(href,label)=>`<a class="nd-link" href="${href}">${label}</a>`;
   const mainLinks=[
     ['#exec-summary','Summary',true],
+    ['#discovery','Discovery — what to do next',!!inv.discovery],
     ['#spine-presentation','Investigation map',!!inv.spine],
     ['#studies','Studies',(inv.studies||[]).length],
     ['#synthesis-gaps','Synthesis & gaps',(syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
@@ -2388,6 +2390,7 @@ function execSummary(inv){
     <div class="sec-h"><h2>Executive summary</h2><span class="rule"></span></div>
     ${q?`<p class="prose" style="font-size:16px;margin:2px 0 8px"><b>Question.</b> ${esc(q)}</p>`:''}
     ${verdict?`<div class="prose" style="font-size:15.5px">${mdLite(verdict)}</div>`:''}
+    ${(ex.verdict_detail||'').trim()?`<div class="prose measure" style="font-size:14px;color:var(--ink-2);margin:6px 0 0">${mdLite(ex.verdict_detail)}</div>`:''}
     ${gl?`<div style="margin-top:12px"><div class="kicker" style="margin-bottom:6px">Milestone outcomes</div><div>${gl}</div></div>`:''}
     <p class="measure" style="color:var(--ink-2);font-size:12.5px;margin:12px 0 0;line-height:1.5">
       Across <b>${c.total||0}</b> studies — <b>${c.supported||0}</b> supported · <b>${c.qualified||0}</b> qualified · <b>${c.refuted||0}</b> refuted · <b>${c.planned||0}</b> planned.
