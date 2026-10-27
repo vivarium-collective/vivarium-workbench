@@ -1289,7 +1289,17 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
     for t in (spec.get("tests") or []) + (spec.get("behavior_tests") or []):
         if not isinstance(t, dict):
             continue
-        m = t.get("measure") or {}
+        # ``measure`` is schema-typed ["string", "object"]: a string measure
+        # (e.g. a prose metric description) carries no path, so only dict
+        # measures contribute one. Guard so a string measure doesn't raise
+        # ``'str' object has no attribute 'get'`` and 500 study-run-baseline.
+        m = t.get("measure")
+        if not isinstance(m, dict):
+            continue
+        # A derived-scalar measure's own ``path`` is the name of a computed value,
+        # not an emittable observable — resolve it to the SOURCE observables the
+        # computer reads so the run emits those. Fall back to the literal path for
+        # a plain (non-derived) measure.
         srcs = _req_obs(m, _ws) if _req_obs is not None else None
         if srcs:
             for s in srcs:

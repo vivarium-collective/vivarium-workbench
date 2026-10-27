@@ -608,7 +608,21 @@
     if (window.ResizeObserver) { var ro = new ResizeObserver(syncVars); ro.observe(panel); }
     window.addEventListener('resize', function () { if (isOpen()) ensureStack(dock); syncVars(); });
 
-    setOpen(lsGet(K.open, '0') === '1');            // render the initial open/closed state
+    // Render the initial open/closed state. On a phone every dockable panel is a
+    // full-screen sheet over the content (responsive.css), so a remembered "open"
+    // from an earlier desktop visit (localStorage is shared across every
+    // github.io/<repo>/ site) must NOT restore: it would land the user on an empty
+    // sheet, flip the bottom nav to that panel and squeeze the top bar into a
+    // sliver. Start closed and leave the stored desktop preference untouched.
+    var phoneStart = false;
+    try { phoneStart = !!(window.matchMedia && window.matchMedia('(max-width:640px)').matches); } catch (e) { /* ignore */ }
+    if (phoneStart) {
+      var storedOpen = lsGet(K.open, '0');
+      setOpen(false);
+      lsSet(K.open, storedOpen);
+    } else {
+      setOpen(lsGet(K.open, '0') === '1');
+    }
 
     return {
       open: function () { setOpen(true); },
