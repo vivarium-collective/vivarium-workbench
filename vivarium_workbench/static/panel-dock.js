@@ -29,6 +29,24 @@
       });
       localStorage.setItem('viv.panels.reset.v1', '1');
     }
+    // v2: the dock-layout storage changed from a flat per-side order
+    // (`viv.dock.order` = {side: [key,...]}) to a multi-lane model (side-by-side
+    // columns), and the per-side stack sizes/grows gained a lane dimension.
+    // A browser upgraded from an earlier build still holds the OLD-shape layout,
+    // which wedges the new engine — panels pile onto one dock at a stale width,
+    // so they overlap, look unresponsive, and resist dragging (no exception; it's
+    // a silent layout corruption). Clear the format-changed layout keys ONCE so
+    // the panels fall back to their defaults; later dock/drag choices re-persist
+    // in the new shape. Open/collapsed prefs (viv.*.userset / .open / .dock) are
+    // untouched — only the layout geometry is stale.
+    if (localStorage.getItem('viv.panels.reset.v2') == null) {
+      Object.keys(localStorage).forEach(function (k) {
+        if (k === 'viv.dock.order' || k.indexOf('viv.stack.') === 0) {
+          localStorage.removeItem(k);
+        }
+      });
+      localStorage.setItem('viv.panels.reset.v2', '1');
+    }
   } catch (e) { /* private mode — the right/closed defaults already apply */ }
 
   function svg(inner) {
