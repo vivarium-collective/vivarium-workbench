@@ -69,7 +69,7 @@ def test_augment_noop_when_skipped(tmp_path, monkeypatch):
 
 def _stub_workspace_audit(monkeypatch, studies):
     """Make build_audit's upstream study_audit return a fixed report."""
-    import viva_superpowers.study_audit as sa
+    import discovery_engine.study_audit as sa
 
     class _FakeReport:
         def as_dict(self):
@@ -108,7 +108,7 @@ def test_build_audit_unavailable_is_not_false_pass(tmp_path, monkeypatch):
     # When the structural audit can't run (e.g. a missing dep like ruamel),
     # build_audit must NOT report every study as worst="pass" — that silently
     # hides non-compliance behind false green (the lumenoid trap).
-    import viva_superpowers.study_audit as sa
+    import discovery_engine.study_audit as sa
     from vivarium_workbench.lib import audit_grade
 
     def _boom(ws_root, extra_packages=None):

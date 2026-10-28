@@ -3,7 +3,7 @@
 
 The endpoint returns the investigation's competing ``hypotheses[]`` with a
 COMPUTED ``support_log`` folded in via the deterministic
-``viva_superpowers.hypotheses.rollup_support`` (falling back to
+``discovery_engine.hypotheses.rollup_support`` (falling back to
 ``score_support`` per hypothesis). AI-free + tolerant: never 500, returns the
 authored hypotheses un-enriched on absence/failure.
 """
@@ -59,7 +59,7 @@ def test_tolerant_on_missing_investigation(tmp_ws):
 
 
 def test_rollup_support_enriches_support_log(tmp_ws, monkeypatch):
-    """When viva_superpowers.hypotheses.rollup_support is importable, its enriched
+    """When discovery_engine.hypotheses.rollup_support is importable, its enriched
     hypotheses (with support_log) flow through to the payload."""
 
     def _rollup(inv_spec, study_specs):
@@ -73,9 +73,9 @@ def test_rollup_support_enriches_support_log(tmp_ws, monkeypatch):
             hyps.append(h2)
         return {**inv_spec, "hypotheses": hyps}
 
-    fake = types.ModuleType("viva_superpowers.hypotheses")
+    fake = types.ModuleType("discovery_engine.hypotheses")
     fake.rollup_support = _rollup
-    monkeypatch.setitem(sys.modules, "viva_superpowers.hypotheses", fake)
+    monkeypatch.setitem(sys.modules, "discovery_engine.hypotheses", fake)
 
     d = build_investigation_hypotheses(tmp_ws, "the-inv")
     log = d["hypotheses"][0]["support_log"]
@@ -87,13 +87,13 @@ def test_falls_back_to_score_support(tmp_ws, monkeypatch):
     """When rollup_support is absent but score_support exists, support_log is
     computed per hypothesis."""
 
-    fake = types.ModuleType("viva_superpowers.hypotheses")
+    fake = types.ModuleType("discovery_engine.hypotheses")
     # No rollup_support attribute → the import in the worker raises ImportError.
     fake.score_support = lambda h, study_specs: [
         {"study": s.get("name"), "observation": "matched prediction", "delta": "weakens"}
         for s in study_specs
     ]
-    monkeypatch.setitem(sys.modules, "viva_superpowers.hypotheses", fake)
+    monkeypatch.setitem(sys.modules, "discovery_engine.hypotheses", fake)
 
     d = build_investigation_hypotheses(tmp_ws, "the-inv")
     log = d["hypotheses"][0]["support_log"]
@@ -103,9 +103,9 @@ def test_falls_back_to_score_support(tmp_ws, monkeypatch):
 def test_tolerant_on_compute_failure(tmp_ws, monkeypatch):
     """A throwing rollup_support degrades to the authored hypotheses, not 500."""
 
-    fake = types.ModuleType("viva_superpowers.hypotheses")
+    fake = types.ModuleType("discovery_engine.hypotheses")
     fake.rollup_support = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
-    monkeypatch.setitem(sys.modules, "viva_superpowers.hypotheses", fake)
+    monkeypatch.setitem(sys.modules, "discovery_engine.hypotheses", fake)
 
     d = build_investigation_hypotheses(tmp_ws, "the-inv")
     assert d["hypotheses"][0]["id"] == "H1"  # authored, un-enriched

@@ -220,7 +220,7 @@ class TestLoadStudyDetailSpec:
 
 # ---------------------------------------------------------------------------
 # _latest_outcomes — canonical-run resolution (aligns SERVER with the client's
-# viva_superpowers.study_outcomes.canonical_outcomes: canonical: true wins,
+# discovery_engine.study_outcomes.canonical_outcomes: canonical: true wins,
 # else newest completed run — NOT last-run-wins across all runs).
 # ---------------------------------------------------------------------------
 

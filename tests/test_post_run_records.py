@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from viva_superpowers import study_io, run_registry, study_outcomes
+from discovery_engine import study_io, run_registry, study_outcomes
 
 
 def test_sync_after_run_picks_up_db_row(tmp_path: Path):
@@ -22,7 +22,7 @@ def test_post_run_hook_calls_sync(tmp_path: Path):
     d = tmp_path / "studies" / "s1"; d.mkdir(parents=True)
     study_io.save_yaml_atomic(d / "study.yaml", {"name": "s1", "runs": []})
 
-    with patch("viva_superpowers.study_outcomes.sync") as mock_sync:
+    with patch("discovery_engine.study_outcomes.sync") as mock_sync:
         mock_sync.return_value = {"added": 0, "updated": 0, "computed": {"runs_evaluated": 0,
                                                                           "tests_code": 0,
                                                                           "tests_agent": 0}}

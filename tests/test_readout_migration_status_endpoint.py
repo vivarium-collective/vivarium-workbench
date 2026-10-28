@@ -3,7 +3,7 @@
 
 Phase 2.1d (rewire-first): the read-only STATUS sibling of
 ``/api/study-readout-migrate``. This endpoint wraps
-``viva_superpowers.readout_migration.readout_migration_status`` unchanged — the
+``discovery_engine.readout_migration.readout_migration_status`` unchanged — the
 plugin still computes the migration buckets, only the caller (the workbench, on
 behalf of the ``/viva-report`` skill) moves. These tests exercise the lib
 builder directly (the same "endpoint test calls the lib fn" idiom as
@@ -67,7 +67,7 @@ def test_unknown_study_404(tmp_path):
 
 
 def test_status_buckets_and_is_read_only(tmp_path):
-    pytest.importorskip("viva_superpowers.readout_migration")
+    pytest.importorskip("discovery_engine.readout_migration")
 
     ws, sy = _study_ws(tmp_path)
     original = sy.read_text()
@@ -93,10 +93,10 @@ def test_status_buckets_and_is_read_only(tmp_path):
 
 def test_equivalence_with_direct_readout_migration_status_call(tmp_path):
     """The endpoint's result must match calling
-    ``viva_superpowers.readout_migration.readout_migration_status`` directly —
+    ``discovery_engine.readout_migration.readout_migration_status`` directly —
     same buckets, same values."""
     pbg_readout_migration = pytest.importorskip(
-        "viva_superpowers.readout_migration"
+        "discovery_engine.readout_migration"
     )
 
     ws, sy = _study_ws(tmp_path)

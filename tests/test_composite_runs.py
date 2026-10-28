@@ -612,7 +612,7 @@ def test_delete_run_removes_row(tmp_path):
 def test_collect_emit_paths_resolves_derived_measure_to_source(monkeypatch):
     """A derived-scalar measure emits its SOURCE observable, not the (un-produced)
     derived name — so the run captures what the gate's evaluator reads."""
-    import viva_superpowers.study_evaluator as SE
+    import discovery_engine.study_evaluator as SE
     monkeypatch.setattr(
         SE, "required_observables_for_measure",
         lambda m, ws: ({"enrichment_factor"} if (m or {}).get("path") == "log10_enrichment"

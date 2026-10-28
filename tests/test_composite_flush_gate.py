@@ -1,7 +1,7 @@
 """composite_flush writes a severity-aware study gate to run_dir/report.json.
 
 Only hard-severity axis mismatches FAIL; a soft mismatch or drift WARNs;
-directional axes never gate (via viva_superpowers.study_verdict.severity_gate).
+directional axes never gate (via discovery_engine.study_verdict.severity_gate).
 Best-effort: any failure returns None and leaves no partial report.json.
 """
 import json

@@ -87,7 +87,7 @@ def test_switch_is_isolated_across_sessions(tmp_path, monkeypatch):
     """The load-bearing slice-4 property: session A switching does not move
     session B, nor the process-global default."""
     from fastapi.testclient import TestClient
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
     from vivarium_workbench.api.app import create_app
     from vivarium_workbench.lib import _root
 

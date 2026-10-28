@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("viva_superpowers.argument_store")
-pytest.importorskip("viva_superpowers.narrative")
+pytest.importorskip("discovery_engine.argument_store")
+pytest.importorskip("discovery_engine.narrative")
 
 from viva_superpowers import study_io  # noqa: E402
 from vivarium_workbench.lib.needs_attention import scan_investigation  # noqa: E402

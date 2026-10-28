@@ -326,7 +326,7 @@ def test_grade_study_storeless_derived_scalar_with_registered_computer(tmp_path,
     registry (via ObservableNotFound with reader=None), not the run store. This
     is the ParCa-study path: derived_scalar IS store-less-gradeable."""
     import yaml as _yaml
-    import viva_superpowers.study_evaluator as se
+    import discovery_engine.study_evaluator as se
 
     study_dir = tmp_path / "studies" / "derived-study"
     study_dir.mkdir(parents=True)

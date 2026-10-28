@@ -26,7 +26,7 @@ _V2E = Path("/Users/eranagmon/code/v2e-invest")
 
 @pytest.mark.skipif(not _V2E.is_dir(), reason="v2e-invest workspace not present")
 def test_viz_stale_demoted_to_one_info_per_study_on_v2e_invest():
-    from viva_superpowers.report_linter import lint_workspace_report
+    from discovery_engine.report_linter import lint_workspace_report
 
     findings = lint_workspace_report(_V2E)  # read-only
     viz = [f for f in findings if f.check == "viz_stale_vs_latest_run"]

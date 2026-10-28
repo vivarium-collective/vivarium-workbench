@@ -2,7 +2,7 @@
 (``lib.iset_close_views.iset_close``).
 
 Phase 2.1h (rewire-first): this endpoint wraps
-``viva_superpowers.investigation_close.close_investigation`` unchanged — the
+``discovery_engine.investigation_close.close_investigation`` unchanged — the
 plugin still renders the report, derives contributors, stamps the YAML, and
 commits/PRs; only the caller (the workbench, on behalf of ``/viva-investigation
 close``) moves. These tests exercise the lib builder directly (the same
@@ -111,7 +111,7 @@ def test_write_stamps_yaml_and_commits(ws_with_investigation):
 def test_equivalence_with_direct_close_call(tmp_path):
     """The endpoint result must match calling
     ``investigation_close.close_investigation`` directly (dry-run path)."""
-    pbg_close = pytest.importorskip("viva_superpowers.investigation_close")
+    pbg_close = pytest.importorskip("discovery_engine.investigation_close")
 
     # Build two identical fixtures.
     def build(root):

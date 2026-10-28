@@ -216,7 +216,7 @@ def test_study_sync_runs_unknown_study(ws: Path) -> None:
 
 
 def test_study_sync_runs_happy(ws: Path) -> None:
-    from viva_superpowers import run_registry, study_io
+    from discovery_engine import run_registry, study_io
 
     d = ws / "studies" / "s1"
     d.mkdir()

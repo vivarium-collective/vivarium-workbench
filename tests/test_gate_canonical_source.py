@@ -1,4 +1,4 @@
-from viva_superpowers import study_status
+from discovery_engine import study_status
 
 
 def _passed(parent):

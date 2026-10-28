@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from vivarium_workbench.lib import auto_evaluate as ae
-from viva_superpowers import study_io
+from discovery_engine import study_io
 
 
 def _write_study(tmp_path: Path, text: str) -> Path:

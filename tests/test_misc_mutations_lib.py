@@ -135,7 +135,7 @@ class TestRenderDashboardForce:
         return ws
 
     def test_force_writes_override_log_for_blocking_finding(self, tmp_path, monkeypatch):
-        pytest.importorskip("viva_superpowers.report_linter")
+        pytest.importorskip("discovery_engine.report_linter")
         ws = self._ws_with_blocking_finding(tmp_path)
         monkeypatch.setattr(mm, "render_workspace_report", lambda ws_root, **kw: None)
 
@@ -157,7 +157,7 @@ class TestRenderDashboardForce:
         assert not (ws / ".pbg" / "report-lint-overrides.json").exists()
 
     def test_force_idempotent_does_not_double_log(self, tmp_path, monkeypatch):
-        pytest.importorskip("viva_superpowers.report_linter")
+        pytest.importorskip("discovery_engine.report_linter")
         ws = self._ws_with_blocking_finding(tmp_path)
         monkeypatch.setattr(mm, "render_workspace_report", lambda ws_root, **kw: None)
 
