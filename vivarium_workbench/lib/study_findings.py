@@ -354,7 +354,7 @@ _STOP = {
 def load_bib_keys(ws_root: Path) -> set[str]:
     """Every @entry key declared in the workspace bibliography (best-effort).
 
-    Thin wrapper over the shared :func:`viva_superpowers.bibtex.bib_keys` so the
+    Thin wrapper over the shared :func:`discovery_engine.bibtex.bib_keys` so the
     findings writer, the report linter, and study verify all resolve the same
     file with the same parser.
     """

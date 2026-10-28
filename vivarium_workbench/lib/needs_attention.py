@@ -889,8 +889,8 @@ def open_epistemic_debts(spec: dict) -> list[dict]:
     Returns a severity-sorted list of ``{"kind", "ref", "note", "severity"}``
     where ``kind`` is one of ``claim-untested | control-absent |
     metric-uncalibrated | alternative-not-excluded | region-unexplored |
-    viz-stale``. PURE; reuses :mod:`viva_superpowers.rigor` +
-    :mod:`viva_superpowers.viz_freshness` rather than reinventing the harvest, so
+    viz-stale``. PURE; reuses :mod:`discovery_engine.rigor` +
+    :mod:`discovery_engine.viz_freshness` rather than reinventing the harvest, so
     it can't drift from the scorecard. Tolerant of a minimal/empty spec.
     """
     spec = spec or {}

@@ -7,7 +7,7 @@ the handlers.
 
 ``investigation-rigor`` is intentionally NOT built here: it depends on the
 per-study run-merging loader (``study_spec.load_study_detail_spec`` merges
-runs.db + reconciles simulation_set), which ``viva_superpowers.rigor`` reads via
+runs.db + reconciles simulation_set), which ``discovery_engine.rigor`` reads via
 ``spec["runs"]``.
 
 Builders
@@ -216,7 +216,7 @@ def build_investigation_hypotheses(ws_root: Path, name: str) -> dict:
 
     Returns ``{hypotheses: [...], investigation: name}`` always (never raises).
     The ``hypotheses`` list carries computed ``support_log`` fields (via
-    ``viva_superpowers.hypotheses.rollup_support`` / ``score_support``).  An
+    ``discovery_engine.hypotheses.rollup_support`` / ``score_support``).  An
     absent ``viva_superpowers``, missing investigation, or compute failure
     returns the authored hypotheses unchanged (or an empty list) rather than
     a 500.

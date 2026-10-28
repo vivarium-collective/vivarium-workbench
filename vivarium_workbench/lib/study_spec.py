@@ -5,7 +5,7 @@ the per-study loader that resolves a study's spec, **merges the runs recorded in
 ``studies/<slug>/runs.db``** on top of any ``spec.runs`` persisted in
 study.yaml, **reconciles ``simulation_set``** with what actually ran, and
 **auto-discovers pre-rendered viz HTML**.  Several routes need exactly this
-merged spec — most importantly rigor (``viva_superpowers.rigor`` reads
+merged spec — most importantly rigor (``discovery_engine.rigor`` reads
 ``spec["runs"]`` for the replication + run-persistence dimensions), and
 ``GET /api/study/{slug}`` (Phase A, Batch 4).
 
@@ -440,7 +440,7 @@ def read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]:
     conn = sqlite3.connect(str(runs_db)) if runs_db.is_file() else None
     if conn is not None:
         conn.row_factory = sqlite3.Row
-    # Every record read from this database is persisted in it, and says so: the rigor scorecard (viva_superpowers.rigor,
+    # Every record read from this database is persisted in it, and says so: the rigor scorecard (discovery_engine.rigor,
     # run persistence) accepts a run only if its record carries an emitter or a run-db reference such as ``db_path``.
     db_path = os.path.relpath(runs_db, ws_root).replace(os.sep, "/") if conn is not None else None
     try:
@@ -981,7 +981,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # Rigor count-split (viva-superpowers #285): the pins-vs-acceptance-vs-
         # expected-fail verdict ledger, so views can render "pins 2/2 ·
         # acceptance 1/2 · expected-fail behaved 1/1" instead of one conflated
-        # "gate: passed". gate_rigor delegates to viva_superpowers.study_verdict
+        # "gate: passed". gate_rigor delegates to discovery_engine.study_verdict
         # .verdict_count_split when importable, mirrors the buckets locally
         # otherwise. Render-only; best-effort.
         try:
@@ -1018,7 +1018,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
 
         # Wave 3b #25 — attach the derived lifecycle floor to each finding (the
         # report-data path so the SPA renders the chip without a JS recompute).
-        # Defensive: a missing viva_superpowers.study_verdict.lifecycle_floor
+        # Defensive: a missing discovery_engine.study_verdict.lifecycle_floor
         # leaves findings untouched (the chip then shows only the authored state).
         try:
             from discovery_engine.study_verdict import lifecycle_floor as _lf
@@ -1656,7 +1656,7 @@ _COMPLETE_STATUSES = {"complete", "completed", "ran", "done"}
 def _latest_outcomes(spec: dict) -> tuple[dict, dict]:
     """Resolve the study's authoritative per-test outcomes from the single
     *canonical* run (see ``_canonical_run``), mirroring the client's
-    ``viva_superpowers.study_outcomes.canonical_outcomes``.
+    ``discovery_engine.study_outcomes.canonical_outcomes``.
 
     Previously this aggregated last-run-wins across ALL runs and ignored the
     ``canonical:`` flag, so the report (client, canonical-run) and the study

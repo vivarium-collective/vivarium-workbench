@@ -1171,7 +1171,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
     except Exception:  # noqa: BLE001
         _synthesis["validation"] = {"items": [], "summary": {"total": 0, "by_kind": {}, "by_severity": {}}}
     # Also fold in the EXISTING report-readiness linter (report_views.build_report_lint
-    # → viva_superpowers.report_linter + the dashboard's composite-resolution,
+    # → discovery_engine.report_linter + the dashboard's composite-resolution,
     # readout-emit-plan, question/approach and visualization-gap checks). Same
     # deterministic infra the live report-lint endpoint uses — reused, not rebuilt.
     try:

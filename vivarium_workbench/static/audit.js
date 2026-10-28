@@ -1,6 +1,6 @@
 // vivarium_workbench/static/audit.js
 // Read-only Audit view: renders the L0-L5 study-reproducibility audit report
-// (GET /api/audit → viva_superpowers.study_audit) as a summary header plus a
+// (GET /api/audit → discovery_engine.study_audit) as a summary header plus a
 // compact per-study / per-investigation block listing each check as
 // "✓/⚠/✗ L# check-name — detail", colored by status. Purely presentational and
 // self-contained (CSP-safe, no external assets). Renders in BOTH live and

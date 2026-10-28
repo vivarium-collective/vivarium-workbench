@@ -11,8 +11,9 @@ import sqlite3
 import traceback
 from pathlib import Path
 
-from viva_superpowers import diff_reports, build_report
+from discovery_engine.post_sim import build_report
 from discovery_engine.study_verdict import severity_gate
+from discovery_engine.test_diff import diff_reports
 from vivarium_workbench.lib.conclusion_card import _CANON_SEVERITY
 from vivarium_workbench.lib.ephemeral_study import merge_declarations
 
@@ -144,7 +145,7 @@ def _write_report_gate(run_dir, study_name, run_id, *,
     Aggregates this run's per-card verdicts (``_load_verdict_cards``) into a
     ``test_report/v1`` and gates it on axis severity: only ``hard``-severity axis
     mismatches FAIL; a soft mismatch or drift WARNs; directional axes never gate
-    (see ``viva_superpowers.study_verdict.severity_gate``). Pure + best-effort in
+    (see ``discovery_engine.study_verdict.severity_gate``). Pure + best-effort in
     the same style as ``_write_test_diff`` — never raises into the run loop.
     """
     run_dir = Path(run_dir)

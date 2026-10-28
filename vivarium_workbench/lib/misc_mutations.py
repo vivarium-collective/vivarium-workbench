@@ -57,7 +57,7 @@ def render_dashboard(ws_root: Path, body: Any = None) -> tuple[dict, int]:
 
     Phase 2.1d — ``body`` (all fields optional; ``None``/``{}`` preserves the
     previous unconditional-render behavior) mirrors the old ``/viva-report``
-    skill's CLI render usage (``viva_superpowers.report.render_workspace_report``)
+    skill's CLI render usage (``discovery_engine.report.render_workspace_report``)
     so the skill can call this endpoint as a thin client instead of
     reimplementing the render:
 
@@ -97,7 +97,7 @@ def render_dashboard(ws_root: Path, body: Any = None) -> tuple[dict, int]:
 def _log_force_overrides(ws_root: Path) -> None:
     """Best-effort port of the plugin's forced-render override logging.
 
-    Mirrors ``viva_superpowers.report.render_workspace_report(force=True,
+    Mirrors ``discovery_engine.report.render_workspace_report(force=True,
     on_force_log_overrides=True)``: run the structural linter and, for every
     currently error-level finding not already logged in
     ``.pbg/report-lint-overrides.json``, append it via

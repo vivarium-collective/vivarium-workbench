@@ -104,7 +104,7 @@ def reconcile_simset_with_runs(sim_set, runs, ws_root: Optional[Path] = None):
             seeds = sorted({x for r in mruns for x in _seeds(r)})
             # Prefer the framework-baked run-record summary (generations /
             # sim_minutes / n_readouts persisted at record time by
-            # viva_superpowers.study_outcomes). Falls back to opening the store
+            # discovery_engine.study_outcomes). Falls back to opening the store
             # only for legacy runs recorded before the summary was baked in.
             gens = [r.get("generations") for r in mruns if r.get("generations")]
             mins = [r.get("sim_minutes") or r.get("duration_min") for r in mruns

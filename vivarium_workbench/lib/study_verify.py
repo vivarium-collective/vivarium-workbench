@@ -332,7 +332,7 @@ def _check_parent_studies(study: dict, ws_root: Path | None) -> Iterable[VerifyF
 def _load_bib_keys(ws_root: Path | None) -> set[str] | None:
     """Workspace bib keys, or None when there's no bib file (soft-skip).
 
-    Delegates to the shared :func:`viva_superpowers.bibtex.bib_keys` so verify
+    Delegates to the shared :func:`discovery_engine.bibtex.bib_keys` so verify
     resolves the SAME file (``references/papers.bib`` first) and parser as the
     report linter — previously verify read a different file with a different
     regex, so a cite could pass one gate and fail the other.

@@ -76,7 +76,8 @@ vivarium-workbench gen-readme --workspace /path/to/ws [--check]
 There is no separate build step (pure Python + static assets) and no linter
 configured in the repo. Dependencies are managed with `uv` (`uv.lock`); install
 editable with `pip install -e .` (or `uv pip install -e .`) into the venv that
-will run it. Note `bigraph-loom` and `pbg-superpowers` are direct git/path deps.
+will run it. Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
+`discovery-engine` are direct git/path deps.
 
 ## Architecture
 
@@ -94,11 +95,21 @@ The old stdlib `BaseHTTPRequestHandler` (`server.py`, ~9.6k lines) has been
 own code + tests import from there. `server.py` is now a ~40-line **deprecation
 shim** that re-exports only six symbols still consumed by external repos
 (v2ecoli / sms-ecoli import `_json_default`/`_json_sanitize`/`_json_body`;
-pbg-superpowers imports `_build_iset_summary_for_test`/`_build_iset_detail_for_test`/
+viva-superpowers imports `_build_iset_summary_for_test`/`_build_iset_detail_for_test`/
 `_observables_for_ref`) from their new `lib` homes (`lib/json_serialize.py`,
 `lib/iset_test_shims.py`, `lib/observables_views.py`). The `dashboard_client`
 test fixture now spawns the live FastAPI app. Do **not** add new dependencies on
 `server.py` — import the `lib` homes directly.
+
+**Plugin split.** `discovery_engine` (the `discovery-engine` package) holds the investigation/study
+framework and the discovery cycle: study audit/evaluation/verdict/status, rigor,
+the report linter, the argument/knowledge/narrative projections, post-sim steps,
+and `viz_freshness`. `viva_superpowers` is the skills-first facade plus the helpers
+that stayed behind (`catalog`, `feedback_import`, `feedback_tracking`,
+`chart_store`, `run_params`, `loop_state`, `test_audit`); for moved modules it
+keeps only back-compat shims. New workbench code imports moved modules from
+`discovery_engine.*` directly, and `tests/test_plugin_import_allowlist.py` plus
+the import-linter config govern both packages.
 
 Supporting the typed contract: `lib/models.py` holds pydantic models for the JSON
 payloads (many still `extra="allow"` passthroughs — tightening them is tracked in
@@ -174,8 +185,11 @@ behavior, consider both the live and snapshot data sources.
   commit to — keep the two mental models separate.
 
 ## Companion projects
-- **pbg-superpowers** — Claude Code plugin whose `/pbg-*` skills drive this
-  dashboard's HTTP API (AI-assisted authoring). A runtime dependency.
+- **viva-superpowers** (formerly pbg-superpowers) — Claude Code plugin whose
+  `/viva-*` skills drive this dashboard's HTTP API (AI-assisted authoring). A
+  runtime dependency.
+- **discovery-engine** — the investigation/study framework + discovery cycle
+  (`discovery_engine.*`), extracted from viva-superpowers. A runtime git dependency.
 - **viva-template** — the workspace scaffold this dashboard serves; ships the
   canonical `.pbg/schemas/` validators the dashboard reads at save time.
 - **bigraph-loom** — embedded state-tree (bigraph) explorer, served at

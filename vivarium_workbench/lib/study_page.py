@@ -199,7 +199,7 @@ def _jinja_markdown(text):
 #     within_tol / drift / mismatch / ungraded.
 #   - acceptance-criterion result tokens — spine_acceptance's per-criterion
 #     `result` (study_enrichment.study_acceptance_criterion), sourced from
-#     viva_superpowers.investigation_status's _CRIT_PASS/_CRIT_FAIL/
+#     discovery_engine.investigation_status's _CRIT_PASS/_CRIT_FAIL/
 #     _CRIT_CAVEATS/_CRIT_PROGRESS: passing / failing /
 #     passing-with-caveats / in-progress.
 # Matching is case-insensitive. Anything outside these three families — an
@@ -218,7 +218,7 @@ _OUTCOME_TOKEN_MAP: dict[str, str] = {
     "DRIFT": "conditional-pass",
     "MISMATCH": "not met",
     "UNGRADED": "not assessable",
-    # acceptance-criterion tokens (viva_superpowers.investigation_status)
+    # acceptance-criterion tokens (discovery_engine.investigation_status)
     "PASSING": "met",
     "FAILING": "not met",
     "PASSING-WITH-CAVEATS": "conditional-pass",
@@ -282,7 +282,7 @@ def outcome_glyph(token) -> str:
 # Checked and deliberately NOT rendered as attribution (no real actor
 # identity behind them):
 #   - computed_gate_verdict.evaluated_by (persisted pipeline_gate.gate_evaluator
-#     / viva_superpowers.study_verdict.roll_up_verdict) is ALWAYS the literal
+#     / discovery_engine.study_verdict.roll_up_verdict) is ALWAYS the literal
 #     string "code" — a machine-evaluator marker, not a person/agent identity.
 #     Rendering "by code" on every gate row would be decorative, not honest
 #     attribution, so the six-gate ladder carries no per-gate actor here.
@@ -293,14 +293,14 @@ def outcome_glyph(token) -> str:
 #     verdict card's attribution line renders the literal "unattributed"
 #     token until that field exists.
 #   - findings[] and spine_acceptance.criteria[] (study_acceptance_criterion /
-#     viva_superpowers.investigation_status.roll_up_acceptance) carry no
+#     discovery_engine.investigation_status.roll_up_acceptance) carry no
 #     author/responded_by/decided_by field in the current schema — only
 #     {study, behavior, result}.
 #
 # Human vs agent: never inferred from a bare person-name guess. The ONLY
 # thing that classifies a recorded name as "agent" is it matching a
 # well-known LLM/automation naming token — the same category of signal
-# viva_superpowers.investigation_close.derive_contributors already uses
+# discovery_engine.investigation_close.derive_contributors already uses
 # (there: an email's "noreply@anthropic.com" / "bot" / "ci" substring flags
 # a git co-author as an agent). Every other non-empty name defaults to
 # "human" — a documented DEFAULT, not a claim about who that person is:
@@ -675,7 +675,7 @@ def build_gate_ladder(spec: dict, ws_root=None, slug: Optional[str] = None) -> l
     """The ``status ▾`` gate ladder: the six axes relabeled as the six gates,
     each with its authored state plus — where a machine evaluator's value is
     ALREADY attached to *spec* by :func:`study_spec.load_study_detail_spec`
-    (``derived_status`` from ``viva_superpowers.study_status.derive_status``;
+    (``derived_status`` from ``discovery_engine.study_status.derive_status``;
     ``computed_gate_verdict`` from the persisted/rolled-up gate evaluator) — a
     computed state and a computed-vs-authored divergence flag.
 

@@ -276,7 +276,7 @@ def build_argument_overlay(ws_root, inv_slug, *, derive_fn=None, narrate_fn=None
         return _empty_argument_overlay(inv_slug)
 
     # Synthesis spine (Plan-progress) + unified open calls (Decisions). Tolerant:
-    # if viva_superpowers.synthesis isn't importable the UI just omits them.
+    # if discovery_engine.synthesis isn't importable the UI just omits them.
     gates: list = []
     decisions: list = []
     try:

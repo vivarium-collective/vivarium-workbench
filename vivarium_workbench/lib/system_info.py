@@ -32,7 +32,7 @@ def build_framework_metrics(ws_root: Path) -> dict:
 
     Aggregates framework-self metrics across EVERY study + every investigation
     in the workspace via the deterministic
-    ``viva_superpowers.rigor.framework_metrics`` (each metric is
+    ``discovery_engine.rigor.framework_metrics`` (each metric is
     ``{fraction, count, total}``).
 
     AI-free + tolerant: an absent/old viva_superpowers, or an unreadable

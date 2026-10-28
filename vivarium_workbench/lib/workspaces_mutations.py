@@ -5,7 +5,7 @@ Behaviour-preserving ports of the stdlib handlers
 ``_post_workspaces_cleanup_stale``.
 
 These 3 POSTs edit the **GLOBAL** ``~/.pbg`` workspace catalog via
-``viva_superpowers.workspace_catalog`` (already a lib; process-global, NOT server
+``discovery_engine.workspace_catalog`` (already a lib; process-global, NOT server
 state).  They take a ``path`` from the request body and use NO workspace /
 ws_root — so the builders take ONLY ``body`` and operate on the global catalog.
 There is nothing to thread through: a FastAPI call mutates the global ``~/.pbg``

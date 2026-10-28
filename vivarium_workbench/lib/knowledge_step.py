@@ -2,7 +2,7 @@
 knowledge store (Concepts + canonical Verdicts) at an event boundary.
 
 It is the thin pbg adapter around
-``viva_superpowers.knowledge_store.derive_knowledge``: the pure derivation and
+``discovery_engine.knowledge_store.derive_knowledge``: the pure derivation and
 its unit tests live in viva-superpowers; this Step wires it into the engine.
 Like the other investigation Steps it runs at a transaction boundary, NOT on the
 biological simulation schedule, and writes a read-only ``knowledge`` node — it

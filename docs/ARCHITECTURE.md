@@ -37,7 +37,7 @@ The mental model is three layers:
    ENGINE            process-bigraph + bigraph-schema     (runs the science)
       │
    TOOLING           vivarium-workbench  (THIS REPO)      (UI + orchestration + git)
-   + AI TOOLING      pbg-superpowers (/pbg-* Claude skills)
+   + AI TOOLING      viva-superpowers (/viva-* Claude skills) + discovery-engine
       │
    DATA              a workspace directory                (the only source of truth)
                      (scaffolded from viva-template)
@@ -76,7 +76,7 @@ spawns the live FastAPI app. `server.py` is now only a ~40-line deprecation shim
 re-exporting six symbols (`_json_default`/`_json_sanitize`/`_json_body` and
 `_build_iset_summary_for_test`/`_build_iset_detail_for_test`/`_observables_for_ref`)
 from their `lib` homes, retained solely for external consumers (v2ecoli,
-sms-ecoli, pbg-superpowers) until they migrate to the `lib` paths.
+sms-ecoli, viva-superpowers) until they migrate to the `lib` paths.
 
 Supporting the typed contract:
 
@@ -108,7 +108,7 @@ discovered from three sources (see `lib/composite_lookup.py`):
 1. the workspace's own package — `<package>/composites/*.composite.*`
 2. every installed `pbg-*` distribution's `composites/` directory
 3. `@composite_generator`-decorated factory functions discovered via
-   `pbg_superpowers.composite_generator`
+   `viva_superpowers.composite_generator`
 
 A composite is referenced by an id like `v2ecoli.composites.baseline.baseline`.
 The state tree itself (its structure and type system) is owned by
@@ -162,7 +162,7 @@ Two derived concepts drive the UI's "is this study OK?" signal:
 axis that is set wins. **⚠ Correction:** there are **6 axes**, not 5 —
 `gate > evaluation > simulation > implementation > design > expert_review`.
 This is why a study can show "passed" even while a later sim is still "running".
-Rollup logic lives largely in `pbg_superpowers` (`study_verdict`, `study_status`)
+Rollup logic lives largely in `discovery_engine` (`study_verdict`, `study_status`)
 and is computed on read — it is not persisted.
 
 ### Investigations: DAG, baseline vs. variants, coordinated runs
@@ -219,12 +219,12 @@ under `investigations/<inv>/studies/<slug>/`. Resolution is nested-first
 | Workspace identity & config | `workspace.yaml` | dashboard + `/pbg-*` skills (both write it) |
 | Experiment design | `studies/<slug>/study.yaml` | dashboard + `/pbg-*` skills |
 | Research-arc structure | `investigations/<slug>/investigation.yaml` | dashboard + `/pbg-*` skills |
-| Model definition | `*.composite.yaml` / generator fn | workspace package / installed pbg-* / pbg-superpowers |
+| Model definition | `*.composite.yaml` / generator fn | workspace package / installed pbg-* / viva-superpowers |
 | **Run results** | `studies/<slug>/runs.db` (or backend emitter output) | written by process-bigraph emitter during a run |
 | Audit trail | the workspace's **git history** (+ `.pbg/events.jsonl` event log) | dashboard commits most mutations; catalog ops are an exception (see §6) |
 | Validation schemas | `.pbg/schemas/*.json` | **viva-template** (read-only here) |
-| Cross-dashboard discovery | `~/.pbg/servers/` | `pbg_superpowers.workspace_catalog` |
-| Derived status/verdicts | *(not persisted — computed on read)* | `pbg_superpowers` rollups |
+| Cross-dashboard discovery | `~/.pbg/servers/` | `viva_superpowers.workspace_catalog` |
+| Derived status/verdicts | *(not persisted — computed on read)* | `discovery_engine` rollups |
 
 The key invariant: **the workspace's YAML files are the only durable store of
 authored work, and `runs.db` is the durable store of results.** Everything the
@@ -435,7 +435,17 @@ model assumes a trusted-localhost deployment. See the deep-dive §10.
 | Bigraph **type system** + JSON (de)serialization | **bigraph-schema** | `BigraphJSONEncoder` / `bigraph_json_hook` when persisting/transporting state. |
 | Interactive **state-tree (bigraph) explorer** | **bigraph-loom** | Embedded viewer; the dashboard feeds it composite-state JSON. Assets copied into the publish bundle. |
 | Workspace **scaffold** + `.pbg/schemas/` validators | **viva-template** | Read-only here. Schemas are loaded at save time (`lib/workspace_yaml.py` → `Draft7Validator`); invalid YAML is rejected with HTTP 400 *before* any commit. viva-template owns the schema versions. |
-| **AI-assisted authoring** + many runtime computations | **viva-superpowers** (formerly pbg-superpowers) | A *runtime library*, not just a plugin. Provides `workspace_catalog` (multi-dashboard discovery via `~/.pbg/servers/`), `composite_generator`, visualization discovery, and the verdict/status/rigor rollups the dashboard computes on read. Its `/viva-*` (formerly `/pbg-*`) Claude Code skills write the **same** workspace files the dashboard does. |
+| **AI-assisted authoring** + many runtime computations | **viva-superpowers** (formerly pbg-superpowers) | A *runtime library*, not just a plugin. Provides `workspace_catalog` (multi-dashboard discovery via `~/.pbg/servers/`), `composite_generator`, visualization discovery, and the skills facade. (The verdict/status/rigor rollups now live in the sibling **discovery-engine** package; see the split note below.) Its `/viva-*` (formerly `/pbg-*`) Claude Code skills write the **same** workspace files the dashboard does. |
+
+**viva_superpowers vs. discovery_engine.** `discovery_engine` (the separate `discovery-engine` git dependency) holds the investigation/study
+framework and the discovery cycle: study audit/evaluation/verdict/status, rigor,
+the report linter, the argument/knowledge/narrative projections, post-sim steps,
+and `viz_freshness`. `viva_superpowers` is the skills-first facade plus the helpers
+that stayed behind (`catalog`, `feedback_import`, `feedback_tracking`,
+`chart_store`, `run_params`, `loop_state`, `test_audit`); for moved modules it
+keeps only back-compat shims. New workbench code imports moved modules from
+`discovery_engine.*` directly, and `tests/test_plugin_import_allowlist.py` plus
+the import-linter config govern both packages.
 
 > **⚠ Coupling note:** this is the deepest and leakiest dependency in the repo —
 > **101 import statements across 47 modules** (as of v0.4.1), imported
@@ -460,7 +470,7 @@ model assumes a trusted-localhost deployment. See the deep-dive §10.
 
 ### Dual authoring (dashboard ⇄ /pbg-* skills)
 
-Both the dashboard's HTTP API and pbg-superpowers' `/pbg-*` Claude Code skills
+Both the dashboard's HTTP API and viva-superpowers' `/viva-*` Claude Code skills
 mutate the **same** `workspace.yaml` / `study.yaml` / `investigation.yaml`
 files, synchronized through git. They also hand off via `.pbg/` directories:
 e.g. the dashboard's "Create visualization" writes a `.pbg/viz-requests/<name>.md`
@@ -484,7 +494,7 @@ orchestrates simulations — either as detached `run-composite` processes
 see the §4 correction) that delegate to process-bigraph and write `runs.db` —
 then renders specs+results into verdicts and charts, for both the live server
 and a static read-only bundle. It is schema-validated by viva-template,
-AI-co-authored by pbg-superpowers, and uses bigraph-loom to visualize state
+AI-co-authored by viva-superpowers, and uses bigraph-loom to visualize state
 trees. The dashboard itself stores nothing outside the workspace. For the
 code-verified detail behind every claim here, see
 [ARCHITECTURE-DEEP-DIVE.md](ARCHITECTURE-DEEP-DIVE.md).

@@ -487,7 +487,7 @@ def _list_visualizations() -> dict:
         pass
 
     # Append report-card / test classes. They auto-register into
-    # viva_superpowers.post_sim.TEST_REGISTRY (REPORT_CARD_REGISTRY is the same
+    # discovery_engine.post_sim.TEST_REGISTRY (REPORT_CARD_REGISTRY is the same
     # dict) when the modules that define them are imported — the same
     # import-time-registration contract as the Analysis classes above, so import
     # the card modules first. Surfaces them in the Registry's "Tests" tab.
@@ -1701,7 +1701,7 @@ def _run_study_analyses(params: dict) -> dict:
 
     Two kinds of analysis are dispatched, partitioned by base class:
 
-    - **Generic** record-based analyses — ``viva_superpowers.post_sim.AnalysisStep``
+    - **Generic** record-based analyses — ``discovery_engine.post_sim.AnalysisStep``
       subclasses (e.g. viva-simularium's ``SimulariumAnalysis``) — run directly
       over a ``ResultsHandle`` built from the run's emitter output. These need no
       v2ecoli, so a plain workspace's analyses run in the flush. See

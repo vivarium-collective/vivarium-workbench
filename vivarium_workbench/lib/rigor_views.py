@@ -3,7 +3,7 @@
 The ``ws_root``-parameterised builder for the rigor GET route ported in
 Phase A, Batch 3.  It reads the **run-merged** per-study spec via
 ``lib.study_spec.load_study_detail_spec`` — this is the whole reason the loader
-was extracted first: ``viva_superpowers.rigor`` reads ``spec["runs"]`` for the
+was extracted first: ``discovery_engine.rigor`` reads ``spec["runs"]`` for the
 replication (dim 1) and run-persistence (dim 13) dimensions, so the runs.db
 merge must already be applied or the scores drift from the legacy handler.
 
@@ -62,7 +62,7 @@ def build_study_rigor(ws_root: Path, study: Optional[str]) -> dict:
 
     Returns the per-study evidence & rigor scorecard (``dimensions`` / ``score``
     / ``summary``, plus ``study_type`` / ``mode`` / ``descriptive``) from
-    ``viva_superpowers.rigor.study_rigor``, computed over the study's
+    ``discovery_engine.rigor.study_rigor``, computed over the study's
     run-merged spec loaded via :func:`vivarium_workbench.lib.study_spec.
     load_study_detail_spec` — the same loader :func:`build_investigation_rigor`
     uses for its member studies, so replication (dim 1) and run-persistence
@@ -74,7 +74,7 @@ def build_study_rigor(ws_root: Path, study: Optional[str]) -> dict:
     - 404 when no ``study.yaml`` / ``spec.yaml`` exists for the slug
       (``{"error": "study not found"}``).
 
-    Never a 500: an unimportable ``viva_superpowers.rigor`` or any exception
+    Never a 500: an unimportable ``discovery_engine.rigor`` or any exception
     raised while scoring degrades to a 200-shaped payload
     ``{"unavailable": True, "reason": "<ExceptionType>: <message>"}`` — no
     fabricated empty scorecard (spec §2 R2, "absent != empty").
@@ -96,7 +96,7 @@ def build_investigation_rigor(ws_root: Path, investigation: Optional[str]) -> di
 
     Returns the rigor roll-up across the investigation's member studies plus the
     investigation-level dimensions (adversarial coverage, traceable methodology),
-    from ``viva_superpowers.rigor.investigation_rigor``.  Each member study's spec
+    from ``discovery_engine.rigor.investigation_rigor``.  Each member study's spec
     is loaded run-merged via :func:`load_study_detail_spec`.
 
     Raises ``RigorViewError``:
