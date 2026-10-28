@@ -59,7 +59,6 @@ tests/test_visualization_endpoints.py::test_get_catalog_marks_out_of_sync_when_i
 tests/test_visualization_endpoints.py::test_post_create_from_composite_creates_v2_spec
 
 # ── Snapshot/publish + loom serving ───────────────────────────────────────────
-tests/test_data_endpoints.py::test_snapshot_css_hides_studies_rail_section
 tests/test_data_endpoints.py::test_snapshot_css_hides_switcher_and_shows_label
 tests/test_loom_explore_serve.py::test_loom_explore_index_served
 tests/test_loom_explore_serve.py::test_loom_explore_root_redirects_to_index
