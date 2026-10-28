@@ -240,7 +240,7 @@ investigation-contracts = { git = "https://github.com/vivarium-collective/invest
 # the interface without dragging in an implementation, and a cloud adapter swaps
 # in without the port changing. Enforced in CI (`lint-imports`).
 [tool.importlinter]
-root_packages = ["vivarium_workbench", "viva_superpowers"]
+root_packages = ["vivarium_workbench", "viva_superpowers", "discovery_engine"]
 
 [[tool.importlinter.contracts]]
 name = "ports are pure interfaces (no adapter / no git-impl imports)"
@@ -265,7 +265,7 @@ forbidden_modules = [
 # ALLOWED must not appear below, and vice-versa.
 #   - the Phase-1 substrate shims (moved to process_bigraph)
 #   - vivarium_workbench.lib.viz_freshness — de-vendored in 2.1a; the workbench
-#     must import viva_superpowers.viz_freshness directly, never re-vendor it.
+#     must import discovery_engine.viz_freshness directly, never re-vendor it.
 #   - vivarium_workbench.lib.backfill_runs — deleted in 2.1a as dead code.
 #   - the 12 compute modules moved into lib/ in 2.1k + the refresh_viz twin
 #     (deleted from the plugin; the workbench owns lib/refresh_viz.py).
