@@ -34,8 +34,8 @@ from typing import Any, Callable
 from discovery_engine.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib import linkage_index
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
-from viva_superpowers import rigor
-from viva_superpowers import viz_freshness
+from discovery_engine import rigor
+from discovery_engine import viz_freshness
 
 
 # ---------------------------------------------------------------------------

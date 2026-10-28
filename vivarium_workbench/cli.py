@@ -135,7 +135,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     def _unregister():
         try:
-            from viva_superpowers import workspace_catalog
+            from discovery_engine import workspace_catalog
             workspace_catalog.unregister_server(workspace)
         except Exception:
             pass
@@ -154,7 +154,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # non-fatal — the dashboard still works, it just won't appear in other
     # dashboards' switchers.
     try:
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         ws_name = _workspace_name(workspace)
         # Ensure this workspace appears in OTHER dashboards' switchers.
         # add() is idempotent; safe to call on every boot.
@@ -948,7 +948,7 @@ def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
     ``/viva-workspace`` skill — moves from ``python -m viva_superpowers.scaffold``
     to this ``vwb`` verb. The module move is 2.1k)."""
     try:
-        from viva_superpowers import scaffold
+        from discovery_engine import scaffold
     except ImportError as e:  # noqa: BLE001
         print(f"error: workspace scaffolding requires viva_superpowers: {e}", file=sys.stderr)
         return 1
@@ -978,7 +978,7 @@ def cmd_catalog_add(args: argparse.Namespace) -> int:
     ``viva_superpowers.workspace_catalog.add`` — the same call ``vwb serve``
     already makes on boot (Phase 2.1i rewire-first)."""
     try:
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
     except ImportError as e:  # noqa: BLE001
         print(f"error: catalog registration requires viva_superpowers: {e}", file=sys.stderr)
         return 1
@@ -1002,7 +1002,7 @@ def cmd_scaffold_investigation(args: argparse.Namespace) -> int:
     2.1k step 0 — completes the ``/viva-expert`` rewire; the plugin still owns
     the scaffold payload, only the caller moves)."""
     try:
-        from viva_superpowers import scaffold
+        from discovery_engine import scaffold
     except ImportError as e:  # noqa: BLE001
         print(f"error: investigation scaffolding requires viva_superpowers: {e}", file=sys.stderr)
         return 1

@@ -977,8 +977,8 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
     suggestions, and drift. Degrades gracefully (returns ``None``) when the installed
     viva_superpowers predates the discovery engine, so the report never breaks."""
     try:
-        from viva_superpowers import discover
-        from viva_superpowers import discovery_engine as de
+        from discovery_engine import discover
+        from discovery_engine import discovery_engine as de
         _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
         cyc = discover.run_cycle(inv_spec, studies)
         clo = de.closure(cyc, inv_spec)

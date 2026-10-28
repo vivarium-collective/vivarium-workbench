@@ -1212,7 +1212,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     computed_acceptance: Optional[dict] = None
     try:
         from discovery_engine.investigation_status import roll_up_acceptance
-        from viva_superpowers import study_io as _sio
+        from discovery_engine import study_io as _sio
         studies_by_name: dict = {}
         for _sd in study_wp.iter_study_dirs():
             _syp = _sd / "study.yaml"

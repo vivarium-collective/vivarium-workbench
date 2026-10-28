@@ -150,7 +150,7 @@ def build_workspaces(ws_root: Path) -> dict:
     Always returns a dict (falls back to current-only on missing/corrupt
     catalog).
     """
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
 
     current_root = ws_root
     current_resolved = str(current_root.resolve())

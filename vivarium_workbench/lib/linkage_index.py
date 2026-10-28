@@ -56,7 +56,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from viva_superpowers import study_io
+from discovery_engine import study_io
 from discovery_engine.workspace_paths import WorkspacePaths
 
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs

@@ -26,7 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from viva_superpowers import workspace_catalog
+from discovery_engine import workspace_catalog
 
 
 def workspaces_add(body: Any) -> tuple[dict, int]:

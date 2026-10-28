@@ -935,7 +935,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # flag any stored axis (or legacy planning headline) that contradicts
         # execution state. Stops the "planning status after execution" drift.
         try:
-            from viva_superpowers import study_status as _ss
+            from discovery_engine import study_status as _ss
             runs = spec.get("runs") or []
             spec["derived_status"] = _ss.derive_status(spec, runs)
             diss = _ss.status_disagreements(spec, runs)

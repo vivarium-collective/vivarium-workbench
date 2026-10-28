@@ -43,7 +43,7 @@ from vivarium_workbench.lib.atomic_io import atomic_write_text
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from viva_superpowers import study_io  # noqa: F401  (kept for the documented study_io/study_outcomes seam)
+from discovery_engine import study_io
 from discovery_engine.study_outcomes import canonical_run
 
 

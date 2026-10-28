@@ -334,7 +334,7 @@ def _condition_satisfied(parent: Optional[dict], condition: str) -> bool:
         return exec_status == "completed"
     if condition == "tests-passed":
         try:
-            from viva_superpowers import study_status  # type: ignore[import]
+            from discovery_engine import study_status
 
             counts = study_status.count_test_outcomes(parent, parent.get("runs"))
             return counts["fail"] == 0 and counts["pass"] > 0
