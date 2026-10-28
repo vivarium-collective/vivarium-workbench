@@ -11,9 +11,9 @@ the dashboard API instead, matching the pattern already used by
 Four builders, each ``(dict, int)``:
 
 - ``build_band_provenance_missing`` — ``GET /api/band-provenance?study=``
-  wraps ``viva_superpowers.band_provenance.bands_missing_provenance`` (READ).
+  wraps ``discovery_engine.band_provenance.bands_missing_provenance`` (READ).
 - ``write_band_provenance`` — ``POST /api/band-provenance``
-  wraps ``viva_superpowers.band_provenance.set_band_provenance`` (WRITE —
+  wraps ``discovery_engine.band_provenance.set_band_provenance`` (WRITE —
   the skill's ONLY sanctioned write path for citation provenance).
 - ``build_citation_gaps`` — ``GET /api/citation-gaps?investigation=``
   wraps ``vivarium_workbench.lib.citation_gaps.investigation_citation_gaps`` (READ).
@@ -57,7 +57,7 @@ def _load_raw_study_spec(sdir: Path) -> dict:
 def build_band_provenance_missing(ws_root: Path, study: Optional[str]) -> "tuple[dict, int]":
     """GET /api/band-provenance builder — the uncited-bands read.
 
-    Wraps ``viva_superpowers.band_provenance.bands_missing_provenance``.
+    Wraps ``discovery_engine.band_provenance.bands_missing_provenance``.
 
     Returns ``({"study": slug, "missing": [...]}, 200)`` where ``missing`` is
     exactly the plugin function's ``[{name, kind, band, field_path}]`` list
@@ -98,7 +98,7 @@ def build_band_provenance_missing(ws_root: Path, study: Optional[str]) -> "tuple
 def write_band_provenance(ws_root: Path, body: dict) -> "tuple[dict, int]":
     """POST /api/band-provenance builder — the ONLY sanctioned write path.
 
-    Wraps ``viva_superpowers.band_provenance.set_band_provenance``.
+    Wraps ``discovery_engine.band_provenance.set_band_provenance``.
 
     Body: ``{study, test_name, cites: [bib_key, ...], calibration_anchor?}``.
     ``cites`` must be a non-empty list of strings — this is the ``/viva-

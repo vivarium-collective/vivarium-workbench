@@ -144,7 +144,7 @@ def _write_report_gate(run_dir, study_name, run_id, *,
     Aggregates this run's per-card verdicts (``_load_verdict_cards``) into a
     ``test_report/v1`` and gates it on axis severity: only ``hard``-severity axis
     mismatches FAIL; a soft mismatch or drift WARNs; directional axes never gate
-    (see ``viva_superpowers.study_verdict.severity_gate``). Pure + best-effort in
+    (see ``discovery_engine.study_verdict.severity_gate``). Pure + best-effort in
     the same style as ``_write_test_diff`` — never raises into the run loop.
     """
     run_dir = Path(run_dir)

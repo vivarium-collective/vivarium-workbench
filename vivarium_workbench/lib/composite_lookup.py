@@ -1,6 +1,6 @@
 """Workspace-local + installed-package composite discovery.
 
-Mirrors viva_superpowers.composite_spec + composite_discovery for the dashboard's
+Mirrors discovery_engine.composite_spec + composite_discovery for the dashboard's
 use. Self-contained: no dependency on pbg-superpowers (which is a Claude Code
 plugin, not always pip-installable in workspace venvs).
 
@@ -749,7 +749,7 @@ def unresolved_study_composite_refs(spec: dict, known_ids: set[str]) -> list[str
     """Return the study's declared composite refs that DON'T resolve to any
     registered composite id.
 
-    Prefers ``viva_superpowers.report_linter.unresolved_composite_refs`` (the
+    Prefers ``discovery_engine.report_linter.unresolved_composite_refs`` (the
     canonical, spec-only contract) when available; falls back to the local
     extraction + last-segment match. Defensive: never raises.
 

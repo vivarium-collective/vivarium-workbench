@@ -173,7 +173,7 @@ def build_behavior_tests_verdict(spec: dict) -> dict:
         "n_fail": sum(1 for r in results if r == "FAIL"),
         "n_total": len(rows),
         # The split verdict ledger (pins vs acceptance vs expected-fail) —
-        # additive key; delegates to viva_superpowers.study_verdict when #285
+        # additive key; delegates to discovery_engine.study_verdict when #285
         # is installed, mirrors the same buckets locally otherwise.
         "count_split": _gate_rigor.verdict_count_split(spec),
     }

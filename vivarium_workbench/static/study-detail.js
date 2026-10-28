@@ -54,7 +54,7 @@
   // attribution (the feedback_tracked panel below) reads identically to any
   // server-rendered attribution. Only a known LLM/automation naming TOKEN
   // (claude, gpt-4o, ci, ...) flips a recorded name to "agent" — the same
-  // category of signal viva_superpowers.investigation_close.derive_contributors
+  // category of signal discovery_engine.investigation_close.derive_contributors
   // already uses for git co-authors (there: an email's "noreply@anthropic.com"
   // / "bot" / "ci" substring). Every other non-empty name defaults to "human"
   // — a documented DEFAULT, not a claim about who that person is. Empty/None
@@ -3683,7 +3683,7 @@
   }
 
   // ── G5: Quality check group (rigor scorecard) ───────────────────────────
-  // GET /api/study-rigor?study=<slug> → viva_superpowers.rigor.study_rigor,
+  // GET /api/study-rigor?study=<slug> → discovery_engine.rigor.study_rigor,
   // already computed in CI but never rendered on the page until now. Fetched
   // client-side (same pattern as _loadReadouts / _loadAnalyses above)
   // into #check-group-quality. Study-spine reorg (spec §3.7): this mount
@@ -3736,7 +3736,7 @@
     var header = '<div class="check-group-header" style="display:flex;align-items:center;'
       + 'gap:8px;flex-wrap:wrap"><strong>Quality</strong> '
       + '<span class="muted" style="font-size:0.85em">rigor scorecard &mdash; '
-      + '<code>viva_superpowers.rigor</code></span>';
+      + '<code>discovery_engine.rigor</code></span>';
     if (!rigor || rigor.unavailable) {
       var reason = (rigor && rigor.reason) || 'could not be computed';
       return {
@@ -3802,7 +3802,7 @@
   window._loadQualityChecks = _loadQualityChecks;
 
   // ── G6: Reproducibility check group (L0-L5 study_audit) ─────────────────
-  // GET /api/study-audit?study=<slug> → viva_superpowers.study_audit
+  // GET /api/study-audit?study=<slug> → discovery_engine.study_audit
   // (audit_workspace, filtered to this slug) — already computed in CI as the
   // reproducibility gate, never rendered on the page until now. Same fetch
   // pattern as _loadQualityChecks, into #check-group-reproducibility.
@@ -3916,7 +3916,7 @@
     var header = '<div class="check-group-header" style="display:flex;align-items:center;'
       + 'gap:8px;flex-wrap:wrap"><strong>Reproducibility</strong> '
       + '<span class="muted" style="font-size:0.85em">L0&ndash;L5 audit &mdash; '
-      + '<code>viva_superpowers.study_audit</code></span>';
+      + '<code>discovery_engine.study_audit</code></span>';
     if (!audit || audit.unavailable) {
       var reason = (audit && audit.reason) || 'could not be computed';
       return {

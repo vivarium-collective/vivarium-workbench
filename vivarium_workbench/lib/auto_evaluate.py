@@ -13,7 +13,7 @@ verdicts — so the report never shows a "pending" pill for a study that ran.
 Deterministic + dashboard-callable orchestration. The behavior-test evaluation
 is pluggable via an injected ``test_runner`` callable so the orchestration is
 unit-testable without a live dashboard or a real ``RunReader``. The default
-runner reuses :func:`viva_superpowers.study_evaluator.evaluate_study` against a
+runner reuses :func:`discovery_engine.study_evaluator.evaluate_study` against a
 ``RunReader`` opened on the run's store.
 
 Relationship to ``study_evaluator.compute_outcomes``: that writes a *parallel*

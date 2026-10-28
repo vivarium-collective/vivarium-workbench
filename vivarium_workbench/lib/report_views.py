@@ -181,7 +181,7 @@ def _enrich_findings_with_weight(study_spec: dict) -> list:
     """Attach evidential weight to each finding.
 
     Mirrors ``server._enrich_findings_with_weight``.  Tolerant: if
-    ``viva_superpowers.rigor.finding_evidential_weight`` is unavailable the
+    ``discovery_engine.rigor.finding_evidential_weight`` is unavailable the
     findings pass through unchanged.
     """
     findings = study_spec.get("findings") or []
@@ -460,13 +460,13 @@ def _linkage_cached_index(ws_root: Path) -> Optional[dict]:
 def build_report_lint(ws_root: Path) -> tuple[dict, int]:
     """GET /api/report-lint builder.
 
-    Runs the deterministic linter (``viva_superpowers.report_linter``) over
+    Runs the deterministic linter (``discovery_engine.report_linter``) over
     the workspace and returns ``(payload_dict, status_code)``.  Always 200 —
     tolerant on linter absence or workspace scan failure.
 
     Phase 2.1d: also applies ``<ws>/.pbg/report-lint-overrides.json`` the same
     way the old ``/viva-report`` skill/CLI did (``report_linter``-backed
-    ``viva_superpowers.report.render_workspace_report``'s lint step) — an
+    ``discovery_engine.report.render_workspace_report``'s lint step) — an
     error-level finding whose ``override_key`` is logged in the override file
     is downgraded to a warning (message prefixed ``[overridden]``) via
     ``report_linter.apply_overrides``. This reuses each finding's own

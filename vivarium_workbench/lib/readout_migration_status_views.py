@@ -1,5 +1,5 @@
 """``GET /api/study-readout-migration-status`` builder — wraps
-``viva_superpowers.readout_migration.readout_migration_status``.
+``discovery_engine.readout_migration.readout_migration_status``.
 
 Phase 2.1d (rewire-first, ``docs/superpowers/plans/2026-08-04-phase2.1-rewire-
 first.md`` §2.1d): the read-only STATUS sibling of
@@ -8,7 +8,7 @@ first.md`` §2.1d): the read-only STATUS sibling of
 ``readout_migration_status(study_dir)`` — it only reads ``study.yaml`` and
 buckets every readout into ``{canonical, migratable, needs_human}`` so a skill
 can ask "what would migrate?" via the dashboard API instead of importing
-``viva_superpowers.readout_migration`` directly, matching the rewire-first
+``discovery_engine.readout_migration`` directly, matching the rewire-first
 pattern already used by ``/api/report-lint`` and ``/api/study-sync-runs``.
 
 ``readout_migration_status`` performs NO writes; the actual rewrite is the
@@ -36,7 +36,7 @@ def readout_migration_status_view(ws_root: Path, body: dict) -> "tuple[dict, int
     POST builders.
 
     Returns ``(status, 200)`` on success, where ``status`` is exactly what
-    ``viva_superpowers.readout_migration.readout_migration_status`` returns —
+    ``discovery_engine.readout_migration.readout_migration_status`` returns —
     ``{canonical, migratable, needs_human}`` — plus the resolved ``study``
     slug. PURE: reads ``study.yaml`` only, never writes. Render-error-tolerant:
     unresolvable readouts are collected into ``needs_human`` by the plugin

@@ -943,9 +943,9 @@ def cmd_add_dashboard(args: argparse.Namespace) -> int:
 
 def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
     """Scaffold a new process-bigraph workspace (bootstrap — runs before any
-    server exists). Wraps ``viva_superpowers.scaffold`` (Phase 2.1i rewire-
+    server exists). Wraps ``discovery_engine.scaffold`` (Phase 2.1i rewire-
     first: the plugin still owns the scaffold payload; only the caller — the
-    ``/viva-workspace`` skill — moves from ``python -m viva_superpowers.scaffold``
+    ``/viva-workspace`` skill — moves from ``python -m discovery_engine.scaffold``
     to this ``vwb`` verb. The module move is 2.1k)."""
     try:
         from discovery_engine import scaffold
@@ -975,7 +975,7 @@ def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
 def cmd_catalog_add(args: argparse.Namespace) -> int:
     """Register a workspace in ``~/.pbg/workspaces.json`` so it appears in the
     dashboard's workspace switcher (idempotent). Wraps
-    ``viva_superpowers.workspace_catalog.add`` — the same call ``vwb serve``
+    ``discovery_engine.workspace_catalog.add`` — the same call ``vwb serve``
     already makes on boot (Phase 2.1i rewire-first)."""
     try:
         from discovery_engine import workspace_catalog
@@ -998,7 +998,7 @@ def cmd_catalog_add(args: argparse.Namespace) -> int:
 def cmd_scaffold_investigation(args: argparse.Namespace) -> int:
     """Scaffold an investigation + one skeleton study per composite generator
     (the ``investigation-from-wrapper`` bootstrap). Wraps
-    ``viva_superpowers.scaffold.scaffold_investigation_from_wrapper`` (Phase
+    ``discovery_engine.scaffold.scaffold_investigation_from_wrapper`` (Phase
     2.1k step 0 — completes the ``/viva-expert`` rewire; the plugin still owns
     the scaffold payload, only the caller moves)."""
     try:

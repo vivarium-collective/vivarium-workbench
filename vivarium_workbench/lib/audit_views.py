@@ -1,6 +1,6 @@
 """Read-only L0-L5 study-reproducibility audit view.
 
-Wraps :func:`viva_superpowers.study_audit.audit_workspace` behind the same
+Wraps :func:`discovery_engine.study_audit.audit_workspace` behind the same
 ``(body, status)`` contract used by :mod:`investigation_graph_views`, so the
 ``GET /api/audit`` route is a thin ``JSONResponse`` passthrough. This is the
 *visible* companion to the CI reproducibility gate (which lives in v2ecoli CI);
@@ -64,7 +64,7 @@ def build_audit(ws_root) -> tuple[dict, int]:
       - the L0-L5 **reproducibility grade** (:mod:`audit_grade`, self-contained —
         works with or without the upstream package), attached as ``grade`` on
         each study/investigation block + ``summary.grade_distribution``;
-      - the upstream **structural** audit (``viva_superpowers.study_audit``),
+      - the upstream **structural** audit (``discovery_engine.study_audit``),
         whose per-check levels/verdicts fill each block's ``checks`` when present.
 
     When ``study_audit`` is unavailable the report is built from the grade alone,
@@ -241,7 +241,7 @@ def _grade_acceptance(rolled: "dict | None") -> "dict | None":
 
 def _acceptance_closed_check(ws_root: Path, slug: str) -> "dict | None":
     """Compute the investigation closed-check fresh via the canonical
-    :func:`viva_superpowers.investigation_status.roll_up_acceptance` evaluator
+    :func:`discovery_engine.investigation_status.roll_up_acceptance` evaluator
     (the same one the report's conclusion and the linkage index use), then grade
     it with :func:`_grade_acceptance`. Loads the investigation spec + member
     study specs read-only. Degrades to ``None`` (skip) on any failure — a missing
@@ -289,7 +289,7 @@ def build_study_audit(ws_root: Path, study: Optional[str]) -> dict:
     """Build the GET /api/study-audit payload for one study (Fable G6).
 
     Backs the Tests tab's Reproducibility check group. Runs the SAME
-    ``viva_superpowers.study_audit.audit_workspace`` evaluator ``build_audit``
+    ``discovery_engine.study_audit.audit_workspace`` evaluator ``build_audit``
     uses for the workspace-wide Audit tab -- there is no single-study entry
     point upstream, so this audits the whole workspace and returns just the
     block for ``study`` -- then returns that study's block verbatim:
@@ -302,7 +302,7 @@ def build_study_audit(ws_root: Path, study: Optional[str]) -> dict:
     - 404 when no ``study.yaml``/``spec.yaml`` exists for the slug
       (``{"error": "study not found"}``).
 
-    Never a 500: an unimportable ``viva_superpowers.study_audit``, any
+    Never a 500: an unimportable ``discovery_engine.study_audit``, any
     exception raised while auditing, or the audited workspace simply not
     reporting a block for this slug (e.g. a nested/invalid study.yaml the
     evaluator skips) all degrade to a 200-shaped

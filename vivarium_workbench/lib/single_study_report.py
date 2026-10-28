@@ -671,7 +671,7 @@ def _render_controls_and_falsifiability(spec: dict) -> str:
 def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     """Evidence & rigor scorecard section — deterministic skeptic-feedback
     (replication, negative controls, alternative hypotheses, claim discipline,
-    falsifiability, engineered-vs-emergent) computed by viva_superpowers.rigor.
+    falsifiability, engineered-vs-emergent) computed by discovery_engine.rigor.
 
     Returns '' if pbg-superpowers isn't importable, so the report degrades
     gracefully.
@@ -748,7 +748,7 @@ _WEIGHT_CHIP_COLORS = {
 
 
 def _finding_weight(spec: dict, finding: dict) -> dict | None:
-    """W8 — per-finding evidential weight via viva_superpowers.rigor.
+    """W8 — per-finding evidential weight via discovery_engine.rigor.
 
     Defensive: returns None when pbg-superpowers (or the new function) isn't
     importable, so the chip simply doesn't render and the report degrades.
