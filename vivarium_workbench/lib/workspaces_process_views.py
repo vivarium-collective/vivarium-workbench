@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from viva_superpowers import workspace_catalog
+from discovery_engine import workspace_catalog
 
 
 def workspaces_start(ws_root: Path, body: Any) -> tuple[dict, int]:

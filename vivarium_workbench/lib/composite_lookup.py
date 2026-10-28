@@ -764,7 +764,7 @@ def unresolved_study_composite_refs(spec: dict, known_ids: set[str]) -> list[str
     """
     known = set(known_ids)
     try:
-        from viva_superpowers.report_linter import unresolved_composite_refs as _ps
+        from discovery_engine.report_linter import unresolved_composite_refs as _ps
         flagged = list(_ps(spec, known))
     except Exception:  # noqa: BLE001 — older/absent viva_superpowers → local fallback
         return [r for r in _study_composite_refs(spec) if not _ref_resolves(r, known)]

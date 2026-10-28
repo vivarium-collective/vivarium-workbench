@@ -278,12 +278,12 @@ def test_section_nav_omits_chips_for_empty_sections(_ws):
 # W24 — skeptical-reader report mode
 # ---------------------------------------------------------------------------
 
-# These exercise the new render paths that lean on viva_superpowers.rigor /
+# These exercise the new render paths that lean on discovery_engine.rigor /
 # needs_attention. The renderer degrades gracefully when those aren't
 # importable, so skip the strict-content assertions in that case.
 _HAS_RIGOR = False
 try:  # pragma: no cover - environment dependent
-    from viva_superpowers.rigor import study_rigor, finding_evidential_weight  # noqa: F401
+    from discovery_engine.rigor import study_rigor, finding_evidential_weight  # noqa: F401
     from vivarium_workbench.lib.needs_attention import open_epistemic_debts  # noqa: F401
     _HAS_RIGOR = True
 except Exception:  # pragma: no cover

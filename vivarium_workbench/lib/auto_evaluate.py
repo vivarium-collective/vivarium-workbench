@@ -43,8 +43,8 @@ from vivarium_workbench.lib.atomic_io import atomic_write_text
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from viva_superpowers import study_io  # noqa: F401  (kept for the documented study_io/study_outcomes seam)
-from viva_superpowers.study_outcomes import canonical_run
+from discovery_engine import study_io
+from discovery_engine.study_outcomes import canonical_run
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ def _evaluator_test_runner(
     optional ``[evaluator]`` extra (``viva_emitters.RunReader``) is absent — the
     orchestrator turns both into a clean ``status`` rather than a crash.
     """
-    from viva_superpowers.study_evaluator import _resolve_run_store, evaluate_study  # noqa: PLC0415
+    from discovery_engine.study_evaluator import _resolve_run_store, evaluate_study  # noqa: PLC0415
 
     store = _resolve_run_store(run, study_dir, ws_root)
     if store is None:

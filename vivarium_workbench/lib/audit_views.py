@@ -82,7 +82,7 @@ def build_audit(ws_root) -> tuple[dict, int]:
     report = None
     err = grades.get("error") or ""
     try:
-        from viva_superpowers import study_audit
+        from discovery_engine import study_audit
         report = study_audit.audit_workspace(
             ws_root, extra_packages=_workspace_packages(ws_root) or None
         ).as_dict()
@@ -248,8 +248,8 @@ def _acceptance_closed_check(ws_root: Path, slug: str) -> "dict | None":
     investigation.yaml, no criteria, or an unimportable evaluator — so the audit
     never 500s and never fabricates a verdict."""
     try:
-        from viva_superpowers import study_io as _sio
-        from viva_superpowers.investigation_status import roll_up_acceptance
+        from discovery_engine import study_io as _sio
+        from discovery_engine.investigation_status import roll_up_acceptance
 
         wp = WorkspacePaths.load(ws_root)
         inv_yaml = wp.dir("investigations") / slug / "investigation.yaml"
@@ -319,7 +319,7 @@ def build_study_audit(ws_root: Path, study: Optional[str]) -> dict:
         raise StudyAuditViewError({"error": "study not found"}, 404)
 
     try:
-        from viva_superpowers import study_audit
+        from discovery_engine import study_audit
         report = study_audit.audit_workspace(
             ws_root, extra_packages=_workspace_packages(ws_root) or None
         )

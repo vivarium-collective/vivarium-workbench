@@ -85,7 +85,7 @@ def build_study_rigor(ws_root: Path, study: Optional[str]) -> dict:
     if spec is None:
         raise RigorViewError({"error": "study not found"}, 404)
     try:
-        from viva_superpowers.rigor import study_rigor
+        from discovery_engine.rigor import study_rigor
         return study_rigor(spec)
     except Exception as e:  # noqa: BLE001 — degrade, never 500
         return {"unavailable": True, "reason": f"{type(e).__name__}: {e}"}
@@ -129,7 +129,7 @@ def build_investigation_rigor(ws_root: Path, investigation: Optional[str]) -> di
         if sp:
             member_specs.append(sp)
     try:
-        from viva_superpowers.rigor import investigation_rigor
+        from discovery_engine.rigor import investigation_rigor
         return investigation_rigor(inv_spec, member_specs)
     except Exception as e:  # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}",

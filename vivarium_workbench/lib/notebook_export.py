@@ -603,7 +603,7 @@ def _generator_param_cell(ov: str, params: dict) -> str:
 
 def _load_inspect_code(comp_rel: str, var: str) -> str:
     return (
-        "from viva_superpowers.composite_spec import load_spec\n"
+        "from discovery_engine.composite_spec import load_spec\n"
         f"{var} = load_spec(REPO / {comp_rel!r})\n"
         f"describe_spec({var})"
     )
@@ -727,7 +727,7 @@ def _run_code(slug: str, studies_rel: str, recipes: list[dict],
             )
         else:
             lines.append(
-                "            from viva_superpowers.composite_spec import build_composite_from_spec"
+                "            from discovery_engine.composite_spec import build_composite_from_spec"
             )
             lines.append(
                 f"            _comp = build_composite_from_spec({var}, "

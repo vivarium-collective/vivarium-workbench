@@ -41,7 +41,7 @@ def _isolate_viva_home(tmp_path_factory):
     pytest temp dirs**, dating back months. The switcher dropdown reads this file,
     so the leak eventually made the real UI unusable.
 
-    ``viva_superpowers.workspace_catalog`` resolves its home as
+    ``discovery_engine.workspace_catalog`` resolves its home as
     ``$VIVA_HOME or $PBG_HOME or ~/.pbg``, so setting an env var is the supported
     way to redirect it. Set in ``os.environ`` (not via monkeypatch, which is
     function-scoped) because ``dashboard_client`` passes ``os.environ.copy()`` to

@@ -2,7 +2,7 @@
 (``lib.readout_migrate_views.study_readout_migrate``).
 
 Phase 2.1d (rewire-first): this endpoint wraps
-``viva_superpowers.readout_migration.migrate_study_file`` unchanged — the
+``discovery_engine.readout_migration.migrate_study_file`` unchanged — the
 plugin still computes the migration, only the caller (the workbench, on
 behalf of the ``/viva-report`` skill) moves. These tests exercise the lib
 builder directly (the same "endpoint test calls the lib fn" idiom as
@@ -115,10 +115,10 @@ def test_apply_alias_behaves_like_write(tmp_path):
 
 def test_equivalence_with_direct_migrate_study_file_call(tmp_path):
     """The endpoint's report must match calling
-    ``viva_superpowers.readout_migration.migrate_study_file`` directly —
+    ``discovery_engine.readout_migration.migrate_study_file`` directly —
     same keys, same values, for both the dry-run and the write path."""
     pbg_readout_migration = pytest.importorskip(
-        "viva_superpowers.readout_migration"
+        "discovery_engine.readout_migration"
     )
 
     ws, sy = _study_ws(tmp_path)

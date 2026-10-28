@@ -28,7 +28,7 @@ def _has_study_audit() -> bool:
     specifics are gated on availability.
     """
     try:
-        import viva_superpowers.study_audit  # noqa: F401
+        import discovery_engine.study_audit  # noqa: F401
     except Exception:
         return False
     return True
@@ -104,7 +104,7 @@ def _audit_study_workspace(root: Path) -> Path:
     """A workspace whose study.yaml is readable by BOTH ``load_study_detail_spec``
     (which build_study_audit uses for the 404 existence check -- it parses via
     ``lib.investigations.load_spec``, which requires either a top-level
-    ``composite:`` or ``variants:``) AND ``viva_superpowers.study_audit`` (which
+    ``composite:`` or ``variants:``) AND ``discovery_engine.study_audit`` (which
     reads the file directly via ``study_io.load_yaml``, no such requirement).
     Deliberately NOT ``_make_workspace``'s ``conditions.baseline`` shape above --
     that shape has no top-level ``composite``/``variants`` and no
@@ -138,7 +138,7 @@ class TestBuildStudyAudit:
 
     def test_happy_path_computes_for_fixture_study(self, tmp_path):
         """The study exists, so this MUST get either a real per-study audit
-        block (when viva_superpowers.study_audit is installed, which it is in
+        block (when discovery_engine.study_audit is installed, which it is in
         this env) or an honest unavailable() -- never a raise, never a
         fabricated empty block."""
         ws = _audit_study_workspace(tmp_path / "ws")
@@ -165,7 +165,7 @@ class TestBuildStudyAudit:
         as rigor_views.build_study_rigor (spec §2 R2)."""
         ws = _audit_study_workspace(tmp_path / "ws")
 
-        import viva_superpowers.study_audit as _sa_mod
+        import discovery_engine.study_audit as _sa_mod
 
         def _boom(*args, **kwargs):
             raise RuntimeError("audit exploded")
@@ -182,7 +182,7 @@ class TestBuildStudyAudit:
         KeyError or fabricating an empty checks list."""
         ws = _audit_study_workspace(tmp_path / "ws")
 
-        import viva_superpowers.study_audit as _sa_mod
+        import discovery_engine.study_audit as _sa_mod
 
         class _EmptyReport:
             studies = []

@@ -1254,7 +1254,7 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
     # defensively: an older viva_superpowers without the resolver simply yields
     # no readout-driven additions (the dashboard still works).
     try:
-        from viva_superpowers.readout_resolver import (
+        from discovery_engine.readout_resolver import (
             resolve_study_readouts, ResolvedReadout,
         )
     except ImportError:
@@ -1276,7 +1276,7 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
     # or when the mechanism/declarations are unavailable (no behavior change then).
     _req_obs = None
     try:
-        from viva_superpowers.study_evaluator import required_observables_for_measure as _req_obs
+        from discovery_engine.study_evaluator import required_observables_for_measure as _req_obs
     except ImportError:
         _req_obs = None
     _ws = None

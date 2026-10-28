@@ -78,7 +78,7 @@ def build_band_provenance_missing(ws_root: Path, study: Optional[str]) -> "tuple
         return {"error": f"study not found: {slug}"}, 404
 
     try:
-        from viva_superpowers.band_provenance import bands_missing_provenance
+        from discovery_engine.band_provenance import bands_missing_provenance
     except ImportError as e:  # noqa: BLE001
         return {"error": f"band provenance requires viva_superpowers: {e}"}, 500
 
@@ -141,7 +141,7 @@ def write_band_provenance(ws_root: Path, body: dict) -> "tuple[dict, int]":
         return {"error": f"study not found: {slug}"}, 404
 
     try:
-        from viva_superpowers.band_provenance import set_band_provenance
+        from discovery_engine.band_provenance import set_band_provenance
     except ImportError as e:  # noqa: BLE001
         return {"error": f"band provenance requires viva_superpowers: {e}"}, 500
 

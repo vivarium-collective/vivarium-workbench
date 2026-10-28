@@ -81,7 +81,7 @@ def test_cmd_serve_continues_when_registration_fails(tmp_path, workspace_dir):
     boot — registration is opt-in, not a hard dependency.
 
     We verify this by spawning a wrapper script that monkeypatches
-    viva_superpowers.workspace_catalog.register_server to raise before calling
+    discovery_engine.workspace_catalog.register_server to raise before calling
     the CLI. The dashboard must reach the serve step (server-info written) and
     the ~/.pbg/servers/ entry must NOT have been created.
     """
@@ -95,7 +95,7 @@ def test_cmd_serve_continues_when_registration_fails(tmp_path, workspace_dir):
     wrapper = tmp_path / "run_patched.py"
     wrapper.write_text(textwrap.dedent(f"""\
         import sys
-        import viva_superpowers.workspace_catalog as _cat
+        import discovery_engine.workspace_catalog as _cat
 
         def _bad_register(**kwargs):
             raise RuntimeError("simulated registration failure")

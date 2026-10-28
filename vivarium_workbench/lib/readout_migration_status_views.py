@@ -60,7 +60,7 @@ def readout_migration_status_view(ws_root: Path, body: dict) -> "tuple[dict, int
         return {"error": f"study not found: {slug}"}, 404
 
     try:
-        from viva_superpowers.readout_migration import readout_migration_status
+        from discovery_engine.readout_migration import readout_migration_status
     except ImportError as e:  # noqa: BLE001
         return {"error": f"readout migration requires viva_superpowers: {e}"}, 500
 

@@ -76,7 +76,7 @@ def _seed_from_finding(workspace: Path, parent_name: str, finding_id: str, *,
     ``followup_proposals[]`` row needed); ``resolve_seed_source`` synthesizes
     an inline proposal stub.
     """
-    from viva_superpowers.seed_from_followup import (
+    from discovery_engine.seed_from_followup import (
         resolve_seed_source,
         write_child_study,
     )

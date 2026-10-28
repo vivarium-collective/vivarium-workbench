@@ -33,9 +33,9 @@ from typing import Any, Callable, Iterable
 
 import yaml
 
-from viva_superpowers.bibtex import bib_keys
-from viva_superpowers.study_io import load_yaml, save_yaml_atomic
-from viva_superpowers.workspace_paths import WorkspacePaths
+from discovery_engine.bibtex import bib_keys
+from discovery_engine.study_io import load_yaml, save_yaml_atomic
+from discovery_engine.workspace_paths import WorkspacePaths
 
 from vivarium_workbench.lib.expert_search import search_expert_docs
 from vivarium_workbench.lib.path_safety import plain_name
@@ -121,7 +121,7 @@ def save_study_atomic(study_yaml: Path, data: dict) -> None:
 
 # Canonical implementation lives in paths.py; re-exported here for the
 # historical callers (and study_verify) that import it from this module.
-from viva_superpowers.paths import find_workspace_root  # noqa: E402,F401
+from discovery_engine.paths import find_workspace_root  # noqa: E402,F401
 
 
 def study_dir_from_slug(ws_root: Path, slug: str) -> Path:

@@ -1,6 +1,6 @@
 """Run records read from a study's ``runs.db`` say where their data is, so the rigor scorecard credits them (#1288).
 
-``viva_superpowers.rigor`` counts a run as persisted only if its record carries an emitter or a run-db reference
+``discovery_engine.rigor`` counts a run as persisted only if its record carries an emitter or a run-db reference
 (``db_path`` ...). The records the workbench builds from ``runs.db`` carried neither, so a study whose trajectories
 were saved scored ``run_persistence: gap``. These tests build a REAL ``runs.db`` and ask the REAL scorecard.
 """
@@ -13,8 +13,8 @@ import yaml
 
 from vivarium_workbench.lib import rigor_views, study_spec
 
-pytest.importorskip("viva_superpowers.rigor")
-from viva_superpowers.rigor import run_is_emitter_backed  # noqa: E402
+pytest.importorskip("discovery_engine.rigor")
+from discovery_engine.rigor import run_is_emitter_backed  # noqa: E402
 
 SLUG = "bench"
 

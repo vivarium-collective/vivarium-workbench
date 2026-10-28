@@ -1,7 +1,7 @@
 """Thread-A / Task 3 (A3): GET /api/report-lint + per-study readiness panel.
 
 The endpoint runs the existing deterministic linter
-(``viva_superpowers.report_linter.lint_workspace_report``) and returns its
+(``discovery_engine.report_linter.lint_workspace_report``) and returns its
 findings as ``{findings: [{study, check, severity, message}]}`` so the
 dashboard can surface a per-study readiness panel (SP2b-ii readout-migration +
 SP2c band-citation-gap findings). The dashboard adds no AI — it just runs the

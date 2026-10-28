@@ -276,7 +276,7 @@ def _preregistration_status(spec: dict) -> dict | None:
     ``study_verdict.preregistration_status``. Returns None when pbg-superpowers
     (or the function) isn't importable so the chip simply doesn't render."""
     try:
-        from viva_superpowers.study_verdict import preregistration_status
+        from discovery_engine.study_verdict import preregistration_status
     except Exception:
         return None
     try:
@@ -682,7 +682,7 @@ def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     renders it as its own ordered section immediately below.
     """
     try:
-        from viva_superpowers.rigor import study_rigor
+        from discovery_engine.rigor import study_rigor
     except Exception:
         return ""
     sc = study_rigor(study_spec)
@@ -754,7 +754,7 @@ def _finding_weight(spec: dict, finding: dict) -> dict | None:
     importable, so the chip simply doesn't render and the report degrades.
     """
     try:
-        from viva_superpowers.rigor import finding_evidential_weight
+        from discovery_engine.rigor import finding_evidential_weight
     except Exception:
         return None
     try:
@@ -885,7 +885,7 @@ def _lifecycle_floor(spec: dict, finding: dict) -> str | None:
     Returns None when pbg-superpowers (or the function) isn't importable, so the
     chip falls back to the authored value (or nothing)."""
     try:
-        from viva_superpowers.study_verdict import lifecycle_floor
+        from discovery_engine.study_verdict import lifecycle_floor
     except Exception:
         return None
     try:

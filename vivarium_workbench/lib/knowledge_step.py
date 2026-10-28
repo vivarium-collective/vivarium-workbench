@@ -68,7 +68,7 @@ class KnowledgeStep(process_bigraph.Step):
         return {"knowledge": "node"}
 
     def update(self, state=None):
-        from viva_superpowers.knowledge_store import derive_knowledge
+        from discovery_engine.knowledge_store import derive_knowledge
 
         inv_spec, studies_by_slug = _load_knowledge_inputs(
             self.config["workspace"], self.config["investigation_slug"])

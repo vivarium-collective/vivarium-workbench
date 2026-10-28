@@ -78,7 +78,7 @@ def test_computed_gate_verdict_passed_matches_server_condition_satisfied(
     """The computed verdict 'passed' MUST equal server._condition_satisfied
     tests-passed branch: counts['fail']==0 and counts['pass']>0."""
     from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
-    from viva_superpowers import study_status
+    from discovery_engine import study_status
 
     spec = _study_detail_spec(ws_with_passing_study, "my-study")
     # Verify the server predicate agrees
@@ -128,7 +128,7 @@ def test_computed_gate_verdict_does_not_modify_gate_status(ws_with_passing_study
 
 def test_roll_up_acceptance_all_pass_returns_passing():
     """Pure data-path: all criteria passing → verdict_status=='passing'."""
-    from viva_superpowers.investigation_status import roll_up_acceptance
+    from discovery_engine.investigation_status import roll_up_acceptance
 
     inv_spec = {
         "name": "my-inv",
@@ -152,7 +152,7 @@ def test_roll_up_acceptance_all_pass_returns_passing():
 
 
 def test_roll_up_acceptance_fail_returns_failing():
-    from viva_superpowers.investigation_status import roll_up_acceptance
+    from discovery_engine.investigation_status import roll_up_acceptance
 
     inv_spec = {
         "name": "my-inv",
@@ -169,7 +169,7 @@ def test_roll_up_acceptance_fail_returns_failing():
 
 
 def test_roll_up_acceptance_criteria_fields():
-    from viva_superpowers.investigation_status import roll_up_acceptance
+    from discovery_engine.investigation_status import roll_up_acceptance
 
     inv_spec = {
         "name": "my-inv",

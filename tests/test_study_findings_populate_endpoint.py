@@ -2,7 +2,7 @@
 (``lib.finding_observations_views.study_findings_populate_observations``).
 
 Phase 2.1f (rewire-first): this endpoint wraps
-``viva_superpowers.finding_observations.populate_finding_observations``
+``discovery_engine.finding_observations.populate_finding_observations``
 unchanged — the plugin still fills the code-owned finding slots, only the
 caller (the workbench, on behalf of the ``/viva-biology-forward`` skill) moves.
 These tests exercise the lib builder directly (the same "endpoint test calls
@@ -122,10 +122,10 @@ def test_populate_is_idempotent(tmp_path):
 
 def test_equivalence_with_direct_populate_call(tmp_path):
     """The endpoint's result must match calling
-    ``viva_superpowers.finding_observations.populate_finding_observations``
+    ``discovery_engine.finding_observations.populate_finding_observations``
     directly — same ``filled``/``skipped`` counts."""
     pbg_finding_observations = pytest.importorskip(
-        "viva_superpowers.finding_observations"
+        "discovery_engine.finding_observations"
     )
 
     ws, sy = _study_ws(tmp_path)

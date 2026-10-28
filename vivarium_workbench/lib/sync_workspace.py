@@ -23,7 +23,7 @@ from vivarium_workbench.lib import sync_materialize
 
 def _catalog_add(path, name=None, package=None) -> dict:
     """Thin seam over the workspace catalog (monkeypatched in tests)."""
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
     return workspace_catalog.add(path, name=name)
 
 

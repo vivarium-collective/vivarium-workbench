@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import viva_superpowers.post_sim as post_sim
-from viva_superpowers.post_sim import AnalysisStep
+import discovery_engine.post_sim as post_sim
+from discovery_engine.post_sim import AnalysisStep
 from vivarium_workbench import env_worker
 
 

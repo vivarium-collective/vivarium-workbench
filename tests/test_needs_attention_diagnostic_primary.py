@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("viva_superpowers.study_verdict")
+pytest.importorskip("discovery_engine.study_verdict")
 
 from vivarium_workbench.lib.needs_attention import _diagnostic_branch_items  # noqa: E402
 

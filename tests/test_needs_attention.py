@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from viva_superpowers import study_io
+from discovery_engine import study_io
 from vivarium_workbench.lib.needs_attention import (
     scan_investigation, _stale_findings, open_epistemic_debts,
 )
