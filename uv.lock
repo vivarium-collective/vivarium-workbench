@@ -659,7 +659,7 @@ wheels = [
 [[package]]
 name = "discovery-engine"
 version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main#ec2958baca1749ff9f924295e72023d2ce027027" }
+source = { git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main#64d4854f90e3a6f6d0314e6f2010274b0334ddad" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "click" },
