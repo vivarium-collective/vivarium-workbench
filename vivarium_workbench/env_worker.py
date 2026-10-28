@@ -496,7 +496,7 @@ def _list_visualizations() -> dict:
     except Exception:  # noqa: BLE001
         pass
     _seen_rc: set = set()
-    for _modname, _regattr in (("viva_superpowers.post_sim", "TEST_REGISTRY"),
+    for _modname, _regattr in (("discovery_engine.post_sim", "TEST_REGISTRY"),
                                ("v2ecoli.workflow.post_sim", "REPORT_CARD_REGISTRY")):
         try:
             _mod = __import__(_modname, fromlist=[_regattr])
@@ -1738,7 +1738,7 @@ def _run_study_analyses(params: dict) -> dict:
     generic: list = []      # (name, params, cls)
     remaining: list = []    # entries handed to the v2ecoli path
     try:
-        from viva_superpowers.post_sim import (
+        from discovery_engine.post_sim import (
             ANALYSIS_REGISTRY as _VIVA_REG,
             AnalysisStep as _AStep,
             Analysis as _LiveAnalysis,
@@ -1790,7 +1790,7 @@ def _run_generic_analyses(generic: list, store_paths, simulation_id, output_dir,
     if not store_paths:
         return [], [{"error": "no store path for generic analyses"}]
     try:
-        from viva_superpowers.post_sim import ResultsHandle
+        from discovery_engine.post_sim import ResultsHandle
         from bigraph_schema import allocate_core
     except Exception as exc:  # noqa: BLE001
         return [], [{"error": f"viva_superpowers post-sim unavailable: {exc}"}]

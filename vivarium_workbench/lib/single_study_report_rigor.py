@@ -72,7 +72,7 @@ def _threshold_sensitivity(spec: dict, test_name: str):
     """critique #9 — defensive bridge to ``rigor.threshold_sensitivity``.
     Returns a list of ``{cutoff, result}`` or None when unavailable/guarded."""
     try:
-        from viva_superpowers.rigor import threshold_sensitivity
+        from discovery_engine.rigor import threshold_sensitivity
     except Exception:
         return None
     try:

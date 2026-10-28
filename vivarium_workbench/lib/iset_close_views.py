@@ -54,7 +54,7 @@ def iset_close(ws_root: Path, body: dict) -> "tuple[dict, int]":
     auto_pr = not bool((body or {}).get("no_pr") or False)
 
     try:
-        from viva_superpowers.investigation_close import close_investigation
+        from discovery_engine.investigation_close import close_investigation
     except ImportError as e:  # noqa: BLE001
         return {"error": f"investigation close requires viva_superpowers: {e}"}, 500
 

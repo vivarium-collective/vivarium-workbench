@@ -249,7 +249,7 @@ def _acceptance_closed_check(ws_root: Path, slug: str) -> "dict | None":
     never 500s and never fabricates a verdict."""
     try:
         from viva_superpowers import study_io as _sio
-        from viva_superpowers.investigation_status import roll_up_acceptance
+        from discovery_engine.investigation_status import roll_up_acceptance
 
         wp = WorkspacePaths.load(ws_root)
         inv_yaml = wp.dir("investigations") / slug / "investigation.yaml"

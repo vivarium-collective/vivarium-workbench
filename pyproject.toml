@@ -87,7 +87,7 @@ dependencies = [
     # from `main` (below) is what keeps the stale standalone `pbg-emitters` out of
     # this package's own (non-demo) resolution. The PyPI release (0.22.0) still
     # predates that migration and would drag pbg-emitters back in, so it is NOT
-    # used; declare BARE here + git `main` via [tool.uv.sources] (same
+    # used; declare BARE here + git `main` via [tool.uv.sources]
     # keep-URL-out-of-published-metadata pattern as the deps below). Bump to a
     # PyPI floor once viva-superpowers publishes a viva-emitters release — DONE:
     # 0.23.0 declares viva-emitters>=0.2.3, so the floor is bumped here. The
@@ -112,6 +112,7 @@ dependencies = [
     # 500. The hosted image is currently built without `[chat]` (Dockerfile).
     # Background: docs/ARCHITECTURE.md, "Coupling note".
     "viva-superpowers[evaluator]>=0.23.0",
+    "discovery-engine",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
@@ -179,6 +180,7 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
+discovery-engine = { git = "https://github.com/vivarium-collective/discovery-engine.git", branch = "main" }
 # viva-superpowers: sourced from git (NOT PyPI 0.22.0) because only main has
 # migrated off pbg-emitters onto viva-emitters>=0.2.3 — the whole point of this
 # change. Pinned to a REV, not `branch = "main"`, matching the deliberate choice

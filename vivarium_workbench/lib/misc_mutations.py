@@ -110,7 +110,7 @@ def _log_force_overrides(ws_root: Path) -> None:
     render request fails.
     """
     try:
-        from viva_superpowers.report_linter import (
+        from discovery_engine.report_linter import (
             lint_workspace_report,
             load_overrides,
             write_override,

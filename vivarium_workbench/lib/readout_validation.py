@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from viva_superpowers.readout_resolver import (
+from discovery_engine.readout_resolver import (
     ResolvedReadout,
     UnresolvedReadout,
     resolve_readout,

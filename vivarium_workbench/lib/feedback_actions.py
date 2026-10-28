@@ -44,7 +44,7 @@ from ruamel.yaml import YAML
 
 from viva_superpowers import study_io
 from viva_superpowers.feedback_import import _feedback_files
-from viva_superpowers.workspace_paths import WorkspacePaths
+from discovery_engine.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.workspace_paths import study_yaml_path
 
 # Action status sets ──────────────────────────────────────────────────────────

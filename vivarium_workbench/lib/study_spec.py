@@ -961,7 +961,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
             if isinstance(persisted_ge, dict) and persisted_ge.get("result"):
                 cgv = dict(persisted_ge)
             else:
-                from viva_superpowers.study_verdict import roll_up_verdict
+                from discovery_engine.study_verdict import roll_up_verdict
                 cgv = roll_up_verdict(spec)
             # Attach the per-test counts the verdict was derived from so the SPA
             # can show "4 passed · 1 skipped" beside the badge (workbench#758) —
@@ -970,7 +970,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
             # predate it, so backfill render-time (never persisted → no churn).
             if isinstance(cgv, dict) and "counts" not in cgv:
                 try:
-                    from viva_superpowers.study_status import count_test_outcomes
+                    from discovery_engine.study_status import count_test_outcomes
                     cgv["counts"] = count_test_outcomes(spec, spec.get("runs"))
                 except Exception:  # noqa: BLE001
                     pass
@@ -997,7 +997,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # function in pbg-superpowers; render-only, never modifies study.yaml.
         # Defensive: degrade silently if pbg-superpowers isn't importable.
         try:
-            from viva_superpowers.study_verdict import preregistration_status
+            from discovery_engine.study_verdict import preregistration_status
             ps = preregistration_status(spec)
             if isinstance(ps, dict) and ps.get("preregistered"):
                 spec["preregistration_status"] = ps
@@ -1021,7 +1021,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # Defensive: a missing viva_superpowers.study_verdict.lifecycle_floor
         # leaves findings untouched (the chip then shows only the authored state).
         try:
-            from viva_superpowers.study_verdict import lifecycle_floor as _lf
+            from discovery_engine.study_verdict import lifecycle_floor as _lf
             for _f in (spec.get("findings") or []):
                 if not isinstance(_f, dict) or "_lifecycle_floor" in _f:
                     continue

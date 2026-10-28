@@ -58,10 +58,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
-from viva_superpowers.bibtex import bib_keys
-from viva_superpowers.paths import find_workspace_root
-from viva_superpowers.study_io import load_yaml as _load_yaml
-from viva_superpowers.workspace_paths import WorkspacePaths
+from discovery_engine.bibtex import bib_keys
+from discovery_engine.paths import find_workspace_root
+from discovery_engine.study_io import load_yaml as _load_yaml
+from discovery_engine.workspace_paths import WorkspacePaths
 
 
 # ---------------------------------------------------------------------------

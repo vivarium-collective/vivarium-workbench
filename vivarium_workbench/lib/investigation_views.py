@@ -261,7 +261,7 @@ def build_investigation_hypotheses(ws_root: Path, name: str) -> dict:
 
     # 1) Preferred: rollup_support returns the enriched inv_spec (or list).
     try:
-        from viva_superpowers.hypotheses import rollup_support  # type: ignore[import]
+        from discovery_engine.hypotheses import rollup_support  # type: ignore[import]
     except Exception:  # noqa: BLE001
         rollup_support = None
     if rollup_support is not None:
@@ -280,7 +280,7 @@ def build_investigation_hypotheses(ws_root: Path, name: str) -> dict:
 
     # 2) Fallback: score_support per hypothesis.
     try:
-        from viva_superpowers.hypotheses import score_support  # type: ignore[import]
+        from discovery_engine.hypotheses import score_support  # type: ignore[import]
     except Exception:  # noqa: BLE001
         return base
     out = []

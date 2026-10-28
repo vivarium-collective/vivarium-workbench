@@ -61,7 +61,7 @@ def is_expected_fail(test) -> bool:
     ``control: negative``. Delegates to viva_superpowers when available.
     """
     try:
-        from viva_superpowers.study_verdict import is_expected_fail as _ief
+        from discovery_engine.study_verdict import is_expected_fail as _ief
     except ImportError:
         pass  # local mirror below — can delegate once viva-superpowers #285 lands
     else:
@@ -105,7 +105,7 @@ def classify_gates(spec: dict) -> dict:
     viva_superpowers when available.
     """
     try:
-        from viva_superpowers.study_verdict import classify_gates as _cg
+        from discovery_engine.study_verdict import classify_gates as _cg
     except ImportError:
         pass  # local mirror below — can delegate once viva-superpowers #285 lands
     else:
@@ -169,7 +169,7 @@ def verdict_count_split(spec: dict) -> dict:
     locally (can delegate fully once viva-superpowers #285 lands).
     """
     try:
-        from viva_superpowers.study_verdict import verdict_count_split as _vcs
+        from discovery_engine.study_verdict import verdict_count_split as _vcs
     except ImportError:
         pass  # local mirror below — can delegate once viva-superpowers #285 lands
     else:

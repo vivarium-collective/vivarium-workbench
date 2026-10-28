@@ -76,7 +76,7 @@ def build_framework_metrics(ws_root: Path) -> dict:
         "n_studies": len(study_specs),
     }
     try:
-        from viva_superpowers.rigor import framework_metrics
+        from discovery_engine.rigor import framework_metrics
     except Exception:  # noqa: BLE001 — older viva_superpowers lacks the function
         return base
     try:

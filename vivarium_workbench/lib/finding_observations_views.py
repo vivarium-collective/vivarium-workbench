@@ -56,7 +56,7 @@ def study_findings_populate_observations(ws_root: Path, body: dict) -> "tuple[di
         return {"error": f"study not found: {slug}"}, 404
 
     try:
-        from viva_superpowers.finding_observations import populate_finding_observations
+        from discovery_engine.finding_observations import populate_finding_observations
     except ImportError as e:  # noqa: BLE001
         return {"error": f"finding population requires viva_superpowers: {e}"}, 500
 

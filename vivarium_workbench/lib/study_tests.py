@@ -182,7 +182,7 @@ def _run_spine_tests(
     """
     t0 = time.time()
     try:
-        from viva_superpowers.study_evaluator import compute_outcomes
+        from discovery_engine.study_evaluator import compute_outcomes
     except Exception as e:  # noqa: BLE001
         return StudyTestsResult(
             summary={"passed": 0, "failed": 0, "skipped": 0, "duration_s": 0.0},
