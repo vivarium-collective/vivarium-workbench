@@ -364,3 +364,36 @@ class TestConditionEnvironment:
                     {"repo": "r", "ref": "   "}):
             with pytest.raises(ValueError, match="non-empty string"):
                 condition_environment({"conditions": {"baseline": {"environment": env}}})
+
+
+# ── condition_environment_ref (environment-declaration) ──────────────────────
+
+from vivarium_workbench.lib.study_spec import condition_environment_ref  # noqa: E402
+
+
+def test_condition_environment_ref_per_condition():
+    spec = {"conditions": {"baseline": {"environment_ref": "pulse"}}}
+    assert condition_environment_ref(spec, "baseline") == "pulse"
+
+
+def test_condition_environment_ref_study_level_default():
+    # No per-condition ref → fall back to the study-level default.
+    spec = {"environment_ref": "pulse", "conditions": {"baseline": {}}}
+    assert condition_environment_ref(spec, "baseline") == "pulse"
+
+
+def test_condition_environment_ref_per_condition_overrides_study_level():
+    spec = {"environment_ref": "pulse",
+            "conditions": {"saline": {"environment_ref": "pulse-vcell"}}}
+    assert condition_environment_ref(spec, "saline") == "pulse-vcell"
+
+
+def test_condition_environment_ref_absent_is_none():
+    assert condition_environment_ref({}, "baseline") is None
+
+
+def test_condition_environment_ref_malformed_raises():
+    # A declared-but-non-string ref is a loud error, never silently dropped.
+    import pytest
+    with pytest.raises(ValueError):
+        condition_environment_ref({"environment_ref": 42}, "baseline")

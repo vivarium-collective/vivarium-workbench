@@ -272,3 +272,42 @@ def test_manifest_declared_environment_recorded_unresolved():
     assert d["repo"] == "CovertLabEcoli/vEcoli-private" and d["ref"] == "a1b2c3d"
     # honesty: declared ≠ executed until a W4/W5 dispatch resolves it
     assert d["commit"] is None and d["lockfile_hash"] is None
+
+
+# --- declared environment + verification (environment-declaration) ----------
+
+_PULSE_ENV_YAML = """\
+default: pulse
+environments:
+  pulse:
+    core:
+      process-bigraph: ">=1.10.1"
+    packages:
+      protobuf: "==7.35.0"
+"""
+
+
+def test_manifest_records_declared_environment_and_verification(tmp_path):
+    # A workspace that declares a named environment and a run that references it:
+    # the manifest records the declared name and a verification verdict, and the
+    # captured fingerprint is driven by the environment's members.
+    (tmp_path / "environments.yaml").write_text(_PULSE_ENV_YAML)
+    m = cr.build_run_manifest(spec_id="s", params={}, n_steps=1, emitter=None,
+                              emit_paths=[], runtime={}, origin="composite",
+                              ws_root=tmp_path, environment_ref="pulse")
+    assert m["environment_ref"] == "pulse"
+    assert "environment_verification" in m
+    assert "matches" in m["environment_verification"]
+    # capture is driven by the declared members (core + packages)
+    assert set(m["env"]["sim_packages"]) == {"process-bigraph", "protobuf"}
+
+
+def test_manifest_environment_keys_present_and_null_when_undeclared(tmp_path):
+    # Back-compat: no environments.yaml, no ref — keys exist (stable shape) but
+    # the declaration is null and verification trivially matches.
+    m = cr.build_run_manifest(spec_id="s", params={}, n_steps=1, emitter=None,
+                              emit_paths=[], runtime={}, origin="composite",
+                              ws_root=tmp_path)
+    assert m["environment_ref"] is None
+    assert m["environment_verification"]["matches"] is True
+    assert m["environment_verification"]["drift"] == []
