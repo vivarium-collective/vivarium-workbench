@@ -984,33 +984,35 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Resources</span>
       </a>
-      <!-- Registry: 3×2 grid of stores — the type catalog. A row of circles
-           (continuous-type stores) over a row of squares (discrete/struct
-           stores) reads as "different KINDS of stores" — the registry's
-           heterogeneous-types semantics. -->
+      <!-- Catalog: a clean 2×2 grid of equal rounded tiles — the module catalog
+           reads as "a gallery of interchangeable things to pick from". -->
       <a href="#market"            class="viv-rail-link menu-link" data-page="market">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="3.4" y="9.6" width="6.4" height="6.4" rx="1.3"/>
-            <rect x="12.2" y="3.4" width="5.2" height="5.2" rx="1.1"/>
-            <rect x="12.2" y="10.8" width="5.2" height="5.2" rx="1.1"/>
+            <rect x="3.6"  y="3.6"  width="7.2" height="7.2" rx="1.3"/>
+            <rect x="13.2" y="3.6"  width="7.2" height="7.2" rx="1.3"/>
+            <rect x="3.6"  y="13.2" width="7.2" height="7.2" rx="1.3"/>
+            <rect x="13.2" y="13.2" width="7.2" height="7.2" rx="1.3"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Catalog</span>
       </a>
-      <!-- Processes: a tall process box with an arrow feeding in (left) and an
-           arrow exiting (right), both outside the box — input → process → output.
-           Sits under Registry (its artifacts are discovered there). -->
+      <!-- Process: a ported process box (input/output nodes on each side) that
+           fans out through a bus into two child boxes — input → process → outputs,
+           the flow-chart reading of a transformation step. -->
       <a href="#modules"           class="viv-rail-link menu-link" data-page="modules">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="9" y="9" width="6" height="6" rx="1.8"/>
-            <circle cx="3.7" cy="12" r="2.2"/>
-            <path d="M9 12 H5.9"/>
-            <circle cx="20.3" cy="12" r="2.2"/>
-            <path d="M15 12 H18.1"/>
-            <circle cx="12" cy="20.3" r="2.2"/>
-            <path d="M12 15 V18.1"/>
+            <rect x="7.5" y="2.8" width="9" height="5" rx="1.1"/>
+            <circle cx="3.3" cy="5.3" r="1.5"/>
+            <path d="M7.5 5.3 H4.8"/>
+            <circle cx="20.7" cy="5.3" r="1.5"/>
+            <path d="M16.5 5.3 H19.2"/>
+            <rect x="3.3"  y="16.2" width="7" height="5" rx="1.1"/>
+            <rect x="13.7" y="16.2" width="7" height="5" rx="1.1"/>
+            <path d="M12 7.8 V11 M6.8 11 H17.2 M6.8 11 V15.9 M17.2 11 V15.9"/>
+            <path d="M5.5 14.3 L6.8 15.9 L8.1 14.3"/>
+            <path d="M15.9 14.3 L17.2 15.9 L18.5 14.3"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Process</span>
@@ -1082,12 +1084,20 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#" id="viv-studies-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Studies browser">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="4.5" cy="6"  r="1.2" fill="currentColor" stroke="none"/>
-            <path d="M9 6 H20"/>
-            <circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/>
-            <path d="M9 12 H20"/>
-            <circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/>
-            <path d="M9 18 H20"/>
+            <!-- a left spine branching to three bars, each ending in a node -->
+            <path d="M3.5 5.5 V18.5"/>
+            <path d="M3.5 6 H6"/>
+            <rect x="6" y="4.4" width="6.5" height="3.2" rx="1.1"/>
+            <path d="M12.5 6 H15.2"/>
+            <circle cx="17.6" cy="6" r="1.7"/>
+            <path d="M3.5 12 H6"/>
+            <rect x="6" y="10.4" width="6.5" height="3.2" rx="1.1"/>
+            <path d="M12.5 12 H15.2"/>
+            <circle cx="17.6" cy="12" r="1.7"/>
+            <path d="M3.5 18 H6"/>
+            <rect x="6" y="16.4" width="6.5" height="3.2" rx="1.1"/>
+            <path d="M12.5 18 H15.2"/>
+            <circle cx="17.6" cy="18" r="1.7"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Studies</span>
@@ -1128,6 +1138,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
             <polyline points="16 18 22 12 16 6"/>
             <polyline points="8 6 2 12 8 18"/>
+            <line x1="14" y1="5" x2="10" y2="19"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Code</span>
