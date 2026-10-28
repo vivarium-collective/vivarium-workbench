@@ -41,18 +41,42 @@ def _ws_two_unlinked_claims(tmp_path: Path) -> Path:
     return root
 
 
-@pytest.mark.xfail(
-    reason="Asserts the pre-extraction (over-reporting) narrative.audit behavior: two "
-    "unlinked claims surfacing a gap. The current engine (discovery-engine) requires a "
-    "declared, unsupported edge for a gap; unlinked claims no longer qualify. See #1499 "
-    "for the (a) update-test / (b) product-decision resolution.",
-    strict=False,
-)
-def test_narrative_gap_becomes_a_needs_attention_item(tmp_path):
+def test_narrative_gap_becomes_a_needs_attention_item(tmp_path, monkeypatch):
+    # The scan derives its argument graph via discovery_engine.derive_argument,
+    # which only ever emits supporting (prerequisite/support) or challenge edges —
+    # so a unit↔unit narrative gap (which audit() raises ONLY for a DECLARED,
+    # non-supporting, non-challenge edge between adjacent claims) cannot arise from
+    # a plain two-study workspace. (This is the engine's post-extraction "don't
+    # over-report on a wide DAG" behavior: bare unlinked claims no longer qualify.)
+    # To exercise the audit → scan → needs-attention WIRING on a genuine gap, inject
+    # an argument graph carrying such an edge: two adjacent claims joined by a
+    # declared "association" edge with no supporting path between them. Whether the
+    # scan should additionally SURFACE such gaps from real workspaces (i.e. derive
+    # non-supporting edges, or merge an authored argument) is the open product
+    # question tracked in #1499.
     root = _ws_two_unlinked_claims(tmp_path)
+
+    import discovery_engine.argument_store as _argstore
+
+    def _graph_with_declared_gap(_inv_spec, _studies_by_slug):
+        return {
+            "claims": {
+                "claim:s-a": {"proposition": "A holds", "verdict": "supported"},
+                "claim:s-b": {"proposition": "B holds", "verdict": "supported"},
+            },
+            # a declared edge that is neither supporting nor a challenge → the
+            # reading asserts a transition with no justifying link: a gap.
+            "edges": [{"from": "claim:s-a", "to": "claim:s-b",
+                       "type": "association", "relation": "authored"}],
+        }
+
+    # _narrative_gap_items does `from discovery_engine.argument_store import
+    # derive_argument` at call time, so patching the source attribute takes effect.
+    monkeypatch.setattr(_argstore, "derive_argument", _graph_with_declared_gap)
+
     d = scan_investigation(root, "inv")
     gaps = [it for it in d["items"] if it["kind"] == "narrative_gap"]
-    assert gaps, "an unsupported narrative transition should surface as a needs-attention item"
+    assert gaps, "a declared unsupported transition should surface as a needs-attention item"
     g = gaps[0]
     assert g["severity"] in ("high", "medium")
     assert "→" in g["ref"]          # "from→to"
