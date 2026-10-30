@@ -988,6 +988,15 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             studies_out.append(_unloadable_study_node(sp, slug, str(e)))
             continue
 
+        # Evidence read ONCE per study (derive-on-read); None => legacy path.
+        try:
+            from vivarium_workbench.lib.study_evidence import (  # noqa: PLC0415
+                evidence_for_study as _evidence_for_study,
+            )
+            _ev = _evidence_for_study(ws_root, slug)
+        except Exception:  # noqa: BLE001 — never 500 the page on a bad study
+            _ev = None
+
         sim_set = study_spec.get("simulation_set") or []
         beh_tests = (
             study_spec.get("behavior_tests")
@@ -1105,6 +1114,12 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             }
         except Exception:  # noqa: BLE001
             pass
+        if _ev is not None:
+            # B1: live counts from the evidence bundle (agrees with the Report
+            # Cards tab). The per-test glyph list still comes from the authored
+            # behavior tests and may not match the live count one-to-one.
+            _beh_summary["passed"] = int(_ev.tests_passed)
+            _beh_summary["total"] = int(_ev.tests_total)
         # Runs summary: {count, status, n_steps, emitter}. Count from the same
         # helper as n_runs; latest status/n_steps/emitter from the run registry
         # (newest row), all best-effort + degrade-gracefully.
@@ -1169,16 +1184,22 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             "confidence":            study_spec.get("confidence"),
             "design_status":         study_spec.get("design_status"),
             "implementation_status": study_spec.get("implementation_status"),
-            "simulation_status":     study_spec.get("simulation_status"),
+            "simulation_status":     (
+                _ev.execution if _ev is not None and _ev.execution != "not_run"
+                else study_spec.get("simulation_status")
+            ),
             "evaluation_status":     study_spec.get("evaluation_status"),
-            "gate_status":           study_spec.get("gate_status"),
+            "gate_status":           (
+                _ev.gate if _ev is not None and _ev.gate != "not_started"
+                else study_spec.get("gate_status")
+            ),
             "expert_review_status":  study_spec.get("expert_review_status"),
             # Two-axis ontology — the graph card reads these directly. execution
             # is always derived (every card gets a Progress pill); verdict is set
             # only when authored or derivable (else the card shows "pending").
             # Same derivation as the typed graph builder (shared study_ontology).
-            "execution_status":      _derive_execution_status(study_spec, raw_status),
-            "verdict":               _derive_verdict(study_spec),
+            "execution_status":      _derive_execution_status(study_spec, raw_status, evidence=_ev),
+            "verdict":               _derive_verdict(study_spec, evidence=_ev),
             "evidence_tier":         study_spec.get("evidence_tier"),
             # viva-superpowers #285 — the split verdict ledger (or None).
             "verdict_count_split":   _count_split,

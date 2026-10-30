@@ -141,8 +141,14 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
         # Progress pill; the verdict (what the evidence supports) is only set when
         # authored or derivable, so an unmarked study shows "pending". Authored
         # fields win over derivation.
-        _node["execution_status"] = _derive_execution_status(study_spec, _node_status)
-        _verdict = _derive_verdict(study_spec)
+        try:
+            from vivarium_workbench.lib.study_evidence import evidence_for_study
+            _ev = evidence_for_study(ws_root, slug)
+        except Exception:  # noqa: BLE001 — degrade to legacy derivation
+            _ev = None
+        _node["execution_status"] = _derive_execution_status(
+            study_spec, _node_status, evidence=_ev)
+        _verdict = _derive_verdict(study_spec, evidence=_ev)
         if _verdict:
             _node["verdict"] = _verdict
         if study_spec.get("evidence_tier"):
