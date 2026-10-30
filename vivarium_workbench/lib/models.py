@@ -1867,6 +1867,35 @@ class FeedbackRecordActionResult(BaseModel):
     kind: Optional[str] = None
 
 
+class FeedbackSaveBody(BaseModel):
+    """POST /api/feedback-save — a collected inline-feedback payload from the
+    study page's capture widget (``static/study-feedback.js``).
+
+    Canonical ingest shape: ``{meta:{investigation, study?, reviewer?,
+    generated_at?, ...}, annotations:{section_id: [{author, text, ts, ...}]}}``.
+    Wraps ``viva_superpowers.feedback_import.write_feedback_payload``, which
+    writes it under ``investigations/<inv>/feedback/<ts>.yaml``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    meta: dict[str, Any] = {}
+    annotations: dict[str, Any] = {}
+
+
+class FeedbackSaveResult(BaseModel):
+    """``POST /api/feedback-save`` response: ``{saved, path}`` on success;
+    failures carry ``error`` via ``extra="allow"``.
+
+    Source: ``lib.feedback_save_views.feedback_save``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    saved: bool = False
+    path: Optional[str] = None
+
+
 # --- viva-investigation rewire endpoint (Phase 2.1h) -----------------------
 
 
