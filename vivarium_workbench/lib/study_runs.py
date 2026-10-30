@@ -346,6 +346,13 @@ def _run_post_run_flush(ws_root, study_dir, spec, spec_id, run_id, full_params,
         behavior_test_card.write_behavior_test_card(study_dir)
     except Exception as exc:  # never fail a successful run on a report-card error
         print(f"[behavior_test_card] write failed: {exc}", file=sys.stderr)
+    # Self-heal the stored execution_status from evidence BEFORE the
+    # investigation roll-up reads it (best-effort; never breaks the flush).
+    try:
+        from vivarium_workbench.lib.study_reconcile import reconcile_study_status
+        reconcile_study_status(ws_root, study_dir.name)
+    except Exception:
+        pass
     lifecycle_mutations._sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response
 
