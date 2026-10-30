@@ -1,0 +1,16 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": "Keep discovery-engine in sync automatically. While it is a branch=main git dep, lockFileMaintenance refreshes uv.lock to the latest engine commit; once discovery-engine publishes tags, the tag bump is tracked too.",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "packageRules": [
+    {
+      "matchPackageNames": ["discovery-engine"],
+      "groupName": "discovery-engine",
+      "schedule": ["at any time"]
+    }
+  ]
+}
