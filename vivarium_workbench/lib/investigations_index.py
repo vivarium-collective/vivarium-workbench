@@ -487,7 +487,10 @@ def build_investigations(ws_root: Path) -> dict:
         # `effective_status` are the SAME value by construction (see below), and
         # this helper can scan runs/tests, so computing it twice per study was
         # pure duplicated work across 80+ studies.
-        _disp_status = _study_display_status(ws_root, spec["name"], spec)
+        from vivarium_workbench.lib.investigation_status import _safe_evidence
+        _disp_status = _study_display_status(
+            ws_root, spec["name"], spec,
+            evidence=_safe_evidence(ws_root, spec["name"]))
         row = {
             "name": spec["name"],
             "composite": composite_summary,

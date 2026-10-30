@@ -4535,6 +4535,37 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
 
     @app.post(
+        "/api/study/{slug}/reconcile-status",
+        tags=["Studies"],
+        summary="Reconcile a study's stored execution_status to its evidence",
+    )
+    def study_reconcile_status(
+        slug: str,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        from vivarium_workbench.lib.study_reconcile import reconcile_study_status
+        name = _path_safety.plain_name(slug, "study name")
+        try:
+            return reconcile_study_status(ws, name)
+        except FileNotFoundError:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "study not found", "slug": slug})
+
+    @app.post(
+        "/api/investigation/{slug}/reconcile-status",
+        tags=["Investigations"],
+        summary="Reconcile all member studies' execution_status to evidence",
+    )
+    def investigation_reconcile_status(
+        slug: str,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        from vivarium_workbench.lib.study_reconcile import reconcile_investigation
+        return reconcile_investigation(
+            ws, _path_safety.plain_name(slug, "investigation slug"))
+
+    @app.post(
         "/api/study-variant-add",
         tags=["Studies"],
         summary="Add a variant entry to study.yaml",
