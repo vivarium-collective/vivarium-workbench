@@ -275,8 +275,11 @@ def read_study_status(
             spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
         except Exception:
             return "planning", False
-        status = _study_display_status(
-            ws_root, slug, spec, evidence=_safe_evidence(ws_root, slug))
+        ev = _safe_evidence(ws_root, slug)
+        status = _study_display_status(ws_root, slug, spec, evidence=ev)
+        # Same has_runs rule as the detail rollup: evidence n_runs when present.
+        if ev is not None:
+            return status, (ev.n_runs or 0) > 0
         return status, study_has_runs(slug, spec)
     return "planning", False
 

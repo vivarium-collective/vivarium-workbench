@@ -80,3 +80,30 @@ def test_plan_board_gate_advances(tmp_path):
     det = build_iset_detail(ws, "inv")
     row = det["plan_board"][0]
     assert row["status"] == "passed"
+
+
+def test_has_runs_agrees_when_callable_disagrees_with_evidence(tmp_path):
+    """Planned study, one non-completed run: summary callable says True but
+    detail used n_runs; both must now derive from evidence and agree."""
+    ws = _ws(tmp_path)
+    sd = ws / "studies" / "s1"
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 4, "name": "s1", "status": "planned",
+        "baseline": [{"name": "baseline", "composite": "my.Composite"}]}))
+    import shutil
+    shutil.rmtree(sd / "viz")
+    (sd / "runs.db").unlink()
+    summ = next(x for x in build_iset_summary(ws, study_has_runs=lambda s, sp: True)
+                if x["name"] == "inv")
+    det = build_iset_detail(ws, "inv")
+    assert det["effective_status"] == summ["effective_status"]
+
+
+def test_name_differs_from_slug_stays_fresh(tmp_path):
+    ws = _ws(tmp_path)
+    (ws / "studies" / "s1" / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 4, "name": "different-name", "status": "planned",
+        "simulation_status": "not_run", "gate_status": "not_started",
+        "baseline": [{"name": "baseline", "composite": "my.Composite"}]}))
+    det = build_iset_detail(ws, "inv")
+    assert det["effective_status"] == "complete"

@@ -989,6 +989,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     studies_out: list[dict] = []
     evidence_by_slug: dict = {}  # read once per study; reused by rollup/board/acceptance
     _rollup_status_by_slug: dict = {}
+    _rollup_has_runs_by_name: dict = {}
     for slug in investigation_member_slugs(spec):
         try:
             sp = study_wp.study_dir(slug, must_exist=True) / "study.yaml"
@@ -1083,7 +1084,12 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             ws_root, study_spec["name"], study_spec, evidence=_ev)
         # Same computation as the summary route; used for the investigation rollup.
         evidence_by_slug[slug] = _ev
-        _rollup_status_by_slug[slug] = _eff_status
+        # Keyed by study NAME (the lookup key below), which may differ from the
+        # directory slug.
+        _rollup_status_by_slug[study_spec["name"]] = _eff_status
+        _rollup_has_runs_by_name[study_spec["name"]] = (
+            (_ev.n_runs or 0) > 0 if _ev is not None
+            else (n_runs_for_study or 0) > 0)
         # Safeguard: a study can carry a COMPLETED evaluation as committed
         # report-card verdicts (viz/report_card/*.verdict.json) yet be left at a
         # pre-eval status (e.g. `build`) with no local runs.db — its report cards
@@ -1255,7 +1261,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         _rollup_status_by_slug.get(s.get("name"), s.get("status", "planning"))
         for s in studies_out
     ]
-    member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
+    member_has_runs = [
+        _rollup_has_runs_by_name.get(s.get("name"), (s.get("n_runs") or 0) > 0)
+        for s in studies_out
+    ]
     effective_status = compute_investigation_status(
         member_statuses, has_runs=member_has_runs,
     )
