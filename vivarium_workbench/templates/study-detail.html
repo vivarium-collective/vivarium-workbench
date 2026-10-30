@@ -20,7 +20,7 @@
   <div style="display:flex; align-items:center; gap:14px; justify-content:space-between;">
   <div style="display:flex; align-items:center; gap:12px; min-width:0; flex-wrap:wrap">
   <h1 class="study-title" style="margin:0">
-    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" data-study-kind="{{ study.kind }}" title="{{ name }}">{{ display_name }}</span>
+    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" data-study-kind="{{ study.kind }}" title="{{ name }}" data-edit-kind="study" data-edit-field="title" data-edit-value="{{ study.title or '' }}" data-edit-label="Title">{{ display_name }}</span>
     {# The old standalone "kind" + "phase" pills were visual noise next to the
        title (uniform across a computational investigation; the phase just
        duplicated the gate ladder below). Kind is kept as a data attribute for
@@ -622,15 +622,15 @@
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Background</h2>
       <div class="ctr-meta">
-        {% if study.question %}<div class="ctr-meta-row"><span class="ctr-meta-k">Question</span> <span class="ctr-meta-item">{{ study.question }}</span></div>{% endif %}
-        {% if study.hypothesis %}<div class="ctr-meta-row"><span class="ctr-meta-k">Hypothesis</span> <span class="ctr-meta-item">{{ study.hypothesis }}</span></div>{% endif %}
+        {% if study.question %}<div class="ctr-meta-row"><span class="ctr-meta-k">Question</span> <span class="ctr-meta-item" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question">{{ study.question }}</span></div>{% endif %}
+        {% if study.hypothesis %}<div class="ctr-meta-row"><span class="ctr-meta-k">Hypothesis</span> <span class="ctr-meta-item" data-edit-kind="study" data-edit-field="hypothesis" data-edit-value="{{ study.hypothesis }}" data-edit-multiline data-edit-label="Hypothesis">{{ study.hypothesis }}</span></div>{% endif %}
       </div>
     </div>
     {% endif %}
 
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Model &amp; approach</h2>
-      <p class="ctr-text">{{ study.experiment or study.objective or '' }}</p>
+      <p class="ctr-text"{% if study.objective %} data-edit-kind="study" data-edit-field="objective" data-edit-value="{{ study.objective }}" data-edit-multiline data-edit-label="Objective"{% endif %}>{{ study.experiment or study.objective or '' }}</p>
       <div class="ctr-meta">
         {% if _bl %}<div class="ctr-meta-row"><span class="ctr-meta-k">Model</span> {% for b in _bl %}<code>{{ b.name or b.composite }}</code>{% if not loop.last %}, {% endif %}{% endfor %}<a class="ov-tablink" href="#" onclick="_setStudyTab('compose');return false;">model →</a></div>{% endif %}
         {% if study.implemented_methods %}
@@ -704,7 +704,7 @@
         <details class="finding-details">
           <summary class="finding-row">
             <span class="finding-status-glyph">{{ _glyph }}</span>
-            <span class="finding-claim finding-statement">{{ _text }}</span>
+            <span class="finding-claim finding-statement"{% if f.id and f.statement %} data-edit-kind="study" data-edit-field="findings[{{ f.id }}].statement" data-edit-value="{{ f.statement }}" data-edit-multiline data-edit-label="Finding {{ f.id }}"{% endif %}>{{ _text }}</span>
             {% if f.evidence and f.evidence.from_test %}
             <span class="finding-chip">via <code>{{ f.evidence.from_test }}</code></span>
             {% elif f.evidence and f.evidence.from_run %}
@@ -1899,7 +1899,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
     {% if study.conclusion %}
     <div class="decide-section" style="margin-top:18px">
       <h3 class="overview-label">Conclusion</h3>
-      <div class="conclusion-md" style="background:#f8fafc;padding:12px;border-left:3px solid #94a3b8;border-radius:3px;font-size:0.9em;line-height:1.5">{{ study.conclusion | markdown }}</div>
+      <div class="conclusion-md" style="background:#f8fafc;padding:12px;border-left:3px solid #94a3b8;border-radius:3px;font-size:0.9em;line-height:1.5" data-edit-kind="study" data-edit-field="conclusion" data-edit-value="{{ study.conclusion }}" data-edit-multiline data-edit-label="Conclusion">{{ study.conclusion | markdown }}</div>
     </div>
     {% endif %}
     {% endif %}
@@ -2418,6 +2418,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
 <script src="/comparison-view.js"></script>
 <script src="/study-detail.js"></script>
 <script src="/study-feedback.js"></script>
+<script src="/inline-edit.js"></script>
 <script>
 // Re-assert the refresh-aware seed handlers AFTER study-detail.js (which
 // defines its own navigate-away _seedFollowupStudy). The embedded

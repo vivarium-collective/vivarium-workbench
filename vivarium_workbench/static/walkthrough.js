@@ -11115,6 +11115,16 @@
   }
   window._planBoardHtml = _planBoardHtml;
 
+  // Inline-edit attribute string (consumed by static/inline-edit.js). The value
+  // is the RAW yaml source, not the rendered (markdown / whitespace-collapsed)
+  // text, so a save writes back losslessly.
+  function _ieAttrs(field, value, label, multiline) {
+    return ' data-edit-kind="investigation" data-edit-field="' + _esc(field) + '"' +
+      ' data-edit-value="' + _esc(value || '') + '"' +
+      ' data-edit-label="' + _esc(label) + '"' +
+      (multiline ? ' data-edit-multiline' : '');
+  }
+
   function _renderInvOpening(d) {
     d = d || {};
     var ex = d.executive || {};
@@ -11237,7 +11247,8 @@
     var whatIsLede = whatIs ? whatIs.split(/\n\s*\n/)[0].trim() : '';
     var ovParts = [];
     if (whatIsLede)
-      ovParts.push('<div class="inv-brief-prose inv-brief-overview-lede">' +
+      ovParts.push('<div class="inv-brief-prose inv-brief-overview-lede"' +
+        _ieAttrs('executive.what_is_this', whatIs, 'Overview', true) + '>' +
         _renderInvLeadMarkdown(whatIsLede) + '</div>');
     if (verdict)
       ovParts.push('<div class="inv-brief-overview-verdict inv-vs-' + vsClass + '" ' +
@@ -11262,10 +11273,15 @@
     // structured argument (Hypothesis & evidence folded in here per the owner).
     var bgParts = [];
     if (leadProse)
-      bgParts.push('<div class="inv-brief-prose">' + _renderInvLeadMarkdown(leadProse) + '</div>');
+      bgParts.push('<div class="inv-brief-prose"' +
+        _ieAttrs(d.lead ? 'lead' : 'description', leadProse, 'Background', true) + '>' +
+        _renderInvLeadMarkdown(leadProse) + '</div>');
     var _bgMeta = [];
-    if (q) _bgMeta.push('<span class="inv-brief-meta-item"><em>Question</em> ' + _invInline(oneline(q)) + '</span>');
-    if (hyp) _bgMeta.push('<span class="inv-brief-meta-item"><em>Hypothesis</em> ' + _invInline(hyp) + '</span>');
+    // Only the text (inner span) is editable, so the <em> label survives a save.
+    if (q) _bgMeta.push('<span class="inv-brief-meta-item"><em>Question</em> <span' +
+      _ieAttrs('question', d.question, 'Question', true) + '>' + _invInline(oneline(q)) + '</span></span>');
+    if (hyp) _bgMeta.push('<span class="inv-brief-meta-item"><em>Hypothesis</em> <span' +
+      _ieAttrs('hypothesis', d.hypothesis, 'Hypothesis', true) + '>' + _invInline(hyp) + '</span></span>');
     if (_bgMeta.length) bgParts.push('<div class="inv-brief-meta">' + _bgMeta.join('') + '</div>');
     var _evBody = _evidenceBody();
     if (_evBody)
