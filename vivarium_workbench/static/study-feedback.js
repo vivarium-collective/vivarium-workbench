@@ -661,7 +661,9 @@
     payload.meta.investigation = inv;
     var url = "/api/feedback-save";
     try {
-      if (window.DataSource && typeof window.DataSource.apiUrl === "function") url = window.DataSource.apiUrl("feedback-save");
+      // apiUrl only prefixes the base path for an absolute "/api/..." path; a
+      // bare name is returned unchanged and would POST relative to the page.
+      if (window.DataSource && typeof window.DataSource.apiUrl === "function") url = window.DataSource.apiUrl("/api/feedback-save");
     } catch (e) {}
     fetch(url, {
       method: "POST",
