@@ -544,7 +544,7 @@
     if (!layout || !mainEl) return;
     dockCtl = window.VivPanelDock.make({
       panel: r, layout: layout, mainEl: mainEl, key: 'code',
-      label: 'Process code', ghostIcon: CODE_GHOST,
+      label: 'Code', ghostIcon: CODE_GHOST,
       launcher: document.getElementById('viv-code-toggle'),
       resizeHandle: 'viv-code-resize-handle',
       dragHandles: ['.viv-code-head'],

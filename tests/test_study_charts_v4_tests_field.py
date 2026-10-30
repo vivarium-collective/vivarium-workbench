@@ -73,9 +73,12 @@ def test_unresolvable_measure_path_yields_refusal(tmp_path):
     assert "svg" not in stub
 
 
-def test_missing_measure_path_yields_unresolved_stub(tmp_path):
-    """A test with no `measure.path` at all also gets a visible stub,
-    alongside a sibling test that DOES resolve normally."""
+def test_non_chart_tests_skipped_from_gallery_data_gap_kept(tmp_path):
+    """Tests with no plottable series are not visualizations: a test with no
+    `measure.path` (a scalar assertion) and a `kind: derived` scalar readout are
+    graded with their verdict on the Audit tab, so they are skipped from the
+    Visualizations gallery rather than emitted as empty stubs. A non-derived path
+    with no image IS a genuine data gap and is kept visible."""
     runs_db = tmp_path / "runs.db"
     runs_db.touch()
     spec = {
@@ -83,15 +86,16 @@ def test_missing_measure_path_yields_unresolved_stub(tmp_path):
         "tests": [
             {"name": "no-path-test", "classification": "primary",
              "measure": {"kind": "live_cell_count"}, "pass_if": {}},
-            # A second, resolvable-path test keeps path_specs non-empty so
-            # the per-test loop is actually reached.
+            {"name": "derived-scalar-test", "classification": "primary",
+             "measure": {"path": "growth_rate", "kind": "derived"}, "pass_if": {}},
+            # A non-derived path with no image is a real data gap -> kept.
             {"name": "unresolvable-test", "classification": "primary",
              "measure": {"path": "still.unresolvable"}, "pass_if": {}},
         ],
     }
     charts = render_v4_test_charts(spec, runs_db, fallback_db=None)
-    assert len(charts) == 2
-    by_key = {c["key"]: c for c in charts}
-    stub = by_key["v4-no-path-test"]
-    assert stub["status"] == "unresolved"
-    assert "measure.path" in stub["caption"]
+    keys = {c["key"] for c in charts}
+    assert "v4-no-path-test" not in keys          # scalar assertion -> Audit only
+    assert "v4-derived-scalar-test" not in keys   # scalar readout -> Audit only
+    assert "v4-unresolvable-test" in keys         # genuine data gap -> kept
+    assert len(charts) == 1

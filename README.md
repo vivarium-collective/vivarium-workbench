@@ -68,14 +68,14 @@ bash use-this-template-init.sh
 ```
 
 **With AI authoring.** Install the
-[pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)
+[viva-superpowers](https://github.com/vivarium-collective/viva-superpowers)
 Claude Code plugin and from inside Claude Code run:
 
 ```
-/pbg-workspace my-project
+/viva-workspace my-project
 ```
 
-See [pbg-superpowers' Getting Started](https://github.com/vivarium-collective/pbg-superpowers#getting-started)
+See [viva-superpowers' Getting Started](https://github.com/vivarium-collective/viva-superpowers#getting-started)
 for the full walkthrough.
 
 ### 3. Serve
@@ -97,11 +97,11 @@ take — creating a study, registering an observable, kicking off a run — comm
 to your active workstream branch, so there's a full git audit trail visible
 under **GitHub Branches**. The dashboard reads the workspace's `.pbg/schemas/`
 validators, so malformed YAML is caught at save time rather than at run time.
-If you installed the **pbg-superpowers** plugin, every dashboard action can
-also be driven by natural-language `/pbg-*` skills against the same files —
+If you installed the **viva-superpowers** plugin, every dashboard action can
+also be driven by natural-language `/viva-*` skills against the same files —
 use whichever interface fits the moment. For the full AI-augmented authoring
 experience, see the
-[pbg-superpowers Getting Started](https://github.com/vivarium-collective/pbg-superpowers#getting-started).
+[viva-superpowers Getting Started](https://github.com/vivarium-collective/viva-superpowers#getting-started).
 
 ## Running modes
 
@@ -211,6 +211,7 @@ These three planes — and the round-trip between them — are specified in
 ## Companion repos
 
 - **[viva-superpowers](https://github.com/vivarium-collective/viva-superpowers)** (formerly pbg-superpowers) — the Claude Code plugin whose `/viva-*` skills drive this dashboard's HTTP API. Use it for AI-assisted authoring. Its Python library is also a **core dependency** of this package (the deterministic, AI-free domain layer), so it is installed with the workbench whether or not you use the skills.
+- **[discovery-engine](https://github.com/vivarium-collective/discovery-engine)** — the investigation/study framework and discovery cycle (`discovery_engine.*`: audit, evaluation, verdicts, rigor, report linting). A **core git dependency**, installed with the workbench; `viva-superpowers` keeps the skills and a few helpers.
 - **[viva-template](https://github.com/vivarium-collective/viva-template)** — the workspace scaffold this dashboard serves. Includes the canonical `.pbg/schemas/` validators.
 - **investigation-contracts** — event-log contracts shared by both spines. Not yet on PyPI; install editable from the repo: `pip install -e /path/to/investigation-contracts`.
 

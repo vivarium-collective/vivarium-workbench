@@ -143,7 +143,7 @@ def test_switching_tabs_does_not_steal_a_different_tabs_cookie(
     tab A's background fetch runs, and tab B's next plain (header-less)
     navigation — which can only resolve via the cookie — silently rendered
     tab A's workspace instead of its own."""
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
     from vivarium_workbench.lib import session_registry
     session_registry.clear()
 
@@ -216,7 +216,7 @@ def test_switch_build_aligns_cookie_on_its_own_response(client, monkeypatch):
 def test_session_header_takes_precedence_for_binding(client, tmp_path, monkeypatch):
     """The X-VW-Session id is the session key used for per-session binding: a
     switch carrying the header binds THAT id (preferred over cookie/minted)."""
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
     from vivarium_workbench.lib import session_registry
     session_registry.clear()
     ws = tmp_path / "ws_hdr"
@@ -457,8 +457,9 @@ def test_study_charts_empty_workspace(client):
     assert r.status_code == 200
     body = r.json()
     assert body == {
-        "study": "dnaa-1", "schema_version": None, "charts": [],
+        "study": "dnaa-1", "schema_version": None, "charts": [], "gate_results": [],
         "db_exists": False, "data_store": None, "static_count": 0, "live_count": 0,
+        "gate_result_count": 0,
     }
 
 
@@ -4234,7 +4235,7 @@ class TestCsrfMiddleware:
     def test_same_origin_post_passes(self, client, monkeypatch):
         # Origin host == Host ('testserver') → reaches the route (here a 400,
         # not a 403 — it passed the guard).
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
         r = client.post(
             "/api/source/switch",
@@ -4245,7 +4246,7 @@ class TestCsrfMiddleware:
         assert r.json()["error"].endswith("is not a registered workspace")
 
     def test_no_origin_post_passes(self, client, monkeypatch):
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
         r = client.post("/api/source/switch", json={"path": "/nope"})
         assert r.status_code != 403
@@ -4253,7 +4254,7 @@ class TestCsrfMiddleware:
 
     def test_env_disabled_post_passes(self, client, monkeypatch):
         monkeypatch.setenv("VIVARIUM_DASHBOARD_DISABLE_CSRF", "1")
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
         r = client.post(
             "/api/source/switch",
@@ -4274,7 +4275,7 @@ class TestCsrfMiddleware:
         # X-Forwarded-Host instead (simulating a reverse-proxy hop that
         # rewrote Host to an internal address). Only passes with the env set.
         monkeypatch.setenv("VIVARIUM_WORKBENCH_TRUST_PROXY", "1")
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
         r = client.post(
             "/api/source/switch",
@@ -4309,7 +4310,7 @@ class TestCsrfMiddleware:
         monkeypatch.setenv(
             "VIVARIUM_WORKBENCH_ALLOWED_ORIGINS", "http://localhost:8080"
         )
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
         r = client.post(
             "/api/source/switch",
@@ -4344,7 +4345,7 @@ class TestSourceSwitchRoute:
         assert r.json() == {"error": "missing 'path'"}
 
     def test_unregistered_path_400(self, client, tmp_path, monkeypatch):
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
         p = str(tmp_path / "nope")
         r = client.post("/api/source/switch", json={"path": p})
@@ -4354,7 +4355,7 @@ class TestSourceSwitchRoute:
     def test_switch_binds_session_not_global(self, client, tmp_path, monkeypatch):
         """Slice 4: a switch is PER SESSION — it binds the caller's session and
         leaves the process-global root (and other sessions) untouched."""
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         from vivarium_workbench.lib import _root, session_registry
         session_registry.clear()
         ws = tmp_path / "ws2"
@@ -6496,7 +6497,7 @@ def test_switch_returns_ready_materialization_and_status_polls(client, monkeypat
     ws = tmp_path / "wsx"
     ws.mkdir()
     (ws / "workspace.yaml").write_text("name: wsx\n")
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
     monkeypatch.setattr(workspace_catalog, "list_workspaces",
                         lambda: [{"path": str(ws), "name": "wsx"}])
 

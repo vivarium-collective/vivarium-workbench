@@ -1236,7 +1236,7 @@ def test_status_ladder_shows_authored_axis_state(tmp_path):
 
 def test_status_ladder_shows_computed_vs_authored_indicator(tmp_path):
     """Where a computed value exists for a gate (Execution, sourced from
-    viva_superpowers.study_status.derive_status, attached to the spec as
+    discovery_engine.study_status.derive_status, attached to the spec as
     `derived_status` by load_study_detail_spec) the ladder carries a computed
     value for that gate."""
     ws = tmp_path / "ws"
@@ -1537,7 +1537,7 @@ def test_acceptance_criteria_band_renders_with_spine_acceptance(tmp_path, dashbo
 
     # Criterion behavior name + outcome, mapped through the SAME G3 four-value
     # vocabulary ("failing" -> "not met", sourced from
-    # viva_superpowers.investigation_status's criterion-result tokens).
+    # discovery_engine.investigation_status's criterion-result tokens).
     band = tests_panel[band_i:gate_i]
     assert "oric_timing" in band
     assert "not met" in band

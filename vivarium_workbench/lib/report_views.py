@@ -181,12 +181,12 @@ def _enrich_findings_with_weight(study_spec: dict) -> list:
     """Attach evidential weight to each finding.
 
     Mirrors ``server._enrich_findings_with_weight``.  Tolerant: if
-    ``viva_superpowers.rigor.finding_evidential_weight`` is unavailable the
+    ``discovery_engine.rigor.finding_evidential_weight`` is unavailable the
     findings pass through unchanged.
     """
     findings = study_spec.get("findings") or []
     try:
-        from viva_superpowers.rigor import finding_evidential_weight
+        from discovery_engine.rigor import finding_evidential_weight
     except Exception:  # noqa: BLE001
         return findings
     out = []
@@ -460,13 +460,13 @@ def _linkage_cached_index(ws_root: Path) -> Optional[dict]:
 def build_report_lint(ws_root: Path) -> tuple[dict, int]:
     """GET /api/report-lint builder.
 
-    Runs the deterministic linter (``viva_superpowers.report_linter``) over
+    Runs the deterministic linter (``discovery_engine.report_linter``) over
     the workspace and returns ``(payload_dict, status_code)``.  Always 200 —
     tolerant on linter absence or workspace scan failure.
 
     Phase 2.1d: also applies ``<ws>/.pbg/report-lint-overrides.json`` the same
     way the old ``/viva-report`` skill/CLI did (``report_linter``-backed
-    ``viva_superpowers.report.render_workspace_report``'s lint step) — an
+    ``discovery_engine.report.render_workspace_report``'s lint step) — an
     error-level finding whose ``override_key`` is logged in the override file
     is downgraded to a warning (message prefixed ``[overridden]``) via
     ``report_linter.apply_overrides``. This reuses each finding's own
@@ -479,7 +479,7 @@ def build_report_lint(ws_root: Path) -> tuple[dict, int]:
     """
     ws_root = Path(ws_root)
     try:
-        from viva_superpowers.report_linter import (
+        from discovery_engine.report_linter import (
             apply_overrides,
             lint_workspace_report,
             load_overrides,
@@ -685,7 +685,7 @@ def _all_investigation_declared_inputs(ws_root: Path) -> dict:
     ``investigations/<slug>/investigation.yaml``'s ``inputs:`` block. The repo-wide
     Resources page folds them in beside the workspace.yaml-level ones so they all
     show together. Best-effort; a malformed investigation is skipped."""
-    from viva_superpowers.investigation_inputs import investigation_inputs
+    from discovery_engine.investigation_inputs import investigation_inputs
     datasets: list = []
     expert_docs: list = []
     try:
@@ -734,7 +734,7 @@ def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
     Mirrors ``server._inputs_payload`` parameterised on ``ws_root``; the
     current-branch slug comes from ``lib.investigation_status.current_branch_slug``.
     """
-    from viva_superpowers.investigation_inputs import investigation_inputs
+    from discovery_engine.investigation_inputs import investigation_inputs
     from vivarium_workbench.lib.investigation_status import current_branch_slug
     from vivarium_workbench.lib.report import _parse_bib_entries, _enrich_with_file_info
 
@@ -1211,8 +1211,8 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
 
     computed_acceptance: Optional[dict] = None
     try:
-        from viva_superpowers.investigation_status import roll_up_acceptance
-        from viva_superpowers import study_io as _sio
+        from discovery_engine.investigation_status import roll_up_acceptance
+        from discovery_engine import study_io as _sio
         studies_by_name: dict = {}
         for _sd in study_wp.iter_study_dirs():
             _syp = _sd / "study.yaml"

@@ -487,7 +487,7 @@ def _list_visualizations() -> dict:
         pass
 
     # Append report-card / test classes. They auto-register into
-    # viva_superpowers.post_sim.TEST_REGISTRY (REPORT_CARD_REGISTRY is the same
+    # discovery_engine.post_sim.TEST_REGISTRY (REPORT_CARD_REGISTRY is the same
     # dict) when the modules that define them are imported — the same
     # import-time-registration contract as the Analysis classes above, so import
     # the card modules first. Surfaces them in the Registry's "Tests" tab.
@@ -496,7 +496,7 @@ def _list_visualizations() -> dict:
     except Exception:  # noqa: BLE001
         pass
     _seen_rc: set = set()
-    for _modname, _regattr in (("viva_superpowers.post_sim", "TEST_REGISTRY"),
+    for _modname, _regattr in (("discovery_engine.post_sim", "TEST_REGISTRY"),
                                ("v2ecoli.workflow.post_sim", "REPORT_CARD_REGISTRY")):
         try:
             _mod = __import__(_modname, fromlist=[_regattr])
@@ -1701,7 +1701,7 @@ def _run_study_analyses(params: dict) -> dict:
 
     Two kinds of analysis are dispatched, partitioned by base class:
 
-    - **Generic** record-based analyses — ``viva_superpowers.post_sim.AnalysisStep``
+    - **Generic** record-based analyses — ``discovery_engine.post_sim.AnalysisStep``
       subclasses (e.g. viva-simularium's ``SimulariumAnalysis``) — run directly
       over a ``ResultsHandle`` built from the run's emitter output. These need no
       v2ecoli, so a plain workspace's analyses run in the flush. See
@@ -1738,7 +1738,7 @@ def _run_study_analyses(params: dict) -> dict:
     generic: list = []      # (name, params, cls)
     remaining: list = []    # entries handed to the v2ecoli path
     try:
-        from viva_superpowers.post_sim import (
+        from discovery_engine.post_sim import (
             ANALYSIS_REGISTRY as _VIVA_REG,
             AnalysisStep as _AStep,
             Analysis as _LiveAnalysis,
@@ -1790,7 +1790,7 @@ def _run_generic_analyses(generic: list, store_paths, simulation_id, output_dir,
     if not store_paths:
         return [], [{"error": "no store path for generic analyses"}]
     try:
-        from viva_superpowers.post_sim import ResultsHandle
+        from discovery_engine.post_sim import ResultsHandle
         from bigraph_schema import allocate_core
     except Exception as exc:  # noqa: BLE001
         return [], [{"error": f"viva_superpowers post-sim unavailable: {exc}"}]
@@ -3172,6 +3172,11 @@ def _list_generators() -> dict:
 
 
 _WS_CORE: dict = {}
+# Per-package cores for running a registry process that belongs to an INSTALLED
+# package other than the served workspace (the registry lists processes from every
+# installed package, but each package registers its OWN custom port types — e.g.
+# viva_munk's `pymunk_agent` — in its own build_core). Keyed by top-level package.
+_PKG_CORES: dict = {}
 
 try:
     from bigraph_schema.matching import find_candidates as _find_candidates_impl
@@ -3213,6 +3218,40 @@ def _get_workspace_core():
     mod = __import__(f"{package_name}.core", fromlist=["build_core"])
     _WS_CORE["c"] = mod.build_core()
     return _WS_CORE["c"]
+
+
+def _core_for_package(pkg: str):
+    """Return the core to run a process whose address starts with ``pkg``.
+
+    The registry lists processes from every installed package, but each package
+    registers its OWN custom port types in its own ``build_core`` (e.g.
+    ``viva_munk`` registers ``pymunk_agent``, used as ``map[pymunk_agent]``). The
+    served workspace's core only has the served package's types, so running a
+    process from another installed package fails to parse its ports ("cannot
+    resolve type"). Build + cache that package's own core and run against it.
+
+    Falls back to the served workspace core when ``pkg`` is the served package,
+    is empty, or has no importable ``<pkg>.core.build_core``.
+    """
+    if not pkg:
+        return _get_workspace_core()
+    try:
+        served_pkg, _p, _w = _workspace_meta(_workspace)
+    except Exception:
+        served_pkg = None
+    if pkg == served_pkg:
+        return _get_workspace_core()
+    if pkg in _PKG_CORES:
+        return _PKG_CORES[pkg]
+    try:
+        mod = __import__(f"{pkg}.core", fromlist=["build_core"])
+        core = mod.build_core()
+        _PKG_CORES[pkg] = core
+        return core
+    except Exception:
+        # No package core (or it failed) — fall back to the served core; the run
+        # may still fail, but no worse than before and with the same diagnostics.
+        return _get_workspace_core()
 
 
 def _json_safe(obj):
@@ -4000,7 +4039,9 @@ def _run_process(params: dict) -> dict:
     interval = p.get("interval")
 
     try:
-        core = _get_workspace_core()
+        # Use the process's OWN package core so its custom port types resolve,
+        # even when it belongs to an installed package other than the served one.
+        core = _core_for_package(address.split(".")[0] if address else "")
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "stage": "core", "error": f"build_core failed: {e}"}
     if core is None:

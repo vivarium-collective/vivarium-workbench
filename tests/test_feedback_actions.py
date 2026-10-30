@@ -304,7 +304,7 @@ def test_golden_apply_on_tmp_copy(tmp_path):
         record_feedback_action,
         study_feedback_actions,
     )
-    from viva_superpowers.workspace_paths import WorkspacePaths
+    from discovery_engine.workspace_paths import WorkspacePaths
 
     slug = "dnaa-3-box-binding"
     wp_real = WorkspacePaths.load(REAL_WS)

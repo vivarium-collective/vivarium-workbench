@@ -76,7 +76,12 @@ body.snapshot #viv-ai-panel {
 }
 
 /* ── GitHub identity / "Connect GitHub" rail footer (git auth — not in a read-only viewer) ── */
-body.snapshot .viv-rail-footer {
+/* Target the identity footer SPECIFICALLY (.viv-rail-footer-link), not every
+   .viv-rail-footer: the pinned "About Vivarium Workbench" footer
+   (.viv-rail-footer.viv-rail-bottom-footer, #viv-rail-about) also carries
+   .viv-rail-footer and must stay visible in the snapshot — the About page is
+   exported and useful read-only. */
+body.snapshot .viv-rail-footer-link {
   display: none !important;
 }
 

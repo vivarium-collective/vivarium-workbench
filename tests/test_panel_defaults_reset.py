@@ -19,13 +19,15 @@ def test_one_time_reset_clears_the_remembered_panel_state():
 
 
 def test_defaults_are_right_and_closed():
+    # Chat is built on the shared VivPanelDock engine now (key 'ai'), so its
+    # right-dock + closed defaults come from the engine, not chat.js reading storage.
     chat = (STATIC / "chat.js").read_text()
-    assert "lsGet('viv.ai.dock', 'right')" in chat         # chat docks right by default
-    assert "lsGet('viv.ai.open', '0')" in chat             # chat closed by default
+    assert "key: 'ai'" in chat and "defaultDock: 'right'" in chat   # chat docks right by default
     code = (STATIC / "process-code.js").read_text()
     assert "defaultDock: 'right'" in code                  # code docks right by default
     pd = (STATIC / "panel-dock.js").read_text()
-    assert "lsGet(K.open, '0')" in pd                      # panels (incl. code) closed by default
+    assert "lsGet(K.open, '0')" in pd                      # panels (incl. chat + code) closed by default
+    assert "lsGet(K.dock" in pd                            # dock read from storage with the per-panel default
 
 
 def test_reset_runs_before_the_panels_read_storage():

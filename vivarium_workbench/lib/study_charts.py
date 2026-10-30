@@ -580,7 +580,13 @@ def discover_declared_figure_charts(study_dir: Path,
             try:
                 rel = fig.relative_to(url_base).as_posix()
             except ValueError:
-                rel = fig.name
+                # Robust against a relative url_base or a symlinked workspace
+                # root (/tmp -> /private/tmp): resolve both before falling back
+                # to the bare filename (which 404s under any nested layout).
+                try:
+                    rel = fig.resolve().relative_to(Path(url_base).resolve()).as_posix()
+                except ValueError:
+                    rel = fig.name
             rec = {**meta, "key": key, "iframe_url": f"/{rel}", "media": iframe_media}
         else:
             try:
@@ -729,19 +735,12 @@ def render_v4_test_charts(spec: dict,
         path = measure.get("path")
         title = f"{t.get('name','(unnamed)')}  ({t.get('classification','test')})"
         if not path:
-            # Honesty fix: a silent `continue` here made a declared test
-            # vanish from the report with no signal — a reviewer would just
-            # see fewer cards than declared tests. Emit a visible stub
-            # instead (mirrors the "default-baseline" warning-caption
-            # pattern below).
-            charts.append({
-                "key": f"v4-{t.get('name','test')}",
-                "title": title,
-                "caption": "⚠ Unresolved: this test declares no measure.path.",
-                "status": "unresolved",
-                "source": "live",
-                "data_source": None,
-            })
+            # A test with no measure.path is a scalar assertion, not a chart: it
+            # has no plottable series. It is shown with its verdict on the Audit
+            # tab (every declared test appears there), so emitting an empty
+            # "no measure.path" stub in the Visualizations gallery is pure
+            # redundancy — a wall of placeholder cards that crowds out the real
+            # figures. Skip it here; the test is not lost, it lives in Audit.
             continue
         idx = measure.get("index")
         key = (path, idx)
@@ -763,22 +762,22 @@ def render_v4_test_charts(spec: dict,
             # "default-baseline"` means data WAS found, just from the
             # fallback db). A refusal names the missing path and what the
             # store DOES carry, replacing the prior silent `continue`.
-            present = _present_leaves()
             # A `kind: derived` measure names a workspace-computed SCALAR
             # (study_evaluator derived-scalar registry), not an emitted series —
-            # so "no image in store" is expected and NOT a data gap. Say so
-            # cleanly instead of a misleading missing-observable refusal.
+            # so it has no time series to plot and is graded + shown on the Audit
+            # tab. Skip it here rather than emit a "no time series" placeholder in
+            # the Visualizations gallery (same redundancy as the no-path case).
             if (measure.get("kind") or "") == "derived":
-                reason = (
-                    f"Computed scalar readout {path!r} (no time series) — graded "
-                    f"from run data via the workspace derived-scalar evaluator."
-                )
-            else:
-                reason = (
-                    f"no image for observable path {path!r} in this run's store"
-                    + (f" (present: {', '.join(present[:8])}"
-                       f"{', …' if len(present) > 8 else ''})" if present else "")
-                )
+                continue
+            # A non-derived measure with no image IS a genuine data gap: a chart
+            # was expected here but no run in any source carries the observable.
+            # Keep this one visible — it is a real signal, not a scalar assertion.
+            present = _present_leaves()
+            reason = (
+                f"no image for observable path {path!r} in this run's store"
+                + (f" (present: {', '.join(present[:8])}"
+                   f"{', …' if len(present) > 8 else ''})" if present else "")
+            )
             refusal = Refusal(reason=reason, missing=[path], present=present)
             charts.append({
                 "key": f"v4-{t.get('name','test')}",
@@ -1623,7 +1622,7 @@ def _render_perf_sweep_charts(conn) -> list[dict]:
 def latest_run_row(runs_db) -> dict | None:
     """Newest runs_meta row as {run_id, completed_at, generation_id, emitter_path},
     tolerating older DBs missing the optional columns. Mirrors
-    viva_superpowers.run_registry.latest_run (not importable here)."""
+    discovery_engine.run_registry.latest_run (not importable here)."""
     runs_db = Path(runs_db)
     if not runs_db.is_file():
         return None
@@ -1702,7 +1701,7 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
     import yaml as _yaml
 
     from vivarium_workbench.lib.simulations_index import discover_default_baseline_db
-    from viva_superpowers.viz_freshness import chart_freshness, manifest_diff
+    from discovery_engine.viz_freshness import chart_freshness, manifest_diff
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     # Layout-aware: a study may live nested under
@@ -1736,12 +1735,29 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
             live_charts = render_study_charts(runs_db, run_name=None)
     for c in live_charts:
         c.setdefault("source", "live")
+    # The Visualizations tab holds VISUALIZATIONS. A live per-test card that
+    # carries no rendered figure (no svg/img/iframe) is not one: it is either a
+    # derived-scalar "Computed scalar readout (no time series)" or an
+    # "unresolved: no measure.path" stub — a gate RESULT graded from run data.
+    # Split those out into `gate_results` so the UI can surface them under
+    # Simulations › Results, where run-derived results belong, instead of
+    # cluttering Visualizations with figureless cards.
+    def _is_figure(c: dict) -> bool:
+        return bool(c.get("svg") or c.get("img") or c.get("srcdoc") or c.get("iframe_url"))
+    gate_results = [c for c in live_charts if not _is_figure(c)]
+    live_charts = [c for c in live_charts if _is_figure(c)]
     static_charts = discover_static_study_charts(charts_dir, hide_superseded=hide_superseded)
     # Declared figure visualizations resolved to self-contained chart records so
     # they embed in both the live dashboard and the static report snapshot.
     # Deduped against static_charts by key.
+    # Pass the RESOLVED workspace root (_wp.root), not the raw ws_root argument:
+    # study_dir (and the figure paths derived from it) come back absolute/resolved
+    # via WorkspacePaths, so a relative ws_root (e.g. Path('.') under
+    # publish.build_bundle) would make iframe_url's `fig.relative_to(ws_root)`
+    # raise and fall back to a bare `multibody.html` — which 404s in the static
+    # snapshot and shows every interactive figure as "unavailable".
     declared_figs = discover_declared_figure_charts(
-        study_dir, (spec or {}).get("visualizations") or [], ws_root=ws_root)
+        study_dir, (spec or {}).get("visualizations") or [], ws_root=_wp.root)
     if declared_figs:
         static_keys = {c.get("key") for c in static_charts}
         # A study's ``embed_visualizations`` are rendered separately as iframes
@@ -1759,6 +1775,20 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
             e.get("name"): e for e in ((spec or {}).get("visualizations") or [])
             if isinstance(e, dict)
         }
+        # The study-detail baseline native gallery renders the latest run's
+        # viz.json panels inline. A study-DECLARED visualization is rendered into
+        # viz.json by the run AND into viz/<name>.html post-run, so without this
+        # it appears twice (once as a native panel, once as a declared chart).
+        # Drop the declared chart when the native gallery already shows it (matched
+        # by name); a viz not yet in viz.json still renders as a declared chart.
+        try:
+            from vivarium_workbench.lib.study_native_gallery import (
+                build_study_native_gallery,
+            )
+            native_names = set(
+                (build_study_native_gallery(ws_root, name) or {}).get("panels") or {})
+        except Exception:  # noqa: BLE001 — native gallery is best-effort here
+            native_names = set()
 
         def _is_embedded(c):
             key = c.get("key")
@@ -1770,7 +1800,9 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
 
         static_charts = static_charts + [
             c for c in declared_figs
-            if c.get("key") not in static_keys and not _is_embedded(c)
+            if c.get("key") not in static_keys
+            and not _is_embedded(c)
+            and c.get("key") not in native_names
         ]
 
     # Per-chart freshness for static charts, matched on-disk against the spec's
@@ -1799,8 +1831,10 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
         "study": name,
         "schema_version": (spec or {}).get("schema_version"),
         "charts": live_charts + static_charts,
+        "gate_results": gate_results,
         "db_exists": db_exists,
         "data_store": data_store,
         "static_count": len(static_charts),
         "live_count": len(live_charts),
+        "gate_result_count": len(gate_results),
     }

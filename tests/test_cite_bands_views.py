@@ -2,7 +2,7 @@
 (``lib.cite_bands_views``) backing the ``/viva-cite-bands`` skill.
 
 Phase 2.1e (rewire-first): these endpoints wrap
-``viva_superpowers.band_provenance`` / ``citation_gaps`` / ``expert_search``
+``discovery_engine.band_provenance`` / ``citation_gaps`` / ``expert_search``
 unchanged — the plugin still computes, only the caller (the workbench, on
 behalf of the skill) moves. These tests exercise the lib builders directly
 (the same "endpoint test calls the lib fn" idiom as
@@ -90,8 +90,8 @@ def test_band_provenance_missing_lists_uncited_bands(tmp_path):
 
 
 def test_band_provenance_missing_equivalence_with_plugin(tmp_path):
-    pytest.importorskip("viva_superpowers.band_provenance")
-    from viva_superpowers.band_provenance import bands_missing_provenance
+    pytest.importorskip("discovery_engine.band_provenance")
+    from discovery_engine.band_provenance import bands_missing_provenance
 
     ws, sy = _study_ws(tmp_path)
     spec = yaml.safe_load(sy.read_text())
@@ -199,8 +199,8 @@ def test_write_band_provenance_never_fabricates_entry(tmp_path):
 
 
 def test_write_band_provenance_equivalence_with_plugin(tmp_path):
-    pytest.importorskip("viva_superpowers.band_provenance")
-    from viva_superpowers.band_provenance import set_band_provenance
+    pytest.importorskip("discovery_engine.band_provenance")
+    from discovery_engine.band_provenance import set_band_provenance
 
     ws1, sy1 = _study_ws(tmp_path / "endpoint")
     ws2, sy2 = _study_ws(tmp_path / "direct")

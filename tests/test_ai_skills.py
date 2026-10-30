@@ -23,6 +23,17 @@ from vivarium_workbench.api import app as appmod  # noqa: E402
 from vivarium_workbench.lib import ai_auth, ai_chat, ai_skills, ai_tools  # noqa: E402
 
 
+@pytest.fixture
+def _isolate_ambient_skills(monkeypatch):
+    # viva_superpowers 0.24 ships /viva-* skills that ai_skills discovers via
+    # _package_skill_dirs (and, on a local server, _plugin_skill_dirs). Tests that
+    # control their own skill set request this to isolate the ambient package/plugin
+    # skills ("no skills" means genuinely none). NOT autouse — some tests below
+    # deliberately exercise the real plugin/package discovery.
+    monkeypatch.setattr(ai_skills, "_package_skill_dirs", lambda: [])
+    monkeypatch.setattr(ai_skills, "_plugin_skill_dirs", lambda: [])
+
+
 def _skill(root: Path, folder: str, body: str, *, name: str | None = None, desc: str = "does a thing",
            tools: str = "Bash(*) Read") -> Path:
     d = root / folder
@@ -95,7 +106,7 @@ def test_package_skill_dirs_empty_when_dependency_absent(tmp_path, monkeypatch):
     assert ai_skills._package_skill_dirs() == []
 
 
-def test_discover_reads_frontmatter_and_says_what_each_skill_needs(tmp_path, monkeypatch):
+def test_discover_reads_frontmatter_and_says_what_each_skill_needs(tmp_path, monkeypatch, _isolate_ambient_skills):
     lib = tmp_path / "lib"
     _skill(lib, "status", "Call `curl $URL/api/workspace-manifest` and summarise.")
     _skill(lib, "shipit", "Then run `gh pr create` and `git checkout -b x`.", desc="ships")
@@ -173,7 +184,7 @@ def _ctx(app, ws, skills):
     return RunContext(deps=d, model=TestModel(), usage=RunUsage(), tool_call_id="c1")
 
 
-def test_load_skill_takes_a_name_never_a_path(tmp_path, monkeypatch):
+def test_load_skill_takes_a_name_never_a_path(tmp_path, monkeypatch, _isolate_ambient_skills):
     lib = tmp_path / "lib"
     _skill(lib, "ok", "the body")
     (tmp_path / "loot.txt").write_text("LOOT")
@@ -262,7 +273,7 @@ def test_manual_mode_has_no_tools_and_therefore_no_skills(tmp_path, monkeypatch)
     assert not seen["tools"] and not seen["results"]
 
 
-def test_no_skills_means_no_skill_tools_are_registered(tmp_path, monkeypatch):
+def test_no_skills_means_no_skill_tools_are_registered(tmp_path, monkeypatch, _isolate_ambient_skills):
     frames, seen = _run_turn(tmp_path, monkeypatch, "agent", with_skill=False)
     assert "call_operation" in seen["tools"] and "load_skill" not in seen["tools"] and "list_skills" not in seen["tools"]
     assert [f["type"] for f in frames][-1] == "done"

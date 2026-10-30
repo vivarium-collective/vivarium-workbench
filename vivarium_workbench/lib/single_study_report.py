@@ -231,20 +231,20 @@ def _reproduce_block_html(spec: dict, slug: str) -> str:
     c = study_run_commands(spec, slug)
     rows = [
         f'<div><code>{_h(c["baseline"])}</code>'
-        f' <span style="color:#64748b">— run the baseline</span></div>'
+        f' <span style="color:var(--text-muted, #64748b)">— run the baseline</span></div>'
     ]
     for v in c["variants"]:
         rows.append(
             f'<div><code>{_h(v["cmd"])}</code>'
-            f' <span style="color:#64748b">— variant {_h(v["name"])}</span></div>'
+            f' <span style="color:var(--text-muted, #64748b)">— variant {_h(v["name"])}</span></div>'
         )
     rows.append(
         f'<div><code>{_h(c["rerun_hint"])}</code>'
-        f' <span style="color:#64748b">— re-run a recorded run by id</span></div>'
+        f' <span style="color:var(--text-muted, #64748b)">— re-run a recorded run by id</span></div>'
     )
     return (
         '<section class="reproduce-study" style="margin:18px 0;padding:12px 14px;'
-        'background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px">'
+        'background:var(--info-bg, #f0f9ff);border:1px solid var(--info-border, #bae6fd);border-radius:6px">'
         '<h3 style="margin:0 0 6px 0;font-size:0.95em">Reproduce this study</h3>'
         + "".join(rows)
         + '</section>'
@@ -276,7 +276,7 @@ def _preregistration_status(spec: dict) -> dict | None:
     ``study_verdict.preregistration_status``. Returns None when pbg-superpowers
     (or the function) isn't importable so the chip simply doesn't render."""
     try:
-        from viva_superpowers.study_verdict import preregistration_status
+        from discovery_engine.study_verdict import preregistration_status
     except Exception:
         return None
     try:
@@ -328,8 +328,8 @@ def _render_key_metrics(metrics: list) -> str:
         if isinstance(m, str):
             chips.append(
                 f'<span class="metric-chip" style="display:inline-block;'
-                f'padding:4px 10px;border-radius:6px;background:#f1f5f9;'
-                f'color:#0f172a;margin:2px;font-size:0.88em">{_h(m)}</span>'
+                f'padding:4px 10px;border-radius:6px;background:var(--chip, #f1f5f9);'
+                f'color:var(--text, #0f172a);margin:2px;font-size:0.88em">{_h(m)}</span>'
             )
         elif isinstance(m, dict):
             st = str(m.get("status", "")).lower()
@@ -425,7 +425,7 @@ def _render_viz_embeds(viz_entries: list[dict]) -> str:
     for entry in viz_entries:
         blocks.append(
             f'<section class="viz-embed" style="margin:24px 0;'
-            f'border:1px solid #e2e8f0;border-radius:8px;padding:16px">'
+            f'border:1px solid var(--border, #e2e8f0);border-radius:8px;padding:16px">'
             f'<h3 style="margin-top:0">{_h(entry["name"])}</h3>'
             # Each viz HTML may contain its own <html>/<body>; we wrap in
             # an iframe srcdoc so it stays sandboxed and CSS doesn't bleed
@@ -490,23 +490,23 @@ def _render_conclusion_verdicts(spec: dict) -> str:
         bg, fg = _TRACK_COLORS.get(res, ("#f1f5f9", "#475569"))
         basis = t.get("basis") or ""
         basis_html = (
-            f'<div style="color:#475569;font-size:0.9em;margin-top:2px">{_multiline(basis)}</div>'
+            f'<div style="color:var(--text-muted, #475569);font-size:0.9em;margin-top:2px">{_multiline(basis)}</div>'
             if basis else ""
         )
         rows.append(
-            '<div style="padding:8px 0;border-top:1px solid #f1f5f9">'
+            '<div style="padding:8px 0;border-top:1px solid var(--chip, #f1f5f9)">'
             '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'
-            f'<span style="display:inline-block;min-width:11em;font-weight:600;color:#1e293b">{_h(label)}</span>'
+            f'<span style="display:inline-block;min-width:11em;font-weight:600;color:var(--text, #1e293b)">{_h(label)}</span>'
             f'<span style="display:inline-block;padding:2px 10px;border-radius:9999px;'
             f'background:{bg};color:{fg};font-weight:700;font-size:0.85em">{_h(res)}</span>'
-            f'<span style="color:#94a3b8;font-size:0.82em">{_h(hint)} · computed</span>'
+            f'<span style="color:var(--text-muted, #94a3b8);font-size:0.82em">{_h(hint)} · computed</span>'
             '</div>'
             f'{basis_html}'
             '</div>'
         )
     return (
         '<section id="verdicts"><h2>Conclusion verdicts</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Three-track verdict — '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">Three-track verdict — '
         'each result is <strong>computed</strong> from canonical fields (gate evaluator, run '
         'status, finding tiers). The basis is the author\'s rationale.</p>'
         + "".join(rows) +
@@ -561,8 +561,8 @@ def _render_conclusion_synthesis(spec: dict) -> str:
     # Claims first — rendered separately because each <li> carries a weight chip.
     if claim_lis:
         blocks.append(
-            '<div style="margin:10px 0"><strong style="color:#1e293b">Claims</strong>'
-            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{"".join(claim_lis)}</ul></div>'
+            '<div style="margin:10px 0"><strong style="color:var(--text, #1e293b)">Claims</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:var(--text-muted, #334155)">{"".join(claim_lis)}</ul></div>'
         )
     for label, items in sections:
         items = [i for i in (items or []) if i]
@@ -570,14 +570,14 @@ def _render_conclusion_synthesis(spec: dict) -> str:
             continue
         lis = "".join(f'<li>{_multiline(str(i))}</li>' for i in items)
         blocks.append(
-            f'<div style="margin:10px 0"><strong style="color:#1e293b">{_h(label)}</strong>'
-            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{lis}</ul></div>'
+            f'<div style="margin:10px 0"><strong style="color:var(--text, #1e293b)">{_h(label)}</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:var(--text-muted, #334155)">{lis}</ul></div>'
         )
     if not blocks:
         return ""
     return (
         '<section id="synthesis"><h2>Conclusion synthesis</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Read-only synthesis derived '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">Read-only synthesis derived '
         'from the study\'s canonical fields (findings, limitations, follow-up proposals).</p>'
         + "".join(blocks) +
         '</section>'
@@ -603,7 +603,7 @@ def _render_alternatives(spec: dict) -> str:
             if a.get("status"):
                 extra.append(f'status: {_h(a["status"])}')
             extra_html = (
-                f' <span style="color:#94a3b8;font-size:0.85em">({" · ".join(extra)})</span>'
+                f' <span style="color:var(--text-muted, #94a3b8);font-size:0.85em">({" · ".join(extra)})</span>'
                 if extra else ""
             )
             if claim or extra_html:
@@ -614,7 +614,7 @@ def _render_alternatives(spec: dict) -> str:
         return ""
     return (
         '<section id="alternatives"><h2>Alternative hypotheses</h2>'
-        f'<ul style="padding-left:20px;color:#334155;line-height:1.6">{"".join(items)}</ul>'
+        f'<ul style="padding-left:20px;color:var(--text-muted, #334155);line-height:1.6">{"".join(items)}</ul>'
         '</section>'
     )
 
@@ -629,7 +629,7 @@ def _render_controls_and_falsifiability(spec: dict) -> str:
     bits = []
     if controls:
         head = (
-            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<tr style="text-align:left;color:var(--text-muted, #475569);font-size:0.82em">'
             '<th style="padding:4px 8px">Name</th><th style="padding:4px 8px">Kind</th>'
             '<th style="padding:4px 8px">Hypothesis</th><th style="padding:4px 8px">Expected</th>'
             '<th style="padding:4px 8px">Observed</th><th style="padding:4px 8px">Result</th></tr>'
@@ -643,7 +643,7 @@ def _render_controls_and_falsifiability(spec: dict) -> str:
                 f'font-weight:600;font-size:0.82em">{_h(res)}</span>' if res else ""
             )
             trows.append(
-                '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+                '<tr style="border-top:1px solid var(--chip, #f1f5f9);font-size:0.9em">'
                 f'<td style="padding:4px 8px">{_h(c.get("name", ""))}</td>'
                 f'<td style="padding:4px 8px">{_h(c.get("kind", ""))}</td>'
                 f'<td style="padding:4px 8px">{_h(c.get("hypothesis", ""))}</td>'
@@ -654,15 +654,15 @@ def _render_controls_and_falsifiability(spec: dict) -> str:
             )
         bits.append(
             '<div id="rigor-controls" style="margin:10px 0">'
-            '<strong style="color:#1e293b">Controls</strong>'
+            '<strong style="color:var(--text, #1e293b)">Controls</strong>'
             '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
             + head + "".join(trows) + '</table></div>'
         )
     if falsifiability:
         bits.append(
             '<div id="rigor-falsifiability" style="margin:10px 0;padding:8px 12px;'
-            'background:#f8fafc;border-left:4px solid #64748b;border-radius:4px">'
-            f'<strong style="color:#1e293b">Falsifiability:</strong> '
+            'background:var(--subtle, #f8fafc);border-left:4px solid var(--text-muted, #64748b);border-radius:4px">'
+            f'<strong style="color:var(--text, #1e293b)">Falsifiability:</strong> '
             f'{_multiline(str(falsifiability))}</div>'
         )
     return "".join(bits)
@@ -671,7 +671,7 @@ def _render_controls_and_falsifiability(spec: dict) -> str:
 def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     """Evidence & rigor scorecard section — deterministic skeptic-feedback
     (replication, negative controls, alternative hypotheses, claim discipline,
-    falsifiability, engineered-vs-emergent) computed by viva_superpowers.rigor.
+    falsifiability, engineered-vs-emergent) computed by discovery_engine.rigor.
 
     Returns '' if pbg-superpowers isn't importable, so the report degrades
     gracefully.
@@ -682,7 +682,7 @@ def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     renders it as its own ordered section immediately below.
     """
     try:
-        from viva_superpowers.rigor import study_rigor
+        from discovery_engine.rigor import study_rigor
     except Exception:
         return ""
     sc = study_rigor(study_spec)
@@ -703,7 +703,7 @@ def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
         sev = d.get("severity", "gap")
         c = color.get(sev, "#64748b")
         comments = " ".join(d.get("comments") or [])
-        comment_html = (f' <span style="color:#94a3b8;font-size:0.82em">{_h(comments)}</span>'
+        comment_html = (f' <span style="color:var(--text-muted, #94a3b8);font-size:0.82em">{_h(comments)}</span>'
                         if comments else "")
         label = d.get("label", "")
         ll = label.lower()
@@ -714,10 +714,10 @@ def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
             link = ' <a href="#rigor-falsifiability" style="font-size:0.82em">(see statement ↓)</a>'
         rows.append(
             '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;'
-            'border-top:1px solid #f1f5f9">'
+            'border-top:1px solid var(--chip, #f1f5f9)">'
             f'<span style="color:{c};font-weight:700;min-width:1.2em">{glyph.get(sev, "•")}</span>'
-            f'<div><strong style="color:#1e293b">{_h(label)}</strong>{comment_html}{link}'
-            f'<div style="color:#475569;font-size:0.9em;margin-top:1px">{_h(d.get("detail", ""))}</div>'
+            f'<div><strong style="color:var(--text, #1e293b)">{_h(label)}</strong>{comment_html}{link}'
+            f'<div style="color:var(--text-muted, #475569);font-size:0.9em;margin-top:1px">{_h(d.get("detail", ""))}</div>'
             '</div></div>'
         )
     # In skeptic mode the controls/falsifiability detail is rendered as its
@@ -725,11 +725,11 @@ def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     controls_html = "" if skeptic else _render_controls_and_falsifiability(study_spec)
     return (
         '<section id="rigor"><h2>Evidence &amp; rigor</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Deterministic feedback '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">Deterministic feedback '
         'on how well this study defends its claims against a skeptical reader — computed '
         'from declared fields. Gaps prompt the next iteration to add controls, replicates, '
         'alternatives, or a falsifiability note.</p>'
-        f'<div style="font-weight:600;color:#1e293b;margin-bottom:2px">{_h(sc.get("summary", ""))}</div>'
+        f'<div style="font-weight:600;color:var(--text, #1e293b);margin-bottom:2px">{_h(sc.get("summary", ""))}</div>'
         + "".join(rows)
         + controls_html +
         '</section>'
@@ -748,13 +748,13 @@ _WEIGHT_CHIP_COLORS = {
 
 
 def _finding_weight(spec: dict, finding: dict) -> dict | None:
-    """W8 — per-finding evidential weight via viva_superpowers.rigor.
+    """W8 — per-finding evidential weight via discovery_engine.rigor.
 
     Defensive: returns None when pbg-superpowers (or the new function) isn't
     importable, so the chip simply doesn't render and the report degrades.
     """
     try:
-        from viva_superpowers.rigor import finding_evidential_weight
+        from discovery_engine.rigor import finding_evidential_weight
     except Exception:
         return None
     try:
@@ -885,7 +885,7 @@ def _lifecycle_floor(spec: dict, finding: dict) -> str | None:
     Returns None when pbg-superpowers (or the function) isn't importable, so the
     chip falls back to the authored value (or nothing)."""
     try:
-        from viva_superpowers.study_verdict import lifecycle_floor
+        from discovery_engine.study_verdict import lifecycle_floor
     except Exception:
         return None
     try:
@@ -956,13 +956,13 @@ def _render_units_and_time(spec: dict) -> str:
         if not entries:
             return ""
         head = (
-            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<tr style="text-align:left;color:var(--text-muted, #475569);font-size:0.82em">'
             '<th style="padding:4px 8px">Quantity</th><th style="padding:4px 8px">Unit</th>'
             '<th style="padding:4px 8px">Scale / step</th><th style="padding:4px 8px">Note</th></tr>'
         )
         for e in entries:
             rows.append(
-                '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+                '<tr style="border-top:1px solid var(--chip, #f1f5f9);font-size:0.9em">'
                 f'<td style="padding:4px 8px"><code>{_h(str(e.get("quantity") or e.get("name") or ""))}</code></td>'
                 f'<td style="padding:4px 8px">{_cell(e.get("unit"))}</td>'
                 f'<td style="padding:4px 8px">{_cell(e.get("scale") if e.get("scale") is not None else e.get("step"))}</td>'
@@ -971,12 +971,12 @@ def _render_units_and_time(spec: dict) -> str:
             )
     elif isinstance(ut, dict):
         head = (
-            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<tr style="text-align:left;color:var(--text-muted, #475569);font-size:0.82em">'
             '<th style="padding:4px 8px">Quantity</th><th style="padding:4px 8px">Value</th></tr>'
         )
         for k, v in ut.items():
             rows.append(
-                '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+                '<tr style="border-top:1px solid var(--chip, #f1f5f9);font-size:0.9em">'
                 f'<td style="padding:4px 8px"><code>{_h(str(k))}</code></td>'
                 f'<td style="padding:4px 8px">{_cell(v)}</td>'
                 '</tr>'
@@ -987,7 +987,7 @@ def _render_units_and_time(spec: dict) -> str:
         return ""
     return (
         '<section id="units-and-time"><h2>Units &amp; time</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">The unit and '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">The unit and '
         'time-base declarations this study commits to — what each observable is '
         'measured in and what a simulation step means in wall/biological time.</p>'
         '<table style="border-collapse:collapse;width:100%">'
@@ -1046,20 +1046,20 @@ def _render_provenance(info: dict) -> str:
 
     def _row(label: str, value: str) -> str:
         return (
-            '<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid #e2e8f0">'
-            f'<span style="flex:0 0 12em;font-weight:600;color:#475569">{_h(label)}</span>'
-            f'<span style="color:#1e293b">{value}</span>'
+            '<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--border, #e2e8f0)">'
+            f'<span style="flex:0 0 12em;font-weight:600;color:var(--text-muted, #475569)">{_h(label)}</span>'
+            f'<span style="color:var(--text, #1e293b)">{value}</span>'
             '</div>'
         )
 
     commit = info.get("workspace_commit")
     rows.append(_row("Workspace commit",
                      f'<code>{_h(commit)}</code>' if commit
-                     else '<span style="color:#94a3b8">unavailable (not a git checkout)</span>'))
+                     else '<span style="color:var(--text-muted, #94a3b8)">unavailable (not a git checkout)</span>'))
     plat = info.get("platform")
     py = info.get("python")
     plat_bits = " · ".join(_h(x) for x in (plat, f"Python {py}" if py else None) if x)
-    rows.append(_row("Platform", plat_bits or '<span style="color:#94a3b8">unavailable</span>'))
+    rows.append(_row("Platform", plat_bits or '<span style="color:var(--text-muted, #94a3b8)">unavailable</span>'))
     versions = info.get("versions") or {}
     if versions:
         chips = "".join(
@@ -1068,13 +1068,13 @@ def _render_provenance(info: dict) -> str:
         )
         rows.append(_row("Stack", chips))
     else:
-        rows.append(_row("Stack", '<span style="color:#94a3b8">no stack packages importable</span>'))
+        rows.append(_row("Stack", '<span style="color:var(--text-muted, #94a3b8)">no stack packages importable</span>'))
     return (
         '<section id="provenance"><h2>Provenance &amp; environment</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">The code state and '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">The code state and '
         'environment this report was rendered from, so a reviewer can tie the numbers '
         'to an exact commit and stack.</p>'
-        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;'
+        '<div style="background:var(--subtle, #f8fafc);border:1px solid var(--border, #e2e8f0);border-radius:6px;'
         'padding:4px 14px 10px">' + "".join(rows) + '</div>'
         '</section>'
     )
@@ -1118,19 +1118,19 @@ def _render_epistemic_debts(spec: dict) -> str:
         note = _multiline(str(d.get("note") or ""))
         rows.append(
             '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;'
-            'border-top:1px solid #f1f5f9">'
+            'border-top:1px solid var(--chip, #f1f5f9)">'
             f'<span style="padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
             f'font-weight:600;font-size:0.72em;white-space:nowrap">{_h(sev)}</span>'
-            f'<div><strong style="color:#1e293b">{kind}</strong>'
+            f'<div><strong style="color:var(--text, #1e293b)">{kind}</strong>'
             + (f' <code style="font-size:0.82em">{ref}</code>' if ref else "")
-            + f'<div style="color:#475569;font-size:0.9em;margin-top:1px">{note}</div>'
+            + f'<div style="color:var(--text-muted, #475569);font-size:0.9em;margin-top:1px">{note}</div>'
             '</div></div>'
         )
     if not rows:
         return ""
     return (
         '<section id="epistemic-debts"><h2>Open epistemic debts</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Negative knowledge — '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">Negative knowledge — '
         'what this study has <em>not</em> yet established (untested claims, absent '
         'controls, uncalibrated metrics, un-excluded alternatives, unexplored regions, '
         'stale visuals). Derived from the rigor scorecard + freshness signals.</p>'
@@ -1210,18 +1210,18 @@ def _render_audit_trail(spec: dict) -> str:
         ("Threshold provenance", threshold),
     ]
     rows = "".join(
-        '<div style="display:flex;gap:10px;padding:6px 0;border-top:1px solid #e2e8f0">'
-        f'<span style="flex:0 0 16em;font-weight:600;color:#475569">{_h(label)}</span>'
-        f'<span style="color:#1e293b">{_multiline(str(val))}</span>'
+        '<div style="display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--border, #e2e8f0)">'
+        f'<span style="flex:0 0 16em;font-weight:600;color:var(--text-muted, #475569)">{_h(label)}</span>'
+        f'<span style="color:var(--text, #1e293b)">{_multiline(str(val))}</span>'
         '</div>'
         for label, val in pairs
     )
     return (
         '<section id="audit-trail"><h2>Audit trail</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">The skeptic\'s '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">The skeptic\'s '
         'one-glance ledger: the claim and exactly what backs it, what it assumes, '
         'what could overturn it, and what it has not yet settled.</p>'
-        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;'
+        '<div style="background:var(--subtle, #f8fafc);border:1px solid var(--border, #e2e8f0);border-radius:6px;'
         'padding:4px 14px 10px">' + rows + '</div>'
         '</section>'
     )
@@ -1242,15 +1242,15 @@ def _render_limitations(spec: dict) -> str:
     if [x for x in lims if x]:
         lis = "".join(f'<li>{_multiline(str(x))}</li>' for x in lims if x)
         blocks.append(
-            '<div style="margin:10px 0"><strong style="color:#1e293b">Limitations</strong>'
-            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{lis}</ul></div>'
+            '<div style="margin:10px 0"><strong style="color:var(--text, #1e293b)">Limitations</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:var(--text-muted, #334155)">{lis}</ul></div>'
         )
     if [x for x in rem if x]:
         lis = "".join(f'<li>{_multiline(str(x))}</li>' for x in rem if x)
         blocks.append(
-            '<div style="margin:10px 0"><strong style="color:#1e293b">Remaining '
+            '<div style="margin:10px 0"><strong style="color:var(--text, #1e293b)">Remaining '
             'uncertainties</strong>'
-            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{lis}</ul></div>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:var(--text-muted, #334155)">{lis}</ul></div>'
         )
     if not blocks:
         return ""
@@ -1299,7 +1299,7 @@ def _render_composition_commitment(spec: dict) -> str:
         added = [added]
     if added:
         rows.append(
-            '<div style="margin:8px 0"><strong style="color:#1e293b">Component added</strong> '
+            '<div style="margin:8px 0"><strong style="color:var(--text, #1e293b)">Component added</strong> '
             f'{_chip_list(added, bg="#e0e7ff", fg="#3730a3")}</div>'
         )
 
@@ -1310,17 +1310,17 @@ def _render_composition_commitment(spec: dict) -> str:
         if isinstance(gap_items, str):
             gap_items = [gap_items]
         gap_html = (
-            ' <span style="color:#475569;font-size:0.85em">closes:</span> '
+            ' <span style="color:var(--text-muted, #475569);font-size:0.85em">closes:</span> '
             + _chip_list(gap_items, bg="#fee2e2", fg="#991b1b")
         ) if gap_items else ""
         if note or gap_html:
             rows.append(
-                '<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+                '<div style="margin:8px 0"><strong style="color:var(--text, #1e293b)">Deficit addressed</strong> '
                 f'{_multiline(str(note)) if note else ""}{gap_html}</div>'
             )
     elif isinstance(deficit, str) and deficit:
         rows.append(
-            '<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+            '<div style="margin:8px 0"><strong style="color:var(--text, #1e293b)">Deficit addressed</strong> '
             f'{_multiline(deficit)}</div>'
         )
 
@@ -1329,7 +1329,7 @@ def _render_composition_commitment(spec: dict) -> str:
         new_behavior = [new_behavior]
     if new_behavior:
         rows.append(
-            '<div style="margin:8px 0"><strong style="color:#1e293b">New behavior</strong> '
+            '<div style="margin:8px 0"><strong style="color:var(--text, #1e293b)">New behavior</strong> '
             f'{_chip_list(new_behavior, bg="#dcfce7", fg="#166534")}</div>'
         )
 
@@ -1348,8 +1348,8 @@ def _render_composition_commitment(spec: dict) -> str:
             )
     if inv_bits:
         rows.append(
-            '<div style="margin:8px 0"><strong style="color:#1e293b">Invariants required</strong>'
-            '<ul style="margin:4px 0 0;padding-left:20px;color:#334155;font-size:0.92em">'
+            '<div style="margin:8px 0"><strong style="color:var(--text, #1e293b)">Invariants required</strong>'
+            '<ul style="margin:4px 0 0;padding-left:20px;color:var(--text-muted, #334155);font-size:0.92em">'
             + "".join(inv_bits) + '</ul></div>'
         )
 
@@ -1358,7 +1358,7 @@ def _render_composition_commitment(spec: dict) -> str:
         excluded = [excluded]
     if excluded:
         rows.append(
-            '<div style="margin:8px 0"><strong style="color:#1e293b">Alternatives excluded</strong> '
+            '<div style="margin:8px 0"><strong style="color:var(--text, #1e293b)">Alternatives excluded</strong> '
             f'{_chip_list(excluded, bg="#fef9c3", fg="#854d0e")}</div>'
         )
 
@@ -1366,7 +1366,7 @@ def _render_composition_commitment(spec: dict) -> str:
         return ""
     return (
         '<section id="commitment"><h2>Theoretical commitment</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">What this study adds to its '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">What this study adds to its '
         'prerequisite — the component introduced, the deficit it closes, the new behavior it '
         'unlocks, the earlier invariants it must preserve, and the alternatives it excludes.</p>'
         + "".join(rows) +
@@ -1396,7 +1396,7 @@ def _render_invariant_checks(spec: dict) -> str:
     checks = sorted(checks, key=lambda c: _INVAR_STATUS_RANK.get(
         str(c.get("status", "")).lower(), 9))
     head = (
-        '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        '<tr style="text-align:left;color:var(--text-muted, #475569);font-size:0.82em">'
         '<th style="padding:4px 8px">Study</th><th style="padding:4px 8px">Test</th>'
         '<th style="padding:4px 8px">Prior</th><th style="padding:4px 8px">Now</th>'
         '<th style="padding:4px 8px">Status</th></tr>'
@@ -1410,7 +1410,7 @@ def _render_invariant_checks(spec: dict) -> str:
             f'font-weight:600;font-size:0.82em">{_h(status or "—")}</span>'
         )
         rows.append(
-            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            '<tr style="border-top:1px solid var(--chip, #f1f5f9);font-size:0.9em">'
             f'<td style="padding:4px 8px"><code>{_h(c.get("study", ""))}</code></td>'
             f'<td style="padding:4px 8px">{_h(c.get("test", ""))}</td>'
             f'<td style="padding:4px 8px">{_h(c.get("prior", ""))}</td>'
@@ -1420,7 +1420,7 @@ def _render_invariant_checks(spec: dict) -> str:
         )
     return (
         '<section id="invariants"><h2>Invariant checks</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Earlier guarantees re-checked in '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">Earlier guarantees re-checked in '
         'the current code state — each invariant required by this study, its prior vs current value, '
         'and whether it was preserved. Invalidated / weakened invariants are listed first.</p>'
         '<table style="border-collapse:collapse;width:100%">'
@@ -1440,7 +1440,7 @@ def _render_causal_necessity(spec: dict) -> str:
     if not ablations:
         return ""
     head = (
-        '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        '<tr style="text-align:left;color:var(--text-muted, #475569);font-size:0.82em">'
         '<th style="padding:4px 8px">Process / target</th><th style="padding:4px 8px">Mode</th>'
         '<th style="padding:4px 8px">Behavior test</th><th style="padding:4px 8px">Baseline → ablated</th>'
         '<th style="padding:4px 8px">Role</th><th style="padding:4px 8px">Necessary</th></tr>'
@@ -1469,7 +1469,7 @@ def _render_causal_necessity(spec: dict) -> str:
         baseline = a.get("baseline_result")
         ablated = a.get("ablated_result")
         rows.append(
-            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            '<tr style="border-top:1px solid var(--chip, #f1f5f9);font-size:0.9em">'
             f'<td style="padding:4px 8px">{proc_target}</td>'
             f'<td style="padding:4px 8px"><code>{_h(a.get("mode", ""))}</code></td>'
             f'<td style="padding:4px 8px">{_h(a.get("behavior_test", ""))}</td>'
@@ -1480,7 +1480,7 @@ def _render_causal_necessity(spec: dict) -> str:
         )
     return (
         '<section id="causal-necessity"><h2>Causal necessity</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Counterfactual read of the ablation '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">Counterfactual read of the ablation '
         'suite — each process/store removed or perturbed, whether a behavior test flipped, and so '
         'whether that component is causally necessary for the behavior (vs redundant or merely '
         'modulatory).</p>'
@@ -1493,7 +1493,7 @@ def _render_causal_necessity(spec: dict) -> str:
 def _wiring_summary(wiring) -> str:
     """Render an inputs/outputs wiring map ({port: [store_path]}) as port→store."""
     if not isinstance(wiring, dict) or not wiring:
-        return '<span style="color:#94a3b8">—</span>'
+        return '<span style="color:var(--text-muted, #94a3b8)">—</span>'
     bits = []
     for port, path in wiring.items():
         if isinstance(path, (list, tuple)):
@@ -1502,7 +1502,7 @@ def _wiring_summary(wiring) -> str:
             tgt = str(path)
         bits.append(
             f'<code style="font-size:0.82em">{_h(str(port))}'
-            f'<span style="color:#94a3b8">→</span>{_h(tgt)}</code>'
+            f'<span style="color:var(--text-muted, #94a3b8)">→</span>{_h(tgt)}</code>'
         )
     return " ".join(bits)
 
@@ -1548,27 +1548,27 @@ def _render_model_card(composite_doc: Optional[dict],
             cfg_html = ""
             if isinstance(cfg, dict) and cfg:
                 cfg_html = (
-                    '<div style="color:#475569;font-size:0.85em;margin-top:2px">config: '
+                    '<div style="color:var(--text-muted, #475569);font-size:0.85em;margin-top:2px">config: '
                     + _chip_list([f"{k}={v}" for k, v in cfg.items()]) + '</div>'
                 )
             desc = node.get("doc") or ""
             desc_html = (
-                f'<div style="color:#64748b;font-size:0.85em;margin-top:2px">{_h(desc[:300])}</div>'
+                f'<div style="color:var(--text-muted, #64748b);font-size:0.85em;margin-top:2px">{_h(desc[:300])}</div>'
                 if desc else ""
             )
             prows.append(
-                '<div style="padding:8px 0;border-top:1px solid #f1f5f9">'
-                f'<div><strong style="color:#1e293b">{_h(name)}</strong> '
+                '<div style="padding:8px 0;border-top:1px solid var(--chip, #f1f5f9)">'
+                f'<div><strong style="color:var(--text, #1e293b)">{_h(name)}</strong> '
                 f'<code style="font-size:0.82em">{_h(addr)}</code></div>'
-                f'<div style="font-size:0.88em;margin-top:2px"><span style="color:#475569">in:</span> '
+                f'<div style="font-size:0.88em;margin-top:2px"><span style="color:var(--text-muted, #475569)">in:</span> '
                 f'{_wiring_summary(node.get("inputs"))}</div>'
-                f'<div style="font-size:0.88em;margin-top:2px"><span style="color:#475569">out:</span> '
+                f'<div style="font-size:0.88em;margin-top:2px"><span style="color:var(--text-muted, #475569)">out:</span> '
                 f'{_wiring_summary(node.get("outputs"))}</div>'
                 f'{cfg_html}{desc_html}'
                 '</div>'
             )
         sections.append(
-            '<div style="margin:10px 0"><strong style="color:#1e293b">Processes</strong>'
+            '<div style="margin:10px 0"><strong style="color:var(--text, #1e293b)">Processes</strong>'
             + "".join(prows) + '</div>'
         )
 
@@ -1585,18 +1585,18 @@ def _render_model_card(composite_doc: Optional[dict],
             if isinstance(val, (dict, list)):
                 val_disp = f"⟨{type(val).__name__}⟩"
             badge = (
-                ' <span style="padding:0 6px;border-radius:9999px;background:#dbeafe;color:#1e40af;'
+                ' <span style="padding:0 6px;border-radius:9999px;background:var(--info-bg, #dbeafe);color:var(--info-fg, #1e40af);'
                 'font-size:0.72em">boundary</span>' if name in boundary else ""
             )
             srows.append(
-                '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+                '<tr style="border-top:1px solid var(--chip, #f1f5f9);font-size:0.9em">'
                 f'<td style="padding:4px 8px"><code>{_h(name)}</code>{badge}</td>'
                 f'<td style="padding:4px 8px">{_h(str(val_disp))}</td></tr>'
             )
         sections.append(
-            '<div style="margin:10px 0"><strong style="color:#1e293b">Stores &amp; initial values</strong>'
+            '<div style="margin:10px 0"><strong style="color:var(--text, #1e293b)">Stores &amp; initial values</strong>'
             '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
-            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<tr style="text-align:left;color:var(--text-muted, #475569);font-size:0.82em">'
             '<th style="padding:4px 8px">Store</th><th style="padding:4px 8px">Initial</th></tr>'
             + "".join(srows) + '</table></div>'
         )
@@ -1619,7 +1619,7 @@ def _render_model_card(composite_doc: Optional[dict],
                     obs_bits.append(str(m))
     if obs_bits:
         sections.append(
-            '<div style="margin:10px 0"><strong style="color:#1e293b">Observables</strong> '
+            '<div style="margin:10px 0"><strong style="color:var(--text, #1e293b)">Observables</strong> '
             + _chip_list(obs_bits) + '</div>'
         )
 
@@ -1641,7 +1641,7 @@ def _render_model_card(composite_doc: Optional[dict],
             pert_bits.append(str(iv))
     if pert_bits:
         sections.append(
-            '<div style="margin:10px 0"><strong style="color:#1e293b">Perturbations</strong> '
+            '<div style="margin:10px 0"><strong style="color:var(--text, #1e293b)">Perturbations</strong> '
             + _chip_list(pert_bits, bg="#fef9c3", fg="#854d0e") + '</div>'
         )
 
@@ -1649,7 +1649,7 @@ def _render_model_card(composite_doc: Optional[dict],
         return ""
     return (
         '<section id="model-card"><h2>Model card</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">A static, reader-independent '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">A static, reader-independent '
         'description of the model — its processes, wiring, stores, observables, and perturbations — '
         'rendered from the composite state so it reads the same for everyone.</p>'
         + "".join(sections) +
@@ -1702,11 +1702,11 @@ def _render_representation(model_representation: Optional[dict]) -> str:
     for store, role in sorted(store_role.items()):
         bg, fg = _REPR_ROLE_COLORS.get(role, ("#f1f5f9", "#475569"))
         gap_badge = (
-            ' <span style="padding:0 6px;border-radius:9999px;background:#fee2e2;color:#991b1b;'
+            ' <span style="padding:0 6px;border-radius:9999px;background:var(--err-bg, #fee2e2);color:var(--err-fg, #991b1b);'
             'font-size:0.72em">unclosed gap</span>' if store in gap_set else ""
         )
         rows.append(
-            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            '<tr style="border-top:1px solid var(--chip, #f1f5f9);font-size:0.9em">'
             f'<td style="padding:4px 8px"><code>{_h(store)}</code>{gap_badge}</td>'
             f'<td style="padding:4px 8px"><span style="padding:1px 8px;border-radius:9999px;'
             f'background:{bg};color:{fg};font-weight:600;font-size:0.82em">{_h(role)}</span></td>'
@@ -1717,7 +1717,7 @@ def _render_representation(model_representation: Optional[dict]) -> str:
     if rows:
         table_html = (
             '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
-            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<tr style="text-align:left;color:var(--text-muted, #475569);font-size:0.82em">'
             '<th style="padding:4px 8px">Store</th><th style="padding:4px 8px">Representation</th></tr>'
             + "".join(rows) + '</table>'
         )
@@ -1750,7 +1750,7 @@ def _render_representation(model_representation: Optional[dict]) -> str:
         return ""
     return (
         '<section id="representation"><h2>Representation claims</h2>'
-        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">How each store is represented '
+        '<p style="color:var(--text-muted, #475569);font-size:0.92em;margin:0 0 8px">How each store is represented '
         '(inside / boundary-crossing / derived / self-produced) and whether the model achieves '
         'interface closure (no missing inputs) and semantic closure (every self-produced store '
         'actually fluxes).</p>'
@@ -1907,7 +1907,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     inv_chip = ""
     if investigation_slug:
         inv_chip = (
-            f'<div class="inv-chip" style="color:#475569;font-size:0.9em;'
+            f'<div class="inv-chip" style="color:var(--text-muted, #475569);font-size:0.9em;'
             f'margin-bottom:4px">Investigation: '
             f'<code>{_h(investigation_slug)}</code> · '
             f'<strong>focus study</strong></div>'
@@ -1921,7 +1921,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     if lit_match:
         quality_bits.append(f'<span>Literature match: <strong>{_h(lit_match)}</strong></span>')
     quality_html = (
-        '<div class="quality" style="display:flex;gap:16px;color:#334155;'
+        '<div class="quality" style="display:flex;gap:16px;color:var(--text-muted, #334155);'
         'font-size:0.92em;margin:8px 0">'
         + " · ".join(quality_bits)
         + '</div>'
@@ -1936,19 +1936,19 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     if conclusion:
         head_blocks.append(
             f'<div class="conclusion" style="margin:12px 0;padding:10px 14px;'
-            f'background:#f8fafc;border-left:4px solid #0ea5e9;border-radius:4px">'
+            f'background:var(--subtle, #f8fafc);border-left:4px solid var(--info-fg, #0ea5e9);border-radius:4px">'
             f'<strong>Conclusion:</strong> {_multiline(conclusion)}</div>'
         )
     if main_insight:
         head_blocks.append(
             f'<div class="insight" style="margin:12px 0;padding:10px 14px;'
-            f'background:#fefce8;border-left:4px solid #eab308;border-radius:4px">'
+            f'background:var(--warn-bg, #fefce8);border-left:4px solid #eab308;border-radius:4px">'
             f'<strong>Main insight:</strong> {_multiline(main_insight)}</div>'
         )
     if caveat:
         head_blocks.append(
             f'<div class="caveat" style="margin:12px 0;padding:10px 14px;'
-            f'background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px">'
+            f'background:#fef2f2;border-left:4px solid var(--err-fg, #dc2626);border-radius:4px">'
             f'<strong>Caveat:</strong> {_multiline(caveat)}</div>'
         )
 
@@ -2102,11 +2102,11 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
         _rows = "".join(_lint_row(r) for r in unresolved_composites)
         composite_lint_html = (
             '<div class="composite-lint-banner" role="alert" '
-            'style="margin:14px 0;padding:10px 14px;background:#fffbeb;'
+            'style="margin:14px 0;padding:10px 14px;background:var(--warn-bg, #fffbeb);'
             'border:1px solid #f59e0b;border-left-width:5px;border-radius:6px;'
-            'color:#92400e;font-size:0.92em">'
+            'color:var(--warn-fg, #92400e);font-size:0.92em">'
             f'{_rows}'
-            '<div style="margin-top:4px;font-size:0.9em;color:#a16207">'
+            '<div style="margin-top:4px;font-size:0.9em;color:var(--warn-fg, #a16207)">'
             'This study references a composite that doesn’t resolve — it may not '
             'declare a real, registered composite.</div>'
             '</div>'
@@ -2119,12 +2119,12 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
 <title>{_h(title)} — single-study report</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-         color:#0f172a; max-width:980px; margin:0 auto; padding:0 32px 32px; line-height:1.5; }}
+         color:var(--text, #0f172a); max-width:980px; margin:0 auto; padding:0 32px 32px; line-height:1.5; }}
   h1 {{ margin:0 0 4px; font-size:1.9em }}
-  h2 {{ border-bottom:1px solid #e2e8f0; padding-bottom:6px; margin-top:32px; font-size:1.35em }}
+  h2 {{ border-bottom:1px solid var(--border, #e2e8f0); padding-bottom:6px; margin-top:32px; font-size:1.35em }}
   h3 {{ font-size:1.05em }}
-  code {{ background:#f1f5f9; padding:1px 6px; border-radius:4px; font-size:0.9em }}
-  iframe {{ background:#fff }}
+  code {{ background:var(--chip, #f1f5f9); padding:1px 6px; border-radius:4px; font-size:0.9em }}
+  iframe {{ background:var(--card, #fff) }}
   /* Sticky strip — pinned at the top of the viewport once the user
      scrolls past the page header. Keeps the title + verdict + jump
      nav visible regardless of scroll depth. The negative left/right
@@ -2135,11 +2135,11 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     margin: 0 -32px 0 -32px; padding: 10px 32px;
     background: rgba(248, 250, 252, 0.96);
     backdrop-filter: blur(4px);
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--border, #e2e8f0);
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
     font-size: 0.92em;
   }}
-  .ssr-sticky-title {{ font-weight: 600; color: #0f172a;
+  .ssr-sticky-title {{ font-weight: 600; color: var(--text, #0f172a);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 48ch;
   }}
@@ -2147,7 +2147,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     margin-left: auto;
   }}
   .ssr-section-nav a {{
-    color: #2563eb; text-decoration: none;
+    color: var(--info-fg, #2563eb); text-decoration: none;
     padding: 3px 10px; border-radius: 9999px;
     background: rgba(37, 99, 235, 0.08);
     font-size: 0.9em;
@@ -2157,8 +2157,8 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
      hash-anchors land below the sticky header, not under it. */
   section[id], h1, h2 {{ scroll-margin-top: 56px; }}
   body > header {{ padding-top: 32px; }}
-  .footer {{ margin-top:48px; padding-top:16px; border-top:1px solid #e2e8f0;
-            color:#64748b; font-size:0.85em }}
+  .footer {{ margin-top:48px; padding-top:16px; border-top:1px solid var(--border, #e2e8f0);
+            color:var(--text-muted, #64748b); font-size:0.85em }}
 </style>
 </head>
 <body>
@@ -2167,7 +2167,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
 <header>
   {inv_chip}
   <h1>{_h(title)}</h1>
-  <div class="meta" style="color:#475569;font-size:0.95em">
+  <div class="meta" style="color:var(--text-muted, #475569);font-size:0.95em">
     <code>{_h(study_spec.get("name", ""))}</code> {badge}{study_type_badge}{prereg_chip}
   </div>
   {quality_html}

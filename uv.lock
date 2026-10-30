@@ -139,7 +139,7 @@ wheels = [
 
 [[package]]
 name = "bigraph-schema"
-version = "1.8.1"
+version = "1.8.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
@@ -148,9 +148,9 @@ dependencies = [
     { name = "pint" },
     { name = "plum-dispatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1e/af/b98986bab188aa4a1280591bd180febbc718fa834866d9d2f76df7b269b7/bigraph_schema-1.8.1.tar.gz", hash = "sha256:8bad19838454b6468ac4db10cf06b085da192aac9ddb3de65181655347c4061b", size = 185919, upload-time = "2026-10-12T16:01:10.701Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/4a/2a4ab83a3990fd7aafaca5a38dc542190784ae6629d63bd3f60af172afc2/bigraph_schema-1.8.3.tar.gz", hash = "sha256:2ad25dc69f6f3c61e2f028b7a706703af33dff1709f2c53f9f0441e6c0df0a65", size = 188936, upload-time = "2026-10-25T18:42:50.956Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/44/ca/69528f16860eafee020efa0ff0a5017c60d9c13189da2f02548197336f35/bigraph_schema-1.8.1-py3-none-any.whl", hash = "sha256:826b75e5df8ab60079a0f3adc529abb51ab955daf0f0ddc9be02c2444d60b3df", size = 185499, upload-time = "2026-10-12T16:01:09.133Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/44/c167c5f2e868f13b252398bd8c122bb0bd93b8482a84c4233eeac4884cc1/bigraph_schema-1.8.3-py3-none-any.whl", hash = "sha256:02becc19454260c09a853ffcb1cc32561a3f851ece966c4c7216f1d38e17829d", size = 186489, upload-time = "2026-10-25T18:42:49.439Z" },
 ]
 
 [[package]]
@@ -511,12 +511,16 @@ wheels = [
 
 [[package]]
 name = "compose-api-client"
-version = "0.7.35"
-source = { git = "https://github.com/biosimulations/compose-api.git?subdirectory=clients%2Fpython&tag=0.7.35#367ccb293a490b81bb6c38e34b61aa355d6b5701" }
+version = "0.7.72"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
     { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/ff/c2bfb09aa2537c142fd775b53acc70892189c41d68d43404892fa6d5320a/compose_api_client-0.7.72.tar.gz", hash = "sha256:cfd495eb472502728f95dbba4cb47ecff33fee36fe4638d4c1f849109e12a26e", size = 193083, upload-time = "2026-10-29T02:42:39.735Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/a4/71968fa987f8624b799b22ac7e903bb94ac90bd2f0b7ddb21dadb186a50f/compose_api_client-0.7.72-py3-none-any.whl", hash = "sha256:0dd56f5d6d95389c6b9b8a7349ca47f3b950416b603b60a01f334c0e935cf4c0", size = 384441, upload-time = "2026-10-29T02:42:38.24Z" },
 ]
 
 [[package]]
@@ -667,6 +671,29 @@ wheels = [
 ]
 
 [[package]]
+name = "discovery-engine"
+version = "0.1.0"
+source = { git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main#64d4854f90e3a6f6d0314e6f2010274b0334ddad" }
+dependencies = [
+    { name = "bigraph-schema" },
+    { name = "click" },
+    { name = "filelock" },
+    { name = "jinja2" },
+    { name = "jsonschema", extra = ["format-nongpl"] },
+    { name = "numpy" },
+    { name = "polars" },
+    { name = "process-bigraph" },
+    { name = "psutil" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "ruamel-yaml" },
+    { name = "scipy" },
+    { name = "typer" },
+    { name = "viva-emitters", extra = ["parquet"] },
+    { name = "viva-workspace" },
+]
+
+[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -755,6 +782,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5b/58/ff455d9fe47c60abadb34b9e05a304b1f05f5ab8000ac01565156b6f5e43/fastapi-0.138.0.tar.gz", hash = "sha256:d445a4877636ad191e7053e08c9bf98cb921a6756776848400bb773d1740c061", size = 419240, upload-time = "2026-06-20T01:18:05.259Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6c/ff/8496d9847a5fedae775eb49460722d3efaa80487854273e9647ae876218c/fastapi-0.138.0-py3-none-any.whl", hash = "sha256:b6f54fd1bd72c80b0f899f172c61a600f6f7af9b43d4d772a018f35624048cb0", size = 126779, upload-time = "2026-06-20T01:18:03.483Z" },
+]
+
+[[package]]
+name = "filelock"
+version = "4.2.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/28/3893324bcadf8f89b1616637468d766af3f625008c0735bf704fdfa86617/filelock-4.2.4.tar.gz", hash = "sha256:c6d8663535e1650ee430507b4ffbac7b464dd64b7647ea0112a9f406499d163d", size = 652444, upload-time = "2026-10-19T01:57:51.001Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/1b/5e74289a1878e666bb4b65fe5805a04cafcac2aa5f519ef1ead67ef91c56/filelock-4.2.4-py3-none-any.whl", hash = "sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e", size = 162475, upload-time = "2026-10-19T01:57:49.419Z" },
 ]
 
 [[package]]
@@ -3352,6 +3388,15 @@ wheels = [
 ]
 
 [[package]]
+name = "shellingham"
+version = "1.5.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3499,6 +3544,21 @@ wheels = [
 ]
 
 [[package]]
+name = "typer"
+version = "0.27.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-doc" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "rich" },
+    { name = "shellingham" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/51/d33db42cc72ffd8c30777547b42d01f0cbf9d95a770457698d0174b3ed71/typer-0.27.3.tar.gz", hash = "sha256:d0396f770a560ab1b0a8504e13b5f254b728cedb05c61cf0359e944e50ce8901", size = 205303, upload-time = "2026-10-06T17:24:16.61Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/ea/2e31b67051e91a133189e9c000c222502ddc6969856416de0d095de4c0b0/typer-0.27.3-py3-none-any.whl", hash = "sha256:e50022f28b82a86313e54501317a1db64bf8f8d036ff8cfe5ca7e47675454aff", size = 123312, upload-time = "2026-10-06T17:24:15.054Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3615,14 +3675,16 @@ xarray = [
 
 [[package]]
 name = "viva-superpowers"
-version = "0.23.0"
-source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#4e2655affc7d141d4da5f71dbbf126573d4f8f50" }
+version = "0.24.0"
+source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#f67ff2b1004021fb9542d2c479961c1d83de00b5" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "click" },
+    { name = "filelock" },
     { name = "jinja2" },
     { name = "jsonschema", extra = ["format-nongpl"] },
     { name = "process-bigraph" },
+    { name = "psutil" },
     { name = "pypdf" },
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
@@ -3652,6 +3714,7 @@ dependencies = [
     { name = "bigraph-schema" },
     { name = "boto3" },
     { name = "compose-api-client" },
+    { name = "discovery-engine" },
     { name = "fastapi" },
     { name = "investigation-contracts" },
     { name = "jinja2" },
@@ -3709,7 +3772,8 @@ viz = [
 requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
     { name = "boto3", specifier = ">=1.34" },
-    { name = "compose-api-client", git = "https://github.com/biosimulations/compose-api.git?subdirectory=clients%2Fpython&tag=0.7.35" },
+    { name = "compose-api-client", specifier = ">=0.7.72" },
+    { name = "discovery-engine", git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },

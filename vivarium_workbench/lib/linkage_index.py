@@ -56,8 +56,8 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from viva_superpowers import study_io
-from viva_superpowers.workspace_paths import WorkspacePaths
+from discovery_engine import study_io
+from discovery_engine.workspace_paths import WorkspacePaths
 
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 
@@ -212,7 +212,7 @@ def _sources_of_investigation(ws_root: Path, slug: str, spec: dict) -> list[str]
     """investigation → source, NORMALIZING the split-shape: both
     ``inputs.{references,datasets,expert_docs}`` AND the top-level
     ``references``/``expert_docs`` lists."""
-    from viva_superpowers.investigation_inputs import investigation_inputs
+    from discovery_engine.investigation_inputs import investigation_inputs
 
     out: list[str] = []
 
@@ -396,7 +396,7 @@ def ac_gating_matrix(ws_root: Path | str, inv: str) -> dict:
     Reuses :func:`investigation_status.roll_up_acceptance` for the coded results
     (no reimplementation).
     """
-    from viva_superpowers.investigation_status import roll_up_acceptance
+    from discovery_engine.investigation_status import roll_up_acceptance
 
     ws_root = Path(ws_root)
     wp = WorkspacePaths.load(ws_root)

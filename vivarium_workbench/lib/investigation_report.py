@@ -823,7 +823,12 @@ def _build_synthesis(inv, studies, spine):
         fnds = []
         for m in members:
             for f in (m["_s"].get("findings") or [])[:3]:
-                ev = (f or {}).get("evidence") or {}
+                # evidence may be a plain string (a prose description) rather than
+                # a {observed, units} dict; guard before .get() so _build_synthesis
+                # doesn't crash the whole report on `'str' object has no attribute
+                # 'get'`. A string evidence simply has no structured observed/units.
+                ev = (f or {}).get("evidence")
+                ev = ev if isinstance(ev, dict) else {}
                 fnds.append({
                     "study": m["slug"], "title": m["title"], "grade": m["grade"],
                     "status": (f or {}).get("status"),
@@ -964,6 +969,65 @@ def _build_synthesis(inv, studies, spine):
             if v:
                 out[k] = v
     return out
+
+
+def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
+    """Run one discovery cycle and return a slim, renderable view of *what to do next*:
+    value-ranked opportunities, the productivity diagnosis, expert-gated study
+    suggestions, and drift. Degrades gracefully (returns ``None``) when the installed
+    viva_superpowers predates the discovery engine, so the report never breaks."""
+    try:
+        from discovery_engine import discover
+        from discovery_engine import discovery_engine as de
+        _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
+        cyc = discover.run_cycle(inv_spec, studies)
+        clo = de.closure(cyc, inv_spec)
+        na = de.next_action(cyc, inv_spec)
+        opps = de.opportunities(cyc, inv_spec)
+        diag = de.diagnose(cyc, inv_spec)
+        frontier = de.frontier(cyc, inv_spec)
+        # How many frontier items actually BLOCK closure (unaddressed criteria,
+        # narrative gaps, open challenges) vs. are residual hardening/extensions.
+        # When closed this is 0 by construction, so the surfaces can say "closed —
+        # N residual (non-blocking)" rather than imply the open items are unfinished.
+        _blocking_kinds = getattr(de, "_CLOSURE_BLOCKING",
+                                  ("unaddressed_criterion", "narrative_gap", "open_challenge"))
+        closure_blocking = sum(1 for it in frontier if it.get("kind") in _blocking_kinds)
+        recs = cyc.get("validations") or []
+        census: dict = {}
+        for r in recs:
+            st = (r.get("result") or {}).get("execution_status")
+            census[st] = census.get(st, 0) + 1
+        return {
+            "closed": clo["closed"],
+            "frontier_size": clo["open_items"],
+            "closure_blocking": closure_blocking,
+            "next_action": ({"op": na["op"], "kind": na["kind"], "target": na["target"]}
+                            if na else None),
+            "opportunities": [{"source": o["source"], "action": o["action_type"],
+                               "score": o["value"]["score"], "impact": o["value"]["impact"],
+                               "enable": o["value"]["enable"], "question": o.get("question")}
+                              for o in opps[:10]],
+            "diagnosis": {"flags": [f["flag"] for f in diag["flags"]],
+                          "validator_pass_rate": diag["validator_pass_rate"]},
+            # the recommendation->action bridge (Decide surface): each next move + how
+            # it would be executed + its consequence class. None on an older engine.
+            "execution_plan": ([{"source": p["source"], "action": p["action_type"],
+                                 "score": p["score"], "consequence": p["consequence"],
+                                 "command": p["command"]}
+                                for p in de.execute_plan(cyc, inv_spec)[:8]]
+                               if hasattr(de, "execute_plan") else None),
+            "suggestions": [{"id": s.get("id"), "parent": s.get("parent_study"),
+                             "status": s.get("status"),
+                             "needs": (s.get("awaiting_expert") or [None])[0]}
+                            for s in (cyc.get("suggestions") or [])],
+            "validator_census": census,
+            "drift": {"divergences": sum(1 for i in frontier if i["kind"] == "divergence"),
+                      "stale_validations": len(
+                          de.stale_records(recs, inv_spec.get("validation_snapshot")))},
+        }
+    except Exception:
+        return None
 
 
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
@@ -1107,7 +1171,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
     except Exception:  # noqa: BLE001
         _synthesis["validation"] = {"items": [], "summary": {"total": 0, "by_kind": {}, "by_severity": {}}}
     # Also fold in the EXISTING report-readiness linter (report_views.build_report_lint
-    # → viva_superpowers.report_linter + the dashboard's composite-resolution,
+    # → discovery_engine.report_linter + the dashboard's composite-resolution,
     # readout-emit-plan, question/approach and visualization-gap checks). Same
     # deterministic infra the live report-lint endpoint uses — reused, not rebuilt.
     try:
@@ -1142,6 +1206,10 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "at_a_glance": inv.get("at_a_glance"),
         "acceptance_criteria": inv.get("acceptance_criteria"),
         "spine": spine,
+        # The discovery engine's live "what to do next" view (value-ranked
+        # opportunities, diagnosis, expert-gated study suggestions, drift). None when
+        # the installed viva_superpowers predates the engine — renders as a no-op.
+        "discovery": _build_discovery(ws_root, inv_slug),
         # Deterministic cross-study synthesis (claim-evidence map, stage-grouped
         # integrated findings, contradictions, continuity, roadmap, figure ranking,
         # run-status/evidence/claim separation) — the finding-first report layer.

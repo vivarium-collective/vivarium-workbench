@@ -10,8 +10,8 @@ stay in place and are reached only when the named backend advertises `/viva/v1`.
 
 | Claim | Source |
 |---|---|
-| Routes, parameters, schemas | compose-api 0.7.35's OpenAPI, the `openapi.json` shipped in the locked `compose-api-client` (git tag `0.7.35`); snapshot at `tests/_contracts/compose_api_openapi_0.7.35.json`, which a test keeps equal to the shipped one. It equals compose.cam.uchc.edu's live `/openapi.json` (0.7.36 on 2026-10-22, whose spec is unchanged from 0.7.35) except that file uploads read `format: binary` instead of `contentMediaType`, compose-api's deliberate rewrite for its client generator (`compose_api/api/openapi_spec.py`) |
-| Environments, registry entries, the pilot's interface manifest | `GET /registry/environments`, `/registry/entries`, `/registry/environments/viva-pde-particle/manifest` on compose.cam.uchc.edu 0.7.33, 2026-10-22 (`tests/_fixtures/compose_api/`) |
+| Routes, parameters, schemas | compose-api 0.7.72's OpenAPI, the `openapi.json` shipped in the locked `compose-api-client` (PyPI `compose-api-client` 0.7.72); snapshot at `tests/_contracts/compose_api_openapi_0.7.72.json`, which a test keeps equal to the shipped one. It equals compose.cam.uchc.edu's live `/openapi.json` (0.7.76 on 2026-10-29) except for `info.version` and that file uploads read `format: binary` instead of `contentMediaType`, compose-api's deliberate rewrite for its client generator (`compose_api/api/openapi_spec.py`) |
+| Environments, registry entries, the pilot's interface manifest | `GET /registry/environments`, `/registry/entries`, `/registry/environments/viva-pde-particle/manifest` on compose.cam.uchc.edu 0.7.33, 2026-10-22 (`tests/_fixtures/compose_api/`; the live registry has since moved, see that README) |
 | What a run's archive holds | a real export run by viva-pde-particle's real runner in its own image, and production simulation 4706 (`tests/_fixtures/compose_api/README.md`) |
 | Address rules | compose-api `compose_api/registry/validation.py`: only `local:<module>.<Class>`; `local:!` and other protocols are always refused |
 | Cancel | compose-api `DELETE /simulations/{simulation_id}` (`cancel-simulation`, biosimulations/compose-api#346) |
@@ -34,15 +34,20 @@ named, nothing is probed and runs stay local.
 
 ## Which environment runs the workspace
 
-The code is not shipped. The run uses an image compose-api already lists:
+The code is not shipped. The run uses a prebuilt environment compose-api already lists:
 1. `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=name:<environment>`, when set, names it outright.
 2. Otherwise the workspace's git `origin` is matched to a registry entry's `source` (`GET /registry/entries`), and
-   that entry's prebuilt environment (`GET /registry/environments`, `kind: prebuilt`) is the one. Its `simulator`
-   becomes the run's `simulator=`.
+   that entry's prebuilt environment (`GET /registry/environments`, `kind: prebuilt`) is the one. Its name becomes the
+   run's `environment=`, so its default version runs.
 3. No match is a **409** naming the registration steps (below).
 
+Environments of kind `mash-up` (compose-api composes them from registry entries and reuses them) are not used yet:
+a workspace whose entry has no prebuilt environment is a 409, even though compose-api could compose one for it.
+
 The run uses the image, not the checkout. When the entry pins a `commit` and HEAD is another commit, the submit
-answers with a `warning`. A landed run records the image digest as its `code_version.image`.
+answers with a `warning`. A landed run records the environment version it ran in (`compose.environment_version`, such
+as `viva-pde-particle@2`, read from the run's own record) and that version's image digest as `code_version.image`.
+A run from before versions has no version, and its image is resolved from the simulator name.
 
 ## The document
 
@@ -72,7 +77,7 @@ shorter run.
 
 | Workbench | compose-api |
 |---|---|
-| submit (study baseline and variant, `/api/remote-run-submit`) | `POST /simulation/run` with the `.pbg` as `uploaded_file`. Query: `simulator=<env>`, `interval_time=<n_steps>` (a local run calls `composite.run(1)` per step), `tags=workbench,study:<study>,workbench:dispatch:<uuid>`, `description` |
+| submit (study baseline and variant, `/api/remote-run-submit`) | `POST /simulation/run` with the `.pbg` as `uploaded_file`. Query: `environment=<env>`, `interval_time=<n_steps>` (a local run calls `composite.run(1)` per step), `tags=workbench,study:<study>,workbench:dispatch:<uuid>`, `description` |
 | Composites-tab remote run (`/api/composite-test-run`, the detached `run_remote`) | the same submit (tag `composite:<id>`), then the runner waits on the status, downloads the results and lands them as the card's run. It records the card's emit selection, else the composite's declared emitters; declared analyses are not run, and the run log says so |
 | preflight (`/api/remote-dispatch-preflight`) | the environment lookup alone: ready when one runs the workspace, otherwise its reason |
 | poll (`/api/remote-run-poll`) | `GET /results/simulation/status` (`submitting` until SLURM has the job) |
@@ -98,13 +103,26 @@ simulation ids, so the compose check runs before them.
 
 ## Onboarding a workspace
 
-Two pieces, by pattern (viva-pde-particle is the reference):
-1. **The workspace's repository:** a `compose.Dockerfile`, a workflow that publishes the image, and a runner that
-   honours the job contract `run <doc> -o <output> -n <interval>` and writes `results_<date>.pber`
-   (`gather_emitter_results` as JSON). See viva-pde-particle's `docker/compose.Dockerfile`,
-   `.github/workflows/compose-image.yml` and `viva_pde_particle/compose_runner.py`.
-2. **compose-api:** a `manifest.yaml` entry (level `tested`, `bundles: [<env>]`, `source`, `commit`, evidence), an
-   `environments.yaml` entry, the image digest in `PREBUILT_SIMULATORS`, and the CI-generated interface manifest.
+As compose-api's maintainer described it on 2026-10-29 (biosimulations/compose-api#353; the design is its
+`docs/plan-environment-composition.md`):
+1. **A `manifest.yaml` entry in compose-api, reviewed by PR:** `source`, `install` (git, commit and extras, or a PyPI
+   pin), `conda`, `requires`, `module_roots` and compliance cases. The manifest is the allow-list: what is trusted
+   is a commit, not a repository. `PREBUILT_SIMULATORS` no longer exists.
+2. **A prebuilt environment, which is what this workbench runs today.** A workspace that publishes its own image
+   (a `compose.Dockerfile`, a workflow that publishes it, and a runner that honours `run <doc> -o <output> -n
+   <interval>` and writes `results_<date>.pber`; viva-pde-particle's `docker/compose.Dockerfile`,
+   `.github/workflows/compose-image.yml` and `viva_pde_particle/compose_runner.py` are the reference) needs:
+   - **Once, by compose-api PR:** the environment declared in `environments.yaml` (`kind: prebuilt`). The version
+     route resolves its `name` only through a declared environment or an existing mash-up, and answers 404
+     `no environment` otherwise (`compose_api/api/routers/registry.py`, `create_environment_version`).
+   - **Per image, by an administrator, through the API:** `POST /registry/environments/{name}/versions` with
+     `{"image": "<ref>@sha256:…"}`. The new version is not the default. Runs that name the environment, as this
+     workbench does (`environment=<name>`), get it only after `PUT /registry/environments/{name}/default`.
+   Later images of an already declared environment need no PR, config change or redeploy (compose-api's maintainer
+   registered viva-pde-particle's version 2 that way on 2026-10-27).
+3. **Or no image at all.** When no ready environment covers the classes a document names, compose-api composes a
+   `mash-up` from the registry entries (cached by its entry set) for a signed-in caller, and writes its own runner
+   into the image. This workbench does not use mash-ups yet (see "Which environment runs the workspace").
 
 ## Tests
 

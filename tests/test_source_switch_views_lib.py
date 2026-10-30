@@ -33,7 +33,7 @@ def test_missing_path_400():
 
 
 def test_unregistered_path_400(tmp_path, monkeypatch):
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
 
     monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
     p = str(tmp_path / "nope")
@@ -48,7 +48,7 @@ def test_switch_by_name_resolves(tmp_path, monkeypatch):
     (no filesystem path in the request)."""
     ws = tmp_path / "ws"
     ws.mkdir()
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
 
     monkeypatch.setattr(
         workspace_catalog, "list_workspaces",
@@ -61,7 +61,7 @@ def test_switch_by_name_resolves(tmp_path, monkeypatch):
 
 
 def test_switch_by_unknown_name_400(monkeypatch):
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
 
     monkeypatch.setattr(
         workspace_catalog, "list_workspaces",
@@ -74,7 +74,7 @@ def test_switch_by_unknown_name_400(monkeypatch):
 
 
 def test_switch_by_ambiguous_name_400(monkeypatch):
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
 
     monkeypatch.setattr(
         workspace_catalog, "list_workspaces",
@@ -89,7 +89,7 @@ def test_switch_by_ambiguous_name_400(monkeypatch):
 def test_path_wins_when_both_given(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     ws.mkdir()
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
 
     monkeypatch.setattr(
         workspace_catalog, "list_workspaces",
@@ -106,7 +106,7 @@ def test_happy_path_repoints_and_invalidates(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text("name: w\n")
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
 
     monkeypatch.setattr(
         workspace_catalog, "list_workspaces",

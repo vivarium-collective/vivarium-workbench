@@ -686,6 +686,40 @@
     if (x > w * 0.67) return 'right';
     return null;
   }
+  // iTerm2-style drop target during a panel drag. Given the pointer, the window
+  // size, and the OTHER open docked panels (each {key, side, left, top, right,
+  // bottom}), decide where a drop would land:
+  //   {kind:'swap',   otherKey}        — over the CENTER of a panel → swap places
+  //   {kind:'insert', side, relKey, after} — over a panel's edge → slot before/after it
+  //   {kind:'edge',   side}            — over an empty edge band → dock to that side
+  //   null                             — the dead middle → no-op
+  // Pure + deterministic for unit tests. Panels are stacked vertically on left/
+  // right (reorder by Y) and horizontally on top/bottom (reorder by X).
+  function dropTarget(x, y, w, h, panels) {
+    panels = panels || [];
+    for (var i = 0; i < panels.length; i++) {
+      var p = panels[i];
+      if (x >= p.left && x <= p.right && y >= p.top && y <= p.bottom) {
+        var vertical = (p.side === 'left' || p.side === 'right');
+        var pw = p.right - p.left, ph = p.bottom - p.top;
+        var fx = pw > 0 ? (x - p.left) / pw : 0.5;
+        var fy = ph > 0 ? (y - p.top) / ph : 0.5;
+        // Cross-axis edge strips → a NEW LANE (a column beside this panel on a
+        // left/right side, a row above/below it on a top/bottom band). The cross
+        // axis is x for a vertical side, y for a horizontal band.
+        var SPLIT = 0.22;
+        var cross = vertical ? fx : fy;
+        if (cross < SPLIT) return { kind: 'split', side: p.side, relKey: p.key, after: false };
+        if (cross > 1 - SPLIT) return { kind: 'split', side: p.side, relKey: p.key, after: true };
+        // Main axis → stack into this panel's lane, before (first half) or after it.
+        var frac = vertical ? fy : fx;
+        return { kind: 'insert', side: p.side, relKey: p.key, after: frac >= 0.5 };
+      }
+    }
+    var z = dropZone(x, y, w, h);
+    return z ? { kind: 'edge', side: z } : null;
+  }
+
   // Panel thickness (width for left/right, height for bottom/top), kept usable at any
   // window size.
   function clampDock(dock, size, vw, vh) {
@@ -709,7 +743,7 @@
     findTool: findTool, storeRestore: storeRestore, storeOpen: storeOpen, storeMerge: storeMerge, storeDelete: storeDelete, storeList: storeList, storePrune: storePrune, titleOf: titleOf,
     mentionQuery: mentionQuery, insertMention: insertMention, contextItems: contextItems,
     PROVIDERS: PROVIDERS, providerMeta: providerMeta, mergeModels: mergeModels, modelTree: modelTree, parseQualified: parseQualified,
-    DOCKS: DOCKS, validDock: validDock, dropZone: dropZone, clampDock: clampDock,
+    DOCKS: DOCKS, validDock: validDock, dropZone: dropZone, dropTarget: dropTarget, clampDock: clampDock,
     nextIndex: nextIndex, loadKnown: loadKnown, addKnown: addKnown, removeKnown: removeKnown,
     filterItems: filterItems, ATTACH: ATTACH, attachError: attachError, composePrompt: composePrompt,
   };

@@ -1,6 +1,6 @@
 """Workspace-local + installed-package composite discovery.
 
-Mirrors viva_superpowers.composite_spec + composite_discovery for the dashboard's
+Mirrors discovery_engine.composite_spec + composite_discovery for the dashboard's
 use. Self-contained: no dependency on pbg-superpowers (which is a Claude Code
 plugin, not always pip-installable in workspace venvs).
 
@@ -41,6 +41,62 @@ def load_spec(path: Path) -> dict:
     if path.suffix.lower() == ".json":
         return json.loads(text)
     return yaml.safe_load(text)
+
+
+def resolve_generator_entry(spec_id: str, pkg: Optional[str] = None):
+    """Resolve a ``@composite_generator`` entry by its short spec_id.
+
+    Two gaps make a plain ``_REGISTRY.get(spec_id)`` miss for editable-workspace
+    composites, so every run/flush/emitter lookup went through this same hole:
+
+    1. ``_REGISTRY`` is keyed by ``entry.id`` — the fully-qualified module path
+       (e.g. ``mosaic_compose.composites.community.mosaic_glv_vaginal``) — but the
+       rest of the codebase passes the SHORT name (``entry.name``, e.g.
+       ``mosaic_glv_vaginal``). The key never matches the short spec_id, so an
+       import-registered composite is invisible to ``.get(spec_id)``.
+    2. An editable-install workspace package isn't reached by
+       ``discover_generators()`` (``packages_distributions()`` misses it — a
+       known uv/hatchling editable gap, e.g. dist 'genesis' vs import package
+       'viva_genesis'); its composites register only as a side effect of
+       importing the package.
+
+    So: look up by key; if missing and ``pkg`` is given, import it (and prefer
+    its ``build_core``, the convention's registration hook) and retry by key;
+    finally fall back to matching ``entry.name`` across the registry. Returns the
+    ``GeneratorEntry`` or ``None``.
+    """
+    try:
+        from process_bigraph.composite_generator import _REGISTRY, discover_generators
+    except Exception:
+        return None
+    if not _REGISTRY:
+        try:
+            discover_generators()
+        except Exception:
+            pass
+    entry = _REGISTRY.get(spec_id)
+    if entry is not None:
+        return entry
+    if pkg:
+        try:
+            __import__(pkg)
+            try:
+                core_mod = __import__(f"{pkg}.core", fromlist=["build_core"])
+                if hasattr(core_mod, "build_core"):
+                    core_mod.build_core()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        entry = _REGISTRY.get(spec_id)
+        if entry is not None:
+            return entry
+    # Short-name fallback: _REGISTRY is keyed by the full module path (entry.id),
+    # but spec_id is the short entry.name.
+    for candidate in _REGISTRY.values():
+        if getattr(candidate, "name", None) == spec_id:
+            return candidate
+    return None
 
 
 def _spec_record(spec: dict, package: str, stem: str, path: Path,
@@ -187,7 +243,69 @@ def _discover_generators_via_worker(ws_root: Path) -> dict:
         return {}
 
 
-def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]:
+def _discover_workspace_generators(ws_root: Path, package_path: str) -> dict:
+    """``{gid: entry}`` ``@composite_generator`` composites from the WORKSPACE
+    package ONLY, discovered IN-PROCESS.
+
+    The env-worker path (:func:`_discover_generators_via_worker`) exists so the
+    long-lived HTTP process never imports generator modules; but it discovers
+    via ``process_bigraph.composite_generator.discover_generators``, which walks
+    and imports *every* installed bigraph-schema distribution (dozens of
+    packages, minutes of cold imports + provisioning). A short-lived CLI caller
+    that only renders the workspace's own composites — ``gen-readme`` — must not
+    pay that: it would keep just the handful whose module is the workspace
+    package anyway. This imports only this workspace's ``<pkg>/composites/*.py``
+    so their decorators fire, then reads the process-bigraph registry for
+    generator specs under ``package_path``. Returns the same entry-dict shape as
+    the worker, so :func:`discover_all_composites`'s merge is unchanged.
+    Best-effort: a composite module that fails to import is skipped (never
+    raises), matching the env-wide path's per-module tolerance.
+    """
+    out: dict = {}
+    comp_dir = Path(ws_root) / package_path / "composites"
+    if not comp_dir.is_dir():
+        return out
+    import importlib
+    for py in sorted(comp_dir.glob("*.py")):
+        if py.stem.startswith("_"):
+            continue
+        try:
+            importlib.import_module(f"{package_path}.composites.{py.stem}")
+        except Exception:  # noqa: BLE001 — best-effort, skip an unimportable module
+            continue
+    try:
+        from process_bigraph.composite_generator import _cs, _entry_for
+        specs = _cs.all_specs()
+    except Exception:  # noqa: BLE001 — no process-bigraph registry → spec-only
+        return out
+    ws_prefix = package_path + "."
+    for sid, s in specs.items():
+        if getattr(s, "kind", None) != "generator":
+            continue
+        try:
+            e = _entry_for(s)
+        except Exception:  # noqa: BLE001
+            continue
+        mod = getattr(e, "module", "") or ""
+        if not (mod == package_path or mod.startswith(ws_prefix)):
+            continue  # only THIS workspace's generators, not leaked installed ones
+        out[sid] = {
+            "name": e.name,
+            "description": getattr(e, "description", "") or "",
+            "parameters": getattr(e, "parameters", {}) or {},
+            "module": mod,
+            "default_n_steps": getattr(e, "default_n_steps", None),
+            "preferred_time": getattr(e, "preferred_time", None),
+            "visualizations": list(getattr(e, "visualizations", []) or []),
+            "methods": list(getattr(e, "methods", []) or []),
+            "fidelity": getattr(e, "fidelity", "") or "",
+            "n_processes": getattr(e, "n_processes", None),
+        }
+    return out
+
+
+def discover_all_composites(ws_root: Path, package_path: str,
+                            *, scope: str = "all") -> dict[str, dict]:
     """Discover composites from the workspace + every installed pbg-* package.
 
     If the workspace's package is also pip-installed (e.g., `pip install -e .`),
@@ -201,16 +319,23 @@ def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]
     ``kind: "spec"`` and gain a derived ``module``. If pbg-superpowers is not
     importable the function falls back to spec-only behavior.
     """
+    # scope="workspace": discover ONLY this workspace's composites (FS docs +
+    # in-process workspace-package generators) — no installed-package scan, no
+    # federation, no env-worker import of the whole environment. Used by the
+    # gen-readme CLI, whose output keeps only workspace-local composites anyway.
+    workspace_only = scope == "workspace"
+
     out: dict[str, dict] = {}
     out.update(discover_workspace_composites(ws_root, package_path))
-    for spec_id, rec in discover_installed_pbg_composites().items():
-        if spec_id not in out:
-            out[spec_id] = rec
+    if not workspace_only:
+        for spec_id, rec in discover_installed_pbg_composites().items():
+            if spec_id not in out:
+                out[spec_id] = rec
 
-    # Federated composites from linked workspaces under external/ (read-only).
-    from vivarium_workbench.lib import federation as _fed
-    for spec_id, rec in _fed.federated_composites(ws_root).items():
-        out.setdefault(spec_id, rec)
+        # Federated composites from linked workspaces under external/ (read-only).
+        from vivarium_workbench.lib import federation as _fed
+        for spec_id, rec in _fed.federated_composites(ws_root).items():
+            out.setdefault(spec_id, rec)
 
     # Tag every spec entry with kind + derived module (idempotent).
     for spec_id, rec in out.items():
@@ -221,7 +346,9 @@ def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]
     # Merge @composite_generator entries — discovered in the env worker (importing
     # generator modules is workspace Python, kept out of the HTTP process). The
     # workbench keeps the pure FS/YAML spec scan above + the shaping below.
-    for gid, entry in _discover_generators_via_worker(ws_root).items():
+    _generators = (_discover_workspace_generators(ws_root, package_path)
+                   if workspace_only else _discover_generators_via_worker(ws_root))
+    for gid, entry in _generators.items():
         if gid in out:
             continue
         rec: dict = {
@@ -622,7 +749,7 @@ def unresolved_study_composite_refs(spec: dict, known_ids: set[str]) -> list[str
     """Return the study's declared composite refs that DON'T resolve to any
     registered composite id.
 
-    Prefers ``viva_superpowers.report_linter.unresolved_composite_refs`` (the
+    Prefers ``discovery_engine.report_linter.unresolved_composite_refs`` (the
     canonical, spec-only contract) when available; falls back to the local
     extraction + last-segment match. Defensive: never raises.
 
@@ -637,7 +764,7 @@ def unresolved_study_composite_refs(spec: dict, known_ids: set[str]) -> list[str
     """
     known = set(known_ids)
     try:
-        from viva_superpowers.report_linter import unresolved_composite_refs as _ps
+        from discovery_engine.report_linter import unresolved_composite_refs as _ps
         flagged = list(_ps(spec, known))
     except Exception:  # noqa: BLE001 — older/absent viva_superpowers → local fallback
         return [r for r in _study_composite_refs(spec) if not _ref_resolves(r, known)]
@@ -685,13 +812,19 @@ def _dedupe_alias_composites(records: list) -> list:
     return out
 
 
-def composites_data(ws_root: Path) -> dict:
+def composites_data(ws_root: Path, *, scope: str = "all") -> dict:
     """Pure data builder for GET /api/composites — returns ``{"composites": [...]}``.
 
     Discovers every composite visible to *ws_root* (workspace-local + installed
     ``pbg-*`` packages), applies the per-workspace registry allow-list, and
     collapses alias duplicates. Called by ``lib.composites_query`` (in a fresh
     subprocess) and by ``publish.build_bundle``.
+
+    ``scope="workspace"`` restricts discovery to this workspace's OWN composites
+    (FS docs + in-process workspace-package generators), skipping the installed-
+    package / federation / env-worker environment scan. The ``gen-readme`` CLI
+    uses it: it keeps only ``workspace_local`` rows anyway, and the env-wide scan
+    imports every installed bigraph-schema package (the ``readme-check`` timeout).
 
     Moved from ``vivarium_workbench.server._composites_data`` so it has no
     dependency on the retired stdlib server or a module-global ``WORKSPACE``.
@@ -714,7 +847,7 @@ def composites_data(ws_root: Path) -> dict:
             _importlib.import_module(pkg)
         except Exception:
             pass
-        specs = discover_all_composites(ws_root, pkg)
+        specs = discover_all_composites(ws_root, pkg, scope=scope)
         ws_prefix_dot = pkg + "."
         out: list = []
         for s in specs.values():

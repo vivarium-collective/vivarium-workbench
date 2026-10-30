@@ -5,7 +5,7 @@ Behaviour-preserving ports of the stdlib handlers
 
 These 2 POSTs spawn / SIGTERM a ``vivarium-dashboard serve`` child process for a
 workspace that is registered in the GLOBAL ``~/.pbg`` catalog (reached via
-``viva_superpowers.workspace_catalog`` — process-global, NOT server state).
+``discovery_engine.workspace_catalog`` — process-global, NOT server state).
 
 ``start`` spawns the child via ``subprocess.Popen`` (idempotent: returns the
 existing URL if a live entry already exists) and polls the catalog for up to 8 s.
@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from viva_superpowers import workspace_catalog
+from discovery_engine import workspace_catalog
 
 
 def workspaces_start(ws_root: Path, body: Any) -> tuple[dict, int]:

@@ -1,7 +1,7 @@
 """Behavioural parity tests for ``lib.workspaces_mutations`` (3 builders).
 
 Each builder is a pure port of a stdlib workspace-registry handler that edits
-the GLOBAL ``~/.pbg`` catalog via ``viva_superpowers.workspace_catalog``.  Every
+the GLOBAL ``~/.pbg`` catalog via ``discovery_engine.workspace_catalog``.  Every
 test monkeypatches ``workspaces_mutations.workspace_catalog`` with a fake so the
 real ``~/.pbg`` catalog is NEVER touched, and asserts the exact ``(body, status)``
 the legacy handlers returned (incl. the cleanup-stale orphan-file unlink).

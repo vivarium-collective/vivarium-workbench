@@ -28,9 +28,9 @@ from pathlib import Path
 
 import yaml
 
-from viva_superpowers.band_provenance import bands_missing_provenance
-from viva_superpowers.investigation_inputs import investigation_inputs
-from viva_superpowers.workspace_paths import WorkspacePaths
+from discovery_engine.band_provenance import bands_missing_provenance
+from discovery_engine.investigation_inputs import investigation_inputs
+from discovery_engine.workspace_paths import WorkspacePaths
 
 
 def _member_slugs(wp: WorkspacePaths, inv_slug: str) -> list[str]:

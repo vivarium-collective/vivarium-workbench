@@ -144,13 +144,13 @@ def build_workspaces(ws_root: Path) -> dict:
 
     Mirrors ``server.Handler._get_workspaces`` exactly (servers-join + status/
     url/pid logic + sort order).  Reads the GLOBAL ``~/.pbg/workspaces.json``
-    via ``viva_superpowers.workspace_catalog.list_workspaces()``; only the
+    via ``discovery_engine.workspace_catalog.list_workspaces()``; only the
     ``current`` entry needs ``ws_root``.
 
     Always returns a dict (falls back to current-only on missing/corrupt
     catalog).
     """
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
 
     current_root = ws_root
     current_resolved = str(current_root.resolve())

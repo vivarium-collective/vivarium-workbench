@@ -36,9 +36,10 @@ dependencies = [
     # dev installs are unchanged.)
     "pytest-json-report>=1.5",
     # compose-api's client (lib/remote_run_compose.py, docs/backend-compose-api.md): the generated client and its
-    # hand-written session (httpx and attrs only; no [auth]/[cli] extras). 0.7.34 is the first with the registry
-    # routes and cancel-simulation; until it is on PyPI it resolves from the git pin in [tool.uv.sources].
-    "compose-api-client>=0.7.34",
+    # hand-written session (httpx and attrs only; no [auth]/[cli] extras). 0.7.72 is the first release on PyPI
+    # that has the registry routes and cancel-simulation (0.7.34 added them; PyPI went 0.7.6 -> 0.7.72), and it
+    # types every error body.
+    "compose-api-client>=0.7.72",
     # Floor, not decoration: `lib/artifacts/hashing.py` re-exports
     # `process_bigraph.artifacts.artifact_id` instead of hand-porting it.
     # 1.7.0 is the release that narrows whole floats correctly, so `seed: 1`
@@ -91,7 +92,7 @@ dependencies = [
     # from `main` (below) is what keeps the stale standalone `pbg-emitters` out of
     # this package's own (non-demo) resolution. The PyPI release (0.22.0) still
     # predates that migration and would drag pbg-emitters back in, so it is NOT
-    # used; declare BARE here + git `main` via [tool.uv.sources] (same
+    # used; declare BARE here + git `main` via [tool.uv.sources]
     # keep-URL-out-of-published-metadata pattern as the deps below). Bump to a
     # PyPI floor once viva-superpowers publishes a viva-emitters release — DONE:
     # 0.23.0 declares viva-emitters>=0.2.3, so the floor is bumped here. The
@@ -116,6 +117,7 @@ dependencies = [
     # 500. The hosted image is currently built without `[chat]` (Dockerfile).
     # Background: docs/ARCHITECTURE.md, "Coupling note".
     "viva-superpowers[evaluator]>=0.23.0",
+    "discovery-engine",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
@@ -183,6 +185,7 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
+discovery-engine = { git = "https://github.com/vivarium-collective/discovery-engine.git", branch = "main" }
 # viva-superpowers: sourced from git (NOT PyPI 0.22.0) because only main has
 # migrated off pbg-emitters onto viva-emitters>=0.2.3 — the whole point of this
 # change. Pinned to a REV, not `branch = "main"`, matching the deliberate choice
@@ -208,10 +211,6 @@ viva-basic-processes = { git = "https://github.com/vivarium-collective/viva-basi
 # bot `refresh registry` commit dropped v2ecoli from its index.) Bump deliberately.
 viva-catalog = { git = "https://github.com/vivarium-collective/viva-marketplace.git", rev = "4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
 viva-workspace = { git = "https://github.com/vivarium-collective/viva-workspace.git", branch = "main" }
-# compose-api-client >= 0.7.34 is not on PyPI yet (it is at 0.7.6): pinned to a compose-api release tag whose
-# contract the workbench is verified against (tests/_contracts), in the repository's clients/python. Drop this
-# source once it is published, keeping the PyPI floor above.
-compose-api-client = { git = "https://github.com/biosimulations/compose-api.git", subdirectory = "clients/python", tag = "0.7.35" }
 # investigation-contracts is declared bare in [project.dependencies] (kept out
 # of published metadata) and is not on PyPI; supply its git URL here so `uv
 # sync`/`uv lock` can resolve it (the editable-install gap that was failing CI).
@@ -246,7 +245,7 @@ investigation-contracts = { git = "https://github.com/vivarium-collective/invest
 # the interface without dragging in an implementation, and a cloud adapter swaps
 # in without the port changing. Enforced in CI (`lint-imports`).
 [tool.importlinter]
-root_packages = ["vivarium_workbench", "viva_superpowers"]
+root_packages = ["vivarium_workbench", "viva_superpowers", "discovery_engine"]
 
 [[tool.importlinter.contracts]]
 name = "ports are pure interfaces (no adapter / no git-impl imports)"
@@ -271,7 +270,7 @@ forbidden_modules = [
 # ALLOWED must not appear below, and vice-versa.
 #   - the Phase-1 substrate shims (moved to process_bigraph)
 #   - vivarium_workbench.lib.viz_freshness — de-vendored in 2.1a; the workbench
-#     must import viva_superpowers.viz_freshness directly, never re-vendor it.
+#     must import discovery_engine.viz_freshness directly, never re-vendor it.
 #   - vivarium_workbench.lib.backfill_runs — deleted in 2.1a as dead code.
 #   - the 12 compute modules moved into lib/ in 2.1k + the refresh_viz twin
 #     (deleted from the plugin; the workbench owns lib/refresh_viz.py).

@@ -1174,6 +1174,60 @@ def _flatten_numeric_leaves(node, *, prefix: str, max_depth: int, _depth: int = 
                 v, prefix=path, max_depth=max_depth, _depth=_depth + 1)
 
 
+def _observables_from_zarr(zarr_path: Path) -> dict:
+    """Read an XArrayEmitter zarr store into flat per-observable trajectories.
+
+    Returns ``{observable_path: [v0, v1, ...]}`` with each key the dotted store
+    path an ``inputs_map`` names (e.g. ``stores.species.Lactobacillus``), plus
+    ``global_time`` / ``time``. Mirrors the shape ``gather_emitter_outputs``
+    builds from SQLite history so the v2-Visualization render path works for
+    xarray runs too. Best-effort: returns ``{}`` on any read failure.
+
+    The store is partitioned ``experiment_id=…/variant=…/lineage_seed=…/<path>``
+    with the leaf value under a ``generation=N`` (or ``time_gen=N``) data_var;
+    the observable path is the group path after the ``lineage_seed=…`` segment.
+    """
+    try:
+        import numpy as np
+        import xarray as xr
+    except ImportError:
+        return {}
+    try:
+        dt = xr.open_datatree(str(zarr_path), engine="zarr")
+    except Exception:  # noqa: BLE001 — unreadable store: fall back to sqlite
+        return {}
+
+    def _obs_path(group: str) -> str | None:
+        segs = [s for s in group.strip("/").split("/") if s]
+        idx = None
+        for i, s in enumerate(segs):
+            if s.startswith("lineage_seed="):
+                idx = i
+        if idx is None:
+            return None
+        rest = segs[idx + 1:]
+        return ".".join(rest)  # "" at the lineage_seed node itself (the time axis)
+
+    out: dict = {}
+    for group in dt.groups:
+        node = dt[group]
+        obs_path = _obs_path(group)
+        if obs_path is None:
+            continue
+        for _vname, da in node.data_vars.items():
+            try:
+                series = np.ravel(da.values).tolist()
+            except Exception:  # noqa: BLE001
+                continue
+            if obs_path == "":
+                # Leaf at the lineage_seed node = the global time axis.
+                out.setdefault("global_time", series)
+                out.setdefault("time", series)
+            else:
+                out[obs_path] = series
+    return out
+
+
 def gather_emitter_outputs(db_path: Path, *, run_id: str | None = None,
                            max_state_bytes: int | None = None) -> dict:
     """Flatten runs.db into per-observable trajectories + emitter schemas.
@@ -1279,6 +1333,17 @@ def gather_emitter_outputs(db_path: Path, *, run_id: str | None = None,
                     # Only fall back to global_time if state doesn't carry a "time" key
                     if "time" not in state:
                         observables.setdefault("time", []).append(row["global_time"])
+            # XArrayEmitter runs write a per-run zarr store (and no SQLite history
+            # rows); when the history path yielded nothing, read the trajectories
+            # from the zarr so the v2-Visualization render path works for xarray.
+            if not observables:
+                try:
+                    from vivarium_workbench.lib import run_store
+                    zarr_path = run_store.zarr_store_path_for_db(db_path, run_id)
+                    if zarr_path is not None and Path(zarr_path).is_dir():
+                        observables = _observables_from_zarr(Path(zarr_path))
+                except Exception:  # noqa: BLE001 — zarr read is best-effort
+                    pass
             sim_name = meta["sim_name"]
             by_sim.setdefault(sim_name, []).append({
                 "run_id": run_id,
@@ -1376,6 +1441,14 @@ def _resolve_observable(observables: dict, path: str) -> list | None:
     """
     if not path:
         return None
+
+    # Direct flat-key match. The zarr reader (xarray-emitter runs) records each
+    # observable under its full dotted path as a flat key ("stores.species.X"),
+    # not as a nested per-tick dict. Prefer it when it carries usable scalars.
+    _direct = observables.get(path)
+    if _direct is not None and any(
+            v is not None and not isinstance(v, (dict, list)) for v in _direct):
+        return _direct
 
     def _walk(parts: list[str]) -> list | None:
         series = observables.get(parts[0])

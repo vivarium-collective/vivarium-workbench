@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from viva_superpowers import study_io, run_registry
-from viva_superpowers import study_outcomes as so
+from discovery_engine import study_io, run_registry
+from discovery_engine import study_outcomes as so
 from vivarium_workbench.lib import needs_attention
 
 # record_runs' provenance sync shipped with the reproducible-rerun spine. A stale
@@ -23,7 +23,7 @@ from vivarium_workbench.lib import needs_attention
 # there. CI installs a current pbg-superpowers, so the test runs for real.
 if "provenance_status" not in inspect.getsource(so):
     pytest.skip(
-        "installed viva_superpowers.study_outcomes predates provenance sync",
+        "installed discovery_engine.study_outcomes predates provenance sync",
         allow_module_level=True,
     )
 

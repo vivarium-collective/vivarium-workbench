@@ -174,7 +174,7 @@ def _run_spine_tests(
     """Run the run/outcome-spine evaluator for a study whose ``tests:`` is the
     behaviour-test list (measure / pass_if), instead of pytest.
 
-    Calls ``viva_superpowers.study_evaluator.compute_outcomes`` (writes the parallel
+    Calls ``discovery_engine.study_evaluator.compute_outcomes`` (writes the parallel
     ``computed_outcomes`` block per run), then reports the latest run's per-test
     verdicts in the StudyTestsResult shape the Tests tab already renders. The
     authored verdict (if any) is the headline; the code-computed measured value /
@@ -182,7 +182,7 @@ def _run_spine_tests(
     """
     t0 = time.time()
     try:
-        from viva_superpowers.study_evaluator import compute_outcomes
+        from discovery_engine.study_evaluator import compute_outcomes
     except Exception as e:  # noqa: BLE001
         return StudyTestsResult(
             summary={"passed": 0, "failed": 0, "skipped": 0, "duration_s": 0.0},

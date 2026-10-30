@@ -16,7 +16,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from viva_superpowers.viz_freshness import stamp_meta          # A.3: plugin-canonical
+from discovery_engine.viz_freshness import stamp_meta          # A.3: plugin-canonical
 
 from vivarium_workbench.lib.refusal import Refusal, present_leaves_from_runs_db
 

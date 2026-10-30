@@ -54,6 +54,21 @@ def test_branch_source_js_new_branch_registration_wired():
     assert "state.selected && state.selected.repo_url" not in js
 
 
+def test_branch_source_seeds_repo_from_current_entry_not_display_name():
+    """Regression: /api/workspaces returns `current` as {name, path} — the
+    workspace DISPLAY name, which has no repo field. Seeding
+    state.current.repo from cur.name made the Repo selector's seed match
+    (repos.indexOf(seed)) miss whenever a workspace's display name differs
+    from its repo (biomodels→viva-biomodels, lumenoid→viva-lumenoid, …), so
+    the picker fell back to the alphabetically-first repo (e.g. "3d-ecoli").
+    The seed must come from the matching workspaces-list entry's real repo."""
+    js = (_PKG_DIR / "static" / "branch-source.js").read_text()
+    # Seed resolves the real repo from curEntry first.
+    assert "(curEntry && curEntry.repo) || cur.name" in js
+    # The bare display-name seed must be gone.
+    assert "{ repo: cur.name }" not in js
+
+
 def test_branch_source_mounted_in_github_page():
     tpl = (_PKG_DIR / "templates" / "index.html.j2").read_text()
     assert 'id="viv-branch-source"' in tpl

@@ -2,7 +2,7 @@
 
 The endpoint aggregates framework-self metrics across every study + every
 investigation in the workspace via the deterministic
-``viva_superpowers.rigor.framework_metrics`` and returns
+``discovery_engine.rigor.framework_metrics`` and returns
 ``{metrics, n_investigations, n_studies}`` so the dashboard can render a
 "Framework scorecard" section. AI-free + tolerant: never 500, typed payload on
 absence/failure.
@@ -53,10 +53,10 @@ def test_framework_metrics_tolerant_on_missing_ws(tmp_path):
 
 
 def test_framework_metrics_tolerant_on_compute_failure(tmp_ws, monkeypatch):
-    pytest.importorskip("viva_superpowers.rigor")
-    from viva_superpowers import rigor as _rigor
+    pytest.importorskip("discovery_engine.rigor")
+    from discovery_engine import rigor as _rigor
     if not hasattr(_rigor, "framework_metrics"):
-        pytest.skip("viva_superpowers.rigor.framework_metrics not available")
+        pytest.skip("discovery_engine.rigor.framework_metrics not available")
 
     monkeypatch.setattr(_rigor, "framework_metrics",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))

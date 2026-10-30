@@ -7,7 +7,7 @@ Two kinds of evidence, kept apart:
   production run's results, and the environment's real interface manifest. Address form, the manifest check and
   landing are tested against these, so they check the workbench against what compose-api and its runners produce.
 * **Transport** over a real workbench server, against ``VivaV1Stub`` generated from compose-api's OpenAPI
-  (``tests/_contracts/compose_api_openapi_0.7.35.json``, the spec shipped in the locked client). These prove the
+  (``tests/_contracts/compose_api_openapi_0.7.72.json``, the spec shipped in the locked client). These prove the
   requests the workbench sends are ones the contract accepts and that the UI routes wire through. They do NOT
   prove a deployment runs the document: only a real run does (the PR's live run against compose.cam.uchc.edu).
 """
@@ -31,7 +31,7 @@ from vivarium_workbench.lib.remote_run_landing import land_composite_results
 
 HERE = Path(__file__).parent
 FIX = HERE / "_fixtures" / "compose_api"
-SPEC_PATH = HERE / "_contracts" / "compose_api_openapi_0.7.35.json"
+SPEC_PATH = HERE / "_contracts" / "compose_api_openapi_0.7.72.json"
 FIXTURE_WS = HERE / "_fixtures" / "ws_increase_demo"
 COMPOSITE = "pbg_ws_increase_demo.composites.increase-demo"
 SIM_ID = 4706
@@ -271,7 +271,7 @@ def test_a_named_compose_api_is_detected_and_reported(ws, stub, backend_env, das
     _name(backend_env, stub.url)
     cfg = dashboard_client(ws).get("/api/remote-run-config").json()
     assert cfg["backend"]["dispatch"] == "compose-api"
-    assert cfg["backend"]["version"] == "0.7.35"
+    assert cfg["backend"]["version"] == "0.7.72"
 
 
 def test_without_a_named_backend_compose_api_is_never_asked(ws, stub, backend_env, dashboard_client):
@@ -297,7 +297,8 @@ def test_a_study_run_submits_the_exported_document_with_its_environment_and_tags
 
     (call,) = stub.calls_to("run-simulation")
     assert call.status == 200  # the stub validated the form and query against the contract
-    assert call.query["simulator"] == [PILOT] and call.query["interval_time"] == ["1.0"]
+    assert call.query["environment"] == [PILOT] and "simulator" not in call.query
+    assert call.query["interval_time"] == ["1.0"]
     assert call.query["tags"][:2] == ["workbench", "study:demo"]
     assert call.query["tags"][2].startswith(rc.DISPATCH_TAG_PREFIX) and len(call.query["tags"]) == 3
     doc = json.loads(call.body["uploaded_file"])
@@ -326,7 +327,7 @@ def test_a_workspace_no_environment_runs_is_told_how_to_register(ws, stub, backe
     _name(backend_env, stub.url, environment=None)
     res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
     assert res.status_code == 409 and res.json()["reason"] == "not-registered"
-    assert "PREBUILT_SIMULATORS" in res.json()["error"]
+    assert "manifest.yaml" in res.json()["error"] and "PREBUILT_SIMULATORS" not in res.json()["error"]
     assert stub.calls_to("run-simulation") == []
 
 
@@ -341,12 +342,15 @@ def test_the_registry_entry_is_found_from_the_workspaces_git_origin(ws, stub, ba
     assert env["image"].startswith("ghcr.io/vivarium-collective/viva-pde-particle-compose@sha256:")
 
 
-def test_a_finished_run_lands_the_real_runners_results_once(ws, stub, backend_env, dashboard_client):
+@pytest.mark.parametrize("version_field", [{}, {"environment_version": None}], ids=["absent", "null"])
+def test_a_finished_run_lands_the_real_runners_results_once(ws, stub, backend_env, dashboard_client, version_field):
+    """A run from before environment versions has none (the field absent or null): its image is resolved from the
+    simulator name through the environment listing, as before, and no version is looked up."""
     stub.respond("GET", "/results/simulation/status", 200, _hpcrun("completed"))
     # compose-api answers a prebuilt simulator's NAME here when the deployment lists its image
     # (compose_api/api/routers/simulations.py, _simulator_label); the digest is the environment's image.
     detail = {"simulation_id": SIM_ID, "experiment_id": "exp-1", "simulator_id": 282, "container_def_hash": "h",
-              "status": "completed", "simulator": PILOT}
+              "status": "completed", "simulator": PILOT, **version_field}
     image = next(e["image"] for e in _json("environments.json") if e["name"] == PILOT)
     assert "@sha256:" in image
     stub.respond("GET", "/simulations/{simulation_id}", 200, detail)
@@ -360,10 +364,107 @@ def test_a_finished_run_lands_the_real_runners_results_once(ws, stub, backend_en
     with sqlite3.connect(ws / "studies" / "demo" / "runs.db") as db:
         (params,) = db.execute("SELECT params_json FROM runs_meta WHERE run_id = ?", (landed,)).fetchone()
         assert json.loads(params)["compose"]["image"] == image
+        assert json.loads(params)["compose"]["environment_version"] is None
         assert db.execute("SELECT count(*) FROM history WHERE simulation_id = ?", (landed,)).fetchone()[0] == 6
+    assert stub.calls_to("get-environment-version") == []
     again = c.post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID}).json()
     assert again == {"run_id": landed, "already_landed": True}
     assert len(stub.calls_to("get-simulation-results-file")) == 1
+
+
+def test_a_landed_run_records_the_environment_version_it_ran_in_not_the_current_default(
+        ws, stub, backend_env, dashboard_client):
+    """Regression: the image was resolved from the environment's CURRENT listing, which names its default version.
+    Once an environment has versions that default moves, so a run of version 2 landed after version 3 became the
+    default recorded the wrong digest. The run's own ``environment_version`` names the version, and the version names
+    its image."""
+    listed = next(e["image"] for e in _json("environments.json") if e["name"] == PILOT)
+    ran_in = listed.rsplit("@sha256:", 1)[0] + "@sha256:" + "ab" * 32
+    assert ran_in != listed, "the version the run used must differ from what the listing names today"
+    stub.respond("GET", "/results/simulation/status", 200, _hpcrun("completed"))
+    stub.respond("GET", "/simulations/{simulation_id}", 200,
+                 {"simulation_id": SIM_ID, "experiment_id": "exp-1", "simulator_id": 282, "container_def_hash": "h",
+                  "status": "completed", "simulator": PILOT,
+                  "environment_version": {"environment": PILOT, "number": 2}})
+    stub.respond("GET", "/registry/environments/{name}/versions/{number}", 200,
+                 {"database_id": 7, "environment_id": 3, "environment": PILOT, "number": 2, "state": "ready",
+                  "simulator_id": 282, "image": ran_in})
+    stub.respond_bytes("GET", "/results/simulation/results/file", 200,
+                       (FIX / "results_particle_diffusion.zip").read_bytes(), "application/octet-stream")
+    _name(backend_env, stub.url)
+    res = dashboard_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
+    assert res.status_code == 200, res.text
+    (version_call,) = stub.calls_to("get-environment-version")
+    assert version_call.path == f"/registry/environments/{PILOT}/versions/2"
+    with sqlite3.connect(ws / "studies" / "demo" / "runs.db") as db:
+        params, manifest = db.execute("SELECT params_json, manifest_json FROM runs_meta WHERE run_id = ?",
+                                      (res.json()["run_id"],)).fetchone()
+    compose = json.loads(params)["compose"]
+    assert (compose["environment_version"], compose["image"]) == (f"{PILOT}@2", ran_in)
+    assert json.loads(manifest)["code_version"]["image"] == ran_in
+
+
+def _land_in_version(ws, stub, backend_env, dashboard_client, number=2, environment=PILOT):
+    """Land a completed run whose own record names ``environment@number``; returns the landing response."""
+    stub.respond("GET", "/results/simulation/status", 200, _hpcrun("completed"))
+    stub.respond("GET", "/simulations/{simulation_id}", 200,
+                 {"simulation_id": SIM_ID, "experiment_id": "exp-1", "simulator_id": 282, "container_def_hash": "h",
+                  "status": "completed", "simulator": None,
+                  "environment_version": {"environment": environment, "number": number}})
+    stub.respond_bytes("GET", "/results/simulation/results/file", 200,
+                       (FIX / "results_particle_diffusion.zip").read_bytes(), "application/octet-stream")
+    _name(backend_env, stub.url)
+    return dashboard_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
+
+
+def _landed_provenance(ws, run_id):
+    with sqlite3.connect(ws / "studies" / "demo" / "runs.db") as db:
+        params, manifest = db.execute("SELECT params_json, manifest_json FROM runs_meta WHERE run_id = ?",
+                                      (run_id,)).fetchone()
+    return json.loads(params)["compose"], json.loads(manifest)["code_version"]
+
+
+def test_a_composed_version_has_no_image_and_still_lands_with_its_version_recorded(
+        ws, stub, backend_env, dashboard_client):
+    """A mash-up version is composed from entries, not built from an image: its record carries none."""
+    stub.respond("GET", "/registry/environments/{name}/versions/{number}", 200,
+                 {"database_id": 9, "environment_id": 4, "environment": "mash-05956395cf", "number": 2,
+                  "state": "ready", "simulator_id": 290})
+    res = _land_in_version(ws, stub, backend_env, dashboard_client, environment="mash-05956395cf")
+    assert res.status_code == 200, res.text
+    compose, code_version = _landed_provenance(ws, res.json()["run_id"])
+    assert compose["environment_version"] == "mash-05956395cf@2" and compose["image"] is None
+    assert code_version["image"] is None
+
+
+def test_a_version_record_that_is_gone_does_not_block_landing_a_completed_run(
+        ws, stub, backend_env, dashboard_client):
+    """The version's record can be gone (its environment no longer declared): that is permanent, so the run's results
+    are landed with the version label it carries and no image."""
+    stub.respond_error("GET", "/registry/environments/{name}/versions/{number}", 404,
+                       {"detail": f"no environment {PILOT!r}"})
+    res = _land_in_version(ws, stub, backend_env, dashboard_client)
+    assert res.status_code == 200, res.text
+    compose, code_version = _landed_provenance(ws, res.json()["run_id"])
+    assert compose["environment_version"] == f"{PILOT}@2" and compose["image"] is None
+    assert code_version["image"] is None
+
+
+def test_a_version_lookup_that_fails_to_answer_leaves_the_run_unlanded_to_retry(
+        ws, stub, backend_env, dashboard_client):
+    """Unlike a missing record, a server error is transient: landing is refused, not recorded without its image, so
+    asking again lands it with the image."""
+    tmpl = "/registry/environments/{name}/versions/{number}"
+    stub.respond_error("GET", tmpl, 503, {"detail": "unavailable"})
+    res = _land_in_version(ws, stub, backend_env, dashboard_client)
+    assert res.status_code == 502 and res.json()["phase"] == "backend_error", res.text
+    image = next(e["image"] for e in _json("environments.json") if e["name"] == PILOT)
+    stub.respond("GET", tmpl, 200, {"database_id": 7, "environment_id": 3, "environment": PILOT, "number": 2,
+                                    "state": "ready", "simulator_id": 282, "image": image})
+    again = dashboard_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
+    assert again.status_code == 200 and "already_landed" not in again.json(), again.text
+    compose, _ = _landed_provenance(ws, again.json()["run_id"])
+    assert compose["image"] == image
 
 
 def test_an_unfinished_run_is_not_landed(ws, stub, backend_env, dashboard_client):
@@ -413,7 +514,9 @@ def _summary(simulation_id: int) -> dict:
 def test_the_trace_of_a_compose_run_is_served_whichever_id_the_ui_sends(ws, stub, backend_env, dashboard_client,
                                                                        key):
     """The run panel sends ``simulation_id=compose-N`` (perfetto-open.js); both ids reach compose-api's trace."""
-    trace = {"traceEvents": [{"name": "job", "ph": "X", "ts": 0, "dur": 5, "pid": 1, "tid": 1}]}
+    # The shape production serves (checked on simulation 5337): the 0.7.72 contract requires all three keys.
+    trace = {"traceEvents": [{"name": "job", "ph": "X", "ts": 0, "dur": 5, "pid": 1, "tid": 1}],
+             "displayTimeUnit": "ms", "otherData": {"source": "compose-api", "simulation_id": str(SIM_ID)}}
     stub.respond("GET", "/results/simulation/trace/chrome", 200, trace)
     _name(backend_env, stub.url)
     c = dashboard_client(ws)
@@ -657,7 +760,8 @@ def test_the_composites_card_runs_on_compose_api_end_to_end(ws, stub, backend_en
     assert state["status"] == "completed", (ws / ".pbg" / "runs" / run_id / "run.log").read_text()
     assert state["n_steps"] == 6, "the landed history's steps, not the requested count"
     (call,) = stub.calls_to("run-simulation")
-    assert call.query["simulator"] == [PILOT] and call.query["interval_time"] == ["3.0"]
+    assert call.query["environment"] == [PILOT] and "simulator" not in call.query
+    assert call.query["interval_time"] == ["3.0"]
 
 
 def test_the_composites_card_runner_runs_on_compose_api_and_lands_the_history(ws, stub, backend_env):
@@ -678,7 +782,8 @@ def test_the_composites_card_runner_runs_on_compose_api_and_lands_the_history(ws
     assert run_runner._execute_remote(req, run_dir) == 0, (run_dir / "run.log").read_text()
 
     (call,) = stub.calls_to("run-simulation")
-    assert call.query["simulator"] == [PILOT] and call.query["interval_time"] == ["3.0"]
+    assert call.query["environment"] == [PILOT] and "simulator" not in call.query
+    assert call.query["interval_time"] == ["3.0"]
     doc = json.loads(call.body["uploaded_file"])
     assert rc._state(doc)[rc.STUDY_EMITTER]["inputs"]["stores"]["level"] == ["stores", "level"]
     conn = cr.connect(db)

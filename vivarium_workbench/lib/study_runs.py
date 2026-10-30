@@ -295,6 +295,18 @@ def _run_post_run_flush(ws_root, study_dir, spec, spec_id, run_id, full_params,
                     continue
                 if "Failed to render" not in html:
                     viz_html[key] = html
+            # 3. Inline Visualization-STEP HTML the run itself captured
+            #    (render_results in the child subprocess) — e.g. a composite's
+            #    embedded spatial-snapshot viz (viva-munk MultibodyVizStep, a
+            #    tyssue/CPM snapshot step). These aren't declared visualizations[],
+            #    so the loops above miss them; merge them so they reach viz.json →
+            #    the study's native gallery. render_results yields a {'html': ...}
+            #    payload, so pull the HTML string out.
+            for key, payload in (response.get("viz_html") or {}).items():
+                html = payload.get("html") if isinstance(payload, dict) else payload
+                if (isinstance(html, str) and html.strip()
+                        and "Failed to render" not in html and key not in viz_html):
+                    viz_html[key] = html
             # Single framework-aligned write path (shared with the canonical
             # sims/run.py runners) — see lib/run_viz.write_run_viz.
             write_run_viz(ws_root, run_id, viz_html)
@@ -329,7 +341,7 @@ def _run_post_run_flush(ws_root, study_dir, spec, spec_id, run_id, full_params,
         if analysis_errors:
             response.setdefault("analysis_errors", []).extend(analysis_errors)
     try:
-        from viva_superpowers import study_outcomes
+        from discovery_engine import study_outcomes
         study_outcomes.sync(study_dir)  # record runs + compute outcomes
     except Exception as exc:  # never fail a successful run on a record error
         print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
@@ -1095,7 +1107,7 @@ def run_study_variant(ws_root, body):
             if analysis_errors:
                 response.setdefault("analysis_errors", []).extend(analysis_errors)
         try:
-            from viva_superpowers import study_outcomes
+            from discovery_engine import study_outcomes
             study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)

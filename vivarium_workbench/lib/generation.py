@@ -51,7 +51,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from viva_superpowers.workspace_paths import WorkspacePaths
+from discovery_engine.workspace_paths import WorkspacePaths
 
 
 _GEN_ID_RE = re.compile(r"^gen-\d{8}T\d{6}Z-[0-9a-f]{6}$")

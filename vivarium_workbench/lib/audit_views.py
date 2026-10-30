@@ -1,6 +1,6 @@
 """Read-only L0-L5 study-reproducibility audit view.
 
-Wraps :func:`viva_superpowers.study_audit.audit_workspace` behind the same
+Wraps :func:`discovery_engine.study_audit.audit_workspace` behind the same
 ``(body, status)`` contract used by :mod:`investigation_graph_views`, so the
 ``GET /api/audit`` route is a thin ``JSONResponse`` passthrough. This is the
 *visible* companion to the CI reproducibility gate (which lives in v2ecoli CI);
@@ -64,7 +64,7 @@ def build_audit(ws_root) -> tuple[dict, int]:
       - the L0-L5 **reproducibility grade** (:mod:`audit_grade`, self-contained —
         works with or without the upstream package), attached as ``grade`` on
         each study/investigation block + ``summary.grade_distribution``;
-      - the upstream **structural** audit (``viva_superpowers.study_audit``),
+      - the upstream **structural** audit (``discovery_engine.study_audit``),
         whose per-check levels/verdicts fill each block's ``checks`` when present.
 
     When ``study_audit`` is unavailable the report is built from the grade alone,
@@ -82,7 +82,7 @@ def build_audit(ws_root) -> tuple[dict, int]:
     report = None
     err = grades.get("error") or ""
     try:
-        from viva_superpowers import study_audit
+        from discovery_engine import study_audit
         report = study_audit.audit_workspace(
             ws_root, extra_packages=_workspace_packages(ws_root) or None
         ).as_dict()
@@ -90,14 +90,19 @@ def build_audit(ws_root) -> tuple[dict, int]:
         err = err or f"study_audit unavailable: {exc}"
 
     if report is None:
+        # The structural audit could not run (dependency missing/broken). Do NOT
+        # report every study as worst="pass" — that silently hides non-compliance
+        # behind false green. Mark each block "unavailable" with worst="unknown"
+        # so the UI shows the audit couldn't run, not that everything passed.
         report = {
             "error": err,
-            "studies": [{"slug": s, "worst": "pass", "checks": []} for s in grades["studies"]],
-            "investigations": [{"slug": s, "worst": "pass", "checks": []}
+            "studies": [{"slug": s, "worst": "unknown", "unavailable": True, "checks": []}
+                        for s in grades["studies"]],
+            "investigations": [{"slug": s, "worst": "unknown", "unavailable": True, "checks": []}
                                for s in grades["investigations"]],
             "summary": {"n_studies": len(grades["studies"]),
                         "n_investigations": len(grades["investigations"]),
-                        "hard_failures": 0},
+                        "hard_failures": 0, "unavailable": True},
         }
 
     for blk in report.get("studies", []):
@@ -108,6 +113,26 @@ def build_audit(ws_root) -> tuple[dict, int]:
         g = grades["investigations"].get(blk.get("slug"))
         if g:
             blk["grade"] = g
+
+    # Fold the observable-contract check (readouts ⊆ composite observables) into
+    # every study block, so the workspace-wide Audit tab grades readout coverage
+    # exactly as the single-study Tests tab does (via build_study_audit). The
+    # check is tier "soft" and self-skips when a study declares no readouts or
+    # its baseline composite won't resolve, so this never 500s and never fabricates.
+    for blk in report.get("studies", []):
+        if blk.get("unavailable"):
+            continue  # audit couldn't run — don't paint partial green over it
+        _augment_with_observable_contract(blk, ws_root, blk.get("slug"))
+
+    # The ladder's top rung: grade each investigation's closed-check (every
+    # acceptance criterion met by a supporting study verdict) as an L5 check,
+    # computed fresh. Soft-tier + self-skipping (no criteria / unloadable), so
+    # it never 500s and never fabricates.
+    for blk in report.get("investigations", []):
+        if blk.get("unavailable"):
+            continue  # audit couldn't run — don't paint partial green over it
+        _augment_with_acceptance_closed(blk, ws_root, blk.get("slug"))
+
     report.setdefault("summary", {})["grade_distribution"] = grades.get("distribution", {})
     return report, 200
 
@@ -182,11 +207,89 @@ def _augment_with_observable_contract(block: dict, ws_root: Path, slug: str) -> 
     return block
 
 
+def _grade_acceptance(rolled: "dict | None") -> "dict | None":
+    """Map a :func:`roll_up_acceptance` result to an L5 ``acceptance-closed``
+    check — the inquiry-level analogue of the ground-check: an investigation is
+    *closed* only when every acceptance criterion is met by a supporting study
+    verdict. ``failing`` -> ``fail`` (a criterion is refuted/unmet),
+    ``in-progress``/``passing-with-caveats`` -> ``warn`` (not yet closed),
+    ``passing`` -> ``pass`` (closed). Returns ``None`` to skip when the
+    investigation declares no acceptance criteria (nothing to grade)."""
+    if not isinstance(rolled, dict):
+        return None
+    criteria = rolled.get("criteria") or []
+    if not criteria:
+        return None
+    unmet = rolled.get("unmet") or []
+    vs = rolled.get("verdict_status")
+    base = {"level": "L5", "name": "acceptance-closed", "tier": "soft"}
+    if vs == "failing":
+        names = ", ".join(f"{c.get('study')}·{c.get('behavior')}" for c in unmet[:5])
+        return {**base, "status": "fail",
+                "detail": f"{len(unmet)} of {len(criteria)} acceptance criteria "
+                          f"refuted or unmet: {names}"}
+    if vs in ("in-progress", "passing-with-caveats"):
+        return {**base, "status": "warn",
+                "detail": f"investigation not yet closed ({vs}): {len(unmet)} of "
+                          f"{len(criteria)} criteria not passing"}
+    if vs == "passing":
+        return {**base, "status": "pass",
+                "detail": f"all {len(criteria)} acceptance criteria met — "
+                          f"investigation closed"}
+    return None
+
+
+def _acceptance_closed_check(ws_root: Path, slug: str) -> "dict | None":
+    """Compute the investigation closed-check fresh via the canonical
+    :func:`discovery_engine.investigation_status.roll_up_acceptance` evaluator
+    (the same one the report's conclusion and the linkage index use), then grade
+    it with :func:`_grade_acceptance`. Loads the investigation spec + member
+    study specs read-only. Degrades to ``None`` (skip) on any failure — a missing
+    investigation.yaml, no criteria, or an unimportable evaluator — so the audit
+    never 500s and never fabricates a verdict."""
+    try:
+        from discovery_engine import study_io as _sio
+        from discovery_engine.investigation_status import roll_up_acceptance
+
+        wp = WorkspacePaths.load(ws_root)
+        inv_yaml = wp.dir("investigations") / slug / "investigation.yaml"
+        if not inv_yaml.is_file():
+            return None
+        inv_spec = _sio.load_yaml_mapping(inv_yaml) or {}
+        if not (inv_spec.get("acceptance_criteria") or []):
+            return None
+        studies_by_name: dict = {}
+        studies_dir = wp.dir("studies")
+        if studies_dir.is_dir():
+            for sd in studies_dir.iterdir():
+                syp = sd / "study.yaml"
+                if syp.is_file():
+                    try:
+                        studies_by_name[sd.name] = _sio.load_yaml_mapping(syp)
+                    except Exception:  # noqa: BLE001 — one bad study must not sink the audit
+                        pass
+        rolled = roll_up_acceptance(inv_spec, studies_by_name)
+    except Exception:  # noqa: BLE001 — degrade, never 500
+        return None
+    return _grade_acceptance(rolled)
+
+
+def _augment_with_acceptance_closed(block: dict, ws_root: Path, slug: str) -> dict:
+    """Fold the acceptance-closed check into an investigation-audit ``block`` in
+    place (append to ``checks``, recompute ``worst``), then return it. A no-op
+    when :func:`_acceptance_closed_check` skips."""
+    chk = _acceptance_closed_check(ws_root, slug)
+    if chk is not None:
+        block.setdefault("checks", []).append(chk)
+        block["worst"] = _worst_status(block.get("checks") or [])
+    return block
+
+
 def build_study_audit(ws_root: Path, study: Optional[str]) -> dict:
     """Build the GET /api/study-audit payload for one study (Fable G6).
 
     Backs the Tests tab's Reproducibility check group. Runs the SAME
-    ``viva_superpowers.study_audit.audit_workspace`` evaluator ``build_audit``
+    ``discovery_engine.study_audit.audit_workspace`` evaluator ``build_audit``
     uses for the workspace-wide Audit tab -- there is no single-study entry
     point upstream, so this audits the whole workspace and returns just the
     block for ``study`` -- then returns that study's block verbatim:
@@ -199,7 +302,7 @@ def build_study_audit(ws_root: Path, study: Optional[str]) -> dict:
     - 404 when no ``study.yaml``/``spec.yaml`` exists for the slug
       (``{"error": "study not found"}``).
 
-    Never a 500: an unimportable ``viva_superpowers.study_audit``, any
+    Never a 500: an unimportable ``discovery_engine.study_audit``, any
     exception raised while auditing, or the audited workspace simply not
     reporting a block for this slug (e.g. a nested/invalid study.yaml the
     evaluator skips) all degrade to a 200-shaped
@@ -216,7 +319,7 @@ def build_study_audit(ws_root: Path, study: Optional[str]) -> dict:
         raise StudyAuditViewError({"error": "study not found"}, 404)
 
     try:
-        from viva_superpowers import study_audit
+        from discovery_engine import study_audit
         report = study_audit.audit_workspace(
             ws_root, extra_packages=_workspace_packages(ws_root) or None
         )

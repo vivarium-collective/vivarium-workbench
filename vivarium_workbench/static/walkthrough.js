@@ -774,14 +774,18 @@
   // UI feature flags (ui.composite_view, ui.auto_results)
   // -------------------------------------------------------------------------
   window._uiConfig = null;
-  apiFetch('GET', '/api/ui-config').then(function(r) { return r.json(); }).then(function(cfg) {
+  // Guard the body parse: /api/ui-config is a LIVE-server endpoint not baked into
+  // the static snapshot, so it 404s there with an HTML page. Without the r.ok check
+  // a `.json()` on that HTML throws an UNCAUGHT SyntaxError rejection (no .catch),
+  // which cascades and leaves the UI half-wired in published bundles. Degrade to {}.
+  apiFetch('GET', '/api/ui-config').then(function(r) { return r && r.ok ? r.json() : null; }).then(function(cfg) {
     window._uiConfig = cfg || {};
     // Read-only / remote-only mode: hide authoring controls (.js-authoring) via
     // CSS; the Source panel reads this flag at render time to go remote-only.
     if (window._uiConfig.readonly) document.body.classList.add('readonly');
     _applyCompositeViewMode();
     _applyAutoResultsCheckbox();
-  });
+  }).catch(function () { /* snapshot / offline: ui-config unavailable — use defaults */ });
 
   function _applyCompositeViewMode() {
     var cfg = window._uiConfig || {};
@@ -2290,12 +2294,24 @@
       window.open(_build3dSrc(m), '_blank', 'noopener');
     } else if (t.kind === 'embed-simularium') {
       window.open(_buildSimulariumSrc(m), '_blank', 'noopener');
-    } else if (m.href) {
-      window.open(m.href, '_blank', 'noopener');
     } else {
-      // Contributed launcher viewers are keyed by full uid (package::id) at the
-      // launch endpoint; t.id is the bare id, so prefer t.uid.
-      _launchViewer(t.uid || t.id, m.study || m.ref || '');  // resolves via endpoint / snapshot note
+      // Open the selected item's static export. A workspace-root-absolute href
+      // (/studies/…) MUST carry the hosting base path in the published snapshot,
+      // or it 404s to the domain root; an external (http/protocol-relative) href
+      // opens as-is. Mirrors the picker's _openHref + sim-table.toolsCell. Fall
+      // back to any target's static href before the live launch endpoint so a
+      // launcher whose selected item lacks an href (but whose pack IS baked)
+      // opens in the read-only snapshot instead of hitting the "local only" note.
+      var _bp = window.__BASE_PATH__ || (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || '';
+      var _rawHref = m.href || (((t.targets || []).filter(function (x) { return x && x.href; })[0]) || {}).href;
+      if (_rawHref) {
+        window.open(/^https?:|^\/\//.test(_rawHref) ? _rawHref : (_bp + _rawHref), '_blank', 'noopener');
+      } else {
+        // Live-only launcher (no baked export): keyed by full uid (package::id)
+        // at the launch endpoint; t.id is the bare id, so prefer t.uid. The
+        // snapshot shows a "launch locally" note rather than calling a 404.
+        _launchViewer(t.uid || t.id, m.study || m.ref || '');
+      }
     }
   }
   window._openTool = _openTool;
@@ -2350,6 +2366,7 @@
   // active workspace ships the manifest, so it's purely additive.
 
   var _RES_TYPE_LABEL = {
+    'sbml-model':       'SBML models',
     'lipid-structure':  'Lipid structures',
     'reaction-pathway': 'Reaction pathways',
     'evidence-dataset': 'Evidence datasets',
@@ -2766,8 +2783,31 @@
       _resRefChips(r.references, refsById) + '</div>';
   }
 
+  // sbml-model → count chips, source, used-by study chips, and the FULL
+  // Antimony in a scrollable monospace block (large multi-organ models scroll
+  // instead of blowing out the card).
+  function _resModelCard(r, refsById) {
+    var chips = [];
+    if (_resV(r.n_species)) chips.push('<span class="res-tag">' + _esc(_resV(r.n_species)) + ' species</span>');
+    if (_resV(r.n_reactions)) chips.push('<span class="res-tag">' + _esc(_resV(r.n_reactions)) + ' reactions</span>');
+    var counts = chips.length ? '<div class="res-tags">' + chips.join(' ') + '</div>' : '';
+    var usedBy = (r.used_by && r.used_by.length)
+      ? '<div class="res-kv"><span class="res-kv-k">Used by</span><span class="res-kv-v">' +
+        r.used_by.map(_resStudyChip).join(' ') + '</span></div>'
+      : '';
+    var antimony = _resV(r.antimony)
+      ? '<pre class="res-antimony" style="max-height:28em;overflow:auto;margin:.5em 0 0;padding:.6em .8em;' +
+        'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8em;line-height:1.4;' +
+        'white-space:pre;background:rgba(127,127,127,.1);border-radius:4px;">' + _esc(String(r.antimony)) + '</pre>'
+      : '';
+    return '<div class="res-card res-model">' + _resCardHead(r) + counts +
+      '<div class="res-kv-grid">' + _resKV('Source', r.source) + '</div>' +
+      usedBy + antimony + '</div>';
+  }
+
   function _resRenderCard(r, refsById) {
     switch (r.type) {
+      case 'sbml-model':       return _resModelCard(r, refsById);
       case 'lipid-structure':  return _resLipidCard(r, refsById);
       case 'reaction-pathway': return _resPathwayCard(r, refsById);
       case 'evidence-dataset': return _resEvidenceCard(r, refsById);
@@ -2990,7 +3030,10 @@
   // Persists in localStorage.
   window._registryZoom = (function () {
     var z; try { z = localStorage.getItem('viv.registryZoom'); } catch (e) { z = null; }
-    return (z === 'table' || z === 'grid' || z === 'full') ? z : 'grid';
+    // Only the two lower views remain as browse modes; the "full" in-place zoom
+    // was replaced by the single-card Process view (reached via "Explore"), so a
+    // stored 'full' coerces to the Cards grid.
+    return (z === 'table' || z === 'grid') ? z : 'grid';
   })();
 
   // ── Cards-grid column control (shared: registry / composites / modules) ──
@@ -3348,8 +3391,8 @@
       : '';
     var selCls = (window._registrySelected && window._registrySelected === p.address) ? ' reg-selected' : '';
     return '<div class="registry-card' + selCls + '"' + sourceAttr + ' data-address="' + addr + '"' +
-        ' onclick="_selectRegistryEntry(\'' + addr + '\')" ondblclick="_zoomInOn(\'' + addr + '\')"' +
-        ' title="Double-click to zoom in on this ' + (p.kind || 'process') + '">' +
+        ' onclick="_selectRegistryEntry(\'' + addr + '\')" ondblclick="_showRegistryCard(\'' + addr + '\',\'' + esc(p.kind || 'process') + '\')"' +
+        ' title="Double-click to Explore (open the full card)">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
           '<div class="reg-card-head"><strong class="reg-card-name">' + esc(p.name) + '</strong>' + _procKindBadge(p.kind) + _procBridgeBadge(p) + defaultBadge + _regUseBadge(p) + _contractBadge(p.contract_audit) + '</div>' +
@@ -3360,7 +3403,10 @@
       '</div>' +
       _successBar(sp) +
       cfgPortsBtn +
-      codeBtnGrid +
+      '<div class="reg-card-actions" style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">' +
+        '<button type="button" class="reg-explore-btn" onclick="event.stopPropagation();_showRegistryCard(\'' + addr + '\',\'' + esc(p.kind || 'process') + '\')" title="Open the full card in the Process view">🔍 Explore</button>' +
+        codeBtnGrid +
+      '</div>' +
       _runCmdChip(p.run_command) +
     '</div>';
   }
@@ -3600,6 +3646,75 @@
   }
   window._enterMaxcardMode = _enterMaxcardMode;
 
+  // ── "Process" page focus mode (driven by the Registry panel) ───────────────
+  // Show a SINGLE registry item as a full semantic-zoom card in the main Process
+  // view (#page-modules), hiding the full-list browser. Mirrors the investigation
+  // detail ↔ list pattern: a "Back to full registry" control returns to the list.
+  // Reuses the same card renderers + lazy hydration as _enterMaxcardMode.
+  function _showRegistryCard(address, kind) {
+    if (!address) return;
+    function _escAddr(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    var page = document.getElementById('page-modules');
+    if (page) page.classList.add('registry-focus');
+    window._registrySelected = address;
+    if (typeof _switchPage === 'function') _switchPage('modules');
+    var isComposite = (kind === 'composite');
+    var host = document.getElementById('registry-focus-host');
+    if (!host) return;
+    host.innerHTML = '<div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading…</span></div>';
+    var tries = 0;
+    (function attempt() {
+      // the card may be requested before the registry/composites load completes;
+      // (re)trigger the loader and retry, exactly as the popcard/maxcard paths do.
+      var html = null;
+      if (isComposite) {
+        var c = (window._compositesById || {})[address];
+        if (c) html = _renderCompositeCardFull(c);
+      } else {
+        var e = _registryEntryByAddress(address);
+        if (e) html = _renderRegistryEntryFull(e);
+      }
+      if (html) {
+        var bar = '<div class="registry-focus-bar">' +
+          '<button type="button" class="btn-link registry-back-all" onclick="_registryBrowseAll()" title="Show the full registry list">◂ Back to full registry</button>' +
+          '<span class="registry-focus-crumb" title="' + _escAddr(address) + '">' + _escAddr(address) + '</span></div>';
+        host.innerHTML = bar + '<div class="reg-cards reg-cards-full popcard-single">' + html + '</div>';
+        if (typeof _observeRunnableCards === 'function') _observeRunnableCards(host);
+        if (isComposite) {
+          // Open with the bigraph graph fully showing (not the compact run/outputs
+          // strip): data-graph="open" → the loom mounts with ?graph=open. The user
+          // can still collapse it. Mirrors the "fill the pane" / pop-out behavior.
+          var lembed = host.querySelector('.ccard-loom-embed');
+          if (lembed) lembed.setAttribute('data-graph', 'open');
+          var expBtn = host.querySelector('.pcard-graph-bar');
+          if (expBtn && typeof _toggleLoomCard === 'function') _toggleLoomCard(expBtn);
+        }
+        try { host.scrollIntoView({ block: 'start' }); } catch (e2) { /* ignore */ }
+        return;
+      }
+      if (tries % 6 === 0) {
+        if (isComposite) { if (typeof _loadComposites === 'function') _loadComposites(); }
+        else { window._registryLoaded = false; if (typeof _loadRegistry === 'function') _loadRegistry(false); }
+      }
+      if (tries++ < 120) setTimeout(attempt, 200);
+    })();
+  }
+  window._showRegistryCard = _showRegistryCard;
+
+  // Leave focus mode → the classic full-registry list browser (all items). The
+  // "go back to full registry" affordance the Process page keeps.
+  function _registryBrowseAll() {
+    var page = document.getElementById('page-modules');
+    if (page) page.classList.remove('registry-focus');
+    // the full in-place zoom was replaced by the single-card Process view, so the
+    // browse list only ever shows one of the two lower views.
+    if (window._registryZoom === 'full') window._registryZoom = 'grid';
+    if (typeof _switchPage === 'function') _switchPage('modules');
+    if (!window._registryLoaded && typeof _loadRegistry === 'function') _loadRegistry(false);
+    if (typeof _loadComposites === 'function') _loadComposites();
+  }
+  window._registryBrowseAll = _registryBrowseAll;
+
   // "Pop back in" from a pop-out window: return to the full workbench (rail
   // visible) with this composite maximized. Prefer navigating the opener so the
   // pop-out closes; fall back to navigating this window.
@@ -3729,19 +3844,22 @@
       var np = (c.parameters && typeof c.parameters === 'object') ? Object.keys(c.parameters).length : 0;
       var nr = (c.requires && c.requires.processes) ? c.requires.processes.length : 0;
       var sel = (window._registrySelected === c.id) ? ' reg-selected' : '';
-      return '<tr class="reg-tr' + sel + '" data-address="' + _esc(c.id) + '" onclick="_selectRegistryEntry(\'' + _esc(c.id) + '\')" ondblclick="_setRegistryZoom(\'full\')" title="Double-click to open the full card">' +
+      return '<tr class="reg-tr' + sel + '" data-address="' + _esc(c.id) + '" onclick="_selectRegistryEntry(\'' + _esc(c.id) + '\')" ondblclick="_showRegistryCard(\'' + _esc(c.id) + '\',\'composite\')" title="Double-click to Explore (open the full card)">' +
         '<td class="reg-td-name"><strong>' + _esc(c.name) + '</strong> <code>' + _esc(c.id) + '</code></td>' +
         '<td>' + _esc(mod(c)) + '</td>' +
         '<td class="num">' + np + '</td>' +
         '<td class="num">' + nr + '</td>' +
         '<td class="num">' + (sp.studies || 0) + '</td>' +
         '<td class="num">' + _successCell(sp) + '</td>' +
-        '<td><button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this composite\'s source"' +
-          ' onclick="event.stopPropagation();_openCompositeCode(\'' + _esc(c.id) + '\')">&lt;/&gt; Code</button></td>' +
+        '<td class="reg-td-actions">' +
+          '<button type="button" class="reg-explore-btn-sm" title="Open the full card in the Process view"' +
+            ' onclick="event.stopPropagation();_showRegistryCard(\'' + _esc(c.id) + '\',\'composite\')">🔍 Explore</button>' +
+          '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this composite\'s source"' +
+            ' onclick="event.stopPropagation();_openCompositeCode(\'' + _esc(c.id) + '\')">&lt;/&gt; Code</button></td>' +
       '</tr>';
     }).join('');
     return '<div class="registry-table-wrap"><table class="registry-table"><thead><tr>' +
-      '<th>Name</th><th>Module</th><th class="num">Params</th><th class="num">Needs</th><th class="num">Studies</th><th class="num">Success</th><th>Code</th>' +
+      '<th>Name</th><th>Module</th><th class="num">Params</th><th class="num">Needs</th><th class="num">Studies</th><th class="num">Success</th><th>Actions</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
@@ -4638,8 +4756,8 @@
     var body = rows.map(function (p) {
       var sel = (window._registrySelected && window._registrySelected === p.address) ? ' reg-selected' : '';
       return '<tr class="reg-tr' + sel + '" data-source="' + _esc(p.source || '') + '" data-address="' + _esc(p.address || '') +
-          '" onclick="_selectRegistryEntry(\'' + _esc(p.address || '') + '\')" ondblclick="_zoomInOn(\'' + _esc(p.address || '') + '\')"' +
-          ' title="Click to select · double-click to zoom in on this process">' +
+          '" onclick="_selectRegistryEntry(\'' + _esc(p.address || '') + '\')" ondblclick="_showRegistryCard(\'' + _esc(p.address || '') + '\',\'' + _esc(p.kind || 'process') + '\')"' +
+          ' title="Click to select · double-click to Explore (open the full card)">' +
         '<td class="reg-td-name" title="' + _esc(p.address || p.name || '') + '"><strong>' + _esc(p.name) + '</strong> <code>' + _esc(p.address || '') + '</code></td>' +
         '<td class="reg-td-kind">' + (_procKindBadge(p.kind) || _esc(_procKindLabel(p.kind))) + _procBridgeBadge(p) + '</td>' +
         '<td title="' + _esc(mod(p)) + '">' + _esc(mod(p)) + '</td>' +
@@ -4649,16 +4767,19 @@
         '<td class="num">' + _nPorts(p.inputs) + '</td>' +
         '<td class="num">' + _nPorts(p.outputs) + '</td>' +
         '<td class="reg-td-src">' + _esc(p.source || '') + '</td>' +
-        '<td>' + (/^(process|step)$/.test(p.kind || 'process') && p.address
-          ? '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this process\'s source"' +
-            ' onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + _esc(p.address) + '\')">&lt;/&gt; Code</button>'
-          : '') + '</td>' +
+        '<td class="reg-td-actions">' +
+          (p.address ? '<button type="button" class="reg-explore-btn-sm" title="Open the full card in the Process view"' +
+            ' onclick="event.stopPropagation();_showRegistryCard(\'' + _esc(p.address) + '\',\'' + _esc(p.kind || 'process') + '\')">🔍 Explore</button>' : '') +
+          (/^(process|step)$/.test(p.kind || 'process') && p.address
+            ? '<button type="button" class="reg-cfgports-btn js-code-btn" title="View / edit this process\'s source"' +
+              ' onclick="event.stopPropagation();window.ProcessCode&&ProcessCode.open(\'' + _esc(p.address) + '\')">&lt;/&gt; Code</button>'
+            : '') + '</td>' +
       '</tr>';
     }).join('');
     el.innerHTML = '<div class="registry-table-wrap"><table class="registry-table reg-table-fill">' + colgroup + '<thead><tr>' +
       th('name', 'Name', '', 0) + th('kind', 'Type', '', 1) + th('module', 'Module', '', 2) + th('use', 'Uses', 'num', 3) +
       th('studies', 'Studies', 'num', 4) + th('success', 'Success', 'num', 5) +
-      th('in', 'In', 'num', 6) + th('out', 'Out', 'num', 7) + th('source', 'Source', '', 8) + th('code', 'Code', '', 9) +
+      th('in', 'In', 'num', 6) + th('out', 'Out', 'num', 7) + th('source', 'Source', '', 8) + th('code', 'Actions', '', 9) +
       '</tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
@@ -4774,6 +4895,9 @@
   function _renderRegistryGrid(containerId, entries) {
     // In a pop-out window the single card owns its container — don't clobber it.
     if (document.body.classList.contains('popcard-mode')) return;
+    // The browse list keeps only the two lower views (table / grid); the full
+    // in-place zoom is now the single-card Process view (via "Explore").
+    if (window._registryZoom === 'full') window._registryZoom = 'grid';
     var el = document.getElementById(containerId);
     if (!el) return;
     if (!entries || !entries.length) {
@@ -5445,7 +5569,9 @@
       .map(function (c, i) { return { c: c, i: i, n: _figNum(c) }; })
       .sort(function (a, b) { return (a.n - b.n) || (a.i - b.i); })
       .map(function (x) { return x.c; });
-    // Semantic zoom: Table (dense) → Cards (grid + usage) → Full (accordion).
+    // Semantic zoom: the two lower views only (Table / Cards) — the full in-place
+    // zoom is replaced by the single-card Process view, reached via "Explore".
+    if (window._registryZoom === 'full') window._registryZoom = 'grid';
     var zoom = window._registryZoom || 'grid';
     if (zoom === 'table') { el.innerHTML = _renderCompositeTableHtml(list); return; }
     var cardsCls = 'reg-cards reg-cards-' + (zoom === 'full' ? 'full' : 'grid');
@@ -7864,11 +7990,10 @@
   }
 
   function _vivToggleRail() {
+    // The rail is permanently collapsed (icon bar); toggling is a no-op so no
+    // stray caller can expand it back out.
     var rail = document.getElementById('viv-rail');
-    if (!rail) return;
-    var collapsed = rail.classList.toggle('viv-rail-collapsed');
-    _vivSyncRailToggleLabel(collapsed);
-    try { localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    if (rail) rail.classList.add('viv-rail-collapsed');
   }
   window._vivToggleRail = _vivToggleRail;
 
@@ -7895,19 +8020,12 @@
   window._vivToggleRailSearch = _vivToggleRailSearch;
 
   function _vivRestoreRailState() {
-    var stored = null;
-    try { stored = localStorage.getItem('vivarium.rail-collapsed'); } catch (e) {}
-    // Default view is the COLLAPSED icon rail (drag the edge to widen); once the
-    // user sets it either way, their stored choice wins.
-    var collapsed = (stored === null) ? true : (stored === '1');
+    // The rail is now PERMANENTLY collapsed — a fixed icon bar. The expand/resize
+    // mechanism (drag handle + width restore) was removed, so always keep the
+    // collapsed class regardless of any stored width/choice from older builds.
     var rail = document.getElementById('viv-rail');
-    if (rail) {
-      // Apply the saved expanded width (the collapsed rule overrides it via
-      // higher CSS specificity, so this is safe even when collapsed).
-      _vivRailApplyWidth(rail, _vivRailSavedWidth());
-      if (collapsed) rail.classList.add('viv-rail-collapsed');
-    }
-    _vivSyncRailToggleLabel(collapsed);
+    if (rail) rail.classList.add('viv-rail-collapsed');
+    _vivSyncRailToggleLabel(true);
   }
   window._vivRestoreRailState = _vivRestoreRailState;
 
@@ -10034,8 +10152,10 @@
     // Fully collapses (not just scrolled out of view) — click the toggle to show.
     try { localStorage.setItem('inv-overview-collapsed', '1'); } catch (e) { /* ignore */ }
     if (typeof _applyInvOverviewState === 'function') _applyInvOverviewState();
-    // The overview collapse above hides the prose/cockpit; keep the FULL graph in
-    // place (no strip, no float) so studies can be clicked through quickly.
+    // The study opens INLINE below the investigation graph (the original behavior),
+    // with the graph↔study resize bar between them so the graph pane can be resized.
+    // The investigation carries its slim title bar and can be dragged to a side
+    // window manually; opening a study no longer forces that.
     _renderGraphBarNav();
     var panel = document.getElementById('ws-study-panel');
     var frame = document.getElementById('ws-study-frame');
@@ -10160,7 +10280,7 @@
     var _exportDd =
       '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
         '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
-          'aria-label="Export" title="Export — report, notebook, or figures" onclick="_toggleInvReportMenu(event)">↓</button>' +
+          'aria-label="Export" title="Export — report, notebook, or figures" onclick="_toggleInvReportMenu(event)"><span aria-hidden="true">↓</span> Export ▾</button>' +
         '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
           'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:170px;padding:4px">' +
           '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
@@ -10174,7 +10294,7 @@
       (isSnapshot ? '' :
       ' <button class="btn-mini" onclick="_rerunInvestigation()" ' +
         'aria-label="Run current spec" ' +
-        'title="Run current spec — re-run every member study\'s CURRENT baseline (re-derives from each study.yaml)">▶</button>');
+        'title="Run current spec — re-run every member study\'s CURRENT baseline (re-derives from each study.yaml)"><span aria-hidden="true">▶</span> Run</button>');
     if (name) {
       (window.DataSource
         ? window.DataSource.loadIsetList()
@@ -10224,6 +10344,20 @@
     _wsResetStudyTabs(name);   // graph expanded, no study open
     _wsSetInvestigationActions();   // Report/Notebook actions in #ws-actions
     if (typeof _applyInvOverviewState === 'function') _applyInvOverviewState();
+    // The investigation graph shows by DEFAULT (the standalone collapsed bar was
+    // removed, so a stale collapsed state would otherwise leave it invisible with
+    // no affordance). Expand it on open; the header "Graph" button toggles it.
+    if (typeof _aigExpandInline === 'function') {
+      var _fsG = document.getElementById('investigation-dag-fs');
+      if (_fsG && _fsG.classList.contains('aig-collapsed')) _aigExpandInline();
+    }
+    // Sync the header "Graph" button caret after the graph has had a chance to
+    // render + auto-fill (its height, hence "shown", is set asynchronously).
+    if (typeof _aigSyncGraphToggle === 'function') {
+      _aigSyncGraphToggle();
+      setTimeout(_aigSyncGraphToggle, 400);
+      setTimeout(_aigSyncGraphToggle, 1200);
+    }
   }
   window._showInvestigationWorkspace = _showInvestigationWorkspace;
 
@@ -11119,7 +11253,10 @@
       tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vs.toUpperCase() : '',
         html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
           '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
-          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' });
+          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' +
+          // Claims (RFC-0005 synthesis layer): each claim, its verdict, and what
+          // supports/challenges it — filled async by argument-graph.js.
+          '<div id="inv-verdict-claims-mount" class="inv-claims-mount"></div>' });
 
     // 3. Background — the lead intro, the driving Question + Hypothesis, and the
     // structured argument (Hypothesis & evidence folded in here per the owner).
@@ -11136,6 +11273,14 @@
         '<div class="inv-brief-frameworks-label">Hypothesis &amp; evidence</div>' + _evBody + '</div>');
     if (bgParts.length)
       tabs.push({ id:'background', label:'Background', html: bgParts.join('') });
+
+    // Narrative — the ordered scientific reading (RFC-0005): the investigation's
+    // claims arranged by explanatory dependence, with the audit gaps marked
+    // inline. A derived document, next to Background. Filled async by
+    // argument-graph.js; shows nothing if the derivation layer is unavailable.
+    tabs.push({ id:'narrative', label:'Narrative', html:
+      '<div id="inv-narrative-mount" class="inv-narrative-mount">' +
+      '<p class="muted" style="padding:16px">Loading narrative…</p></div>' });
 
     // 4. Biology — the plain-English mechanism narrative (biological_story).
     if (bio)
@@ -11167,15 +11312,26 @@
       // evaluated board as no progress. The per-outcome breakdown is in the board tally.
       var _TERMINAL = { passed: 1, met: 1, qualified: 1, refuted: 1 };
       var _evaluated = _pb.filter(function (g) { return _TERMINAL[g.status]; }).length;
-      tabs.push({ id:'plan', label:'Plan progress', html:_planHtml,
+      // The formalized synthesis spine (canonical gate verdicts rolled up from
+      // member claims) replaces this content when argument-graph.js loads the
+      // overlay; _planHtml is the sync fallback if the derivation layer is absent.
+      tabs.push({ id:'plan', label:'Plan progress', html:'<div id="inv-plan-mount">' + _planHtml + '</div>',
         badge: _pb.length ? (_evaluated + '/' + _pb.length + ' evaluated') : '' });
     }
 
-    // 8. Decisions — the open expert decisions, HIGHLIGHTED when any are open.
+    // 8. Decisions — the discovery cycle's "what to do next" (value-ranked
+    //    opportunities, diagnosis, the gated Decide plan) ABOVE the authored expert
+    //    decisions and the derived open items. Shown whenever the investigation has
+    //    studies, so the cycle view is visible even once every decision is resolved.
     var _decHtml = _invDecisionTabHtml(d);
-    if (_decHtml) {
+    var _hasStudies = Array.isArray(d.studies) && d.studies.length;
+    if (_decHtml || _hasStudies) {
       var _nDec = (((d.executive || {}).decisions_needed) || []).length;
-      tabs.push({ id: 'decisions', label: 'Decisions', html: _decHtml,
+      // #inv-discovery-mount ← /api/investigation-discovery (argument-graph.js poller);
+      // _decHtml = the authored Resolve cockpit; #inv-decisions-mount ← derived open
+      // items (audit gaps, open-question claims, divergences) from the overlay.
+      tabs.push({ id: 'decisions', label: 'Decisions',
+        html: '<div id="inv-discovery-mount"></div>' + _decHtml + '<div id="inv-decisions-mount"></div>',
         badge: _nDec ? (_nDec + ' needed') : 'all clear', attention: _nDec > 0 });
     }
 
@@ -12140,8 +12296,10 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      btn.textContent = (collapsed ? '▸' : '▾');
-      btn.setAttribute('title', 'Overview');
+      // Keep the "Overview" text label beside the caret (iTerm-style labeled
+      // control); only the caret direction reflects collapsed/expanded.
+      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Overview';
+      btn.setAttribute('title', collapsed ? 'Show overview' : 'Hide overview');
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
   }
@@ -13367,6 +13525,7 @@
   function _aigCollapseInline() {
     var fs = document.getElementById('investigation-dag-fs');
     if (fs) fs.classList.add('aig-collapsed');
+    _aigSyncGraphToggle();
   }
   function _aigExpandInline() {
     var fs = document.getElementById('investigation-dag-fs');
@@ -13379,9 +13538,44 @@
       setTimeout(function () { shell._aigProgrammaticResize = false; }, 80);
     }
     try { if (typeof window._aigFit === 'function') window._aigFit(); } catch (e) { /* ignore */ }
+    _aigSyncGraphToggle();
+  }
+  // Is the inline investigation graph actually VISIBLE right now? It can be hidden
+  // either by the collapsed class OR by having zero height (no study / fresh
+  // render before auto-fill), so judge by real visibility, not just the class.
+  function _aigGraphShown() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs || fs.classList.contains('aig-collapsed')) return false;
+    if (fs.classList.contains('aig-dock')) return true;   // docked window counts as shown
+    var sh = document.getElementById('investigation-dag-shell');
+    return !!(sh && sh.offsetParent !== null && sh.getBoundingClientRect().height > 8);
+  }
+  window._aigGraphShown = _aigGraphShown;
+  // Toggle the inline investigation graph from the header-nav "Graph" button
+  // (next to Overview). The standalone slim "Investigation graph" bar was removed;
+  // this header button is the always-available toggle. Expanding always gives the
+  // graph a visible height (_aigExpandInline sets it + fits).
+  function _aigToggleInline() {
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!fs) return;
+    if (_aigGraphShown()) _aigCollapseInline();
+    else _aigExpandInline();
+  }
+  // Keep the header "Graph" button's caret + state in sync with the graph,
+  // whatever toggles it (this button, the graph↔study divider drag, the dock
+  // control). Caret ▾ = graph shown, ▸ = graph hidden.
+  function _aigSyncGraphToggle() {
+    var btn = document.getElementById('inv-graph-toggle');
+    if (!btn) return;
+    var shown = _aigGraphShown();
+    btn.innerHTML = '<span class="inv-graph-caret" aria-hidden="true">' + (shown ? '▾' : '▸') + '</span> Graph';
+    btn.setAttribute('aria-expanded', shown ? 'true' : 'false');
+    btn.setAttribute('title', shown ? 'Hide investigation graph' : 'Show investigation graph');
   }
   window._aigCollapseInline = _aigCollapseInline;
   window._aigExpandInline = _aigExpandInline;
+  window._aigToggleInline = _aigToggleInline;
+  window._aigSyncGraphToggle = _aigSyncGraphToggle;
   function _aigFit() {
     var shell = document.getElementById('investigation-dag-shell');
     if (!shell) return;
@@ -15667,7 +15861,13 @@
     // Need both: window._investigations (all studies) AND window._isetIndex (groups).
     // If either isn't loaded yet, fall back to a loading message + kick the missing one.
     if (!Array.isArray(window._isetIndex)) window._isetIndex = [];
-    if (!Array.isArray(window._investigations) || !window._investigations.length) {
+    // Studies not FETCHED yet (still undefined, not an array) → show the spinner
+    // and kick the load. A loaded-but-EMPTY array ([]) is NOT "still loading": it
+    // means the workspace genuinely has no studies, so fall through and render the
+    // (empty) groups below — which show a proper "No studies" state. Treating []
+    // as "not loaded" re-fetched forever and spun on "Loading…" (e.g. an
+    // investigation with zero studies).
+    if (!Array.isArray(window._investigations)) {
       // No studies in memory yet → fall back to the legacy render until they arrive.
       if (typeof _renderRailInvestigationsLegacy === 'function') return _renderRailInvestigationsLegacy();
       if (window.ProgressTrack) {
@@ -18545,6 +18745,9 @@
   // instead of the old standalone bigraph-loom composite-explore page.
   function _openCompositeCardView(spec_id) {
     if (!spec_id) return;
+    // Unified: open the composite as a single full card in the Process view
+    // (same destination as every "Explore" action), not the removed full zoom.
+    if (typeof window._showRegistryCard === 'function') { window._showRegistryCard(spec_id, 'composite'); return; }
     if (typeof _openCompositesTab === 'function') _openCompositesTab();
     window._registryZoom = 'full';
     try { localStorage.setItem('viv.registryZoom', 'full'); } catch (e) { /* private mode */ }
@@ -19840,7 +20043,11 @@
   }
 
   function _refreshGitStatus() {
-    apiFetch('GET', '/api/git-status').then(function (r) { return r.json(); }).then(function (s) {
+    // Guard the body parse: /api/git-status is a LIVE-server endpoint not baked into
+    // the static snapshot (404s with an HTML page there). Without the r.ok check a
+    // `.json()` on that HTML throws an UNCAUGHT SyntaxError rejection (no .catch) —
+    // the cascade that leaves panels half-wired in published bundles. Degrade to null.
+    apiFetch('GET', '/api/git-status').then(function (r) { return r && r.ok ? r.json() : null; }).then(function (s) {
       // Legacy single-string box (still populated for any consumer that
       // reads it). The GitHub-tab settings page renders the same data into
       // individual rows via _renderGitStatusRows below.
@@ -19849,7 +20056,7 @@
       // so it doesn't duplicate that section.
       var box = document.getElementById('viv-git-status');
       if (box) { box.hidden = true; }
-      if (!s.branch) {
+      if (!s || !s.branch) {
         _renderGitStatusRows(null);
         return;
       }
@@ -20044,10 +20251,10 @@
     });
     var gaps = sev.error + sev.warning;
     var head, bg, bd, col;
-    if (!findings.length) { head = '✓ Ready'; bg = '#f0fdf4'; bd = '#16a34a'; col = '#166534'; }
-    else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = '#fffbeb'; bd = '#f59e0b'; col = '#92400e'; }
-    else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = '#eff6ff'; bd = '#3b82f6'; col = '#1e40af'; }
-    var lbl = '<span class="small" style="color:#64748b">code-computed by the report linter (deterministic)</span>';
+    if (!findings.length) { head = '✓ Ready'; bg = 'var(--ok-bg, #f0fdf4)'; bd = '#16a34a'; col = 'var(--ok-fg, #166534)'; }
+    else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = 'var(--warn-bg, #fffbeb)'; bd = '#f59e0b'; col = 'var(--warn-fg, #92400e)'; }
+    else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = 'var(--info-bg, #eff6ff)'; bd = '#3b82f6'; col = 'var(--info-fg, #1e40af)'; }
+    var lbl = '<span class="small" style="color:var(--text-muted, #64748b)">code-computed by the report linter (deterministic)</span>';
     // Ready → no dropdown needed.
     if (!findings.length) {
       return '<div class="readiness-banner" style="margin:12px 0;padding:12px 16px;background:' + bg
@@ -20065,14 +20272,14 @@
         return '<li style="margin-top:3px"><span style="color:' + dot + ';font-weight:700">●</span> ' + _h(f.message || '') + '</li>';
       }).join('');
       return '<div style="margin-top:9px"><code>' + _h(c) + '</code> '
-        + '<span class="small" style="color:#94a3b8">(' + byCheck[c].length + ')</span>'
+        + '<span class="small" style="color:var(--text-muted, #94a3b8)">(' + byCheck[c].length + ')</span>'
         + '<ul class="small" style="margin:3px 0 0 18px;padding:0">' + items + '</ul></div>';
     }).join('');
     return '<details class="readiness-banner" style="margin:12px 0;background:' + bg
       + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
       + '<summary style="padding:12px 16px;cursor:pointer;list-style:none;outline:none">'
       + '<strong>Readiness: ' + head + '</strong> ' + lbl
-      + '<div class="small" style="color:#64748b;margin-top:5px">' + breakdown
+      + '<div class="small" style="color:var(--text-muted, #64748b);margin-top:5px">' + breakdown
       + ' &nbsp;·&nbsp; <span style="opacity:.7;font-style:italic">click to expand</span></div>'
       + '</summary>'
       + '<div style="padding:2px 16px 12px 16px">' + groups + '</div>'

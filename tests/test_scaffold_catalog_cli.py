@@ -2,7 +2,7 @@
 (``cli.cmd_scaffold_workspace`` / ``cli.cmd_catalog_add``).
 
 Phase 2.1i (rewire-first): these ``vwb`` verbs wrap the plugin's bootstrap
-compute (``viva_superpowers.scaffold`` / ``workspace_catalog``) so the
+compute (``discovery_engine.scaffold`` / ``workspace_catalog``) so the
 ``/viva-workspace`` skill can stop shelling ``python -m viva_superpowers.*``.
 The scaffold path is inherently pre-server, so it lives on the CLI (not an
 HTTP endpoint). ``catalog-add`` is isolated to a temp ``VIVA_HOME`` so it never
@@ -23,7 +23,7 @@ def _mk_workspace(tmp_path, name="ws"):
 
 
 def test_catalog_add_registers_workspace(tmp_path, monkeypatch, capsys):
-    pytest.importorskip("viva_superpowers.workspace_catalog")
+    pytest.importorskip("discovery_engine.workspace_catalog")
     home = tmp_path / "viva_home"
     monkeypatch.setenv("VIVA_HOME", str(home))
     ws = _mk_workspace(tmp_path)
@@ -40,7 +40,7 @@ def test_catalog_add_registers_workspace(tmp_path, monkeypatch, capsys):
 
 
 def test_catalog_add_rejects_non_workspace(tmp_path, monkeypatch, capsys):
-    pytest.importorskip("viva_superpowers.workspace_catalog")
+    pytest.importorskip("discovery_engine.workspace_catalog")
     monkeypatch.setenv("VIVA_HOME", str(tmp_path / "viva_home"))
     not_ws = tmp_path / "plain"
     not_ws.mkdir()
@@ -51,14 +51,14 @@ def test_catalog_add_rejects_non_workspace(tmp_path, monkeypatch, capsys):
 
 
 def test_catalog_add_is_idempotent(tmp_path, monkeypatch):
-    pytest.importorskip("viva_superpowers.workspace_catalog")
+    pytest.importorskip("discovery_engine.workspace_catalog")
     home = tmp_path / "viva_home"
     monkeypatch.setenv("VIVA_HOME", str(home))
     ws = _mk_workspace(tmp_path)
 
     assert main(["catalog-add", "--path", str(ws)]) == 0
     assert main(["catalog-add", "--path", str(ws)]) == 0  # re-run: no error
-    from viva_superpowers import workspace_catalog
+    from discovery_engine import workspace_catalog
     entries = [e for e in workspace_catalog.list_workspaces()]
     # exactly one entry for this path (append-or-noop)
     matches = [e for e in entries if str(ws.resolve()) in json.dumps(e, default=str)]

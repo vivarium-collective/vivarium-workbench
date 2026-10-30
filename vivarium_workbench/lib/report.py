@@ -520,6 +520,31 @@ def _normalize_asset_urls(html: str) -> str:
     )
 
 
+def _inline_avatar_data_uri(ws_root: Path, rel: str) -> str:
+    """Inline a workspace-relative image (the workspace `avatar:`/`icon:`) as a
+    data URI, so the rail avatar renders the same in the live server and the
+    published static bundle. Returns "" (→ monogram fallback) if the path escapes
+    the workspace, is missing, isn't an image, or is too large (>256 KiB)."""
+    import base64
+    import mimetypes
+    try:
+        root = Path(ws_root).resolve()
+        path = (root / rel).resolve()
+        if root not in path.parents and path != root:
+            return ""
+        if not path.is_file() or path.stat().st_size > 256 * 1024:
+            return ""
+        mime = mimetypes.guess_type(str(path))[0]
+        if not mime:
+            mime = "image/svg+xml" if path.suffix.lower() == ".svg" else ""
+        if not mime.startswith("image/"):
+            return ""
+        b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    except Exception:
+        return ""
+
+
 def render_workspace_report(ws_root: Path | None = None, *, today: str | None = None, base_path: str = "") -> Path:
     """Build <ws_root>/reports/index.html from workspace.yaml + pending branches."""
     ws_root = ws_root or _ws_root()
@@ -629,6 +654,19 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # GitHub repository this workspace is associated with (from `git remote
     # origin`) — rendered as a link in the rail header.
     _repo_slug = _detect_github_repo(ws_root)
+    # Per-workspace identity shown in the rail (expanded + collapsed): an optional
+    # profile picture (`avatar:`/`icon:` in workspace.yaml, a URL) and the home
+    # page the workspace name links to (`homepage:` else the GitHub repo). With no
+    # avatar the rail falls back to a name-derived monogram (client-side), which
+    # distinguishes workspaces better than the shared org avatar would.
+    _ws_avatar = str(ws.get("avatar") or ws.get("icon") or "").strip()
+    # A workspace-relative image path (not an http/data URL) is inlined as a data
+    # URI so it renders identically in the live server and the published static
+    # bundle — no extra file-serving/bundling needed. http(s)/data URIs pass through.
+    if _ws_avatar and not _ws_avatar.lower().startswith(("http://", "https://", "data:")):
+        _ws_avatar = _inline_avatar_data_uri(ws_root, _ws_avatar)
+    _ws_home = str(ws.get("homepage") or "").strip() or (
+        f"https://github.com/{_repo_slug}" if _repo_slug else "")
     # Rail-chip subtitle describing the ACTIVE source. A materialized remote
     # build (.../build-cache/sim<id>-<commit>) carries a .viv-build.json with its
     # branch/commit/id (stamped at switch time) and isn't a git repo; a local
@@ -666,6 +704,8 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         workspace_branch=_workspace_subtitle,
         workspace_is_remote=_workspace_is_remote,
         repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
+        workspace_avatar=_ws_avatar,
+        workspace_home=_ws_home,
         dashboard_name=dashboard_name,
         dashboard_logo=dashboard_logo,
         active_investigation_name=active_investigation_name,

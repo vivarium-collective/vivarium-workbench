@@ -58,10 +58,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
-from viva_superpowers.bibtex import bib_keys
-from viva_superpowers.paths import find_workspace_root
-from viva_superpowers.study_io import load_yaml as _load_yaml
-from viva_superpowers.workspace_paths import WorkspacePaths
+from discovery_engine.bibtex import bib_keys
+from discovery_engine.paths import find_workspace_root
+from discovery_engine.study_io import load_yaml as _load_yaml
+from discovery_engine.workspace_paths import WorkspacePaths
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +332,7 @@ def _check_parent_studies(study: dict, ws_root: Path | None) -> Iterable[VerifyF
 def _load_bib_keys(ws_root: Path | None) -> set[str] | None:
     """Workspace bib keys, or None when there's no bib file (soft-skip).
 
-    Delegates to the shared :func:`viva_superpowers.bibtex.bib_keys` so verify
+    Delegates to the shared :func:`discovery_engine.bibtex.bib_keys` so verify
     resolves the SAME file (``references/papers.bib`` first) and parser as the
     report linter — previously verify read a different file with a different
     regex, so a cite could pass one gate and fail the other.

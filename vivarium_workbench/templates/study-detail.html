@@ -1347,6 +1347,15 @@
      emitter · size) — auto-filled by _loadResultsSummary from the runs list. #}
   <div id="results-summary" data-study="{{ name }}" style="margin:0 0 16px"></div>
 
+  {# Gate results — each acceptance test's graded scalar readout (or an
+     unresolved stub). These are run-derived RESULTS, so they live here, not in
+     the Visualizations tab (which holds only rendered figures). Filled by
+     _loadGateResults from the study-charts payload's `gate_results`. #}
+  <div id="gate-results-section" data-study="{{ name }}" style="margin:0 0 22px" hidden>
+    <h4>Gate results <span class="muted" style="font-size:0.8em;font-weight:normal">— each acceptance test's value, graded from run data</span></h4>
+    <div id="gate-results"></div>
+  </div>
+
   <h4>Latest run preview <span class="muted" style="font-size:0.8em;font-weight:normal">— downsampled sparkline + first/last/min/max per store</span></h4>
   <div id="results-preview" data-study="{{ name }}">
     <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading results preview…</span></div>
@@ -1473,7 +1482,7 @@
      this study's criteria; never recomputed here). Absent/empty means the
      study has no owning investigation or no persisted acceptance — render
      NOTHING (§2 R2: absent != empty; no fabricated criteria, no empty box).
-     Each criterion's `result` (viva_superpowers.investigation_status's
+     Each criterion's `result` (discovery_engine.investigation_status's
      passing/failing/passing-with-caveats/in-progress vocabulary) is mapped
      through the SAME shared outcome_label/_class/_glyph filters G3 defined,
      so this band reads in the identical four-value vocabulary as the rest
@@ -2432,6 +2441,13 @@ window._seedFollowupProposal = _seedFollowupProposal;
   // run buttons in a published read-only snapshot (reproducible-rerun-spine
   // Task 4 / G2: both equally inert with no live backend to launch against).
   if (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.mode === "snapshot") {
+    // The study-detail shell does NOT load walkthrough.js (which sets this on
+    // the main SPA), so set body.snapshot here. Without it every snapshot check
+    // on this page reads false — most visibly the inline bigraph-loom embed,
+    // which then mounts in LIVE mode (?id=&live=1) and hangs forever fetching
+    // /api/composite-state?ref=… against a backend the static bundle doesn't
+    // have, instead of the baked static /api/composite-state/<id>.json.
+    document.body.classList.add("snapshot");
     var reproduceBtn = document.getElementById("study-reproduce");
     if (reproduceBtn) reproduceBtn.style.display = "none";
     var runCurrentBtn = document.getElementById("study-run-current-spec");

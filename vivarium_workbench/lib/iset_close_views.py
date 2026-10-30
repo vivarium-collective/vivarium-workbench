@@ -1,11 +1,11 @@
 """``POST /api/iset-close`` builder — wraps
-``viva_superpowers.investigation_close.close_investigation``.
+``discovery_engine.investigation_close.close_investigation``.
 
 Phase 2.1h (rewire-first, ``docs/superpowers/plans/2026-08-04-phase2.1-rewire-
 first.md`` §2.1h): the workbench keeps importing the plugin's compute to BACK
 this endpoint (no module move yet — that's 2.1k). This lets
 ``skills/viva-investigation/SKILL.md``'s ``close`` subcommand stop shelling out
-to ``python -m viva_superpowers.investigation_close`` and call the dashboard API
+to ``python -m discovery_engine.investigation_close`` and call the dashboard API
 instead — realizing the "Close investigation" endpoint the skill's prose already
 anticipated (``the dashboard button ... will call the same close_investigation
 function via a new POST /api/iset-close handler``).
@@ -54,7 +54,7 @@ def iset_close(ws_root: Path, body: dict) -> "tuple[dict, int]":
     auto_pr = not bool((body or {}).get("no_pr") or False)
 
     try:
-        from viva_superpowers.investigation_close import close_investigation
+        from discovery_engine.investigation_close import close_investigation
     except ImportError as e:  # noqa: BLE001
         return {"error": f"investigation close requires viva_superpowers: {e}"}, 500
 

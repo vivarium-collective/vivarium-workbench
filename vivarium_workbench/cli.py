@@ -32,39 +32,21 @@ def _workspace_name(workspace: Path) -> str:
 
 
 def _warn_if_loom_dist_stale() -> None:
-    """Warn when the built loom bundle is missing or older than its source.
+    """Ensure the loom viewer bundle is available before serving, building or
+    resolving a fallback when needed.
 
-    `vivarium_workbench/loom/_dist` is a gitignored build artifact. On an editable
-    / source checkout, pulling loom source changes does NOT rebuild it, so the
-    server silently keeps serving the OLD bundle — the only symptom is a stale
-    loom (e.g. a new render flag doing nothing). Surface it loudly at startup so
-    the fix (`scripts/build_loom.sh` + restart) is obvious. Best-effort; a wheel
-    install ships only `_dist` (no `src`), so this never false-warns there.
+    `vivarium_workbench/loom/_dist` is a gitignored build artifact (built by
+    `scripts/build_loom.sh`, baked into wheels by hatch_build.py). A source
+    checkout or git worktree may not have it locally — which showed as the
+    "viewer bundle is missing" card. `loom_assets.ensure_built()` now heals that
+    at startup: it reuses a fresh vendored build, inherits a git worktree's MAIN
+    checkout bundle, rebuilds a stale one, or builds a standalone source checkout
+    (when Node is present) — degrading gracefully (a warning, not a crash) only
+    when genuinely impossible. Best-effort; a wheel install ships `_dist`.
     """
     try:
-        from vivarium_workbench.loom_assets import asset_dir
-        dist = asset_dir()
-        src = dist.parent / "src"
-        if not dist.is_dir():
-            print("warning: loom bundle (loom/_dist) is missing — run "
-                  "scripts/build_loom.sh, or the Explorer / render-loom will 404.",
-                  file=sys.stderr)
-            return
-        if not src.is_dir():
-            return  # a wheel install: no source tree to compare against
-        def _newest(p: Path) -> float:
-            m = 0.0
-            for f in p.rglob("*"):
-                if f.is_file():
-                    try:
-                        m = max(m, f.stat().st_mtime)
-                    except OSError:
-                        pass
-            return m
-        if _newest(src) > _newest(dist) + 1:
-            print("warning: loom/_dist is OLDER than loom/src — the served loom "
-                  "bundle is stale. Rebuild it (scripts/build_loom.sh) and restart "
-                  "so renderer changes take effect.", file=sys.stderr)
+        from vivarium_workbench import loom_assets
+        loom_assets.ensure_built(require=False)
     except Exception:
         pass
 
@@ -153,7 +135,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     def _unregister():
         try:
-            from viva_superpowers import workspace_catalog
+            from discovery_engine import workspace_catalog
             workspace_catalog.unregister_server(workspace)
         except Exception:
             pass
@@ -172,7 +154,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # non-fatal — the dashboard still works, it just won't appear in other
     # dashboards' switchers.
     try:
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
         ws_name = _workspace_name(workspace)
         # Ensure this workspace appears in OTHER dashboards' switchers.
         # add() is idempotent; safe to call on every boot.
@@ -961,12 +943,12 @@ def cmd_add_dashboard(args: argparse.Namespace) -> int:
 
 def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
     """Scaffold a new process-bigraph workspace (bootstrap — runs before any
-    server exists). Wraps ``viva_superpowers.scaffold`` (Phase 2.1i rewire-
+    server exists). Wraps ``discovery_engine.scaffold`` (Phase 2.1i rewire-
     first: the plugin still owns the scaffold payload; only the caller — the
-    ``/viva-workspace`` skill — moves from ``python -m viva_superpowers.scaffold``
+    ``/viva-workspace`` skill — moves from ``python -m discovery_engine.scaffold``
     to this ``vwb`` verb. The module move is 2.1k)."""
     try:
-        from viva_superpowers import scaffold
+        from discovery_engine import scaffold
     except ImportError as e:  # noqa: BLE001
         print(f"error: workspace scaffolding requires viva_superpowers: {e}", file=sys.stderr)
         return 1
@@ -993,10 +975,10 @@ def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
 def cmd_catalog_add(args: argparse.Namespace) -> int:
     """Register a workspace in ``~/.pbg/workspaces.json`` so it appears in the
     dashboard's workspace switcher (idempotent). Wraps
-    ``viva_superpowers.workspace_catalog.add`` — the same call ``vwb serve``
+    ``discovery_engine.workspace_catalog.add`` — the same call ``vwb serve``
     already makes on boot (Phase 2.1i rewire-first)."""
     try:
-        from viva_superpowers import workspace_catalog
+        from discovery_engine import workspace_catalog
     except ImportError as e:  # noqa: BLE001
         print(f"error: catalog registration requires viva_superpowers: {e}", file=sys.stderr)
         return 1
@@ -1016,11 +998,11 @@ def cmd_catalog_add(args: argparse.Namespace) -> int:
 def cmd_scaffold_investigation(args: argparse.Namespace) -> int:
     """Scaffold an investigation + one skeleton study per composite generator
     (the ``investigation-from-wrapper`` bootstrap). Wraps
-    ``viva_superpowers.scaffold.scaffold_investigation_from_wrapper`` (Phase
+    ``discovery_engine.scaffold.scaffold_investigation_from_wrapper`` (Phase
     2.1k step 0 — completes the ``/viva-expert`` rewire; the plugin still owns
     the scaffold payload, only the caller moves)."""
     try:
-        from viva_superpowers import scaffold
+        from discovery_engine import scaffold
     except ImportError as e:  # noqa: BLE001
         print(f"error: investigation scaffolding requires viva_superpowers: {e}", file=sys.stderr)
         return 1

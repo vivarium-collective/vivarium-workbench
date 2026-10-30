@@ -90,10 +90,12 @@ export interface StudyChartsPayload {
   study: string;
   schema_version: any | null;
   charts: ChartPayload[];
+  gate_results: ChartPayload[];
   db_exists: boolean;
   data_store: string | null;
   static_count: number;
   live_count: number;
+  gate_result_count: number;
 }
 
 export interface InvestigationSummary {

@@ -1,11 +1,11 @@
 """``POST /api/study-readout-migrate`` builder — wraps
-``viva_superpowers.readout_migration.migrate_study_file``.
+``discovery_engine.readout_migration.migrate_study_file``.
 
 Phase 2.1d (rewire-first, ``docs/superpowers/plans/2026-08-04-phase2.1-rewire-
 first.md`` §2.1d): the workbench keeps importing the plugin's compute to BACK
 this endpoint (no module move yet — that's 2.1k). This lets
 ``skills/viva-report/SKILL.md:215`` stop importing
-``viva_superpowers.readout_migration`` directly and call the dashboard API
+``discovery_engine.readout_migration`` directly and call the dashboard API
 instead, matching the rewire-first pattern already used by ``/api/report-lint``
 and ``/api/study-sync-runs``.
 
@@ -36,7 +36,7 @@ def study_readout_migrate(ws_root: Path, body: dict) -> "tuple[dict, int]":
     ``migrate_study_file``'s own ``write`` keyword.
 
     Returns ``(report, 200)`` on success, where ``report`` is exactly what
-    ``viva_superpowers.readout_migration.migrate_study_file`` returns —
+    ``discovery_engine.readout_migration.migrate_study_file`` returns —
     ``{entries, migrated, needs_human, study_yaml, written, changed,
     canonicalized}`` — plus the resolved ``study`` slug. Render-error-tolerant:
     unresolvable readouts are collected into ``needs_human`` by the plugin
@@ -62,7 +62,7 @@ def study_readout_migrate(ws_root: Path, body: dict) -> "tuple[dict, int]":
         return {"error": f"study not found: {slug}"}, 404
 
     try:
-        from viva_superpowers.readout_migration import migrate_study_file
+        from discovery_engine.readout_migration import migrate_study_file
     except ImportError as e:  # noqa: BLE001
         return {"error": f"readout migration requires viva_superpowers: {e}"}, 500
 

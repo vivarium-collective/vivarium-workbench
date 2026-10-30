@@ -2,7 +2,7 @@
 
 Covers the new display surfaces for the gate-class distinctions:
   * ``gate_rigor.verdict_count_split`` — pins vs acceptance vs expected-fail
-    buckets (delegates to viva_superpowers.study_verdict when #285 is
+    buckets (delegates to discovery_engine.study_verdict when #285 is
     installed; local mirror otherwise).
   * ``behavior_test_card`` — per-row gate_class / expected-fail badges and the
     split ledger in the card summary; an expected-fail control never renders

@@ -69,6 +69,52 @@ def test_generate_fills_both_tables(ws: Path):
     assert gen_readme.GEN_NOTE in text
 
 
+def test_collect_composites_does_not_trigger_env_wide_discovery(ws: Path, monkeypatch):
+    """gen-readme must list composites via WORKSPACE-SCOPED discovery, never the
+    env-worker path (``_discover_generators_via_worker`` → process-bigraph's
+    ``discover_generators``, which imports every installed bigraph-schema package —
+    the dozens-of-modules import that times out ``readme-check`` in CI). If that
+    path is invoked, fail loudly."""
+    import vivarium_workbench.lib.composite_lookup as cl
+
+    def _must_not_run(*_a, **_k):
+        raise AssertionError("gen-readme invoked env-wide generator discovery")
+
+    monkeypatch.setattr(cl, "_discover_generators_via_worker", _must_not_run)
+    rows = gen_readme.collect_composites(ws)
+    assert "widget" in {r["name"] for r in rows}  # the FS .composite.yaml still listed
+
+
+def test_collect_composites_lists_workspace_generators_in_process(tmp_path: Path, monkeypatch):
+    """A workspace-package ``@composite_generator`` is discovered IN-PROCESS and
+    listed — without importing the whole installed environment."""
+    import vivarium_workbench.lib.composite_lookup as cl
+
+    root = tmp_path / "gen-ws"
+    _write(root / "workspace.yaml", """\
+        name: gen-ws
+        package_path: pbg_gendemo
+    """)
+    _write(root / "pbg_gendemo" / "__init__.py", "")
+    _write(root / "pbg_gendemo" / "composites" / "__init__.py", "")
+    _write(root / "pbg_gendemo" / "composites" / "gen_widget.py", """\
+        from process_bigraph.composite_generator import composite_generator
+
+        @composite_generator(name="gen_widget", description="A generated widget composite.")
+        def gen_widget():
+            return {"state": {}}
+    """)
+    _write(root / "README.md", "# g\n\n<!-- BEGIN:composites -->\n<!-- END:composites -->\n")
+
+    def _must_not_run(*_a, **_k):
+        raise AssertionError("env-wide generator discovery must not run")
+
+    monkeypatch.setattr(cl, "_discover_generators_via_worker", _must_not_run)
+    monkeypatch.syspath_prepend(str(root))
+    rows = gen_readme.collect_composites(root)
+    assert "gen_widget" in {r["name"] for r in rows}
+
+
 def test_idempotent_and_check(ws: Path):
     assert gen_readme.generate(ws) == 0
     first = (ws / "README.md").read_text()
@@ -96,8 +142,8 @@ def test_check_detects_drift(ws: Path):
 
 
 def test_dashboard_block_local_fallback(ws: Path):
-    # A README with only the dashboard marker + no git remote → the prominent
-    # callout falls back to the local-serve instruction (no Pages URL to link).
+    # A README with only the dashboard marker + no git remote → the link block
+    # falls back to the local-serve instruction (no Pages URL to link).
     _write(ws / "README.md", """\
         # demo
 
@@ -106,15 +152,35 @@ def test_dashboard_block_local_fallback(ws: Path):
     """)
     assert gen_readme.generate(ws) == 0
     text = (ws / "README.md").read_text()
-    assert "read-only dashboard" in text.lower()
+    assert "workbench" in text.lower()
     assert "vivarium-workbench serve" in text  # no remote → local-serve instruction
     assert gen_readme.GEN_NOTE in text
 
 
 def test_render_dashboard_with_base():
     out = gen_readme.render_dashboard("https://owner.github.io/repo")
-    assert "https://owner.github.io/repo/dashboard/" in out
-    assert "Explore the interactive read-only dashboard" in out
+    assert "https://owner.github.io/repo/workbench/" in out
+    assert "Open the read-only workbench" in out
+    assert "🔬" not in out  # plain, not the old slop callout
+
+
+def test_render_badges_with_remote(tmp_path: Path):
+    out = gen_readme.render_badges(tmp_path, "owner/repo", "https://owner.github.io/repo")
+    assert "actions/workflows/workspace-ci.yml/badge.svg" in out
+    assert "https://owner.github.io/repo/workbench/" in out
+    # No LICENSE file in tmp_path → no license badge.
+    assert "github/license" not in out
+
+
+def test_render_badges_includes_license_when_present(tmp_path: Path):
+    (tmp_path / "LICENSE").write_text("MIT\n")
+    out = gen_readme.render_badges(tmp_path, "owner/repo", "https://owner.github.io/repo")
+    assert "img.shields.io/github/license/owner/repo" in out
+
+
+def test_render_badges_no_remote_is_empty(tmp_path: Path):
+    out = gen_readme.render_badges(tmp_path, None, None)
+    assert "badge" not in out  # nothing to point at → just the gen-note, no broken badges
 
 
 def test_only_present_markers_are_generated(ws: Path):

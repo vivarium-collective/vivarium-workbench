@@ -1,11 +1,11 @@
 """``POST /api/study-findings-populate-observations`` builder — wraps
-``viva_superpowers.finding_observations.populate_finding_observations``.
+``discovery_engine.finding_observations.populate_finding_observations``.
 
 Phase 2.1f (rewire-first, ``docs/superpowers/plans/2026-08-04-phase2.1-rewire-
 first.md`` §2.1f): the workbench keeps importing the plugin's compute to BACK
 this endpoint (no module move yet — that's 2.1k). This lets
 ``skills/viva-biology-forward/SKILL.md`` stop importing
-``viva_superpowers.finding_observations`` directly and call the dashboard API
+``discovery_engine.finding_observations`` directly and call the dashboard API
 instead, matching the rewire-first pattern already used by
 ``/api/study-readout-migrate`` and ``/api/study-sync-runs``.
 
@@ -33,7 +33,7 @@ def study_findings_populate_observations(ws_root: Path, body: dict) -> "tuple[di
     Body: ``{study: <slug>}``.
 
     Returns ``(result, 200)`` on success, where ``result`` is exactly what
-    ``viva_superpowers.finding_observations.populate_finding_observations``
+    ``discovery_engine.finding_observations.populate_finding_observations``
     returns — ``{filled, skipped}`` — plus the resolved ``study`` slug.
     Idempotent: a second call on an already-filled study returns
     ``filled=0`` and does not rewrite ``study.yaml``.
@@ -56,7 +56,7 @@ def study_findings_populate_observations(ws_root: Path, body: dict) -> "tuple[di
         return {"error": f"study not found: {slug}"}, 404
 
     try:
-        from viva_superpowers.finding_observations import populate_finding_observations
+        from discovery_engine.finding_observations import populate_finding_observations
     except ImportError as e:  # noqa: BLE001
         return {"error": f"finding population requires viva_superpowers: {e}"}, 500
 

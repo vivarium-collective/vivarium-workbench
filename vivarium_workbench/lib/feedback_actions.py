@@ -42,9 +42,9 @@ from typing import Any, Iterator
 import yaml
 from ruamel.yaml import YAML
 
-from viva_superpowers import study_io
+from discovery_engine import study_io
 from viva_superpowers.feedback_import import _feedback_files
-from viva_superpowers.workspace_paths import WorkspacePaths
+from discovery_engine.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.workspace_paths import study_yaml_path
 
 # Action status sets ──────────────────────────────────────────────────────────
@@ -438,7 +438,7 @@ def apply_feedback_action(
             result["recorded_note"] = True
 
         elif kind == "study-seed":
-            from viva_superpowers import seed_from_followup
+            from discovery_engine import seed_from_followup
             if not target_study:
                 return {"applied": False, "error": "study-seed action has no target_study"}
             parent_spec = study_io.load_yaml(study_yaml_path(workspace, target_study))

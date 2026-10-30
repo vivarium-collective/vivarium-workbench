@@ -11,8 +11,9 @@ import sqlite3
 import traceback
 from pathlib import Path
 
-from viva_superpowers import diff_reports, build_report
-from viva_superpowers.study_verdict import severity_gate
+from discovery_engine.post_sim import build_report
+from discovery_engine.study_verdict import severity_gate
+from discovery_engine.test_diff import diff_reports
 from vivarium_workbench.lib.conclusion_card import _CANON_SEVERITY
 from vivarium_workbench.lib.ephemeral_study import merge_declarations
 
@@ -144,7 +145,7 @@ def _write_report_gate(run_dir, study_name, run_id, *,
     Aggregates this run's per-card verdicts (``_load_verdict_cards``) into a
     ``test_report/v1`` and gates it on axis severity: only ``hard``-severity axis
     mismatches FAIL; a soft mismatch or drift WARNs; directional axes never gate
-    (see ``viva_superpowers.study_verdict.severity_gate``). Pure + best-effort in
+    (see ``discovery_engine.study_verdict.severity_gate``). Pure + best-effort in
     the same style as ``_write_test_diff`` — never raises into the run loop.
     """
     run_dir = Path(run_dir)
@@ -165,12 +166,10 @@ def _composite_analyses(spec_id: str, core) -> list:
     declarations (each a dict with at least ``name``, optionally ``params``).
     [] when the generator is unregistered or declares none."""
     try:
-        from process_bigraph.composite_generator import _REGISTRY, discover_generators
+        from vivarium_workbench.lib.composite_lookup import resolve_generator_entry
     except ImportError:
         return []
-    if not _REGISTRY:
-        discover_generators()
-    entry = _REGISTRY.get(spec_id)
+    entry = resolve_generator_entry(spec_id)
     return list(getattr(entry, "analyses", []) or []) if entry else []
 
 

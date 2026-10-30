@@ -11,6 +11,12 @@ workbench against what compose-api and its runners actually produce.
 | `viva-pde-particle.manifest.json` | the environment's interface manifest | `GET https://compose.cam.uchc.edu/registry/environments/viva-pde-particle/manifest` (0.7.33) |
 | `environments.json`, `entries.json` | the registry's environments and entries | `GET /registry/environments`, `GET /registry/entries` on the same deployment |
 
-`../../_contracts/compose_api_openapi_0.7.35.json` is the `openapi.json` shipped in the locked `compose-api-client`
-(biosimulations/compose-api tag `0.7.35`, `367ccb2`; production's 0.7.36 serves the same spec); `test_backend_dispatch_compose.py`
-fails when the two differ.
+`../../_contracts/compose_api_openapi_0.7.72.json` is the `openapi.json` shipped in the locked `compose-api-client`
+(PyPI `compose-api-client` 0.7.72; production's 0.7.76 serves the same spec apart from `info.version` and compose-api's
+`format: binary` rewrite of its upload fields); `test_backend_dispatch_compose.py` fails when the two differ.
+
+The registry files above are the 2026-10-22 captures, kept as they are. On 2026-10-29 the live registry (0.7.76) had moved:
+`viva-pde-particle` has versions 1 to 3 and its default is version 3 (digest `444501fa…`; the captured digest `7ada6256…`
+is version 1), and its manifest also lists the engine's emitters. Every class in `particle_diffusion.pbg` is provided
+by the live manifest. The old manifest stays useful because it lacks `RAMEmitter`, which keeps the engine-class
+carve-out in the preflight under test.

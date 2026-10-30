@@ -48,7 +48,7 @@ def test_type_order_is_known_types_first():
     data = load_structured_resources(FIX)
     assert data is not None
     # All known types present, so order equals the canonical TYPE_ORDER.
-    assert data["type_order"] == list(TYPE_ORDER)
+    assert data["type_order"] == [t for t in TYPE_ORDER if t != "sbml-model"]
     # evidence-dataset is ordered immediately after reaction-pathway.
     order = data["type_order"]
     assert order.index("evidence-dataset") == order.index("reaction-pathway") + 1
@@ -298,3 +298,25 @@ def test_payload_model_validates_reader_output():
     empty = StructuredResourcesPayload(available=False)
     assert empty.available is False
     assert empty.groups == {}
+
+
+def test_sbml_model_groups_first_and_preserves_antimony(tmp_path):
+    (tmp_path / "workspace.yaml").write_text("name: m\n")
+    d = tmp_path / "viva_genesis" / "data" / "vg_data"
+    d.mkdir(parents=True)
+    antimony = "model m\n  S1 -> S2; k*S1\n  k = 1\nend\n"
+    (d / "structured_resources.yaml").write_text(yaml.safe_dump({
+        "name": "m",
+        "resources": [
+            {"id": "lip", "type": "lipid-structure", "name": "Lip"},
+            {"id": "mdl", "type": "sbml-model", "name": "Model",
+             "source": "BIOMD0000000064", "n_species": 2, "n_reactions": 1,
+             "used_by": ["s1"], "antimony": antimony},
+        ],
+    }))
+    data = load_structured_resources(tmp_path)
+    assert data is not None
+    assert data["type_order"][0] == "sbml-model"
+    entry = data["groups"]["sbml-model"][0]
+    assert entry["id"] == "mdl"
+    assert entry["antimony"] == antimony

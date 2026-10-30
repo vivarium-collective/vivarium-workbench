@@ -170,10 +170,12 @@ def resolve_environment(session: "ComposeSession", ws_root: Path) -> dict:
         what = (f"its registry entry {entry.id!r} has no prebuilt environment" if entry is not None
                 else f"no registry entry has source {origin}")
         raise ComposeDispatchError({
-            "error": f"compose-api cannot run this workspace: {what}. Registering it takes an image built from the "
-                     "repository (a compose.Dockerfile and its publishing workflow) and a compose-api config change: "
-                     "a manifest.yaml entry at level tested, an environments.yaml entry, and the image digest in "
-                     "PREBUILT_SIMULATORS (docs/backend-compose-api.md, onboarding).",
+            "error": f"compose-api cannot run this workspace: {what}. This workbench runs a workspace in a prebuilt "
+                     "environment, which takes a manifest.yaml entry for the repository and a declared prebuilt "
+                     "environment (environments.yaml), both by compose-api PR; then an administrator registers the "
+                     "image (POST /registry/environments/{name}/versions) and makes that version the default "
+                     "(PUT /registry/environments/{name}/default). Composed (mash-up) environments are not used yet "
+                     "(docs/backend-compose-api.md, onboarding).",
             "reason": "not-registered", "origin": origin}, 409)
     env = prebuilt[0]
     return {"name": env.name, "simulator": env.simulator, "image": env.image, "entry": entry,
@@ -408,7 +410,7 @@ def _dispatch(session: "ComposeSession", ws_root: Path, composite_id: str, param
         pbg = Path(td) / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', composite_id)}.pbg"
         pbg.write_text(json.dumps(document), encoding="utf-8")
         try:
-            experiment = session.submit(pbg, simulator=env["simulator"], interval=steps,
+            experiment = session.submit(pbg, environment=env["name"], interval=steps,
                                         tags=[*tags, dispatch_tag], description=description)
         except UncertainOutcomeError as e:
             # The answer was lost after the request may have arrived: never resubmit, find the run by its tag.
@@ -573,7 +575,8 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
                 return {"error": f"run {run_id!r} is {state.status}; only a completed run has results to land",
                         "phase": _phase(state.status), "run_id": run_id}, 409
             detail = session.simulation(simulation_id)
-            image = _image_of(session, _text(detail.simulator))
+            version = _version_of(detail)
+            image = _image_of(session, version, _text(detail.simulator))
             with tempfile.TemporaryDirectory() as td:
                 archive = Path(td) / "results.zip"
                 archive.write_bytes(session.results(simulation_id))
@@ -585,6 +588,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
                     "source": deployment, "backend": BACKEND,
                     "compose": {"run_id": run_id, "simulation_id": simulation_id,
                                 "experiment_id": detail.experiment_id, "image": image,
+                                "environment_version": f"{version[0]}@{version[1]}" if version else None,
                                 "slurm_job_id": state.slurm_job},
                 }
                 landed = cr.generate_run_id(spec_id, params=provenance)
@@ -624,10 +628,26 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     return {"run_id": landed}, 200
 
 
-def _image_of(session: "ComposeSession", simulator: "str | None") -> "str | None":
-    """The image a run ran in. compose-api's ``simulator`` is a prebuilt simulator's NAME when the deployment lists
-    its image (``simulations._simulator_label``), else the image itself; the name resolves to the image (a digest)
-    through ``GET /registry/environments``."""
+def _version_of(detail: Any) -> "tuple[str, int] | None":
+    """The ``(environment, number)`` a run ran in, from its own record; None for a run from before versions (the
+    client's field is ``None | Unset | VersionRef``)."""
+    v = detail.environment_version
+    return (v.environment, v.number) if hasattr(v, "environment") and hasattr(v, "number") else None
+
+
+def _image_of(session: "ComposeSession", version: "tuple[str, int] | None", simulator: "str | None") -> "str | None":
+    """The image a run ran in. The run's own environment version names it exactly (a prebuilt version's image, by
+    digest; a composed version has none): the environment's current listing cannot, because its default version
+    moves. A run from before versions has no version; its ``simulator`` is a prebuilt simulator's NAME when the
+    deployment lists its image (``simulations._simulator_label``), else the image itself, and the name resolves to
+    the image through ``GET /registry/environments``."""
+    if version is not None:
+        from compose_api_client.ext import NotFoundError
+
+        try:
+            return _text(session.environment_version(*version).image)
+        except NotFoundError:
+            return None  # the version's record is gone; its label is still the run's provenance
     if simulator is None:
         return None
     env = next((e for e in session.environments() if e.simulator == simulator and e.image), None)
@@ -736,7 +756,7 @@ def trace(run_id: str) -> "tuple[bytes | dict, int, str]":
     except CliError as e:
         body, code = _backend_error(e)
         return body, code, ""
-    return json.dumps(doc).encode("utf-8"), 200, f"{run_id}-trace.json"
+    return json.dumps(doc.to_dict()).encode("utf-8"), 200, f"{run_id}-trace.json"
 
 
 def head_matches_entry(ws_root: Path, entry: Any) -> "bool | None":

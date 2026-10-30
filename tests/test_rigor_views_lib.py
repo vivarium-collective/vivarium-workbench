@@ -104,7 +104,7 @@ class TestBuildStudyRigor:
         payload (spec R2: absent != empty, never a fabricated empty scorecard)."""
         ws = _make_workspace(tmp_path)
 
-        import viva_superpowers.rigor as _rigor_mod
+        import discovery_engine.rigor as _rigor_mod
 
         def _boom(spec: dict) -> dict:
             raise RuntimeError("scorecard exploded")

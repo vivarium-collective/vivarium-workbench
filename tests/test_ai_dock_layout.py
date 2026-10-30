@@ -68,7 +68,7 @@ def test_shared_panel_dock_engine_exists_and_reuses_the_dock_math():
     assert "'--viv-' + key + '-' + suffix" in js                # per-key footprint vars on <html>
     for call in ("V('left')", "V('right')", "V('rw')", "V('bottom')"):
         assert call in js
-    assert "C.dropZone" in js and "C.clampDock" in js           # reuses chat-core's dock math
+    assert "C.dropTarget" in js and "C.clampDock" in js         # reuses chat-core's dock math (iTerm drop targets)
     assert "draggable', 'false'" in js and "pointercancel" in js   # same anti-strand guards as the chat
 
 
@@ -207,12 +207,20 @@ def test_studies_is_a_dockable_rail_tab_like_chat_and_code():
     # New launcher tab + panel.
     assert 'id="viv-studies-toggle"' in html, "Studies rail launcher missing"
     assert 'id="viv-studies-panel"' in html and 'id="viv-studies-body"' in html
-    # Both study tabs sit at the top of the nav, under Search.
+    # Investigations sits at the top of the primary nav, under Search.
     search_i = html.index('viv-rail-search-link')
     inv_i = html.index('data-page="investigations"')
-    studies_i = html.index('id="viv-studies-toggle"')
     resources_i = html.index('id="rail-resources"')
-    assert search_i < inv_i < studies_i < resources_i, "Investigations+Studies not under Search"
+    assert search_i < inv_i < resources_i, "Investigations not under Search"
+    # Studies is now grouped with the OTHER dockable-panel launchers (Chat, Code)
+    # in the pinned .viv-rail-dock-group well below the primary nav — a set of
+    # inset-window toggles set apart from the page-nav tabs.
+    dock_i = html.index('viv-rail-dock-group')
+    studies_i = html.index('id="viv-studies-toggle"')
+    ai_i = html.index('id="viv-ai-toggle"')
+    code_i = html.index('id="viv-code-toggle"')
+    assert resources_i < dock_i, "dockable-panels group should sit below the primary nav"
+    assert dock_i < studies_i < ai_i < code_i, "dock group order: Studies, Chat, Code"
 
     js = (STATIC / "studies-panel.js").read_text()
     assert "VivPanelDock.make" in js and "key: 'studies'" in js
@@ -279,16 +287,18 @@ def test_search_and_stepper_share_one_row():
 
 
 def test_dockable_panel_headers_are_inline_corner_controls():
-    """studies / code / chat panels drop the full-width header bar; the dock/close
-    controls sit in the top-right corner, in line with the first row (not a
-    separate bar). Only the icon controls remain (title dropped), and each panel's
-    first row reserves a corner so the controls never occlude existing buttons."""
+    """studies / code / chat panels drop the full-width header bar; the legacy
+    dock/close corner-control rules remain in the stylesheet. The Studies and Chat
+    dock/close controls now live in the panel titlebar (.vp-titlebar), so those two
+    rows no longer reserve a right-hand corner — their buttons fill to the panel's
+    right edge. The code panel's rows still reserve their corner."""
     css = (STATIC / "style.css").read_text()
     for sel in (".viv-studies-panel .vp-head", ".viv-code-rail .vp-head", "#viv-ai-panel .vp-head"):
         assert sel in css, f"{sel} corner-control rule missing"
     assert "position:absolute; top:7px; right:6px;" in css
     assert ".viv-studies-panel .vp-head > :not(.vp-icon)" in css          # title dropped
-    assert "#viv-ai-panel .vp-toolbar{ padding-right" in css              # chat reserves its corner
+    assert "#viv-ai-panel .vp-toolbar{ padding-right" not in css          # chat no longer reserves a corner
+    assert ".viv-code-rail .viv-code-newbar{ padding-right" in css        # code panel still reserves
 
 
 def test_popout_close_returns_to_inline_docking():

@@ -19,7 +19,7 @@ ledger::
 so a report can say "pins 2/2 · acceptance 1/2 · expected-fail behaved 1/1"
 instead of one conflated "gate: passed".
 
-Every public function here DELEGATES to ``viva_superpowers.study_verdict``
+Every public function here DELEGATES to ``discovery_engine.study_verdict``
 when the corresponding function is importable (i.e. once #285 lands in the
 installed viva-superpowers), and otherwise mirrors the same classification
 locally from the spec fields — expected-fail markers checked FIRST so a
@@ -61,7 +61,7 @@ def is_expected_fail(test) -> bool:
     ``control: negative``. Delegates to viva_superpowers when available.
     """
     try:
-        from viva_superpowers.study_verdict import is_expected_fail as _ief
+        from discovery_engine.study_verdict import is_expected_fail as _ief
     except ImportError:
         pass  # local mirror below — can delegate once viva-superpowers #285 lands
     else:
@@ -105,7 +105,7 @@ def classify_gates(spec: dict) -> dict:
     viva_superpowers when available.
     """
     try:
-        from viva_superpowers.study_verdict import classify_gates as _cg
+        from discovery_engine.study_verdict import classify_gates as _cg
     except ImportError:
         pass  # local mirror below — can delegate once viva-superpowers #285 lands
     else:
@@ -164,12 +164,12 @@ def verdict_count_split(spec: dict) -> dict:
     ``behaved`` counts expected-fail controls whose canonical result IS
     ``FAIL`` (the control failed exactly as designed). ``label`` is the
     compact human string, e.g. ``"pins 2/2 · acceptance 1/2 · expected-fail
-    behaved 1/1"``. Delegates to ``viva_superpowers.study_verdict`` when its
+    behaved 1/1"``. Delegates to ``discovery_engine.study_verdict`` when its
     ``verdict_count_split`` is importable; otherwise mirrors the same buckets
     locally (can delegate fully once viva-superpowers #285 lands).
     """
     try:
-        from viva_superpowers.study_verdict import verdict_count_split as _vcs
+        from discovery_engine.study_verdict import verdict_count_split as _vcs
     except ImportError:
         pass  # local mirror below — can delegate once viva-superpowers #285 lands
     else:
