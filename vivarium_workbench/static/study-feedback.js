@@ -648,6 +648,10 @@
       download(exportName(), y);
     }
   }
+  // >>> FB_LIVE_SAVE — the only network code. The self-contained investigation
+  // report must make no network calls, so render_html STRIPS this block (down to
+  // a no-op) when it inlines this engine. Never show the Save button where this
+  // is stripped (the report sets noSave). Do not add fetch()/"/api/" elsewhere.
   function saveToWorkspace() {
     var inv = pickInvestigation();
     if (!inv) { toast("No investigation resolved — export instead", false); return; }
@@ -670,6 +674,7 @@
       })
       .catch(function (err) { toast("Save failed: " + err, false); });
   }
+  // <<< FB_LIVE_SAVE
 
   // ── styles ─────────────────────────────────────────────────────────────────────
   function injectStyle() {

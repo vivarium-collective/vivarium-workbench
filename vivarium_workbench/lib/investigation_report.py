@@ -1299,6 +1299,15 @@ def render_html(data: dict, plotly_js: "str | None" = None) -> str:
         fb_js = (STATIC_DIR / "study-feedback.js").read_text(encoding="utf-8")
     except Exception:
         fb_js = ""
+    if fb_js:
+        # The report is self-contained and offline — strip the only network code
+        # (the live Save-to-workspace block) so the bundle has no fetch()/"/api/".
+        fb_js = re.sub(
+            r"//\s*>>> FB_LIVE_SAVE.*?//\s*<<< FB_LIVE_SAVE",
+            "function saveToWorkspace(){}",
+            fb_js,
+            flags=re.S,
+        )
     html = html.replace("__FEEDBACK_JS__", fb_js.replace("</script", "<\\/script"))
     pj = plotly_js or ""
     if pj:
