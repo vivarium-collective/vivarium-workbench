@@ -106,14 +106,15 @@ framework and the discovery cycle: study audit/evaluation/verdict/status, rigor,
 the report linter, the argument/knowledge/narrative projections, post-sim steps,
 and `viz_freshness`. `viva_superpowers` is the skills-first facade plus the helpers
 that stayed behind (`catalog`, `feedback_import`, `feedback_tracking`,
-`chart_store`, `run_params`, `loop_state`, `test_audit`). **The workbench consumes
-the moved modules from `discovery_engine.*`.** Note: `viva_superpowers` does **not**
-re-export `discovery_engine` — it still carries full, *independently diverging*
-forks of the moved modules (kept alive by its own console scripts, skills, and
-external-CI consumers), not back-compat shims. Reconciling those forks is tracked
-separately; until then, `discovery_engine.*` is canonical for the workbench and a
-`viva_superpowers` fork may differ. `tests/test_plugin_import_allowlist.py` plus
-the import-linter config govern which modules the workbench may import from each.
+`chart_store`, `run_params`, `loop_state`, `test_audit`); for every moved module it
+keeps only a **back-compat shim** that re-exports the engine
+(`sys.modules[__name__] = discovery_engine.<m>`), so `viva_superpowers.<m>` *is* the
+same module object as `discovery_engine.<m>` — a permanent facade with **no forks and
+no divergence** (viva-superpowers' own `test_discovery_engine_facade.py` asserts that
+object identity across the whole set). **New workbench code imports moved modules from
+`discovery_engine.*` directly** (never through the shim); `tests/test_plugin_import_allowlist.py`
+(the allowlist) plus the import-linter config govern which modules the workbench may
+import from each package.
 
 Supporting the typed contract: `lib/models.py` holds pydantic models for the JSON
 payloads (many still `extra="allow"` passthroughs — tightening them is tracked in
