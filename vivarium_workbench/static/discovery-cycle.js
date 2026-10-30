@@ -41,7 +41,11 @@
   function injectStyle() {
     if (el("dcyc-style")) return;
     var css = [
-      ".dcyc-wrap{display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px}",
+      // Height chain so the graph scrolls inside the dock (these viv-cycle-*
+      // classes carry no CSS otherwise; mirrors style.css's .viv-studies-* rules).
+      "#viv-cycle-panel .viv-cycle-panel-inner{display:flex;flex-direction:column;height:100%;min-width:0;flex:1}",
+      "#viv-cycle-body{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}",
+      ".dcyc-wrap{display:flex;flex-direction:column;flex:1;min-height:0;font-size:13px}",
       ".dcyc-top{padding:10px 12px;border-bottom:1px solid var(--viv-border,#e5e7eb);display:flex;flex-direction:column;gap:8px;flex:none}",
       ".dcyc-current{font-size:12px;color:var(--viv-fg-muted,#667);display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
       ".dcyc-current b{color:var(--viv-fg,#223)}",
@@ -52,7 +56,7 @@
       ".dcyc-btn-primary{background:#2563eb;border-color:#2563eb;color:#fff}",
       ".dcyc-btn-sm{padding:3px 9px;font-size:12px}",
       ".dcyc-status{font-size:11.5px;color:var(--viv-fg-muted,#778);min-height:1em}",
-      ".dcyc-graph{flex:1;overflow:auto;padding:8px 10px}",
+      ".dcyc-graph{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 10px}",
       ".dcyc-phase-h{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--viv-fg-muted,#9aa3af);margin:10px 0 3px}",
       ".dcyc-node{border:1px solid var(--viv-border,#e1e3ea);border-radius:9px;margin-bottom:6px;background:var(--viv-bg,#fff);overflow:hidden}",
       ".dcyc-node.st-mut{border-style:dashed}",
