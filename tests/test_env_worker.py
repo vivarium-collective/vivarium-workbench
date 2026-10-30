@@ -6,6 +6,7 @@ suite runs on — so macOS locally and Linux in CI both cover the fd-passing +
 framing transport (spec §2, platform support).
 """
 import socket
+import sys # C.M. The system needs to be checked for Windows.
 from pathlib import Path
 
 import pytest
@@ -64,7 +65,8 @@ def test_close_is_clean_and_idempotent(tmp_path):
     assert not w.alive()
     w.close()  # idempotent
 
-
+# C.M.: This test only makes sense for Unix-type systems so should be skipped on Windows.
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGSTOP does not exist on Windows")
 def test_timeout_surfaces_as_unavailable(tmp_path):
     """A worker that never replies must raise, not hang, once the timeout elapses."""
     w = EnvWorker(tmp_path, timeout=0.5)
@@ -80,7 +82,8 @@ def test_timeout_surfaces_as_unavailable(tmp_path):
         w._proc.kill()
         w.close()
 
-
+# C.M.: The socketpair test does not apply to Windows, so the test should be skipped then.
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows uses the dial-back transport")
 def test_transport_is_socketpair_no_filesystem(tmp_path):
     """The channel is a socketpair (spec §5) — no named UDS path to leak/limit."""
     w = EnvWorker(tmp_path)
