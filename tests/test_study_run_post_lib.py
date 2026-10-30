@@ -543,6 +543,47 @@ def test_render_study_visualizations_happy_writes_and_passes_effective_spec(tmp_
     assert captured["name"] == "study-x"
 
 
+def test_render_study_visualizations_skips_addressless_prerendered_viz(tmp_path, monkeypatch):
+    """REGRESSION: a viz with no resolvable address (pre-rendered externally — it
+    declares a `rendered` file but no live render class, and workspace.yaml has no
+    matching class) must be EXCLUDED, not sent to render_visualizations — which would
+    KeyError on the missing 'address' and overwrite its good html with an error stub."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: w\nvisualizations: []\n", encoding="utf-8")
+    study_dir = tmp_path / "study"
+    (study_dir / "viz").mkdir(parents=True)
+    # the externally pre-rendered figure the flush must not clobber
+    prer = study_dir / "viz" / "eigen.html"
+    prer.write_text("<svg>real figure</svg>", encoding="utf-8")
+
+    import vivarium_workbench.lib.composite_lookup as cl
+    import vivarium_workbench.lib.viz_render as vr
+    monkeypatch.setattr(cl, "_discover_generators_via_worker", lambda ws_root: {})
+    monkeypatch.setattr(vr, "viz_render_hooks", lambda ws_root: ({}, lambda doc, _r=None: "<html>"))
+
+    captured = {}
+
+    def fake_render_visualizations(effective_spec, sd, name, inputs_by_class=None,
+                                   core_registry=None, build_and_run=None):
+        captured["viz"] = [v.get("name") for v in effective_spec.get("visualizations", [])]
+        return []
+
+    import vivarium_workbench.lib.investigations as inv
+    monkeypatch.setattr(inv, "render_visualizations", fake_render_visualizations)
+
+    spec = {"name": "s", "visualizations": [
+        {"name": "addressed", "address": "local:Foo"},
+        {"name": "eigen", "rendered": "workspace/.../eigen.html"},  # no address
+    ]}
+    srp.render_study_visualizations(ws, study_dir, spec, "spec.id")
+
+    # the addressless viz was excluded (not passed to the renderer) ...
+    assert captured.get("viz") == ["addressed"]
+    # ... and its pre-rendered figure was left intact (not clobbered with a stub).
+    assert prer.read_text(encoding="utf-8") == "<svg>real figure</svg>"
+
+
 def test_run_post_run_scripts_detects_write_with_stale_mtime(tmp_path, monkeypatch):
     """REGRESSION: detection must not compare st_mtime against a wall clock.
 
