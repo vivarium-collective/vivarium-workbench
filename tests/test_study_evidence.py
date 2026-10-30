@@ -124,3 +124,18 @@ def test_probe_performs_no_writes(fixture_ws):
     evidence_for_study(fixture_ws, "s3-protrusions-to-enclosure")
     evidence_for_study(fixture_ws, "untouched")
     assert snap() == before
+
+
+def test_completed_then_failed_stays_completed(fixture_ws):
+    _runs(fixture_ws, "redo", [("r1", "completed", 100.0), ("r2", "failed", 200.0)])
+    assert evidence_for_study(fixture_ws, "redo").execution == "completed"
+
+
+def test_unreadable_runs_db_is_logged_not_silent(fixture_ws, caplog):
+    sd = fixture_ws / "studies" / "corrupt"
+    sd.mkdir(parents=True)
+    (sd / "runs.db").write_bytes(b"this is not a sqlite database" * 50)
+    with caplog.at_level("WARNING", logger="vivarium_workbench.lib.study_evidence"):
+        ev = evidence_for_study(fixture_ws, "corrupt")
+    assert ev.execution == "not_run"
+    assert any("could not be read" in r.message for r in caplog.records)

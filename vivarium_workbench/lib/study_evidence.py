@@ -14,11 +14,14 @@ orphaned / cancelled (``ran`` / ``done`` also count as success). Gate mapping:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+_log = logging.getLogger(__name__)
 
 _COMPLETE = {"complete", "completed", "ran", "done"}
 _UNGRADED = {"", "ungraded", "pending", "planned", "not_run", "n/a", "none"}
@@ -34,29 +37,49 @@ class StudyEvidence:
     n_runs: int
 
 
+def _query_rows(uri: str) -> list[tuple[str, str]]:
+    conn = sqlite3.connect(uri, uri=True, timeout=1.0)
+    try:
+        return [(r[0], str(r[1] or "").strip().lower()) for r in conn.execute(
+            "SELECT run_id, status FROM runs_meta "
+            "ORDER BY COALESCE(completed_at, started_at) DESC, started_at DESC")]
+    finally:
+        conn.close()
+
+
 def _run_rows(runs_db: Path) -> list[tuple[str, str]]:
-    """``[(run_id, status)]`` newest-first from runs_meta; [] if absent/unreadable."""
+    """``[(run_id, status)]`` newest-first from runs_meta.
+
+    A missing file means no runs. A file that exists but cannot be read is retried
+    with ``immutable=1`` (read-only published bundles can't create a WAL ``-shm``);
+    if that also fails the error is logged before falling back to ``[]``.
+    """
     if not runs_db.is_file():
         return []
     try:
-        conn = sqlite3.connect(f"file:{runs_db}?mode=ro", uri=True, timeout=1.0)
-        try:
-            return [(r[0], str(r[1] or "").strip().lower()) for r in conn.execute(
-                "SELECT run_id, status FROM runs_meta "
-                "ORDER BY COALESCE(completed_at, started_at) DESC, started_at DESC")]
-        finally:
-            conn.close()
+        return _query_rows(f"file:{runs_db}?mode=ro")
     except sqlite3.Error:
+        pass
+    try:
+        return _query_rows(f"file:{runs_db}?mode=ro&immutable=1")
+    except sqlite3.Error as exc:
+        _log.warning("runs.db exists but could not be read (%s): %s; "
+                     "treating as no runs", runs_db, exc)
         return []
 
 
 def _execution(rows: list[tuple[str, str]]) -> str:
+    """Aggregate over ALL runs: any running -> running; else any success ->
+    completed (a later failed re-run does not erase a completed run); else
+    rows exist -> failed; no rows -> not_run."""
     if not rows:
         return "not_run"
-    if any(s == "running" for _, s in rows):
+    statuses = {s for _, s in rows}
+    if "running" in statuses:
         return "running"
-    # Latest run wins: an earlier failure does not mask a later success.
-    return "completed" if rows[0][1] in _COMPLETE else "failed"
+    if statuses & _COMPLETE:
+        return "completed"
+    return "failed"
 
 
 def _graded_overalls(study_dir: Path) -> list[str]:
