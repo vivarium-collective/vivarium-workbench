@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pbg-artistoo"
+version = "0.1.0"
+description = "Process-bigraph wrapper for the Artistoo Cellular Potts Model (via a Node.js bridge)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [{name = "Eran Agmon", email = "agmon.eran@gmail.com"}]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "bigraph-schema>=0.0.60",
+    "process-bigraph>=0.0.66",
+    "bigraph-viz>=2.0.3",
+    "pyyaml>=6.0",
+    "jsonschema[format-nongpl]>=4.21",
+    "jinja2>=3.1",
+    "pypdf>=4.0",
+    "matplotlib",
+    "plotly",
+    "vivarium-workbench",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib", "plotly", "bigraph-viz2"]
+
+[tool.uv.sources]
+# vivarium-workbench (the dashboard/publish CLI) isn't on PyPI — resolve it from
+# git main so `uv sync` and the publish workflow can install it.
+vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-workbench.git", branch = "main" }
+
+[project.urls]
+Homepage = "https://github.com/vivarium-collective/pbg-artistoo"
+Issues = "https://github.com/vivarium-collective/pbg-artistoo/issues"
+Artistoo = "https://github.com/ingewortel/artistoo"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pbg_artistoo"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"pbg_artistoo/node_bridge/artistoo_bridge.js" = "pbg_artistoo/node_bridge/artistoo_bridge.js"
+"pbg_artistoo/node_bridge/package.json" = "pbg_artistoo/node_bridge/package.json"

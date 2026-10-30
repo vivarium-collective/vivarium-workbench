@@ -71,6 +71,15 @@ vivarium-workbench doctor          # exits non-zero if process-bigraph/viva-supe
 # workspace itself (between <!-- BEGIN:composites/investigations --> markers).
 # --check exits 1 if stale (wire into the workspace's CI).
 vivarium-workbench gen-readme --workspace /path/to/ws [--check]
+
+# The compose-api registry entry for a workspace (paste under `entries:` in compose-api's
+# manifest.yaml), derived from the workspace's own files and from the commit it pins: module
+# roots are the packages that commit's build ships. Refuses a dirty or unpushed HEAD, a workspace
+# that is not a repository root, and a level above `listed` without --evidence; warns about what
+# only a person can decide (dev tooling in the runtime dependencies, a pixi.toml, non-Python
+# parts). --check compares the registry's existing entry with the workspace instead (exit 1 on
+# module roots that share nothing with what it ships; the checkout's state is only a warning).
+vivarium-workbench compose-entry --workspace /path/to/ws [--registry URL|FILE] [--level tested --evidence TEXT] [--check]
 ```
 
 There is no separate build step (pure Python + static assets) and no linter
