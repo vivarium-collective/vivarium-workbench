@@ -229,12 +229,14 @@ class _Modules:
 
     def __init__(self) -> None:
         from discovery_engine import discover
+        from discovery_engine import discovery_engine as de
         from discovery_engine import (
             evidence_integrity, candidate_action, experiment_design,
             model_architect, evaluation, transition_model,
             study_seeding, study_refinement,
         )
         self.discover = discover
+        self.de = de
         self.evidence_integrity = evidence_integrity
         self.candidate_action = candidate_action
         self.experiment_design = experiment_design
@@ -346,7 +348,35 @@ def build_cycle_trace(ws_root, inv_slug: str, *, only: list[str] | None = None) 
     adv = _STEP_BY_ID["advance"]
     out_steps.append({**adv, "status": "idle", "duration_ms": 0,
                       "summary": "run via Run continuously (sandboxed)"})
-    return {"available": True, "inv_slug": inv_slug, "steps": out_steps}
+    return {"available": True, "inv_slug": inv_slug,
+            "summary": _cycle_summary(ctx, M), "steps": out_steps}
+
+
+def _cycle_summary(ctx: dict, M: _Modules) -> dict:
+    """The engine's headline verdict for the panel banner: is the investigation
+    closed, how big is the open frontier, what's the next action, and — crucially —
+    how much of the plan is machine-runnable vs. human-only decisions. This is what
+    answers 'I ran the cycle, why didn't anything advance?': when ``runnable`` is 0
+    and ``human_decisions`` > 0, there is nothing for Advance to execute."""
+    cyc = ctx.get("cyc") or {}
+    inv_spec = ctx["inv_spec"]
+    try:
+        clo = M.de.closure(cyc, inv_spec)
+        na = M.de.next_action(cyc, inv_spec)
+        plan = M.de.execute_plan(cyc, inv_spec) if hasattr(M.de, "execute_plan") else []
+        runnable = [p for p in plan if (p.get("consequence") or "") != "human-only"]
+        consequence = plan[0].get("consequence") if plan else None
+        return {
+            "closed": clo.get("closed"),
+            "frontier_size": clo.get("open_items"),
+            "next_action": ({"op": na.get("op"), "kind": na.get("kind"),
+                             "target": na.get("target"), "consequence": consequence}
+                            if na else None),
+            "runnable": len(runnable),
+            "human_decisions": len(plan) - len(runnable),
+        }
+    except Exception:
+        return {}
 
 
 def rerun_step(ws_root, inv_slug: str, step_id: str) -> dict:

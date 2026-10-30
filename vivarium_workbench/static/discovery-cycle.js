@@ -21,7 +21,7 @@
 
   var ctl = null, popoutWin = null, initDone = false, built = false;
   // panel state (persists while the panel is mounted)
-  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "" };
+  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null };
 
   function el(id) { return document.getElementById(id); }
   function base() { return global.__BASE_PATH__ || ""; }
@@ -57,6 +57,12 @@
       ".dcyc-btn-sm{padding:3px 9px;font-size:12px}",
       ".dcyc-status{font-size:11.5px;color:var(--viv-fg-muted,#778);min-height:1em}",
       ".dcyc-graph{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 10px}",
+      ".dcyc-banner{border-radius:9px;padding:9px 11px;margin:2px 0 8px;border:1px solid var(--viv-border,#e1e3ea)}",
+      ".dcyc-bn-closed{background:rgba(22,163,74,.08);border-color:rgba(22,163,74,.35)}",
+      ".dcyc-bn-open{background:rgba(37,99,235,.07);border-color:rgba(37,99,235,.3)}",
+      ".dcyc-bn-h{font-weight:650;font-size:13px}",
+      ".dcyc-bn-sub{font-size:11.5px;color:var(--viv-fg,#445);margin-top:3px}",
+      ".dcyc-chip{display:inline-block;font-size:10px;padding:0 6px;border-radius:999px;border:1px solid var(--viv-border,#cdd);background:var(--viv-bg,#fff);vertical-align:1px}",
       ".dcyc-phase-h{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--viv-fg-muted,#9aa3af);margin:10px 0 3px}",
       ".dcyc-node{border:1px solid var(--viv-border,#e1e3ea);border-radius:9px;margin-bottom:6px;background:var(--viv-bg,#fff);overflow:hidden}",
       ".dcyc-node.st-mut{border-style:dashed}",
@@ -220,9 +226,35 @@
 
   function setTrace(trace) {
     S.steps = (trace && trace.steps) || [];
+    if (trace && "summary" in trace) S.summary = trace.summary || null;
     S.byId = {};
     S.steps.forEach(function (s) { S.byId[s.id] = s; });
     renderGraph();
+  }
+
+  function bannerHtml() {
+    var m = S.summary;
+    if (!m || m.closed == null) return "";
+    var closed = !!m.closed;
+    var na = m.next_action;
+    var cls = closed ? "dcyc-bn-closed" : "dcyc-bn-open";
+    var head = closed
+      ? "✓ Closed · " + (m.frontier_size || 0) + " open (non-blocking)"
+      : "◷ Open · " + (m.frontier_size || 0) + " on the frontier";
+    var runline = "";
+    if (m.runnable === 0 && m.human_decisions > 0) {
+      runline = '<div class="dcyc-bn-sub">Nothing to auto-run — ' + m.human_decisions +
+        " human decision(s) pending. Running a cycle analyzes; it won't advance these.</div>";
+    } else if (m.runnable > 0) {
+      runline = '<div class="dcyc-bn-sub">' + m.runnable + " runnable step(s) — use Advance (sandbox).</div>";
+    }
+    var naline = na
+      ? '<div class="dcyc-bn-sub">Next: <b>' + esc(na.op || na.kind) + "</b>" +
+        (na.consequence ? ' <span class="dcyc-chip">' + esc(na.consequence) + "</span>" : "") +
+        (na.target ? " — " + esc(String(na.target).slice(0, 90)) : "") + "</div>"
+      : "";
+    return '<div class="dcyc-banner ' + cls + '"><div class="dcyc-bn-h">' + head + "</div>" +
+      naline + runline + "</div>";
   }
 
   // ---- render -------------------------------------------------------------
@@ -232,7 +264,7 @@
     if (!S.steps.length) { g.innerHTML = '<p class="empty-state">Load an investigation to see its cycle.</p>'; return; }
     var phases = [];
     S.steps.forEach(function (s) { if (phases.indexOf(s.phase) < 0) phases.push(s.phase); });
-    g.innerHTML = phases.map(function (ph) {
+    g.innerHTML = bannerHtml() + phases.map(function (ph) {
       var nodes = S.steps.filter(function (s) { return s.phase === ph; });
       return '<div class="dcyc-phase-h">' + esc(ph) + "</div>" + nodes.map(nodeHtml).join("");
     }).join("");
