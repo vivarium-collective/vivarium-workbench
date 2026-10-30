@@ -393,6 +393,7 @@
       "</div>";
     document.body.appendChild(pop);
     curPop = pop;
+    pop._anchor = anchorBtn;
     positionPop(pop, anchorBtn);
 
     var ta = pop.querySelector(".fb-note");
@@ -775,7 +776,19 @@
       if (curPop && !ev.target.closest(".fb-pop") && !ev.target.closest(".fb-corner")) closePop();
     });
     document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closePop(); });
-    window.addEventListener("resize", closePop);
+    // On resize, REPOSITION the open popover — never close it. The study page
+    // renders in an auto-growing iframe, and focusing the note textarea opens
+    // the mobile keyboard; both fire resize, and closing here made the popover
+    // vanish right after it opened (worse on mobile). Reposition to the anchor
+    // if it's still in the DOM; otherwise leave the popover where it is.
+    var _rzTimer = null;
+    window.addEventListener("resize", function () {
+      if (!curPop || _rzTimer) return;
+      _rzTimer = setTimeout(function () {
+        _rzTimer = null;
+        if (curPop && curPop._anchor && curPop._anchor.isConnected) positionPop(curPop, curPop._anchor);
+      }, 80);
+    });
   }
 
   if (document.readyState === "loading") {
