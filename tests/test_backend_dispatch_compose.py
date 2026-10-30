@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -128,6 +129,8 @@ def test_the_manifest_check_reads_dict_form_addresses_as_compose_api_does():
     "https://github.com/vivarium-collective/viva-pde-particle.git/",
     "https://user:secret@github.com/vivarium-collective/viva-pde-particle.git",
     "ssh://git@github.com/vivarium-collective/viva-pde-particle.git",
+    # how a registry entry pinned by commit links its repository (viva-basic-processes' `source` in the live registry)
+    "https://github.com/vivarium-collective/viva-pde-particle/tree/70438826a348cfb3feddbc928e2c9038129ff69e",
 ])
 def test_every_spelling_of_a_git_remote_names_the_same_repository(remote):
     assert rc._canonical_repo(remote) == "github.com/vivarium-collective/viva-pde-particle"
@@ -791,3 +794,293 @@ def test_the_composites_card_runner_runs_on_compose_api_and_lands_the_history(ws
         assert conn.execute("SELECT count(*) FROM history WHERE simulation_id = 'card-1'").fetchone()[0] == 6
     finally:
         conn.close()
+
+
+# --- an entry no prebuilt environment bundles: compose-api chooses or builds the environment ------------------------
+#
+# The registry below is production's (0.7.76, 2026-10-30; tests/_fixtures/compose_api/README.md): `viva-basic-processes`
+# is a real entry at level tested, pinned by commit (its `source` links the commit), in no environment. The fixture
+# workspace stands in for its repository only through the git origin that matches it to the entry: what is under test
+# is what the workbench sends and how it reads the answers, which the stub validates against the contract. That
+# compose-api then picks or builds the environment is proven by a real run only.
+
+BASIC = "viva-basic-processes"
+BASIC_REMOTE = "git@github.com:vivarium-collective/viva-basic-processes.git"
+PILOT_REMOTE = "git@github.com:vivarium-collective/viva-pde-particle.git"
+
+
+def _live_registry(stub) -> None:
+    stub.respond("GET", "/registry/entries", 200, _json("entries_0.7.76.json"))
+    stub.respond("GET", "/registry/environments", 200, _json("environments_0.7.76.json"))
+
+
+def _with_origin(ws: Path, remote: str) -> None:
+    subprocess.run(["git", "init", "-q", str(ws)], check=True)
+    subprocess.run(["git", "-C", str(ws), "remote", "remove", "origin"], check=False, capture_output=True)
+    subprocess.run(["git", "-C", str(ws), "remote", "add", "origin", remote], check=True)
+
+
+def test_a_commit_pinned_registry_source_names_the_same_repository_as_the_remote():
+    entry = next(e for e in _json("entries_0.7.76.json") if e["id"] == BASIC)
+    assert "/tree/" in entry["source"], "the real entry links its commit; if this changed, so did the shape under test"
+    assert rc._canonical_repo(entry["source"]) == rc._canonical_repo(BASIC_REMOTE)
+    assert rc._canonical_repo(BASIC_REMOTE) == "github.com/vivarium-collective/viva-basic-processes"
+
+
+def test_an_entry_no_prebuilt_environment_bundles_is_run_in_an_environment_compose_api_chooses(ws, stub, backend_env):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    with rc._session() as session:
+        env = rc.resolve_environment(session, ws)
+    assert (env["name"], env["simulator"], env["image"]) == (None, None, None)
+    assert (env["entry"].id, env["module_roots"]) == (BASIC, ["viva_basic_processes"])
+
+
+def test_the_prebuilt_environment_still_wins_when_the_entry_has_one(ws, stub, backend_env):
+    """The path viva-pde-particle runs on today is unchanged by the inferred one, on production's current registry."""
+    _live_registry(stub)
+    _with_origin(ws, PILOT_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    with rc._session() as session:
+        env = rc.resolve_environment(session, ws)
+    assert (env["name"], env["simulator"]) == (PILOT, PILOT)
+    assert env["image"].startswith("ghcr.io/vivarium-collective/viva-pde-particle-compose@sha256:")
+    # every entry the environment bundles, as before: since 0.7.76 that includes the engine's emitters entry
+    assert sorted(env["module_roots"]) == ["process_bigraph.emitter", "viva_pde_particle"]
+
+
+def test_a_repository_no_entry_has_is_still_told_to_add_one(ws, stub, backend_env):
+    _live_registry(stub)
+    _with_origin(ws, "git@github.com:someone/unregistered.git")
+    _name(backend_env, stub.url, environment=None)
+    with rc._session() as session, pytest.raises(rc.ComposeDispatchError) as refused:
+        rc.resolve_environment(session, ws)
+    assert refused.value.status == 409 and refused.value.body["reason"] == "not-registered"
+    assert "manifest.yaml" in refused.value.body["error"] and "environments.yaml" not in refused.value.body["error"]
+
+
+def test_a_study_run_with_no_prebuilt_environment_names_none_and_reads_no_manifest(ws, stub, backend_env,
+                                                                                    dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 202, res.text
+    assert res.json()["run_id"] == RUN_ID and res.json()["environment"] is None
+
+    (call,) = stub.calls_to("run-simulation")
+    assert call.status == 200  # the stub validated the form and query against the contract
+    assert "environment" not in call.query and "simulator" not in call.query
+    assert call.query["tags"][:2] == ["workbench", "study:demo"]
+    assert call.query["tags"][2].startswith(rc.DISPATCH_TAG_PREFIX) and len(call.query["tags"]) == 3
+    doc = json.loads(call.body["uploaded_file"])
+    assert all(a.startswith("local:") and not a.startswith("local:!") for a in rc._addresses(doc))
+    assert stub.calls_to("get-environment-manifest") == [], "an environment that may not exist yet has no manifest"
+
+
+def test_with_no_manifest_only_the_address_form_is_checked():
+    doc = {"a": {"address": "local:module_nobody_registered.Anything"}, "b": {"address": "local:!x.Y"},
+           "c": {"address": {"protocol": "parallel", "data": "x.Y"}}}
+    problems = rc.manifest_violations(doc, None, [])
+    assert len(problems) == 2 and all("only local:<module>.<Class>" in p for p in problems), problems
+    assert not any("module_nobody_registered" in p for p in problems), "the service answers for classes it may not know"
+    # an environment with a manifest is checked as before: the same document has one more thing wrong with it
+    assert len(rc.manifest_violations(doc, [], [])) == 3
+
+
+def test_the_preflight_for_an_inferred_environment_says_what_a_first_run_needs(ws, stub, backend_env,
+                                                                              dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    anonymous = dashboard_client(ws).get("/api/remote-dispatch-preflight").json()
+    assert (anonymous["ok"], anonymous["reason"], anonymous["environment"]) == (True, "inferred", None)
+    assert (anonymous["registry_entry"], anonymous["registry_level"], anonymous["signed_in"]) == (BASIC, "tested", False)
+    assert rc.TOKEN_ENV_VAR in anonymous["message"]
+
+    backend_env.setenv(rc.TOKEN_ENV_VAR, "token-for-test")
+    signed_in = dashboard_client(ws).get("/api/remote-dispatch-preflight").json()
+    assert signed_in["signed_in"] is True and rc.TOKEN_ENV_VAR not in signed_in["message"]
+
+
+def test_a_first_run_that_needs_a_signed_in_caller_says_so_and_is_not_retried(ws, stub, backend_env, dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    stub.respond_error("POST", "/simulation/run", 401, {"detail": "Creating an environment needs a signed-in caller"})
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 401 and rc.TOKEN_ENV_VAR in res.json()["error"], res.text
+    assert len(stub.calls_to("run-simulation")) == 1, "a refused submission is never sent twice"
+
+
+def test_compose_apis_refusal_is_shown_in_its_own_words_with_each_violation(ws, stub, backend_env, dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    detail = {"message": "the composite names processes this service will not run",
+              "violations": [{"document": "demo.pbg", "address": "local:pbg_ws_increase_demo.Increase",
+                              "reason": "module `pbg_ws_increase_demo` is not provided by any registered simulator",
+                              "always_rejected": False}]}
+    stub.respond("POST", "/simulation/run", 400, {"detail": detail})
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    error = res.json()["error"]
+    assert res.status_code == 409 and res.json()["reason"] == "refused", res.text
+    assert "the composite names processes this service will not run" in error
+    assert "local:pbg_ws_increase_demo.Increase: module `pbg_ws_increase_demo` is not provided" in error
+    assert "{" not in error, "sentences, not a dict"
+
+
+def test_a_lost_answer_in_an_inferred_environment_is_found_by_its_tag_and_never_resubmitted(ws, stub, backend_env,
+                                                                                          dashboard_client):
+    """A second submission could start a second environment build, so this matters more here than for an image."""
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    stub.respond_error("POST", "/simulation/run", 500, {"detail": "proxy timeout"})
+    stub.respond("GET", "/simulations", 200, {"simulations": [_summary(SIM_ID)], "total": 1})
+    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
+    assert res.status_code == 202 and res.json()["run_id"] == RUN_ID, res.text
+    assert len(stub.calls_to("run-simulation")) == 1
+
+
+LIVE_COMPOSE = os.environ.get("VIVARIUM_WORKBENCH_LIVE_COMPOSE", "").strip()
+
+
+@pytest.mark.skipif(not LIVE_COMPOSE, reason="opt-in: VIVARIUM_WORKBENCH_LIVE_COMPOSE=<base URL> reads a live registry")
+def test_the_live_registry_resolves_the_pilot_to_its_image_and_a_bundle_less_entry_to_none(ws, backend_env):
+    """Read-only (two GETs): the stub is not the only oracle. It fails when the registry moves (viva-basic-processes
+    gains an environment, the pilot loses its image), which is the signal to refresh the 0.7.76 fixtures."""
+    backend_env.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", LIVE_COMPOSE)
+    backend_env.delenv("VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT", raising=False)
+    with rc._session() as session:
+        _with_origin(ws, PILOT_REMOTE)
+        pilot = rc.resolve_environment(session, ws)
+        _with_origin(ws, BASIC_REMOTE)
+        basic = rc.resolve_environment(session, ws)
+    assert pilot["name"] == PILOT and pilot["image"].startswith("ghcr.io/")
+    assert basic["name"] is None and basic["entry"].id == BASIC
+
+
+# --- what the adversarial review found ---------------------------------------------------------------------------------
+
+GIT_QUIET = ["git", "-c", "user.name=t", "-c", "user.email=t@example.org", "-c", "commit.gpgsign=false",
+             "-c", "core.hooksPath=/dev/null"]
+
+
+@pytest.mark.parametrize("remote, expected", [
+    ("git@github.com:tree/r.git", "github.com/tree/r"),  # an owner named tree
+    ("https://github.com/o/tree/", "github.com/o/tree"),  # a repository named tree
+    ("https://github.com/o/tree/tree/9a1a624dc925cf700c3f89a8cc008a8fa4b4e5d4", "github.com/o/tree"),
+    ("https://github.com/o/r/tree/feature/x", "github.com/o/r"),  # a branch name with a slash
+])
+def test_a_name_that_is_tree_is_a_name_and_not_a_link_suffix(remote, expected):
+    assert rc._canonical_repo(remote) == expected
+
+
+class _Answered(Exception):
+    """What the client raises for a refusal: its message names the operation and the status; the body is on detail."""
+
+    def __init__(self, detail):
+        super().__init__("the API answered POST /simulation/run with HTTP 409")
+        self.detail = detail
+
+
+@pytest.mark.parametrize("detail, expected", [
+    ({"message": "will not run", "violations": [{"address": "local:a.B", "reason": "unknown"},
+                                                 {"address": "local:c.D", "reason": "level listed"}]},
+     "will not run: local:a.B: unknown; local:c.D: level listed"),
+    ({"message": "will not run"}, "will not run"),
+    ({"message": "will not run", "violations": []}, "will not run"),
+    ({"message": "will not run", "violations": ["local:a.B refused", None, ""]}, "will not run: local:a.B refused"),
+    ({"message": "will not run", "violations": "one sentence"}, "will not run: one sentence"),
+    ({}, "refused"),
+    ("pixi could not solve the environment: a conflicts with b", "pixi could not solve the environment: a conflicts with b"),
+    (None, "the API answered POST /simulation/run with HTTP 409"),
+])
+def test_a_refusal_is_put_in_the_services_words_whatever_shape_it_arrives_in(detail, expected):
+    assert rc._refusal_text(_Answered(detail)) == expected
+
+
+def test_a_conflict_the_service_explains_is_shown_with_its_explanation(ws, stub, backend_env, dashboard_client):
+    """A lock pixi cannot solve, or an environment that already failed for this set of entries, is a 409 whose words
+    are on `detail`; the client's own message says only "HTTP 409"."""
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    stub.respond_error("POST", "/simulation/run", 409, {"detail": "pixi could not solve the environment: a==1 conflicts with b==2"})
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 409 and res.json()["reason"] == "refused", res.text
+    assert "pixi could not solve the environment: a==1 conflicts with b==2" in res.json()["error"]
+    assert len(stub.calls_to("run-simulation")) == 1
+
+
+def test_a_busy_service_reads_as_rate_limited_and_the_run_is_sent_once(ws, stub, backend_env, dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    stub.respond_error("POST", "/simulation/run", 429, {"detail": "two environments are already being built"})
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 502 and res.json()["reason"] == "rate limited", res.text
+    assert len(stub.calls_to("run-simulation")) == 1, "a busy builder is not asked again"
+
+
+def test_the_composites_card_runner_shows_a_conflict_with_its_explanation(ws, stub, backend_env):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    stub.respond_error("POST", "/simulation/run", 409,
+                       {"detail": "environment mash-0a364f43c1 failed to build; an administrator can make a new version"})
+    with pytest.raises(RuntimeError) as refused:
+        rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=1, overrides={}, emit_paths=["stores/level"],
+                         poll_interval=0.01, poll_timeout=5)
+    assert "compose-api refused the run" in str(refused.value) and "failed to build" in str(refused.value)
+
+
+def test_the_401_names_the_token_without_the_clients_own_cli_advice(ws, stub, backend_env, dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+    stub.respond_error("POST", "/simulation/run", 401, {"detail": "Creating an environment needs a signed-in caller"})
+    anonymous = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert anonymous.status_code == 401
+    assert anonymous.json()["error"] == f"compose-api needs a signed-in caller: set {rc.TOKEN_ENV_VAR}"
+
+    backend_env.setenv(rc.TOKEN_ENV_VAR, "token-for-test")
+    rejected = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert rejected.status_code == 401 and rejected.json()["error"].startswith(f"compose-api rejected the token in {rc.TOKEN_ENV_VAR}")
+
+
+def _commit(ws: Path) -> None:
+    """A commit no registry entry pins, so the checkout's HEAD differs from every pin."""
+    subprocess.run([*GIT_QUIET, "-C", str(ws), "commit", "-q", "--allow-empty", "-m", "head"], check=True)
+
+
+def test_a_head_that_is_not_the_pin_is_warned_about_for_a_prebuilt_image_exactly_as_before(ws, stub, backend_env,
+                                                                                        dashboard_client):
+    entries = _json("entries_0.7.76.json")
+    pilot = next(e for e in entries if e["id"] == PILOT)
+    pilot["module_roots"] = ["pbg_ws_increase_demo"]  # as test_a_study_run_submits_... does, so the roots check passes
+    stub.respond("GET", "/registry/entries", 200, entries)
+    stub.respond("GET", "/registry/environments", 200, _json("environments_0.7.76.json"))
+    _with_origin(ws, PILOT_REMOTE)
+    _commit(ws)
+    _name(backend_env, stub.url, environment=None)
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 202, res.text
+    image = next(e for e in _json("environments_0.7.76.json") if e["name"] == PILOT)["image"]
+    assert res.json()["warning"] == (f"this checkout's HEAD is not commit {pilot['commit']} that compose-api's registry pins "
+                                     f"for {PILOT}: the run uses the environment's image ({image}), not this checkout")
+
+
+def test_a_head_that_is_not_the_pin_is_warned_about_for_an_inferred_environment_too(ws, stub, backend_env,
+                                                                                   dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _commit(ws)
+    _name(backend_env, stub.url, environment=None)
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 202, res.text
+    pin = next(e for e in _json("entries_0.7.76.json") if e["id"] == BASIC)["commit"]
+    assert res.json()["warning"] == (f"this checkout's HEAD is not commit {pin} that compose-api's registry pins for {BASIC}: "
+                                     "the run uses the environment compose-api has for that commit, not this checkout")
