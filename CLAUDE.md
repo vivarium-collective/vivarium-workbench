@@ -106,10 +106,14 @@ framework and the discovery cycle: study audit/evaluation/verdict/status, rigor,
 the report linter, the argument/knowledge/narrative projections, post-sim steps,
 and `viz_freshness`. `viva_superpowers` is the skills-first facade plus the helpers
 that stayed behind (`catalog`, `feedback_import`, `feedback_tracking`,
-`chart_store`, `run_params`, `loop_state`, `test_audit`); for moved modules it
-keeps only back-compat shims. New workbench code imports moved modules from
-`discovery_engine.*` directly, and `tests/test_plugin_import_allowlist.py` plus
-the import-linter config govern both packages.
+`chart_store`, `run_params`, `loop_state`, `test_audit`). **The workbench consumes
+the moved modules from `discovery_engine.*`.** Note: `viva_superpowers` does **not**
+re-export `discovery_engine` — it still carries full, *independently diverging*
+forks of the moved modules (kept alive by its own console scripts, skills, and
+external-CI consumers), not back-compat shims. Reconciling those forks is tracked
+separately; until then, `discovery_engine.*` is canonical for the workbench and a
+`viva_superpowers` fork may differ. `tests/test_plugin_import_allowlist.py` plus
+the import-linter config govern which modules the workbench may import from each.
 
 Supporting the typed contract: `lib/models.py` holds pydantic models for the JSON
 payloads (many still `extra="allow"` passthroughs — tightening them is tracked in
