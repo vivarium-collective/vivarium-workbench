@@ -1896,6 +1896,35 @@ class FeedbackSaveResult(BaseModel):
     path: Optional[str] = None
 
 
+class ProseEditBody(BaseModel):
+    """POST /api/prose-edit — write one whitelisted prose field back into a
+    study.yaml / investigation.yaml (comment-preserving).
+
+    Body ``{kind: study|investigation, slug, field, value}``. The inline-edit
+    client (``static/inline-edit.js``) sends it when a tagged field is saved.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: Optional[str] = None
+    slug: Optional[str] = None
+    field: Optional[str] = None
+    value: Optional[str] = None
+
+
+class ProseEditResult(BaseModel):
+    """``POST /api/prose-edit`` response: ``{saved, file}`` on success; failures
+    carry ``error`` via ``extra="allow"``.
+
+    Source: ``lib.prose_edit_views.prose_edit``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    saved: bool = False
+    file: Optional[str] = None
+
+
 # --- viva-investigation rewire endpoint (Phase 2.1h) -----------------------
 
 
