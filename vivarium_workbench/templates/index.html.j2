@@ -2979,6 +2979,9 @@ window.__VIVA_FB_CONFIG__ = (function () {
       var em = el.querySelector("em");
       if (em && em.textContent.trim()) return em.textContent.trim(); // Question / Hypothesis
     }
+    // async argument-graph items: narrative claim / verdict claim / decision / gate
+    var it = el.querySelector(".ag-prop,.ag-dc-title,.ag-gate-name,.ag-gate-id");
+    if (it && it.textContent.trim()) return it.textContent.trim();
     var h = el.querySelector("h1,h2,h3,h4,dt,summary");
     var t = (h && h.textContent) || "";
     if (!t && el.id) t = el.id.replace(/-mount$/, "");
@@ -2993,10 +2996,17 @@ window.__VIVA_FB_CONFIG__ = (function () {
   function sidOf(el) { return "investigation-" + slugify(curSlug()) + "-" + panelOf(el) + "-" + localKey(el); }
   function labelOf(el) { var h = headOf(el); return (h ? h.slice(0, 80) : panelOf(el)); }
   var SUBS = [
+    // static brief blocks
     ".inv-brief-overview-lede", ".inv-brief-overview-verdict", ".inv-brief-meta-item",
     ".inv-brief-prose", ".inv-brief-evidence", ".inv-brief-frameworks",
-    "#inv-verdict-claims-mount", "#inv-narrative-mount", "#inv-plan-mount",
-    "#inv-discovery-mount", "#inv-decisions-mount", ".inv-decision",
+    // async argument-graph items (filled into the Narrative/Verdict/Plan/Decisions
+    // tabs): each gets its own corner, not one per whole section
+    ".ag-unit",   // narrative claims
+    ".ag-claim",  // verdict claims & evidence
+    ".ag-dcall",  // derived decision items (gaps / divergences / open questions)
+    ".ag-gate",   // synthesis-spine gates (Plan)
+    ".inv-decision",       // authored decision cards
+    "#inv-discovery-mount", // discovery section (whole)
   ];
   return {
     context: "investigation",
