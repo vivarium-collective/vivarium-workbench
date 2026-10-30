@@ -83,7 +83,25 @@ def _study_has_active_run(
     return False
 
 
-def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
+_EVIDENCE_EXEC_TO_SIM = {"completed": "ran", "failed": "failed", "running": "running"}
+
+
+def _spec_with_evidence(spec: dict, evidence: object) -> dict:
+    """Shallow copy of ``spec`` whose frozen simulation/gate axes are replaced by
+    informative live evidence (execution != not_run, gate != not_started)."""
+    out = dict(spec)
+    exe = getattr(evidence, "execution", None)
+    if exe in _EVIDENCE_EXEC_TO_SIM:
+        out["simulation_status"] = _EVIDENCE_EXEC_TO_SIM[exe]
+    gate = getattr(evidence, "gate", None)
+    if gate in ("passed", "failed"):
+        out["gate_status"] = gate
+    return out
+
+
+def _study_display_status(
+    ws_root: Path, slug: str, spec: dict, evidence: object = None,
+) -> str:
     """A study's headline status for investigation roll-ups.
 
     ``running`` is a LIVE claim, so it is decided ONLY by an actual active run
@@ -94,7 +112,12 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
     expert_review), falling back to the deprecated legacy ``status`` field only
     when no axis is set, with any stale running-ish value demoted to the study's
     real non-running state.
+
+    ``evidence`` (a ``StudyEvidence``, optional): when informative it overrides
+    the frozen ``simulation_status``/``gate_status``. ``None`` => unchanged.
     """
+    if evidence is not None:
+        spec = _spec_with_evidence(spec, evidence)
     if _study_has_active_run(ws_root, slug, spec):
         return "running"
 
@@ -130,6 +153,15 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
                 break
         status = alt or "planning"
     return status
+
+
+def _safe_evidence(ws_root: Path, slug: str):
+    """Evidence for a study, or None on any failure (never raises)."""
+    try:
+        from vivarium_workbench.lib.study_evidence import evidence_for_study
+        return evidence_for_study(ws_root, slug)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def compute_investigation_status(
@@ -243,7 +275,8 @@ def read_study_status(
             spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
         except Exception:
             return "planning", False
-        status = _study_display_status(ws_root, slug, spec)
+        status = _study_display_status(
+            ws_root, slug, spec, evidence=_safe_evidence(ws_root, slug))
         return status, study_has_runs(slug, spec)
     return "planning", False
 

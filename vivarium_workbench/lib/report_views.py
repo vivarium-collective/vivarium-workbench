@@ -120,6 +120,15 @@ def clear_cache() -> None:
 _PRE_EVAL_STATUSES = frozenset({"build", "planned", "implementation", "design", "pending", ""})
 
 
+def _fresh_gate_entry(entry: dict, ev: Any) -> dict:
+    """Copy of a study dict with ``gate_status`` taken from informative evidence."""
+    gate = getattr(ev, "gate", None)
+    if gate in ("passed", "failed"):
+        entry = dict(entry)
+        entry["gate_status"] = gate
+    return entry
+
+
 def _compute_study_effective_status(
     status: str, has_runs: bool = False, has_active_run: bool = False
 ) -> str:
@@ -978,6 +987,8 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         return normalize_dag_edges(study_spec)
 
     studies_out: list[dict] = []
+    evidence_by_slug: dict = {}  # read once per study; reused by rollup/board/acceptance
+    _rollup_status_by_slug: dict = {}
     for slug in investigation_member_slugs(spec):
         try:
             sp = study_wp.study_dir(slug, must_exist=True) / "study.yaml"
@@ -1068,7 +1079,11 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # study whose stale `status:` still said `planned` showed as "planned" in
         # the graph card while the sidebar (multi-axis) showed it done. Sharing
         # one helper makes the rail dot and the card badge agree by construction.
-        _eff_status = _study_display_status(ws_root, study_spec["name"], study_spec)
+        _eff_status = _study_display_status(
+            ws_root, study_spec["name"], study_spec, evidence=_ev)
+        # Same computation as the summary route; used for the investigation rollup.
+        evidence_by_slug[slug] = _ev
+        _rollup_status_by_slug[slug] = _eff_status
         # Safeguard: a study can carry a COMPLETED evaluation as committed
         # report-card verdicts (viz/report_card/*.verdict.json) yet be left at a
         # pre-eval status (e.g. `build`) with no local runs.db — its report cards
@@ -1236,7 +1251,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         if _study_steps:
             _study_step_values.append(_study_steps)
 
-    member_statuses = [s.get("status", "planning") for s in studies_out]
+    member_statuses = [
+        _rollup_status_by_slug.get(s.get("name"), s.get("status", "planning"))
+        for s in studies_out
+    ]
     member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
     effective_status = compute_investigation_status(
         member_statuses, has_runs=member_has_runs,
@@ -1251,7 +1269,8 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             _syp = _sd / "study.yaml"
             if _syp.exists():
                 try:
-                    studies_by_name[_sd.name] = _sio.load_yaml_mapping(_syp)
+                    studies_by_name[_sd.name] = _fresh_gate_entry(
+                        _sio.load_yaml_mapping(_syp), evidence_by_slug.get(_sd.name))
                 except Exception:  # noqa: BLE001
                     pass
         computed_acceptance = roll_up_acceptance(spec, studies_by_name)
@@ -1310,11 +1329,19 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         except InvestigationSpecError:
             continue
         _gate_member_specs[_slug] = _ss
-        _board_studies.setdefault(_slug, {
+        if _slug not in evidence_by_slug:
+            try:
+                from vivarium_workbench.lib.study_evidence import (  # noqa: PLC0415
+                    evidence_for_study as _efs,
+                )
+                evidence_by_slug[_slug] = _efs(ws_root, _slug)
+            except Exception:  # noqa: BLE001
+                evidence_by_slug[_slug] = None
+        _board_studies.setdefault(_slug, _fresh_gate_entry({
             "name": _ss.get("name") or _slug,
             "gate_status": _ss.get("gate_status"),
             "findings": _ss.get("findings") or [],
-        })
+        }, evidence_by_slug.get(_slug)))
 
     plan_board: list = []
     if _plan_gates:
