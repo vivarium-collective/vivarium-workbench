@@ -37,6 +37,7 @@ NON_PYTHON_DIRS = frozenset({"node_bridge", "cxx", "cpp", "src_cpp", "java", "ja
 #: compose-api composes every environment on a pinned release of these.
 CORE_PACKAGES = ("process-bigraph", "bigraph-schema")
 LEVELS = ("listed", "installable", "tested")
+_FULL_COMMIT = re.compile(r"[0-9a-fA-F]{40}")
 
 _REMOTE = re.compile(
     r"^(?:git@github\.com:|(?:https?|ssh|git)://(?:[^@/]+@)?github\.com/)(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$",
@@ -227,6 +228,11 @@ def derive(ws: Path, *, level: str = "listed", registry: "list[dict] | None" = N
     elif Path(top).resolve() != ws.resolve():
         say("error", "not-repo-root", f"the workspace is inside the git repository at {top}; the entry pins that whole "
                                       "repository, which compose-api installs from its root, so run this at its root")
+    if package and repo and _normalized(package) != _normalized(repo[1]):
+        say("warn" if level == "listed" else "error", "distribution-name-differs",
+            f"[project].name {package!r} differs from the repository name {repo[1]!r}: compose-api installs a git source under the "
+            "repository's name, and uv fails the lock when the package's metadata names another ('Package metadata name ... does "
+            "not match given name ...'). Rename the distribution to match, or pin a commit where they agree")
     if not remote:
         say("error", "no-origin", "the workspace has no git remote named origin to pin")
     elif repo is None:
@@ -294,7 +300,8 @@ def derive(ws: Path, *, level: str = "listed", registry: "list[dict] | None" = N
     leaked = [d for d in DEV_TOOLS if d in declared]
     if leaked:
         say("warn", "dev-tool-dependency", f"{', '.join(leaked)} is a runtime dependency, and a composed environment installs "
-                                           "it with everything it needs: move it to an optional extra")
+                                           "it with everything it needs, including version bounds the composition's pinned core "
+                                           "may not meet (the lock then fails): move it to an optional extra")
     extras = sorted(project.get("optional-dependencies", {}))
     if extras:
         say("info", "extras-available", f"pyproject.toml declares extras ({', '.join(extras)}); none is added to install.extras, "
@@ -311,6 +318,19 @@ def derive(ws: Path, *, level: str = "listed", registry: "list[dict] | None" = N
         if "git" in sources.get(core, {}):
             say("warn", "core-from-git", f"{core} comes from git in [tool.uv.sources]; compose-api builds on its pinned "
                                          "release, so check the workspace runs on that")
+    for name, source in sorted(sources.items()):
+        if _normalized(name) not in declared or _normalized(name) in CORE_PACKAGES:
+            # a source for what only an extra installs is not followed (viva-simbio declares vivarium-workbench only in its
+            # `dashboard` extra, and its real lock holds neither it nor its source); the core has its own finding above
+            continue
+        floating = [s for s in (source if isinstance(source, list) else [source])
+                    if isinstance(s, dict) and s.get("git") and not _FULL_COMMIT.fullmatch(str(s.get("rev", "")))]
+        if floating:
+            ref = next((f" ({k} {floating[0][k]})" for k in ("rev", "branch", "tag") if floating[0].get(k)), "")
+            say("warn", "git-source-without-commit", f"[tool.uv.sources] sends {name} to {floating[0]['git']}{ref} without a full "
+                                                     "commit: pixi follows it for a package installed from git, so the lock takes "
+                                                     "whatever that ref holds when it runs, with its own sources, and the entry's "
+                                                     f"pin does not cover it; if {name} is on PyPI, delete the source")
     backend = pyproject.get("build-system", {}).get("build-backend", "")
     if "maturin" in backend or "setuptools_rust" in backend:
         say("warn", "compiled-build", f"built with {backend}: the extension is compiled when the environment is built, so "
@@ -395,5 +415,9 @@ def check(derived: Derived, registry: list[dict]) -> list[Finding]:
                                                         f"pyproject.toml's is {derived.package!r}"))
     if entry.get("commit") and derived.head and entry["commit"] != derived.head:
         found.append(Finding("info", "commit-differs", f"the registry pins {str(entry['commit'])[:8]}; the workspace is at {derived.head[:8]}"))
+    if entry.get("level") != "listed" and any(f.code == "distribution-name-differs" for f in derived.findings):
+        found.append(Finding("error", "registered-entry-cannot-lock", f"the registry entry {entry.get('id')!r} is at level "
+                                                                      f"{entry.get('level')}, but the workspace's distribution name "
+                                                                      "differs from its repository's, so its first lock fails"))
     found.append(Finding("info", "registry-level", f"the registry entry {entry.get('id')!r} is at level {entry.get('level')}"))
     return found

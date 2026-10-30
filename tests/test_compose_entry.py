@@ -150,6 +150,80 @@ def test_what_only_a_person_can_decide_is_said_not_guessed(tmp_path):
     assert "pixi-toml" in _codes(pde, "warn") and "conda" not in pde.entry, "conda: is for a person to fill in"
 
 
+WORKBENCH_SOURCE = 'vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-workbench.git", branch = "main" }'
+WORKBENCH_GIT = "https://github.com/vivarium-collective/vivarium-workbench.git"
+
+
+def _edit(ws: Path, old: str, new: str) -> None:
+    """Change the checkout's pyproject.toml, commit and push it: the tree is clean again, at a new HEAD."""
+    path = ws / "pyproject.toml"
+    text = path.read_text()
+    assert text.count(old) == 1, old
+    path.write_text(text.replace(old, new))
+    _git(ws, "commit", "-q", "-am", "edit")
+    _git(ws, "push", "-q", "origin", "main")
+
+
+def _git_source_message(derived: ce.Derived) -> str | None:
+    return next((f.message for f in derived.findings if f.code == "git-source-without-commit"), None)
+
+
+def test_a_dependency_sent_to_a_git_branch_is_flagged_because_the_lock_follows_it(tmp_path):
+    # artistoo's own file: `vivarium-workbench = { git = ..., branch = "main" }`, and it is a declared dependency. On
+    # 2026-10-30 such a source made the first lock of 17 of 25 workspaces unsatisfiable.
+    message = _git_source_message(ce.derive(_workspace(tmp_path, **ARTISTOO)))
+    assert message and "vivarium-workbench" in message and f"{WORKBENCH_GIT} (branch main)" in message
+
+
+def test_a_git_source_for_something_no_run_installs_is_not_flagged(tmp_path):
+    # pde-particle redirects vivarium-workbench too, but only its optional `workbench` extra declares it; viva-simbio is the
+    # same and its real lock holds neither the package nor its source
+    assert _git_source_message(ce.derive(_workspace(tmp_path, "pde-particle", ["viva_pde_particle"]))) is None
+
+
+@pytest.mark.parametrize(("ref", "flagged"), [
+    ('rev = "' + "a" * 40 + '"', False),
+    ('rev = "' + "A" * 40 + '"', False),  # git's object names are case-insensitive
+    ('rev = "main"', True),  # a branch name in rev still floats
+    ('rev = "abc1234def56"', True),  # a short commit is not the full one compose-api's install requires
+    ('rev = "' + "a" * 40 + '\\n"', True),  # a trailing newline is not a commit
+    ('tag = "v1.2.3"', True),
+])
+def test_only_a_full_commit_pins_a_git_source(tmp_path, ref, flagged):
+    ws = _workspace(tmp_path, **ARTISTOO)
+    _edit(ws, WORKBENCH_SOURCE, f'vivarium-workbench = {{ git = "{WORKBENCH_GIT}", {ref} }}')
+    message = _git_source_message(ce.derive(ws))
+    assert (message is not None) is flagged
+    if flagged and "\\n" not in ref:
+        assert f"({ref.replace(' = ', ' ').replace(chr(34), '')})" in message  # it names the ref it found
+
+
+def test_a_list_of_sources_with_markers_is_flagged_when_any_follows_a_branch(tmp_path):
+    ws = _workspace(tmp_path, **ARTISTOO)
+    _edit(ws, WORKBENCH_SOURCE, "vivarium-workbench = [\n"
+          f'    {{ git = "{WORKBENCH_GIT}", branch = "main", marker = "sys_platform == \'linux\'" }},\n'
+          '    { path = "../vivarium-workbench", marker = "sys_platform == \'win32\'" },\n]')
+    assert _git_source_message(ce.derive(ws))
+
+
+@pytest.mark.parametrize("source", ['{ path = "../vivarium-workbench" }', "{ workspace = true }", '{ index = "pypi-mirror" }', '"not a table"'])
+def test_a_source_that_is_not_a_git_source_is_ignored_and_never_crashes(tmp_path, source):
+    ws = _workspace(tmp_path, **ARTISTOO)
+    _edit(ws, WORKBENCH_SOURCE, f"vivarium-workbench = {source}")
+    assert _git_source_message(ce.derive(ws)) is None
+
+
+def test_the_name_of_a_source_is_matched_the_way_pip_matches_names(tmp_path):
+    ws = _workspace(tmp_path, **ARTISTOO)
+    _edit(ws, WORKBENCH_SOURCE, WORKBENCH_SOURCE.replace("vivarium-workbench =", "Vivarium_Workbench ="))
+    assert _git_source_message(ce.derive(ws))
+
+
+def test_a_core_package_from_git_gets_its_own_finding_and_not_this_one(tmp_path):
+    ws = _workspace(tmp_path, **ARTISTOO)  # artistoo declares process-bigraph
+    _edit(ws, WORKBENCH_SOURCE, 'process-bigraph = { git = "https://github.com/vivarium-collective/process-bigraph.git", branch = "main" }')
+    derived = ce.derive(ws)
+    assert "core-from-git" in _codes(derived, "warn") and _git_source_message(derived) is None
 
 
 # --- what compose-api could never run ----------------------------------------------------------------------------
@@ -589,3 +663,45 @@ def test_an_unknown_level_is_refused(tmp_path):
 ])
 def test_a_name_that_is_tree_is_a_name_and_not_a_link_suffix(source, expected):
     assert ce.canonical_source(source) == expected
+
+
+# a distribution that is not named for its repository cannot be locked: uv refuses it
+
+def test_a_distribution_named_differently_from_its_repository_is_refused_above_listed(tmp_path):
+    """viva-artistoo ships as pbg-artistoo. compose-api installs a git source under the repository's name, and uv fails the lock
+    ("Package metadata name `pbg-chaste` does not match given name `viva-chaste`", observed with viva-chaste, viva-dynamic-networks and
+    viva-pennylane-data-reuploading); artistoo has the same shape but was not locked."""
+    ws = _workspace(tmp_path, **ARTISTOO)
+    refused = ce.derive(ws, level="tested", evidence=["checked"])
+    assert refused.entry is None and "distribution-name-differs" in _codes(refused, "error")
+    assert "pbg-artistoo" in next(f.message for f in refused.findings if f.code == "distribution-name-differs")
+    listed = ce.derive(ws)  # at listed nothing runs, so it is only a warning
+    assert listed.entry is not None and "distribution-name-differs" in _codes(listed, "warn")
+
+
+def test_a_distribution_named_for_its_repository_is_not_reported(tmp_path):
+    assert "distribution-name-differs" not in _codes(ce.derive(_workspace(tmp_path, **KETCHUP), level="tested", evidence=["checked"]))
+
+
+@pytest.mark.parametrize(("level", "severity"), [("listed", "warn"), ("installable", "error"), ("tested", "error")])
+def test_the_name_difference_is_an_error_above_listed_in_every_mode(tmp_path, level, severity):
+    ws = _workspace(tmp_path, **ARTISTOO)
+    for check_only in (False, True):  # --check audits the registry, so it must not soften what a person asked for
+        derived = ce.derive(ws, level=level, evidence=["checked"], check_only=check_only)
+        assert "distribution-name-differs" in _codes(derived, severity)
+
+
+def test_check_mode_fails_a_registered_entry_above_listed_whose_workspace_cannot_lock(tmp_path):
+    ws = _workspace(tmp_path, **ARTISTOO)
+    registry = ce.load_registry(str(REGISTRY))
+    entry = next(e for e in registry if e["id"] == "viva-artistoo")  # production's entry as served on 2026-10-30: listed
+    derived = ce.derive(ws, registry=registry, check_only=True)
+    assert "registered-entry-cannot-lock" not in [f.code for f in ce.check(derived, registry)]  # nothing runs at listed
+    entry["level"] = "tested"
+    assert "registered-entry-cannot-lock" in [f.code for f in ce.check(derived, registry) if f.severity == "error"]
+
+
+def test_a_name_that_differs_only_by_normalization_is_not_reported(tmp_path):
+    ws = _workspace(tmp_path, **KETCHUP)
+    _edit(ws, 'name = "viva-ketchup"', 'name = "Viva_Ketchup"')  # PEP 503: the same distribution name
+    assert "distribution-name-differs" not in _codes(ce.derive(ws, level="tested", evidence=["checked"]))
