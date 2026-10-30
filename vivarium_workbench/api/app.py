@@ -90,6 +90,7 @@ from vivarium_workbench.lib import study_narrative_command_views as _study_narra
 from vivarium_workbench.lib import study_findings_views as _study_findings_views
 from vivarium_workbench.lib import readout_migration_status_views as _readout_migration_status_views
 from vivarium_workbench.lib import feedback_record_views as _feedback_record_views
+from vivarium_workbench.lib import feedback_save_views as _feedback_save_views
 from vivarium_workbench.lib import iset_close_views as _iset_close_views
 from vivarium_workbench.lib import scaffold_mutations as _scaffold_mut
 from vivarium_workbench.lib import composite_state_views as _composite_state_views
@@ -261,6 +262,8 @@ from vivarium_workbench.lib.models import (
     StudyFindingsResult,
     StudyReadoutMigrationStatusResult,
     FeedbackRecordActionBody,
+    FeedbackSaveBody,
+    FeedbackSaveResult,
     ISetCloseBody,
     ISetCloseResult,
     FeedbackRecordActionResult,
@@ -6043,6 +6046,33 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return FeedbackRecordActionResult.model_validate(body)
+
+    @app.post(
+        "/api/feedback-save",
+        response_model=FeedbackSaveResult,
+        tags=["Studies"],
+        summary="Persist collected inline feedback into the workspace feedback dir",
+    )
+    def feedback_save(
+        req: FeedbackSaveBody,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[FeedbackSaveResult, JSONResponse]:
+        """Wraps ``viva_superpowers.feedback_import.write_feedback_payload``.
+
+        Body: a canonical ``{meta:{investigation, study?, reviewer?, ...},
+        annotations:{section_id: [{author, text, ts, ...}]}}`` payload from the
+        study page's inline-feedback widget (``static/study-feedback.js``).
+        Writes it to ``investigations/<inv>/feedback/<ts>.yaml`` — the path the
+        dashboard and the responder skills scan. Returns ``{saved, path}``. 400
+        missing ``meta.investigation`` / empty annotations, 404 unknown
+        investigation, 500 on failure.
+        """
+        body, status = _feedback_save_views.feedback_save(
+            ws, req.model_dump(exclude_unset=True)
+        )
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return FeedbackSaveResult.model_validate(body)
 
     @app.post(
         "/api/iset-close",

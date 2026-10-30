@@ -2961,6 +2961,83 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      (session-per-tab): ready / ⏳ preparing / ⚠️ failed. -->
 <script src="assets/session-status.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script src="assets/workspace-picker.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<!-- Inline expert-feedback for the SPA investigation view: the shared engine
+     (static/study-feedback.js) decorates the investigation brief's tab panels
+     (Overview/Verdict/Background/Narrative/Decisions…) with a hover-corner 💬.
+     Study cards are same-origin iframes whose own study-feedback.js handles
+     their regions and mounts the SAME shared bottom-right button in this top
+     window; localStorage aggregation rolls investigation + study notes into one
+     canonical export. -->
+<script>
+window.__VIVA_FB_CONFIG__ = (function () {
+  function slugify(s) { return (String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48)) || "x"; }
+  function curSlug() { var d = window._currentIsetData; return (d && (d.slug || d.name)) || window._currentIset || window._currentIsetSlug || ""; }
+  function curTitle() { var d = window._currentIsetData; return (d && d.title) || curSlug() || "investigation"; }
+  function panelOf(el) { var p = el.closest && el.closest(".inv-brief-panel"); return (p && p.getAttribute("data-panel")) || "overview"; }
+  function headOf(el) {
+    if (el.classList && el.classList.contains("inv-brief-meta-item")) {
+      var em = el.querySelector("em");
+      if (em && em.textContent.trim()) return em.textContent.trim(); // Question / Hypothesis
+    }
+    // async argument-graph items: narrative claim / verdict claim / decision / gate
+    var it = el.querySelector(".ag-prop,.ag-dc-title,.ag-gate-name,.ag-gate-id");
+    if (it && it.textContent.trim()) return it.textContent.trim();
+    var h = el.querySelector("h1,h2,h3,h4,dt,summary");
+    var t = (h && h.textContent) || "";
+    if (!t && el.id) t = el.id.replace(/-mount$/, "");
+    if (!t) t = (String(el.className || "").split(/\s+/)[0] || "section").replace(/^inv-brief-/, "");
+    return t.replace(/\s+/g, " ").trim();
+  }
+  function localKey(el) {
+    if (el.id) return slugify(el.id.replace(/-mount$/, ""));
+    if (el.hasAttribute && el.hasAttribute("data-index")) return "decision-" + slugify(el.getAttribute("data-index"));
+    return slugify(headOf(el));
+  }
+  function sidOf(el) { return "investigation-" + slugify(curSlug()) + "-" + panelOf(el) + "-" + localKey(el); }
+  function labelOf(el) { var h = headOf(el); return (h ? h.slice(0, 80) : panelOf(el)); }
+  var SUBS = [
+    // static brief blocks
+    ".inv-brief-overview-lede", ".inv-brief-overview-verdict", ".inv-brief-meta-item",
+    ".inv-brief-prose", ".inv-brief-evidence", ".inv-brief-frameworks",
+    // async argument-graph items (filled into the Narrative/Verdict/Plan/Decisions
+    // tabs): each gets its own corner, not one per whole section
+    ".ag-unit",   // narrative claims
+    ".ag-claim",  // verdict claims & evidence
+    ".ag-dcall",  // derived decision items (gaps / divergences / open questions)
+    ".ag-gate",   // synthesis-spine gates (Plan)
+    ".inv-decision",       // authored decision cards
+    "#inv-discovery-mount", // discovery section (whole)
+  ];
+  return {
+    context: "investigation",
+    observeRoot: "#viv-content",
+    meta: { investigation: curSlug },
+    title: function () { return "Feedback on " + curTitle(); },
+    storeId: function () { return "inv." + slugify(curSlug() || "investigation"); },
+    noSave: false,
+    groups: [
+      { id: "overview", name: "Overview" }, { id: "verdict", name: "Verdict" },
+      { id: "background", name: "Background" }, { id: "narrative", name: "Narrative" },
+      { id: "biology", name: "Biology" }, { id: "plan", name: "Plan" },
+      { id: "decisions", name: "Decisions" },
+    ],
+    groupSwitch: function (gid) {
+      try {
+        var btns = document.querySelectorAll(".inv-brief-tab");
+        for (var i = 0; i < btns.length; i++) {
+          if ((btns[i].getAttribute("onclick") || "").indexOf("'" + gid + "'") >= 0 && window._invBriefTab) {
+            window._invBriefTab(btns[i], gid); return;
+          }
+        }
+      } catch (e) {}
+    },
+    regions: SUBS.map(function (sel) {
+      return { scope: ".inv-brief", sel: sel, group: panelOf, sid: sidOf, label: labelOf };
+    }),
+  };
+})();
+</script>
+<script src="assets/study-feedback.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* inline feedback unavailable */"></script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
 document.addEventListener("DOMContentLoaded", function() {

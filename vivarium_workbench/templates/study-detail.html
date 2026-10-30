@@ -2288,6 +2288,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 <script src="/toast.js"></script>
 <script>
 window._studyName = "{{ name }}";
+window.__STUDY_INVESTIGATION__ = "{{ study_investigation }}";  // owning investigation (feedback save routing)
 window._study = null;  // populated by _bootstrapStudy() in study-detail.js
 
 // Save handler for the Conditions → Model settings editable rows.
@@ -2416,6 +2417,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
 <script src="/progress-track.js"></script>
 <script src="/comparison-view.js"></script>
 <script src="/study-detail.js"></script>
+<script src="/study-feedback.js"></script>
 <script>
 // Re-assert the refresh-aware seed handlers AFTER study-detail.js (which
 // defines its own navigate-away _seedFollowupStudy). The embedded

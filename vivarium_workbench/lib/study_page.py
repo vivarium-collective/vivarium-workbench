@@ -943,7 +943,16 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict, *, base_path:
     # Tier-C fallback: metric chips from run outcomes when a study has no
     # authored ``report.key_metrics`` (collapsed single-source schema).
     from vivarium_workbench.lib import study_derivations as _D
+    # Owning investigation (for the inline-feedback widget's save routing). Cheap
+    # scan via WorkspacePaths; works in the live server and the published bundle
+    # (same builder). Empty string when the study belongs to no investigation.
+    try:
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths as _WP
+        study_investigation = _WP.load(ws_root).study_owner(name) or ""
+    except Exception:
+        study_investigation = ""
     html = tpl.render(study=spec, name=name, result_figure=result_figure,
+                      study_investigation=study_investigation,
                       derived_metrics=_D.key_metrics(spec),
                       display_name=spec.get("title") or _hn["title"],
                       name_chip=_hn["chip"],

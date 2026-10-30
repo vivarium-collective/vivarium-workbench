@@ -1286,6 +1286,29 @@ def render_html(data: dict, plotly_js: "str | None" = None) -> str:
     payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     title = f"{data.get('title', 'Investigation')} — report"
     html = tpl.replace("__TITLE__", _h(title)).replace("__DATA__", payload)
+    # Inline the shared inline-feedback engine (single source:
+    # static/study-feedback.js) so the downloaded report stays self-contained,
+    # plus the meta it needs to route/export the canonical feedback YAML.
+    fb_meta = json.dumps(
+        {"investigation": data.get("slug", ""), "title": data.get("title", "")},
+        ensure_ascii=False,
+    ).replace("<", "\\u003c")
+    html = html.replace("__FEEDBACK_META__", fb_meta)
+    try:
+        from vivarium_workbench.lib.static_serving import STATIC_DIR
+        fb_js = (STATIC_DIR / "study-feedback.js").read_text(encoding="utf-8")
+    except Exception:
+        fb_js = ""
+    if fb_js:
+        # The report is self-contained and offline — strip the only network code
+        # (the live Save-to-workspace block) so the bundle has no fetch()/"/api/".
+        fb_js = re.sub(
+            r"//\s*>>> FB_LIVE_SAVE.*?//\s*<<< FB_LIVE_SAVE",
+            "function saveToWorkspace(){}",
+            fb_js,
+            flags=re.S,
+        )
+    html = html.replace("__FEEDBACK_JS__", fb_js.replace("</script", "<\\/script"))
     pj = plotly_js or ""
     if pj:
         # a Plotly bundle can contain the literal "</script>" inside a string;
