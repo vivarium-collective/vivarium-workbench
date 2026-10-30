@@ -256,6 +256,48 @@ def _load_context(ws_root, inv_slug: str, M: _Modules) -> dict:
             "runs_by_study": runs_by_study}
 
 
+def list_cycle_investigations(ws_root) -> list[dict]:
+    """The investigations the cycle can actually run on: those with an
+    ``investigation.yaml`` on disk (not study-granularity rows). ``[{slug, title}]``,
+    sorted by title. Degrades to ``[]`` when the engine/layout can't be resolved."""
+    try:
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+        import yaml
+        inv_dir = WorkspacePaths.load(Path(ws_root)).investigations
+    except Exception:
+        return []
+    out: list[dict] = []
+    if inv_dir.is_dir():
+        for d in sorted(p for p in inv_dir.iterdir() if p.is_dir()):
+            yf = d / "investigation.yaml"
+            if not yf.is_file():
+                continue
+            title = d.name
+            try:
+                spec = yaml.safe_load(yf.read_text(encoding="utf-8")) or {}
+                title = spec.get("title") or spec.get("question") or spec.get("name") or d.name
+            except Exception:
+                pass
+            out.append({"slug": d.name, "title": str(title)})
+    out.sort(key=lambda r: r["title"].lower())
+    return out
+
+
+def _blocked_trace(inv_slug: str, err: str) -> dict:
+    """A trace for an investigation whose inputs couldn't be loaded: the load step
+    errors with the reason, the rest are blocked. Never raises — the panel shows
+    *why* instead of a blank graph or a 500."""
+    nodes: list[dict] = []
+    for meta in STEPS:
+        if meta["id"] == "load_inputs":
+            nodes.append({**meta, "status": "error", "duration_ms": 0,
+                          "summary": err, "result": None, "error": err})
+        else:
+            nodes.append({**meta, "status": "blocked", "duration_ms": 0,
+                          "summary": "blocked — inputs failed to load"})
+    return {"available": True, "inv_slug": inv_slug, "error": err, "steps": nodes}
+
+
 def build_cycle_trace(ws_root, inv_slug: str, *, only: list[str] | None = None) -> dict:
     """Run the pure analytical cycle as one traced pass and return per-step results.
 
@@ -263,12 +305,19 @@ def build_cycle_trace(ws_root, inv_slug: str, *, only: list[str] | None = None) 
     the full dependency chain still runs so the restricted step has real upstream
     inputs. Returns ``{available, inv_slug, steps:[...]}`` where each step has
     ``{id,label,phase,module,func,kind,depends_on,status,duration_ms,summary,result,error}``.
-    ``status`` is ok | empty | error.
+    ``status`` is ok | empty | error | blocked.
     """
     if not engine_available():
         return {"available": False, "inv_slug": inv_slug, "steps": []}
     M = _Modules()
-    ctx = _load_context(ws_root, inv_slug, M)
+    try:
+        ctx = _load_context(ws_root, inv_slug, M)
+    except FileNotFoundError:
+        return _blocked_trace(
+            inv_slug, f"no investigation.yaml for {inv_slug!r} "
+                      "(this row isn't a cycle-runnable investigation)")
+    except Exception as e:
+        return _blocked_trace(inv_slug, f"{type(e).__name__}: {e}")
     want = set(only) if only else None
     out_steps: list[dict] = []
     for step_id in _AUTO:

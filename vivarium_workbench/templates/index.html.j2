@@ -1047,20 +1047,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Explore</span>
       </a>
-      <a href="#discovery"        class="viv-rail-link menu-link" data-page="discovery">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <!-- a cycle of nodes: three dots on a ring with a sweep arrow -->
-            <circle cx="12" cy="12" r="8"/>
-            <circle cx="12" cy="4"  r="1.3" fill="currentColor"/>
-            <circle cx="19" cy="15" r="1.3" fill="currentColor"/>
-            <circle cx="5"  cy="15" r="1.3" fill="currentColor"/>
-            <path d="M15 8 A5 5 0 1 1 8.5 8.2"/>
-            <path d="M8.5 5.4 L8.5 8.6 L11.4 8"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">Cycle</span>
-      </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
            #viv-workspace-switcher). Hash route #github kept for back-compat.
@@ -1115,6 +1101,20 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           </svg>
         </span>
         <span class="viv-rail-link-label">Studies</span>
+      </a>
+      <a href="#" id="viv-cycle-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Discovery engine cycle — run the cycle on the loaded investigation">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <!-- a cycle of nodes: a ring with three nodes + a sweep arrow -->
+            <circle cx="12" cy="12" r="8"/>
+            <circle cx="12" cy="4"  r="1.4" fill="currentColor"/>
+            <circle cx="19" cy="15.5" r="1.4" fill="currentColor"/>
+            <circle cx="5"  cy="15.5" r="1.4" fill="currentColor"/>
+            <path d="M14.8 8 A5 5 0 1 1 8.4 8.3"/>
+            <path d="M8.4 5.4 L8.4 8.6 L11.3 8"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Cycle</span>
       </a>
       <a href="#" id="viv-registry-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Registry browser — composites, processes, analyses &amp; visualizations">
         <span class="viv-rail-link-icon">
@@ -1305,32 +1305,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     </div>
   </div>
 
-</section>
-
-<!-- ===== PAGE: DISCOVERY ENGINE CYCLE — a live, clickable map of the discovery
-      engine's cycle. Pick an investigation, run one analytical cycle (or run
-      continuously in a sandbox), watch each step light up, click a node to see
-      its result, and re-run any single step. Backed by /api/discovery-cycle*.
-      All rendering + wiring lives in static/discovery-cycle.js. ===== -->
-<section id="page-discovery" class="page" data-page="discovery">
-  <div id="dcyc-root" class="dcyc-root">
-    <div class="dcyc-toolbar">
-      <label class="dcyc-pick">Investigation
-        <select id="dcyc-inv"><option value="">Loading&hellip;</option></select>
-      </label>
-      <button id="dcyc-run"      class="dcyc-btn dcyc-btn-primary" disabled>Run one cycle</button>
-      <button id="dcyc-run-cont" class="dcyc-btn" disabled title="Advance toward closure in a sandboxed copy — never touches your real files">Run continuously (sandbox)</button>
-      <span id="dcyc-status" class="dcyc-status"></span>
-    </div>
-    <div class="dcyc-body">
-      <div id="dcyc-graph" class="dcyc-graph">
-        <p class="empty-state">Pick an investigation to load the cycle.</p>
-      </div>
-      <aside id="dcyc-inspect" class="dcyc-inspect">
-        <p class="empty-state">Click a step to see what ran and its result.</p>
-      </aside>
-    </div>
-  </div>
 </section>
 
 <!-- ===== PAGE: RESOURCES — the workspace's source material on ONE scrolling
@@ -2602,6 +2576,35 @@ a.viv-bs-commit:hover { text-decoration: underline; }
               aria-label="Expand the registry panel"
               onclick="window.RegistryPanel&&RegistryPanel.expand()">⟩</button>
       <div class="viv-registry-body" id="viv-registry-body"></div>
+    </div>
+  </aside>
+
+  <!-- Discovery-engine Cycle panel: a live, clickable map of the discovery cycle
+       for the LOADED investigation. Run one cycle (or advance continuously in a
+       sandbox), click a step to see what ran + its result, re-run any step. Built
+       on VivPanelDock, same shape as the Studies panel. Content + wiring live in
+       static/discovery-cycle.js (mounts into #viv-cycle-body). -->
+  <aside id="viv-cycle-panel" class="viv-cycle-panel" aria-label="Discovery cycle" hidden>
+    <div class="viv-cycle-panel-inner">
+      <div class="viv-cycle-resize-handle" id="viv-cycle-resize-handle"
+           role="separator" aria-orientation="vertical" aria-label="Resize discovery cycle panel"
+           title="Drag to resize"></div>
+      <div class="viv-cycle-head vp-head" title="Drag to dock left / right / bottom / top">
+        <span class="vp-title">Discovery cycle</span>
+        <span class="vp-spacer"></span>
+        <button class="vp-icon" type="button" data-act="dock" title="Move or pop out panel" aria-label="Move or pop out panel"
+                onclick="window.CyclePanel&&CyclePanel.dockMenu(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+        </button>
+        <button class="vp-icon" type="button" title="Close" aria-label="Close discovery cycle panel"
+                onclick="window.CyclePanel&&CyclePanel.toggle()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <button type="button" class="viv-cycle-expand" title="Expand the discovery cycle panel"
+              aria-label="Expand the discovery cycle panel"
+              onclick="window.CyclePanel&&CyclePanel.expand()">⟩</button>
+      <div class="viv-cycle-body" id="viv-cycle-body"></div>
     </div>
   </aside>
 

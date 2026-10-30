@@ -76,6 +76,25 @@ def test_rerun_rejects_mutating_advance():
     assert "error" in out and "mutating" in out["error"]
 
 
+def test_missing_investigation_is_blocked_not_a_crash():
+    # a slug with no investigation.yaml must degrade to a visible blocked trace,
+    # never raise (which would 500 the endpoint and blank the panel)
+    trace = ct.build_cycle_trace(_WS, "no-such-investigation")
+    assert trace["available"] is True
+    assert "error" in trace
+    assert {s["id"] for s in trace["steps"]} == {s["id"] for s in ct.STEPS}
+    assert _step(trace, "load_inputs")["status"] == "error"
+    assert _step(trace, "run_cycle")["status"] == "blocked"
+
+
+def test_list_cycle_investigations_only_returns_runnable():
+    rows = ct.list_cycle_investigations(_WS)
+    slugs = [r["slug"] for r in rows]
+    assert _SLUG in slugs  # the real investigation is listed
+    for r in rows:
+        assert r["slug"] and r["title"]  # every row is usable in the picker
+
+
 def test_sandbox_advance_never_touches_real_workspace(tmp_path):
     import shutil
     # copy the fixture so we can assert byte-for-byte it is unchanged

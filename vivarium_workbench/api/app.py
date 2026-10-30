@@ -1107,6 +1107,18 @@ def create_app() -> FastAPI:
         return {"available": engine_available(), "steps": STEPS}
 
     @app.get(
+        "/api/discovery-cycle-investigations",
+        tags=["Investigations"],
+        summary="Investigations the discovery cycle can run on (have investigation.yaml)",
+    )
+    def discovery_cycle_investigations(ws: Path = Depends(get_workspace)) -> dict:
+        """The cycle-runnable investigations for the picker — only those with an
+        ``investigation.yaml`` on disk, so the panel never offers a study-granularity
+        row that would fail to load. Backed by ``lib.cycle_trace.list_cycle_investigations``."""
+        from vivarium_workbench.lib.cycle_trace import list_cycle_investigations
+        return {"investigations": list_cycle_investigations(ws)}
+
+    @app.get(
         "/api/discovery-cycle/{slug}",
         tags=["Investigations"],
         summary="Run the full analytical discovery cycle and trace every step",
