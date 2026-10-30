@@ -1,0 +1,94 @@
+schema_version: 2
+name: mgen
+created: "2026-09-12"
+plugin_version: 0.22.0
+package_path: viva_mgen
+
+imports:
+  pbg_parsimony:
+    source: https://github.com/vivarium-collective/viva-parsimony
+    ref: main
+    mode: reference
+    description: |
+      cellPACK-style 3D packing engine (Ingredient/Capsule/Chromosome/
+      build_pack) used by viva_mgen.structural to pack the whole-cell
+      molecular roster into a single-membrane M. genitalium capsule.
+
+# Directory layout. New workspaces group their research directories under a
+# tidy `workspace/` subtree (the dirs below); the hidden `.pbg/` machine state
+# stays at the root like `.git/`. Tooling (dashboard, lint, skills) resolves
+# these via the shared WorkspacePaths resolver. Any key you remove falls back
+# to its flat top-level default — so you can move things back if you prefer.
+layout:
+  studies: workspace/studies
+  investigations: workspace/investigations
+  composites: workspace/composites
+  references: workspace/references
+  datasets: workspace/datasets
+  reports: workspace/reports
+
+# The four arrays below start empty; the dashboard populates them as you
+# work. Hand-editing is fine for small adds, but the dashboard's writers
+# also keep cross-references (studies, runs, viz wiring) consistent.
+
+# Observable specs: name + store_path + index_by. Populated by the Studies
+# tab when you declare a behavior_test or readout. See .pbg/schemas/study.schema.json
+# (readouts section) for shape.
+observables: []
+
+# Visualization wiring (address + config). Populated by the Visualizations
+# tab and /viva-viz.
+visualizations: []
+
+# Reproducible simulation specs (composite + steps + params). Populated by
+# the Composites tab "Run" button and by `/viva-study run-baseline`.
+simulations: []
+
+# Workspace-scoped datasets (file path + format + provenance). Browse the
+# model's parameters and knowledge base in the Resources tab.
+datasets:
+- name: M. genitalium parameters
+  path: datasets/parameters.csv
+  claims:
+  - Every fitted scalar constant used by viva-Mgen (mass fractions, cell-cycle
+    durations, metabolite pools, maintenance/exchange bounds) with value, units,
+    and source — the browsable parameter list.
+- name: iPS189 metabolic network (Suthers 2009)
+  path: datasets/ips189.sbml.xml
+  url: https://www.ebi.ac.uk/biomodels/MODEL1507180052
+  claims:
+  - The published M. genitalium genome-scale reconstruction (351 reactions, 346
+    metabolites, 126 genes) the FBA metabolism submodel runs on.
+- name: Gene list + reference essentiality
+  path: datasets/genes.csv
+  claims:
+  - All 525 M. genitalium genes with symbol, name, reference essentiality, and
+    associated metabolic reactions (Karr 2012 knowledge base).
+- name: Fitted constants (raw)
+  path: datasets/fitted_constants.json
+  claims:
+  - Raw states.Mass / states.Time / states.Metabolite / processes.Metabolism
+    parameter blocks extracted verbatim from the Karr 2012 parameters.json.
+
+# Resources tab data-source provider — lists the parameter / knowledge-base
+# files so all model parameters are browsable in the dashboard Resources tab.
+dashboard:
+  data_sources:
+    label: M. genitalium parameters & knowledge base
+    provider: viva_mgen.data_sources:list_sources
+
+# Read-only workbench: the 3D cell viewers are too heavy for gh-pages (meshes
+# ~350MB/study), so the packs + meshes + the parsimony viewer app are hosted on
+# Cloudflare R2 and streamed. Each key is a saved-viz pack name (the *.pack.json
+# basename); the value is the external viewer URL that overrides the bundled
+# gh-pages viewer for that pack. Only the small *.pack.json + *.meta.json are
+# committed (they seed the gallery entry + power the LOCAL viewer). Mirrors the
+# ecoli-3d pattern (v2ecoli workspace.yaml ui.viz_viewer_urls).
+ui:
+  viz_viewer_urls:
+    mgen_maritan_baseline: "https://pub-eb913fbbdc584bd7add047c823570b13.r2.dev/mgen-3d/viewer/index.html?file=https://pub-eb913fbbdc584bd7add047c823570b13.r2.dev/mgen-3d/s01-maritan-baseline/viz/3d/mgen_maritan_baseline.pack.json"
+    mgen_reproduction_driven: "https://pub-eb913fbbdc584bd7add047c823570b13.r2.dev/mgen-3d/viewer/index.html?file=https://pub-eb913fbbdc584bd7add047c823570b13.r2.dev/mgen-3d/s02-reproduction-driven/viz/3d/mgen_reproduction_driven.pack.json"
+
+references_bib: workspace/references/papers.bib
+server:
+  enabled: false

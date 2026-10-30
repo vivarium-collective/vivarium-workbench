@@ -1,0 +1,45 @@
+schema_version: 2
+name: pennylane-adversarial
+created: "2026-07-01"
+plugin_version: 0.15.0
+package_path: pbg_pennylane_adversarial
+
+# Directory layout. New workspaces group their research directories under a
+# tidy `workspace/` subtree (the dirs below); the hidden `.pbg/` machine state
+# stays at the root like `.git/`. Tooling (dashboard, lint, skills) resolves
+# these via the shared WorkspacePaths resolver. Any key you remove falls back
+# to its flat top-level default — so you can move things back if you prefer.
+layout:
+  studies: workspace/studies
+  investigations: workspace/investigations
+  composites: workspace/composites
+  references: workspace/references
+  datasets: workspace/datasets
+  notes: workspace/notes
+  experiments: workspace/experiments
+  reports: workspace/reports
+
+# The four arrays below start empty; the dashboard populates them as you
+# work. Hand-editing is fine for small adds, but the dashboard's writers
+# also keep cross-references (studies, runs, viz wiring) consistent.
+
+# Observable specs: name + store_path + index_by. Populated by the Studies
+# tab when you declare a behavior_test or readout. See .pbg/schemas/study.schema.json
+# (readouts section) for shape.
+observables: []
+
+# Visualization wiring (address + config). Populated by the Visualizations
+# tab and /pbg-viz.
+visualizations: []
+
+# Reproducible simulation specs (composite + steps + params). Populated by
+# the Composites tab "Run" button and by `/pbg-study run-baseline`.
+simulations: []
+
+# Workspace-scoped datasets (file path + format + provenance). Populated by
+# the Inputs tab "Attach dataset" action.
+datasets: []
+
+references_bib: workspace/references/papers.bib
+server:
+  enabled: false
