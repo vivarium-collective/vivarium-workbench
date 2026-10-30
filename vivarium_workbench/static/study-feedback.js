@@ -70,6 +70,19 @@
   function cssEscape(s) {
     return String(s).replace(/"/g, '\\"');
   }
+  // The study detail page renders inside a full-height iframe in the SPA (the
+  // outer page scrolls, not the iframe), so position:fixed would pin the
+  // floating button to the iframe's document — i.e. the bottom of the content,
+  // not the screen. When embedded in a same-origin iframe, mount the viewport
+  // chrome (FAB + tray + toast) into the TOP window so it's fixed to the screen.
+  // Standalone pages (direct study page, report, published bundle) are not
+  // framed, so topDoc() === document and behavior is unchanged.
+  function topDoc() {
+    try {
+      if (window.self !== window.top && window.top && window.top.document) return window.top.document;
+    } catch (e) {}
+    return document;
+  }
   function headingText(el) {
     var h = el.querySelector(
       "h1,h2,h3,h4,.card-h,.card-title,.figure-title,.finding-statement,.expert-question-title,.di-card-title,.followup-title,.sec-h,summary"
@@ -203,23 +216,70 @@
   }
 
   // ── store (localStorage) ──────────────────────────────────────────────────────
-  // FB = { sectionId: {note, disposition, label, group, ts} }
+  // Each surface (a study, the report, the SPA investigation view) persists its
+  // own store keyed `viva.fb.store.<ws>.<storeId>`, with meta under
+  // `viva.fb.meta.<ws>.<storeId>`. localStorage is shared across same-origin
+  // frames, so the single shared button AGGREGATES every store in the workspace
+  // — one count, one export ("all at once"), even when a study detail iframe and
+  // the SPA investigation view are on screen together.
+  // FB (this surface) = { sectionId: {note, disposition, label, group, ts} }
   var FB = {};
-  function storeKey() {
-    var ws = (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.workspace) || "";
-    return "viva.fb.store." + slugify(ws) + "." + (CONFIG.storeId || "x");
+  // Guarantee unique section ids by checking the LIVE DOM — removed/re-rendered
+  // elements don't inflate the suffix, so ids stay stable across re-renders
+  // (only genuine same-view duplicates, e.g. Question + Hypothesis, get a -2).
+  function uniqueSid(sid) {
+    var base = sid, n = 1;
+    while (document.querySelector('[data-fb-sid="' + cssEscape(sid) + '"]')) {
+      n++;
+      sid = base + "-" + n;
+    }
+    return sid;
   }
+  var STORE_PREFIX = "viva.fb.store.";
+  var META_PREFIX = "viva.fb.meta.";
+  function WS() {
+    return slugify((window.__DASH_CONFIG__ && window.__DASH_CONFIG__.workspace) || "");
+  }
+  function storeId() {
+    return val(CONFIG.storeId) || "x";
+  }
+  function storeKey() {
+    return STORE_PREFIX + WS() + "." + storeId();
+  }
+  function metaKey() {
+    return META_PREFIX + WS() + "." + storeId();
+  }
+  var _loadedKey = null;
   function loadStore() {
+    _loadedKey = storeKey();
     try {
-      FB = JSON.parse(localStorage.getItem(storeKey()) || "{}") || {};
+      FB = JSON.parse(localStorage.getItem(_loadedKey) || "{}") || {};
     } catch (e) {
       FB = {};
     }
+  }
+  // The SPA investigation instance is long-lived across investigation switches
+  // (storeId is a function of the current slug) — reload FB when it changes.
+  function ensureStore() {
+    if (storeKey() !== _loadedKey) loadStore();
+  }
+  function persistMeta() {
+    try {
+      localStorage.setItem(metaKey(), JSON.stringify({
+        investigation: metaInvestigation(),
+        study: metaStudy(),
+        title: val(CONFIG.title) || "",
+        context: CONFIG.context || "",
+        noSave: !!CONFIG.noSave,
+        storeId: storeId(),
+      }));
+    } catch (e) {}
   }
   function saveStore() {
     try {
       localStorage.setItem(storeKey(), JSON.stringify(FB));
     } catch (e) {}
+    persistMeta();
     refreshChrome();
   }
   function setFB(key, patch) {
@@ -227,14 +287,42 @@
     if (!FB[key].note && !FB[key].disposition) delete FB[key];
     saveStore();
   }
-  function fbCount() {
-    return Object.keys(FB).length;
-  }
-  function rememberInvestigation(v) {
-    if (CONFIG.context !== "study") return;
+  // Aggregate every store for this workspace (investigation first, then studies).
+  function allStores() {
+    var pfx = STORE_PREFIX + WS() + ".";
+    var out = [];
     try {
-      localStorage.setItem("viva.fb.inv." + slugify(metaStudy() || studySlug()), v || "");
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!k || k.indexOf(pfx) !== 0) continue;
+        var entries = {};
+        try { entries = JSON.parse(localStorage.getItem(k) || "{}") || {}; } catch (e) { entries = {}; }
+        if (!Object.keys(entries).length) continue;
+        var storeId = k.slice(pfx.length);
+        var meta = {};
+        try { meta = JSON.parse(localStorage.getItem(META_PREFIX + WS() + "." + storeId) || "{}") || {}; } catch (e) {}
+        out.push({ storeId: storeId, meta: meta, entries: entries });
+      }
     } catch (e) {}
+    out.sort(function (a, b) {
+      var ai = a.meta.context === "investigation" ? 0 : 1;
+      var bi = b.meta.context === "investigation" ? 0 : 1;
+      if (ai !== bi) return ai - bi;
+      return String(a.meta.title || a.storeId).localeCompare(String(b.meta.title || b.storeId));
+    });
+    return out;
+  }
+  function totalCount() {
+    return allStores().reduce(function (n, s) { return n + Object.keys(s.entries).length; }, 0);
+  }
+  function pickInvestigation() {
+    var stores = allStores();
+    for (var i = 0; i < stores.length; i++) if (stores[i].meta.context === "investigation" && stores[i].meta.investigation) return stores[i].meta.investigation;
+    for (var j = 0; j < stores.length; j++) if (stores[j].meta.investigation) return stores[j].meta.investigation;
+    return metaInvestigation();
+  }
+  function anySaveable() {
+    return allStores().some(function (s) { return !s.meta.noSave; });
   }
 
   // ── decoration: hover 💬 corners on every region ──────────────────────────────
@@ -244,6 +332,7 @@
     el.__fbDecorated = true;
     var sid, label, group;
     try { sid = region.sid(el); } catch (e) { sid = "x"; }
+    sid = uniqueSid(sid);
     try { label = region.label(el); } catch (e) { label = ""; }
     group = typeof region.group === "function" ? region.group(el) : region.group || "";
     el.classList.add("fb-region");
@@ -261,6 +350,7 @@
     markCorner(sid);
   }
   function decorateAll() {
+    ensureStore();
     (CONFIG.regions || []).forEach(function (region) {
       var roots = region.scope ? document.querySelectorAll(region.scope) : [document];
       for (var r = 0; r < roots.length; r++) {
@@ -340,97 +430,90 @@
     pop.style.top = top + window.scrollY + "px";
   }
 
-  // ── floating button + tray (appear only when feedback exists) ─────────────────
+  // ── floating button + tray (singleton in the TOP window; aggregates stores) ───
   function buildChrome() {
-    if (document.getElementById("fb-fab")) return;
-    var fab = document.createElement("button");
+    var TD = topDoc();
+    if (TD.getElementById("fb-fab")) { refreshChrome(); return; } // one shared button
+    var fab = TD.createElement("button");
     fab.id = "fb-fab";
     fab.type = "button";
     fab.title = "Review & export collected feedback";
     fab.innerHTML = '💬 Feedback <span id="fb-count">0</span>';
     fab.addEventListener("click", toggleTray);
-    document.body.appendChild(fab);
-    var tray = document.createElement("div");
+    TD.body.appendChild(fab);
+    var tray = TD.createElement("div");
     tray.id = "fb-tray";
     tray.hidden = true;
-    document.body.appendChild(tray);
+    TD.body.appendChild(tray);
     refreshChrome();
   }
   function refreshChrome() {
-    var n = fbCount();
-    var fab = document.getElementById("fb-fab");
+    var TD = topDoc();
+    var n = totalCount();
+    var fab = TD.getElementById("fb-fab");
     if (fab) {
       fab.style.display = n > 0 ? "flex" : "none"; // appears only when there's feedback
       var c = fab.querySelector("#fb-count");
       if (c) c.textContent = n;
     }
-    var tray = document.getElementById("fb-tray");
+    var tray = TD.getElementById("fb-tray");
     if (tray) {
       if (n === 0) tray.hidden = true;
       if (!tray.hidden) renderTray();
     }
   }
   function toggleTray() {
-    var tray = document.getElementById("fb-tray");
+    var tray = topDoc().getElementById("fb-tray");
     if (!tray) return;
     tray.hidden = !tray.hidden;
     if (!tray.hidden) renderTray();
   }
   function renderTray() {
-    var tray = document.getElementById("fb-tray");
+    var tray = topDoc().getElementById("fb-tray");
     if (!tray) return;
-    var keys = Object.keys(FB);
-    var byGroup = {};
-    keys.forEach(function (sid) {
-      var g = FB[sid].group || "other";
-      (byGroup[g] = byGroup[g] || []).push(sid);
-    });
-    var order = (CONFIG.groups || []).map(function (g) { return g.id; });
-    Object.keys(byGroup).forEach(function (g) { if (order.indexOf(g) < 0) order.push(g); });
+    var stores = allStores();
 
-    var html = '<div class="fb-tray-h"><b>' + esc(CONFIG.title || "Feedback") + "</b>" +
+    var html = '<div class="fb-tray-h"><b>Feedback</b>' +
       '<button type="button" class="fb-tray-x" title="Close">✕</button></div>';
     html += '<div class="fb-tray-meta"><label>Reviewer <input id="fb-reviewer" type="text" value="' +
-      esc(reviewerName()) + '" placeholder="your name"></label>';
-    if (CONFIG.allowInvestigationEdit && !isSnapshot()) {
-      html += '<label>Investigation <input id="fb-inv" type="text" value="' +
-        esc(metaInvestigation()) + '" placeholder="inv-slug"></label>';
-    }
-    html += "</div>";
+      esc(reviewerName()) + '" placeholder="your name"></label></div>';
 
-    html += '<div class="fb-tray-list">';
-    order.forEach(function (g) {
-      if (!byGroup[g]) return;
-      html += '<div class="fb-tray-group">' + esc(groupName(g)) + "</div>";
-      byGroup[g].forEach(function (sid) {
-        var e = FB[sid];
-        var disp = e.disposition === "ok" ? "👍" : e.disposition === "revise" ? "✏️" : "•";
-        html += '<div class="fb-item" data-sid="' + esc(sid) + '">' +
-          '<span class="fb-item-disp">' + disp + "</span>" +
-          '<span class="fb-item-body"><span class="fb-item-label">' + esc(e.label || sid) + "</span>" +
-          '<span class="fb-item-note">' + esc(e.note || "(no note)") + "</span></span>" +
-          '<button type="button" class="fb-item-del" title="Remove">✕</button></div>';
+    if (!stores.length) {
+      html += '<div class="fb-tray-empty">No notes yet. Hover any region (a figure, a finding, a tab section…) and click the 💬 in its corner.</div>';
+    } else {
+      html += '<div class="fb-tray-list">';
+      stores.forEach(function (s) {
+        var gtitle = s.meta.title || (s.meta.study ? "Study: " + s.meta.study : s.meta.investigation || s.storeId);
+        html += '<div class="fb-tray-group">' + esc(gtitle) + "</div>";
+        Object.keys(s.entries).sort().forEach(function (sid) {
+          var e = s.entries[sid];
+          var disp = e.disposition === "ok" ? "👍" : e.disposition === "revise" ? "✏️" : "•";
+          html += '<div class="fb-item" data-store="' + esc(s.storeId) + '" data-sid="' + esc(sid) + '">' +
+            '<span class="fb-item-disp">' + disp + "</span>" +
+            '<span class="fb-item-body"><span class="fb-item-label">' + esc(e.region || e.label || sid) + "</span>" +
+            '<span class="fb-item-note">' + esc(e.note != null ? e.note : e.text || "(no note)") + "</span></span>" +
+            '<button type="button" class="fb-item-del" title="Remove">✕</button></div>';
+        });
       });
-    });
-    html += "</div>";
+      html += "</div>";
+    }
 
     html += '<div class="fb-tray-actions">' +
       '<button type="button" id="fb-export">⬇ Export .yaml</button>' +
       '<button type="button" id="fb-copy">⧉ Copy</button>' +
-      (isSnapshot() || CONFIG.noSave ? "" : '<button type="button" id="fb-save" class="primary">⤴ Save to workspace</button>') +
+      (!isSnapshot() && anySaveable() ? '<button type="button" id="fb-save" class="primary">⤴ Save to workspace</button>' : "") +
       "</div>";
     tray.innerHTML = html;
 
     tray.querySelector(".fb-tray-x").addEventListener("click", toggleTray);
     var rev = tray.querySelector("#fb-reviewer");
     if (rev) rev.addEventListener("input", function () { setReviewerName(rev.value); });
-    var invInput = tray.querySelector("#fb-inv");
-    if (invInput) invInput.addEventListener("input", function () { rememberInvestigation(invInput.value.trim()); });
     tray.querySelectorAll(".fb-item").forEach(function (row) {
       var sid = row.getAttribute("data-sid");
-      row.querySelector(".fb-item-body").addEventListener("click", function () { jumpTo(sid); });
+      var store = row.getAttribute("data-store");
+      row.querySelector(".fb-item-body").addEventListener("click", function () { jumpTo(store, sid); });
       row.querySelector(".fb-item-del").addEventListener("click", function (ev) {
-        ev.stopPropagation(); delete FB[sid]; saveStore(); markCorner(sid); renderTray();
+        ev.stopPropagation(); deleteItem(store, sid);
       });
     });
     tray.querySelector("#fb-export").addEventListener("click", exportYaml);
@@ -438,16 +521,30 @@
     var saveBtn = tray.querySelector("#fb-save");
     if (saveBtn) saveBtn.addEventListener("click", saveToWorkspace);
   }
-  function jumpTo(sid) {
+  function deleteItem(store, sid) {
+    var key = STORE_PREFIX + WS() + "." + store;
+    try {
+      var o = JSON.parse(localStorage.getItem(key) || "{}") || {};
+      delete o[sid];
+      if (Object.keys(o).length) localStorage.setItem(key, JSON.stringify(o));
+      else localStorage.removeItem(key);
+    } catch (e) {}
+    if (store === (CONFIG.storeId || "x")) delete FB[sid];
+    markCorner(sid);
+    refreshChrome();
+    renderTray();
+  }
+  function jumpTo(store, sid) {
+    // Only this surface's regions are reachable from its own engine instance;
+    // items from another frame/surface simply don't scroll (cross-frame).
+    var reg = document.querySelector('.fb-region[data-fb-sid="' + cssEscape(sid) + '"]');
+    if (!reg) return;
     var e = FB[sid];
     if (e && e.group && typeof CONFIG.groupSwitch === "function") CONFIG.groupSwitch(e.group);
     setTimeout(function () {
-      var reg = document.querySelector('.fb-region[data-fb-sid="' + cssEscape(sid) + '"]');
-      if (reg) {
-        reg.scrollIntoView({ behavior: "smooth", block: "center" });
-        reg.classList.add("fb-flash");
-        setTimeout(function () { reg.classList.remove("fb-flash"); }, 1400);
-      }
+      reg.scrollIntoView({ behavior: "smooth", block: "center" });
+      reg.classList.add("fb-flash");
+      setTimeout(function () { reg.classList.remove("fb-flash"); }, 1400);
     }, 120);
   }
 
@@ -456,24 +553,30 @@
     return '"' + String(s == null ? "" : s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, " ") + '"';
   }
   function payloadObj() {
+    // Aggregate every store in the workspace into ONE canonical payload. Section
+    // ids are globally unique (study-<slug>-… / investigation-…), so study notes
+    // attribute to their study and investigation notes stay report-level.
     var author = reviewerName() || "reviewer";
     var annotations = {};
-    Object.keys(FB).sort().forEach(function (sid) {
-      var e = FB[sid];
-      var entry = { author: author, text: e.note || "", ts: e.ts || nowIso() };
-      if (e.disposition) entry.disposition = e.disposition;
-      if (e.label) entry.region = e.label;
-      if (e.group) entry.group = e.group;
-      annotations[sid] = [entry];
+    var stores = allStores();
+    stores.forEach(function (s) {
+      Object.keys(s.entries).sort().forEach(function (sid) {
+        var e = s.entries[sid];
+        var entry = { author: author, text: e.note != null ? e.note : e.text || "", ts: e.ts || nowIso() };
+        if (e.disposition) entry.disposition = e.disposition;
+        if (e.region || e.label) entry.region = e.region || e.label;
+        if (e.group) entry.group = e.group;
+        annotations[sid] = [entry];
+      });
     });
     var meta = {
-      investigation: metaInvestigation(),
+      investigation: pickInvestigation(),
       reviewer: author,
       generated_at: nowIso(),
       source: "workbench-inline-feedback",
     };
-    var st = metaStudy();
-    if (st) meta.study = st;
+    // Single study in scope (no investigation store) → keep the study hint.
+    if (stores.length === 1 && stores[0].meta.study) meta.study = stores[0].meta.study;
     return { meta: meta, annotations: annotations };
   }
   function genYaml() {
@@ -503,16 +606,16 @@
     return L.join("\n") + "\n";
   }
   function exportName() {
-    return "feedback-" + slugify(metaInvestigation() || metaStudy() || "report") +
-      (metaStudy() ? "-" + slugify(metaStudy()) : "") + ".yaml";
+    return "feedback-" + slugify(pickInvestigation() || "report") + ".yaml";
   }
   function download(name, text) {
+    var TD = topDoc();
     var blob = new Blob([text], { type: "application/x-yaml" });
     var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
+    var a = TD.createElement("a");
     a.href = url;
     a.download = name;
-    document.body.appendChild(a);
+    TD.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
@@ -522,10 +625,11 @@
       window.Toast.show(msg, ok === false ? "error" : "success");
       return;
     }
-    var t = document.createElement("div");
+    var TD = topDoc();
+    var t = TD.createElement("div");
     t.className = "fb-toast" + (ok === false ? " err" : "");
     t.textContent = msg;
-    document.body.appendChild(t);
+    TD.body.appendChild(t);
     setTimeout(function () { t.classList.add("in"); }, 10);
     setTimeout(function () { t.classList.remove("in"); setTimeout(function () { t.remove(); }, 300); }, 2600);
   }
@@ -545,9 +649,9 @@
     }
   }
   function saveToWorkspace() {
-    var inv = (document.getElementById("fb-inv") && document.getElementById("fb-inv").value.trim()) || metaInvestigation();
-    if (!inv) { toast("Set the investigation slug first", false); return; }
-    if (!fbCount()) { toast("No notes to save", false); return; }
+    var inv = pickInvestigation();
+    if (!inv) { toast("No investigation resolved — export instead", false); return; }
+    if (!totalCount()) { toast("No notes to save", false); return; }
     var payload = payloadObj();
     payload.meta.investigation = inv;
     var url = "/api/feedback-save";
@@ -620,10 +724,15 @@
       ".fb-toast.err{background:#d23f3f;}",
       "@media print{.fb-corner,#fb-fab,#fb-tray,.fb-pop{display:none !important;}}",
     ].join("\n");
-    var st = document.createElement("style");
-    st.id = "fb-style";
-    st.textContent = css;
-    document.head.appendChild(st);
+    // Inject into this document (regions/corners/popover live here) AND the top
+    // document (where the FAB/tray/toast are mounted when embedded in an iframe).
+    [document, topDoc()].forEach(function (doc) {
+      if (!doc || doc.getElementById("fb-style")) return;
+      var st = doc.createElement("style");
+      st.id = "fb-style";
+      st.textContent = css;
+      (doc.head || doc.documentElement).appendChild(st);
+    });
   }
 
   // ── wiring ───────────────────────────────────────────────────────────────────
