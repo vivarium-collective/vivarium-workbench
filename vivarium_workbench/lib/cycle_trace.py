@@ -464,6 +464,160 @@ def sandbox_advance(ws_root, inv_slug: str, *, max_runs: int = 4) -> dict:
         shutil.rmtree(sandbox, ignore_errors=True)
 
 
+# Engine evaluation verdict (compare_hypotheses) -> the authored study verdict
+# vocab (discover.VERDICT_VOCAB). Conservative: only decisive verdicts are written;
+# unresolved/gated leave the study's authored verdict untouched (value None = skip).
+_VERDICT_MAP = {
+    "supported": "supported",
+    "provisionally-supported": "qualified",
+    "contested": "inconclusive",
+    "unresolved": None,
+    "gated": None,
+}
+
+
+def _study_path(wp, inv_slug: str, slug: str):
+    """Resolve a member study's study.yaml: flat ``studies/<slug>/`` first, then the
+    nested ``investigations/<inv>/studies/<slug>/`` layout (mirrors load_cycle_inputs)."""
+    flat = wp.studies / slug / "study.yaml"
+    if flat.is_file():
+        return flat
+    nested = wp.investigations / inv_slug / "studies" / slug / "study.yaml"
+    if nested.is_file():
+        return nested
+    return None
+
+
+def _git_commit(ws_root: Path, dirs: list, message: str) -> dict:
+    """Commit the changed research files under ``dirs`` to the workspace git, so an
+    apply is auditable and revertible. Best-effort: a non-repo / nothing-staged /
+    failure is reported, never raised (the files are written regardless)."""
+    import subprocess
+    rels = [str(d) for d in dirs if d]
+    if not rels:
+        return {"committed": False, "reason": "nothing to commit"}
+    try:
+        subprocess.run(["git", "-C", str(ws_root), "add", "--"] + rels,
+                       check=True, capture_output=True, timeout=30)
+        st = subprocess.run(["git", "-C", str(ws_root), "status", "--porcelain", "--"] + rels,
+                            capture_output=True, text=True, timeout=30)
+        if not st.stdout.strip():
+            return {"committed": False, "reason": "no changes to commit"}
+        subprocess.run(["git", "-C", str(ws_root), "commit", "-m", message, "--"] + rels,
+                       check=True, capture_output=True, timeout=30)
+        sha = subprocess.run(["git", "-C", str(ws_root), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=30).stdout.strip()
+        return {"committed": True, "sha": sha}
+    except Exception as e:
+        return {"committed": False, "reason": f"{type(e).__name__}: {e}"}
+
+
+def apply_cycle(ws_root, inv_slug: str, *, scope: str = "all") -> dict:
+    """Write the cycle's findings back to the REAL investigation + studies, then commit
+    the changed files to the workspace git. This is the opposite of a read-only run —
+    it mutates research artifacts, so it is only reached via the panel's explicit Apply.
+
+    Writes, by ``scope``:
+      - verdicts: each study's engine-evaluated verdict -> study.yaml (decisive only)
+      - edges   (scope 'all'): connect_investigation enriches the builds-on edges
+      - state   : persist the cycle_state/next-actions -> investigation.yaml
+
+    Open decisions the engine marks ``human-only`` (steer) are NEVER auto-resolved —
+    they are surfaced for the human. Returns a report of exactly what changed + the
+    refreshed trace.
+    """
+    if not engine_available():
+        return {"available": False}
+    import yaml
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    M = _Modules()
+    ws_root = Path(ws_root)
+    wp = WorkspacePaths.load(ws_root)
+    inv_path = wp.investigations / inv_slug / "investigation.yaml"
+    if not inv_path.is_file():
+        return {"available": True, "inv_slug": inv_slug,
+                "error": f"no investigation.yaml for {inv_slug!r}", "report": {}}
+
+    _, inv_spec, studies = M.discover.load_cycle_inputs(ws_root, inv_slug)
+    cyc = M.discover.run_cycle(inv_spec, studies)
+    runs_by: dict = {}
+    try:
+        runs_by = M.discover._load_runs_by_study(ws_root, inv_slug, studies)
+    except Exception:
+        pass
+    ev_state = M.evidence_integrity.reconcile_evidence_state(inv_spec, studies, runs_by)
+    evald = M.evaluation.compare_hypotheses(inv_spec, studies, ev_state)
+
+    report: dict = {"verdicts": [], "edges": {}, "cycle_state": False,
+                    "resolutions": [], "skipped": []}
+
+    # 1. verdicts — decisive engine verdicts onto the study cards
+    for slug, c in (evald or {}).items():
+        status = c.get("status")
+        verdict = _VERDICT_MAP.get(status)
+        sp = _study_path(wp, inv_slug, slug)
+        if verdict is None:
+            report["skipped"].append({"study": slug, "reason": f"engine verdict '{status}' not decisive"})
+            continue
+        if sp is None:
+            report["skipped"].append({"study": slug, "reason": "no study.yaml on disk"})
+            continue
+        try:
+            cur = (yaml.safe_load(sp.read_text(encoding="utf-8")) or {}).get("verdict")
+        except Exception:
+            cur = None
+        if cur == verdict:
+            report["skipped"].append({"study": slug, "reason": f"already '{verdict}'"})
+            continue
+        rationale = "discovery cycle: " + status + (
+            f" (favored {c.get('favored')})" if c.get("favored") else "")
+        try:
+            M.discover.set_verdict(sp, verdict, rationale)
+            report["verdicts"].append({"study": slug, "from": cur, "to": verdict})
+        except Exception as e:
+            report["skipped"].append({"study": slug, "reason": f"{type(e).__name__}: {e}"})
+
+    # 2. edges — enrich the builds-on backbone (scope 'all')
+    if scope == "all":
+        try:
+            conn = M.discover.connect_investigation(ws_root, inv_slug)
+            report["edges"] = {"enriched": conn.get("enriched", {}),
+                               "needs_relate": conn.get("needs_relate", {})}
+        except Exception as e:
+            report["edges"] = {"error": f"{type(e).__name__}: {e}"}
+
+    # 3. resolutions — only ever machine-resolvable ones; the open decisions here are
+    # human-only (steer), which we deliberately leave for the human to resolve.
+    try:
+        plan = M.de.execute_plan(cyc, inv_spec) if hasattr(M.de, "execute_plan") else []
+        human_only = [p for p in plan if (p.get("consequence") or "") == "human-only"]
+        report["resolutions"] = {"auto_resolved": 0,
+                                 "left_for_human": len(human_only)}
+    except Exception:
+        report["resolutions"] = {"auto_resolved": 0}
+
+    # 4. persist cycle_state onto the investigation
+    if scope in ("all", "state"):
+        try:
+            M.discover.persist_cycle(inv_path, inv_spec, cyc)
+            report["cycle_state"] = True
+        except Exception as e:
+            report["cycle_state"] = f"error: {type(e).__name__}: {e}"
+
+    # 5. commit just the touched research dirs to the workspace git
+    try:
+        inv_rel = wp.investigations.relative_to(ws_root)
+        stu_rel = wp.studies.relative_to(ws_root)
+        commit_dirs = sorted({inv_rel, stu_rel})
+    except Exception:
+        commit_dirs = [wp.investigations, wp.studies]
+    report["commit"] = _git_commit(
+        ws_root, commit_dirs, f"discovery cycle: apply findings to {inv_slug}")
+
+    return {"available": True, "inv_slug": inv_slug, "report": report,
+            "after": build_cycle_trace(ws_root, inv_slug)}
+
+
 def _closed_of(trace: dict) -> bool | None:
     """Pull the closure flag out of a trace's run_cycle result if present."""
     for s in trace.get("steps", []):

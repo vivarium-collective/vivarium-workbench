@@ -1157,6 +1157,24 @@ def create_app() -> FastAPI:
         from vivarium_workbench.lib.cycle_trace import sandbox_advance
         return sandbox_advance(ws, slug, max_runs=max(1, min(int(max_runs), 12)))
 
+    @app.post(
+        "/api/discovery-cycle/{slug}/apply",
+        tags=["Investigations"],
+        summary="Write the cycle's findings back to the real investigation + studies",
+    )
+    def discovery_cycle_apply(slug: str, payload: dict = Body(default={}),
+                              ws: Path = Depends(get_workspace)) -> dict:
+        """Apply the discovery cycle's findings to the REAL artifacts: write each
+        study's engine-evaluated verdict onto study.yaml, enrich the builds-on edges,
+        persist the cycle_state onto investigation.yaml, and commit the changed files
+        to the workspace git (auditable + revertible). Human-only decisions are left
+        for the human. ``payload`` may set ``scope`` (all | verdicts | state). This
+        MUTATES research files — reached only via the panel's explicit Apply button.
+        Backed by ``lib.cycle_trace.apply_cycle``."""
+        from vivarium_workbench.lib.cycle_trace import apply_cycle
+        scope = str((payload or {}).get("scope") or "all")
+        return apply_cycle(ws, slug, scope=scope)
+
     @app.get(
         "/api/investigation-report/{slug}",
         tags=["Investigations"],

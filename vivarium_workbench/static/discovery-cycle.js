@@ -21,13 +21,21 @@
 
   var ctl = null, popoutWin = null, initDone = false, built = false;
   // panel state (persists while the panel is mounted)
-  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null };
+  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null };
 
   function el(id) { return document.getElementById(id); }
   function base() { return global.__BASE_PATH__ || ""; }
   function getJSON(path) {
     return fetch(base() + path, { headers: { "Accept": "application/json" } })
       .then(function (r) { return r.json(); });
+  }
+  function postJSON(path, body) {
+    // session.js adds X-VW-Session; same-origin Origin satisfies the CSRF guard.
+    return fetch(base() + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) { return r.json(); });
   }
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
@@ -60,6 +68,8 @@
       ".dcyc-banner{border-radius:9px;padding:9px 11px;margin:2px 0 8px;border:1px solid var(--viv-border,#e1e3ea)}",
       ".dcyc-bn-closed{background:rgba(22,163,74,.08);border-color:rgba(22,163,74,.35)}",
       ".dcyc-bn-open{background:rgba(37,99,235,.07);border-color:rgba(37,99,235,.3)}",
+      ".dcyc-bn-applied{background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.4)}",
+      ".dcyc-bn-applied code{font-family:ui-monospace,Menlo,monospace}",
       ".dcyc-bn-h{font-weight:650;font-size:13px}",
       ".dcyc-bn-sub{font-size:11.5px;color:var(--viv-fg,#445);margin-top:3px}",
       ".dcyc-chip{display:inline-block;font-size:10px;padding:0 6px;border-radius:999px;border:1px solid var(--viv-border,#cdd);background:var(--viv-bg,#fff);vertical-align:1px}",
@@ -108,6 +118,7 @@
       '      <select id="dcyc-inv"><option value="">Loading…</option></select>' +
       '      <button id="dcyc-run" class="dcyc-btn dcyc-btn-primary" disabled>Run</button>' +
       '      <button id="dcyc-run-cont" class="dcyc-btn" disabled title="Advance toward closure in a sandboxed copy — never touches your real files">Advance ▸</button>' +
+      '      <button id="dcyc-apply" class="dcyc-btn" disabled title="Write the cycle\'s findings back to the real investigation + studies (verdicts, edges, cycle-state), committed to git">Apply to investigation ▸</button>' +
       '    </div>' +
       '    <div id="dcyc-status" class="dcyc-status"></div>' +
       '  </div>' +
@@ -117,6 +128,7 @@
     if (sel) sel.addEventListener("change", function () { onPick(sel.value, true); });
     var r = el("dcyc-run"); if (r) r.addEventListener("click", runCycle);
     var rc = el("dcyc-run-cont"); if (rc) rc.addEventListener("click", runContinuous);
+    var ap = el("dcyc-apply"); if (ap) ap.addEventListener("click", applyCycle);
     built = true;
     return true;
   }
@@ -202,6 +214,8 @@
     lsSet(K_SLUG, S.slug);
     el("dcyc-run").disabled = !S.slug;
     el("dcyc-run-cont").disabled = !S.slug;
+    var ap = el("dcyc-apply"); if (ap) ap.disabled = true;   // re-enabled after a run
+    S.applyReport = null;
     setStatus("");
     syncCurrent();
     if (!S.slug) {
@@ -264,10 +278,12 @@
     if (!S.steps.length) { g.innerHTML = '<p class="empty-state">Load an investigation to see its cycle.</p>'; return; }
     var phases = [];
     S.steps.forEach(function (s) { if (phases.indexOf(s.phase) < 0) phases.push(s.phase); });
-    g.innerHTML = bannerHtml() + phases.map(function (ph) {
+    g.innerHTML = applyReportHtml() + bannerHtml() + phases.map(function (ph) {
       var nodes = S.steps.filter(function (s) { return s.phase === ph; });
       return '<div class="dcyc-phase-h">' + esc(ph) + "</div>" + nodes.map(nodeHtml).join("");
     }).join("");
+    var dm = el("dcyc-apply-dismiss");
+    if (dm) dm.addEventListener("click", function () { S.applyReport = null; renderGraph(); });
     Array.prototype.forEach.call(g.querySelectorAll(".dcyc-nh"), function (h) {
       h.addEventListener("click", function () { toggleNode(h.getAttribute("data-id")); });
     });
@@ -343,6 +359,7 @@
       setTrace(j);
       var errs = j.steps.filter(function (s) { return s.status === "error"; }).length;
       var blk = j.steps.filter(function (s) { return s.status === "blocked"; }).length;
+      var ap = el("dcyc-apply"); if (ap) ap.disabled = !!blk;   // can apply once a real run exists
       setStatus(blk ? (j.error || "Could not load this investigation.")
         : ("Cycle complete in " + ((Date.now() - t0) / 1000).toFixed(1) + "s" +
           (errs ? " · " + errs + " step(s) errored" : "")));
@@ -396,6 +413,61 @@
         S.busy = false;
         el("dcyc-run").disabled = !S.slug; el("dcyc-run-cont").disabled = !S.slug;
       });
+  }
+
+  function applyCycle() {
+    if (!S.slug || S.busy) return;
+    var name = currentTitle(S.slug);
+    if (!global.confirm(
+      "Apply the cycle's findings to “" + name + "”?\n\n" +
+      "This writes the engine's verdicts onto the study cards, enriches the builds-on " +
+      "edges, and persists the cycle-state to the REAL investigation + study files, then " +
+      "commits them to the workspace git (revertible). Human-only decisions are left for you.")) return;
+    S.busy = true;
+    ["dcyc-run", "dcyc-run-cont", "dcyc-apply"].forEach(function (id) { var e = el(id); if (e) e.disabled = true; });
+    setStatus("Applying to the investigation…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/apply", { scope: "all" })
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (j.error) { setStatus(j.error); return; }
+        S.applyReport = j.report || {};
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after); else renderGraph();
+        var r = j.report || {};
+        var nv = (r.verdicts || []).length;
+        var commit = r.commit || {};
+        var ctxt = commit.committed ? (" · committed " + commit.sha)
+          : (commit.reason ? (" · " + commit.reason) : "");
+        setStatus("Applied · " + nv + " verdict(s)" + ctxt);
+      })
+      .catch(function () { setStatus("Apply request failed."); })
+      .finally(function () {
+        S.busy = false;
+        el("dcyc-run").disabled = !S.slug; el("dcyc-run-cont").disabled = !S.slug;
+        el("dcyc-apply").disabled = !S.slug;
+      });
+  }
+
+  function applyReportHtml() {
+    var r = S.applyReport;
+    if (!r) return "";
+    var parts = [];
+    var nv = (r.verdicts || []).length;
+    if (nv) parts.push("<b>" + nv + "</b> verdict(s) written: " +
+      r.verdicts.map(function (v) { return esc(v.study) + " → " + esc(v.to); }).join(", "));
+    else parts.push("no verdicts changed");
+    var enr = (r.edges && r.edges.enriched) ? Object.keys(r.edges.enriched).length : 0;
+    if (enr) parts.push(enr + " edge(s) enriched");
+    if (r.cycle_state === true) parts.push("cycle-state persisted");
+    if (r.resolutions && r.resolutions.left_for_human)
+      parts.push(r.resolutions.left_for_human + " human decision(s) left for you");
+    var commit = r.commit || {};
+    var cline = commit.committed ? ("committed <code>" + esc(commit.sha) + "</code> to the workspace git")
+      : ("not committed — " + esc(commit.reason || "unknown"));
+    var skip = (r.skipped || []).length;
+    return '<div class="dcyc-banner dcyc-bn-applied"><div class="dcyc-bn-h">✓ Applied to the investigation</div>' +
+      '<div class="dcyc-bn-sub">' + parts.join(" · ") + "</div>" +
+      '<div class="dcyc-bn-sub">' + cline + (skip ? (" · " + skip + " study/studies skipped (not decisive / unchanged)") : "") + "</div>" +
+      '<div class="dcyc-bn-sub"><button class="dcyc-btn dcyc-btn-sm" id="dcyc-apply-dismiss">Dismiss</button></div></div>';
   }
 
   // ---- dock registration --------------------------------------------------

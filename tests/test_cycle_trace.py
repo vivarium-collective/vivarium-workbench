@@ -95,6 +95,30 @@ def test_list_cycle_investigations_only_returns_runnable():
         assert r["slug"] and r["title"]  # every row is usable in the picker
 
 
+def test_apply_cycle_writes_report_and_stays_in_its_workspace(tmp_path):
+    import shutil
+    ws = tmp_path / "ws"
+    shutil.copytree(_WS, ws)
+    out = ct.apply_cycle(ws, _SLUG, scope="all")
+    assert out["available"] is True
+    r = out["report"]
+    # a well-formed report regardless of how thin the fixture is
+    for k in ("verdicts", "edges", "cycle_state", "skipped", "commit"):
+        assert k in r
+    assert isinstance(r["verdicts"], list)
+    # every written verdict is in the canonical study vocab
+    from discovery_engine.discover import VERDICT_VOCAB
+    for v in r["verdicts"]:
+        assert v["to"] in VERDICT_VOCAB
+    # the refreshed trace comes back too
+    assert out["after"]["available"] is True
+
+
+def test_apply_never_writes_an_offvocab_or_human_decision():
+    # the mapping must only ever produce decisive, in-vocab verdicts; unresolved/gated skip
+    assert set(ct._VERDICT_MAP.values()) <= {"supported", "qualified", "inconclusive", None}
+
+
 def test_sandbox_advance_never_touches_real_workspace(tmp_path):
     import shutil
     # copy the fixture so we can assert byte-for-byte it is unchanged
