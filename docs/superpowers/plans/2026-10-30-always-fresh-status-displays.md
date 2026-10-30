@@ -269,9 +269,9 @@ evidence shows passed gates.
   - `POST /api/study/{slug}/reconcile-status` → `ReconcileResult` model.
   - `POST /api/investigation/{slug}/reconcile-status` → `ReconcileInvestigationResult` model.
   - A call to `reconcile_study_status` appended to `_run_post_run_flush` so a completed run self-heals the stored `execution_status`.
-  - Both routes CSRF/origin-guarded (`_csrf_ok`) and use the `get_workspace` dependency, matching an existing POST route pattern. **Step 1 confirms the exact decorator + dependency + model-return pattern from a sample POST route.**
+  - Both routes use the `get_workspace` dependency; CSRF is handled by the global `_csrf_mw` middleware, so no per-route guard is needed (see appendix). Pattern: `def route(req: SomeBody, ws: Path = Depends(get_workspace)) -> dict`.
 
-- [ ] **Step 1: Confirm the POST route pattern** (CSRF guard, `get_workspace`, pydantic return). (No code.)
+- [ ] **Step 1: Confirm the POST route pattern** from `api/app.py` L4537 (appendix has it). (No code.)
 - [ ] **Step 2: Write failing test** using the `dashboard_client` fixture: POST the study reconcile endpoint against a fixture ws whose stored field is stale; assert 200 + `changed: true` + the study.yaml now reflects evidence; POST again → `changed: false`. A separate test: after a simulated run flush, the stored field is reconciled.
 - [ ] **Step 3: Run, verify fail.**
 - [ ] **Step 4: Implement** routes + models + the flush hook.
@@ -285,3 +285,26 @@ evidence shows passed gates.
 - Tasks 1 and 2 are foundational and independent; 3 depends on 1; 4 on 1+2; 5 on 1+3; 6 on 1+3; 7 on 4. 5 and 6 can be done in either order.
 - The frontend needs **no** changes for freshness — the JS reads the same payload keys, which become fresh server-side. (A later, separate task could surface a "Reconcile" button; out of scope here.)
 - After all tasks: run `reconcile-investigation` on the eukaryogenesis workspace as the acceptance check (S1–S5 execution flips to true state, gate shows live).
+
+---
+
+## Appendix: confirmed interfaces (ground truth — resolves the "Step 1 confirm" steps)
+
+Package root is `vivarium_workbench/lib/` (not top-level `lib/`). All verified on this worktree.
+
+**Task 1 — evidence sources & vocab:**
+- `study_spec.read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]` (L426) — newest-first; row keys include `run_id, status, n_steps, completed_at, source`. **No `heartbeat_at`** (so runs.db can never drive "running"; only study.yaml `runs[]` can).
+- `runs_meta.status` vocabulary written by `composite_runs`: **`running, completed, failed, orphaned, cancelled`** (+ `ran` / `completed` only via the `simulations`-table and `.pbg/runs.jsonl` merge fallbacks). Treat "completed" = `study_spec._COMPLETE_STATUSES = {complete, completed, ran, done}` (L1653); `orphaned`/`cancelled` are NOT success.
+- Gate from report cards: `study_spec.has_graded_report_cards(ws_root, slug) -> bool` (L1607); per-card verdict via `study_spec._report_card_verdict_and_subject(path) -> (verdict, subject, counts)` (L1387), verdict ∈ `{within_tol, drift, mismatch, ungraded}`. **Map:** gate `passed` = all graded cards `within_tol`; `failed` = any `mismatch` **or** any `drift`; `not_started` = none graded. (Report-card vocab is a DIFFERENT axis from study verdict `{supported,qualified,inconclusive,refuted}`.)
+- Live behavior-test counts for B1: read the latest run's `.pbg/runs/<run_id>/report.json` (and `test_diff.json`) — these are the live per-run evaluation artifacts (vs. frozen `study.yaml runs[].outcomes`). Confirm `report.json` shape in Step 1 and derive `tests_passed/tests_total` from it.
+- **Fixtures: none ship a `runs.db` or `*.verdict.json`.** Build evidence at runtime in `tmp_path` via `composite_runs.save_metadata(...)` + `complete_metadata(..., status=...)` and by writing `studies/<slug>/viz/report_card/<card>.verdict.json`. Copy patterns from `tests/test_composite_runs.py` + `tests/test_report_card_promotion.py`. The `dashboard_client` fixture (`tests/conftest.py` L196) spawns the real server for endpoint tests.
+
+**Task 2 — schema resolution:** read `WorkspacePaths(ws_root).pbg / "schemas" / "study.schema.json"` (pattern: `field_migrate.migrate_fields` L120-149). Parse `schema["properties"]` for the mechanical field + its `enum`, honoring `deprecated` + scalar `x-replaced-by` (reuse the logic shape of `field_migrate.safe_renames_from_schema` L40). Canonical mechanical field = `execution_status`; older viva-genesis = `simulation_status` (enum `{not_run,running,ran,failed}`).
+
+**Task 3 — derivation signatures:** `derive_execution_status(spec, node_status="")` (L47, returns `EXEC_VALUES`), `derive_verdict(spec)` (L82). Add optional `evidence` param to both; keep the `evidence=None` path byte-identical. `derive_confidence` is **not** here — it's `discovery_engine.study_verdict.derive_confidence` (used by graph L135); leave it untouched (no engine change, confidence not in scope).
+
+**Task 5 — card/graph anchors:** card loop in `report_views.build_iset_detail(ws_root, name)` (L899), `for slug in investigation_member_slugs(spec)` (L970); execution/verdict set at **L1180/L1181**; behavior-tests `_beh_summary` at L1091-1107; `_eff_status` at L1051 (+ report-card safeguard L1058-1067). Graph: `investigation_graph_views.build_investigation_graph(ws_root, inv_slug)` (L72), nodes at L127-129, execution/verdict at **L144-147**, report-card promotion L105-114.
+
+**Task 6 — rollup/B2:** `investigation_status._study_display_status(ws_root, slug, spec)` (L86) — already takes the **spec + ws_root** (add an `evidence` param or let it call `evidence_for_study`). `compute_investigation_status(study_statuses: list[str], has_runs=None)` (L135) — takes **status strings**. **B2 root cause:** `report_views` L1206 builds `member_statuses` from each study's **raw `status`**, while the card/graph use the fresher `_eff_status` (computed at L1051). Fix = feed the evidence-fresh effective statuses (not raw `status`) into the L1206 rollup. Plan board: `plan_board.py` A→E rows.
+
+**Task 7 — endpoints/flush:** POST pattern (`api/app.py` L4537): `def route(req: SomeBody, ws: Path = Depends(get_workspace)) -> dict`. **CSRF is a global middleware** (`_csrf_mw`, L666) — a new POST needs **no** per-route guard (correct the earlier note; `VIVARIUM_WORKBENCH_DISABLE_CSRF=1` bypasses in tests). `get_workspace` at L435 (overridable via `dependency_overrides`). Flush insertion point: `study_runs._run_post_run_flush(...)` (L170) — add the reconcile call around **L348**, after `auto_evaluate.evaluate_on_run_completion` (L336-338) and before `lifecycle_mutations._sync_parent_investigation` (L349).
