@@ -481,8 +481,14 @@ def rerun_investigation(ws_root, investigation):
             errors.append({"study": s, "error": str(e)})
             ok[s] = False
             continue
-        if status < 300 and (resp or {}).get("run_id"):
-            launched.append({"study": s, "run_id": resp["run_id"]})
+        # run_study_baseline returns the id as `simulation_id` (the
+        # run_composite_subprocess response key), not `run_id` — accept either,
+        # as rerun_run already does. Without this a successful baseline fell to
+        # the else branch and the 200 status was recorded as an "error", so every
+        # launched study was reported failed (#1492).
+        rid = (resp or {}).get("simulation_id") or (resp or {}).get("run_id")
+        if status < 300 and rid:
+            launched.append({"study": s, "run_id": rid})
             ok[s] = True
         else:
             errors.append({"study": s, "error": (resp or {}).get("error", status)})
