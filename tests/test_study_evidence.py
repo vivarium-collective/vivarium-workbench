@@ -139,3 +139,9 @@ def test_unreadable_runs_db_is_logged_not_silent(fixture_ws, caplog):
         ev = evidence_for_study(fixture_ws, "corrupt")
     assert ev.execution == "not_run"
     assert any("could not be read" in r.message for r in caplog.records)
+
+
+def test_legacy_alias_verdict_counts_as_passed(fixture_ws):
+    _card(fixture_ws, "untouched", "a", "pass")
+    ev = evidence_for_study(fixture_ws, "untouched")
+    assert ev.gate == "passed" and ev.evaluation == "evaluated"

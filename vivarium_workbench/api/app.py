@@ -4544,7 +4544,13 @@ def create_app() -> FastAPI:
         ws: Path = Depends(get_workspace),
     ) -> dict:
         from vivarium_workbench.lib.study_reconcile import reconcile_study_status
-        return reconcile_study_status(ws, _path_safety.plain_name(slug, "study name"))
+        name = _path_safety.plain_name(slug, "study name")
+        try:
+            return reconcile_study_status(ws, name)
+        except FileNotFoundError:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "study not found", "slug": slug})
 
     @app.post(
         "/api/investigation/{slug}/reconcile-status",

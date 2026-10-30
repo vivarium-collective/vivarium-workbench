@@ -109,3 +109,22 @@ def test_reconcile_investigation(ws):
     assert by[SLUG]["changed"] is True
     assert by["idle"]["skipped"] == "no run evidence"
     assert "error" in by["ghost"]
+
+
+def test_no_schema_is_skipped_not_raised(tmp_path):
+    (tmp_path / "workspace.yaml").write_text("name: t\n")
+    _runs(tmp_path, SLUG, [("r1", "completed", 100.0)])
+    p = _study(tmp_path, SLUG, simulation_status="not_run")
+    before = p.read_text(encoding="utf-8")
+    out = reconcile_study_status(tmp_path, SLUG)
+    assert out["changed"] is False and out["skipped"] == "no schema"
+    assert p.read_text(encoding="utf-8") == before
+
+
+def test_non_ascii_prose_survives_reconcile(ws):
+    p = _study(ws, SLUG, simulation_status="not_run",
+               note="12 µM at 37 °C — α/β")
+    reconcile_study_status(ws, SLUG)
+    text = p.read_text(encoding="utf-8")
+    assert "12 µM at 37 °C — α/β" in text and "\\u" not in text
+    assert yaml.safe_load(text)["note"] == "12 µM at 37 °C — α/β"

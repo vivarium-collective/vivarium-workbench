@@ -351,8 +351,8 @@ def _run_post_run_flush(ws_root, study_dir, spec, spec_id, run_id, full_params,
     try:
         from vivarium_workbench.lib.study_reconcile import reconcile_study_status
         reconcile_study_status(ws_root, study_dir.name)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        print(f"[reconcile_status] failed: {exc}", file=sys.stderr)
     lifecycle_mutations._sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response
 

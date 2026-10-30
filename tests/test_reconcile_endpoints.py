@@ -66,6 +66,12 @@ def test_study_reconcile_endpoint_and_idempotent(client, ws):
     assert r2.status_code == 200 and r2.json()["changed"] is False
 
 
+def test_study_reconcile_unknown_slug_is_404(client):
+    r = client.post("/api/study/no-such-study/reconcile-status")
+    assert r.status_code == 404
+    assert r.json() == {"error": "study not found", "slug": "no-such-study"}
+
+
 def test_investigation_reconcile_endpoint(client, ws):
     r = client.post("/api/investigation/inv/reconcile-status")
     assert r.status_code == 200, r.text

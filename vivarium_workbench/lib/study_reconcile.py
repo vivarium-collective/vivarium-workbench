@@ -34,7 +34,11 @@ def reconcile_study_status(ws_root: Path, slug: str) -> dict:
     ws_root = Path(ws_root)
     path = WorkspacePaths.load(ws_root).study_dir(slug, must_exist=True) / "study.yaml"
     study = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    field, enum = mechanical_exec_field(ws_root)
+    try:
+        field, enum = mechanical_exec_field(ws_root)
+    except ValueError:
+        return {"changed": False, "field": None, "before": None,
+                "after": None, "skipped": "no schema"}
     current = study.get(field)
 
     ev = evidence_for_study(ws_root, slug)
@@ -49,7 +53,8 @@ def reconcile_study_status(ws_root: Path, slug: str) -> dict:
         return _result(False, field, current, current, "already fresh")
 
     study[field] = target
-    atomic_write_text(path, yaml.safe_dump(study, sort_keys=False))
+    atomic_write_text(path, yaml.safe_dump(
+        study, sort_keys=False, allow_unicode=True, width=10**6))
     return _result(True, field, current, target, None)
 
 

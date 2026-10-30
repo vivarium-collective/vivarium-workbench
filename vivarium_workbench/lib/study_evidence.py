@@ -84,16 +84,17 @@ def _execution(rows: list[tuple[str, str]]) -> str:
 
 def _graded_overalls(study_dir: Path) -> list[str]:
     rc = study_dir / "viz" / "report_card"
+    from vivarium_workbench.lib.study_spec import _normalize_verdict
     out: list[str] = []
     if not rc.is_dir():
         return out
     for vj in sorted(rc.glob("*.verdict.json")):
         try:
-            overall = str((json.loads(vj.read_text(encoding="utf-8")) or {})
-                          .get("overall") or "").strip().lower()
+            raw = (json.loads(vj.read_text(encoding="utf-8")) or {}).get("overall")
         except Exception:  # noqa: BLE001
             continue
-        if overall not in _UNGRADED:
+        overall = _normalize_verdict(raw if isinstance(raw, str) else None)
+        if overall and overall not in _UNGRADED:
             out.append(overall)
     return out
 
