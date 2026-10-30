@@ -32,11 +32,18 @@ import threading
 from pathlib import Path
 from typing import Any
 
+# C.M.: I am adding imports for functions that listen for workers to connect
+from vivarium_workbench.lib.env_worker_dialback import DialBackError, DialBackListener
+
 # The worker program, shipped in the package (spec §4) and located by path so the
 # workspace venv needs no vivarium-workbench dependency.
 _WORKER_PATH = str(Path(__file__).resolve().parent.parent / "env_worker.py")
 _MAX_FRAME = 64 * 1024 * 1024
 
+# C.M.: Windows needs more time for the worker to start and connect back using dial-back
+# because of the Python, so we need a more generous time interval. This can be fine-tuned
+# but I am using 60.0 for now.
+_LOCAL_START_TIMEOUT = 60.0
 
 class EnvWorkerError(Exception):
     """A structured error returned by the worker (spec §9, environment error)."""
@@ -55,7 +62,7 @@ class EnvWorker:
     """A live connection to one env-worker. Serial (spec §8).
 
     Both are Optional because the two transports differ in what they own: a
-    dial-back worker has no local process (``_proc is None``), and ``close()``
+    remote dial-back worker has no local process (``_proc is None``), and ``close()``
     drops the socket so ``alive()`` stays honest for a worker we cannot poll.
     """
 
@@ -67,6 +74,12 @@ class EnvWorker:
         self.workspace = str(workspace)
         self.timeout = timeout
         interpreter = interpreter or sys.executable
+
+        # C.M.: Check to see if the system is Windows and needs a different path,
+        # otherwise run as before. Windows cannot run socketpair.
+        if sys.platform == "win32":
+            self._start_dial_back(interpreter, log_path)
+            return
 
         parent, child = socket.socketpair()
         os.set_inheritable(child.fileno(), True)   # portable POSIX fd-passing (spec §5)
@@ -95,6 +108,37 @@ class EnvWorker:
         finally:
             child.close()  # the child holds its own inherited copy
         self._attach(parent)
+
+
+    # C.M. Establishes a Windows-specific method to establish the worker.
+    def _start_dial_back(self, interpreter: str, log_path: Path | str | None) -> None:
+        """Start a local worker on Windows, where socketpair + pass_fds cannot work.
+
+        Windows cannot hand an open socket to a child process, so the worker
+        connects back to a one-time localhost port instead and proves itself with
+        a one-time token: the same transport remote workers use. The token goes
+        through the environment, not the command line, where other local programs
+        could read it. Unlike a remote worker, this object owns the process, so
+        close() and alive() work exactly as they do for the socketpair transport.
+        """
+        self._log = open(log_path, "ab") if log_path else subprocess.DEVNULL
+        with DialBackListener(bind_host="127.0.0.1") as listener:
+            self._proc = subprocess.Popen(
+                [interpreter, _WORKER_PATH,
+                 "--connect-to", f"127.0.0.1:{listener.port}",
+                 "--workspace", self.workspace],
+                stdout=self._log, stderr=self._log,
+                cwd=self.workspace,
+                env={**os.environ, "V2E_ROOT": self.workspace,
+                     "VIVARIUM_ENV_WORKER_TOKEN": listener.token},
+            )
+            try:
+                sock = listener.accept(timeout=_LOCAL_START_TIMEOUT)
+            except DialBackError as e:
+                self._proc.kill()
+                self._proc.wait(timeout=5)
+                raise EnvWorkerUnavailable(f"env worker did not connect: {e}") from e
+        self._attach(sock)
 
     def _attach(self, sock: socket.socket) -> None:
         """Bind a connected socket + per-instance protocol state.
