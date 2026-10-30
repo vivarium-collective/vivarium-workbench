@@ -34,18 +34,25 @@ named, nothing is probed and runs stay local.
 
 ## Which environment runs the workspace
 
-The code is not shipped. The run uses a prebuilt environment compose-api already lists:
-1. `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=name:<environment>`, when set, names it outright.
-2. Otherwise the workspace's git `origin` is matched to a registry entry's `source` (`GET /registry/entries`), and
-   that entry's prebuilt environment (`GET /registry/environments`, `kind: prebuilt`) is the one. Its name becomes the
-   run's `environment=`, so its default version runs.
-3. No match is a **409** naming the registration steps (below).
+The code is not shipped. `GET /registry/entries` and `GET /registry/environments` decide where the run goes:
+1. `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=name:<environment>`, when set, names a prebuilt environment outright.
+2. Otherwise the workspace's git `origin` is matched to a registry entry's `source` (an entry pinned by commit links
+   `…/tree/<commit>`, which names the same repository). If that entry has a prebuilt environment
+   (`kind: prebuilt`, in the entry's `bundles`), its name becomes the run's `environment=`, so its default version runs.
+3. If the entry has none, the run names **no environment**, and compose-api infers one from the classes the document
+   names: a ready environment that covers them, or else a `mash-up` it builds from the registry entries for a
+   signed-in caller and caches by its entry set (`docs/plan-environment-composition.md` in compose-api, D7.1 to D7.7).
+   `GET /registry/entries` does not say whether an entry can be composed, so compose-api decides and its refusal is
+   shown as it gives it: a **409** (`refused`) carrying its message and each violation, whether it answered 400 or 422
+   (a document it will not take) or 409 (a lock pixi cannot solve, or an environment already failed for this set of
+   entries). A **429** (it builds at most two new environments at a time) reads as `rate limited`. The first run of a new combination needs
+   `COMPOSE_API_TOKEN` (an anonymous one is a **401** that says so) and waits for the build; later runs reuse it. The
+   preflight answers `reason: inferred`, with the entry, its level, and whether a token is set.
+4. No registry entry has the repository: a **409** (`not-registered`), because a compose-api pull request adds the
+   entry (below).
 
-Environments of kind `mash-up` (compose-api composes them from registry entries and reuses them) are not used yet:
-a workspace whose entry has no prebuilt environment is a 409, even though compose-api could compose one for it.
-
-The run uses the image, not the checkout. When the entry pins a `commit` and HEAD is another commit, the submit
-answers with a `warning`. A landed run records the environment version it ran in (`compose.environment_version`, such
+The run uses the environment, not the checkout: the prebuilt image, or the environment built from the entry's pinned
+commit. When the entry pins a `commit` and HEAD is another commit, the submit answers with a `warning`. A landed run records the environment version it ran in (`compose.environment_version`, such
 as `viva-pde-particle@2`, read from the run's own record) and that version's image digest as `code_version.image`.
 A run from before versions has no version, and its image is resolved from the simulator name.
 
@@ -69,6 +76,8 @@ does not look classes up.
 - An engine class (`process_bigraph.*`) is resolved by every process-bigraph core.
 - Anything else is a **409** listing each address.
 - An environment with no interface manifest is a **409** (`no-manifest`).
+- An inferred environment may not exist yet, so there is no manifest to read: only the address form (`local:` and no
+  `!`) is checked here, and compose-api's own check of the classes is shown if it refuses.
 
 **Steps.** compose-api runs `interval_time` from 0 to 1000. A run asking for more is a **400** (`bad-steps`), not a
 shorter run.
@@ -77,7 +86,7 @@ shorter run.
 
 | Workbench | compose-api |
 |---|---|
-| submit (study baseline and variant, `/api/remote-run-submit`) | `POST /simulation/run` with the `.pbg` as `uploaded_file`. Query: `environment=<env>`, `interval_time=<n_steps>` (a local run calls `composite.run(1)` per step), `tags=workbench,study:<study>,workbench:dispatch:<uuid>`, `description` |
+| submit (study baseline and variant, `/api/remote-run-submit`) | `POST /simulation/run` with the `.pbg` as `uploaded_file`. Query: `environment=<env>` (omitted when compose-api infers it), `interval_time=<n_steps>` (a local run calls `composite.run(1)` per step), `tags=workbench,study:<study>,workbench:dispatch:<uuid>`, `description` |
 | Composites-tab remote run (`/api/composite-test-run`, the detached `run_remote`) | the same submit (tag `composite:<id>`), then the runner waits on the status, downloads the results and lands them as the card's run. It records the card's emit selection, else the composite's declared emitters; declared analyses are not run, and the run log says so |
 | preflight (`/api/remote-dispatch-preflight`) | the environment lookup alone: ready when one runs the workspace, otherwise its reason |
 | poll (`/api/remote-run-poll`) | `GET /results/simulation/status` (`submitting` until SLURM has the job) |
@@ -92,6 +101,9 @@ simulation ids, so the compose check runs before them.
 **Failures.**
 - `502 unreachable` means only that compose-api could not be reached. Any other failed answer is
   `502 backend_error`, `401` (no `COMPOSE_API_TOKEN`) or `403`.
+- compose-api refusing the run (a `400` or `422` whose `detail` lists each address and why, or a `409` conflict) is a
+  **409** (`refused`) whose text carries compose-api's message and every violation. The client's own message names only
+  the operation and the status, so the text is read from `detail`.
 - A compose id with no backend named is a **409** (`no-backend`).
 - A submission is never retried, because a retry could run twice. When its answer is lost (`UncertainOutcomeError`),
   the run is looked up by its `workbench:dispatch:<uuid>` tag (5 tries, 3 s apart). If none is found, the answer is
@@ -108,7 +120,7 @@ As compose-api's maintainer described it on 2026-10-29 (biosimulations/compose-a
 1. **A `manifest.yaml` entry in compose-api, reviewed by PR:** `source`, `install` (git, commit and extras, or a PyPI
    pin), `conda`, `requires`, `module_roots` and compliance cases. The manifest is the allow-list: what is trusted
    is a commit, not a repository. `PREBUILT_SIMULATORS` no longer exists.
-2. **A prebuilt environment, which is what this workbench runs today.** A workspace that publishes its own image
+2. **A prebuilt environment, which this workbench uses when the entry has one.** A workspace that publishes its own image
    (a `compose.Dockerfile`, a workflow that publishes it, and a runner that honours `run <doc> -o <output> -n
    <interval>` and writes `results_<date>.pber`; viva-pde-particle's `docker/compose.Dockerfile`,
    `.github/workflows/compose-image.yml` and `viva_pde_particle/compose_runner.py` are the reference) needs:
@@ -122,7 +134,10 @@ As compose-api's maintainer described it on 2026-10-29 (biosimulations/compose-a
    registered viva-pde-particle's version 2 that way on 2026-10-27).
 3. **Or no image at all.** When no ready environment covers the classes a document names, compose-api composes a
    `mash-up` from the registry entries (cached by its entry set) for a signed-in caller, and writes its own runner
-   into the image. This workbench does not use mash-ups yet (see "Which environment runs the workspace").
+   into the image. This workbench uses it: a workspace whose entry has no prebuilt environment is submitted with no
+   `environment=` (see "Which environment runs the workspace"). So a workspace needs one reviewed `manifest.yaml`
+   entry and nothing else, and compose-api runs its classes only when that entry is at level `tested` or higher
+   (the header of compose-api's `registry/manifest.yaml`).
 
 ## Tests
 
@@ -130,4 +145,8 @@ As compose-api's maintainer described it on 2026-10-29 (biosimulations/compose-a
 - **Real artifacts:** address form, the manifest check and landing run against `tests/_fixtures/compose_api/`.
 - **Transport:** a real workbench server against `VivaV1Stub` generated from the snapshot, including multipart
   validation of the upload.
-- What neither proves: that a deployment runs the document. Only a live run against compose-api does.
+- **Inferred environments** (an entry no prebuilt environment bundles) run against production's registry as captured
+  from 0.7.76 on 2026-10-30 (`entries_0.7.76.json`, `environments_0.7.76.json`); the prebuilt path is pinned against
+  the same capture. `VIVARIUM_WORKBENCH_LIVE_COMPOSE=<base URL>` adds one read-only test (two GETs) against a live registry.
+- What neither proves: that a deployment runs the document, or builds the environment. Only a live run against
+  compose-api does.
