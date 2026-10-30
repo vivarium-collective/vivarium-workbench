@@ -148,6 +148,9 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             _ev = None
         _node["execution_status"] = _derive_execution_status(
             study_spec, _node_status, evidence=_ev)
+        if _ev is not None and _ev.execution != "not_run":
+            # Colour driver follows live evidence, consistent with execution_status.
+            _node["status"] = _ev.execution
         _verdict = _derive_verdict(study_spec, evidence=_ev)
         if _verdict:
             _node["verdict"] = _verdict

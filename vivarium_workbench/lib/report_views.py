@@ -896,6 +896,17 @@ def _resolve_bib_references(ws_root: Path) -> dict:
         return {}
 
 
+def _fresh_gate_verdict(study_spec: dict, ev) -> Optional[dict]:
+    """Persisted gate_evaluator dict, with ``result`` overridden by live evidence."""
+    ge = (study_spec.get("pipeline_gate") or {}).get("gate_evaluator")
+    ge = dict(ge) if isinstance(ge, dict) else None
+    if ev is not None and ev.gate in ("passed", "failed"):
+        ge = ge or {}
+        ge["result"] = ev.gate
+        ge["evaluated_by"] = "evidence"
+    return ge
+
+
 def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     """GET /api/investigation/<name> builder.
 
@@ -1120,6 +1131,13 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             # behavior tests and may not match the live count one-to-one.
             _beh_summary["passed"] = int(_ev.tests_passed)
             _beh_summary["total"] = int(_ev.tests_total)
+            try:
+                from vivarium_workbench.lib.study_evidence import (  # noqa: PLC0415
+                    test_glyphs_for_study as _glyphs,
+                )
+                _beh_summary["tests"] = _glyphs(ws_root, slug)
+            except Exception:  # noqa: BLE001
+                _beh_summary["tests"] = []
         # Runs summary: {count, status, n_steps, emitter}. Count from the same
         # helper as n_runs; latest status/n_steps/emitter from the run registry
         # (newest row), all best-effort + degrade-gracefully.
@@ -1204,13 +1222,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             # viva-superpowers #285 — the split verdict ledger (or None).
             "verdict_count_split":   _count_split,
             # Spine A2: persisted coded gate_evaluator.
-            "computed_gate_verdict": (
-                (study_spec.get("pipeline_gate") or {}).get("gate_evaluator")
-                if isinstance(
-                    (study_spec.get("pipeline_gate") or {}).get("gate_evaluator"), dict
-                )
-                else None
-            ),
+            "computed_gate_verdict": _fresh_gate_verdict(study_spec, _ev),
             "derived": _study_derivations.derived_block(study_spec),
             # Task 9: canonical CLI run-command strings (single source of truth)
             # so the investigation-report SPA can render run-command chips off the

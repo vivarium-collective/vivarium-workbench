@@ -106,20 +106,32 @@ def _gate(graded: list[str]) -> str:
     return "passed" if all(o == "within_tol" for o in graded) else "not_started"
 
 
-def _test_counts(ws_root: Path, run_id: str | None) -> tuple[int, int]:
-    """(passed, total) cards in the latest run's report.json; (0, 0) if none."""
+def _latest_cards(ws_root: Path, run_id: str | None) -> list[tuple[str, str]]:
+    """``[(card_name, overall)]`` from the latest run's report.json; [] if none."""
     if not run_id:
-        return 0, 0
+        return []
     try:
         f = WorkspacePaths.load(ws_root).pbg / "runs" / run_id / "report.json"
         if not f.is_file():
-            return 0, 0
+            return []
         cards = (json.loads(f.read_text(encoding="utf-8")) or {}).get("cards") or {}
-        overalls = [str((c or {}).get("overall") or "").strip().lower()
-                    for c in cards.values()]
-        return sum(o == "within_tol" for o in overalls), len(overalls)
+        return [(str(k), str((c or {}).get("overall") or "").strip().lower())
+                for k, c in cards.items()]
     except Exception:  # noqa: BLE001
-        return 0, 0
+        return []
+
+
+def _test_counts(ws_root: Path, run_id: str | None) -> tuple[int, int]:
+    """(passed, total) cards in the latest run's report.json; (0, 0) if none."""
+    cards = _latest_cards(ws_root, run_id)
+    return sum(o == "within_tol" for _, o in cards), len(cards)
+
+
+def test_glyphs_for_study(ws_root: Path, slug: str) -> list[dict]:
+    """Per-card ``[{name, passed}]`` from the SAME source as ``tests_passed/total``."""
+    rows = _run_rows(WorkspacePaths.load(Path(ws_root)).study_dir(slug) / "runs.db")
+    return [{"name": n, "passed": o == "within_tol"}
+            for n, o in _latest_cards(Path(ws_root), rows[0][0] if rows else None)]
 
 
 def evidence_for_study(ws_root: Path, slug: str) -> StudyEvidence:

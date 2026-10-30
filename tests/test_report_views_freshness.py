@@ -61,6 +61,10 @@ def test_card_is_fresh_despite_stale_stored_fields(tmp_path, monkeypatch):
     assert s["gate_status"] == "passed"
     assert (s["behavior_tests"]["passed"], s["behavior_tests"]["total"]) == (2, 3)
     assert len(calls) == 1
+    tests = s["behavior_tests"]["tests"]
+    assert len(tests) == s["behavior_tests"]["total"] == 3
+    assert sum(t["passed"] for t in tests) == s["behavior_tests"]["passed"] == 2
+    assert s["computed_gate_verdict"]["result"] == "passed"
 
 
 def test_graph_node_is_fresh_and_reads_once(tmp_path, monkeypatch):
@@ -69,6 +73,7 @@ def test_graph_node_is_fresh_and_reads_once(tmp_path, monkeypatch):
     graph, _ = build_investigation_graph(ws, "inv")
     node = next(n for n in graph["studies"] if n.get("slug") == "s1")
     assert node["execution_status"] == "completed"
+    assert node["status"] == "completed"
     assert len(calls) == 1
 
 
