@@ -393,6 +393,7 @@
       "</div>";
     document.body.appendChild(pop);
     curPop = pop;
+    pop._anchor = anchorBtn;
     positionPop(pop, anchorBtn);
 
     var ta = pop.querySelector(".fb-note");
@@ -660,7 +661,9 @@
     payload.meta.investigation = inv;
     var url = "/api/feedback-save";
     try {
-      if (window.DataSource && typeof window.DataSource.apiUrl === "function") url = window.DataSource.apiUrl("feedback-save");
+      // apiUrl only prefixes the base path for an absolute "/api/..." path; a
+      // bare name is returned unchanged and would POST relative to the page.
+      if (window.DataSource && typeof window.DataSource.apiUrl === "function") url = window.DataSource.apiUrl("/api/feedback-save");
     } catch (e) {}
     fetch(url, {
       method: "POST",
@@ -775,7 +778,19 @@
       if (curPop && !ev.target.closest(".fb-pop") && !ev.target.closest(".fb-corner")) closePop();
     });
     document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closePop(); });
-    window.addEventListener("resize", closePop);
+    // On resize, REPOSITION the open popover — never close it. The study page
+    // renders in an auto-growing iframe, and focusing the note textarea opens
+    // the mobile keyboard; both fire resize, and closing here made the popover
+    // vanish right after it opened (worse on mobile). Reposition to the anchor
+    // if it's still in the DOM; otherwise leave the popover where it is.
+    var _rzTimer = null;
+    window.addEventListener("resize", function () {
+      if (!curPop || _rzTimer) return;
+      _rzTimer = setTimeout(function () {
+        _rzTimer = null;
+        if (curPop && curPop._anchor && curPop._anchor.isConnected) positionPop(curPop, curPop._anchor);
+      }, 80);
+    });
   }
 
   if (document.readyState === "loading") {
