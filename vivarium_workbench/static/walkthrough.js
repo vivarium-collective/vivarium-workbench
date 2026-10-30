@@ -980,6 +980,11 @@
     if (pageId === 'resources') {
       _loadResources();
     }
+    // Discovery Engine cycle panel: self-contained (static/discovery-cycle.js).
+    // Init once per load; it populates the investigation picker and waits for a pick.
+    if (pageId === 'discovery' && window.DiscoveryCycle && window.DiscoveryCycle.init) {
+      try { window.DiscoveryCycle.init(); } catch (e) { /* panel optional */ }
+    }
     // Branch page: render the Source (Scope Local/Remote, repo, branch) section on
     // every navigation, so it's populated from the first visit instead of relying
     // on the one-time DOMContentLoaded render (which may not have finished — or ran
@@ -1038,7 +1043,7 @@
       var _snapshot = document.body.classList.contains('snapshot');
       var validPages = _snapshot
         ? ['workspace-inputs', 'simulation-setup', 'modules', 'market', 'investigations', 'simulations', 'visualizations', 'resources', 'audit', 'composite-explore', 'github', 'about']
-        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'resources', 'modules', 'market', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
+        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'discovery', 'resources', 'modules', 'market', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -1070,7 +1075,7 @@
         var _snap = document.body.classList.contains('snapshot');
         var validPages = _snap
           ? ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'resources', 'audit', 'composite-explore', 'github', 'about']
-          : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'resources', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
+          : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'discovery', 'resources', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
         // Default landing view is Studies (the #investigations page) when there's
         // no (or an unknown) hash.
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'investigations');

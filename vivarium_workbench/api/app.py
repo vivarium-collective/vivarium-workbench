@@ -1095,6 +1095,57 @@ def create_app() -> FastAPI:
         return _build_discovery(ws, slug) or {}
 
     @app.get(
+        "/api/discovery-cycle-steps",
+        tags=["Investigations"],
+        summary="Discovery-engine cycle step graph (static metadata)",
+    )
+    def discovery_cycle_steps() -> dict:
+        """The canonical ordered step graph of the discovery cycle (nodes + data
+        dependencies + pure/mutating kind) — lets the Discovery Engine panel draw
+        the diagram before any run. Backed by ``lib.cycle_trace.STEPS``."""
+        from vivarium_workbench.lib.cycle_trace import STEPS, engine_available
+        return {"available": engine_available(), "steps": STEPS}
+
+    @app.get(
+        "/api/discovery-cycle/{slug}",
+        tags=["Investigations"],
+        summary="Run the full analytical discovery cycle and trace every step",
+    )
+    def discovery_cycle(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """Run one full pass of the pure analytical cycle for an investigation and
+        return a per-step trace: each step's status, timing, one-line summary, and
+        full result. Read-only — no step here writes to disk. Backed by
+        ``lib.cycle_trace.build_cycle_trace``."""
+        from vivarium_workbench.lib.cycle_trace import build_cycle_trace
+        return build_cycle_trace(ws, slug)
+
+    @app.get(
+        "/api/discovery-cycle/{slug}/step/{step_id}",
+        tags=["Investigations"],
+        summary="Re-run one step of the discovery cycle (fresh result)",
+    )
+    def discovery_cycle_step(slug: str, step_id: str,
+                             ws: Path = Depends(get_workspace)) -> dict:
+        """Re-run a single cycle step. Its dependency chain is recomputed so the
+        result is fresh and consistent. Rejects the mutating ``advance`` step
+        (use the sandboxed advance). Backed by ``lib.cycle_trace.rerun_step``."""
+        from vivarium_workbench.lib.cycle_trace import rerun_step
+        return rerun_step(ws, slug, step_id)
+
+    @app.get(
+        "/api/discovery-cycle/{slug}/advance",
+        tags=["Investigations"],
+        summary="Drive the cycle toward closure in a sandboxed copy (never mutates real files)",
+    )
+    def discovery_cycle_advance(slug: str, max_runs: int = 4,
+                                ws: Path = Depends(get_workspace)) -> dict:
+        """Advance the cycle (Phase E execute) against a throwaway COPY of the
+        investigation, so the real workspace is never mutated, then report the
+        frontier before/after. Backed by ``lib.cycle_trace.sandbox_advance``."""
+        from vivarium_workbench.lib.cycle_trace import sandbox_advance
+        return sandbox_advance(ws, slug, max_runs=max(1, min(int(max_runs), 12)))
+
+    @app.get(
         "/api/investigation-report/{slug}",
         tags=["Investigations"],
         summary="Self-contained investigation report (deterministic, data-only)",
