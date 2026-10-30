@@ -63,6 +63,13 @@
     if (!el.getAttribute("data-edit-field")) return;
     el.__ieDecorated = true;
     el.classList.add("ie-editable");
+    // A corner button needs a real box: an inline element's absolute child
+    // anchors to its first line box (→ the ✎ lands mid-text on wrapped spans).
+    // Promote truly-inline fields to inline-block so top:4px/right lands at the
+    // text block's actual top-right. Block fields are untouched.
+    try {
+      if (getComputedStyle(el).display === "inline") el.style.display = "inline-block";
+    } catch (e) {}
     var pencil = document.createElement("button");
     pencil.type = "button";
     pencil.className = "ie-pencil";
