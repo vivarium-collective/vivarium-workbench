@@ -44,8 +44,13 @@ def canon_relation(rel):
     return REL_ALIASES.get(str(rel).strip().lower(), "builds-on")
 
 
-def derive_execution_status(spec: dict, node_status: str = "") -> str:
-    """Execution axis (what happened), independent of the scientific verdict."""
+def derive_execution_status(spec: dict, node_status: str = "", evidence=None) -> str:
+    """Execution axis (what happened), independent of the scientific verdict.
+
+    ``evidence`` (a StudyEvidence, optional): evidence of a real run wins over
+    stale stored fields; ``not_run`` evidence falls through to the spec."""
+    if evidence is not None and evidence.execution in ("completed", "running", "failed"):
+        return evidence.execution
     ex = str(spec.get("execution_status") or "").strip().lower()
     if ex in EXEC_VALUES:
         return ex
@@ -79,10 +84,12 @@ def derive_execution_status(spec: dict, node_status: str = "") -> str:
     return "planned"
 
 
-def derive_verdict(spec: dict):
+def derive_verdict(spec: dict, evidence=None):
     """Scientific verdict axis (what the evidence supports). Authored wins (with
     legacy values folded); else parse the free-text report.verdict /
-    study_card.status. Returns None when nothing supports a verdict yet."""
+    study_card.status. Returns None when nothing supports a verdict yet.
+    ``evidence`` is accepted for signature symmetry and never used: a verdict
+    is authored-only."""
     v = str(spec.get("verdict") or "").strip().lower()
     if v in VERDICT_ALIASES:
         return VERDICT_ALIASES[v]
