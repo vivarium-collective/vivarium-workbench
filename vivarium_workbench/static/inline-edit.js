@@ -180,13 +180,15 @@
   function injectStyle() {
     if (document.getElementById("ie-style")) return;
     var css = [
-      ".ie-editable{position:relative;cursor:text;border-radius:5px;transition:background .12s,box-shadow .12s;}",
-      ".ie-editable:hover{background:rgba(45,108,223,.06);box-shadow:inset 0 0 0 1px rgba(45,108,223,.25);}",
-      ".ie-editable.ie-editing{background:transparent;box-shadow:none;cursor:auto;}",
-      ".ie-pencil{position:absolute;top:2px;left:-22px;width:18px;height:18px;padding:0;border:none;border-radius:5px;background:transparent;",
-      "  color:#2d6cdf;cursor:pointer;font-size:12px;line-height:18px;text-align:center;opacity:0;transition:opacity .12s;}",
-      ".ie-editable:hover>.ie-pencil{opacity:.85;}",
-      ".ie-pencil:hover{opacity:1;background:rgba(45,108,223,.12);}",
+      ".ie-editable{position:relative;}",
+      // Corner ✎ button mirroring the feedback 💬 (.fb-corner), parked one slot
+      // to its LEFT (right:30px vs 4px) so the two sit side-by-side when a field
+      // is also a feedback region; reveals on hover of the field.
+      ".ie-pencil{position:absolute;top:4px;right:30px;z-index:6;width:26px;height:26px;padding:0;border:none;border-radius:7px;",
+      "  background:var(--card,#fff);box-shadow:0 1px 4px rgba(0,0,0,.18);color:#2d6cdf;cursor:pointer;font-size:13px;line-height:26px;text-align:center;",
+      "  opacity:0;transform:translateY(-2px);transition:opacity .12s,transform .12s;}",
+      ".ie-editable:hover>.ie-pencil,.ie-pencil:focus{opacity:.92;transform:none;}",
+      ".ie-pencil:hover{opacity:1;box-shadow:0 2px 8px rgba(0,0,0,.28);}",
       ".ie-editing>.ie-pencil{display:none;}",
       ".ie-editor{display:block;margin:2px 0;}",
       ".ie-editor-h{font-size:11px;color:var(--ink-2,#64748b);margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em;}",
@@ -219,14 +221,14 @@
     decorateAll();
     var root = document.querySelector("main.study-page") || document.querySelector("#viv-content") || document.body;
     new MutationObserver(schedule).observe(root, { childList: true, subtree: true });
+    // Edit is triggered only by the ✎ button (so the field text stays selectable).
     document.addEventListener("click", function (ev) {
-      var el = ev.target.closest(".ie-editable");
+      var pen = ev.target.closest(".ie-pencil");
+      if (!pen) return;
+      var el = pen.closest(".ie-editable");
       if (!el || el.classList.contains("ie-editing")) return;
-      if (ev.target.closest(".ie-editor")) return;
-      // ignore clicks on real links/buttons inside the field (other than our pencil)
-      var hit = ev.target.closest("a,button");
-      if (hit && !hit.classList.contains("ie-pencil")) return;
       ev.preventDefault();
+      ev.stopPropagation();
       openEditor(el);
     });
   }
