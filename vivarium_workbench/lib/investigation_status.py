@@ -301,6 +301,30 @@ def read_study_status(
     return "planning", False
 
 
+def _card_description(spec: dict) -> str:
+    """The one-line blurb for an investigation card. The authored top-level
+    ``description`` wins; otherwise fall back to the narrative an investigation actually
+    authors — ``executive.what_is_this``, then the ``lead``'s first paragraph, then
+    ``scientific_argument.main_claim`` — so a card is never blank when the spine is filled.
+    Whitespace/newlines are collapsed to a single line."""
+    spec = spec or {}
+    authored = (spec.get("description") or "").strip()
+    if authored:
+        return authored
+    ex = spec.get("executive")
+    ex = ex if isinstance(ex, dict) else {}
+    sa = spec.get("scientific_argument")
+    sa = sa if isinstance(sa, dict) else {}
+    lead = spec.get("lead") or ""
+    for cand in (ex.get("what_is_this"),
+                 lead.split("\n\n")[0] if lead else None,
+                 sa.get("main_claim")):
+        cand = (cand or "").strip()
+        if cand:
+            return " ".join(cand.split())
+    return ""
+
+
 def build_iset_summary(
     ws_root: Path, *, study_has_runs: StudyHasRuns
 ) -> list[dict]:
@@ -361,7 +385,7 @@ def build_iset_summary(
             "closed":           marks["closure"]["closed"],
             "closure_source":   marks["closure"]["source"],
             "effective_status": compute_investigation_status(statuses, has_runs=has_runs),
-            "description":      spec.get("description", ""),
+            "description":      _card_description(spec),
             "question":         spec.get("question", ""),
             "hypothesis":       spec.get("hypothesis", ""),
             "n_studies":        len(study_slugs),
@@ -387,7 +411,7 @@ def build_iset_summary(
             "verdict_status":   (fspec.get("executive") or {}).get("verdict_status")
                                 or fspec.get("status") or "planning",
             "effective_status": "federated",
-            "description":      fspec.get("description", ""),
+            "description":      _card_description(fspec),
             "question":         fspec.get("question", ""),
             "hypothesis":       fspec.get("hypothesis", ""),
             "n_studies":        len(fi.get("member_studies", [])),
