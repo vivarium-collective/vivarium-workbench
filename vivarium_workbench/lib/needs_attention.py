@@ -888,6 +888,10 @@ def viz_figure_records(ws_root, inv_slug: str, only_study: str | None = None) ->
         vstate = discover.viz_inventory(Path(ws_root), inv_slug, studies)
         return validation._figure_freshness(SimpleNamespace(viz_state=vstate, studies=studies))
     except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception(
+            "viz_figure_records: engine figure-freshness validator failed; "
+            "needs-attention viz items may disagree with the frontier")
         return []
 
 

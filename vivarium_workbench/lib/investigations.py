@@ -2106,7 +2106,8 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                           inputs_by_class: "dict | None" = None,
                           build_and_run=None,
                           skipped: "list | None" = None,
-                          latest_run_id: "str | None" = None) -> list[Path]:
+                          latest_run_id: "str | None" = None,
+                          output_rel: "str | None" = None) -> list[Path]:
     """Render every viz in ``spec.visualizations`` against the investigation's runs.db.
 
     For each viz:
@@ -2158,7 +2159,8 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
             if skipped is not None:
                 skipped.append({"name": None, "reason": "no name"})
             continue
-        target = viz_dir / f"{vname}.html"
+        target = (inv_dir / output_rel) if output_rel else viz_dir / f"{vname}.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
         stamp = False
         # A static-figure viz (address scheme image:/png:/svg:/gif:/… , or
         # chart == "image") is a file on disk, NOT a viz-class dispatch — embed it
@@ -2183,6 +2185,12 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
             if doc is not None:
                 try:
                     html = build_and_run(doc, core_registry)
+                    if not (html or "").strip():
+                        # empty output == a failed render (e.g. env worker down); never
+                        # write it over a real figure or stamp it fresh.
+                        if skipped is not None:
+                            skipped.append({"name": vname, "reason": "render produced empty output"})
+                        continue
                     stamp = True
                 except Exception as e:
                     html = _viz_error_stub(vname, e)

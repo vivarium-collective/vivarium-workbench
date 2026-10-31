@@ -29,7 +29,9 @@ def _ws(tmp_path, viz, runs=True):
     if runs:
         c = sqlite3.connect(sd / "runs.db")
         c.execute("CREATE TABLE runs_meta (run_id TEXT, started_at REAL, completed_at REAL, sim_name TEXT, params_json TEXT)")
-        c.execute("INSERT INTO runs_meta VALUES ('run-9', 1.0, 2.0, 'default', '{}')")
+        # latest by completed_at is run-9, but it is NOT the last-inserted row
+        c.execute("INSERT INTO runs_meta VALUES ('run-9', 5.0, 9.0, 'default', '{}')")
+        c.execute("INSERT INTO runs_meta VALUES ('run-old', 1.0, 2.0, 'default', '{}')")
         c.commit(); c.close()
     return ws, sd
 
@@ -127,3 +129,72 @@ def test_needs_attention_agrees_with_frontier(tmp_path):
     recs = viz_figure_records(ws, "inv", only_study="s1")
     debts = [d for d in open_epistemic_debts({"name": "s1"}, recs) if d["kind"] == "viz-stale"]
     assert {d["ref"] for d in debts} == {"a", "b"}
+
+
+def _class_ws(tmp_path, extra=None):
+    ws, sd = _ws(tmp_path, [{"name": "c", "address": "local:V", **(extra or {})}])
+    return ws, sd
+
+
+class _V:
+    def inputs(self): return {}
+
+
+def test_empty_class_render_leaves_good_figure_untouched(tmp_path):
+    from vivarium_workbench.lib.viz_build import render_one
+    ws, sd = _class_ws(tmp_path)
+    (sd / "viz").mkdir()
+    fig = sd / "viz/c.html"
+    fig.write_text("<p>GOOD</p>")
+    before = fig.read_bytes()
+    r = render_one(ws, "s1", "c", core_registry={"V": _V}, inputs_by_class={"V": {}},
+                   build_and_run=lambda d, reg: "")
+    assert r["ok"] is False
+    assert fig.read_bytes() == before
+    assert not Path(str(fig) + ".meta.json").exists()
+
+
+def test_failed_class_render_leaves_no_stub_when_no_prior_figure(tmp_path):
+    from vivarium_workbench.lib.viz_build import render_one
+    ws, sd = _class_ws(tmp_path)
+
+    def boom(d, reg):
+        raise RuntimeError("x")
+    r = render_one(ws, "s1", "c", core_registry={"V": _V}, inputs_by_class={"V": {}},
+                   build_and_run=boom)
+    assert r["ok"] is False
+    assert not (sd / "viz/c.html").exists()
+    assert not (sd / "viz/c.html.meta.json").exists()
+
+
+def test_command_exit0_writing_nothing_keeps_stale_figure_and_meta(tmp_path):
+    from vivarium_workbench.lib.viz_build import render_one
+    ws, sd = _ws(tmp_path, [{"name": "a", "render": "true", "chart": "viz/a.html"}])
+    (sd / "viz").mkdir()
+    fig = sd / "viz/a.html"
+    fig.write_text("<p>STALE</p>")
+    meta = Path(str(fig) + ".meta.json")
+    meta.write_text('{"source_run_id": "run-old", "rendered_at": 1.0}')
+    fb, mb = fig.read_bytes(), meta.read_bytes()
+    r = render_one(ws, "s1", "a")
+    assert r["ok"] is False
+    assert fig.read_bytes() == fb and meta.read_bytes() == mb
+
+
+def test_class_render_honours_declared_output(tmp_path):
+    from vivarium_workbench.lib.viz_build import render_one
+    ws, sd = _class_ws(tmp_path, {"chart": "figs/custom.html"})
+    r = render_one(ws, "s1", "c", core_registry={"V": _V}, inputs_by_class={"V": {}},
+                   build_and_run=lambda d, reg: "<p>hi</p>")
+    assert r["ok"] and r["chart"] == "figs/custom.html"
+    assert (sd / "figs/custom.html").read_text() == "<p>hi</p>"
+    assert not (sd / "viz/c.html").exists()
+    assert _meta(sd / "figs/custom.html")["source_run_id"] == "run-9"
+
+
+def test_class_output_escaping_study_refused(tmp_path):
+    from vivarium_workbench.lib.viz_build import render_one
+    ws, sd = _class_ws(tmp_path, {"chart": "../escape.html"})
+    r = render_one(ws, "s1", "c", core_registry={"V": _V}, inputs_by_class={"V": {}},
+                   build_and_run=lambda d, reg: "<p>hi</p>")
+    assert r["ok"] is False and not (sd.parent / "escape.html").exists()

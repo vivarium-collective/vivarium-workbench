@@ -60,46 +60,75 @@ def render_one(ws_root, study: str, name: str, *, build_and_run=None,
     if kind == "figure":
         return _fail("static figure has no refresh recipe", chart=output)
 
+    if not output:
+        return _fail("no resolvable output path for this figure")
+    chart = (sdir / output).resolve()
+    try:
+        chart.relative_to(sdir.resolve())
+    except ValueError:
+        return _fail(f"output {output!r} escapes the study directory", chart=output)
+
     from vivarium_workbench.lib.study_charts import latest_run_row
     latest = latest_run_row(sdir / "runs.db")
     run_id = entry.get("source_run") or (latest or {}).get("run_id")
-    chart = sdir / output
+    meta_p = Path(str(chart) + ".meta.json")
+
+    # ONE snapshot-and-verify guard around both dispatch paths: a render counts only if
+    # the figure exists, is non-empty, and was actually (re)written; otherwise restore
+    # the prior bytes/meta (or remove what the attempt created) and do not stamp.
+    prior = chart.read_bytes() if chart.is_file() else None
+    prior_mtime = chart.stat().st_mtime_ns if prior is not None else None
+    prior_meta = meta_p.read_bytes() if meta_p.is_file() else None
+
+    def _restore():
+        for path, data in ((chart, prior), (meta_p, prior_meta)):
+            if data is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(data)
+        if prior_mtime is not None:
+            import os
+            os.utime(chart, ns=(prior_mtime, prior_mtime))
+
+    def _refuse(detail):
+        _restore()
+        return _fail(detail, chart=output)
 
     if kind == "command":
         from vivarium_workbench.lib.refresh_viz import refresh_study_viz
         res = refresh_study_viz(sdir, {"visualizations": [{**entry, "chart": output}]}, latest)
         r = res[0] if res else {}
         if r.get("status") != "rendered":
-            return _fail(r.get("error") or r.get("reason") or r.get("status") or "render failed",
-                         chart=output)
-        if not chart.is_file():
-            return _fail(f"render command succeeded but wrote no figure at {output}", chart=output)
-        return {"ok": True, "chart": output, "source_run_id": run_id, "detail": "rendered"}
+            return _refuse(r.get("error") or r.get("reason") or r.get("status") or "render failed")
+    else:  # class
+        from vivarium_workbench.lib.investigations import render_visualizations
+        if build_and_run is None:
+            from vivarium_workbench.lib.viz_render import viz_render_hooks
+            inputs_by_class, build_and_run = viz_render_hooks(Path(ws_root))
+        skipped: list = []
+        try:
+            paths = render_visualizations(
+                {"name": spec.get("name", study), "visualizations": [entry]}, sdir, study,
+                core_registry=core_registry, inputs_by_class=inputs_by_class,
+                build_and_run=build_and_run, skipped=skipped,
+                latest_run_id=(latest or {}).get("run_id"), output_rel=output)
+        except Exception as e:  # noqa: BLE001
+            return _refuse(f"render raised {type(e).__name__}: {e}")
+        if not paths:
+            return _refuse(skipped[0]["reason"] if skipped else "nothing rendered")
 
-    # class
-    from vivarium_workbench.lib.investigations import render_visualizations
-    if build_and_run is None:
-        from vivarium_workbench.lib.viz_render import viz_render_hooks
-        inputs_by_class, build_and_run = viz_render_hooks(Path(ws_root))
-    skipped: list = []
-    try:
-        paths = render_visualizations(
-            {"name": spec.get("name", study), "visualizations": [entry]}, sdir, study,
-            core_registry=core_registry, inputs_by_class=inputs_by_class,
-            build_and_run=build_and_run, skipped=skipped,
-            latest_run_id=(latest or {}).get("run_id"))
-    except Exception as e:  # noqa: BLE001
-        return _fail(f"render raised {type(e).__name__}: {e}", chart=output)
-    if not paths:
-        why = skipped[0]["reason"] if skipped else "nothing rendered"
-        return _fail(why, chart=output)
-    written = Path(paths[0])
-    rel = str(written.relative_to(sdir))
-    if "Failed to render" in written.read_text(encoding="utf-8", errors="ignore")[:400]:
-        return _fail("viz class render failed (error stub written)", chart=rel)
-    if True:  # always (re)stamp against the study's latest run
-        stamp_meta(written, source_run_id=(latest or {}).get("run_id"),
-                   generation_id=(latest or {}).get("generation_id"),
-                   rendered_at=time.time(), command=f"render_one:{name}")
-    return {"ok": True, "chart": rel, "source_run_id": (latest or {}).get("run_id"),
-            "detail": "rendered"}
+    if not chart.is_file():
+        return _refuse(f"render wrote no figure at {output}")
+    now = chart.read_bytes()
+    if not now.strip():
+        return _refuse("render produced an empty figure")
+    if now[:400].decode("utf-8", "ignore").lstrip().startswith("<p") and \
+            "Failed to render" in now[:400].decode("utf-8", "ignore"):
+        return _refuse("viz class render failed (error stub)")
+    if prior is not None and now == prior and chart.stat().st_mtime_ns == prior_mtime:
+        return _refuse("render did not write a new figure (kept the existing one)")
+
+    stamp_meta(chart, source_run_id=(latest or {}).get("run_id") if kind == "class" else run_id,
+               generation_id=(latest or {}).get("generation_id"),
+               rendered_at=time.time(), command=f"render_one:{name}")
+    return {"ok": True, "chart": output, "source_run_id": run_id, "detail": "rendered"}
