@@ -150,6 +150,7 @@
       '    <div class="dcyc-current" id="dcyc-current"></div>' +
       '    <div class="dcyc-controls">' +
       '      <select id="dcyc-inv"><option value="">Loading…</option></select>' +
+      '      <button id="dcyc-switch" class="dcyc-btn" disabled title="Show this investigation in the main window (its investigation graph) — switch freely between the graph and the cycle">Switch to investigation ▸</button>' +
       '      <button id="dcyc-run" class="dcyc-btn dcyc-btn-primary" disabled>Run</button>' +
       '      <button id="dcyc-run-cont" class="dcyc-btn" disabled title="Advance toward closure in a sandboxed copy — never touches your real files">Advance ▸</button>' +
       '      <button id="dcyc-apply" class="dcyc-btn" disabled title="Write the cycle\'s findings back to the real investigation + studies (verdicts, edges, cycle-state), committed to git">Apply to investigation ▸</button>' +
@@ -163,6 +164,7 @@
     var r = el("dcyc-run"); if (r) r.addEventListener("click", runCycle);
     var rc = el("dcyc-run-cont"); if (rc) rc.addEventListener("click", runContinuous);
     var ap = el("dcyc-apply"); if (ap) ap.addEventListener("click", applyCycle);
+    var sw = el("dcyc-switch"); if (sw) sw.addEventListener("click", switchToInvestigation);
     built = true;
     return true;
   }
@@ -243,11 +245,26 @@
     });
   }
 
+  // Show the panel's selected investigation in the MAIN window (its investigation
+  // graph), so you can move freely between the graph and the cycle on the same
+  // investigation without re-picking it in the switcher.
+  function switchToInvestigation() {
+    var slug = S.slug || (el("dcyc-inv") && el("dcyc-inv").value) || "";
+    if (!slug) return;
+    try {
+      if (typeof window._openInvestigationDetail === "function") {
+        window._openInvestigationDetail(slug);
+        setStatus("Showing “" + currentTitle(slug) + "” in the main window.");
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   function onPick(slug, resetView) {
     S.slug = slug || "";
     lsSet(K_SLUG, S.slug);
     el("dcyc-run").disabled = !S.slug;
     el("dcyc-run-cont").disabled = !S.slug;
+    var sw = el("dcyc-switch"); if (sw) sw.disabled = !S.slug;
     var ap = el("dcyc-apply"); if (ap) ap.disabled = true;   // re-enabled after a run
     S.applyReport = null;
     setStatus("");
