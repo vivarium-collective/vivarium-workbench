@@ -880,13 +880,18 @@ def viz_figure_records(ws_root, inv_slug: str, only_study: str | None = None) ->
     frontier cannot disagree. Defensive: ``[]`` when the engine / viz inventory is
     unavailable."""
     try:
-        from types import SimpleNamespace
-        from discovery_engine import discover, validation
+        from discovery_engine import discover
         _, _inv, studies = discover.load_cycle_inputs(ws_root, inv_slug)
         if only_study is not None:
             studies = {k: v for k, v in studies.items() if k == only_study}
         vstate = discover.viz_inventory(Path(ws_root), inv_slug, studies)
-        return validation._figure_freshness(SimpleNamespace(viz_state=vstate, studies=studies))
+        # Source the figure records from the cycle the frontier itself runs (the public
+        # `discover.run_cycle` path) rather than reaching into `validation._figure_freshness`,
+        # so this stays within the engine import allowlist and the two cannot disagree.
+        cyc = discover.run_cycle(_inv, studies, viz_state=vstate)
+        vals = (cyc.get("validations") if isinstance(cyc, dict) else []) or []
+        return [r for r in vals
+                if isinstance(r, dict) and r.get("type") == "visual" and r.get("scope") == "figure"]
     except Exception:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).exception(
