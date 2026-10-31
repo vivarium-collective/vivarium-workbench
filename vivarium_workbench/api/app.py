@@ -1319,6 +1319,22 @@ def create_app() -> FastAPI:
         return out
 
     @app.post(
+        "/api/discovery-cycle/{slug}/toggle-untied",
+        tags=["Investigations"],
+        summary="Turn the viz_untied rollout flag on/off for an investigation",
+    )
+    def discovery_cycle_toggle_untied(slug: str, payload: dict = Body(default={}),
+                                      ws: Path = Depends(get_workspace)) -> dict:
+        """``payload`` = ``{enabled: bool}``. Sets ``cycle_flags.viz_untied`` in
+        investigation.yaml and commits (revertible). Backed by ``lib.cycle_trace.set_viz_untied``."""
+        from vivarium_workbench.lib.cycle_trace import set_viz_untied
+        name = _path_safety.plain_name(slug, "investigation")
+        out = set_viz_untied(ws, name, bool((payload or {}).get("enabled")))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
         "/api/discovery-cycle/{slug}/steer",
         tags=["Investigations"],
         summary="Let the AI steer (decide) one open decision of the discovery cycle",

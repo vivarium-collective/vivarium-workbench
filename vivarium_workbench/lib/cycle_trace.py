@@ -154,7 +154,15 @@ def _n_figures(vc: Any) -> int:
     return sum(int(v or 0) for v in vc.values() if isinstance(v, (int, float)))
 
 
-def _summarize(step_id: str, result: Any, viz_census: Any = None) -> str:
+def _n_viz_issues(va: Any) -> int:
+    """Open appropriateness issues from the engine's ``viz_appropriateness`` census."""
+    if not isinstance(va, dict):
+        return 0
+    return sum(int(va.get(k) or 0) for k in ("misplaced", "duplicated")) + (
+        int(va.get("untied") or 0) if va.get("untied_surfaced") else 0)
+
+
+def _summarize(step_id: str, result: Any, viz_census: Any = None, viz_appr: Any = None) -> str:
     """One-line human summary for a node badge, per step shape."""
     try:
         if result is None:
@@ -169,6 +177,10 @@ def _summarize(step_id: str, result: Any, viz_census: Any = None) -> str:
             n_fig = _n_figures(vc)
             if n_fig:
                 out += f" · {n_fig} figures"
+            va = viz_appr or (result.get("cycle_state") or {}).get("viz_appropriateness")
+            n_iss = _n_viz_issues(va)
+            if n_iss:
+                out += f" · {n_iss} viz issue{'s' if n_iss != 1 else ''}"
             return out
         if step_id == "propose_viz":
             return f"{len(result.get('proposals') or [])} proposed"
@@ -219,10 +231,13 @@ def _run_one(step_id: str, ctx: dict, M: Any) -> Any:
             kw = {"viz_state": ctx["viz_state"], "viz_catalog": ctx.get("viz_catalog") or []}
         cyc = M.discover.run_cycle(inv_spec, studies, **kw)
         ctx["cyc"] = cyc
-        try:  # viz_census lives in build_cycle_state, not the run_cycle bundle
-            ctx["viz_census"] = (M.discover.build_cycle_state(cyc, inv_spec) or {}).get("viz_census")
+        try:  # viz_census / viz_appropriateness live in build_cycle_state, not the run_cycle bundle
+            _cs = M.discover.build_cycle_state(cyc, inv_spec) or {}
+            ctx["viz_census"] = _cs.get("viz_census")
+            ctx["viz_appropriateness"] = _cs.get("viz_appropriateness")
         except Exception:
             ctx["viz_census"] = None
+            ctx["viz_appropriateness"] = None
         return cyc
 
     if step_id == "propose_viz":
@@ -481,7 +496,7 @@ def build_cycle_trace(ws_root, inv_slug: str, *, only: list[str] | None = None) 
             status, error = "error", f"{type(e).__name__}: {e}"
         dt = round((time.perf_counter() - t0) * 1000, 2)
         node = {**meta, "status": status, "duration_ms": dt,
-                "summary": _summarize(step_id, result, ctx.get("viz_census")) if status != "error" else error}
+                "summary": _summarize(step_id, result, ctx.get("viz_census"), ctx.get("viz_appropriateness")) if status != "error" else error}
         if want is None or step_id in want:
             node["result"] = result
             node["error"] = error
@@ -514,6 +529,9 @@ _KIND_LABEL = {
     "viz_missing": "Figure not yet rendered",
     "viz_stale": "Figure stale vs latest run",
     "viz_proposed": "Visualization proposed",
+    "viz_misplaced": "Figure in the wrong scope (cross-arm viz under a single study)",
+    "viz_duplicated": "Same cross-arm figure hosted in multiple studies",
+    "viz_untied": "Figure not tied to any observable",
 }
 
 # The frontier-item kinds the engine lets a human/AI discharge with a resolution
@@ -535,6 +553,9 @@ _KIND_TAB = {
     "narrative_gap": "overview",
     "viz_broken": "visualizations", "viz_missing": "visualizations",
     "viz_stale": "visualizations", "viz_proposed": "visualizations",
+    # appropriateness items are informational (no relocate action yet)
+    "viz_misplaced": "visualizations", "viz_duplicated": "visualizations",
+    "viz_untied": "visualizations",
 }
 
 
@@ -554,6 +575,8 @@ def _studies_for_item(kind: str, target: str, text: str, members: list) -> list:
     found: list = []
     t = str(target or "")
     cand = t[len("claim:"):] if t.startswith("claim:") else t
+    if cand.startswith("fig:") and "/" in cand:  # fig:<study>/<name>
+        cand = cand[4:].split("/", 1)[0]
     if cand in members:
         found.append(cand)
     blob = (t + " " + str(text or "")).lower()
@@ -662,6 +685,8 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
                 "open_challenges": clo.get("open_challenges") or 0,
             },
             "frontier": front_rows,
+            "viz_appropriateness": ctx.get("viz_appropriateness"),
+            "viz_untied_enabled": bool((inv_spec.get("cycle_flags") or {}).get("viz_untied")),
         }
     except Exception:
         return {}
@@ -1000,6 +1025,37 @@ def declare_viz_fix(ws_root, inv_slug: str, target: str, declare: dict, rational
     commit = _git_commit(ws_root, _inv_commit_dirs(ws_root),
                          f"discovery cycle: declare {target} in {inv_slug}")
     return {"available": True, "ok": True, "resolution": rec, "commit": commit,
+            "after": build_cycle_trace(ws_root, inv_slug)}
+
+
+def set_viz_untied(ws_root, inv_slug: str, enabled: bool) -> dict:
+    """Flip the ``cycle_flags.viz_untied`` rollout flag on the investigation (the engine
+    gates ``viz_untied`` items on it) and commit. Round-trip YAML edit. Never raises."""
+    if not engine_available():
+        return {"available": False}
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    ws_root = Path(ws_root)
+    inv_path = WorkspacePaths.load(ws_root).investigations / inv_slug / "investigation.yaml"
+    if not inv_path.is_file():
+        return {"available": True, "ok": False, "detail": f"no investigation.yaml for {inv_slug!r}"}
+    try:
+        from ruamel.yaml import YAML
+        y = YAML()
+        y.preserve_quotes = True
+        y.width = 4096
+        spec = y.load(inv_path.read_text()) or {}
+        flags = spec.get("cycle_flags")
+        if not isinstance(flags, dict):
+            flags = {}
+            spec["cycle_flags"] = flags
+        flags["viz_untied"] = bool(enabled)
+        with inv_path.open("w") as fh:
+            y.dump(spec, fh)
+    except Exception as e:
+        return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
+    commit = _git_commit(ws_root, _inv_commit_dirs(ws_root),
+                         f"discovery cycle: {'enable' if enabled else 'disable'} viz_untied in {inv_slug}")
+    return {"available": True, "ok": True, "enabled": bool(enabled), "commit": commit,
             "after": build_cycle_trace(ws_root, inv_slug)}
 
 
