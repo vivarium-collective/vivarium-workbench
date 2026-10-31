@@ -1201,4 +1201,21 @@
   // Initial placement + restore of the open/closed state are handled by
   // VivPanelDock.make() (built in build()); no separate dockTo/open needed.
   window._openAiPanel = function () { if (ctl) ctl.open(); };
+  // Seed the composer with a prompt from another panel (e.g. the Discovery cycle's
+  // "AI steer"): opens the chat and drops the text in, ready for the user to review
+  // and send. Does NOT auto-send — a human stays in the loop for the decision.
+  window._aiSeedPrompt = function (text) {
+    try {
+      if (ctl) ctl.open();
+      var apply = function () {
+        if (!el || !el.input) return false;
+        el.input.value = String(text == null ? '' : text);
+        try { autosize(el.input); } catch (e) { /* ignore */ }
+        el.input.focus();
+        try { el.input.setSelectionRange(el.input.value.length, el.input.value.length); } catch (e) { /* ignore */ }
+        return true;
+      };
+      if (!apply()) window.setTimeout(apply, 200);
+    } catch (e) { /* ignore */ }
+  };
 })();

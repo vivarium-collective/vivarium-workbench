@@ -328,7 +328,7 @@
       acts.push('<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-decide="' +
         esc(it.target) + '" data-kind="' + esc(it.kind) + '">Decide…</button>');
       acts.push('<button class="dcyc-btn dcyc-btn-sm" data-steer="' + esc(it.target) +
-        '" title="Let the AI choose and record the decision">AI steer</button>');
+        '" title="Steer this decision with the AI assistant (opens the chat)">AI steer</button>');
     } else if (it.resolvable) {
       acts.push('<button class="dcyc-btn dcyc-btn-sm" data-decide="' + esc(it.target) +
         '" data-kind="' + esc(it.kind) + '">Resolve…</button>');
@@ -425,19 +425,66 @@
       .finally(function () { S.busy = false; });
   }
 
+  function findFrontierItem(target) {
+    var fr = (S.summary && S.summary.frontier) || [];
+    for (var i = 0; i < fr.length; i++) if (fr[i].target === target) return fr[i];
+    return null;
+  }
+
+  // The built-in AI assistant is "ready" when the chat extra is installed, a
+  // provider+model is selected, and that provider is configured (mirrors chat.js).
+  function aiReady(st) {
+    return !!(st && st.available && st.selected &&
+      (st.providers || []).some(function (p) {
+        return st.selected && p.id === st.selected.provider && p.configured;
+      }));
+  }
+
+  function decisionPrompt(it) {
+    var slug = S.slug, title = currentTitle(slug) || slug;
+    var studies = (it.studies || []).map(function (s) { return s.label + " (" + s.slug + ")"; }).join(", ");
+    var L = [
+      'Help me steer an open decision in the discovery cycle for investigation "' + title + '" (' + slug + ").",
+      "",
+      "Decision: " + (it.target || ""),
+    ];
+    if (studies) L.push("Involved study: " + studies);
+    L.push("");
+    L.push("Recommend the primary choice and the competing alternatives to test head-to-head, " +
+      "with a 1-2 sentence rationale grounded in the investigation's studies and evidence.");
+    var example = JSON.stringify({ kind: "open_decision", target: it.target || "", rationale: "<your choice + why>" });
+    L.push("Then record it: POST /api/discovery-cycle/" + slug + "/resolve with body " +
+      example + ". Then tell me what you recorded.");
+    return L.join("\n");
+  }
+
+  // "AI steer" routes to the built-in chat assistant: if it's set up, seed it with
+  // the decision (the assistant can record it via the workbench API tools); if not,
+  // open the chat so the user can configure it (claude-code needs no API key).
   function steerDecision(target) {
-    if (!S.slug || S.busy) return;
-    if (!global.confirm("Let the AI decide this and record its choice to the investigation?")) return;
-    S.busy = true; setStatus("AI steering…");
-    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/steer", { target: target })
-      .then(function (j) {
-        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
-        if (!j.ok) { setStatus(j.detail || "AI steering is not available."); return; }
-        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
-        var out = (j.action || {}).outcome || {};
-        setStatus("AI decided: " + (out.detail || "recorded") + ".");
-      }).catch(function () { setStatus("Steer request failed."); })
-      .finally(function () { S.busy = false; });
+    if (!S.slug) return;
+    var it = findFrontierItem(target) || { target: target, studies: [] };
+    setStatus("Opening the AI assistant…");
+    getJSON("/api/ai/status").then(function (st) {
+      if (!aiReady(st)) {
+        if (typeof global._openAiPanel === "function") global._openAiPanel();
+        var why = (st && st.available)
+          ? "pick a provider in the chat (claude-code needs no key)"
+          : "install the chat extra + pick a provider (claude-code needs no key)";
+        setStatus("AI assistant isn't set up yet — " + why + ", then try AI steer again.");
+        return;
+      }
+      if (typeof global._aiSeedPrompt === "function") {
+        global._aiSeedPrompt(decisionPrompt(it));
+        setStatus("Decision sent to the AI assistant — review and send it in the chat.");
+      } else if (typeof global._openAiPanel === "function") {
+        global._openAiPanel();
+        setStatus("Opened the AI assistant.");
+      }
+    }).catch(function () {
+      if (typeof global._openAiPanel === "function") global._openAiPanel();
+      setStatus("Opened the AI assistant for setup.");
+    });
   }
 
   // ---- render -------------------------------------------------------------
