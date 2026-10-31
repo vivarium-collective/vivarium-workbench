@@ -21,7 +21,7 @@
 
   var ctl = null, popoutWin = null, initDone = false, built = false;
   // panel state (persists while the panel is mounted)
-  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, gatesOpen: true, decideFor: null };
+  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, delta: null, gatesOpen: true, decideFor: null };
 
   function el(id) { return document.getElementById(id); }
   function base() { return global.__BASE_PATH__ || ""; }
@@ -298,7 +298,43 @@
     S.byId = {};
     S.steps.forEach(function (s) { S.byId[s.id] = s; });
     renderGraph();
+    loadDelta();
   }
+
+
+  // "What changed this cycle": the engine's discovery_delta vs the persisted
+  // evaluation snapshot (GET /api/discovery-delta/{slug}). Live-only.
+  function isSnapshot() { return ((global.__DASH_CONFIG__ || {}).mode) === "snapshot"; }
+  function loadDelta() {
+    if (isSnapshot() || !S.slug) { S.delta = null; return; }
+    var slug = S.slug;
+    getJSON("/api/discovery-delta/" + encodeURIComponent(slug)).then(function (d) {
+      if (slug !== S.slug) return;
+      S.delta = d && d.available ? d : null;
+      renderGraph();
+    }).catch(function () { /* optional surface */ });
+  }
+  function deltaHtml() {
+    var d = S.delta;
+    if (!d) return "";
+    var p = d.proposals || {};
+    var n = function (a) { return (a || []).length; };
+    if (d.unchanged) {
+      return '<div class="dcyc-banner dcyc-bn-open"><div class="dcyc-bn-h">What changed this cycle</div>' +
+        '<div class="dcyc-bn-sub">' + (d.first_cycle ? "No prior snapshot yet (first cycle) — no change to report." : "No change since last cycle.") + "</div></div>";
+    }
+    var chips = [
+      n(d.added_or_qualified) + " added/qualified", n(d.gated) + " gated",
+      n(p.evaluated) + " proposals evaluated", n(d.regressions) + " regressions"
+    ].map(function (t) { return '<span class="dcyc-chip">' + esc(t) + "</span>"; }).join(" ");
+    var names = (d.changed || []).map(function (c) {
+      return esc(c.study) + ": " + esc(c.from) + " → " + esc(c.to);
+    }).concat((d.new_model_versions || []).map(function (m) { return "new model " + esc(m); }));
+    return '<div class="dcyc-banner dcyc-bn-open"><div class="dcyc-bn-h">What changed this cycle</div>' +
+      '<div class="dcyc-bn-sub">' + chips + "</div>" +
+      (names.length ? '<div class="dcyc-bn-sub">' + names.join(" · ") + "</div>" : "") + "</div>";
+  }
+  document.addEventListener("viv:discovery-changed", function () { if (S.slug) loadDelta(); });
 
   function bannerHtml() {
     var m = S.summary;
@@ -525,7 +561,7 @@
     if (!S.steps.length) { g.innerHTML = '<p class="empty-state">Load an investigation to see its cycle.</p>'; return; }
     var phases = [];
     S.steps.forEach(function (s) { if (phases.indexOf(s.phase) < 0) phases.push(s.phase); });
-    g.innerHTML = applyReportHtml() + bannerHtml() + frontierHtml() + phases.map(function (ph) {
+    g.innerHTML = applyReportHtml() + deltaHtml() + bannerHtml() + frontierHtml() + phases.map(function (ph) {
       var nodes = S.steps.filter(function (s) { return s.phase === ph; });
       return '<div class="dcyc-phase-h">' + esc(ph) + "</div>" + nodes.map(nodeHtml).join("");
     }).join("");

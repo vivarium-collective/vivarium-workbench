@@ -1095,6 +1095,24 @@ def create_app() -> FastAPI:
         return _build_discovery(ws, slug) or {}
 
     @app.get(
+        "/api/discovery-delta/{slug}",
+        tags=["Investigations"],
+        summary="What changed this discovery cycle (engine discovery_delta)",
+    )
+    def discovery_delta_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        from vivarium_workbench.lib.discovery_surface import build_discovery_delta
+        return build_discovery_delta(ws, slug)
+
+    @app.get(
+        "/api/evidence-integrity/{slug}",
+        tags=["Investigations"],
+        summary="Per-finding evidence-integrity ledger, summary and by-study roll-up",
+    )
+    def evidence_integrity_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        from vivarium_workbench.lib.discovery_surface import build_evidence_integrity
+        return build_evidence_integrity(ws, slug)
+
+    @app.get(
         "/api/discovery-cycle-steps",
         tags=["Investigations"],
         summary="Discovery-engine cycle step graph (static metadata)",

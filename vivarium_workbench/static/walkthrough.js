@@ -10081,6 +10081,65 @@
   window._aigApplySelection = _aigApplySelection;
 
   // ── Selected-card FULL DETAIL (inline) ─────────────────────────────────────
+  // ---- Evidence-integrity trust badges (GET /api/evidence-integrity/{slug}) ----
+  // VERIFIED / PROVISIONAL / CONTRADICTED / UNSUPPORTED per finding, plus an
+  // investigation-level summary chip. Cached per investigation; placeholders are
+  // painted after the fetch resolves. No-op in snapshot mode (no live engine).
+  var _EV_STYLE = {
+    verified:     {bg: '#d1fae5', fg: '#065f46', bd: '#10b981'},
+    provisional:  {bg: '#fef3c7', fg: '#92400e', bd: '#f59e0b'},
+    contradicted: {bg: '#fee2e2', fg: '#991b1b', bd: '#ef4444'},
+    unsupported:  {bg: '#f1f5f9', fg: '#475569', bd: '#94a3b8'}
+  };
+  window._vivEvidence = window._vivEvidence || {slug: '', byKey: {}, summary: null};
+  function _evBadgeInner(rec) {
+    var st = _EV_STYLE[rec.status] || _EV_STYLE.unsupported;
+    return '<span class="viv-ev-badge" data-status="' + _esc(rec.status) + '" title="' + _esc(rec.reason || '') + '" ' +
+      'style="display:inline-block;font-size:0.62em;font-weight:700;letter-spacing:.03em;text-transform:uppercase;' +
+      'padding:1px 6px;margin-right:6px;border-radius:9999px;border:1px solid ' + st.bd + ';background:' + st.bg + ';color:' + st.fg + '">' +
+      _esc(rec.status) + '</span>';
+  }
+  function _evBadgeHtml(study, findingId) {
+    var rec = (window._vivEvidence.byKey || {})[study + '|' + findingId];
+    return '<span class="viv-ev-slot" data-ev-study="' + _esc(study) + '" data-ev-finding="' + _esc(findingId) + '">' +
+      (rec ? _evBadgeInner(rec) : '') + '</span>';
+  }
+  function _vivPaintEvidence() {
+    var ev = window._vivEvidence;
+    Array.prototype.forEach.call(document.querySelectorAll('.viv-ev-slot'), function (el) {
+      var rec = ev.byKey[el.getAttribute('data-ev-study') + '|' + el.getAttribute('data-ev-finding')];
+      el.innerHTML = rec ? _evBadgeInner(rec) : '';
+    });
+    var host = document.getElementById('investigation-detail-status');
+    if (!host || !host.parentNode) return;
+    var chip = document.getElementById('viv-ev-summary');
+    var sm = ev.summary;
+    if (!sm || !(sm.verified + sm.provisional + sm.contradicted + sm.unsupported)) { if (chip) chip.remove(); return; }
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.id = 'viv-ev-summary';
+      chip.style.cssText = 'display:inline-block;margin-left:8px;font-size:0.75em;padding:2px 9px;border-radius:9999px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155';
+      host.parentNode.insertBefore(chip, host.nextSibling);
+    }
+    chip.title = 'Evidence integrity: findings checked against registered runs';
+    chip.textContent = sm.verified + ' verified · ' + sm.provisional + ' provisional · ' + sm.contradicted + ' contradicted' +
+      (sm.unsupported ? ' · ' + sm.unsupported + ' unsupported' : '');
+  }
+  function _vivLoadEvidence(slug) {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot' || !slug) return;
+    fetch('/api/evidence-integrity/' + encodeURIComponent(slug), {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.available || window._currentIset !== slug) return;
+        var byKey = {};
+        (j.ledger || []).forEach(function (r) { byKey[r.study + '|' + r.finding] = r; });
+        window._vivEvidence = {slug: slug, byKey: byKey, summary: j.summary || null};
+        _vivPaintEvidence();
+      }).catch(function () { /* optional surface */ });
+  }
+  window._vivLoadEvidence = _vivLoadEvidence;
+  window._vivPaintEvidence = _vivPaintEvidence;
+
   // The full Asks / Finds / plan body, from the study DATA (not the band-limited
   // inline preview) so it reads the same at any zoom. Rendered hidden inside each
   // node and revealed in place by _aigSetNodeExpanded when the user expands the
@@ -10094,6 +10153,7 @@
     if (finds && finds.length) {
       H += finds.map(function (f) {
         return '<div style="margin-top:6px;padding-left:10px;border-left:2px solid #e2e8f0">' +
+          _evBadgeHtml(s.name, f.id) +
           _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
       }).join('');
     } else {
@@ -11605,6 +11665,7 @@
     _isetDetailFetch
       .then(function(d) {
         window._currentIsetData = d;
+        try { _vivLoadEvidence(name); } catch (_) {}
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
         var statusEl   = document.getElementById('investigation-detail-status');
         var effStatus  = d.effective_status || d.status || 'planning';
