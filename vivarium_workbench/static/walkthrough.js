@@ -12312,10 +12312,10 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      // Keep the "Overview" text label beside the caret (iTerm-style labeled
+      // Keep the "Investigation" text label beside the caret (iTerm-style labeled
       // control); only the caret direction reflects collapsed/expanded.
-      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Overview';
-      btn.setAttribute('title', collapsed ? 'Show overview' : 'Hide overview');
+      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Investigation';
+      btn.setAttribute('title', collapsed ? 'Show investigation' : 'Hide investigation');
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
   }

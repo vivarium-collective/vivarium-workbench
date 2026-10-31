@@ -286,10 +286,10 @@
     const target = fresh ? el.newHost : el.foot;
     if (el.composer.parentNode !== target) target.appendChild(el.composer);
     el.newCopy.innerHTML = status && !ready
-      ? '<h3>Chat with AI</h3><p>' + e(status.error || (status.available ? 'No AI provider configured or Chat model not selected' :
+      ? '<p>' + e(status.error || (status.available ? 'No AI provider configured or Chat model not selected' :
           (status.reason || "The chat needs the optional extra: pip install 'vivarium-workbench[chat]'"))) + '</p>' +
         (status.available ? '<button class="vp-callout" data-act="settings">Edit AI settings</button>' : '')
-      : '<h3>Chat with AI</h3>';
+      : '';
     el.composer.hidden = !!(fresh && status && !ready);
     el.callout.hidden = !fresh;
     // composer controls
