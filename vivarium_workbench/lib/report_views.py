@@ -41,7 +41,7 @@ from vivarium_workbench.lib import readouts_views as _readouts_views
 from vivarium_workbench.lib import study_derivations as _study_derivations
 from vivarium_workbench.lib.study_ontology import (
     derive_execution_status as _derive_execution_status,
-    derive_verdict as _derive_verdict,
+    resolve_verdict as _resolve_verdict,
 )
 
 
@@ -83,9 +83,10 @@ def _unloadable_study_node(sp: "Path", slug: str, error: str) -> dict:
         "execution_status": _derive_execution_status(raw, authored_status),
         "spec_error": error,
     }
-    _verdict = _derive_verdict(raw)
+    _verdict, _vsrc = _resolve_verdict(raw)
     if _verdict:
         node["verdict"] = _verdict
+        node["verdict_source"] = _vsrc
     return node
 
 
@@ -1050,6 +1051,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # one helper makes the rail dot and the card badge agree by construction.
         from vivarium_workbench.lib.investigation_status import study_run_rows  # noqa: PLC0415
         _run_rows = study_run_rows(ws_root, study_spec["name"], study_spec)
+        _verdict_pair = _resolve_verdict(study_spec)
         _eff_status = _study_display_status(
             ws_root, study_spec["name"], study_spec, runs=_run_rows)
         # Safeguard: a study can carry a COMPLETED evaluation as committed
@@ -1181,7 +1183,9 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             # only when authored or derivable (else the card shows "pending").
             # Same derivation as the typed graph builder (shared study_ontology).
             "execution_status":      _derive_execution_status(study_spec, raw_status, runs=_run_rows),
-            "verdict":               _derive_verdict(study_spec),
+            "verdict":               _verdict_pair[0],
+            # "authored" | "derived" (engine roll-up of graded tests) | None
+            "verdict_source":        _verdict_pair[1],
             "evidence_tier":         study_spec.get("evidence_tier"),
             # viva-superpowers #285 — the split verdict ledger (or None).
             "verdict_count_split":   _count_split,

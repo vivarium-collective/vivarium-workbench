@@ -115,7 +115,10 @@
   }
   function _verdictMeta(s) {
     var v = _studyVerdict(s);
-    return v ? _VERDICT_META[v] : null;  // null → render the pending pill
+    if (!v) return null;  // null → render the pending pill
+    // Engine-derived (not authored/Applied): same look, flagged with a "*".
+    return s && s.verdict_source === 'derived'
+      ? Object.assign({}, _VERDICT_META[v], {derived: true}) : _VERDICT_META[v];
   }
   // A rounded two-axis pill: glyph + (optionally) label, tinted by the axis color.
   function _aigPill(meta, title, cls, compact) {
@@ -124,7 +127,7 @@
       'white-space:nowrap;border-radius:9999px;padding:1px 7px;color:' + meta.color + ';' +
       'background:' + meta.color + '14;border:1px solid ' + meta.color + '40">' +
       '<span style="font-size:1.1em;line-height:1">' + meta.icon + '</span>' +
-      (compact ? '' : _esc(meta.label)) + '</span>';
+      (compact ? '' : _esc(meta.label)) + (meta.derived ? '<sup title="derived">*</sup>' : '') + '</span>';
   }
 
   // Legacy single-axis status model — still used by the rail dot, the sidebar,
@@ -13070,7 +13073,9 @@
           '<span style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
             _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact) +
             _aigPill(verdictMeta || _VERDICT_PENDING,
-                     verdictMeta ? ('Verdict: ' + verdictMeta.label) : 'Verdict: pending — not yet concluded',
+                     verdictMeta ? ('Verdict: ' + verdictMeta.label +
+                       (s.verdict_source === 'derived' ? ' (derived from graded tests, not authored)' : ''))
+                       : 'Verdict: pending — not yet concluded',
                      'aig-verdict-pill', _pillCompact) +
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +

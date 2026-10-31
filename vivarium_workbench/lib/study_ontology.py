@@ -140,13 +140,46 @@ def derive_execution_status(spec: dict, node_status: str = "", runs=None) -> str
     return "planned"
 
 
-def derive_verdict(spec: dict):
-    """Scientific verdict axis (what the evidence supports). Authored wins (with
-    legacy values folded); else parse the free-text report.verdict /
-    study_card.status. Returns None when nothing supports a verdict yet."""
+def _engine_derived_verdict(spec: dict):
+    """The engine's canonical verdict derived from the spec's graded behavior-test
+    outcomes (``discovery_engine.knowledge_store.canonical_verdict`` ->
+    ``study_verdict.roll_up_verdict``), or None when nothing is graded yet
+    (``unassessed``) or the engine is absent. Reads only the in-memory spec."""
+    try:
+        from discovery_engine.knowledge_store import canonical_verdict  # noqa: PLC0415
+        rec = canonical_verdict({k: v for k, v in spec.items()
+                                 if k not in ("verdict", "conclusion_verdict")})
+    except Exception:  # noqa: BLE001 -- engine optional: fall back to authored/pending
+        return None
+    v = str((rec or {}).get("verdict") or "").strip().lower()
+    return v if v in ("supported", "qualified", "refuted", "inconclusive") else None
+
+
+def resolve_verdict(spec: dict):
+    """``(verdict, source)``. Authored ``verdict`` wins (source ``"authored"``);
+    else the engine-derived verdict from graded tests (source ``"derived"``);
+    else a text-parse of the authored report prose (source ``"authored"``).
+    ``(None, None)`` when nothing supports a verdict yet (genuinely pending)."""
     v = str(spec.get("verdict") or "").strip().lower()
     if v in VERDICT_ALIASES:
-        return VERDICT_ALIASES[v]
+        return VERDICT_ALIASES[v], "authored"
+    derived = _engine_derived_verdict(spec)
+    if derived:
+        return derived, "derived"
+    parsed = _parse_verdict_text(spec)
+    return (parsed, "authored") if parsed else (None, None)
+
+
+def derive_verdict(spec: dict):
+    """Scientific verdict axis (what the evidence supports). Authored wins (with
+    legacy values folded); else the engine-derived verdict from graded tests;
+    else parse the free-text report.verdict / study_card.status. Returns None
+    when nothing supports a verdict yet. Use :func:`resolve_verdict` for the
+    source (authored vs derived)."""
+    return resolve_verdict(spec)[0]
+
+
+def _parse_verdict_text(spec: dict):
     rep = spec.get("report") if isinstance(spec.get("report"), dict) else {}
     card = spec.get("study_card") if isinstance(spec.get("study_card"), dict) else {}
     text = str(rep.get("verdict") or card.get("status") or "").strip().lower()

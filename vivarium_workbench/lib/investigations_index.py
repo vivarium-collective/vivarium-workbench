@@ -507,6 +507,8 @@ def build_investigations(ws_root: Path) -> dict:
         # pure duplicated work across 80+ studies.
         _disp_status = _study_display_status(
             ws_root, spec["name"], spec, runs=_rows_for(spec["name"]))
+        from vivarium_workbench.lib.study_ontology import resolve_verdict
+        _vpair = resolve_verdict(spec)
         row = {
             "name": spec["name"],
             "composite": composite_summary,
@@ -541,6 +543,8 @@ def build_investigations(ws_root: Path) -> dict:
             # Progress pill source (Planned/Running/Completed/...), run-aware.
             "execution_status": derive_execution_status(
                 spec, runs=_rows_for(spec["name"])),
+            "verdict": _vpair[0],
+            "verdict_source": _vpair[1],  # "authored" | "derived" | None
             "gate_status": spec.get("gate_status"),
             "confidence": spec.get("confidence"),
             "simulation_status": spec.get("simulation_status"),
