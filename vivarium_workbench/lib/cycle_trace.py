@@ -1155,3 +1155,51 @@ def _closed_of(trace: dict) -> bool | None:
             # avoided here — closure is reported by sandbox_advance's adv frontier.
             return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Investigation top-tab freshness (Verdict + Narrative). Freshness is DERIVED by
+# the engine; the only writes are the accept-gated refresh verbs below.
+# ---------------------------------------------------------------------------
+def investigation_freshness(ws_root, inv_slug: str) -> dict:
+    """Per-tab freshness (``{verdict, decisions, narrative, any_expired}``) computed live
+    by the engine from the on-disk investigation + member studies. Never raises."""
+    if not engine_available():
+        return {"available": False}
+    try:
+        M = _Modules()
+        _p, spec, studies = M.discover.load_cycle_inputs(Path(ws_root), inv_slug)
+        from discovery_engine.narrative_freshness import investigation_freshness as _fr
+        cv = (spec.get("executive") or {}).get("computed_verdict_status")
+        return {"available": True, "freshness": _fr(spec, studies, computed_verdict_status=cv)}
+    except FileNotFoundError:
+        return {"available": True, "freshness": None}
+    except Exception as e:
+        return {"available": True, "freshness": None, "detail": f"{type(e).__name__}: {e}"}
+
+
+def _refresh_tab(ws_root, inv_slug: str, verb: str, rationale: str) -> dict:
+    if not engine_available():
+        return {"available": False, "ok": False, "detail": "discovery engine unavailable"}
+    if not (rationale or "").strip():
+        return {"available": True, "ok": False, "detail": "a rationale is required"}
+    M = _Modules()
+    ws_root = Path(ws_root)
+    try:
+        getattr(M.discover, verb)(ws_root, inv_slug, rationale=rationale)
+    except Exception as e:
+        return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
+    commit = _git_commit(ws_root, _inv_commit_dirs(ws_root),
+                         f"investigation: {verb} in {inv_slug}")
+    return {"available": True, "ok": True, "commit": commit,
+            **investigation_freshness(ws_root, inv_slug)}
+
+
+def accept_verdict(ws_root, inv_slug: str, rationale: str) -> dict:
+    """Accept the engine-computed verdict (engine ``accept_verdict``). Rationale required."""
+    return _refresh_tab(ws_root, inv_slug, "accept_verdict", rationale)
+
+
+def refresh_narrative(ws_root, inv_slug: str, rationale: str) -> dict:
+    """Re-stamp the Narrative basis (engine ``refresh_narrative``). Rationale required."""
+    return _refresh_tab(ws_root, inv_slug, "refresh_narrative", rationale)

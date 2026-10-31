@@ -1244,6 +1244,42 @@ def create_app() -> FastAPI:
                                p.get("declare") if isinstance(p.get("declare"), dict) else {},
                                str(p.get("rationale") or ""))
 
+    @app.get(
+        "/api/investigation/{slug}/freshness",
+        tags=["Investigations"],
+        summary="Derived per-tab freshness (verdict / decisions / narrative)",
+    )
+    def investigation_tab_freshness(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """Engine-derived ``{verdict, decisions, narrative, any_expired}``; read-only."""
+        from vivarium_workbench.lib.cycle_trace import investigation_freshness
+        return investigation_freshness(ws, _path_safety.plain_name(slug, "investigation"))
+
+    @app.post(
+        "/api/investigation/{slug}/accept-verdict",
+        tags=["Investigations"],
+        summary="Accept the computed verdict (rationale required)",
+    )
+    def investigation_accept_verdict(slug: str, payload: dict = Body(default={}),
+                                     ws: Path = Depends(get_workspace)) -> dict:
+        """Verdict tab Refresh. ``payload`` = ``{rationale}`` (400 if blank). Commits."""
+        from vivarium_workbench.lib.cycle_trace import accept_verdict
+        out = accept_verdict(ws, _path_safety.plain_name(slug, "investigation"),
+                             str((payload or {}).get("rationale") or ""))
+        return JSONResponse(out, status_code=400) if out.get("ok") is False else out
+
+    @app.post(
+        "/api/investigation/{slug}/refresh-narrative",
+        tags=["Investigations"],
+        summary="Refresh the narrative basis stamp (rationale required)",
+    )
+    def investigation_refresh_narrative(slug: str, payload: dict = Body(default={}),
+                                        ws: Path = Depends(get_workspace)) -> dict:
+        """Narrative tab Refresh. ``payload`` = ``{rationale}`` (400 if blank). Commits."""
+        from vivarium_workbench.lib.cycle_trace import refresh_narrative
+        out = refresh_narrative(ws, _path_safety.plain_name(slug, "investigation"),
+                                str((payload or {}).get("rationale") or ""))
+        return JSONResponse(out, status_code=400) if out.get("ok") is False else out
+
     @app.post(
         "/api/discovery-cycle/{slug}/accept-viz-proposal",
         tags=["Investigations"],
