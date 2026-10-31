@@ -47,8 +47,9 @@ def build_plan_board(
 ) -> list[dict[str, Any]]:
     """Derive live gate rows from a ``plan_gates`` block + member-study state.
 
-    ``studies_by_name`` maps study slug → a dict with ``gate_status`` and
-    ``findings`` (each ``{id, status, ...}``) — the per-study shape the
+    ``studies_by_name`` maps study slug → a dict with ``gate_status`` (run-aware:
+    authored, else derived from graded acceptance behaviors, with an optional
+    ``gate_status_source``) and ``findings`` (each ``{id, status, ...}``) — the per-study shape the
     investigation-detail builder already produces.
 
     Returns one row per gate (in the gates' authored order) carrying the gate's
@@ -67,6 +68,7 @@ def build_plan_board(
         pending_studies = list(gate.get("pending_studies") or [])
         extends = gate.get("extends")
         prior_passed = extends is None or status_by_id.get(extends) == "passed"
+        source = None
 
         if not scaffolded:
             status = "pending"
@@ -82,6 +84,10 @@ def build_plan_board(
                 status = "passed"
             else:
                 status = "in_progress"
+            # "derived" when any member's gate state came from graded acceptance
+            # behaviors (run-aware) rather than an authored gate_status.
+            source = ("derived" if any(sd.get("gate_status_source") == "derived"
+                                       for sd in member_specs.values()) else "authored")
 
         status_by_id[str(gate.get("id"))] = status
         rows.append({
@@ -95,6 +101,7 @@ def build_plan_board(
             "member_studies": members,
             "pending_studies": pending_studies,
             "status": status,
+            "status_source": source,
         })
 
     return rows

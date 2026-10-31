@@ -834,10 +834,17 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   <!-- LEFT RAIL -->
   <aside id="viv-rail" class="viv-rail viv-rail-collapsed">
 
-    <!-- The Vivarium brand logo was removed; the workspace badge (avatar) is now
-         the top element of the rail. The rail stays permanently collapsed (a fixed
-         icon bar) — there is no expand/resize. "About Vivarium" is reached from the
+    <!-- The Vivarium brand logo was removed; the workspace badge (avatar) is the
+         top element of the rail. The rail opens from a compact icon bar into the
+         full labelled sidebar via the toggle below (or by dragging the right
+         edge); the choice is persisted. "About Vivarium" is reached from the
          About button pinned in the rail footer. ⌘K still opens search. -->
+
+    <!-- The sidebar expand/collapse toggle lives in the Settings popover (the gear
+         at the bottom of the rail). The right-edge drag handle below also sizes the
+         sidebar; both drive the persisted vivarium.rail-collapsed state. -->
+    <div id="viv-rail-resize-handle" class="viv-rail-resize-handle" aria-hidden="true"
+         onpointerdown="_vivRailResizeStart(event)" ondblclick="_vivRailResizeReset()"></div>
 
     {% if repo_url %}
     <!-- GitHub mark, defined once and reused (workspace-name link + collapsed icon). -->
@@ -943,8 +950,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          onclick="event.preventDefault();(window._vivOpenGlobalSearch||_vivToggleRailSearch)();return false;">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="11" cy="11" r="7"/>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Search</span>
@@ -955,13 +961,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="2.5" y="9" width="6" height="6"/>
-            <rect x="16" y="3" width="5.5" height="4"/>
-            <rect x="16" y="10" width="5.5" height="4"/>
-            <rect x="16" y="17" width="5.5" height="4"/>
-            <path d="M8.5 12L16 5"/>
-            <path d="M8.5 12h7.5"/>
-            <path d="M8.5 12L16 19"/>
+            <rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Investigate</span>
@@ -975,11 +975,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#resources" id="rail-resources" class="viv-rail-link menu-link" data-page="resources">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <path d="M8 6 H6 a1 1 0 0 0 -1 1 V19.5 a1 1 0 0 0 1 1 H15 V18"/>
-            <path d="M8 4 H15 L18 7 V18 H8 Z"/>
-            <path d="M15 4 V7 H18"/>
-            <path d="M10.5 10.5 H15.5"/>
-            <path d="M10.5 13 H15.5"/>
+            <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Resources</span>
@@ -989,10 +985,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#market"            class="viv-rail-link menu-link" data-page="market">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="3.6"  y="3.6"  width="7.2" height="7.2" rx="1.3"/>
-            <rect x="13.2" y="3.6"  width="7.2" height="7.2" rx="1.3"/>
-            <rect x="3.6"  y="13.2" width="7.2" height="7.2" rx="1.3"/>
-            <rect x="13.2" y="13.2" width="7.2" height="7.2" rx="1.3"/>
+            <rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Catalog</span>
@@ -1003,16 +996,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#modules"           class="viv-rail-link menu-link" data-page="modules">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="7.5" y="2.8" width="9" height="5" rx="1.1"/>
-            <circle cx="3.3" cy="5.3" r="1.5"/>
-            <path d="M7.5 5.3 H4.8"/>
-            <circle cx="20.7" cy="5.3" r="1.5"/>
-            <path d="M16.5 5.3 H19.2"/>
-            <rect x="3.3"  y="16.2" width="7" height="5" rx="1.1"/>
-            <rect x="13.7" y="16.2" width="7" height="5" rx="1.1"/>
-            <path d="M12 7.8 V11 M6.8 11 H17.2 M6.8 11 V15.9 M17.2 11 V15.9"/>
-            <path d="M5.5 14.3 L6.8 15.9 L8.1 14.3"/>
-            <path d="M15.9 14.3 L17.2 15.9 L18.5 14.3"/>
+            <rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Process</span>
@@ -1020,10 +1004,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <ellipse cx="9.5" cy="6.5" rx="6" ry="2.5"/>
-            <path d="M3.5 6.5 V17.5 c0 1.4 2.7 2.5 6 2.5 c0.55 0 1.08 -0.016 1.58 -0.047"/>
-            <path d="M3.5 12 c0 1.4 2.7 2.5 6 2.5 c0.6 0 1.18 -0.02 1.72 -0.056"/>
-            <path d="M16.3 8.8 L12.4 14.6 H15.1 L13.5 19.4 L18.6 12.9 H15.5 Z" fill="currentColor" stroke="none"/>
+            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Runs DB</span>
@@ -1036,13 +1017,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#visualizations"    class="viv-rail-link menu-link" data-page="visualizations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <!-- increasing bars along the baseline -->
-            <path d="M5 20.5 V16"/>
-            <path d="M10 20.5 V13.5"/>
-            <path d="M15 20.5 V17"/>
-            <!-- up-trending line with an arrowhead at top-right -->
-            <path d="M4 12.5 L8.5 8 L12 11 L20 4"/>
-            <path d="M15.3 4 H20 V8.7"/>
+            <path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Explore</span>
@@ -1084,39 +1059,28 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#" id="viv-studies-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Studies browser">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <!-- a left spine branching to three bars, each ending in a node -->
-            <path d="M3.5 5.5 V18.5"/>
-            <path d="M3.5 6 H6"/>
-            <rect x="6" y="4.4" width="6.5" height="3.2" rx="1.1"/>
-            <path d="M12.5 6 H15.2"/>
-            <circle cx="17.6" cy="6" r="1.7"/>
-            <path d="M3.5 12 H6"/>
-            <rect x="6" y="10.4" width="6.5" height="3.2" rx="1.1"/>
-            <path d="M12.5 12 H15.2"/>
-            <circle cx="17.6" cy="12" r="1.7"/>
-            <path d="M3.5 18 H6"/>
-            <rect x="6" y="16.4" width="6.5" height="3.2" rx="1.1"/>
-            <path d="M12.5 18 H15.2"/>
-            <circle cx="17.6" cy="18" r="1.7"/>
+            <path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Studies</span>
       </a>
+      <a href="#" id="viv-cycle-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Discovery engine cycle — run the cycle on the loaded investigation">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <!-- cycle: refresh arrows around a central node -->
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+            <path d="M21 3v5h-5"/>
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+            <path d="M8 16H3v5"/>
+            <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Cycle</span>
+      </a>
       <a href="#" id="viv-registry-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Registry browser — composites, processes, analyses &amp; visualizations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <!-- three isometric cubes (one atop two) -->
-            <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/>
-            <path d="m7 16.5-4.74-2.85"/>
-            <path d="m7 16.5 5-3"/>
-            <path d="M7 16.5v5.17"/>
-            <path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/>
-            <path d="m17 16.5-5-3"/>
-            <path d="m17 16.5 4.74-2.85"/>
-            <path d="M17 16.5v5.17"/>
-            <path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/>
-            <path d="M7.26 5.15 12 8l4.74-2.85"/>
-            <path d="M12 13.5V8"/>
+            <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/><path d="m7 16.5-4.74-2.85"/><path d="m7 16.5 5-3"/><path d="M7 16.5v5.17"/><path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/><path d="m17 16.5-5-3"/><path d="m17 16.5 4.74-2.85"/><path d="M17 16.5v5.17"/><path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/><path d="M12 8 7.26 5.15"/><path d="m12 8 4.74-2.85"/><path d="M12 13.5V8"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Registry</span>
@@ -1124,11 +1088,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#" id="viv-ai-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Chat">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <rect x="4.5" y="8" width="15" height="10.5" rx="3.5"/>
-            <path d="M12 4.9 V8"/>
-            <circle cx="12" cy="4" r="1.1" fill="currentColor" stroke="none"/>
-            <circle cx="9.3" cy="13.2" r="1.15" fill="currentColor" stroke="none"/>
-            <circle cx="14.7" cy="13.2" r="1.15" fill="currentColor" stroke="none"/>
+            <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Chat</span>
@@ -1136,24 +1096,58 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#" id="viv-code-toggle" class="viv-rail-link" role="button" aria-pressed="false" title="Process code">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <polyline points="16 18 22 12 16 6"/>
-            <polyline points="8 6 2 12 8 18"/>
-            <line x1="14" y1="5" x2="10" y2="19"/>
+            <path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Code</span>
       </a>
-      <!-- Light / dark theme toggle lives in the grouped well too (not tucked at
-           the very bottom). A hairline divider separates this app control from
-           the three dockable-panel launchers above it. -->
+      <!-- Settings: a gear that opens a small popover of app settings. The
+           light/dark theme switch lives inside it (same #viv-theme-toggle id, so
+           the existing _setTheme / _toggleTheme sync drives it unchanged). A
+           hairline divider separates this app control from the dockable-panel
+           launchers above it. -->
       <div class="viv-rail-dock-sep" aria-hidden="true"></div>
-      <div class="viv-rail-theme-footer">
-        <button class="viv-theme-toggle" id="viv-theme-toggle" type="button" role="switch" aria-checked="false"
-                title="Toggle dark / light mode" aria-label="Toggle dark mode" onclick="_toggleTheme()">
-          <span class="viv-theme-ico viv-theme-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span>
-          <span class="viv-theme-ico viv-theme-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></span>
-          <span class="viv-theme-thumb" aria-hidden="true"></span>
-        </button>
+      <div class="viv-rail-settings-wrap">
+        <a href="#" id="viv-settings-toggle" class="viv-rail-link" role="button"
+           aria-haspopup="dialog" aria-expanded="false" title="Settings"
+           onclick="_vivToggleSettings(event)">
+          <span class="viv-rail-link-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </span>
+          <span class="viv-rail-link-label">Settings</span>
+        </a>
+        <div id="viv-settings-popover" class="viv-settings-popover" role="dialog" aria-label="Settings" hidden>
+          <div class="viv-settings-pop-title">Settings</div>
+          <div class="viv-settings-row">
+            <span class="viv-settings-row-label">Appearance</span>
+            <span class="viv-settings-theme">
+              <span class="viv-settings-theme-name">Light / Dark</span>
+              <button class="viv-theme-toggle" id="viv-theme-toggle" type="button" role="switch" aria-checked="false"
+                      title="Toggle dark / light mode" aria-label="Toggle dark mode" onclick="_toggleTheme()">
+                <span class="viv-theme-ico viv-theme-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span>
+                <span class="viv-theme-ico viv-theme-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></span>
+                <span class="viv-theme-thumb" aria-hidden="true"></span>
+              </button>
+            </span>
+          </div>
+          <div class="viv-settings-row">
+            <span class="viv-settings-row-label">Sidebar</span>
+            <button id="viv-rail-toggle" class="viv-settings-sidebar-btn" type="button"
+                    aria-controls="viv-rail" aria-expanded="false"
+                    title="Open sidebar" aria-label="Open sidebar"
+                    onclick="_vivToggleRail()">
+              <svg class="viv-rail-toggle-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2"/>
+                <line x1="9" y1="4" x2="9" y2="20"/>
+              </svg>
+              <span id="viv-rail-toggle-text">Expand</span>
+            </button>
+          </div>
+        </div>
       </div>
     </nav>
 
@@ -1163,9 +1157,7 @@ a.viv-bs-commit:hover { text-decoration: underline; }
       <a href="#about" id="viv-rail-about" class="viv-rail-link menu-link" data-page="about" title="About Vivarium Workbench">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="12" cy="12" r="9"/>
-            <path d="M12 11 V16.5"/>
-            <circle cx="12" cy="7.6" r="0.95" fill="currentColor" stroke="none"/>
+            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">About</span>
@@ -1567,8 +1559,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <button id="ws-back" class="btn-mini" onclick="_showExplore()"
                 title="Back to all investigations" aria-label="All investigations"><span aria-hidden="true">←</span> Back</button>
         <button type="button" id="inv-overview-toggle" class="btn-mini" aria-expanded="false"
-                title="Show overview" aria-label="Toggle overview"
-                onclick="window._toggleInvOverview()"><span class="inv-ov-caret" aria-hidden="true">▸</span> Overview</button>
+                title="Show investigation" aria-label="Toggle investigation section"
+                onclick="window._toggleInvOverview()"><span class="inv-ov-caret" aria-hidden="true">▸</span> Investigation</button>
         <button type="button" id="inv-graph-toggle" class="btn-mini" aria-expanded="true"
                 title="Hide investigation graph" aria-label="Toggle investigation graph"
                 onclick="window._aigToggleInline()"><span class="inv-graph-caret" aria-hidden="true">▾</span> Graph</button>
@@ -2565,6 +2557,35 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     </div>
   </aside>
 
+  <!-- Discovery-engine Cycle panel: a live, clickable map of the discovery cycle
+       for the LOADED investigation. Run one cycle (or advance continuously in a
+       sandbox), click a step to see what ran + its result, re-run any step. Built
+       on VivPanelDock, same shape as the Studies panel. Content + wiring live in
+       static/discovery-cycle.js (mounts into #viv-cycle-body). -->
+  <aside id="viv-cycle-panel" class="viv-cycle-panel" aria-label="Discovery cycle" hidden>
+    <div class="viv-cycle-panel-inner">
+      <div class="viv-cycle-resize-handle" id="viv-cycle-resize-handle"
+           role="separator" aria-orientation="vertical" aria-label="Resize discovery cycle panel"
+           title="Drag to resize"></div>
+      <div class="viv-cycle-head vp-head" title="Drag to dock left / right / bottom / top">
+        <span class="vp-title">Discovery cycle</span>
+        <span class="vp-spacer"></span>
+        <button class="vp-icon" type="button" data-act="dock" title="Move or pop out panel" aria-label="Move or pop out panel"
+                onclick="window.CyclePanel&&CyclePanel.dockMenu(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+        </button>
+        <button class="vp-icon" type="button" title="Close" aria-label="Close discovery cycle panel"
+                onclick="window.CyclePanel&&CyclePanel.toggle()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <button type="button" class="viv-cycle-expand" title="Expand the discovery cycle panel"
+              aria-label="Expand the discovery cycle panel"
+              onclick="window.CyclePanel&&CyclePanel.expand()">⟩</button>
+      <div class="viv-cycle-body" id="viv-cycle-body"></div>
+    </div>
+  </aside>
+
 </div> <!-- /.viv-layout -->
 
 <!-- ============================================================ -->
@@ -2930,6 +2951,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/checklist-select.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* checklist-select unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/argument-graph.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* argument graph view unavailable */"></script>
+<script src="assets/discovery-cycle.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* discovery cycle panel unavailable */"></script>
 <!-- graph-panel.js: the dockable investigation-graph panel (VivPanelDock). Loads
      AFTER panel-dock.js (the engine) and walkthrough.js (the DAG renderer it hosts). -->
 <script src="assets/graph-panel.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* graph panel unavailable */"></script>

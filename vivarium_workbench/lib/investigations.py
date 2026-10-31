@@ -1497,6 +1497,10 @@ def _dynamic_viz_class(class_key: str):
     return getattr(importlib.import_module(module), cls)
 
 
+class VizSpecError(ValueError):
+    """A visualizations[] entry that cannot be dispatched (e.g. no address)."""
+
+
 def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict,
                         *, inputs_by_class: "dict | None" = None) -> dict:
     """Build the small composite that dispatches one visualization.
@@ -1510,7 +1514,9 @@ def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict,
         paths don't hold the live classes, so the env worker supplies
         ``{class: declared_inputs}`` (``viz_class_inputs``). Presence == registered.
     """
-    address = viz_spec["address"]
+    address = viz_spec.get("address")
+    if not address or not isinstance(address, str):
+        raise VizSpecError("no dispatchable address")
     class_key = address.split(":", 1)[1] if ":" in address else address
 
     if class_key.startswith("!"):
@@ -2098,14 +2104,21 @@ def run_investigation(ws_root: Path, name: str, *,
 def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                           core_registry: "dict | None" = None,
                           inputs_by_class: "dict | None" = None,
-                          build_and_run=None) -> list[Path]:
+                          build_and_run=None,
+                          skipped: "list | None" = None,
+                          latest_run_id: "str | None" = None,
+                          output_rel: "str | None" = None) -> list[Path]:
     """Render every viz in ``spec.visualizations`` against the investigation's runs.db.
 
     For each viz:
       1. Build the viz composite via ``build_viz_composite``.
       2. Run it for 1 step via ``build_and_run(doc, core_registry) -> str``.
       3. Write the resulting HTML to ``<inv_dir>/viz/<viz_name>.html``.
-      4. On any error, write an error stub HTML (other vizzes still render).
+      4. An entry that cannot be dispatched (no address / ``VizSpecError``) is
+         SKIPPED and reported via ``skipped`` -- nothing is written, so a real
+         figure already on disk is never clobbered.
+      5. A render exception writes an error stub ONLY when no figure exists yet.
+      6. A successful render is provenance-stamped (``<name>.html.meta.json``).
 
     Args:
         spec: investigation spec dict
@@ -2115,6 +2128,8 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
         build_and_run: callable(doc, core_registry) -> str that runs the composite
             and returns an HTML string.  Must be provided when there are
             visualizations to render; raises ValueError otherwise.
+        latest_run_id: the owning study's latest run id, stamped as the figure's
+            ``source_run_id``. When omitted, falls back to the last runs.db row.
     """
     inv_dir = Path(inv_dir)
     viz_dir = inv_dir / "viz"
@@ -2132,28 +2147,75 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
 
     gathered = gather_emitter_outputs(inv_dir / "runs.db")
     paths = []
+    latest_run = None
+    for _runs in (gathered.get("by_sim") or {}).values():
+        for _r in _runs:
+            latest_run = _r.get("run_id") or latest_run
+    if latest_run_id:
+        latest_run = latest_run_id
     for viz_spec in visualizations:
-        target = viz_dir / f"{viz_spec['name']}.html"
+        vname = viz_spec.get("name")
+        if not vname:
+            if skipped is not None:
+                skipped.append({"name": None, "reason": "no name"})
+            continue
+        target = (inv_dir / output_rel) if output_rel else viz_dir / f"{vname}.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        stamp = False
         # A static-figure viz (address scheme image:/png:/svg:/gif:/… , or
         # chart == "image") is a file on disk, NOT a viz-class dispatch — embed it
         # as an <img> instead of routing it through build_viz_composite (which
         # would treat the file path as an unregistered visualization class).
         if _is_static_image_viz(viz_spec):
             html = _render_image_viz_html(viz_spec, inv_dir)
+            if html.startswith("<p") and target.exists():
+                if skipped is not None:
+                    skipped.append({"name": vname, "reason": "image not found"})
+                continue
         else:
             try:
                 doc = build_viz_composite(viz_spec, gathered, core_registry or {},
                                           inputs_by_class=inputs_by_class)
-                html = build_and_run(doc, core_registry)
+            except VizSpecError as e:
+                if skipped is not None:
+                    skipped.append({"name": vname, "reason": str(e)})
+                continue
             except Exception as e:
-                html = (
-                    f'<p style="color:#991b1b">Failed to render '
-                    f'<code>{viz_spec.get("name", "?")}</code>: '
-                    f'<code>{type(e).__name__}: {e}</code></p>'
-                )
+                doc, html = None, _viz_error_stub(vname, e)
+            if doc is not None:
+                try:
+                    html = build_and_run(doc, core_registry)
+                    if not (html or "").strip():
+                        # empty output == a failed render (e.g. env worker down); never
+                        # write it over a real figure or stamp it fresh.
+                        if skipped is not None:
+                            skipped.append({"name": vname, "reason": "render produced empty output"})
+                        continue
+                    stamp = True
+                except Exception as e:
+                    html = _viz_error_stub(vname, e)
+            if not stamp and target.exists():
+                if skipped is not None:
+                    skipped.append({"name": vname, "reason": "render failed; kept existing figure"})
+                continue
         target.write_text(html, encoding="utf-8")
+        if stamp:
+            try:
+                import time as _time
+                from discovery_engine.viz_freshness import stamp_meta
+                stamp_meta(target, source_run_id=latest_run, generation_id=None,
+                           rendered_at=_time.time(),
+                           command=f"render_visualizations:{vname}")
+            except Exception:
+                pass
         paths.append(target)
     return paths
+
+
+def _viz_error_stub(name, e) -> str:
+    return (f'<p style="color:#991b1b">Failed to render '
+            f'<code>{name or "?"}</code>: '
+            f'<code>{type(e).__name__}: {e}</code></p>')
 
 
 # Static-figure address schemes (mirrors study_charts._FIGURE_ADDR_SCHEMES): a

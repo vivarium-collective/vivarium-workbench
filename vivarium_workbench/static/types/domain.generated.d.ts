@@ -103,6 +103,9 @@ export interface InvestigationSummary {
   title: string | null;
   status: string | null;
   verdict_status: string | null;
+  verdict_status_source: string | null;
+  closed: boolean | null;
+  closure_source: string | null;
   effective_status: string | null;
   description: string | null;
   question: string | null;

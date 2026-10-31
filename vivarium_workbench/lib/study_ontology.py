@@ -44,11 +44,70 @@ def canon_relation(rel):
     return REL_ALIASES.get(str(rel).strip().lower(), "builds-on")
 
 
-def derive_execution_status(spec: dict, node_status: str = "") -> str:
-    """Execution axis (what happened), independent of the scientific verdict."""
+# Authored axis values that carry no information ("nothing happened yet"). A
+# human-set axis outside this set always wins over run evidence; one inside it
+# defers to what runs.db actually shows.
+WEAK_AXIS_VALUES = frozenset({
+    "", "none", "null", "not_run", "not_evaluated", "pending", "planned", "planning",
+})
+_RUN_COMPLETE = frozenset({"complete", "completed", "ran", "done"})
+
+
+def run_derived_axes(spec: dict, runs) -> dict:
+    """``{"simulation_status", "evaluation_status"}`` derived from run rows.
+
+    Delegates to ``study_status.derive_status`` (the single run->status rule)
+    when importable; otherwise applies the same rule inline so a missing
+    optional package never silently reverts cards to "Planned".
+    """
+    runs = [r for r in (runs or []) if isinstance(r, dict)]
+    if not runs:
+        return {"simulation_status": "not_run", "evaluation_status": "not_evaluated"}
+    for mod in ("discovery_engine.study_status", "viva_superpowers.study_status"):
+        try:
+            import importlib
+            d = importlib.import_module(mod).derive_status(spec, runs)
+            return {k: str((d.get(k) or {}).get("value") or "") for k in
+                    ("simulation_status", "evaluation_status")}
+        except Exception:  # noqa: BLE001
+            continue
+    sts = {str(r.get("status") or "").strip().lower() for r in runs}
+    sim = "ran" if sts & _RUN_COMPLETE else ("running" if "running" in sts else "not_run")
+    has_v = any(isinstance(spec.get(k), (list, dict)) and spec.get(k)
+                for k in ("conclusion_verdicts", "findings"))
+    return {"simulation_status": sim,
+            "evaluation_status": "evaluated" if sim == "ran" and has_v else "not_evaluated"}
+
+
+def with_run_derived_axes(spec: dict, runs) -> dict:
+    """Shallow copy of ``spec`` whose simulation/evaluation axes are filled from
+    runs when the authored value is absent or weak. Authored values win."""
+    derived = run_derived_axes(spec, runs)
+    out = dict(spec)
+    for axis, val in derived.items():
+        if str(spec.get(axis) or "").strip().lower() in WEAK_AXIS_VALUES and \
+                val not in ("not_run", "not_evaluated", ""):
+            out[axis] = val
+    return out
+
+
+def derive_execution_status(spec: dict, node_status: str = "", runs=None) -> str:
+    """Execution axis (what happened), independent of the scientific verdict.
+
+    ``runs`` (optional run rows from runs.db / study.yaml) makes the result
+    run-aware: a weak/absent authored simulation/evaluation axis defers to the
+    run-derived one, so a study with a completed run reads ``completed`` without
+    an authored axis. Authored values the human set still win.
+    """
     ex = str(spec.get("execution_status") or "").strip().lower()
     if ex in EXEC_VALUES:
         return ex
+    run_ran = False
+    if runs:
+        merged = with_run_derived_axes(spec, runs)
+        run_ran = (merged.get("simulation_status") != spec.get("simulation_status")
+                   and merged.get("simulation_status") == "ran")
+        spec = merged
     sim = str(spec.get("simulation_status") or "").strip().lower()
     evalst = str(spec.get("evaluation_status") or "").strip().lower()
     gate = str(spec.get("gate_status") or "").strip().lower()
@@ -61,6 +120,8 @@ def derive_execution_status(spec: dict, node_status: str = "") -> str:
         return "completed"
     if str(node_status).strip().lower() == "evaluated":
         return "completed"
+    if run_ran:
+        return "completed"  # a completed run is evidence the study executed
     if life in ("ran", "complete", "completed", "decided", "evaluated"):
         return "completed"  # a legacy `status: evaluated` study has executed
     if sim == "running" or life in ("running", "analyzing", "in_progress"):
@@ -79,13 +140,46 @@ def derive_execution_status(spec: dict, node_status: str = "") -> str:
     return "planned"
 
 
-def derive_verdict(spec: dict):
-    """Scientific verdict axis (what the evidence supports). Authored wins (with
-    legacy values folded); else parse the free-text report.verdict /
-    study_card.status. Returns None when nothing supports a verdict yet."""
+def _engine_derived_verdict(spec: dict):
+    """The engine's canonical verdict derived from the spec's graded behavior-test
+    outcomes (``discovery_engine.knowledge_store.canonical_verdict`` ->
+    ``study_verdict.roll_up_verdict``), or None when nothing is graded yet
+    (``unassessed``) or the engine is absent. Reads only the in-memory spec."""
+    try:
+        from discovery_engine.knowledge_store import canonical_verdict  # noqa: PLC0415
+        rec = canonical_verdict({k: v for k, v in spec.items()
+                                 if k not in ("verdict", "conclusion_verdict")})
+    except Exception:  # noqa: BLE001 -- engine optional: fall back to authored/pending
+        return None
+    v = str((rec or {}).get("verdict") or "").strip().lower()
+    return v if v in ("supported", "qualified", "refuted", "inconclusive") else None
+
+
+def resolve_verdict(spec: dict):
+    """``(verdict, source)``. Authored ``verdict`` wins (source ``"authored"``);
+    else the engine-derived verdict from graded tests (source ``"derived"``);
+    else a text-parse of the authored report prose (source ``"authored"``).
+    ``(None, None)`` when nothing supports a verdict yet (genuinely pending)."""
     v = str(spec.get("verdict") or "").strip().lower()
     if v in VERDICT_ALIASES:
-        return VERDICT_ALIASES[v]
+        return VERDICT_ALIASES[v], "authored"
+    derived = _engine_derived_verdict(spec)
+    if derived:
+        return derived, "derived"
+    parsed = _parse_verdict_text(spec)
+    return (parsed, "authored") if parsed else (None, None)
+
+
+def derive_verdict(spec: dict):
+    """Scientific verdict axis (what the evidence supports). Authored wins (with
+    legacy values folded); else the engine-derived verdict from graded tests;
+    else parse the free-text report.verdict / study_card.status. Returns None
+    when nothing supports a verdict yet. Use :func:`resolve_verdict` for the
+    source (authored vs derived)."""
+    return resolve_verdict(spec)[0]
+
+
+def _parse_verdict_text(spec: dict):
     rep = spec.get("report") if isinstance(spec.get("report"), dict) else {}
     card = spec.get("study_card") if isinstance(spec.get("study_card"), dict) else {}
     text = str(rep.get("verdict") or card.get("status") or "").strip().lower()

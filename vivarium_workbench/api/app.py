@@ -1095,6 +1095,209 @@ def create_app() -> FastAPI:
         return _build_discovery(ws, slug) or {}
 
     @app.get(
+        "/api/discovery-delta/{slug}",
+        tags=["Investigations"],
+        summary="What changed this discovery cycle (engine discovery_delta)",
+    )
+    def discovery_delta_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        from vivarium_workbench.lib.discovery_surface import build_discovery_delta
+        return build_discovery_delta(ws, slug)
+
+    @app.get(
+        "/api/evidence-integrity/{slug}",
+        tags=["Investigations"],
+        summary="Per-finding evidence-integrity ledger, summary and by-study roll-up",
+    )
+    def evidence_integrity_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        from vivarium_workbench.lib.discovery_surface import build_evidence_integrity
+        return build_evidence_integrity(ws, slug)
+
+    @app.get(
+        "/api/discovery-cycle-steps",
+        tags=["Investigations"],
+        summary="Discovery-engine cycle step graph (static metadata)",
+    )
+    def discovery_cycle_steps() -> dict:
+        """The canonical ordered step graph of the discovery cycle (nodes + data
+        dependencies + pure/mutating kind) — lets the Discovery Engine panel draw
+        the diagram before any run. Backed by ``lib.cycle_trace.STEPS``."""
+        from vivarium_workbench.lib.cycle_trace import STEPS, engine_available
+        return {"available": engine_available(), "steps": STEPS}
+
+    @app.get(
+        "/api/discovery-cycle-investigations",
+        tags=["Investigations"],
+        summary="Investigations the discovery cycle can run on (have investigation.yaml)",
+    )
+    def discovery_cycle_investigations(ws: Path = Depends(get_workspace)) -> dict:
+        """The cycle-runnable investigations for the picker — only those with an
+        ``investigation.yaml`` on disk, so the panel never offers a study-granularity
+        row that would fail to load. Backed by ``lib.cycle_trace.list_cycle_investigations``."""
+        from vivarium_workbench.lib.cycle_trace import list_cycle_investigations
+        return {"investigations": list_cycle_investigations(ws)}
+
+    @app.get(
+        "/api/discovery-cycle/{slug}",
+        tags=["Investigations"],
+        summary="Run the full analytical discovery cycle and trace every step",
+    )
+    def discovery_cycle(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """Run one full pass of the pure analytical cycle for an investigation and
+        return a per-step trace: each step's status, timing, one-line summary, and
+        full result. Read-only — no step here writes to disk. Backed by
+        ``lib.cycle_trace.build_cycle_trace``."""
+        from vivarium_workbench.lib.cycle_trace import build_cycle_trace
+        return build_cycle_trace(ws, slug)
+
+    @app.get(
+        "/api/discovery-cycle/{slug}/step/{step_id}",
+        tags=["Investigations"],
+        summary="Re-run one step of the discovery cycle (fresh result)",
+    )
+    def discovery_cycle_step(slug: str, step_id: str,
+                             ws: Path = Depends(get_workspace)) -> dict:
+        """Re-run a single cycle step. Its dependency chain is recomputed so the
+        result is fresh and consistent. Rejects the mutating ``advance`` step
+        (use the sandboxed advance). Backed by ``lib.cycle_trace.rerun_step``."""
+        from vivarium_workbench.lib.cycle_trace import rerun_step
+        return rerun_step(ws, slug, step_id)
+
+    @app.get(
+        "/api/discovery-cycle/{slug}/advance",
+        tags=["Investigations"],
+        summary="Drive the cycle toward closure in a sandboxed copy (never mutates real files)",
+    )
+    def discovery_cycle_advance(slug: str, max_runs: int = 4,
+                                ws: Path = Depends(get_workspace)) -> dict:
+        """Advance the cycle (Phase E execute) against a throwaway COPY of the
+        investigation, so the real workspace is never mutated, then report the
+        frontier before/after. Backed by ``lib.cycle_trace.sandbox_advance``."""
+        from vivarium_workbench.lib.cycle_trace import sandbox_advance
+        return sandbox_advance(ws, slug, max_runs=max(1, min(int(max_runs), 12)))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/apply",
+        tags=["Investigations"],
+        summary="Write the cycle's findings back to the real investigation + studies",
+    )
+    def discovery_cycle_apply(slug: str, payload: dict = Body(default={}),
+                              ws: Path = Depends(get_workspace)) -> dict:
+        """Apply the discovery cycle's findings to the REAL artifacts: write each
+        study's engine-evaluated verdict onto study.yaml, enrich the builds-on edges,
+        persist the cycle_state onto investigation.yaml, and commit the changed files
+        to the workspace git (auditable + revertible). Human-only decisions are left
+        for the human. ``payload`` may set ``scope`` (all | verdicts | state). This
+        MUTATES research files — reached only via the panel's explicit Apply button.
+        Backed by ``lib.cycle_trace.apply_cycle``."""
+        from vivarium_workbench.lib.cycle_trace import apply_cycle
+        scope = str((payload or {}).get("scope") or "all")
+        return apply_cycle(ws, slug, scope=scope)
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/resolve",
+        tags=["Investigations"],
+        summary="Resolve (discharge) one open frontier item of the discovery cycle",
+    )
+    def discovery_cycle_resolve(slug: str, payload: dict = Body(default={}),
+                                ws: Path = Depends(get_workspace)) -> dict:
+        """Record a human decision/resolution for one gate item so it stops being
+        raised on the frontier (the panel's 'decide from the menu'). ``payload`` =
+        ``{kind, target, rationale}`` — a rationale is required. MUTATES
+        investigation.yaml and commits it (revertible). Backed by
+        ``lib.cycle_trace.resolve_frontier_item``."""
+        from vivarium_workbench.lib.cycle_trace import resolve_frontier_item
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        return resolve_frontier_item(ws, name, str(p.get("kind") or ""),
+                                     str(p.get("target") or ""),
+                                     str(p.get("rationale") or ""))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/build-viz",
+        tags=["Investigations"],
+        summary="Render one declared figure (fig:<study>/<name>) of the discovery cycle",
+    )
+    def discovery_cycle_build_viz(slug: str, payload: dict = Body(default={}),
+                                  ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Build button: renders ONE figure in-process via the engine's
+        render branch (``render_hook=viz_build.render_one``). ``payload`` = ``{target}``.
+        Backed by ``lib.cycle_trace.build_viz``."""
+        from vivarium_workbench.lib.cycle_trace import build_viz
+        name = _path_safety.plain_name(slug, "investigation")
+        return build_viz(ws, name, str((payload or {}).get("target") or ""))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/declare-viz",
+        tags=["Investigations"],
+        summary="Apply a viz_broken fix: declare address/render on a broken figure entry",
+    )
+    def discovery_cycle_declare_viz(slug: str, payload: dict = Body(default={}),
+                                    ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Apply-fix button (``discover viz --declare``). ``payload`` =
+        ``{target, declare:{address|render|requires}, rationale}``; a rationale is
+        required. MUTATES study.yaml + investigation.yaml and commits (revertible).
+        Backed by ``lib.cycle_trace.declare_viz_fix``."""
+        from vivarium_workbench.lib.cycle_trace import declare_viz_fix
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        return declare_viz_fix(ws, name, str(p.get("target") or ""),
+                               p.get("declare") if isinstance(p.get("declare"), dict) else {},
+                               str(p.get("rationale") or ""))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/accept-viz-proposal",
+        tags=["Investigations"],
+        summary="Accept a proposed visualization (declares it; rationale required)",
+    )
+    def discovery_cycle_accept_viz(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Accept button. ``payload`` = ``{proposal, rationale, address?}``;
+        a rationale is required (4xx otherwise), and an address for a needs_author
+        proposal. MUTATES study.yaml + investigation.yaml and commits (revertible).
+        Backed by ``lib.cycle_trace.accept_viz_proposal``."""
+        from vivarium_workbench.lib.cycle_trace import accept_viz_proposal
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = accept_viz_proposal(ws, name, str(p.get("proposal") or ""),
+                                  str(p.get("rationale") or ""), p.get("address"))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/reject-viz-proposal",
+        tags=["Investigations"],
+        summary="Reject a proposed visualization (terminal; rationale required)",
+    )
+    def discovery_cycle_reject_viz(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Reject button. ``payload`` = ``{proposal, rationale}``; a rationale
+        is required (4xx otherwise). Backed by ``lib.cycle_trace.reject_viz_proposal``."""
+        from vivarium_workbench.lib.cycle_trace import reject_viz_proposal
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = reject_viz_proposal(ws, name, str(p.get("proposal") or ""),
+                                  str(p.get("rationale") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/steer",
+        tags=["Investigations"],
+        summary="Let the AI steer (decide) one open decision of the discovery cycle",
+    )
+    def discovery_cycle_steer(slug: str, payload: dict = Body(default={}),
+                              ws: Path = Depends(get_workspace)) -> dict:
+        """Drive ONE open decision via the engine's AI decider path (records an
+        ai-driven resolution, ``by='discovery-ai'``). Degrades with a clear message
+        when no decider is configured. ``payload`` = ``{target}``. Backed by
+        ``lib.cycle_trace.ai_steer_decision``."""
+        from vivarium_workbench.lib.cycle_trace import ai_steer_decision
+        name = _path_safety.plain_name(slug, "investigation")
+        return ai_steer_decision(ws, name, str((payload or {}).get("target") or ""))
+
+    @app.get(
         "/api/investigation-report/{slug}",
         tags=["Investigations"],
         summary="Self-contained investigation report (deterministic, data-only)",

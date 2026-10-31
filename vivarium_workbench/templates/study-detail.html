@@ -612,7 +612,7 @@
 
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Claim</h2>
-      <p class="ctr-text">{{ study.claim or study.question or '' }}</p>
+      <p class="ctr-text"{% if study.claim %} data-edit-kind="study" data-edit-field="claim" data-edit-value="{{ study.claim }}" data-edit-multiline data-edit-label="Claim"{% endif %}>{{ study.claim or study.question or '' }}</p>
       {% if study.biological_summary %}
       <div class="ctr-context">{{ study.biological_summary }}</div>
       {% endif %}
@@ -670,7 +670,8 @@
 
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Result</h2>
-      <p class="ctr-text">{{ study.result or _report.main_insight or (_f0.statement if _f0 else '') or '' }}</p>
+      {% set _result_text = study.result or _report.main_insight or (_f0.statement if _f0 else '') or '' %}
+      <p class="ctr-text"{% if _result_text %} data-edit-kind="study" data-edit-field="result" data-edit-value="{{ _result_text }}" data-edit-multiline data-edit-label="Result"{% endif %}>{{ _result_text }}</p>
       {% set _metrics = _report.key_metrics or derived_metrics %}
       {% if _metrics %}
       <div class="ov-metrics">

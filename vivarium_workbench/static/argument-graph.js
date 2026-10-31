@@ -216,6 +216,9 @@
     }).catch(function () { _busy = false; });
   }
 
+  // Discovery state changed (window._vivRefreshDiscoveryViews): drop the
+  // slug-equality guard so the next tick re-fetches and re-renders.
+  document.addEventListener("viv:discovery-changed", function () { _slug = ""; _tick(); });
   setInterval(_tick, 700);
   if (document.readyState !== "loading") _tick();
   else document.addEventListener("DOMContentLoaded", _tick);
@@ -328,6 +331,11 @@
       .then(function (data) { _busy = false; _style(); _render(host, data || {}); host.setAttribute("data-disc", slug); })
       .catch(function () { _busy = false; });
   }
+  document.addEventListener("viv:discovery-changed", function () {
+    var h = document.getElementById("inv-discovery-mount");
+    if (h) h.removeAttribute("data-disc");
+    _tick();
+  });
   setInterval(_tick, 700);
   if (document.readyState !== "loading") _tick();
   else document.addEventListener("DOMContentLoaded", _tick);

@@ -408,6 +408,17 @@ def cmd_runs(args) -> int:
     return 0
 
 
+def cmd_render_viz(args) -> int:
+    from vivarium_workbench.lib.viz_build import render_one
+    res = render_one(Path(args.workspace).resolve(), args.slug, args.viz)
+    if args.json:
+        print(json.dumps(res, indent=2, default=str))
+    else:
+        print(("rendered " if res["ok"] else "FAILED: ") + str(res.get("chart") or "")
+              + ("" if res["ok"] else " - " + str(res.get("detail"))))
+    return 0 if res["ok"] else 1
+
+
 def cmd_status(args) -> int:
     from vivarium_workbench.lib import cli_runs
     _db, row = cli_runs.find_run(Path(args.workspace).resolve(), args.run_id)
@@ -1668,6 +1679,12 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("slug")
     _add_common(pl)
     pl.set_defaults(func=cmd_runs)
+
+    prv = sub.add_parser("render-viz", help="Render one declared figure of a study (stamps provenance)")
+    prv.add_argument("slug")
+    prv.add_argument("--viz", required=True, help="visualization name")
+    _add_common(prv)
+    prv.set_defaults(func=cmd_render_viz)
 
     pst = sub.add_parser("status", help="Show one run's state + progress")
     pst.add_argument("run_id")

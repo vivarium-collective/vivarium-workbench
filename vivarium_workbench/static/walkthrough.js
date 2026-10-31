@@ -115,7 +115,10 @@
   }
   function _verdictMeta(s) {
     var v = _studyVerdict(s);
-    return v ? _VERDICT_META[v] : null;  // null → render the pending pill
+    if (!v) return null;  // null → render the pending pill
+    // Engine-derived (not authored/Applied): same look, flagged with a "*".
+    return s && s.verdict_source === 'derived'
+      ? Object.assign({}, _VERDICT_META[v], {derived: true}) : _VERDICT_META[v];
   }
   // A rounded two-axis pill: glyph + (optionally) label, tinted by the axis color.
   function _aigPill(meta, title, cls, compact) {
@@ -124,7 +127,7 @@
       'white-space:nowrap;border-radius:9999px;padding:1px 7px;color:' + meta.color + ';' +
       'background:' + meta.color + '14;border:1px solid ' + meta.color + '40">' +
       '<span style="font-size:1.1em;line-height:1">' + meta.icon + '</span>' +
-      (compact ? '' : _esc(meta.label)) + '</span>';
+      (compact ? '' : _esc(meta.label)) + (meta.derived ? '<sup title="derived">*</sup>' : '') + '</span>';
   }
 
   // Legacy single-axis status model — still used by the rail dot, the sidebar,
@@ -3138,6 +3141,51 @@
     };
     if (document.readyState !== 'loading') sync();
     else document.addEventListener('DOMContentLoaded', sync);
+  })();
+
+  // ── Settings popover (the rail gear) ────────────────────────────────────
+  // The gear opens a small popover of app settings; the light/dark theme switch
+  // lives inside it (same #viv-theme-toggle id, so _setTheme/_toggleTheme drive
+  // it unchanged). The popover is position:fixed and anchored to the gear on open
+  // so it escapes the rail's overflow clip in the expanded state. Close with the
+  // gear, Escape, or a click outside.
+  function _vivCloseSettings() {
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (pop) pop.setAttribute('hidden', '');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  window._vivCloseSettings = _vivCloseSettings;
+  function _vivAnchorSettings() {
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (!pop || pop.hasAttribute('hidden') || !btn) return;
+    var r = btn.getBoundingClientRect();
+    pop.style.left = (r.right + 8) + 'px';
+    pop.style.bottom = (window.innerHeight - r.bottom) + 'px';
+    pop.style.top = 'auto';
+    pop.style.right = 'auto';
+  }
+  window._vivAnchorSettings = _vivAnchorSettings;
+  function _vivToggleSettings(ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (!pop) return;
+    if (!pop.hasAttribute('hidden')) { _vivCloseSettings(); return; }
+    pop.removeAttribute('hidden');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    _vivAnchorSettings();
+  }
+  window._vivToggleSettings = _vivToggleSettings;
+  (function () {
+    document.addEventListener('click', function (e) {
+      var pop = document.getElementById('viv-settings-popover');
+      if (!pop || pop.hasAttribute('hidden')) return;
+      if (e.target.closest && (e.target.closest('#viv-settings-popover') || e.target.closest('#viv-settings-toggle'))) return;
+      _vivCloseSettings();
+    }, true);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') _vivCloseSettings(); });
   })();
 
   function _syncRegistryToolbar() {
@@ -7987,13 +8035,29 @@
     var label = collapsed ? 'Open sidebar' : 'Collapse sidebar';
     btn.setAttribute('title', label);
     btn.setAttribute('aria-label', label);
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    var txt = document.getElementById('viv-rail-toggle-text');
+    if (txt) txt.textContent = collapsed ? 'Expand' : 'Collapse';
   }
 
   function _vivToggleRail() {
-    // The rail is permanently collapsed (icon bar); toggling is a no-op so no
-    // stray caller can expand it back out.
+    // Flip the rail between the collapsed icon bar and the expanded, labelled
+    // sidebar, persisting the choice. The expanded width + edge-drag resize are
+    // driven by _vivRailResizeStart / the saved vivarium.rail-width.
     var rail = document.getElementById('viv-rail');
-    if (rail) rail.classList.add('viv-rail-collapsed');
+    if (!rail) return;
+    var collapsed = !rail.classList.contains('viv-rail-collapsed');  // target state
+    if (collapsed) {
+      rail.classList.add('viv-rail-collapsed');
+    } else {
+      rail.classList.remove('viv-rail-collapsed');
+      _vivRailApplyWidth(rail, _vivRailSavedWidth());
+    }
+    try { localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0'); } catch (e) { /* private mode */ }
+    _vivSyncRailToggleLabel(collapsed);
+    // The sidebar toggle lives in the settings popover; the rail resize shifts the
+    // gear it is anchored to, so re-anchor it once the width transition settles.
+    if (typeof window._vivAnchorSettings === 'function') setTimeout(window._vivAnchorSettings, 200);
   }
   window._vivToggleRail = _vivToggleRail;
 
@@ -8020,12 +8084,20 @@
   window._vivToggleRailSearch = _vivToggleRailSearch;
 
   function _vivRestoreRailState() {
-    // The rail is now PERMANENTLY collapsed — a fixed icon bar. The expand/resize
-    // mechanism (drag handle + width restore) was removed, so always keep the
-    // collapsed class regardless of any stored width/choice from older builds.
+    // Restore the rail's collapsed/expanded choice (defaults to collapsed for a
+    // first visit). The expanded width comes from the saved vivarium.rail-width;
+    // the header toggle + edge-drag keep both in sync.
     var rail = document.getElementById('viv-rail');
-    if (rail) rail.classList.add('viv-rail-collapsed');
-    _vivSyncRailToggleLabel(true);
+    if (!rail) return;
+    var collapsed = true;
+    try { collapsed = localStorage.getItem('vivarium.rail-collapsed') !== '0'; } catch (e) { /* private mode */ }
+    if (collapsed) {
+      rail.classList.add('viv-rail-collapsed');
+    } else {
+      rail.classList.remove('viv-rail-collapsed');
+      _vivRailApplyWidth(rail, _vivRailSavedWidth());
+    }
+    _vivSyncRailToggleLabel(collapsed);
   }
   window._vivRestoreRailState = _vivRestoreRailState;
 
@@ -8183,6 +8255,36 @@
     });
   }
   window._vivRefreshInvestigationsRail = _vivRefreshInvestigationsRail;
+
+  // Single "discovery state changed" refresh path. Called after a discovery
+  // mutation succeeds (cycle Run/Advance/Apply, decision Resolve, AI-steer).
+  // Re-fetches the FETCH-ONCE live-engine surfaces for the open investigation:
+  // argument overlay + discovery panel (via the 'viv:discovery-changed' event,
+  // which clears their per-slug guards), the investigation detail (cards,
+  // needs-attention chip) and the rail. Debounced; event-driven, no polling;
+  // no-op in snapshot mode or when no investigation is open.
+  var _vivDiscRefreshTimer = null;
+  function _vivRefreshDiscoveryViews(slug) {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return;
+    slug = (typeof slug === 'string' && slug) || window._currentIset || window._currentIsetSlug || '';
+    if (!slug) return;
+    if (_vivDiscRefreshTimer) clearTimeout(_vivDiscRefreshTimer);
+    _vivDiscRefreshTimer = setTimeout(function () {
+      _vivDiscRefreshTimer = null;
+      try { document.dispatchEvent(new CustomEvent('viv:discovery-changed', { detail: { slug: slug } })); } catch (_) {}
+      var detailView = document.getElementById('investigation-detail-view');
+      var open = detailView && detailView.style.display !== 'none';
+      try {
+        if (open && window._currentIset === slug && typeof _openInvestigationDetail === 'function') {
+          _openInvestigationDetail(slug);   // re-fetches /api/investigation/{slug}, graph, needs-attention
+        } else if (typeof _renderInvNeedsAttention === 'function') {
+          _renderInvNeedsAttention(slug);
+        }
+      } catch (_) {}
+      try { _vivRefreshInvestigationsRail(); } catch (_) {}
+    }, 250);
+  }
+  window._vivRefreshDiscoveryViews = _vivRefreshDiscoveryViews;
 
   function _vivRenderInvestigationsRail(investigations) {
     var host = document.getElementById('viv-rail-investigations');
@@ -9669,7 +9771,9 @@
     });
 
     function _isetCardHtml(iset, full) {
-      var closed = (iset.status === 'archived' || iset.status === 'closed');
+      // Closed = authored closed/archived, OR the engine's closure (run-aware,
+      // server-derived: iset.closed with closure_source 'derived').
+      var closed = (iset.status === 'archived' || iset.status === 'closed' || iset.closed === true);
       var descFull = (iset.description || '').split('\n')[0];
       var desc = full ? descFull : descFull.slice(0, 240);
       // Prefer server effective_status; fall back to author status. Intent
@@ -9699,7 +9803,9 @@
         ? '<span class="iset-here-chip" title="You are working on this investigation — it is the current git branch." style="' + pillBase + 'background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-weight:600">⎇ current branch</span>'
         : '';
       var statusPill = closed
-        ? '<span class="status-pill" style="' + pillBase + 'background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db">Closed</span>'
+        ? '<span class="status-pill" style="' + pillBase + 'background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db"' +
+          (iset.closure_source === 'derived' ? ' title="Closed by the discovery engine: acceptance criteria met by graded tests (derived, not authored)"' : '') + '>Closed' +
+          (iset.closure_source === 'derived' ? '*' : '') + '</span>'
         : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '" title="' + _esc(statusTip) + '">' + _esc(meta.label) + '</span>';
       var cardStyle = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;' +
         (closed ? 'opacity:0.6;' : '');
@@ -10051,6 +10157,65 @@
   window._aigApplySelection = _aigApplySelection;
 
   // ── Selected-card FULL DETAIL (inline) ─────────────────────────────────────
+  // ---- Evidence-integrity trust badges (GET /api/evidence-integrity/{slug}) ----
+  // VERIFIED / PROVISIONAL / CONTRADICTED / UNSUPPORTED per finding, plus an
+  // investigation-level summary chip. Cached per investigation; placeholders are
+  // painted after the fetch resolves. No-op in snapshot mode (no live engine).
+  var _EV_STYLE = {
+    verified:     {bg: '#d1fae5', fg: '#065f46', bd: '#10b981'},
+    provisional:  {bg: '#fef3c7', fg: '#92400e', bd: '#f59e0b'},
+    contradicted: {bg: '#fee2e2', fg: '#991b1b', bd: '#ef4444'},
+    unsupported:  {bg: '#f1f5f9', fg: '#475569', bd: '#94a3b8'}
+  };
+  window._vivEvidence = window._vivEvidence || {slug: '', byKey: {}, summary: null};
+  function _evBadgeInner(rec) {
+    var st = _EV_STYLE[rec.status] || _EV_STYLE.unsupported;
+    return '<span class="viv-ev-badge" data-status="' + _esc(rec.status) + '" title="' + _esc(rec.reason || '') + '" ' +
+      'style="display:inline-block;font-size:0.62em;font-weight:700;letter-spacing:.03em;text-transform:uppercase;' +
+      'padding:1px 6px;margin-right:6px;border-radius:9999px;border:1px solid ' + st.bd + ';background:' + st.bg + ';color:' + st.fg + '">' +
+      _esc(rec.status) + '</span>';
+  }
+  function _evBadgeHtml(study, findingId) {
+    var rec = (window._vivEvidence.byKey || {})[study + '|' + findingId];
+    return '<span class="viv-ev-slot" data-ev-study="' + _esc(study) + '" data-ev-finding="' + _esc(findingId) + '">' +
+      (rec ? _evBadgeInner(rec) : '') + '</span>';
+  }
+  function _vivPaintEvidence() {
+    var ev = window._vivEvidence;
+    Array.prototype.forEach.call(document.querySelectorAll('.viv-ev-slot'), function (el) {
+      var rec = ev.byKey[el.getAttribute('data-ev-study') + '|' + el.getAttribute('data-ev-finding')];
+      el.innerHTML = rec ? _evBadgeInner(rec) : '';
+    });
+    var host = document.getElementById('investigation-detail-status');
+    if (!host || !host.parentNode) return;
+    var chip = document.getElementById('viv-ev-summary');
+    var sm = ev.summary;
+    if (!sm || !(sm.verified + sm.provisional + sm.contradicted + sm.unsupported)) { if (chip) chip.remove(); return; }
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.id = 'viv-ev-summary';
+      chip.style.cssText = 'display:inline-block;margin-left:8px;font-size:0.75em;padding:2px 9px;border-radius:9999px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155';
+      host.parentNode.insertBefore(chip, host.nextSibling);
+    }
+    chip.title = 'Evidence integrity: findings checked against registered runs';
+    chip.textContent = sm.verified + ' verified · ' + sm.provisional + ' provisional · ' + sm.contradicted + ' contradicted' +
+      (sm.unsupported ? ' · ' + sm.unsupported + ' unsupported' : '');
+  }
+  function _vivLoadEvidence(slug) {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot' || !slug) return;
+    fetch('/api/evidence-integrity/' + encodeURIComponent(slug), {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.available || window._currentIset !== slug) return;
+        var byKey = {};
+        (j.ledger || []).forEach(function (r) { byKey[r.study + '|' + r.finding] = r; });
+        window._vivEvidence = {slug: slug, byKey: byKey, summary: j.summary || null};
+        _vivPaintEvidence();
+      }).catch(function () { /* optional surface */ });
+  }
+  window._vivLoadEvidence = _vivLoadEvidence;
+  window._vivPaintEvidence = _vivPaintEvidence;
+
   // The full Asks / Finds / plan body, from the study DATA (not the band-limited
   // inline preview) so it reads the same at any zoom. Rendered hidden inside each
   // node and revealed in place by _aigSetNodeExpanded when the user expands the
@@ -10064,6 +10229,7 @@
     if (finds && finds.length) {
       H += finds.map(function (f) {
         return '<div style="margin-top:6px;padding-left:10px;border-left:2px solid #e2e8f0">' +
+          _evBadgeHtml(s.name, f.id) +
           _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
       }).join('');
     } else {
@@ -11131,6 +11297,8 @@
     var whatIs  = (ex.what_is_this || '').trim();
     var verdict = (ex.verdict || '').trim();
     var vs      = (ex.verdict_status || 'in-progress').trim();
+    // Run-aware: a derived verdict_status (member roll-up) is marked with '*'.
+    var vsDerived = ex.verdict_status_source === 'derived';
     var oneline = function(t) { return (t || '').replace(/\s+/g, ' ').trim(); };
     var q   = oneline(d.question);
     var hyp = oneline(d.hypothesis);
@@ -11148,8 +11316,9 @@
     }
 
     var key = String(vs).toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    var vsClass = ({ 'passed':'passed','complete':'passed','in-progress':'progress',
-                     'blocked':'blocked','failed':'blocked','planning':'planning' })[key] || 'default';
+    var vsClass = ({ 'passed':'passed','complete':'passed','passing':'passed','in-progress':'progress',
+                     'blocked':'blocked','failed':'blocked','failing':'blocked','planning':'planning' })[key] || 'default';
+    var vsLabel = vs.toUpperCase() + (vsDerived ? '*' : '');
 
     // The question/framing fields run long — keep the headline to the opening
     // sentence (through the first "?" for questions, else the first period) and
@@ -11253,7 +11422,7 @@
     if (verdict)
       ovParts.push('<div class="inv-brief-overview-verdict inv-vs-' + vsClass + '" ' +
         'style="margin-top:10px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">' +
-        '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span> ' +
+        '<span class="inv-vs-pill"' + (vsDerived ? ' title="Derived from member studies\' graded tests (not authored)"' : '') + '>' + _esc(vsLabel) + '</span> ' +
         '<span class="inv-brief-overview-verdict-text" style="color:#475569">' +
         _invInline(headlineOf(verdict)) + '</span></div>');
     if (ovParts.length)
@@ -11261,9 +11430,9 @@
 
     // 2. Verdict — the full campaign answer (executive.verdict); behind a click.
     if (verdict)
-      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vs.toUpperCase() : '',
+      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vsLabel : '',
         html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
-          '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
+          '<span class="inv-vs-pill">' + _esc(vsLabel) + '</span>' +
           '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' +
           // Claims (RFC-0005 synthesis layer): each claim, its verdict, and what
           // supports/challenges it — filled async by argument-graph.js.
@@ -11342,7 +11511,11 @@
     var _decHtml = _invDecisionTabHtml(d);
     var _hasStudies = Array.isArray(d.studies) && d.studies.length;
     if (_decHtml || _hasStudies) {
-      var _nDec = (((d.executive || {}).decisions_needed) || []).length;
+      // Engine-aware: decisions the cycle considers resolved stop counting even
+      // before Apply trims the authored list (falls back to the authored length).
+      var _exD = d.executive || {};
+      var _nDec = (typeof _exD.decisions_open_count === 'number')
+        ? _exD.decisions_open_count : ((_exD.decisions_needed) || []).length;
       // #inv-discovery-mount ← /api/investigation-discovery (argument-graph.js poller);
       // _decHtml = the authored Resolve cockpit; #inv-decisions-mount ← derived open
       // items (audit gaps, open-question claims, divergences) from the overlay.
@@ -11395,7 +11568,10 @@
 
     if (!needed.length && !resolved.length && !docs.length) return '';
 
-    var n = needed.length;
+    // Decisions the cycle already resolved (server: ex.decisions_engine_resolved)
+    // are hidden/uncounted; data-index keeps pointing at the authored list.
+    var engRes = Array.isArray(ex.decisions_engine_resolved) ? ex.decisions_engine_resolved : [];
+    var n = needed.length - engRes.filter(function (k) { return k >= 0 && k < needed.length; }).length;
     var accent = n ? '#b45309' : '#16a34a';      // amber when open, green when all clear
     var H = [];
     H.push('<div style="padding:2px 0 4px">');
@@ -11426,6 +11602,7 @@
     if (n) {
       H.push('<div style="display:grid;gap:10px">');
       needed.forEach(function (dec, i) {
+        if (engRes.indexOf(i) !== -1) return;
         dec = dec || {};
         var question = (typeof dec === 'string') ? dec : (dec.question || dec.title || '');
         var context = (typeof dec === 'string') ? '' : (dec.context || dec.detail || '');
@@ -11516,7 +11693,8 @@
         var ok = 'Decision resolved — ' + ((res.j && res.j.remaining) || 0) + ' still open';
         if (typeof _showToast === 'function') _showToast(ok);
         // Refresh the detail so the cockpit, log and count badge re-render.
-        if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(invName);
+        if (typeof _vivRefreshDiscoveryViews === 'function') _vivRefreshDiscoveryViews(invName);
+        else if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(invName);
       })
       .catch(function (err) {
         var msg = 'Could not resolve: ' + err;
@@ -11574,6 +11752,7 @@
     _isetDetailFetch
       .then(function(d) {
         window._currentIsetData = d;
+        try { _vivLoadEvidence(name); } catch (_) {}
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
         var statusEl   = document.getElementById('investigation-detail-status');
         var effStatus  = d.effective_status || d.status || 'planning';
@@ -12312,10 +12491,10 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      // Keep the "Overview" text label beside the caret (iTerm-style labeled
+      // Keep the "Investigation" text label beside the caret (iTerm-style labeled
       // control); only the caret direction reflects collapsed/expanded.
-      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Overview';
-      btn.setAttribute('title', collapsed ? 'Show overview' : 'Hide overview');
+      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Investigation';
+      btn.setAttribute('title', collapsed ? 'Show investigation' : 'Hide investigation');
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
   }
@@ -12978,7 +13157,9 @@
           '<span style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
             _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact) +
             _aigPill(verdictMeta || _VERDICT_PENDING,
-                     verdictMeta ? ('Verdict: ' + verdictMeta.label) : 'Verdict: pending — not yet concluded',
+                     verdictMeta ? ('Verdict: ' + verdictMeta.label +
+                       (s.verdict_source === 'derived' ? ' (derived from graded tests, not authored)' : ''))
+                       : 'Verdict: pending — not yet concluded',
                      'aig-verdict-pill', _pillCompact) +
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +

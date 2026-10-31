@@ -56,6 +56,16 @@ ALLOWED: dict[str, str] = {
 # added here deliberately.
 ALLOWED_DISCOVERY: dict[str, str] = {
     "argument_store": "claims + argument-graph projection",
+    # DE2.0 cycle phase modules — pure, read-only projections the Discovery Engine
+    # (Cycle) panel runs as its traced step graph (lib/cycle_trace.py). None writes.
+    "evidence_integrity": "Phase A: reconcile evidence integrity (VERIFIED/PROVISIONAL/…)",
+    "candidate_action": "Phase B: plan candidate actions + select portfolio",
+    "experiment_design": "Phase C: design a discriminating study",
+    "model_architect": "Phase D: model catalog + acquisition routing",
+    "evaluation": "Phase F: compare hypotheses, disagreement map, DiscoveryDelta",
+    "transition_model": "N+2: transition composition + phase diagram",
+    "study_seeding": "Growth loop: select-for-launch + seed a study (preview)",
+    "study_refinement": "Growth loop: refinement needs + refine a study (preview)",
     "band_provenance": "acceptance-band provenance",
     "bibtex": "citation parsing for the report linter",
     "discover": "read-only discovery cycle (run_cycle / load_cycle_inputs)",

@@ -18,7 +18,7 @@
 
   const STORE_KEY = 'viv.chat.v2';
   const DOCS = 'https://github.com/vivarium-collective/vivarium-workbench/blob/main/docs/';
-  const REFRESH_AFTER_MUTATION = ['_loadInvestigations', '_loadInvestigationSets', '_refreshGitStatus'];
+  const REFRESH_AFTER_MUTATION = ['_loadInvestigations', '_loadInvestigationSets', '_refreshGitStatus', '_vivRefreshDiscoveryViews'];
   const PLACEHOLDER_NEW = 'Ask anything, @ to include context about studies or composites';
   const PLACEHOLDER = 'Type your message...';
 
@@ -286,10 +286,10 @@
     const target = fresh ? el.newHost : el.foot;
     if (el.composer.parentNode !== target) target.appendChild(el.composer);
     el.newCopy.innerHTML = status && !ready
-      ? '<h3>Chat with AI</h3><p>' + e(status.error || (status.available ? 'No AI provider configured or Chat model not selected' :
+      ? '<p>' + e(status.error || (status.available ? 'No AI provider configured or Chat model not selected' :
           (status.reason || "The chat needs the optional extra: pip install 'vivarium-workbench[chat]'"))) + '</p>' +
         (status.available ? '<button class="vp-callout" data-act="settings">Edit AI settings</button>' : '')
-      : '<h3>Chat with AI</h3>';
+      : '';
     el.composer.hidden = !!(fresh && status && !ready);
     el.callout.hidden = !fresh;
     // composer controls
@@ -1201,4 +1201,21 @@
   // Initial placement + restore of the open/closed state are handled by
   // VivPanelDock.make() (built in build()); no separate dockTo/open needed.
   window._openAiPanel = function () { if (ctl) ctl.open(); };
+  // Seed the composer with a prompt from another panel (e.g. the Discovery cycle's
+  // "AI steer"): opens the chat and drops the text in, ready for the user to review
+  // and send. Does NOT auto-send — a human stays in the loop for the decision.
+  window._aiSeedPrompt = function (text) {
+    try {
+      if (ctl) ctl.open();
+      var apply = function () {
+        if (!el || !el.input) return false;
+        el.input.value = String(text == null ? '' : text);
+        try { autosize(el.input); } catch (e) { /* ignore */ }
+        el.input.focus();
+        try { el.input.setSelectionRange(el.input.value.length, el.input.value.length); } catch (e) { /* ignore */ }
+        return true;
+      };
+      if (!apply()) window.setTimeout(apply, 200);
+    } catch (e) { /* ignore */ }
+  };
 })();

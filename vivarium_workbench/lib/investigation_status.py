@@ -83,7 +83,40 @@ def _study_has_active_run(
     return False
 
 
-def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
+def study_run_rows(ws_root: Path, slug: str, spec: dict, wp=None) -> list[dict]:
+    """Lightweight run rows (``[{"status": ...}]``) for run-derived status.
+
+    One ``SELECT status FROM runs_meta`` against the study's runs.db plus the
+    ``runs[]`` recorded in study.yaml. Deliberately NOT ``read_runs_db_for_study``
+    (which joins tables and parses params) -- the index calls this per study.
+    Never raises.
+    """
+    rows: list[dict] = [
+        {"status": r.get("status")} for r in (spec.get("runs") or [])
+        if isinstance(r, dict)
+    ]
+    try:
+        import sqlite3
+        from vivarium_workbench.lib.investigations_index import _study_runs_db
+        db = _study_runs_db(ws_root, slug, wp)
+        if db is not None:
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                rows += [{"status": r[0]} for r in
+                         conn.execute("SELECT status FROM runs_meta")]
+            finally:
+                conn.close()
+    except Exception:  # noqa: BLE001 -- missing table / locked db => no evidence
+        pass
+    return rows
+
+
+_WEAK_DISPLAY = frozenset({
+    "", "none", "not_run", "not_evaluated", "pending", "planned", "planning",
+})
+
+
+def _study_display_status(ws_root: Path, slug: str, spec: dict, runs=None) -> str:
     """A study's headline status for investigation roll-ups.
 
     ``running`` is a LIVE claim, so it is decided ONLY by an actual active run
@@ -97,6 +130,17 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
     """
     if _study_has_active_run(ws_root, slug, spec):
         return "running"
+
+    # Run-aware: fill absent/weak simulation/evaluation axes from runs.db so a
+    # study with completed runs never reads "planning". Authored values win.
+    if runs is None:
+        runs = study_run_rows(ws_root, slug, spec)
+    run_ran = False
+    if runs:
+        from vivarium_workbench.lib.study_ontology import with_run_derived_axes
+        merged = with_run_derived_axes(spec, runs)
+        run_ran = merged.get("simulation_status") == "ran"
+        spec = merged
 
     status = None
     chosen_axis = None
@@ -118,6 +162,11 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
     # explicit invalid/error status, which are left untouched.
     if chosen_axis == "gate_status" and status.lower() in _GATE_VERDICT_REFUTED:
         status = "evaluated"
+
+    # A weak headline ("planned"/"not_evaluated"/...) is contradicted by a
+    # completed run: report the study as having run.
+    if run_ran and status.lower() in _WEAK_DISPLAY:
+        status = "ran"
 
     if status.lower() in _STUDY_STATUS_RUNNING:
         # No live run → a running-ish headline is stale. Demote to the first
@@ -226,13 +275,15 @@ StudyHasRuns = Callable[[str, dict], bool]
 
 
 def read_study_status(
-    ws_root: Path, slug: str, *, study_has_runs: StudyHasRuns
+    ws_root: Path, slug: str, *, study_has_runs: StudyHasRuns,
+    specs_out: "dict | None" = None,
 ) -> tuple[str, bool]:
     """Read (status, has_runs) for a member study referenced by an iset.
 
     Returns ``("planning", False)`` if the study can't be located or parsed.
     ``study_has_runs(slug, spec)`` supplies the runs-presence signal (injected so
-    the workspace-coupled runs.db reader stays in the caller).
+    the workspace-coupled runs.db reader stays in the caller). ``specs_out``, when
+    given, collects the parsed spec by slug so callers can reuse it (no re-read).
     """
     try:
         sp = WorkspacePaths.load(ws_root).study_dir(slug, must_exist=True) / "study.yaml"
@@ -244,6 +295,8 @@ def read_study_status(
         except Exception:
             return "planning", False
         status = _study_display_status(ws_root, slug, spec)
+        if specs_out is not None:
+            specs_out[slug] = spec
         return status, study_has_runs(slug, spec)
     return "planning", False
 
@@ -268,10 +321,15 @@ def build_iset_summary(
         # pre- and post-migration schema render (safe superset: `members` is
         # only consulted when `studies` is absent/empty).
         study_slugs = investigation_member_slugs(spec)
+        member_specs: dict = {}
         statuses_and_runs = [
-            read_study_status(ws_root, s, study_has_runs=study_has_runs)
+            read_study_status(ws_root, s, study_has_runs=study_has_runs,
+                              specs_out=member_specs)
             for s in study_slugs
         ]
+        # Run-aware closure / verdict_status (authored wins; derived is flagged).
+        from vivarium_workbench.lib.run_aware_investigation import derive_markings
+        marks = derive_markings(spec, member_specs)
         statuses = [s for s, _ in statuses_and_runs]
         has_runs = [r for _, r in statuses_and_runs]
         # Number of downloadable figures — gates the card's ↓ figures action.
@@ -296,8 +354,12 @@ def build_iset_summary(
             # executive block, falling back to the lifecycle status). Surfaced
             # here so the investigations list can badge each card without
             # fetching the full detail.
-            "verdict_status":   (spec.get("executive") or {}).get("verdict_status")
-                                or spec.get("status") or "planning",
+            "verdict_status":   marks["verdict_status"],
+            # "authored" | "derived" (roll-up of member run-aware verdicts)
+            "verdict_status_source": marks["verdict_status_source"],
+            # Open/Closed: authored status closed/archived, else the engine's closure.
+            "closed":           marks["closure"]["closed"],
+            "closure_source":   marks["closure"]["source"],
             "effective_status": compute_investigation_status(statuses, has_runs=has_runs),
             "description":      spec.get("description", ""),
             "question":         spec.get("question", ""),

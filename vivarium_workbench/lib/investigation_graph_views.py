@@ -26,7 +26,7 @@ _PRE_EVAL_STATUSES = frozenset({"build", "planned", "implementation", "design", 
 from vivarium_workbench.lib.study_ontology import (  # noqa: E402
     canon_relation as _canon_relation,
     derive_execution_status as _derive_execution_status,
-    derive_verdict as _derive_verdict,
+    resolve_verdict as _resolve_verdict,
 )
 
 
@@ -141,10 +141,17 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
         # Progress pill; the verdict (what the evidence supports) is only set when
         # authored or derivable, so an unmarked study shows "pending". Authored
         # fields win over derivation.
-        _node["execution_status"] = _derive_execution_status(study_spec, _node_status)
-        _verdict = _derive_verdict(study_spec)
+        try:
+            from vivarium_workbench.lib.investigation_status import study_run_rows  # noqa: PLC0415
+            _rows = study_run_rows(ws_root, slug, study_spec, wp)
+        except Exception:  # noqa: BLE001
+            _rows = None
+        _node["execution_status"] = _derive_execution_status(
+            study_spec, _node_status, runs=_rows)
+        _verdict, _vsrc = _resolve_verdict(study_spec)
         if _verdict:
             _node["verdict"] = _verdict
+            _node["verdict_source"] = _vsrc
         if study_spec.get("evidence_tier"):
             _node["evidence_tier"] = study_spec["evidence_tier"]
         studies_out.append(_node)
