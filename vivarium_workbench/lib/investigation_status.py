@@ -311,8 +311,10 @@ def _card_description(spec: dict) -> str:
     authored = (spec.get("description") or "").strip()
     if authored:
         return authored
-    ex = spec.get("executive") if isinstance(spec.get("executive"), dict) else {}
-    sa = spec.get("scientific_argument") if isinstance(spec.get("scientific_argument"), dict) else {}
+    ex = spec.get("executive")
+    ex = ex if isinstance(ex, dict) else {}
+    sa = spec.get("scientific_argument")
+    sa = sa if isinstance(sa, dict) else {}
     lead = spec.get("lead") or ""
     for cand in (ex.get("what_is_this"),
                  lead.split("\n\n")[0] if lead else None,
