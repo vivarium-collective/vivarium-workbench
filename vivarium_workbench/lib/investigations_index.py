@@ -509,6 +509,8 @@ def build_investigations(ws_root: Path) -> dict:
             ws_root, spec["name"], spec, runs=_rows_for(spec["name"]))
         from vivarium_workbench.lib.study_ontology import resolve_verdict
         _vpair = resolve_verdict(spec)
+        from vivarium_workbench.lib.run_aware_investigation import resolve_gate_status
+        _gpair = resolve_gate_status(spec)
         row = {
             "name": spec["name"],
             "composite": composite_summary,
@@ -545,7 +547,9 @@ def build_investigations(ws_root: Path) -> dict:
                 spec, runs=_rows_for(spec["name"])),
             "verdict": _vpair[0],
             "verdict_source": _vpair[1],  # "authored" | "derived" | None
-            "gate_status": spec.get("gate_status"),
+            # Authored gate_status wins; else the engine roll-up of graded tests.
+            "gate_status": _gpair[0],
+            "gate_status_source": _gpair[1],  # "authored" | "derived" | None
             "confidence": spec.get("confidence"),
             "simulation_status": spec.get("simulation_status"),
             "evaluation_status": spec.get("evaluation_status"),

@@ -235,6 +235,11 @@ class InvestigationSummary(BaseModel):
     # Authored verdict rollup (executive.verdict_status, else status) so the
     # sidebar can badge each card without fetching the full detail.
     verdict_status: Optional[str] = None
+    # "authored" | "derived" (roll-up of member run-aware verdicts)
+    verdict_status_source: Optional[str] = None
+    # Open/Closed: authored status closed/archived, else the engine's closure.
+    closed: Optional[bool] = None
+    closure_source: Optional[str] = None
     effective_status: Optional[str] = None
     description: Optional[str] = None
     question: Optional[str] = None

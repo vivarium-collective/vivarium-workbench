@@ -9702,7 +9702,9 @@
     });
 
     function _isetCardHtml(iset, full) {
-      var closed = (iset.status === 'archived' || iset.status === 'closed');
+      // Closed = authored closed/archived, OR the engine's closure (run-aware,
+      // server-derived: iset.closed with closure_source 'derived').
+      var closed = (iset.status === 'archived' || iset.status === 'closed' || iset.closed === true);
       var descFull = (iset.description || '').split('\n')[0];
       var desc = full ? descFull : descFull.slice(0, 240);
       // Prefer server effective_status; fall back to author status. Intent
@@ -9732,7 +9734,9 @@
         ? '<span class="iset-here-chip" title="You are working on this investigation — it is the current git branch." style="' + pillBase + 'background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-weight:600">⎇ current branch</span>'
         : '';
       var statusPill = closed
-        ? '<span class="status-pill" style="' + pillBase + 'background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db">Closed</span>'
+        ? '<span class="status-pill" style="' + pillBase + 'background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db"' +
+          (iset.closure_source === 'derived' ? ' title="Closed by the discovery engine: acceptance criteria met by graded tests (derived, not authored)"' : '') + '>Closed' +
+          (iset.closure_source === 'derived' ? '*' : '') + '</span>'
         : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '" title="' + _esc(statusTip) + '">' + _esc(meta.label) + '</span>';
       var cardStyle = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;' +
         (closed ? 'opacity:0.6;' : '');
@@ -11224,6 +11228,8 @@
     var whatIs  = (ex.what_is_this || '').trim();
     var verdict = (ex.verdict || '').trim();
     var vs      = (ex.verdict_status || 'in-progress').trim();
+    // Run-aware: a derived verdict_status (member roll-up) is marked with '*'.
+    var vsDerived = ex.verdict_status_source === 'derived';
     var oneline = function(t) { return (t || '').replace(/\s+/g, ' ').trim(); };
     var q   = oneline(d.question);
     var hyp = oneline(d.hypothesis);
@@ -11241,8 +11247,9 @@
     }
 
     var key = String(vs).toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    var vsClass = ({ 'passed':'passed','complete':'passed','in-progress':'progress',
-                     'blocked':'blocked','failed':'blocked','planning':'planning' })[key] || 'default';
+    var vsClass = ({ 'passed':'passed','complete':'passed','passing':'passed','in-progress':'progress',
+                     'blocked':'blocked','failed':'blocked','failing':'blocked','planning':'planning' })[key] || 'default';
+    var vsLabel = vs.toUpperCase() + (vsDerived ? '*' : '');
 
     // The question/framing fields run long — keep the headline to the opening
     // sentence (through the first "?" for questions, else the first period) and
@@ -11346,7 +11353,7 @@
     if (verdict)
       ovParts.push('<div class="inv-brief-overview-verdict inv-vs-' + vsClass + '" ' +
         'style="margin-top:10px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">' +
-        '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span> ' +
+        '<span class="inv-vs-pill"' + (vsDerived ? ' title="Derived from member studies\' graded tests (not authored)"' : '') + '>' + _esc(vsLabel) + '</span> ' +
         '<span class="inv-brief-overview-verdict-text" style="color:#475569">' +
         _invInline(headlineOf(verdict)) + '</span></div>');
     if (ovParts.length)
@@ -11354,9 +11361,9 @@
 
     // 2. Verdict — the full campaign answer (executive.verdict); behind a click.
     if (verdict)
-      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vs.toUpperCase() : '',
+      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vsLabel : '',
         html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
-          '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
+          '<span class="inv-vs-pill">' + _esc(vsLabel) + '</span>' +
           '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' +
           // Claims (RFC-0005 synthesis layer): each claim, its verdict, and what
           // supports/challenges it — filled async by argument-graph.js.
@@ -11435,7 +11442,11 @@
     var _decHtml = _invDecisionTabHtml(d);
     var _hasStudies = Array.isArray(d.studies) && d.studies.length;
     if (_decHtml || _hasStudies) {
-      var _nDec = (((d.executive || {}).decisions_needed) || []).length;
+      // Engine-aware: decisions the cycle considers resolved stop counting even
+      // before Apply trims the authored list (falls back to the authored length).
+      var _exD = d.executive || {};
+      var _nDec = (typeof _exD.decisions_open_count === 'number')
+        ? _exD.decisions_open_count : ((_exD.decisions_needed) || []).length;
       // #inv-discovery-mount ← /api/investigation-discovery (argument-graph.js poller);
       // _decHtml = the authored Resolve cockpit; #inv-decisions-mount ← derived open
       // items (audit gaps, open-question claims, divergences) from the overlay.
@@ -11488,7 +11499,10 @@
 
     if (!needed.length && !resolved.length && !docs.length) return '';
 
-    var n = needed.length;
+    // Decisions the cycle already resolved (server: ex.decisions_engine_resolved)
+    // are hidden/uncounted; data-index keeps pointing at the authored list.
+    var engRes = Array.isArray(ex.decisions_engine_resolved) ? ex.decisions_engine_resolved : [];
+    var n = needed.length - engRes.filter(function (k) { return k >= 0 && k < needed.length; }).length;
     var accent = n ? '#b45309' : '#16a34a';      // amber when open, green when all clear
     var H = [];
     H.push('<div style="padding:2px 0 4px">');
@@ -11519,6 +11533,7 @@
     if (n) {
       H.push('<div style="display:grid;gap:10px">');
       needed.forEach(function (dec, i) {
+        if (engRes.indexOf(i) !== -1) return;
         dec = dec || {};
         var question = (typeof dec === 'string') ? dec : (dec.question || dec.title || '');
         var context = (typeof dec === 'string') ? '' : (dec.context || dec.detail || '');

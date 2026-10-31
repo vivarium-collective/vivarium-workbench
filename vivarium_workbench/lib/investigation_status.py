@@ -275,13 +275,15 @@ StudyHasRuns = Callable[[str, dict], bool]
 
 
 def read_study_status(
-    ws_root: Path, slug: str, *, study_has_runs: StudyHasRuns
+    ws_root: Path, slug: str, *, study_has_runs: StudyHasRuns,
+    specs_out: "dict | None" = None,
 ) -> tuple[str, bool]:
     """Read (status, has_runs) for a member study referenced by an iset.
 
     Returns ``("planning", False)`` if the study can't be located or parsed.
     ``study_has_runs(slug, spec)`` supplies the runs-presence signal (injected so
-    the workspace-coupled runs.db reader stays in the caller).
+    the workspace-coupled runs.db reader stays in the caller). ``specs_out``, when
+    given, collects the parsed spec by slug so callers can reuse it (no re-read).
     """
     try:
         sp = WorkspacePaths.load(ws_root).study_dir(slug, must_exist=True) / "study.yaml"
@@ -293,6 +295,8 @@ def read_study_status(
         except Exception:
             return "planning", False
         status = _study_display_status(ws_root, slug, spec)
+        if specs_out is not None:
+            specs_out[slug] = spec
         return status, study_has_runs(slug, spec)
     return "planning", False
 
@@ -317,10 +321,15 @@ def build_iset_summary(
         # pre- and post-migration schema render (safe superset: `members` is
         # only consulted when `studies` is absent/empty).
         study_slugs = investigation_member_slugs(spec)
+        member_specs: dict = {}
         statuses_and_runs = [
-            read_study_status(ws_root, s, study_has_runs=study_has_runs)
+            read_study_status(ws_root, s, study_has_runs=study_has_runs,
+                              specs_out=member_specs)
             for s in study_slugs
         ]
+        # Run-aware closure / verdict_status (authored wins; derived is flagged).
+        from vivarium_workbench.lib.run_aware_investigation import derive_markings
+        marks = derive_markings(spec, member_specs)
         statuses = [s for s, _ in statuses_and_runs]
         has_runs = [r for _, r in statuses_and_runs]
         # Number of downloadable figures — gates the card's ↓ figures action.
@@ -345,8 +354,12 @@ def build_iset_summary(
             # executive block, falling back to the lifecycle status). Surfaced
             # here so the investigations list can badge each card without
             # fetching the full detail.
-            "verdict_status":   (spec.get("executive") or {}).get("verdict_status")
-                                or spec.get("status") or "planning",
+            "verdict_status":   marks["verdict_status"],
+            # "authored" | "derived" (roll-up of member run-aware verdicts)
+            "verdict_status_source": marks["verdict_status_source"],
+            # Open/Closed: authored status closed/archived, else the engine's closure.
+            "closed":           marks["closure"]["closed"],
+            "closure_source":   marks["closure"]["source"],
             "effective_status": compute_investigation_status(statuses, has_runs=has_runs),
             "description":      spec.get("description", ""),
             "question":         spec.get("question", ""),
