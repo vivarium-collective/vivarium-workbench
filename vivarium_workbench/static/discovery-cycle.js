@@ -21,7 +21,7 @@
 
   var ctl = null, popoutWin = null, initDone = false, built = false;
   // panel state (persists while the panel is mounted)
-  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null };
+  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, gatesOpen: true };
 
   function el(id) { return document.getElementById(id); }
   function base() { return global.__BASE_PATH__ || ""; }
@@ -98,7 +98,35 @@
       ".dcyc-pre{font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-word;background:var(--viv-bg,#fff);border:1px solid var(--viv-border,#e3e3ea);border-radius:7px;padding:8px;max-height:40vh;overflow:auto;margin-top:6px}",
       ".dcyc-note{font-size:11.5px;color:#b4690e;margin:5px 0}",
       ".dcyc-row-actions{display:flex;gap:6px;margin-bottom:4px}",
-      ".empty-state{color:var(--viv-fg-muted,#9aa);font-size:12.5px;padding:14px}"
+      ".empty-state{color:var(--viv-fg-muted,#9aa);font-size:12.5px;padding:14px}",
+      // per-stage short description, shown muted in the node
+      ".dcyc-nt .desc{font-size:11px;color:var(--viv-fg-muted,#8a93a0);margin-top:2px;line-height:1.35}",
+      ".dcyc-detail .desc{font-size:12px;color:var(--viv-fg,#334);margin-bottom:6px;line-height:1.4}",
+      ".dcyc-gate-note{font-size:11.5px;color:var(--viv-fg,#445);background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.3);border-radius:7px;padding:6px 8px;margin:2px 0 6px}",
+      ".dcyc-gate-note b{color:#8a5a00}",
+      // gate / frontier inspector
+      ".dcyc-gates{border:1px solid var(--viv-border,#e1e3ea);border-radius:9px;margin:2px 0 8px;overflow:hidden}",
+      ".dcyc-gates-h{display:flex;align-items:center;gap:7px;padding:7px 10px;cursor:pointer;background:var(--viv-bg-alt,#f7f8fa);font-size:12px}",
+      ".dcyc-gates-h:hover{background:var(--viv-bg-alt,#eef1f5)}",
+      ".dcyc-gates-h .gt{font-weight:650}",
+      ".dcyc-gates-h .gcount{color:var(--viv-fg-muted,#778);font-size:11px}",
+      ".dcyc-gates-h .dcyc-caret{margin-left:auto}",
+      ".dcyc-gates.exp .dcyc-caret{transform:rotate(90deg)}",
+      ".dcyc-gates-body{padding:6px 8px 8px;display:flex;flex-direction:column;gap:5px}",
+      ".dcyc-fitem{display:flex;align-items:flex-start;gap:8px;padding:6px 7px;border-radius:7px;border:1px solid var(--viv-border,#eceef3);background:var(--viv-bg,#fff)}",
+      ".dcyc-fitem.blk{border-color:rgba(220,38,38,.35);background:rgba(220,38,38,.04)}",
+      ".dcyc-fdot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:4px;background:#94a3b8}",
+      ".dcyc-fitem.blk .dcyc-fdot{background:#dc2626}",
+      ".dcyc-fbody{flex:1;min-width:0}",
+      ".dcyc-fkind{font-weight:600;font-size:11.5px}",
+      ".dcyc-ftarget{font-size:11px;color:var(--viv-fg-muted,#778);margin-top:1px;word-break:break-word}",
+      ".dcyc-fchips{margin-top:3px;display:flex;gap:5px;flex-wrap:wrap}",
+      ".dcyc-fchip{font-size:10px;padding:0 6px;border-radius:999px;border:1px solid var(--viv-border,#cdd);background:var(--viv-bg,#fff);white-space:nowrap}",
+      ".dcyc-fchip.op{border-color:#c7d2fe;background:rgba(37,99,235,.06);color:#1d4ed8}",
+      ".dcyc-fchip.human{border-color:rgba(234,179,8,.5);background:rgba(234,179,8,.1);color:#8a5a00}",
+      ".dcyc-fchip.run{border-color:rgba(22,163,74,.45);background:rgba(22,163,74,.08);color:#15803d}",
+      ".dcyc-fchip.blkc{border-color:rgba(220,38,38,.45);background:rgba(220,38,38,.08);color:#b91c1c}",
+      ".dcyc-gates-foot{font-size:11px;color:var(--viv-fg-muted,#889);padding:2px 2px 0}"
     ].join("\n");
     var st = document.createElement("style");
     st.id = "dcyc-style"; st.textContent = css;
@@ -271,6 +299,47 @@
       naline + runline + "</div>";
   }
 
+  // The gate inspector: every open item on the engine's frontier, what it is, the
+  // op that would resolve it, and whether that op is machine-runnable or human-only.
+  // Blocking items (the ones that keep the investigation from closing) float to the
+  // top and are tinted red. Collapsible; defaults open so the state is visible.
+  function frontierHtml() {
+    var m = S.summary;
+    if (!m || !m.frontier || !m.frontier.length) return "";
+    var items = m.frontier.slice().sort(function (a, b) {
+      return (b.blocking ? 1 : 0) - (a.blocking ? 1 : 0) || (b.priority || 0) - (a.priority || 0);
+    });
+    var nblk = items.filter(function (x) { return x.blocking; }).length;
+    var exp = !!S.gatesOpen;
+    var count = items.length + " open · " + nblk + " blocking · " + (items.length - nblk) + " non-blocking";
+    var dotColor = m.closed ? "#16a34a" : "#2563eb";
+    var rows = items.map(function (it) {
+      var chips = [];
+      if (it.op) chips.push('<span class="dcyc-fchip op">' + esc(it.op) + "</span>");
+      if (it.consequence)
+        chips.push('<span class="dcyc-fchip ' + (it.human ? "human" : "run") + '">' +
+          esc(it.consequence) + (it.human ? " · human" : " · runnable") + "</span>");
+      if (it.blocking) chips.push('<span class="dcyc-fchip blkc">blocks closure</span>');
+      return '<div class="dcyc-fitem' + (it.blocking ? " blk" : "") + '">' +
+        '<span class="dcyc-fdot"></span>' +
+        '<div class="dcyc-fbody">' +
+        '<div class="dcyc-fkind">' + esc(it.kind_label || it.kind || "") + "</div>" +
+        (it.target ? '<div class="dcyc-ftarget">' + esc(it.target) + "</div>" : "") +
+        '<div class="dcyc-fchips">' + chips.join("") + "</div>" +
+        "</div></div>";
+    }).join("");
+    var foot = '<div class="dcyc-gates-foot">Blocking items (acceptance criteria, ' +
+      "narrative gaps, unadjudicated challenges) must clear to close. The rest are " +
+      "tracked but non-blocking. A <b>human</b> op can't be auto-advanced.</div>";
+    return '<div class="dcyc-gates' + (exp ? " exp" : "") + '">' +
+      '<div class="dcyc-gates-h" id="dcyc-gates-h">' +
+      '<span class="dcyc-dot" style="background:' + dotColor + '"></span>' +
+      '<span class="gt">Gates &amp; frontier</span> <span class="gcount">' + count + "</span>" +
+      '<span class="dcyc-caret">▸</span></div>' +
+      (exp ? ('<div class="dcyc-gates-body">' + rows + foot + "</div>") : "") +
+      "</div>";
+  }
+
   // ---- render -------------------------------------------------------------
   function renderGraph() {
     var g = el("dcyc-graph");
@@ -278,12 +347,14 @@
     if (!S.steps.length) { g.innerHTML = '<p class="empty-state">Load an investigation to see its cycle.</p>'; return; }
     var phases = [];
     S.steps.forEach(function (s) { if (phases.indexOf(s.phase) < 0) phases.push(s.phase); });
-    g.innerHTML = applyReportHtml() + bannerHtml() + phases.map(function (ph) {
+    g.innerHTML = applyReportHtml() + bannerHtml() + frontierHtml() + phases.map(function (ph) {
       var nodes = S.steps.filter(function (s) { return s.phase === ph; });
       return '<div class="dcyc-phase-h">' + esc(ph) + "</div>" + nodes.map(nodeHtml).join("");
     }).join("");
     var dm = el("dcyc-apply-dismiss");
     if (dm) dm.addEventListener("click", function () { S.applyReport = null; renderGraph(); });
+    var gh = el("dcyc-gates-h");
+    if (gh) gh.addEventListener("click", function () { S.gatesOpen = !S.gatesOpen; renderGraph(); });
     Array.prototype.forEach.call(g.querySelectorAll(".dcyc-nh"), function (h) {
       h.addEventListener("click", function () { toggleNode(h.getAttribute("data-id")); });
     });
@@ -306,6 +377,7 @@
       '<span class="dcyc-dot"></span>' +
       '<span class="dcyc-nt"><span class="t">' + esc(s.label) + "</span>" +
       '<span class="fn"> · ' + esc(s.module) + "." + esc(s.func) + "</span>" +
+      (s.desc ? '<div class="desc">' + esc(s.desc) + "</div>" : "") +
       '<div class="sum">' + esc(s.summary || "") + "</div></span>" +
       dur + '<span class="dcyc-caret">▸</span></div>';
     return '<div class="' + cls + '">' + head + (exp ? detailHtml(s) : "") + "</div>";
@@ -313,10 +385,12 @@
 
   function detailHtml(s) {
     var deps = (s.depends_on || []).length ? (s.depends_on || []).join(", ") : "none";
+    var desc = s.desc ? '<div class="desc">' + esc(s.desc) + "</div>" : "";
     var meta = '<div class="meta"><code>' + esc(s.module) + "." + esc(s.func) +
       "</code> · " + esc(s.kind) + " · depends on " + esc(deps) + "</div>";
+    var gate = s.gate ? '<div class="dcyc-gate-note"><b>Gate:</b> ' + esc(s.gate) + "</div>" : "";
     if (s.kind === "mutating") {
-      return '<div class="dcyc-detail">' + meta +
+      return '<div class="dcyc-detail">' + desc + meta + gate +
         '<p class="dcyc-note">Runs real study runs + writes results — only via Advance, ' +
         "against a sandboxed copy, so your real investigation is never touched.</p>" +
         '<div class="dcyc-row-actions"><button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-adv="1">Advance ▸ (sandbox)</button></div></div>';
@@ -326,7 +400,7 @@
     var result = ("result" in s) ? jsonBlock(s.result)
       : (s.status === "blocked" ? '<p class="dcyc-note">' + esc(s.error || s.summary) + "</p>"
         : '<p class="empty-state">Run the cycle to populate this step.</p>');
-    return '<div class="dcyc-detail">' + meta + actions + result + "</div>";
+    return '<div class="dcyc-detail">' + desc + meta + gate + actions + result + "</div>";
   }
 
   function jsonBlock(obj) {

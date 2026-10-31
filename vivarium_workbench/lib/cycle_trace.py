@@ -34,45 +34,95 @@ from typing import Any
 # ---------------------------------------------------------------------------
 STEPS: list[dict[str, Any]] = [
     {"id": "load_inputs", "label": "Load inputs", "phase": "Inputs",
-     "module": "discover", "func": "load_cycle_inputs", "kind": "pure", "depends_on": []},
+     "module": "discover", "func": "load_cycle_inputs", "kind": "pure", "depends_on": [],
+     "desc": "Reads the investigation + its member studies from disk (YAML only, no database).",
+     "gate": ""},
     {"id": "run_cycle", "label": "Core projection", "phase": "Core",
-     "module": "discover", "func": "run_cycle", "kind": "pure", "depends_on": ["load_inputs"]},
+     "module": "discover", "func": "run_cycle", "kind": "pure", "depends_on": ["load_inputs"],
+     "desc": "The pure core: derives the argument, verdicts, narrative, gates and frontier "
+             "from the authored specs + recorded run outcomes. Generates no prose, writes nothing.",
+     "gate": "Authored values win over derived; a plain run never writes to disk."},
     {"id": "reconcile_evidence", "label": "A · Reconcile evidence", "phase": "A",
      "module": "evidence_integrity", "func": "reconcile_evidence_state", "kind": "pure",
-     "depends_on": ["load_inputs"]},
+     "depends_on": ["load_inputs"],
+     "desc": "Classifies each study finding by provenance into verified / provisional / "
+             "contradicted / unsupported, using the study's runs.db run-ids.",
+     "gate": "Verified = a numeric value that cites a registered run-id and passes its own "
+             "pass_if band (it does not re-check the run produced that value)."},
     {"id": "plan", "label": "B · Plan (candidate actions)", "phase": "B",
      "module": "candidate_action", "func": "plan_candidate_actions", "kind": "pure",
-     "depends_on": ["run_cycle", "reconcile_evidence"]},
+     "depends_on": ["run_cycle", "reconcile_evidence"],
+     "desc": "Re-casts the open frontier into ranked candidate actions "
+             "(repair / resolve / extend) with a heuristic value score.",
+     "gate": "A RESOLVE needs ≥2 competing hypotheses; a REPAIR is ordered first when "
+             "any evidence is still unverified."},
     {"id": "design", "label": "C · Design experiment", "phase": "C",
      "module": "experiment_design", "func": "design_discriminating_study", "kind": "pure",
-     "depends_on": ["load_inputs"]},
+     "depends_on": ["load_inputs"],
+     "desc": "For each study with competing hypotheses, lays out a discriminating "
+             "experiment: arms, controls, and a pre-committed decision rule.",
+     "gate": "Returns a design only when a study has ≥2 hypotheses whose numeric "
+             "prediction bands are disjoint."},
     {"id": "build_model", "label": "D · Model architect", "phase": "D",
      "module": "model_architect", "func": "build_catalog", "kind": "pure",
-     "depends_on": ["load_inputs"]},
+     "depends_on": ["load_inputs"],
+     "desc": "Inventories the distinct composite paths the studies' arms cite, with a "
+             "capability signature per component.",
+     "gate": "Lexical only — it lists cited composite paths; it does not verify a "
+             "composite exists or imports."},
     {"id": "evaluate", "label": "F · Evaluate", "phase": "F",
      "module": "evaluation", "func": "compare_hypotheses", "kind": "pure",
-     "depends_on": ["run_cycle", "reconcile_evidence"]},
+     "depends_on": ["run_cycle", "reconcile_evidence"],
+     "desc": "Scores each study's hypotheses from findings + prose and assigns a status "
+             "(supported / contested / unresolved / gated).",
+     "gate": "'supported' requires net support > 0 AND the study's evidence verified in "
+             "Phase A; otherwise 'provisionally-supported'."},
     {"id": "delta", "label": "F · Discovery delta", "phase": "F",
      "module": "evaluation", "func": "discovery_delta", "kind": "pure",
-     "depends_on": ["evaluate"]},
+     "depends_on": ["evaluate"],
+     "desc": "Lists the currently supported/qualified claims, model disagreements, and "
+             "anomalies.",
+     "gate": "Measured against an empty baseline — a snapshot of current state, not a "
+             "change since the last cycle."},
     {"id": "transition", "label": "N+2 · Transition model", "phase": "N+2",
      "module": "transition_model", "func": "transition_phase_report", "kind": "pure",
-     "depends_on": ["build_model"]},
+     "depends_on": ["build_model"],
+     "desc": "Domain-specific (endosymbiosis): sweeps a hard-coded rule table over "
+             "proximity × pump × heredity and tallies the outcome.",
+     "gate": "Not a generic step and runs no simulation — the cells are a classification "
+             "of a would-be run."},
     {"id": "propose", "label": "Propose studies", "phase": "Growth",
      "module": "discover", "func": "suggest_studies", "kind": "pure",
-     "depends_on": ["run_cycle"]},
+     "depends_on": ["run_cycle"],
+     "desc": "Gathers next-study proposals from followups, audit gaps, open decisions "
+             "and divergences.",
+     "gate": "Divergence / open-question proposals are held 'awaiting expert'; they carry "
+             "no spec until seeded."},
     {"id": "select", "label": "Select for launch", "phase": "Growth",
      "module": "study_seeding", "func": "select_for_launch", "kind": "pure",
-     "depends_on": ["propose"]},
+     "depends_on": ["propose"],
+     "desc": "Applies the autonomy policy to decide which proposals launch vs. are held.",
+     "gate": "Default human-in-the-loop holds everything unless explicitly approved or "
+             "running autonomously."},
     {"id": "seed", "label": "Seed study (preview)", "phase": "Growth",
      "module": "study_seeding", "func": "build_seeded_study", "kind": "pure",
-     "depends_on": ["select"]},
+     "depends_on": ["select"],
+     "desc": "Previews a new child study spec from a parent + proposal.",
+     "gate": "Preview only — written to disk solely via `seed-study --write`, and only "
+             "when run-ready."},
     {"id": "refine", "label": "Refine study (preview)", "phase": "Growth",
      "module": "study_refinement", "func": "refine_study", "kind": "pure",
-     "depends_on": ["load_inputs"]},
+     "depends_on": ["load_inputs"],
+     "desc": "Previews refinements to a study — replicates, parameter sweeps, higher "
+             "fidelity.",
+     "gate": "Preview only — written to disk solely via `refine-study --write`."},
     {"id": "advance", "label": "E · Execute / advance", "phase": "E",
      "module": "discover", "func": "advance_cycle", "kind": "mutating",
-     "depends_on": ["plan"]},
+     "depends_on": ["plan"],
+     "desc": "The one mutating phase: runs run-ready studies toward closure. In the panel "
+             "it runs against a sandboxed copy, never your real files.",
+     "gate": "Only 'test' ops on never-run, run-ready studies; dry (reports a would-run) "
+             "unless advancing autonomously."},
 ]
 
 # Steps the analytical trace runs automatically (every pure step). The mutating
@@ -352,12 +402,36 @@ def build_cycle_trace(ws_root, inv_slug: str, *, only: list[str] | None = None) 
             "summary": _cycle_summary(ctx, M), "steps": out_steps}
 
 
+# The three frontier-item kinds that block closure (DE `_CLOSURE_BLOCKING`); kept
+# as a local copy so this module does not depend on a private engine name.
+_BLOCKING_KINDS = frozenset({"unaddressed_criterion", "narrative_gap", "open_challenge"})
+
+# Human-readable one-liners for each frontier-item kind, so the gate inspector can
+# say what an open item IS without the reader knowing the engine's vocabulary.
+_KIND_LABEL = {
+    "unaddressed_criterion": "Acceptance criterion not met",
+    "open_challenge": "Unadjudicated challenge",
+    "narrative_gap": "Unsupported narrative transition",
+    "open_decision": "Decision needed",
+    "stale_validation": "Stale validation snapshot",
+    "divergence": "Authored verdict diverges from derived",
+    "validation_finding": "Validator finding",
+    "pending_gate": "Verification debt — verdict met, behavior not run",
+    "open_question": "Open question — claim not yet assessed",
+}
+
+
 def _cycle_summary(ctx: dict, M: _Modules) -> dict:
-    """The engine's headline verdict for the panel banner: is the investigation
-    closed, how big is the open frontier, what's the next action, and — crucially —
-    how much of the plan is machine-runnable vs. human-only decisions. This is what
-    answers 'I ran the cycle, why didn't anything advance?': when ``runnable`` is 0
-    and ``human_decisions`` > 0, there is nothing for Advance to execute."""
+    """The engine's headline verdict + gate state for the panel.
+
+    Answers, from the live engine: is the investigation closed, how big is the open
+    frontier and WHAT is on it (each item's kind, the op that would resolve it, and
+    its consequence tier — i.e. whether a machine may run it or it needs a human),
+    what blocks closure, and how much of the plan is machine-runnable vs. human-only.
+    This is what answers 'I ran the cycle, why didn't anything advance?': when
+    ``runnable`` is 0 and ``human_decisions`` > 0, there is nothing for Advance to
+    execute. Wrapped in try/except so any engine-shape change degrades to an empty
+    summary (the panel hides the banner) rather than 500-ing the trace."""
     cyc = ctx.get("cyc") or {}
     inv_spec = ctx["inv_spec"]
     try:
@@ -366,6 +440,32 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
         plan = M.de.execute_plan(cyc, inv_spec) if hasattr(M.de, "execute_plan") else []
         runnable = [p for p in plan if (p.get("consequence") or "") != "human-only"]
         consequence = plan[0].get("consequence") if plan else None
+        # Join each open frontier item to its execution consequence (execute_plan's
+        # `source`/`action_type` == the item's `target`/`op`), so the gate inspector
+        # shows, per open item: what it is, what would resolve it, and whether that
+        # is machine-runnable or human-only.
+        cons_by: dict = {}
+        for p in plan:
+            cons_by[(p.get("action_type"), p.get("source"))] = p
+        front_rows: list[dict] = []
+        try:
+            items = M.de.frontier(cyc, inv_spec) if hasattr(M.de, "frontier") else []
+        except Exception:
+            items = []
+        for it in items[:60]:
+            kind = it.get("kind")
+            p = cons_by.get((it.get("op"), it.get("target"))) or {}
+            front_rows.append({
+                "kind": kind,
+                "kind_label": _KIND_LABEL.get(kind, kind),
+                "target": str(it.get("target") or "")[:160],
+                "op": it.get("op"),
+                "priority": it.get("priority"),
+                "blocking": kind in _BLOCKING_KINDS,
+                "consequence": p.get("consequence"),
+                "human": (p.get("consequence") or "") == "human-only",
+                "rationale": str(it.get("rationale") or "")[:280],
+            })
         return {
             "closed": clo.get("closed"),
             "frontier_size": clo.get("open_items"),
@@ -374,6 +474,12 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
                             if na else None),
             "runnable": len(runnable),
             "human_decisions": len(plan) - len(runnable),
+            "blocking": {
+                "unaddressed_criteria": clo.get("unaddressed_criteria") or [],
+                "open_gaps": clo.get("open_gaps") or 0,
+                "open_challenges": clo.get("open_challenges") or 0,
+            },
+            "frontier": front_rows,
         }
     except Exception:
         return {}

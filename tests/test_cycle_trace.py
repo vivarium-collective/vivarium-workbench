@@ -57,6 +57,33 @@ def test_foundational_steps_succeed():
     assert isinstance(cyc, dict) and "argument" in cyc and "validations" in cyc
 
 
+def test_every_step_carries_a_description_and_gate_field():
+    # the panel shows a short per-stage description + gate note; both must be present
+    for s in ct.STEPS:
+        assert s.get("desc"), f"{s['id']} has no description"
+        assert "gate" in s, f"{s['id']} is missing the gate field"
+        assert isinstance(s["gate"], str)
+
+
+def test_summary_exposes_gate_frontier_for_inspection():
+    trace = ct.build_cycle_trace(_WS, _SLUG)
+    summary = trace.get("summary")
+    assert isinstance(summary, dict)
+    # the engine ran and produced a gate summary (not the degraded {} fallback)
+    assert "frontier" in summary and "blocking" in summary
+    assert isinstance(summary["frontier"], list)
+    assert isinstance(summary["blocking"], dict)
+    for row in summary["frontier"]:
+        assert set(row) >= {"kind", "kind_label", "target", "op", "blocking", "human"}
+        assert isinstance(row["blocking"], bool)
+        assert isinstance(row["human"], bool)
+        # a blocking item is one of the three closure-blocking kinds
+        if row["blocking"]:
+            assert row["kind"] in ct._BLOCKING_KINDS
+    # frontier size agrees with the number of items surfaced (capped at 60)
+    assert summary.get("frontier_size", 0) >= len(summary["frontier"]) or len(summary["frontier"]) == 60
+
+
 def test_advance_node_is_idle_not_executed():
     trace = ct.build_cycle_trace(_WS, _SLUG)
     adv = _step(trace, "advance")
