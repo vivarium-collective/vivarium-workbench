@@ -500,6 +500,15 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
         except Exception:
             items = []
         members = list(ctx.get("studies") or {})
+        # authored context for each open decision (executive.decisions_needed),
+        # keyed by the question text (== the frontier item's target). This is the
+        # reasoning behind the decision — the grounding the AI steer prompt needs.
+        dn_ctx: dict = {}
+        for d in ((inv_spec.get("executive") or {}).get("decisions_needed") or []):
+            if isinstance(d, dict):
+                q = d.get("question") or d.get("title") or ""
+                if q:
+                    dn_ctx[q] = str(d.get("context") or d.get("detail") or "")
         for it in items[:60]:
             kind = it.get("kind")
             p = cons_by.get((it.get("op"), it.get("target"))) or {}
@@ -517,6 +526,7 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
                 "resolvable": kind in _RESOLVABLE_KINDS,
                 "decision": kind == "open_decision",
                 "studies": _studies_for_item(kind, it.get("target"), rationale, members),
+                "context": (dn_ctx.get(it.get("target"), "")[:500] if kind == "open_decision" else ""),
             })
         return {
             "closed": clo.get("closed"),

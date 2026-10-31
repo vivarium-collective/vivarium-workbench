@@ -442,19 +442,29 @@
 
   function decisionPrompt(it) {
     var slug = S.slug, title = currentTitle(slug) || slug;
-    var studies = (it.studies || []).map(function (s) { return s.label + " (" + s.slug + ")"; }).join(", ");
+    var studyList = (it.studies || []);
+    var studies = studyList.map(function (s) { return s.label + " (" + s.slug + ")"; }).join(", ");
+    var firstStudy = studyList[0] ? studyList[0].label : "";
     var L = [
-      'Help me steer an open decision in the discovery cycle for investigation "' + title + '" (' + slug + ").",
+      'You are helping steer an open decision in the discovery cycle for the investigation "' +
+        title + '" (' + slug + ").",
+      "This is a human-only decision: give me your recommendation, then record it.",
       "",
       "Decision: " + (it.target || ""),
     ];
+    if (it.context) L.push("Why it's open: " + it.context);
     if (studies) L.push("Involved study: " + studies);
     L.push("");
-    L.push("Recommend the primary choice and the competing alternatives to test head-to-head, " +
-      "with a 1-2 sentence rationale grounded in the investigation's studies and evidence.");
-    var example = JSON.stringify({ kind: "open_decision", target: it.target || "", rationale: "<your choice + why>" });
-    L.push("Then record it: POST /api/discovery-cycle/" + slug + "/resolve with body " +
-      example + ". Then tell me what you recorded.");
+    L.push("First review this investigation" +
+      (firstStudy ? (" and study " + firstStudy) : "") +
+      " — the hypotheses, evidence, and current verdicts — with your workspace tools. Then:");
+    L.push("1. Recommend the primary choice and the competing alternatives to run head-to-head, " +
+      "named as the study's own hypotheses where possible, with a 1-2 sentence rationale grounded in the evidence.");
+    L.push("2. Record it: call the discovery-cycle resolve operation " +
+      "(POST /api/discovery-cycle/" + slug + "/resolve) with kind=\"open_decision\", " +
+      "target set to the exact decision text above, and rationale = your choice + why. " +
+      "(I'll be asked to approve the write.)");
+    L.push("3. Tell me what you recorded.");
     return L.join("\n");
   }
 
