@@ -42,49 +42,49 @@ STEPS: list[dict[str, Any]] = [
      "desc": "The pure core: derives the argument, verdicts, narrative, gates and frontier "
              "from the authored specs + recorded run outcomes. Generates no prose, writes nothing.",
      "gate": "Authored values win over derived; a plain run never writes to disk."},
-    {"id": "reconcile_evidence", "label": "A · Reconcile evidence", "phase": "A",
+    {"id": "reconcile_evidence", "label": "Reconcile evidence", "phase": "Evidence",
      "module": "evidence_integrity", "func": "reconcile_evidence_state", "kind": "pure",
      "depends_on": ["load_inputs"],
      "desc": "Classifies each study finding by provenance into verified / provisional / "
              "contradicted / unsupported, using the study's runs.db run-ids.",
      "gate": "Verified = a numeric value that cites a registered run-id and passes its own "
              "pass_if band (it does not re-check the run produced that value)."},
-    {"id": "plan", "label": "B · Plan (candidate actions)", "phase": "B",
+    {"id": "plan", "label": "Plan candidate actions", "phase": "Plan",
      "module": "candidate_action", "func": "plan_candidate_actions", "kind": "pure",
      "depends_on": ["run_cycle", "reconcile_evidence"],
      "desc": "Re-casts the open frontier into ranked candidate actions "
              "(repair / resolve / extend) with a heuristic value score.",
      "gate": "A RESOLVE needs ≥2 competing hypotheses; a REPAIR is ordered first when "
              "any evidence is still unverified."},
-    {"id": "design", "label": "C · Design experiment", "phase": "C",
+    {"id": "design", "label": "Design experiment", "phase": "Experiment design",
      "module": "experiment_design", "func": "design_discriminating_study", "kind": "pure",
      "depends_on": ["load_inputs"],
      "desc": "For each study with competing hypotheses, lays out a discriminating "
              "experiment: arms, controls, and a pre-committed decision rule.",
      "gate": "Returns a design only when a study has ≥2 hypotheses whose numeric "
              "prediction bands are disjoint."},
-    {"id": "build_model", "label": "D · Model architect", "phase": "D",
+    {"id": "build_model", "label": "Model architect", "phase": "Models",
      "module": "model_architect", "func": "build_catalog", "kind": "pure",
      "depends_on": ["load_inputs"],
      "desc": "Inventories the distinct composite paths the studies' arms cite, with a "
              "capability signature per component.",
      "gate": "Lexical only — it lists cited composite paths; it does not verify a "
              "composite exists or imports."},
-    {"id": "evaluate", "label": "F · Evaluate", "phase": "F",
+    {"id": "evaluate", "label": "Evaluate hypotheses", "phase": "Evaluation",
      "module": "evaluation", "func": "compare_hypotheses", "kind": "pure",
      "depends_on": ["run_cycle", "reconcile_evidence"],
      "desc": "Scores each study's hypotheses from findings + prose and assigns a status "
              "(supported / contested / unresolved / gated).",
      "gate": "'supported' requires net support > 0 AND the study's evidence verified in "
              "Phase A; otherwise 'provisionally-supported'."},
-    {"id": "delta", "label": "F · Discovery delta", "phase": "F",
+    {"id": "delta", "label": "Discovery delta", "phase": "Evaluation",
      "module": "evaluation", "func": "discovery_delta", "kind": "pure",
      "depends_on": ["evaluate"],
      "desc": "Lists the currently supported/qualified claims, model disagreements, and "
              "anomalies.",
      "gate": "Measured against an empty baseline — a snapshot of current state, not a "
              "change since the last cycle."},
-    {"id": "transition", "label": "N+2 · Transition model", "phase": "N+2",
+    {"id": "transition", "label": "Transition model", "phase": "Composed model",
      "module": "transition_model", "func": "transition_phase_report", "kind": "pure",
      "depends_on": ["build_model"],
      "desc": "Domain-specific (endosymbiosis): sweeps a hard-coded rule table over "
@@ -116,7 +116,7 @@ STEPS: list[dict[str, Any]] = [
      "desc": "Previews refinements to a study — replicates, parameter sweeps, higher "
              "fidelity.",
      "gate": "Preview only — written to disk solely via `refine-study --write`."},
-    {"id": "advance", "label": "E · Execute / advance", "phase": "E",
+    {"id": "advance", "label": "Execute / advance", "phase": "Execute",
      "module": "discover", "func": "advance_cycle", "kind": "mutating",
      "depends_on": ["plan"],
      "desc": "The one mutating phase: runs run-ready studies toward closure. In the panel "

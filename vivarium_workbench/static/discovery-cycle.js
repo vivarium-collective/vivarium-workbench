@@ -64,7 +64,7 @@
       ".dcyc-btn-primary{background:#2563eb;border-color:#2563eb;color:#fff}",
       ".dcyc-btn-sm{padding:3px 9px;font-size:12px}",
       ".dcyc-status{font-size:11.5px;color:var(--viv-fg-muted,#778);min-height:1em}",
-      ".dcyc-graph{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 10px}",
+      ".dcyc-graph{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 10px 40px}",
       ".dcyc-banner{border-radius:9px;padding:9px 11px;margin:2px 0 8px;border:1px solid var(--viv-border,#e1e3ea)}",
       ".dcyc-bn-closed{background:rgba(22,163,74,.08);border-color:rgba(22,163,74,.35)}",
       ".dcyc-bn-open{background:rgba(37,99,235,.07);border-color:rgba(37,99,235,.3)}",
