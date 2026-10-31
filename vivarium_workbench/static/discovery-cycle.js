@@ -21,7 +21,7 @@
 
   var ctl = null, popoutWin = null, initDone = false, built = false;
   // panel state (persists while the panel is mounted)
-  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, gatesOpen: true };
+  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, gatesOpen: true, decideFor: null };
 
   function el(id) { return document.getElementById(id); }
   function base() { return global.__BASE_PATH__ || ""; }
@@ -126,7 +126,13 @@
       ".dcyc-fchip.human{border-color:rgba(234,179,8,.5);background:rgba(234,179,8,.1);color:#8a5a00}",
       ".dcyc-fchip.run{border-color:rgba(22,163,74,.45);background:rgba(22,163,74,.08);color:#15803d}",
       ".dcyc-fchip.blkc{border-color:rgba(220,38,38,.45);background:rgba(220,38,38,.08);color:#b91c1c}",
-      ".dcyc-gates-foot{font-size:11px;color:var(--viv-fg-muted,#889);padding:2px 2px 0}"
+      ".dcyc-gates-foot{font-size:11px;color:var(--viv-fg-muted,#889);padding:2px 2px 0}",
+      ".dcyc-fgroup-h{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--viv-fg-muted,#9aa3af);margin:7px 2px 3px}",
+      ".dcyc-factions{margin-top:7px;display:flex;gap:6px;flex-wrap:wrap}",
+      ".dcyc-flink{border-color:#c7d2fe;background:rgba(37,99,235,.05);color:#1d4ed8}",
+      ".dcyc-decide{margin-top:8px;border-top:1px dashed var(--viv-border,#e3e6ec);padding-top:8px}",
+      ".dcyc-decide-ta{width:100%;box-sizing:border-box;font:inherit;font-size:12px;min-height:58px;padding:6px 8px;border-radius:7px;border:1px solid var(--viv-border,#ccd);background:var(--viv-bg,#fff);color:inherit;resize:vertical}",
+      ".dcyc-decide .dcyc-row-actions{margin-top:6px}"
     ].join("\n");
     var st = document.createElement("style");
     st.id = "dcyc-style"; st.textContent = css;
@@ -299,45 +305,139 @@
       naline + runline + "</div>";
   }
 
-  // The gate inspector: every open item on the engine's frontier, what it is, the
-  // op that would resolve it, and whether that op is machine-runnable or human-only.
-  // Blocking items (the ones that keep the investigation from closing) float to the
-  // top and are tinted red. Collapsible; defaults open so the state is visible.
+  // The gate inspector: every open item on the engine's frontier, split into the
+  // gates that BLOCK closure vs the ones merely tracked, each showing what it is,
+  // what it's waiting on, which studies it points at (jump-in links), and — for
+  // decisions — the controls to decide it here or let the AI steer it.
+  function fitemHtml(it) {
+    var chips = [];
+    if (it.op) chips.push('<span class="dcyc-fchip op">' + esc(it.op) + "</span>");
+    if (it.consequence)
+      chips.push('<span class="dcyc-fchip ' + (it.human ? "human" : "run") + '">' +
+        esc(it.consequence) + (it.human ? " · human" : " · runnable") + "</span>");
+    if (it.blocking) chips.push('<span class="dcyc-fchip blkc">blocks closure</span>');
+    // jump-in links to the studies this gate points at
+    var links = (it.studies || []).map(function (s) {
+      return '<button class="dcyc-btn dcyc-btn-sm dcyc-flink" data-study="' + esc(s.slug) +
+        '" data-tab="' + esc(s.tab || "overview") + '" title="Open ' + esc(s.slug) +
+        " · " + esc(s.tab || "overview") + '">Open ' + esc(s.label) + " ▸</button>";
+    }).join("");
+    // decide / resolve / AI-steer controls
+    var acts = [];
+    if (it.decision) {
+      acts.push('<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-decide="' +
+        esc(it.target) + '" data-kind="' + esc(it.kind) + '">Decide…</button>');
+      acts.push('<button class="dcyc-btn dcyc-btn-sm" data-steer="' + esc(it.target) +
+        '" title="Let the AI choose and record the decision">AI steer</button>');
+    } else if (it.resolvable) {
+      acts.push('<button class="dcyc-btn dcyc-btn-sm" data-decide="' + esc(it.target) +
+        '" data-kind="' + esc(it.kind) + '">Resolve…</button>');
+    }
+    var desc = it.rationale || it.target || "";
+    var form = (S.decideFor === it.target) ? decideFormHtml(it) : "";
+    var actionRow = (links || acts.length)
+      ? ('<div class="dcyc-factions">' + links + acts.join("") + "</div>") : "";
+    return '<div class="dcyc-fitem' + (it.blocking ? " blk" : "") + '">' +
+      '<span class="dcyc-fdot"></span>' +
+      '<div class="dcyc-fbody">' +
+      '<div class="dcyc-fkind">' + esc(it.kind_label || it.kind || "") + "</div>" +
+      (desc ? '<div class="dcyc-ftarget">' + esc(desc) + "</div>" : "") +
+      '<div class="dcyc-fchips">' + chips.join("") + "</div>" +
+      actionRow + form +
+      "</div></div>";
+  }
+
+  function decideFormHtml(it) {
+    var ph = it.decision
+      ? "Your decision + why — e.g. “Syntrophy is primary (strongest energetic coupling); test commensalism as the main alternative.”"
+      : "Why this item is resolved…";
+    return '<div class="dcyc-decide">' +
+      '<textarea class="dcyc-decide-ta" id="dcyc-decide-ta" placeholder="' + esc(ph) + '"></textarea>' +
+      '<div class="dcyc-row-actions">' +
+      '<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-decide-save="' + esc(it.target) +
+      '" data-kind="' + esc(it.kind) + '">Record decision</button>' +
+      '<button class="dcyc-btn dcyc-btn-sm" data-decide-cancel="1">Cancel</button>' +
+      "</div></div>";
+  }
+
   function frontierHtml() {
     var m = S.summary;
     if (!m || !m.frontier || !m.frontier.length) return "";
-    var items = m.frontier.slice().sort(function (a, b) {
-      return (b.blocking ? 1 : 0) - (a.blocking ? 1 : 0) || (b.priority || 0) - (a.priority || 0);
-    });
-    var nblk = items.filter(function (x) { return x.blocking; }).length;
+    var items = m.frontier.slice();
+    var blocking = items.filter(function (x) { return x.blocking; })
+      .sort(function (a, b) { return (b.priority || 0) - (a.priority || 0); });
+    var tracked = items.filter(function (x) { return !x.blocking; })
+      .sort(function (a, b) { return (b.priority || 0) - (a.priority || 0); });
     var exp = !!S.gatesOpen;
-    var count = items.length + " open · " + nblk + " blocking · " + (items.length - nblk) + " non-blocking";
-    var dotColor = m.closed ? "#16a34a" : "#2563eb";
-    var rows = items.map(function (it) {
-      var chips = [];
-      if (it.op) chips.push('<span class="dcyc-fchip op">' + esc(it.op) + "</span>");
-      if (it.consequence)
-        chips.push('<span class="dcyc-fchip ' + (it.human ? "human" : "run") + '">' +
-          esc(it.consequence) + (it.human ? " · human" : " · runnable") + "</span>");
-      if (it.blocking) chips.push('<span class="dcyc-fchip blkc">blocks closure</span>');
-      return '<div class="dcyc-fitem' + (it.blocking ? " blk" : "") + '">' +
-        '<span class="dcyc-fdot"></span>' +
-        '<div class="dcyc-fbody">' +
-        '<div class="dcyc-fkind">' + esc(it.kind_label || it.kind || "") + "</div>" +
-        (it.target ? '<div class="dcyc-ftarget">' + esc(it.target) + "</div>" : "") +
-        '<div class="dcyc-fchips">' + chips.join("") + "</div>" +
-        "</div></div>";
-    }).join("");
-    var foot = '<div class="dcyc-gates-foot">Blocking items (acceptance criteria, ' +
-      "narrative gaps, unadjudicated challenges) must clear to close. The rest are " +
-      "tracked but non-blocking. A <b>human</b> op can't be auto-advanced.</div>";
+    var count = items.length + " open · " + blocking.length + " blocking · " + tracked.length + " tracked";
+    var dotColor = m.closed ? "#16a34a" : (blocking.length ? "#dc2626" : "#2563eb");
+    function group(title, arr) {
+      if (!arr.length) return "";
+      return '<div class="dcyc-fgroup-h">' + esc(title) + " (" + arr.length + ")</div>" +
+        arr.map(fitemHtml).join("");
+    }
+    var body = group("Blocking — must clear to close", blocking) +
+      group("Tracked — non-blocking", tracked);
+    var foot = blocking.length
+      ? ""
+      : '<div class="dcyc-gates-foot">No blocking gates — the investigation is closed. ' +
+        "The items above are tracked (decisions, debts, questions) but don't block closure.</div>";
     return '<div class="dcyc-gates' + (exp ? " exp" : "") + '">' +
       '<div class="dcyc-gates-h" id="dcyc-gates-h">' +
       '<span class="dcyc-dot" style="background:' + dotColor + '"></span>' +
       '<span class="gt">Gates &amp; frontier</span> <span class="gcount">' + count + "</span>" +
       '<span class="dcyc-caret">▸</span></div>' +
-      (exp ? ('<div class="dcyc-gates-body">' + rows + foot + "</div>") : "") +
+      (exp ? ('<div class="dcyc-gates-body">' + body + foot + "</div>") : "") +
       "</div>";
+  }
+
+  // ---- gate-item actions --------------------------------------------------
+  function openStudyLink(slug, tab) {
+    if (!slug) return;
+    try {
+      if (typeof global._openStudyEmbeddedNewTab === "function") {
+        global._openStudyEmbeddedNewTab(slug, tab || "overview");
+        setStatus("Opened " + slug + ".");
+      } else if (typeof global._openStudyEmbedded === "function") {
+        global._openStudyEmbedded(slug);
+      } else {
+        setStatus("Can't open a study from here (no live workbench).");
+      }
+    } catch (e) { setStatus("Couldn't open the study."); }
+  }
+
+  function submitDecision(target, kind) {
+    var ta = el("dcyc-decide-ta");
+    var rationale = ta ? ta.value.trim() : "";
+    if (!rationale) { setStatus("Enter your decision + rationale first."); if (ta) ta.focus(); return; }
+    if (!S.slug || S.busy) return;
+    S.busy = true; setStatus("Recording decision…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/resolve",
+      { kind: kind, target: target, rationale: rationale })
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (!j.ok) { setStatus(j.detail || "Could not record the decision."); return; }
+        S.decideFor = null;
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
+        var c = j.commit || {};
+        setStatus("Decision recorded" + (c.committed ? (" · committed " + c.sha) : "") + ".");
+      }).catch(function () { setStatus("Resolve request failed."); })
+      .finally(function () { S.busy = false; });
+  }
+
+  function steerDecision(target) {
+    if (!S.slug || S.busy) return;
+    if (!global.confirm("Let the AI decide this and record its choice to the investigation?")) return;
+    S.busy = true; setStatus("AI steering…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/steer", { target: target })
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (!j.ok) { setStatus(j.detail || "AI steering is not available."); return; }
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
+        var out = (j.action || {}).outcome || {};
+        setStatus("AI decided: " + (out.detail || "recorded") + ".");
+      }).catch(function () { setStatus("Steer request failed."); })
+      .finally(function () { S.busy = false; });
   }
 
   // ---- render -------------------------------------------------------------
@@ -355,6 +455,27 @@
     if (dm) dm.addEventListener("click", function () { S.applyReport = null; renderGraph(); });
     var gh = el("dcyc-gates-h");
     if (gh) gh.addEventListener("click", function () { S.gatesOpen = !S.gatesOpen; renderGraph(); });
+    // gate-item actions: jump to a study, open the decide form, record / AI-steer
+    Array.prototype.forEach.call(g.querySelectorAll("[data-study]"), function (b) {
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation(); openStudyLink(b.getAttribute("data-study"), b.getAttribute("data-tab"));
+      });
+    });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-decide]"), function (b) {
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation(); S.decideFor = b.getAttribute("data-decide"); renderGraph();
+        var ta = el("dcyc-decide-ta"); if (ta) ta.focus();
+      });
+    });
+    var dcl = g.querySelector("[data-decide-cancel]");
+    if (dcl) dcl.addEventListener("click", function (ev) { ev.stopPropagation(); S.decideFor = null; renderGraph(); });
+    var dsv = g.querySelector("[data-decide-save]");
+    if (dsv) dsv.addEventListener("click", function (ev) {
+      ev.stopPropagation(); submitDecision(dsv.getAttribute("data-decide-save"), dsv.getAttribute("data-kind"));
+    });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-steer]"), function (b) {
+      b.addEventListener("click", function (ev) { ev.stopPropagation(); steerDecision(b.getAttribute("data-steer")); });
+    });
     Array.prototype.forEach.call(g.querySelectorAll(".dcyc-nh"), function (h) {
       h.addEventListener("click", function () { toggleNode(h.getAttribute("data-id")); });
     });

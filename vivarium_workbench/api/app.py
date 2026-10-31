@@ -1175,6 +1175,40 @@ def create_app() -> FastAPI:
         scope = str((payload or {}).get("scope") or "all")
         return apply_cycle(ws, slug, scope=scope)
 
+    @app.post(
+        "/api/discovery-cycle/{slug}/resolve",
+        tags=["Investigations"],
+        summary="Resolve (discharge) one open frontier item of the discovery cycle",
+    )
+    def discovery_cycle_resolve(slug: str, payload: dict = Body(default={}),
+                                ws: Path = Depends(get_workspace)) -> dict:
+        """Record a human decision/resolution for one gate item so it stops being
+        raised on the frontier (the panel's 'decide from the menu'). ``payload`` =
+        ``{kind, target, rationale}`` — a rationale is required. MUTATES
+        investigation.yaml and commits it (revertible). Backed by
+        ``lib.cycle_trace.resolve_frontier_item``."""
+        from vivarium_workbench.lib.cycle_trace import resolve_frontier_item
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        return resolve_frontier_item(ws, name, str(p.get("kind") or ""),
+                                     str(p.get("target") or ""),
+                                     str(p.get("rationale") or ""))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/steer",
+        tags=["Investigations"],
+        summary="Let the AI steer (decide) one open decision of the discovery cycle",
+    )
+    def discovery_cycle_steer(slug: str, payload: dict = Body(default={}),
+                              ws: Path = Depends(get_workspace)) -> dict:
+        """Drive ONE open decision via the engine's AI decider path (records an
+        ai-driven resolution, ``by='discovery-ai'``). Degrades with a clear message
+        when no decider is configured. ``payload`` = ``{target}``. Backed by
+        ``lib.cycle_trace.ai_steer_decision``."""
+        from vivarium_workbench.lib.cycle_trace import ai_steer_decision
+        name = _path_safety.plain_name(slug, "investigation")
+        return ai_steer_decision(ws, name, str((payload or {}).get("target") or ""))
+
     @app.get(
         "/api/investigation-report/{slug}",
         tags=["Investigations"],

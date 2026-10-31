@@ -84,6 +84,53 @@ def test_summary_exposes_gate_frontier_for_inspection():
     assert summary.get("frontier_size", 0) >= len(summary["frontier"]) or len(summary["frontier"]) == 60
 
 
+def test_frontier_rows_carry_study_links_and_action_flags():
+    trace = ct.build_cycle_trace(_WS, _SLUG)
+    for f in (trace.get("summary") or {}).get("frontier") or []:
+        assert {"resolvable", "decision", "studies"} <= set(f)
+        assert isinstance(f["studies"], list)
+        for s in f["studies"]:
+            assert set(s) >= {"slug", "label", "tab"}
+
+
+def test_resolve_frontier_item_discharges_it(tmp_path):
+    import shutil
+    ws = tmp_path / "ws"
+    shutil.copytree(_WS, ws)
+    front = (ct.build_cycle_trace(ws, _SLUG).get("summary") or {}).get("frontier") or []
+    resolvable = [f for f in front if f.get("resolvable") and f.get("target")]
+    if not resolvable:
+        pytest.skip("fixture has no resolvable frontier item")
+    it = resolvable[0]
+    out = ct.resolve_frontier_item(ws, _SLUG, it["kind"], it["target"], "resolved in test")
+    assert out["available"] is True and out["ok"] is True
+    assert out["resolution"]["kind"] == it["kind"]
+    # the discharged item is gone from the refreshed frontier
+    after = (out.get("after", {}).get("summary") or {}).get("frontier") or []
+    assert not any(f["kind"] == it["kind"] and f["target"] == it["target"] for f in after)
+
+
+def test_resolve_rejects_blank_rationale_and_bad_kind(tmp_path):
+    import shutil
+    ws = tmp_path / "ws"
+    shutil.copytree(_WS, ws)
+    assert ct.resolve_frontier_item(ws, _SLUG, "open_decision", "x", "   ")["ok"] is False
+    assert ct.resolve_frontier_item(ws, _SLUG, "not_a_real_kind", "x", "why")["ok"] is False
+
+
+def test_ai_steer_degrades_cleanly_without_a_decider(tmp_path, monkeypatch):
+    import shutil
+    ws = tmp_path / "ws"
+    shutil.copytree(_WS, ws)
+    monkeypatch.delenv("VIVA_DECIDER_CMD", raising=False)
+    decisions = [f for f in (ct.build_cycle_trace(ws, _SLUG).get("summary") or {}).get("frontier") or []
+                 if f.get("decision")]
+    if not decisions:
+        pytest.skip("fixture has no open decision to steer")
+    out = ct.ai_steer_decision(ws, _SLUG, decisions[0]["target"])
+    assert out["available"] is True and out["ok"] is False and out.get("needs_config") is True
+
+
 def test_advance_node_is_idle_not_executed():
     trace = ct.build_cycle_trace(_WS, _SLUG)
     adv = _step(trace, "advance")

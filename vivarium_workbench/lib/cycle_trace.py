@@ -420,6 +420,53 @@ _KIND_LABEL = {
     "open_question": "Open question — claim not yet assessed",
 }
 
+# The frontier-item kinds the engine lets a human/AI discharge with a resolution
+# (mirrors discover.RESOLUTION_KINDS; local copy avoids importing a private-ish name).
+_RESOLVABLE_KINDS = frozenset({
+    "unaddressed_criterion", "open_challenge", "narrative_gap", "open_decision",
+    "divergence", "open_question", "validation_finding", "stale_validation", "pending_gate",
+})
+
+# Which study tab a given frontier-item kind is best inspected in, so a jump-in link
+# lands the reader where the gate actually lives.
+_KIND_TAB = {
+    "open_decision": "conclusions", "open_challenge": "conclusions",
+    "divergence": "conclusions", "open_question": "conclusions",
+    "unaddressed_criterion": "audit", "pending_gate": "audit",
+    "validation_finding": "overview", "stale_validation": "overview",
+    "narrative_gap": "overview",
+}
+
+
+def _study_label(slug: str) -> str:
+    """Campaign studies are referred to as S1..Sn; show that short label on a link."""
+    import re
+    m = re.match(r"^s(\d+)[-_]", slug or "")
+    return ("S" + m.group(1)) if m else (slug or "")
+
+
+def _studies_for_item(kind: str, target: str, text: str, members: list) -> list:
+    """Best-effort: which member studies a frontier item points at, for a jump-in link.
+    Direct for ``claim:<slug>`` / study-slug targets; for decisions (whose target is the
+    question text) scan the text for member slugs and S-number tokens (the campaign
+    refers to members as S1..Sn). Returns ``[{slug, label, tab}]`` (possibly empty)."""
+    import re
+    found: list = []
+    t = str(target or "")
+    cand = t[len("claim:"):] if t.startswith("claim:") else t
+    if cand in members:
+        found.append(cand)
+    blob = (t + " " + str(text or "")).lower()
+    for m in members:
+        if m not in found and m.lower() in blob:
+            found.append(m)
+    for num in set(re.findall(r"\bs(\d+)\b", blob)):
+        for m in members:
+            if m not in found and re.match(rf"^s{num}[-_]", m.lower()):
+                found.append(m)
+    tab = _KIND_TAB.get(kind, "overview")
+    return [{"slug": s, "label": _study_label(s), "tab": tab} for s in found]
+
 
 def _cycle_summary(ctx: dict, M: _Modules) -> dict:
     """The engine's headline verdict + gate state for the panel.
@@ -452,19 +499,24 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
             items = M.de.frontier(cyc, inv_spec) if hasattr(M.de, "frontier") else []
         except Exception:
             items = []
+        members = list(ctx.get("studies") or {})
         for it in items[:60]:
             kind = it.get("kind")
             p = cons_by.get((it.get("op"), it.get("target"))) or {}
+            rationale = str(it.get("rationale") or "")
             front_rows.append({
                 "kind": kind,
                 "kind_label": _KIND_LABEL.get(kind, kind),
-                "target": str(it.get("target") or "")[:160],
+                "target": str(it.get("target") or "")[:200],
                 "op": it.get("op"),
                 "priority": it.get("priority"),
                 "blocking": kind in _BLOCKING_KINDS,
                 "consequence": p.get("consequence"),
                 "human": (p.get("consequence") or "") == "human-only",
-                "rationale": str(it.get("rationale") or "")[:280],
+                "rationale": rationale[:320],
+                "resolvable": kind in _RESOLVABLE_KINDS,
+                "decision": kind == "open_decision",
+                "studies": _studies_for_item(kind, it.get("target"), rationale, members),
             })
         return {
             "closed": clo.get("closed"),
@@ -721,6 +773,76 @@ def apply_cycle(ws_root, inv_slug: str, *, scope: str = "all") -> dict:
         ws_root, commit_dirs, f"discovery cycle: apply findings to {inv_slug}")
 
     return {"available": True, "inv_slug": inv_slug, "report": report,
+            "after": build_cycle_trace(ws_root, inv_slug)}
+
+
+def _inv_commit_dirs(ws_root: Path) -> list:
+    """The investigations dir, workspace-relative when possible, for a git commit."""
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    inv = WorkspacePaths.load(ws_root).investigations
+    try:
+        return [inv.relative_to(ws_root)]
+    except Exception:
+        return [inv]
+
+
+def resolve_frontier_item(ws_root, inv_slug: str, kind: str, target: str,
+                          rationale: str, *, by: str = "human") -> dict:
+    """Discharge ONE open frontier item by recording a resolution onto the REAL
+    investigation.yaml, then commit it (auditable + revertible) and return the
+    refreshed trace. This is how the panel 'takes a decision' from the menu: the
+    item stops being raised on the next cycle. Only the engine's resolvable kinds are
+    accepted and a rationale is required (a resolution documents *why*). Never raises —
+    a bad kind / missing rationale / write error comes back as ``ok: False``."""
+    if not engine_available():
+        return {"available": False}
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    M = _Modules()
+    ws_root = Path(ws_root)
+    if kind not in _RESOLVABLE_KINDS:
+        return {"available": True, "ok": False, "detail": f"{kind!r} is not a resolvable item"}
+    if not (target or "").strip():
+        return {"available": True, "ok": False, "detail": "target is required"}
+    if not (rationale or "").strip():
+        return {"available": True, "ok": False, "detail": "a rationale is required"}
+    inv_path = WorkspacePaths.load(ws_root).investigations / inv_slug / "investigation.yaml"
+    if not inv_path.is_file():
+        return {"available": True, "ok": False, "detail": f"no investigation.yaml for {inv_slug!r}"}
+    try:
+        rec = M.discover.record_resolution(inv_path, kind, target, rationale, by=by)
+    except Exception as e:
+        return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
+    commit = _git_commit(ws_root, _inv_commit_dirs(ws_root),
+                         f"discovery cycle: resolve {kind} in {inv_slug}")
+    return {"available": True, "ok": True, "resolution": rec, "commit": commit,
+            "after": build_cycle_trace(ws_root, inv_slug)}
+
+
+def ai_steer_decision(ws_root, inv_slug: str, target: str) -> dict:
+    """Let the AI drive one open decision via the engine's decider path
+    (``execute_action`` with a decider + ``autonomous=True``), which records an
+    ai-driven resolution (``by='discovery-ai'``) with the chosen option + rationale.
+    The engine stays LLM-free: the AI is an external agent command in
+    ``$VIVA_DECIDER_CMD``. When that is not configured this degrades with a clear
+    message rather than pretending to decide. Returns the action record + refreshed
+    trace. Never raises."""
+    if not engine_available():
+        return {"available": False}
+    M = _Modules()
+    ws_root = Path(ws_root)
+    if not (target or "").strip():
+        return {"available": True, "ok": False, "detail": "target is required"}
+    try:
+        rec = M.discover.execute_action(ws_root, inv_slug, autonomous=True,
+                                        decider=M.discover._env_decider, target=target)
+    except Exception as e:
+        return {"available": True, "ok": False, "needs_config": True,
+                "detail": ("AI steering needs an AI decider configured: set "
+                           "$VIVA_DECIDER_CMD to an agent that reads {target, detail} JSON "
+                           "and returns {choice, rationale} JSON. "
+                           f"({type(e).__name__}: {e})")}
+    ok = (rec or {}).get("status") == "executed"
+    return {"available": True, "ok": ok, "action": rec,
             "after": build_cycle_trace(ws_root, inv_slug)}
 
 
