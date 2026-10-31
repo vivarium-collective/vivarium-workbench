@@ -149,8 +149,12 @@ def _summarize(step_id: str, result: Any) -> str:
             return f"{result.get('n_studies', 0)} studies"
         if step_id == "run_cycle":
             arg = (result.get("argument") or {})
-            return (f"{len(arg.get('claims') or [])} claims · "
-                    f"{len(result.get('validations') or [])} validators")
+            out = (f"{len(arg.get('claims') or [])} claims · "
+                   f"{len(result.get('validations') or [])} validators")
+            vc = (result.get("cycle_state") or {}).get("viz_census") or result.get("viz_census")
+            if vc:
+                out += f" · {sum(int(v or 0) for v in vc.values())} figures"
+            return out
         if step_id == "reconcile_evidence":
             s = result.get("summary") or {}
             return " · ".join(f"{k}:{v}" for k, v in s.items()) or "no evidence"
@@ -193,7 +197,10 @@ def _run_one(step_id: str, ctx: dict, M: Any) -> Any:
                 "study_slugs": list(studies)}
 
     if step_id == "run_cycle":
-        cyc = M.discover.run_cycle(inv_spec, studies)
+        kw = {}
+        if ctx.get("viz_state") is not None:
+            kw = {"viz_state": ctx["viz_state"], "viz_catalog": []}
+        cyc = M.discover.run_cycle(inv_spec, studies, **kw)
         ctx["cyc"] = cyc
         return cyc
 
@@ -278,13 +285,27 @@ class _Modules:
     """Lazily-imported discovery_engine submodules (all on the import allowlist)."""
 
     def __init__(self) -> None:
+        import importlib
         from discovery_engine import discover
         from discovery_engine import discovery_engine as de
-        from discovery_engine import (
-            evidence_integrity, candidate_action, experiment_design,
-            model_architect, evaluation, transition_model,
-            study_seeding, study_refinement,
-        )
+        from discovery_engine import evidence_integrity
+
+        class _Missing:  # a not-yet-shipped engine module: its step errors, others run
+            def __init__(self, n): self._n = n
+            def __getattr__(self, a):
+                raise ImportError(f"discovery_engine.{self._n} unavailable")
+
+        def _opt(n):
+            try:
+                return importlib.import_module(f"discovery_engine.{n}")
+            except ImportError:
+                return _Missing(n)
+        candidate_action, experiment_design, model_architect, evaluation, \
+            transition_model, study_seeding, study_refinement = (
+                _opt(n) for n in ("candidate_action", "experiment_design",
+                                  "model_architect", "evaluation",
+                                  "transition_model", "study_seeding",
+                                  "study_refinement"))
         self.discover = discover
         self.de = de
         self.evidence_integrity = evidence_integrity
@@ -304,8 +325,13 @@ def _load_context(ws_root, inv_slug: str, M: _Modules) -> dict:
         runs_by_study = M.discover._load_runs_by_study(Path(ws_root), inv_slug, studies)
     except Exception:
         pass
+    viz_state = None
+    try:
+        viz_state = M.discover.viz_inventory(Path(ws_root), inv_slug, studies)
+    except Exception:
+        pass  # older engine / unreadable disk: cycle still runs without viz items
     return {"inv_slug": inv_slug, "inv_spec": inv_spec, "studies": studies,
-            "runs_by_study": runs_by_study}
+            "runs_by_study": runs_by_study, "viz_state": viz_state}
 
 
 def list_cycle_investigations(ws_root) -> list[dict]:
@@ -418,6 +444,10 @@ _KIND_LABEL = {
     "validation_finding": "Validator finding",
     "pending_gate": "Verification debt — verdict met, behavior not run",
     "open_question": "Open question — claim not yet assessed",
+    "viz_broken": "Figure declared but not renderable",
+    "viz_missing": "Figure not yet rendered",
+    "viz_stale": "Figure stale vs latest run",
+    "viz_proposed": "Visualization proposed",
 }
 
 # The frontier-item kinds the engine lets a human/AI discharge with a resolution
@@ -435,6 +465,8 @@ _KIND_TAB = {
     "unaddressed_criterion": "audit", "pending_gate": "audit",
     "validation_finding": "overview", "stale_validation": "overview",
     "narrative_gap": "overview",
+    "viz_broken": "visualizations", "viz_missing": "visualizations",
+    "viz_stale": "visualizations", "viz_proposed": "visualizations",
 }
 
 
@@ -707,7 +739,12 @@ def apply_cycle(ws_root, inv_slug: str, *, scope: str = "all") -> dict:
                 "error": f"no investigation.yaml for {inv_slug!r}", "report": {}}
 
     _, inv_spec, studies = M.discover.load_cycle_inputs(ws_root, inv_slug)
-    cyc = M.discover.run_cycle(inv_spec, studies)
+    try:
+        _vs = M.discover.viz_inventory(ws_root, inv_slug, studies)
+    except Exception:
+        _vs = None
+    cyc = (M.discover.run_cycle(inv_spec, studies, viz_state=_vs, viz_catalog=[])
+           if _vs is not None else M.discover.run_cycle(inv_spec, studies))
     runs_by: dict = {}
     try:
         runs_by = M.discover._load_runs_by_study(ws_root, inv_slug, studies)
