@@ -42,6 +42,13 @@ STEPS: list[dict[str, Any]] = [
      "desc": "The pure core: derives the argument, verdicts, narrative, gates and frontier "
              "from the authored specs + recorded run outcomes. Generates no prose, writes nothing.",
      "gate": "Authored values win over derived; a plain run never writes to disk."},
+    {"id": "propose_viz", "label": "Propose visualizations", "phase": "Core",
+     "module": "viz_proposals", "func": "propose_visualizations", "kind": "pure",
+     "depends_on": ["run_cycle"],
+     "desc": "Proposes figures for gates, discriminating observables and model disagreements "
+             "that no declared visualization covers (typed, content-addressed proposals).",
+     "gate": "Propose-only: nothing is declared or rendered until a human accepts, with a "
+             "rationale. Non-blocking."},
     {"id": "reconcile_evidence", "label": "Reconcile evidence", "phase": "Evidence",
      "module": "evidence_integrity", "func": "reconcile_evidence_state", "kind": "pure",
      "depends_on": ["load_inputs"],
@@ -140,7 +147,14 @@ def engine_available() -> bool:
         return False
 
 
-def _summarize(step_id: str, result: Any) -> str:
+def _n_figures(vc: Any) -> int:
+    """Figure count from a ``viz_census`` (scalar buckets only; ``proposals`` is a sub-dict)."""
+    if not isinstance(vc, dict):
+        return 0
+    return sum(int(v or 0) for v in vc.values() if isinstance(v, (int, float)))
+
+
+def _summarize(step_id: str, result: Any, viz_census: Any = None) -> str:
     """One-line human summary for a node badge, per step shape."""
     try:
         if result is None:
@@ -151,10 +165,13 @@ def _summarize(step_id: str, result: Any) -> str:
             arg = (result.get("argument") or {})
             out = (f"{len(arg.get('claims') or [])} claims · "
                    f"{len(result.get('validations') or [])} validators")
-            vc = (result.get("cycle_state") or {}).get("viz_census") or result.get("viz_census")
-            if vc:
-                out += f" · {sum(int(v or 0) for v in vc.values())} figures"
+            vc = viz_census or (result.get("cycle_state") or {}).get("viz_census")
+            n_fig = _n_figures(vc)
+            if n_fig:
+                out += f" · {n_fig} figures"
             return out
+        if step_id == "propose_viz":
+            return f"{len(result.get('proposals') or [])} proposed"
         if step_id == "reconcile_evidence":
             s = result.get("summary") or {}
             return " · ".join(f"{k}:{v}" for k, v in s.items()) or "no evidence"
@@ -199,10 +216,18 @@ def _run_one(step_id: str, ctx: dict, M: Any) -> Any:
     if step_id == "run_cycle":
         kw = {}
         if ctx.get("viz_state") is not None:
-            kw = {"viz_state": ctx["viz_state"], "viz_catalog": []}
+            kw = {"viz_state": ctx["viz_state"], "viz_catalog": ctx.get("viz_catalog") or []}
         cyc = M.discover.run_cycle(inv_spec, studies, **kw)
         ctx["cyc"] = cyc
+        try:  # viz_census lives in build_cycle_state, not the run_cycle bundle
+            ctx["viz_census"] = (M.discover.build_cycle_state(cyc, inv_spec) or {}).get("viz_census")
+        except Exception:
+            ctx["viz_census"] = None
         return cyc
+
+    if step_id == "propose_viz":
+        return {"proposals": list((ctx.get("cyc") or {}).get("viz_proposals") or []),
+                "viz_catalog_size": len(ctx.get("viz_catalog") or [])}
 
     if step_id == "reconcile_evidence":
         ev = M.evidence_integrity.reconcile_evidence_state(
@@ -318,6 +343,46 @@ class _Modules:
         self.study_refinement = study_refinement
 
 
+_CATALOG_CACHE: dict = {}
+_CATALOG_TTL_S = 120.0
+_CATALOG_TIMEOUT_S = 6.0
+
+
+def _viz_catalog(ws_root) -> list:
+    """Cached (TTL) wrapper: the env worker can be slow or absent, and the trace is
+    rebuilt after every panel action, so neither a catalog nor a failure is re-fetched
+    on each call."""
+    key = str(ws_root)
+    hit = _CATALOG_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < _CATALOG_TTL_S:
+        return hit[1]
+    cat = _fetch_viz_catalog(ws_root)
+    _CATALOG_CACHE[key] = (time.monotonic(), cat)
+    return cat
+
+
+def _fetch_viz_catalog(ws_root) -> list:
+    """The workspace's registered visualization classes as the engine's ``viz_catalog``:
+    ``[{address, name, inputs}]`` (``local:<Class>`` + declared input ports), from the env
+    worker's ``viz_classes`` + ``viz_class_inputs``. Any failure (no worker, no workspace
+    package) degrades to ``[]`` -> every proposal is ``needs_author``."""
+    try:
+        from vivarium_workbench.lib.env_worker_pool import get_pool
+        pool = get_pool()
+        classes = (pool.call(Path(ws_root), "viz_classes", timeout=_CATALOG_TIMEOUT_S) or {}).get("classes") or []
+        inputs = (pool.call(Path(ws_root), "viz_class_inputs", timeout=_CATALOG_TIMEOUT_S) or {}).get("inputs") or {}
+    except Exception:
+        return []
+    out = []
+    for c in classes:
+        if not isinstance(c, dict) or not c.get("address"):
+            continue
+        name = c.get("name") or str(c["address"]).split(":", 1)[-1]
+        out.append({"address": c["address"], "name": name,
+                    "inputs": inputs.get(name) or {}})
+    return out
+
+
 def _load_context(ws_root, inv_slug: str, M: _Modules) -> dict:
     _, inv_spec, studies = M.discover.load_cycle_inputs(ws_root, inv_slug)
     runs_by_study: dict = {}
@@ -331,7 +396,8 @@ def _load_context(ws_root, inv_slug: str, M: _Modules) -> dict:
     except Exception:
         pass  # older engine / unreadable disk: cycle still runs without viz items
     return {"inv_slug": inv_slug, "inv_spec": inv_spec, "studies": studies,
-            "runs_by_study": runs_by_study, "viz_state": viz_state}
+            "runs_by_study": runs_by_study, "viz_state": viz_state,
+            "viz_catalog": _viz_catalog(ws_root) if viz_state is not None else []}
 
 
 def list_cycle_investigations(ws_root) -> list[dict]:
@@ -415,7 +481,7 @@ def build_cycle_trace(ws_root, inv_slug: str, *, only: list[str] | None = None) 
             status, error = "error", f"{type(e).__name__}: {e}"
         dt = round((time.perf_counter() - t0) * 1000, 2)
         node = {**meta, "status": status, "duration_ms": dt,
-                "summary": _summarize(step_id, result) if status != "error" else error}
+                "summary": _summarize(step_id, result, ctx.get("viz_census")) if status != "error" else error}
         if want is None or step_id in want:
             node["result"] = result
             node["error"] = error
@@ -455,6 +521,8 @@ _KIND_LABEL = {
 _RESOLVABLE_KINDS = frozenset({
     "unaddressed_criterion", "open_challenge", "narrative_gap", "open_decision",
     "divergence", "open_question", "validation_finding", "stale_validation", "pending_gate",
+    # viz kinds are actionable in the panel (Build / Apply-fix / Accept-Reject)
+    "viz_broken", "viz_missing", "viz_stale", "viz_proposed",
 })
 
 # Which study tab a given frontier-item kind is best inspected in, so a jump-in link
@@ -532,6 +600,10 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
         except Exception:
             items = []
         members = list(ctx.get("studies") or {})
+        props_by = {p.get("id"): p for p in (cyc.get("viz_proposals") or []) if isinstance(p, dict)}
+        for p in (inv_spec.get("viz_proposals") or []):
+            if isinstance(p, dict):
+                props_by.setdefault(p.get("id"), p)
         # viz records -> derivable_fix (an address inferred from a matching file on disk)
         fix_by: dict = {}
         for _r in (cyc.get("validations") or []):
@@ -567,6 +639,12 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
                 "buildable": kind in ("viz_missing", "viz_stale"),
                 "declarable": kind == "viz_broken",
                 "derivable_fix": fix_by.get(it.get("target")) if kind == "viz_broken" else None,
+                "acceptable": kind == "viz_proposed",
+                "proposal_id": it.get("target") if kind == "viz_proposed" else None,
+                "needs_author": (bool(((props_by.get(it.get("target")) or {}).get("suggested") or {})
+                                      .get("needs_author", True)) if kind == "viz_proposed" else False),
+                "suggested": ((props_by.get(it.get("target")) or {}).get("suggested")
+                              if kind == "viz_proposed" else None),
                 "studies": _studies_for_item(kind, it.get("target"), rationale, members),
                 "context": (dn_ctx.get(it.get("target"), "")[:500] if kind == "open_decision" else ""),
             })
@@ -754,7 +832,7 @@ def apply_cycle(ws_root, inv_slug: str, *, scope: str = "all") -> dict:
         _vs = M.discover.viz_inventory(ws_root, inv_slug, studies)
     except Exception:
         _vs = None
-    cyc = (M.discover.run_cycle(inv_spec, studies, viz_state=_vs, viz_catalog=[])
+    cyc = (M.discover.run_cycle(inv_spec, studies, viz_state=_vs, viz_catalog=_viz_catalog(ws_root))
            if _vs is not None else M.discover.run_cycle(inv_spec, studies))
     runs_by: dict = {}
     try:
@@ -923,6 +1001,66 @@ def declare_viz_fix(ws_root, inv_slug: str, target: str, declare: dict, rational
                          f"discovery cycle: declare {target} in {inv_slug}")
     return {"available": True, "ok": True, "resolution": rec, "commit": commit,
             "after": build_cycle_trace(ws_root, inv_slug)}
+
+
+def _ensure_viz_proposal_persisted(ws_root: Path, inv_slug: str, vp: str, M: Any) -> None:
+    """Proposals are derived (pure) until a cycle persists them; the engine's accept/reject
+    act on the ledger. If ``vp`` is not on disk yet, persist the cycle exactly as
+    ``discover cycle`` would (engine ``persist_cycle``; the ledger is content-addressed)."""
+    inv_path, inv_spec, studies = M.discover.load_cycle_inputs(ws_root, inv_slug)
+    if any(isinstance(p, dict) and p.get("id") == vp for p in inv_spec.get("viz_proposals") or []):
+        return
+    vs = M.discover.viz_inventory(ws_root, inv_slug, studies)
+    cyc = M.discover.run_cycle(inv_spec, studies, viz_state=vs, viz_catalog=_viz_catalog(ws_root))
+    M.discover.persist_cycle(inv_path, inv_spec, cyc, studies=studies, viz_state=vs)
+
+
+def _decide_viz_proposal(ws_root, inv_slug: str, proposal: str, rationale: str,
+                         verb: str, **kw) -> dict:
+    if not engine_available():
+        return {"available": False}
+    M = _Modules()
+    ws_root = Path(ws_root)
+    if not str(proposal or "").startswith("vp:"):
+        return {"available": True, "ok": False, "detail": "proposal must be a vp:<study>:<hash> id"}
+    if not (rationale or "").strip():
+        return {"available": True, "ok": False, "detail": "a rationale is required"}
+    try:
+        _ensure_viz_proposal_persisted(ws_root, inv_slug, proposal, M)
+        rec = getattr(M.discover, f"{verb}_viz_proposal")(
+            ws_root, inv_slug, proposal, rationale=rationale, **kw)
+    except Exception as e:
+        return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
+    commit = _git_commit(ws_root, _viz_commit_dirs(ws_root),
+                         f"discovery cycle: {verb} {proposal} in {inv_slug}")
+    return {"available": True, "ok": True, "proposal": rec, "commit": commit,
+            "after": build_cycle_trace(ws_root, inv_slug)}
+
+
+def _viz_commit_dirs(ws_root: Path) -> list:
+    """Accepting edits a study.yaml as well as investigation.yaml."""
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    dirs = list(_inv_commit_dirs(ws_root))
+    try:
+        st = WorkspacePaths.load(ws_root).studies
+        dirs.append(st.relative_to(ws_root) if st.is_relative_to(ws_root) else st)
+    except Exception:
+        pass
+    return dirs
+
+
+def accept_viz_proposal(ws_root, inv_slug: str, proposal: str, rationale: str,
+                        address: str | None = None) -> dict:
+    """Accept ONE ``vp:`` proposal (engine ``accept_viz_proposal``): declares a
+    ``visualizations[]`` entry (origin viz_proposal) -> next cycle it is ``viz_missing``.
+    Rationale required (and an address for a ``needs_author`` proposal). Commits."""
+    return _decide_viz_proposal(ws_root, inv_slug, proposal, rationale, "accept",
+                                address=(address or "").strip() or None)
+
+
+def reject_viz_proposal(ws_root, inv_slug: str, proposal: str, rationale: str) -> dict:
+    """Terminally reject ONE ``vp:`` proposal (engine ``reject_viz_proposal``). Commits."""
+    return _decide_viz_proposal(ws_root, inv_slug, proposal, rationale, "reject")
 
 
 def ai_steer_decision(ws_root, inv_slug: str, target: str) -> dict:

@@ -1245,6 +1245,44 @@ def create_app() -> FastAPI:
                                str(p.get("rationale") or ""))
 
     @app.post(
+        "/api/discovery-cycle/{slug}/accept-viz-proposal",
+        tags=["Investigations"],
+        summary="Accept a proposed visualization (declares it; rationale required)",
+    )
+    def discovery_cycle_accept_viz(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Accept button. ``payload`` = ``{proposal, rationale, address?}``;
+        a rationale is required (4xx otherwise), and an address for a needs_author
+        proposal. MUTATES study.yaml + investigation.yaml and commits (revertible).
+        Backed by ``lib.cycle_trace.accept_viz_proposal``."""
+        from vivarium_workbench.lib.cycle_trace import accept_viz_proposal
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = accept_viz_proposal(ws, name, str(p.get("proposal") or ""),
+                                  str(p.get("rationale") or ""), p.get("address"))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/reject-viz-proposal",
+        tags=["Investigations"],
+        summary="Reject a proposed visualization (terminal; rationale required)",
+    )
+    def discovery_cycle_reject_viz(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Reject button. ``payload`` = ``{proposal, rationale}``; a rationale
+        is required (4xx otherwise). Backed by ``lib.cycle_trace.reject_viz_proposal``."""
+        from vivarium_workbench.lib.cycle_trace import reject_viz_proposal
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = reject_viz_proposal(ws, name, str(p.get("proposal") or ""),
+                                  str(p.get("rationale") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
         "/api/discovery-cycle/{slug}/steer",
         tags=["Investigations"],
         summary="Let the AI steer (decide) one open decision of the discovery cycle",

@@ -385,7 +385,7 @@
         esc(it.target) + '" data-kind="' + esc(it.kind) + '">Decide…</button>');
       acts.push('<button class="dcyc-btn dcyc-btn-sm" data-steer="' + esc(it.target) +
         '" title="Steer this decision with the AI assistant (opens the chat)">AI steer</button>');
-    } else if (it.resolvable) {
+    } else if (it.resolvable && !/^viz_/.test(it.kind || "")) {
       acts.push('<button class="dcyc-btn dcyc-btn-sm" data-decide="' + esc(it.target) +
         '" data-kind="' + esc(it.kind) + '">Resolve…</button>');
     }
@@ -396,9 +396,16 @@
       acts.push('<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-fix="' +
         esc(it.target) + '" title="Declare an address / render recipe for this figure">Apply fix ▸</button>');
     }
+    if (it.acceptable) {
+      acts.push('<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-vp-accept="' +
+        esc(it.target) + '" title="Declare this visualization (rationale required)">Accept ▸</button>');
+      acts.push('<button class="dcyc-btn dcyc-btn-sm" data-vp-reject="' +
+        esc(it.target) + '" title="Reject this proposal (terminal; rationale required)">Reject ▸</button>');
+    }
     var desc = it.rationale || it.target || "";
     var form = (S.decideFor === it.target) ? decideFormHtml(it)
-      : ((S.fixFor === it.target && it.declarable) ? fixFormHtml(it) : "");
+      : ((S.fixFor === it.target && it.declarable) ? fixFormHtml(it)
+      : ((S.vpFor && S.vpFor.id === it.target && it.acceptable) ? vpFormHtml(it) : ""));
     var actionRow = (links || acts.length)
       ? ('<div class="dcyc-factions">' + links + acts.join("") + "</div>") : "";
     return '<div class="dcyc-fitem' + (it.blocking ? " blk" : "") + '">' +
@@ -423,6 +430,46 @@
       '<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-fix-save="' + esc(it.target) + '">Apply</button>' +
       '<button class="dcyc-btn dcyc-btn-sm" data-fix-cancel="1">Cancel</button>' +
       "</div></div>";
+  }
+
+  function vpFormHtml(it) {
+    var accept = S.vpFor.mode === "accept";
+    var sug = it.suggested || {};
+    var addr = accept
+      ? ('<input class="dcyc-fix-addr" id="dcyc-vp-addr" placeholder="' +
+         (it.needs_author ? "address (required — no catalog class matches), e.g. local:MyViz"
+                          : "address (optional — defaults to the suggested one)") +
+         '" value="' + esc(sug.address || "") + '" style="width:100%;margin-bottom:4px">')
+      : "";
+    return '<div class="dcyc-decide">' + addr +
+      '<textarea class="dcyc-decide-ta" id="dcyc-vp-why" placeholder="' +
+      (accept ? "Why accept this visualization (required)" : "Why reject this proposal (required)") +
+      '"></textarea><div class="dcyc-row-actions">' +
+      '<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-vp-save="' + esc(it.target) + '">' +
+      (accept ? "Accept" : "Reject") + '</button>' +
+      '<button class="dcyc-btn dcyc-btn-sm" data-vp-cancel="1">Cancel</button></div></div>';
+  }
+
+  function submitVizProposal(id) {
+    var mode = S.vpFor && S.vpFor.mode;
+    var why = el("dcyc-vp-why"), addr = el("dcyc-vp-addr");
+    var rationale = why ? why.value.trim() : "";
+    if (!rationale) { setStatus("Enter a rationale."); if (why) why.focus(); return; }
+    if (!S.slug || S.busy) return;
+    var body = { proposal: id, rationale: rationale };
+    if (mode === "accept" && addr && addr.value.trim()) body.address = addr.value.trim();
+    S.busy = true; setStatus((mode === "accept" ? "Accepting " : "Rejecting ") + id + "…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/" + mode + "-viz-proposal", body)
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (!j.ok) { setStatus(j.detail || "Could not record the decision."); return; }
+        S.vpFor = null;
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
+        var c = j.commit || {};
+        setStatus((mode === "accept" ? "Accepted" : "Rejected") + (c.committed ? (" · committed " + c.sha) : "") + ".");
+        refreshViews();
+      }).catch(function () { setStatus("Request failed."); })
+      .finally(function () { S.busy = false; });
   }
 
   function buildViz(target) {
@@ -649,6 +696,19 @@
         var a = el("dcyc-fix-why"); if (a) a.focus();
       });
     });
+    ["accept", "reject"].forEach(function (mode) {
+      Array.prototype.forEach.call(g.querySelectorAll("[data-vp-" + mode + "]"), function (b) {
+        b.addEventListener("click", function (ev) {
+          ev.stopPropagation(); S.vpFor = { id: b.getAttribute("data-vp-" + mode), mode: mode };
+          S.fixFor = null; S.decideFor = null; renderGraph();
+          var a = el("dcyc-vp-why"); if (a) a.focus();
+        });
+      });
+    });
+    var vcl = g.querySelector("[data-vp-cancel]");
+    if (vcl) vcl.addEventListener("click", function (ev) { ev.stopPropagation(); S.vpFor = null; renderGraph(); });
+    var vsv = g.querySelector("[data-vp-save]");
+    if (vsv) vsv.addEventListener("click", function (ev) { ev.stopPropagation(); submitVizProposal(vsv.getAttribute("data-vp-save")); });
     var fcl = g.querySelector("[data-fix-cancel]");
     if (fcl) fcl.addEventListener("click", function (ev) { ev.stopPropagation(); S.fixFor = null; renderGraph(); });
     var fsv = g.querySelector("[data-fix-save]");
