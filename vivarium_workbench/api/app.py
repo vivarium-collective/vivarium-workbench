@@ -1213,6 +1213,38 @@ def create_app() -> FastAPI:
                                      str(p.get("rationale") or ""))
 
     @app.post(
+        "/api/discovery-cycle/{slug}/build-viz",
+        tags=["Investigations"],
+        summary="Render one declared figure (fig:<study>/<name>) of the discovery cycle",
+    )
+    def discovery_cycle_build_viz(slug: str, payload: dict = Body(default={}),
+                                  ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Build button: renders ONE figure in-process via the engine's
+        render branch (``render_hook=viz_build.render_one``). ``payload`` = ``{target}``.
+        Backed by ``lib.cycle_trace.build_viz``."""
+        from vivarium_workbench.lib.cycle_trace import build_viz
+        name = _path_safety.plain_name(slug, "investigation")
+        return build_viz(ws, name, str((payload or {}).get("target") or ""))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/declare-viz",
+        tags=["Investigations"],
+        summary="Apply a viz_broken fix: declare address/render on a broken figure entry",
+    )
+    def discovery_cycle_declare_viz(slug: str, payload: dict = Body(default={}),
+                                    ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Apply-fix button (``discover viz --declare``). ``payload`` =
+        ``{target, declare:{address|render|requires}, rationale}``; a rationale is
+        required. MUTATES study.yaml + investigation.yaml and commits (revertible).
+        Backed by ``lib.cycle_trace.declare_viz_fix``."""
+        from vivarium_workbench.lib.cycle_trace import declare_viz_fix
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        return declare_viz_fix(ws, name, str(p.get("target") or ""),
+                               p.get("declare") if isinstance(p.get("declare"), dict) else {},
+                               str(p.get("rationale") or ""))
+
+    @app.post(
         "/api/discovery-cycle/{slug}/steer",
         tags=["Investigations"],
         summary="Let the AI steer (decide) one open decision of the discovery cycle",

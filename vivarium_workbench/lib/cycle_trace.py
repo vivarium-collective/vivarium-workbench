@@ -532,6 +532,13 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
         except Exception:
             items = []
         members = list(ctx.get("studies") or {})
+        # viz records -> derivable_fix (an address inferred from a matching file on disk)
+        fix_by: dict = {}
+        for _r in (cyc.get("validations") or []):
+            if isinstance(_r, dict) and _r.get("type") == "visual" and _r.get("scope") == "figure":
+                for _e in (_r.get("evidence") or []):
+                    if isinstance(_e, dict) and _e.get("derivable_fix"):
+                        fix_by[_r.get("target")] = _e["derivable_fix"]
         # authored context for each open decision (executive.decisions_needed),
         # keyed by the question text (== the frontier item's target). This is the
         # reasoning behind the decision — the grounding the AI steer prompt needs.
@@ -557,6 +564,9 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
                 "rationale": rationale[:320],
                 "resolvable": kind in _RESOLVABLE_KINDS,
                 "decision": kind == "open_decision",
+                "buildable": kind in ("viz_missing", "viz_stale"),
+                "declarable": kind == "viz_broken",
+                "derivable_fix": fix_by.get(it.get("target")) if kind == "viz_broken" else None,
                 "studies": _studies_for_item(kind, it.get("target"), rationale, members),
                 "context": (dn_ctx.get(it.get("target"), "")[:500] if kind == "open_decision" else ""),
             })
@@ -644,7 +654,8 @@ def sandbox_advance(ws_root, inv_slug: str, *, max_runs: int = 4) -> dict:
         adv_error = None
         try:
             adv = M.discover.advance_cycle(sandbox, inv_slug, autonomous=True,
-                                           max_runs=max_runs) or {}
+                                           max_runs=max_runs,
+                                           render_hook=_render_hook_for(sandbox)) or {}
         except Exception as e:
             adv_error = f"{type(e).__name__}: {e}"
         after = build_cycle_trace(sandbox, inv_slug)
@@ -861,6 +872,55 @@ def resolve_frontier_item(ws_root, inv_slug: str, kind: str, target: str,
         return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
     commit = _git_commit(ws_root, _inv_commit_dirs(ws_root),
                          f"discovery cycle: resolve {kind} in {inv_slug}")
+    return {"available": True, "ok": True, "resolution": rec, "commit": commit,
+            "after": build_cycle_trace(ws_root, inv_slug)}
+
+
+def _render_hook_for(root):
+    """Engine ``render_hook`` that renders one figure in-process via ``render_one``."""
+    from vivarium_workbench.lib.viz_build import render_one
+
+    def hook(study_dir, entry, latest):
+        return render_one(root, Path(study_dir).name, entry["name"])
+    return hook
+
+
+def build_viz(ws_root, inv_slug: str, target: str) -> dict:
+    """Render ONE ``fig:<study>/<name>`` figure through the engine's render branch
+    (``execute_action(... render_hook=render_one)``), so the engine's guards apply
+    (autonomous-only, resolvable-only, never launders a stale figure as fresh). Never
+    raises; returns the action record + refreshed trace."""
+    if not engine_available():
+        return {"available": False}
+    M = _Modules()
+    ws_root = Path(ws_root)
+    if not str(target or "").startswith("fig:") or "/" not in str(target):
+        return {"available": True, "ok": False, "detail": "target must be fig:<study>/<name>"}
+    try:
+        rec = M.discover.execute_action(ws_root, inv_slug, autonomous=True, target=target,
+                                        render_hook=_render_hook_for(ws_root))
+    except Exception as e:
+        return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
+    out = (rec or {}).get("outcome") or {}
+    ok = (rec or {}).get("status") == "executed"
+    return {"available": True, "ok": ok, "action": rec,
+            "detail": out.get("detail") or (rec or {}).get("status"),
+            "after": build_cycle_trace(ws_root, inv_slug)}
+
+
+def declare_viz_fix(ws_root, inv_slug: str, target: str, declare: dict, rationale: str) -> dict:
+    """Apply a ``viz_broken`` fix (``discover viz --declare``): set address/render/requires
+    on the broken entry with a required rationale, then commit. Never raises."""
+    if not engine_available():
+        return {"available": False}
+    M = _Modules()
+    ws_root = Path(ws_root)
+    try:
+        rec = M.discover.declare_viz(ws_root, inv_slug, target, dict(declare or {}), rationale)
+    except Exception as e:
+        return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
+    commit = _git_commit(ws_root, _inv_commit_dirs(ws_root),
+                         f"discovery cycle: declare {target} in {inv_slug}")
     return {"available": True, "ok": True, "resolution": rec, "commit": commit,
             "after": build_cycle_trace(ws_root, inv_slug)}
 

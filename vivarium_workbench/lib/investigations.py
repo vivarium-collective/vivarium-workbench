@@ -2105,7 +2105,8 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                           core_registry: "dict | None" = None,
                           inputs_by_class: "dict | None" = None,
                           build_and_run=None,
-                          skipped: "list | None" = None) -> list[Path]:
+                          skipped: "list | None" = None,
+                          latest_run_id: "str | None" = None) -> list[Path]:
     """Render every viz in ``spec.visualizations`` against the investigation's runs.db.
 
     For each viz:
@@ -2126,6 +2127,8 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
         build_and_run: callable(doc, core_registry) -> str that runs the composite
             and returns an HTML string.  Must be provided when there are
             visualizations to render; raises ValueError otherwise.
+        latest_run_id: the owning study's latest run id, stamped as the figure's
+            ``source_run_id``. When omitted, falls back to the last runs.db row.
     """
     inv_dir = Path(inv_dir)
     viz_dir = inv_dir / "viz"
@@ -2147,6 +2150,8 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
     for _runs in (gathered.get("by_sim") or {}).values():
         for _r in _runs:
             latest_run = _r.get("run_id") or latest_run
+    if latest_run_id:
+        latest_run = latest_run_id
     for viz_spec in visualizations:
         vname = viz_spec.get("name")
         if not vname:

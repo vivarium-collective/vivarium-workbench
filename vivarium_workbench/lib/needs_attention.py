@@ -729,6 +729,12 @@ def scan_investigation(
             except Exception:  # noqa: BLE001
                 pass
 
+    # Signal 8 — figures the cycle's frontier calls broken/missing/stale (same records).
+    try:
+        items.extend(_viz_figure_items(ws_root, inv_slug))
+    except Exception:  # noqa: BLE001
+        pass
+
     items.sort(key=lambda i: (
         _SEVERITY_RANK.get(i["severity"], 99), i["kind"], i["ref"]
     ))
@@ -868,8 +874,61 @@ def _uncalibrated_debts(spec: dict) -> list[dict]:
     return out
 
 
-def _stale_viz_debts(spec: dict) -> list[dict]:
+def viz_figure_records(ws_root, inv_slug: str, only_study: str | None = None) -> list[dict]:
+    """The cycle's ``visual x figure`` validation records for an investigation (the very
+    records the frontier's ``viz_*`` items are projected from), so this scan and the
+    frontier cannot disagree. Defensive: ``[]`` when the engine / viz inventory is
+    unavailable."""
+    try:
+        from types import SimpleNamespace
+        from discovery_engine import discover, validation
+        _, _inv, studies = discover.load_cycle_inputs(ws_root, inv_slug)
+        if only_study is not None:
+            studies = {k: v for k, v in studies.items() if k == only_study}
+        vstate = discover.viz_inventory(Path(ws_root), inv_slug, studies)
+        return validation._figure_freshness(SimpleNamespace(viz_state=vstate, studies=studies))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+_VIZ_CRIT_KIND = {"broken_stub": "viz_broken", "unrendered": "viz_missing", "stale": "viz_stale"}
+
+
+def _viz_figure_items(ws_root, inv_slug: str) -> list[dict]:
     out: list[dict] = []
+    for rec in viz_figure_records(ws_root, inv_slug):
+        crit = (rec.get("criteria") or [None])[0]
+        kind = _VIZ_CRIT_KIND.get(crit)
+        if kind is None:
+            continue
+        tgt = str(rec.get("target") or "")
+        study = tgt[4:].partition("/")[0] if tgt.startswith("fig:") else None
+        out.append(_item(
+            kind, "medium" if kind == "viz_broken" else "low", study, tgt,
+            {"viz_broken": "Figure declared but not renderable",
+             "viz_missing": "Figure not yet rendered",
+             "viz_stale": "Figure stale vs latest run"}[kind],
+            "; ".join(str(f) for f in rec.get("findings") or []),
+            "; ".join(str(f) for f in rec.get("recommendations") or [] if f)))
+    return out
+
+
+def _stale_viz_debts(spec: dict, viz_records: list[dict] | None = None) -> list[dict]:
+    """Stale/unrendered/broken figures as epistemic debts. When the cycle's visual
+    records are supplied (``viz_figure_records``) they are the source of truth; the
+    legacy ``freshness``/``stale`` spec markers remain only as a fallback."""
+    out: list[dict] = []
+    if viz_records is not None:
+        for rec in viz_records:
+            crit = (rec.get("criteria") or [None])[0]
+            if crit not in _VIZ_CRIT_KIND:
+                continue
+            ref = str(rec.get("target") or "visualization").rpartition("/")[2]
+            out.append(_debt(
+                "viz-stale", ref,
+                "; ".join(str(f) for f in rec.get("findings") or []) or f"Visualization '{ref}' is {crit}.",
+                "low"))
+        return out
     for v in (spec.get("visualizations") or []):
         if not isinstance(v, dict):
             continue
@@ -883,7 +942,7 @@ def _stale_viz_debts(spec: dict) -> list[dict]:
     return out
 
 
-def open_epistemic_debts(spec: dict) -> list[dict]:
+def open_epistemic_debts(spec: dict, viz_records: list[dict] | None = None) -> list[dict]:
     """Harvest a study's OPEN epistemic debts (item 15 — negative knowledge).
 
     Returns a severity-sorted list of ``{"kind", "ref", "note", "severity"}``
@@ -936,7 +995,7 @@ def open_epistemic_debts(spec: dict) -> list[dict]:
     debts.extend(_uncalibrated_debts(spec))
 
     # 5. stale visualizations (viz-freshness markers).
-    debts.extend(_stale_viz_debts(spec))
+    debts.extend(_stale_viz_debts(spec, viz_records))
 
     # 6. remaining uncertainties → unexplored regions.
     di = spec.get("discovery_implications") or {}

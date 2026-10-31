@@ -389,8 +389,16 @@
       acts.push('<button class="dcyc-btn dcyc-btn-sm" data-decide="' + esc(it.target) +
         '" data-kind="' + esc(it.kind) + '">Resolve…</button>');
     }
+    if (it.buildable) {
+      acts.push('<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-build="' +
+        esc(it.target) + '" title="Render this figure now (in-process)">Build ▸</button>');
+    } else if (it.declarable) {
+      acts.push('<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-fix="' +
+        esc(it.target) + '" title="Declare an address / render recipe for this figure">Apply fix ▸</button>');
+    }
     var desc = it.rationale || it.target || "";
-    var form = (S.decideFor === it.target) ? decideFormHtml(it) : "";
+    var form = (S.decideFor === it.target) ? decideFormHtml(it)
+      : ((S.fixFor === it.target && it.declarable) ? fixFormHtml(it) : "");
     var actionRow = (links || acts.length)
       ? ('<div class="dcyc-factions">' + links + acts.join("") + "</div>") : "";
     return '<div class="dcyc-fitem' + (it.blocking ? " blk" : "") + '">' +
@@ -401,6 +409,57 @@
       '<div class="dcyc-fchips">' + chips.join("") + "</div>" +
       actionRow + form +
       "</div></div>";
+  }
+
+  function fixFormHtml(it) {
+    var fx = it.derivable_fix || {};
+    return '<div class="dcyc-decide">' +
+      '<input class="dcyc-fix-addr" id="dcyc-fix-addr" placeholder="address, e.g. html:viz/name.html" value="' +
+      esc(fx.address || "") + '" style="width:100%;margin-bottom:4px">' +
+      '<input class="dcyc-fix-render" id="dcyc-fix-render" placeholder="render command (optional), e.g. python viz.py {chart}" ' +
+      'value="' + esc(fx.render || "") + '" style="width:100%;margin-bottom:4px">' +
+      '<textarea class="dcyc-decide-ta" id="dcyc-fix-why" placeholder="Why this fix (required)"></textarea>' +
+      '<div class="dcyc-row-actions">' +
+      '<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-fix-save="' + esc(it.target) + '">Apply</button>' +
+      '<button class="dcyc-btn dcyc-btn-sm" data-fix-cancel="1">Cancel</button>' +
+      "</div></div>";
+  }
+
+  function buildViz(target) {
+    if (!S.slug || S.busy) return;
+    S.busy = true; setStatus("Rendering " + target + "…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/build-viz", { target: target })
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
+        setStatus(j.ok ? ("Rendered " + target + ".") : ("Build failed: " + (j.detail || "unknown")));
+        if (j.ok) refreshViews();
+      }).catch(function () { setStatus("Build request failed."); })
+      .finally(function () { S.busy = false; });
+  }
+
+  function submitFix(target) {
+    var why = el("dcyc-fix-why"), addr = el("dcyc-fix-addr"), rend = el("dcyc-fix-render");
+    var rationale = why ? why.value.trim() : "";
+    var declare = {};
+    if (addr && addr.value.trim()) declare.address = addr.value.trim();
+    if (rend && rend.value.trim()) declare.render = rend.value.trim();
+    if (!declare.address && !declare.render) { setStatus("Enter an address or a render command."); return; }
+    if (!rationale) { setStatus("Enter a rationale for the fix."); if (why) why.focus(); return; }
+    if (!S.slug || S.busy) return;
+    S.busy = true; setStatus("Applying fix…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/declare-viz",
+      { target: target, declare: declare, rationale: rationale })
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (!j.ok) { setStatus(j.detail || "Could not apply the fix."); return; }
+        S.fixFor = null;
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
+        var c = j.commit || {};
+        setStatus("Fix applied" + (c.committed ? (" · committed " + c.sha) : "") + ".");
+        refreshViews();
+      }).catch(function () { setStatus("Declare request failed."); })
+      .finally(function () { S.busy = false; });
   }
 
   function decideFormHtml(it) {
@@ -581,6 +640,19 @@
         var ta = el("dcyc-decide-ta"); if (ta) ta.focus();
       });
     });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-build]"), function (b) {
+      b.addEventListener("click", function (ev) { ev.stopPropagation(); buildViz(b.getAttribute("data-build")); });
+    });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-fix]"), function (b) {
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation(); S.fixFor = b.getAttribute("data-fix"); S.decideFor = null; renderGraph();
+        var a = el("dcyc-fix-why"); if (a) a.focus();
+      });
+    });
+    var fcl = g.querySelector("[data-fix-cancel]");
+    if (fcl) fcl.addEventListener("click", function (ev) { ev.stopPropagation(); S.fixFor = null; renderGraph(); });
+    var fsv = g.querySelector("[data-fix-save]");
+    if (fsv) fsv.addEventListener("click", function (ev) { ev.stopPropagation(); submitFix(fsv.getAttribute("data-fix-save")); });
     var dcl = g.querySelector("[data-decide-cancel]");
     if (dcl) dcl.addEventListener("click", function (ev) { ev.stopPropagation(); S.decideFor = null; renderGraph(); });
     var dsv = g.querySelector("[data-decide-save]");
