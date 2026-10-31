@@ -153,7 +153,7 @@
       '    <div class="dcyc-current" id="dcyc-current"></div>' +
       '    <div class="dcyc-controls">' +
       '      <select id="dcyc-inv"><option value="">Loading…</option></select>' +
-      '      <button id="dcyc-switch" class="dcyc-btn" disabled title="Show this investigation in the main window (its investigation graph) — switch freely between the graph and the cycle">Switch to investigation ▸</button>' +
+      '      <button id="dcyc-switch" class="dcyc-btn" disabled title="Show this investigation in the main window (its investigation graph) — switch freely between the graph and the cycle">Switch ▸</button>' +
       '      <button id="dcyc-run" class="dcyc-btn dcyc-btn-primary" disabled>Run</button>' +
       '      <button id="dcyc-run-cont" class="dcyc-btn" disabled title="Advance toward closure in a sandboxed copy — never touches your real files">Advance ▸</button>' +
       '      <button id="dcyc-apply" class="dcyc-btn" disabled title="Write the cycle\'s findings back to the real investigation + studies (verdicts, edges, cycle-state), committed to git">Apply to investigation ▸</button>' +
