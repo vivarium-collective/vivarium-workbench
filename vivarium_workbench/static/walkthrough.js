@@ -11431,7 +11431,8 @@
     // 2. Verdict — the full campaign answer (executive.verdict); behind a click.
     if (verdict)
       tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vsLabel : '',
-        html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
+        html: '<div class="inv-fresh-mount" data-fresh-tab="verdict" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
+          '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
           '<span class="inv-vs-pill">' + _esc(vsLabel) + '</span>' +
           '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' +
           // Claims (RFC-0005 synthesis layer): each claim, its verdict, and what
@@ -11464,6 +11465,7 @@
     // inline. A derived document, next to Background. Filled async by
     // argument-graph.js; shows nothing if the derivation layer is unavailable.
     tabs.push({ id:'narrative', label:'Narrative', html:
+      '<div class="inv-fresh-mount" data-fresh-tab="narrative" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
       '<div id="inv-narrative-mount" class="inv-narrative-mount">' +
       '<p class="muted" style="padding:16px">Loading narrative…</p></div>' });
 
