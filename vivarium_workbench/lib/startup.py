@@ -116,8 +116,11 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
             from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
             _p = explicit_backend_profile()
             if _p is not None and _p["reachable"]:
-                print(f"backend dispatch: {_p['dispatch']} (server v{_p['version']}; "
-                      f"capabilities: {', '.join(_p['capabilities']) or 'none advertised'})")
+                if _p["dispatch"] == "compose-api":
+                    print(f"backend dispatch: compose-api (server v{_p['version']})")
+                else:
+                    print(f"backend dispatch: {_p['dispatch']} (server v{_p['version']}; "
+                          f"capabilities: {', '.join(_p['capabilities']) or 'none advertised'})")
             elif _p is not None:
                 print(f"backend dispatch: legacy (capabilities unavailable: {_p['error']})",
                       file=sys.stderr)

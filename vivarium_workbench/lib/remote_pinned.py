@@ -100,7 +100,7 @@ def resolve_run_target(ws_root: Path) -> str:
         return "deployment"
     if is_pinned_enabled():
         return "deployment"
-    return "deployment" if uses_viva_v1_dispatch(ws_root) else "local"
+    return "deployment" if uses_named_backend_dispatch(ws_root) else "local"
 
 
 def uses_viva_v1_dispatch(ws_root: Path) -> bool:
@@ -118,6 +118,26 @@ def uses_viva_v1_dispatch(ws_root: Path) -> bool:
     if run_target_for(Path(ws_root)) == "deployment" or is_pinned_enabled():
         return False
     return viva_v1_dispatch_active()
+
+
+def uses_compose_dispatch(ws_root: Path) -> bool:
+    """Whether runs of ``ws_root`` go to compose-api's ``POST /simulation/run``.
+
+    The same guards as :func:`uses_viva_v1_dispatch`: only for an operator who NAMED a backend, and only when
+    no session build or pinned config chose the simulator-keyed path. No named backend: False, no network call.
+    """
+    from vivarium_workbench.lib.run_core import run_target_for
+    from vivarium_workbench.lib.server_capabilities import compose_dispatch_active
+
+    if run_target_for(Path(ws_root)) == "deployment" or is_pinned_enabled():
+        return False
+    return compose_dispatch_active()
+
+
+def uses_named_backend_dispatch(ws_root: Path) -> bool:
+    """Whether a study run of ``ws_root`` goes to the backend the operator named, as a document: viva-v1's
+    ``/viva/v1/composites`` or compose-api's ``/simulation/run`` (``remote_run_views.remote_run_submit`` picks)."""
+    return uses_compose_dispatch(ws_root) or uses_viva_v1_dispatch(ws_root)
 
 
 def resolved_from_session_build(ws_root: Path) -> dict | None:
