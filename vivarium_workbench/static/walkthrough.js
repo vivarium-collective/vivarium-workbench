@@ -3140,6 +3140,51 @@
     else document.addEventListener('DOMContentLoaded', sync);
   })();
 
+  // ── Settings popover (the rail gear) ────────────────────────────────────
+  // The gear opens a small popover of app settings; the light/dark theme switch
+  // lives inside it (same #viv-theme-toggle id, so _setTheme/_toggleTheme drive
+  // it unchanged). The popover is position:fixed and anchored to the gear on open
+  // so it escapes the rail's overflow clip in the expanded state. Close with the
+  // gear, Escape, or a click outside.
+  function _vivCloseSettings() {
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (pop) pop.setAttribute('hidden', '');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  window._vivCloseSettings = _vivCloseSettings;
+  function _vivAnchorSettings() {
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (!pop || pop.hasAttribute('hidden') || !btn) return;
+    var r = btn.getBoundingClientRect();
+    pop.style.left = (r.right + 8) + 'px';
+    pop.style.bottom = (window.innerHeight - r.bottom) + 'px';
+    pop.style.top = 'auto';
+    pop.style.right = 'auto';
+  }
+  window._vivAnchorSettings = _vivAnchorSettings;
+  function _vivToggleSettings(ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (!pop) return;
+    if (!pop.hasAttribute('hidden')) { _vivCloseSettings(); return; }
+    pop.removeAttribute('hidden');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    _vivAnchorSettings();
+  }
+  window._vivToggleSettings = _vivToggleSettings;
+  (function () {
+    document.addEventListener('click', function (e) {
+      var pop = document.getElementById('viv-settings-popover');
+      if (!pop || pop.hasAttribute('hidden')) return;
+      if (e.target.closest && (e.target.closest('#viv-settings-popover') || e.target.closest('#viv-settings-toggle'))) return;
+      _vivCloseSettings();
+    }, true);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') _vivCloseSettings(); });
+  })();
+
   function _syncRegistryToolbar() {
     // Scoped to [data-zoom] — .reg-zoom-btn is shared with the Investigations/
     // Studies zoom toolbar (data-izoom), which must not be touched here.
@@ -7987,13 +8032,29 @@
     var label = collapsed ? 'Open sidebar' : 'Collapse sidebar';
     btn.setAttribute('title', label);
     btn.setAttribute('aria-label', label);
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    var txt = document.getElementById('viv-rail-toggle-text');
+    if (txt) txt.textContent = collapsed ? 'Expand' : 'Collapse';
   }
 
   function _vivToggleRail() {
-    // The rail is permanently collapsed (icon bar); toggling is a no-op so no
-    // stray caller can expand it back out.
+    // Flip the rail between the collapsed icon bar and the expanded, labelled
+    // sidebar, persisting the choice. The expanded width + edge-drag resize are
+    // driven by _vivRailResizeStart / the saved vivarium.rail-width.
     var rail = document.getElementById('viv-rail');
-    if (rail) rail.classList.add('viv-rail-collapsed');
+    if (!rail) return;
+    var collapsed = !rail.classList.contains('viv-rail-collapsed');  // target state
+    if (collapsed) {
+      rail.classList.add('viv-rail-collapsed');
+    } else {
+      rail.classList.remove('viv-rail-collapsed');
+      _vivRailApplyWidth(rail, _vivRailSavedWidth());
+    }
+    try { localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0'); } catch (e) { /* private mode */ }
+    _vivSyncRailToggleLabel(collapsed);
+    // The sidebar toggle lives in the settings popover; the rail resize shifts the
+    // gear it is anchored to, so re-anchor it once the width transition settles.
+    if (typeof window._vivAnchorSettings === 'function') setTimeout(window._vivAnchorSettings, 200);
   }
   window._vivToggleRail = _vivToggleRail;
 
@@ -8020,12 +8081,20 @@
   window._vivToggleRailSearch = _vivToggleRailSearch;
 
   function _vivRestoreRailState() {
-    // The rail is now PERMANENTLY collapsed — a fixed icon bar. The expand/resize
-    // mechanism (drag handle + width restore) was removed, so always keep the
-    // collapsed class regardless of any stored width/choice from older builds.
+    // Restore the rail's collapsed/expanded choice (defaults to collapsed for a
+    // first visit). The expanded width comes from the saved vivarium.rail-width;
+    // the header toggle + edge-drag keep both in sync.
     var rail = document.getElementById('viv-rail');
-    if (rail) rail.classList.add('viv-rail-collapsed');
-    _vivSyncRailToggleLabel(true);
+    if (!rail) return;
+    var collapsed = true;
+    try { collapsed = localStorage.getItem('vivarium.rail-collapsed') !== '0'; } catch (e) { /* private mode */ }
+    if (collapsed) {
+      rail.classList.add('viv-rail-collapsed');
+    } else {
+      rail.classList.remove('viv-rail-collapsed');
+      _vivRailApplyWidth(rail, _vivRailSavedWidth());
+    }
+    _vivSyncRailToggleLabel(collapsed);
   }
   window._vivRestoreRailState = _vivRestoreRailState;
 

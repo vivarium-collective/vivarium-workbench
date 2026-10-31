@@ -5531,6 +5531,40 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 :root[data-theme="dark"] .viv-rail-dock-sep{ background:#2b3647; }
 .viv-rail-dock-group .viv-rail-theme-footer{ padding:0; border-top:none; display:flex; justify-content:center; }
 
+/* ── Settings popover (opened by the rail gear) ──────────────────────────────
+   position:fixed + JS-anchored to the gear so it escapes the rail's overflow
+   clip in the expanded state. The theme switch inside keeps its own styling. */
+.viv-rail-settings-wrap{ position:relative; }
+.viv-settings-popover{
+  position:fixed; z-index:200;
+  min-width:224px; padding:12px 14px;
+  background:#fff; color:#111827;
+  border:1px solid #e5e7eb; border-radius:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,0.18);
+}
+.viv-settings-popover[hidden]{ display:none; }
+.viv-settings-pop-title{ font-weight:600; font-size:0.9em; margin:0 0 10px; }
+.viv-settings-row{ display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.viv-settings-row-label{ font-size:0.86em; color:#374151; }
+.viv-settings-theme{ display:flex; align-items:center; gap:8px; }
+.viv-settings-theme-name{ font-size:0.78em; color:#6b7280; white-space:nowrap; }
+.viv-settings-sidebar-btn{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px; border:1px solid #e5e7eb; border-radius:7px;
+  background:#f9fafb; color:#374151; cursor:pointer; font-size:0.8em;
+  transition:background .12s, border-color .12s, color .12s;
+}
+.viv-settings-sidebar-btn:hover{ background:#f3f4f6; border-color:#d1d5db; color:#111827; }
+.viv-settings-sidebar-btn .viv-rail-toggle-svg{ width:16px; height:16px; }
+:root[data-theme="dark"] .viv-settings-sidebar-btn{ background:#111827; border-color:#2b3647; color:#cbd5e1; }
+:root[data-theme="dark"] .viv-settings-sidebar-btn:hover{ background:#1e293b; color:#e5e7eb; }
+:root[data-theme="dark"] .viv-settings-popover{
+  background:#1b2432; color:#e5e7eb; border-color:#2b3647;
+  box-shadow:0 12px 32px rgba(0,0,0,0.5);
+}
+:root[data-theme="dark"] .viv-settings-row-label{ color:#cbd5e1; }
+:root[data-theme="dark"] .viv-settings-theme-name{ color:#94a3b8; }
+
 /* Dark-mode toggle: a STANDARD, always-visible icon button (not a hidden pill).
    Shows the mode you'll switch TO — a moon in light mode, a sun in dark mode —
    centered and sized like the other grouped icons. */
