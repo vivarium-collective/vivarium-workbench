@@ -368,6 +368,35 @@
   }
   document.addEventListener("viv:discovery-changed", function () { if (S.slug) loadDelta(); });
 
+  // Viz-appropriateness: census line + the opt-in toggle for the `viz_untied` rollout flag.
+  function vizApprHtml() {
+    var m = S.summary;
+    if (!m || m.viz_untied_enabled == null) return "";
+    var va = m.viz_appropriateness || {};
+    var parts = [];
+    if (va.misplaced) parts.push(va.misplaced + " misplaced");
+    if (va.duplicated) parts.push(va.duplicated + " duplicated");
+    if (va.untied_surfaced && va.untied) parts.push(va.untied + " untied");
+    var census = parts.length ? parts.join(" · ") : "no issues";
+    var na = va.not_assessed ? " · " + va.not_assessed + " not assessed" : "";
+    return '<div class="dcyc-bn-sub" id="dcyc-viz-appr">Figure appropriateness: ' + esc(census + na) +
+      ' <label title="Surface figures that are not tied to any observable (rollout flag cycle_flags.viz_untied)">' +
+      '<input type="checkbox" id="dcyc-untied-toggle"' + (m.viz_untied_enabled ? " checked" : "") +
+      "> flag untied figures</label></div>";
+  }
+
+  function toggleUntied(enabled) {
+    if (!S.slug || S.busy) return;
+    S.busy = true; setStatus((enabled ? "Enabling" : "Disabling") + " untied-figure flagging…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/toggle-untied", { enabled: !!enabled })
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
+        setStatus(j.ok ? ("Untied-figure flagging " + (j.enabled ? "on." : "off.")) : (j.detail || "Toggle failed."));
+      }).catch(function () { setStatus("Toggle request failed."); })
+      .finally(function () { S.busy = false; });
+  }
+
   function bannerHtml() {
     var m = S.summary;
     if (!m || m.closed == null) return "";
@@ -390,7 +419,7 @@
         (na.target ? " — " + esc(String(na.target).slice(0, 90)) : "") + "</div>"
       : "";
     return '<div class="dcyc-banner ' + cls + '"><div class="dcyc-bn-h">' + head + "</div>" +
-      naline + runline + "</div>";
+      naline + runline + vizApprHtml() + "</div>";
   }
 
   // The gate inspector: every open item on the engine's frontier, split into the
@@ -719,6 +748,8 @@
         var ta = el("dcyc-decide-ta"); if (ta) ta.focus();
       });
     });
+    var ut = g.querySelector("#dcyc-untied-toggle");
+    if (ut) ut.addEventListener("change", function () { toggleUntied(ut.checked); });
     Array.prototype.forEach.call(g.querySelectorAll("[data-build]"), function (b) {
       b.addEventListener("click", function (ev) { ev.stopPropagation(); buildViz(b.getAttribute("data-build")); });
     });
