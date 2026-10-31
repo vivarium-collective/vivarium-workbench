@@ -193,6 +193,7 @@
   function syncCurrent() {
     var box = el("dcyc-current");
     if (!box) return;
+    if (isSnapshot()) { renderSnapshotNote(); return; }
     var cur = currentSlug();
     S.current = cur;
     if (!cur) { box.innerHTML = '<span>No investigation open in the workbench.</span>'; return; }
@@ -222,10 +223,41 @@
     runCycle();   // one click → load + run
   }
 
+  // ---- read-only snapshot ------------------------------------------------
+  // The cycle is interactive (it runs a live sandbox + writes back on Apply), so a
+  // published static bundle has no backend to drive it. Rather than let the picker
+  // 404 into "(failed to load)" with dead buttons, show an informative read-only note
+  // naming the open investigation + how to run the cycle for real.
+  function renderSnapshotNote() {
+    var sel = el("dcyc-inv");
+    if (sel) { sel.innerHTML = '<option value="">Live workbench only</option>'; sel.disabled = true; }
+    ["dcyc-switch", "dcyc-run", "dcyc-run-cont", "dcyc-apply"].forEach(function (id) {
+      var b = el(id); if (b) b.disabled = true;
+    });
+    var cur = currentSlug();
+    var box = el("dcyc-current");
+    if (box) box.innerHTML = cur
+      ? 'Investigation: <b>' + esc(currentTitle(cur)) + "</b>"
+      : "<span>Open an investigation to see which cycle would run.</span>";
+    var g = el("dcyc-graph");
+    if (g) g.innerHTML =
+      '<div class="empty-state" style="text-align:left;line-height:1.5">' +
+      "<p><b>The discovery cycle is interactive.</b></p>" +
+      '<p class="muted">It runs the investigation\'s build → simulate → compare → score → steer ' +
+      "loop in a live sandbox, proposes the next experiments, and (on Apply) writes verdicts and " +
+      "edges back to the studies — so it works in the running workbench, not in this read-only snapshot.</p>" +
+      '<p class="muted">Run the workbench locally on this workspace to load ' +
+      (cur ? "“" + esc(currentTitle(cur)) + "”" : "an investigation") +
+      " into the cycle and Run / Advance / Apply it.</p>" +
+      '<p><a href="https://github.com/vivarium-collective/vivarium-workbench" target="_blank" rel="noopener">Get vivarium-workbench →</a></p>' +
+      "</div>";
+  }
+
   // ---- data ---------------------------------------------------------------
   function loadInvestigations() {
     var sel = el("dcyc-inv");
     if (!sel) return Promise.resolve();
+    if (isSnapshot()) { renderSnapshotNote(); return Promise.resolve(); }
     return getJSON("/api/discovery-cycle-investigations").then(function (j) {
       var rows = (j && j.investigations) || [];
       if (!rows.length) {
