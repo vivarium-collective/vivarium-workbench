@@ -8184,6 +8184,36 @@
   }
   window._vivRefreshInvestigationsRail = _vivRefreshInvestigationsRail;
 
+  // Single "discovery state changed" refresh path. Called after a discovery
+  // mutation succeeds (cycle Run/Advance/Apply, decision Resolve, AI-steer).
+  // Re-fetches the FETCH-ONCE live-engine surfaces for the open investigation:
+  // argument overlay + discovery panel (via the 'viv:discovery-changed' event,
+  // which clears their per-slug guards), the investigation detail (cards,
+  // needs-attention chip) and the rail. Debounced; event-driven, no polling;
+  // no-op in snapshot mode or when no investigation is open.
+  var _vivDiscRefreshTimer = null;
+  function _vivRefreshDiscoveryViews(slug) {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return;
+    slug = (typeof slug === 'string' && slug) || window._currentIset || window._currentIsetSlug || '';
+    if (!slug) return;
+    if (_vivDiscRefreshTimer) clearTimeout(_vivDiscRefreshTimer);
+    _vivDiscRefreshTimer = setTimeout(function () {
+      _vivDiscRefreshTimer = null;
+      try { document.dispatchEvent(new CustomEvent('viv:discovery-changed', { detail: { slug: slug } })); } catch (_) {}
+      var detailView = document.getElementById('investigation-detail-view');
+      var open = detailView && detailView.style.display !== 'none';
+      try {
+        if (open && window._currentIset === slug && typeof _openInvestigationDetail === 'function') {
+          _openInvestigationDetail(slug);   // re-fetches /api/investigation/{slug}, graph, needs-attention
+        } else if (typeof _renderInvNeedsAttention === 'function') {
+          _renderInvNeedsAttention(slug);
+        }
+      } catch (_) {}
+      try { _vivRefreshInvestigationsRail(); } catch (_) {}
+    }, 250);
+  }
+  window._vivRefreshDiscoveryViews = _vivRefreshDiscoveryViews;
+
   function _vivRenderInvestigationsRail(investigations) {
     var host = document.getElementById('viv-rail-investigations');
     if (!host) return;
@@ -11516,7 +11546,8 @@
         var ok = 'Decision resolved — ' + ((res.j && res.j.remaining) || 0) + ' still open';
         if (typeof _showToast === 'function') _showToast(ok);
         // Refresh the detail so the cockpit, log and count badge re-render.
-        if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(invName);
+        if (typeof _vivRefreshDiscoveryViews === 'function') _vivRefreshDiscoveryViews(invName);
+        else if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(invName);
       })
       .catch(function (err) {
         var msg = 'Could not resolve: ' + err;

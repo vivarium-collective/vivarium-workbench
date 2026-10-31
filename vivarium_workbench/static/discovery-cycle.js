@@ -25,6 +25,9 @@
 
   function el(id) { return document.getElementById(id); }
   function base() { return global.__BASE_PATH__ || ""; }
+  function refreshViews() {
+    try { if (typeof global._vivRefreshDiscoveryViews === "function") global._vivRefreshDiscoveryViews(S.slug); } catch (e) {}
+  }
   function getJSON(path) {
     return fetch(base() + path, { headers: { "Accept": "application/json" } })
       .then(function (r) { return r.json(); });
@@ -438,6 +441,7 @@
         if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
         var c = j.commit || {};
         setStatus("Decision recorded" + (c.committed ? (" · committed " + c.sha) : "") + ".");
+        refreshViews();
       }).catch(function () { setStatus("Resolve request failed."); })
       .finally(function () { S.busy = false; });
   }
@@ -632,6 +636,7 @@
       setStatus(blk ? (j.error || "Could not load this investigation.")
         : ("Cycle complete in " + ((Date.now() - t0) / 1000).toFixed(1) + "s" +
           (errs ? " · " + errs + " step(s) errored" : "")));
+      if (!blk) refreshViews();
     }).catch(function () { setStatus("Cycle request failed."); })
       .finally(function () {
         S.busy = false;
@@ -677,6 +682,7 @@
         renderGraph();
         setStatus("Sandbox advance done · " + ((j.runs || []).length) + " run(s)" +
           (j.advance_error ? " · see the Advance step for details" : ""));
+        refreshViews();
       }).catch(function () { setStatus("Advance request failed."); })
       .finally(function () {
         S.busy = false;
@@ -707,6 +713,7 @@
         var ctxt = commit.committed ? (" · committed " + commit.sha)
           : (commit.reason ? (" · " + commit.reason) : "");
         setStatus("Applied · " + nv + " verdict(s)" + ctxt);
+        refreshViews();
       })
       .catch(function () { setStatus("Apply request failed."); })
       .finally(function () {

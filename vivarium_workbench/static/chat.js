@@ -18,7 +18,7 @@
 
   const STORE_KEY = 'viv.chat.v2';
   const DOCS = 'https://github.com/vivarium-collective/vivarium-workbench/blob/main/docs/';
-  const REFRESH_AFTER_MUTATION = ['_loadInvestigations', '_loadInvestigationSets', '_refreshGitStatus'];
+  const REFRESH_AFTER_MUTATION = ['_loadInvestigations', '_loadInvestigationSets', '_refreshGitStatus', '_vivRefreshDiscoveryViews'];
   const PLACEHOLDER_NEW = 'Ask anything, @ to include context about studies or composites';
   const PLACEHOLDER = 'Type your message...';
 
