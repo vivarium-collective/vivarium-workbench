@@ -83,7 +83,40 @@ def _study_has_active_run(
     return False
 
 
-def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
+def study_run_rows(ws_root: Path, slug: str, spec: dict, wp=None) -> list[dict]:
+    """Lightweight run rows (``[{"status": ...}]``) for run-derived status.
+
+    One ``SELECT status FROM runs_meta`` against the study's runs.db plus the
+    ``runs[]`` recorded in study.yaml. Deliberately NOT ``read_runs_db_for_study``
+    (which joins tables and parses params) -- the index calls this per study.
+    Never raises.
+    """
+    rows: list[dict] = [
+        {"status": r.get("status")} for r in (spec.get("runs") or [])
+        if isinstance(r, dict)
+    ]
+    try:
+        import sqlite3
+        from vivarium_workbench.lib.investigations_index import _study_runs_db
+        db = _study_runs_db(ws_root, slug, wp)
+        if db is not None:
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                rows += [{"status": r[0]} for r in
+                         conn.execute("SELECT status FROM runs_meta")]
+            finally:
+                conn.close()
+    except Exception:  # noqa: BLE001 -- missing table / locked db => no evidence
+        pass
+    return rows
+
+
+_WEAK_DISPLAY = frozenset({
+    "", "none", "not_run", "not_evaluated", "pending", "planned", "planning",
+})
+
+
+def _study_display_status(ws_root: Path, slug: str, spec: dict, runs=None) -> str:
     """A study's headline status for investigation roll-ups.
 
     ``running`` is a LIVE claim, so it is decided ONLY by an actual active run
@@ -97,6 +130,17 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
     """
     if _study_has_active_run(ws_root, slug, spec):
         return "running"
+
+    # Run-aware: fill absent/weak simulation/evaluation axes from runs.db so a
+    # study with completed runs never reads "planning". Authored values win.
+    if runs is None:
+        runs = study_run_rows(ws_root, slug, spec)
+    run_ran = False
+    if runs:
+        from vivarium_workbench.lib.study_ontology import with_run_derived_axes
+        merged = with_run_derived_axes(spec, runs)
+        run_ran = merged.get("simulation_status") == "ran"
+        spec = merged
 
     status = None
     chosen_axis = None
@@ -118,6 +162,11 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
     # explicit invalid/error status, which are left untouched.
     if chosen_axis == "gate_status" and status.lower() in _GATE_VERDICT_REFUTED:
         status = "evaluated"
+
+    # A weak headline ("planned"/"not_evaluated"/...) is contradicted by a
+    # completed run: report the study as having run.
+    if run_ran and status.lower() in _WEAK_DISPLAY:
+        status = "ran"
 
     if status.lower() in _STUDY_STATUS_RUNNING:
         # No live run → a running-ish headline is stale. Demote to the first

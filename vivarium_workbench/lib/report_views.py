@@ -1048,7 +1048,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # study whose stale `status:` still said `planned` showed as "planned" in
         # the graph card while the sidebar (multi-axis) showed it done. Sharing
         # one helper makes the rail dot and the card badge agree by construction.
-        _eff_status = _study_display_status(ws_root, study_spec["name"], study_spec)
+        from vivarium_workbench.lib.investigation_status import study_run_rows  # noqa: PLC0415
+        _run_rows = study_run_rows(ws_root, study_spec["name"], study_spec)
+        _eff_status = _study_display_status(
+            ws_root, study_spec["name"], study_spec, runs=_run_rows)
         # Safeguard: a study can carry a COMPLETED evaluation as committed
         # report-card verdicts (viz/report_card/*.verdict.json) yet be left at a
         # pre-eval status (e.g. `build`) with no local runs.db — its report cards
@@ -1177,7 +1180,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             # is always derived (every card gets a Progress pill); verdict is set
             # only when authored or derivable (else the card shows "pending").
             # Same derivation as the typed graph builder (shared study_ontology).
-            "execution_status":      _derive_execution_status(study_spec, raw_status),
+            "execution_status":      _derive_execution_status(study_spec, raw_status, runs=_run_rows),
             "verdict":               _derive_verdict(study_spec),
             "evidence_tier":         study_spec.get("evidence_tier"),
             # viva-superpowers #285 — the split verdict ledger (or None).
@@ -1203,7 +1206,11 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         if _study_steps:
             _study_step_values.append(_study_steps)
 
-    member_statuses = [s.get("status", "planning") for s in studies_out]
+    # Same run-aware per-study headline the summaries/cards roll up
+    # (_study_display_status), NOT the raw authored `status`, so the detail
+    # header can never disagree with the investigation card.
+    member_statuses = [s.get("effective_status") or s.get("status", "planning")
+                       for s in studies_out]
     member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
     effective_status = compute_investigation_status(
         member_statuses, has_runs=member_has_runs,

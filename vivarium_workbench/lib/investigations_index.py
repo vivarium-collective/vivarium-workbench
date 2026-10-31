@@ -308,7 +308,7 @@ def _normalize_parents(spec: dict) -> list[dict]:
     return normalize_dag_edges(spec)
 
 
-def _condition_satisfied(parent: Optional[dict], condition: str) -> bool:
+def _condition_satisfied(parent: Optional[dict], condition: str, runs=None) -> bool:
     """Return True if ``parent`` satisfies the given prerequisite ``condition``.
 
     Conditions:
@@ -316,6 +316,9 @@ def _condition_satisfied(parent: Optional[dict], condition: str) -> bool:
                              ``ran | evaluated | complete``)
       - ``"complete"``     -- study is fully done
       - ``"tests-passed"`` -- all behavior-test outcomes are PASS (pbg-superpowers)
+
+    ``runs`` (the parent's run rows) makes ``ran``/``complete`` run-aware: a
+    parent with a completed run counts as satisfied without an authored axis.
     """
     if parent is None:
         return False
@@ -325,7 +328,7 @@ def _condition_satisfied(parent: Optional[dict], condition: str) -> bool:
     # six progress fields collapsed to one.
     try:
         from vivarium_workbench.lib.study_ontology import derive_execution_status
-        exec_status = derive_execution_status(parent)
+        exec_status = derive_execution_status(parent, runs=runs)
     except Exception:  # noqa: BLE001
         exec_status = str(parent.get("execution_status") or parent.get("status") or "planned").lower()
     if condition == "ran":
@@ -418,6 +421,18 @@ def build_investigations(ws_root: Path) -> dict:
     except Exception:
         _wp = None
 
+    # Run rows (status only) per study, loaded lazily ONCE and shared by the
+    # display status, execution status and parent-condition checks below (a
+    # parent is consulted once per child edge).
+    from vivarium_workbench.lib.investigation_status import study_run_rows
+    from vivarium_workbench.lib.study_ontology import derive_execution_status
+    _run_rows: dict[str, list] = {}
+
+    def _rows_for(name: str) -> list:
+        if name not in _run_rows:
+            _run_rows[name] = study_run_rows(ws_root, name, by_name.get(name) or {}, _wp)
+        return _run_rows[name]
+
     out = []
     for d, spec in loaded:
         if spec.get("__invalid__"):
@@ -459,7 +474,10 @@ def build_investigations(ws_root: Path) -> dict:
         blocked_by = []
         for p in parents:
             parent_spec = by_name.get(p["study"])
-            if not _condition_satisfied(parent_spec, p["condition"]):
+            if not _condition_satisfied(
+                parent_spec, p["condition"],
+                runs=_rows_for(p["study"]) if parent_spec is not None else None,
+            ):
                 blocked_by.append(
                     {
                         "study": p["study"],
@@ -487,7 +505,8 @@ def build_investigations(ws_root: Path) -> dict:
         # `effective_status` are the SAME value by construction (see below), and
         # this helper can scan runs/tests, so computing it twice per study was
         # pure duplicated work across 80+ studies.
-        _disp_status = _study_display_status(ws_root, spec["name"], spec)
+        _disp_status = _study_display_status(
+            ws_root, spec["name"], spec, runs=_rows_for(spec["name"]))
         row = {
             "name": spec["name"],
             "composite": composite_summary,
@@ -519,6 +538,9 @@ def build_investigations(ws_root: Path) -> dict:
             # _study_display_status helper the graph node now uses too), so the two
             # views derive an IDENTICAL state by construction.
             "effective_status": _disp_status,
+            # Progress pill source (Planned/Running/Completed/...), run-aware.
+            "execution_status": derive_execution_status(
+                spec, runs=_rows_for(spec["name"])),
             "gate_status": spec.get("gate_status"),
             "confidence": spec.get("confidence"),
             "simulation_status": spec.get("simulation_status"),
