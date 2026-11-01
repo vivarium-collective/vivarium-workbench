@@ -29,8 +29,10 @@ def ws_copy(tmp_path):
 
 
 def _post_with_origin(base_url: str, path: str, body: dict, *, origin: str) -> int:
-    """POST with an explicit cross-origin ``Origin`` header (dashboard_client's
-    ``_Client`` can't set arbitrary headers — see test_csrf_origin_guard.py)."""
+    """POST with an explicit cross-origin ``Origin`` header against a real bound
+    socket (the in-process client has no reachable base_url, and this must
+    exercise the real CSRF/Origin guard — see test_csrf_origin_guard.py). The two
+    cross-origin tests below therefore keep the subprocess ``dashboard_client``."""
     import json as _json
 
     req = urllib.request.Request(
@@ -46,14 +48,14 @@ def _post_with_origin(base_url: str, path: str, body: dict, *, origin: str) -> i
         return e.code
 
 
-def test_study_reproduce_unknown_run_404s(dashboard_client, ws_copy):
-    client = dashboard_client(workspace=ws_copy)
+def test_study_reproduce_unknown_run_404s(inproc_client, ws_copy):
+    client = inproc_client(workspace=ws_copy)
     r = client.post("/api/study-reproduce", json={"study": "s", "run_id": "does-not-exist"})
     assert r.status_code == 404 or "error" in r.json()
 
 
-def test_investigation_rerun_empty_investigation_200s(dashboard_client, ws_copy):
-    client = dashboard_client(workspace=ws_copy)
+def test_investigation_rerun_empty_investigation_200s(inproc_client, ws_copy):
+    client = inproc_client(workspace=ws_copy)
     r = client.post("/api/investigation-rerun", json={"investigation": "nonexistent"})
     assert r.status_code == 200
     body = r.json()

@@ -257,6 +257,94 @@ def dashboard_client():
             p.wait()
 
 
+class _InProcClient:
+    """A ``_Client``-shaped client that drives the FastAPI app IN-PROCESS.
+
+    Same surface as :class:`_Client` (``get`` / ``post`` / ``delete`` returning
+    a :class:`_Response`), so a test converts from ``dashboard_client`` to
+    ``inproc_client`` by name alone.
+
+    Why it exists: ``dashboard_client`` spawns a fresh ``uvicorn`` subprocess per
+    call — a ~6.75s boot (app import + workspace ``build_core`` + bind) re-paid
+    on every one of ~150 call sites across the suite, which dominated CI
+    wall-clock and billed minutes. This drives the same app object via Starlette's
+    in-process transport: the app imports once per worker (~1.4s) and each request
+    is sub-100ms, ~65x cheaper per call. It exercises the real routes, middleware,
+    and DI — not a mock.
+
+    Isolation: uses ``create_app()`` (a fresh app per client) with
+    ``get_workspace`` dependency-overridden to this test's workspace, AND sets the
+    process-global workspace root (lib functions that read the global, not the DI,
+    resolve correctly). No ws package is imported in-process, so fixture
+    workspaces that share a package name (e.g. ``pbg_demo``) don't collide in
+    ``sys.modules`` the way they would if the app ran them inline.
+
+    Not a universal replacement. Endpoints that need a real bound socket (SSE
+    streaming, concurrent-request timing) or that assert on real Host/Origin
+    handling must stay on ``dashboard_client``. Endpoints that delegate to the
+    per-session env-worker subprocess (registry/composite walks) still subprocess
+    out — correct, but not faster in-process; convert those only when the file's
+    cost is the server boot, not the worker call.
+    """
+
+    def __init__(self, test_client):
+        self._tc = test_client
+
+    def _wrap(self, r) -> _Response:
+        return _Response(r.status_code, r.content, headers=r.headers)
+
+    def get(self, path: str):
+        return self._wrap(self._tc.get(path))
+
+    def post(self, path: str, json=None):
+        return self._wrap(self._tc.post(path, json=json))
+
+    def delete(self, path: str, json=None):
+        # httpx's .delete() takes no json= kwarg; a DELETE with a body must go
+        # through .request() (the subprocess _Client.delete DOES accept a body).
+        return self._wrap(self._tc.request("DELETE", path, json=json))
+
+
+@pytest.fixture
+def inproc_client():
+    """Factory: inproc_client(workspace=path) -> _InProcClient (in-process).
+
+    Drop-in for ``dashboard_client`` for tests whose endpoints are safe to run
+    in-process (see :class:`_InProcClient`). Restores the global workspace root
+    on teardown so it doesn't leak into later tests in the same worker.
+    """
+    from fastapi.testclient import TestClient
+
+    from vivarium_workbench.api.app import create_app, get_workspace
+    from vivarium_workbench.lib import _root
+
+    saved_root = _root.get_workspace_root()
+    clients: list = []
+
+    def _make(workspace: Path) -> _InProcClient:
+        workspace = Path(workspace)
+        # Both resolution paths: DI (get_workspace) AND the process-global root
+        # that non-DI lib functions read.
+        _root.set_workspace_root(workspace)
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: workspace
+        # base_url on loopback so the DNS-rebinding guard admits the Host and no
+        # Origin header is sent (matches the subprocess client; CSRF allows it).
+        tc = TestClient(app, base_url="http://127.0.0.1")
+        clients.append(tc)
+        return _InProcClient(tc)
+
+    yield _make
+
+    for tc in clients:
+        try:
+            tc.close()
+        except Exception:
+            pass
+    if saved_root is not None:
+        _root.set_workspace_root(saved_root)
+
+
 # ---------------------------------------------------------------------------
 # Minimal workspace fixture for study-run tests (dry-run guard, CLI, etc.)
 # ---------------------------------------------------------------------------

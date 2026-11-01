@@ -22,23 +22,23 @@ def ws_copy(tmp_path):
     return ws
 
 
-def test_investigation_notebook_endpoint_ipynb(dashboard_client, ws_copy):
-    client = dashboard_client(workspace=ws_copy)
+def test_investigation_notebook_endpoint_ipynb(inproc_client, ws_copy):
+    client = inproc_client(workspace=ws_copy)
     resp = client.get("/api/investigation-notebook/baseline")
     assert resp.status_code == 200
     nb = json.loads(resp.text)
     assert nb["nbformat"] == 4 and nb["cells"]
 
 
-def test_investigation_notebook_endpoint_py(dashboard_client, ws_copy):
-    client = dashboard_client(workspace=ws_copy)
+def test_investigation_notebook_endpoint_py(inproc_client, ws_copy):
+    client = inproc_client(workspace=ws_copy)
     resp = client.get("/api/investigation-notebook/baseline?format=py")
     assert resp.status_code == 200
     # the generated script must be syntactically valid Python
     compile(resp.text, "<endpoint>", "exec")
 
 
-def test_investigation_notebook_endpoint_404(dashboard_client, ws_copy):
-    client = dashboard_client(workspace=ws_copy)
+def test_investigation_notebook_endpoint_404(inproc_client, ws_copy):
+    client = inproc_client(workspace=ws_copy)
     resp = client.get("/api/investigation-notebook/does-not-exist")
     assert resp.status_code == 404

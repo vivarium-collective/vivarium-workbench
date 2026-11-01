@@ -191,7 +191,7 @@ def test_roll_up_acceptance_criteria_fields():
 # /api/investigation/<name> carries computed_acceptance
 # ---------------------------------------------------------------------------
 
-def test_iset_detail_carries_computed_acceptance(tmp_path, dashboard_client):
+def test_iset_detail_carries_computed_acceptance(tmp_path, inproc_client):
     """End-to-end: GET /api/investigation/<name> must include computed_acceptance."""
     ws = tmp_path / "ws"
     # Use nested investigation/studies layout for study_dir resolution
@@ -216,7 +216,7 @@ def test_iset_detail_carries_computed_acceptance(tmp_path, dashboard_client):
         "acceptance_criteria": [{"study": "s1", "behavior": "beh-a"}],
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/api/investigation/my-inv")
     assert resp.status_code == 200
     data = resp.json()
