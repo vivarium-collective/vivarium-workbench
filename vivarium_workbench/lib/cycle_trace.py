@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from vivarium_workbench.lib import cycle_runner
+
 
 # ---------------------------------------------------------------------------
 # The step graph. Order is the canonical cycle order; `depends_on` records the
@@ -788,6 +790,7 @@ def sandbox_advance(ws_root, inv_slug: str, *, max_runs: int = 4) -> dict:
         try:
             adv = M.discover.advance_cycle(sandbox, inv_slug, autonomous=True,
                                            max_runs=max_runs,
+                                           runner=cycle_runner.run,
                                            render_hook=_render_hook_for(sandbox)) or {}
         except Exception as e:
             adv_error = f"{type(e).__name__}: {e}"
@@ -1031,6 +1034,7 @@ def build_viz(ws_root, inv_slug: str, target: str) -> dict:
         return {"available": True, "ok": False, "detail": "target must be fig:<study>/<name>"}
     try:
         rec = M.discover.execute_action(ws_root, inv_slug, autonomous=True, target=target,
+                                        runner=cycle_runner.run,
                                         render_hook=_render_hook_for(ws_root))
     except Exception as e:
         return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
