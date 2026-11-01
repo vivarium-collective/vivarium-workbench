@@ -205,3 +205,58 @@ def test_sandbox_advance_never_touches_real_workspace(tmp_path):
     after = {p.relative_to(ws): p.stat().st_mtime_ns
              for p in ws.rglob("*") if p.is_file()}
     assert before == after, "sandbox_advance mutated the real workspace"
+
+
+def test_cycle_summary_runnable_counts_only_dispatchable_actions():
+    """Wave 0 fix #4 (workbench half): the banner's 'runnable' is the honest set the
+    ADVANCE phase would dispatch (engine's dispatchable_actions) — not every non-human-only
+    plan item. A review-tier/unresolvable build_viz must NOT inflate the count, and
+    human_decisions counts the human-only tier directly."""
+    import types
+
+    plan = [
+        {"action_type": "test", "source": "claim:a", "consequence": "simulation"},
+        {"action_type": "build_viz", "source": "fig:s/x", "consequence": "render"},
+        {"action_type": "steer", "source": "d1", "consequence": "human-only"},
+    ]
+    de = types.SimpleNamespace(
+        closure=lambda c, i: {"closed": False, "open_items": 3, "unaddressed_criteria": [],
+                              "open_gaps": 0, "open_challenges": 0},
+        next_action=lambda c, i: {"op": "test", "kind": "open_question", "target": "claim:a"},
+        execute_plan=lambda c, i: plan,
+        frontier=lambda c, i: [],
+    )
+    # the engine says only the test op is actually dispatchable (the render is unresolvable)
+    discover = types.SimpleNamespace(
+        dispatchable_actions=lambda ws, slug, c, i, st: [plan[0]])
+    M = types.SimpleNamespace(de=de, discover=discover)
+    ctx = {"ws_root": "/x", "inv_slug": "og", "inv_spec": {}, "studies": {}, "cyc": {}}
+
+    out = ct._cycle_summary(ctx, M)
+    assert out["runnable"] == 1          # only the dispatchable test op (old filter would say 2)
+    assert out["human_decisions"] == 1   # the human-only steer, counted directly
+
+
+def test_cycle_summary_runnable_falls_back_without_dispatchable_actions():
+    """Against an engine that predates dispatchable_actions (stale venv), the banner
+    degrades to the old non-human-only filter instead of erroring."""
+    import types
+
+    plan = [
+        {"action_type": "test", "source": "claim:a", "consequence": "simulation"},
+        {"action_type": "steer", "source": "d1", "consequence": "human-only"},
+    ]
+    de = types.SimpleNamespace(
+        closure=lambda c, i: {"closed": False, "open_items": 2, "unaddressed_criteria": [],
+                              "open_gaps": 0, "open_challenges": 0},
+        next_action=lambda c, i: {"op": "test", "kind": "open_question", "target": "claim:a"},
+        execute_plan=lambda c, i: plan,
+        frontier=lambda c, i: [],
+    )
+    discover = types.SimpleNamespace()   # no dispatchable_actions attribute
+    M = types.SimpleNamespace(de=de, discover=discover)
+    ctx = {"ws_root": "/x", "inv_slug": "og", "inv_spec": {}, "studies": {}, "cyc": {}}
+
+    out = ct._cycle_summary(ctx, M)
+    assert out["runnable"] == 1          # fallback: non-human-only
+    assert out["human_decisions"] == 1

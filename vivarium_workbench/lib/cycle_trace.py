@@ -410,7 +410,7 @@ def _load_context(ws_root, inv_slug: str, M: _Modules) -> dict:
         viz_state = M.discover.viz_inventory(Path(ws_root), inv_slug, studies)
     except Exception:
         pass  # older engine / unreadable disk: cycle still runs without viz items
-    return {"inv_slug": inv_slug, "inv_spec": inv_spec, "studies": studies,
+    return {"ws_root": ws_root, "inv_slug": inv_slug, "inv_spec": inv_spec, "studies": studies,
             "runs_by_study": runs_by_study, "viz_state": viz_state,
             "viz_catalog": _viz_catalog(ws_root) if viz_state is not None else []}
 
@@ -608,7 +608,20 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
         clo = M.de.closure(cyc, inv_spec)
         na = M.de.next_action(cyc, inv_spec)
         plan = M.de.execute_plan(cyc, inv_spec) if hasattr(M.de, "execute_plan") else []
-        runnable = [p for p in plan if (p.get("consequence") or "") != "human-only"]
+        # Honest runnable set: the plan items the ADVANCE phase would ACTUALLY dispatch
+        # (engine's dispatchable_actions — run-ready test/branch + resolvable renders),
+        # not merely every non-human-only item, which overcounted review-tier and
+        # unresolvable viz ops. Falls back to the old filter against an engine that
+        # predates dispatchable_actions (stale venv).
+        _dispatchable = getattr(M.discover, "dispatchable_actions", None)
+        if _dispatchable is not None and ctx.get("ws_root") is not None:
+            try:
+                runnable = _dispatchable(ctx["ws_root"], ctx["inv_slug"], cyc, inv_spec,
+                                         ctx.get("studies") or {})
+            except Exception:
+                runnable = [p for p in plan if (p.get("consequence") or "") != "human-only"]
+        else:
+            runnable = [p for p in plan if (p.get("consequence") or "") != "human-only"]
         consequence = plan[0].get("consequence") if plan else None
         # Join each open frontier item to its execution consequence (execute_plan's
         # `source`/`action_type` == the item's `target`/`op`), so the gate inspector
@@ -678,7 +691,10 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
                              "target": na.get("target"), "consequence": consequence}
                             if na else None),
             "runnable": len(runnable),
-            "human_decisions": len(plan) - len(runnable),
+            # items a human must act on — the human-only consequence tier. Computed
+            # directly (not plan−runnable) now that runnable is the narrower honest set,
+            # so needs-build / already-run items aren't miscounted as human decisions.
+            "human_decisions": sum(1 for p in plan if (p.get("consequence") or "") == "human-only"),
             "blocking": {
                 "unaddressed_criteria": clo.get("unaddressed_criteria") or [],
                 "open_gaps": clo.get("open_gaps") or 0,
