@@ -260,3 +260,29 @@ def test_cycle_summary_runnable_falls_back_without_dispatchable_actions():
     out = ct._cycle_summary(ctx, M)
     assert out["runnable"] == 1          # fallback: non-human-only
     assert out["human_decisions"] == 1
+
+
+def test_delta_step_diffs_against_persisted_parent_snapshot(tmp_path):
+    """Wave 0 fix #2: the delta step must diff against the parent cycle's persisted
+    ScientificState snapshot (cycle_state.evaluation_snapshot) — exactly as the
+    `discover delta` CLI does — not an empty baseline. Proven by threading a known
+    parent snapshot and seeing its fingerprint surface as prev_fingerprint (which is
+    None before the fix, because prev was never passed)."""
+    import shutil
+    import yaml
+
+    ws = tmp_path / "ws"
+    shutil.copytree(_WS, ws)
+    inv_yaml = ws / "investigations" / _SLUG / "investigation.yaml"
+    spec = yaml.safe_load(inv_yaml.read_text())
+    spec["cycle_state"] = {"evaluation_snapshot": {
+        "fingerprint": "deadbeefdeadbeef", "by_study": {}, "model_versions": []}}
+    inv_yaml.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+    out = ct.rerun_step(ws, _SLUG, "delta")
+    assert out["available"] is True
+    res = out["step"]["result"]
+    assert isinstance(res, dict)
+    # prev was threaded from cycle_state.evaluation_snapshot (None before the fix)
+    assert res["prev_fingerprint"] == "deadbeefdeadbeef"
+    assert set(res) >= {"changed", "unchanged", "new_model_versions", "fingerprint"}
