@@ -42,7 +42,7 @@ def test_study_run_baseline_on_pinned_deployment_409(tmp_path, monkeypatch):
 
 
 def test_study_run_baseline_pinned_deployment_409_over_real_http(
-    tmp_path, dashboard_client, monkeypatch
+    tmp_path, inproc_client, monkeypatch
 ):
     """End-to-end proof of the item-18 fix over the REAL server (no in-process
     monkeypatching of the function under test): a spawned dashboard subprocess
@@ -66,7 +66,7 @@ def test_study_run_baseline_pinned_deployment_409_over_real_http(
         "VIVARIUM_WORKBENCH_REMOTE_REPO_URL",
         "https://github.com/vivarium-collective/v2ecoli",
     )
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     res = client.post("/api/study-run-baseline", json={"study": "demo"})
     assert res.status_code == 409, res.text
     # item 83: this exact scenario (default baseline entry, deployment target)
@@ -87,7 +87,7 @@ def test_study_run_baseline_pinned_deployment_409_over_real_http(
 
 
 def test_study_run_baseline_local_unaffected_over_real_http(
-    tmp_path, dashboard_client, monkeypatch
+    tmp_path, inproc_client, monkeypatch
 ):
     """Regression companion to the pinned test above: with pinned mode OFF
     (plain local dev, the common case), the real server must still run the
@@ -103,7 +103,7 @@ def test_study_run_baseline_local_unaffected_over_real_http(
     sd = ws / "studies" / "demo"; sd.mkdir(parents=True)
     (sd / "study.yaml").write_text(
         "name: demo\nbaseline:\n  - {name: core, composite: pkg.composites.cell}\n")
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     res = client.post(
         "/api/study-run-baseline", json={"study": "demo", "dry_run": True})
     assert res.status_code == 200, res.text
