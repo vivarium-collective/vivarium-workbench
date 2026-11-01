@@ -3,7 +3,7 @@
 Unit tests:
   - build_composite_run_zip: 404 (no run dir), 409 (non-terminal), 200 (happy path)
 
-HTTP-level tests via dashboard_client:
+HTTP-level tests via inproc_client:
   - 404 for unknown run_id
   - 409 for a non-terminal (running) run
   - 200 + application/zip for a completed run
@@ -141,7 +141,7 @@ class TestRunIsTerminal:
 
 
 # ---------------------------------------------------------------------------
-# HTTP-level tests through dashboard_client
+# HTTP-level tests through inproc_client
 # ---------------------------------------------------------------------------
 
 def _minimal_ws(tmp_path: Path, run_id: str, status: str) -> Path:
@@ -153,16 +153,16 @@ def _minimal_ws(tmp_path: Path, run_id: str, status: str) -> Path:
     return ws
 
 
-def test_http_download_missing_run_returns_404(tmp_path, dashboard_client):
+def test_http_download_missing_run_returns_404(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text("name: test-ws\n")
-    client = dashboard_client(workspace=ws)
+    client = inproc_client(workspace=ws)
     resp = client.get("/api/composite-run/nonexistent-run/download")
     assert resp.status_code == 404, resp.text
 
 
-def test_http_download_running_run_returns_409(tmp_path, dashboard_client):
+def test_http_download_running_run_returns_409(tmp_path, inproc_client):
     """A run whose PID matches a live process stays 'running' after reconcile.
 
     The server calls ``reconcile_stale_runs`` at startup: runs with a dead/missing
@@ -187,12 +187,12 @@ def test_http_download_running_run_returns_409(tmp_path, dashboard_client):
     run_dir = ws / ".pbg" / "runs" / run_id
     run_dir.mkdir(parents=True)
     (run_dir / "report.html").write_text("partial")
-    client = dashboard_client(workspace=ws)
+    client = inproc_client(workspace=ws)
     resp = client.get(f"/api/composite-run/{run_id}/download")
     assert resp.status_code == 409, resp.json()
 
 
-def test_http_download_completed_run_returns_zip(tmp_path, dashboard_client):
+def test_http_download_completed_run_returns_zip(tmp_path, inproc_client):
     run_id = "run-complete"
     ws = _minimal_ws(tmp_path, run_id=run_id, status="completed")
     # Populate the run dir with artifacts.
@@ -202,7 +202,7 @@ def test_http_download_completed_run_returns_zip(tmp_path, dashboard_client):
     (run_dir / "analyses.json").write_text('[]')
     (run_dir / "viz.json").write_text('{}')
     (run_dir / "store.parquet").write_bytes(b"PAR1fakeparquet")
-    client = dashboard_client(workspace=ws)
+    client = inproc_client(workspace=ws)
     resp = client.get(f"/api/composite-run/{run_id}/download")
     assert resp.status_code == 200, resp.text
     # The response must declare itself a zip attachment...
