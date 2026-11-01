@@ -900,6 +900,28 @@ def _resolve_bib_references(ws_root: Path) -> dict:
         return {}
 
 
+def _acceptance_freshness(studies_by_name: dict) -> Optional[str]:
+    """``fresh`` | ``stale`` | ``None`` for an acceptance roll-up (Phase 2b). ``stale`` if ANY member
+    study's canonical computed grade was produced by a grader behind the current one — the whole
+    roll-up then needs re-deriving. ``None`` when nothing is graded or the Phase-2 resolver is
+    unavailable (imported defensively — dormant until discovery_engine is bumped to Phase 2)."""
+    try:
+        from discovery_engine.grader_freshness import grade_freshness
+    except ImportError:  # pragma: no cover - pre-Phase-2 discovery_engine
+        return None
+    saw_graded = False
+    for spec in (studies_by_name or {}).values():
+        if not isinstance(spec, dict):
+            continue
+        for run in (spec.get("runs") or []):
+            g = (run.get("computed_outcomes") or {}).get("_grader") if isinstance(run, dict) else None
+            if isinstance(g, dict) and g:
+                saw_graded = True
+                if grade_freshness(g) == "stale":
+                    return "stale"
+    return "fresh" if saw_graded else None
+
+
 def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     """GET /api/investigation/<name> builder.
 
@@ -1245,6 +1267,11 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
                 computed_acceptance["diverges_from_authored"] = (
                     persisted_acc.get("diverges_from_authored")
                 )
+        # Phase 2b: resolve the roll-up's freshness server-side — stale if ANY member study's
+        # computed grade was produced by a grader behind the current one, so the Audit tab shows
+        # "stale → re-grade" rather than trusting a roll-up over outdated grades.
+        if isinstance(computed_acceptance, dict):
+            computed_acceptance["freshness"] = _acceptance_freshness(studies_by_name)
     except Exception:  # noqa: BLE001
         pass
 
