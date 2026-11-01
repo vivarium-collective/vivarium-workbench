@@ -725,6 +725,11 @@ def run_composite_subprocess(
                 study_slug=_study_slug,
                 investigation_slug=_inv_slug,
                 manifest=manifest,
+                # #1475: thread the workspace package through so the variant
+                # path's fallback manifest records code_version.package the same
+                # way the baseline path (which passes pkg to build_run_manifest)
+                # does. No-op when `manifest` is already built (baseline).
+                pkg=pkg,
             )
             if sim_name is not None:
                 conn.execute(
