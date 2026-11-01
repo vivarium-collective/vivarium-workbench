@@ -578,11 +578,15 @@
                   : dock === 'right' ? r0.right - m.clientX
                   : dock === 'top' ? m.clientY - r0.top
                   : r0.bottom - m.clientY;                              // bottom
-          // Drag the resize edge toward the dock edge, past the threshold, to
-          // collapse to a thin strip; drag back out to expand (solo panels only).
+          // Standard dockable feel: a panel resizes down to a usable MINIMUM and
+          // then RESISTS — it does not shrink into an unusable sliver. Collapse to a
+          // thin strip is a deliberate act: shove the edge past COLLAPSE_AT (to within
+          // ~48px of the dock edge), well inside the min, so a normal resize can't
+          // trip it by accident; drag back out to expand (solo panels only).
           if (canCollapse && raw < COLLAPSE_AT) { if (!collapsed) setCollapsed(true); return; }
           if (collapsed) setCollapsed(false);
-          var px = C.clampDock(dock, raw, innerWidth, innerHeight);
+          var MIN_OPEN = isVertical(dock) ? 120 : 160;   // below this we resist, not sliver
+          var px = C.clampDock(dock, raw < MIN_OPEN ? MIN_OPEN : raw, innerWidth, innerHeight);
           if (STACKS[dock]) STACKS[dock].style.setProperty(isVertical(dock) ? 'height' : 'width', px + 'px');
         }
         function up() {
