@@ -294,9 +294,26 @@
 
     // Collapse the panel to a thin edge strip (body hidden, a small expand handle
     // shown via CSS .vp-collapsed); expand restores it. State is persisted.
+    var COLLAPSED_PX = 16;   // thin edge strip width/height when collapsed
     function setCollapsed(c, persist) {
       collapsed = !!c;
       panel.classList.toggle('vp-collapsed', collapsed);
+      // The per-side stack owns the OUTER size (its width/height is set inline by
+      // the resize drag and by ensureStack). The .vp-collapsed CSS shrinks only the
+      // PANEL to a 16px strip — so without also shrinking the stack, a panel that
+      // had a drag width collapses into a 16px strip sitting inside a still-wide
+      // stack, i.e. a wide blank gap. Shrink the stack to the strip on collapse, and
+      // restore its persisted size on expand.
+      var st = STACKS[dock];
+      if (st) {
+        var axis = isVertical(dock) ? 'height' : 'width';
+        if (collapsed) {
+          st.style.setProperty(axis, COLLAPSED_PX + 'px');
+        } else {
+          var n = parseInt(lsGet(stackSizeKey(dock), ''), 10);
+          st.style.setProperty(axis, (n > 0 ? n : defaultSideSize(dock)) + 'px');
+        }
+      }
       if (persist) lsSet(K.collapsed, collapsed ? '1' : '0');
       syncVars();
       if (opts.onCollapse) opts.onCollapse(collapsed);
