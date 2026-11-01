@@ -6504,6 +6504,11 @@ body.vp-dragging .viv-studies-head{ cursor:grabbing; }
   position:relative; overflow:hidden;
   transition:flex-basis .18s ease, width .18s ease;
 }
+/* The `display:flex` above would otherwise override the `[hidden]` attribute the
+   dock toggles on close (UA `[hidden]{display:none}` loses to an author display
+   rule) — so the × never hid the panel. Mirrors the guard every sibling dock
+   panel carries (.viv-studies-panel, .viv-registry-panel, .viv-code-rail, …). */
+.viv-cycle-panel[hidden]{ display:none !important; }
 .viv-cycle-resize-handle{
   position:absolute; top:0; left:0; bottom:0; width:6px;
   cursor:col-resize; z-index:6; background:transparent; transition:background .12s ease;
