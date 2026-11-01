@@ -62,6 +62,7 @@ ALLOWED_DISCOVERY: dict[str, str] = {
     "candidate_action": "Phase B: plan candidate actions + select portfolio",
     "experiment_design": "Phase C: design a discriminating study",
     "model_architect": "Phase D: model catalog + acquisition routing",
+    "capability_gaps": "capability-gap loop: propose/accept/reject/build + close-on-coverage",
     "evaluation": "Phase F: compare hypotheses, disagreement map, DiscoveryDelta",
     "study_seeding": "Growth loop: select-for-launch + seed a study (preview)",
     "study_refinement": "Growth loop: refinement needs + refine a study (preview)",

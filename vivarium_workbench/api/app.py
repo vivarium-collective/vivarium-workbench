@@ -1319,6 +1319,59 @@ def create_app() -> FastAPI:
         return out
 
     @app.post(
+        "/api/discovery-cycle/{slug}/accept-capability-gap",
+        tags=["Investigations"],
+        summary="Accept a proposed capability gap (authorizes a build; rationale required)",
+    )
+    def discovery_cycle_accept_gap(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Accept button for a capability gap. ``payload`` = ``{gap, rationale}``;
+        a rationale is required (4xx otherwise). MUTATES investigation.yaml and commits
+        (revertible). Backed by ``lib.cycle_trace.accept_capability_gap``."""
+        from vivarium_workbench.lib.cycle_trace import accept_capability_gap
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = accept_capability_gap(ws, name, str(p.get("gap") or ""), str(p.get("rationale") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/reject-capability-gap",
+        tags=["Investigations"],
+        summary="Reject a proposed capability gap (terminal; rationale required)",
+    )
+    def discovery_cycle_reject_gap(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Reject button for a capability gap. ``payload`` = ``{gap, rationale}``;
+        a rationale is required (4xx otherwise). Backed by ``lib.cycle_trace.reject_capability_gap``."""
+        from vivarium_workbench.lib.cycle_trace import reject_capability_gap
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = reject_capability_gap(ws, name, str(p.get("gap") or ""), str(p.get("rationale") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/build-capability-gap",
+        tags=["Investigations"],
+        summary="Build an accepted capability gap via the workspace build hook",
+    )
+    def discovery_cycle_build_gap(slug: str, payload: dict = Body(default={}),
+                                  ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Build button for an accepted capability gap. ``payload`` = ``{gap}``;
+        routes it to the workspace build hook. A 4xx is returned only for a client error
+        (bad id, not accepted, no hook registered); a ``needs_author`` / ``failed`` OUTCOME
+        is a 200 carrying the resulting status. Backed by ``lib.cycle_trace.build_capability_gap``."""
+        from vivarium_workbench.lib.cycle_trace import build_capability_gap
+        name = _path_safety.plain_name(slug, "investigation")
+        out = build_capability_gap(ws, name, str((payload or {}).get("gap") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
         "/api/discovery-cycle/{slug}/toggle-untied",
         tags=["Investigations"],
         summary="Turn the viz_untied rollout flag on/off for an investigation",
