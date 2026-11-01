@@ -273,7 +273,9 @@ def test_popout_returns_window_and_studies_routes_to_opener():
     pdjs = (STATIC / "panel-dock.js").read_text()
     assert "var w = window.open(url" in pdjs and "return w;" in pdjs
     wk = (STATIC / "walkthrough.js").read_text()
-    assert "window.opener._openStudyEmbeddedNewTab(name, tab)" in wk
+    # the drill-through added an optional `ev` arg (deep-link to the clicked evidence);
+    # the popped-out Studies list still routes study selection to the opener.
+    assert "window.opener._openStudyEmbeddedNewTab(name, tab, ev)" in wk
 
 
 def test_search_and_stepper_share_one_row():
