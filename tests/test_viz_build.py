@@ -87,9 +87,9 @@ def test_render_viz_cli_writes_meta(tmp_path):
     assert bad.returncode == 1
 
 
-def test_build_endpoint_renders_target_and_next_cycle_is_fresh(tmp_path, dashboard_client):
+def test_build_endpoint_renders_target_and_next_cycle_is_fresh(tmp_path, inproc_client):
     ws, sd = _ws(tmp_path, [{"name": "a", "render": CMD, "chart": "viz/a.html"}])
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     t0 = c.get("/api/discovery-cycle/inv").json()
     fr = t0["summary"]["frontier"]
     item = next(f for f in fr if f["target"] == "fig:s1/a")
@@ -103,9 +103,9 @@ def test_build_endpoint_renders_target_and_next_cycle_is_fresh(tmp_path, dashboa
     assert bad["ok"] is False
 
 
-def test_broken_item_declarable_and_declare_endpoint(tmp_path, dashboard_client):
+def test_broken_item_declarable_and_declare_endpoint(tmp_path, inproc_client):
     ws, sd = _ws(tmp_path, [{"name": "b", "rendered": "viz/b.html"}])
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     item = next(f for f in c.get("/api/discovery-cycle/inv").json()["summary"]["frontier"]
                 if f["target"] == "fig:s1/b")
     assert item["kind"] == "viz_broken" and item["declarable"]

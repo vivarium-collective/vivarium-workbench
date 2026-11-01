@@ -106,11 +106,11 @@ def _name_backend(monkeypatch, url: str, environment: str | None = "id:env-1") -
 # --- (a) no named backend: nothing changes, nothing is asked ----------------------------------
 
 def test_without_a_named_backend_the_config_and_target_are_exactly_as_before(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """The alias env points at a document-capable backend; since it is an ALIAS (not the flag),
     the workbench neither probes its /viva/v1 surface nor moves any run there."""
     monkeypatch.setenv("VIVA_API_BASE", stub.url)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     cfg = c.get("/api/remote-run-config")
     assert cfg.status_code == 200
     assert cfg.json() == {"pinned": False, "deployment": "smsvpctest"}  # no `backend` key at all
@@ -168,13 +168,13 @@ def legacy_backend():
     srv.server_close()
 
 
-def test_named_backend_without_capabilities_route_stays_legacy(ws, clean_backend_env, dashboard_client,
+def test_named_backend_without_capabilities_route_stays_legacy(ws, clean_backend_env, inproc_client,
                                                                monkeypatch, legacy_backend):
     url, handler = legacy_backend
     _name_backend(monkeypatch, url, environment=None)
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/vivarium-collective/v2ecoli")
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     cfg = c.get("/api/remote-run-config").json()
     assert cfg["backend"]["dispatch"] == "legacy" and cfg["backend"]["reachable"] is True
     res = c.post("/api/remote-run-submit", json={
@@ -186,11 +186,11 @@ def test_named_backend_without_capabilities_route_stays_legacy(ws, clean_backend
     assert not any("/viva/v1/composites" in p for _, p in handler.seen)
 
 
-def test_named_backend_without_documents_capability_stays_legacy(ws, stub, clean_backend_env, dashboard_client,
+def test_named_backend_without_documents_capability_stays_legacy(ws, stub, clean_backend_env, inproc_client,
                                                                  monkeypatch):
     stub.respond("GET", "/viva/v1/capabilities", 200, {"version": "0.1.9", "capabilities": ["viva-v1-composites"]})
     _name_backend(monkeypatch, stub.url)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     assert c.get("/api/remote-run-config").json()["backend"]["dispatch"] == "legacy"
     assert c.get("/api/remote-dispatch-preflight").json()["target"] == "local"
     # not hijacked: with no simulator id and no auth the legacy gate answers exactly as it always did
@@ -215,10 +215,10 @@ def test_pinned_and_session_build_keep_the_simulator_path_even_with_a_named_back
 
 # --- a backend that runs documents -------------------------------------------------------------
 
-def test_config_and_preflight_report_the_negotiated_backend(ws, stub, clean_backend_env, dashboard_client,
+def test_config_and_preflight_report_the_negotiated_backend(ws, stub, clean_backend_env, inproc_client,
                                                             monkeypatch):
     _name_backend(monkeypatch, stub.url)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     backend = c.get("/api/remote-run-config").json()["backend"]
     assert backend["dispatch"] == "viva-v1-document"
     assert "viva-v1-composites-documents" in backend["capabilities"]
@@ -226,14 +226,14 @@ def test_config_and_preflight_report_the_negotiated_backend(ws, stub, clean_back
     assert "url" not in json.dumps(backend).lower() or stub.url not in json.dumps(backend)
 
 
-def test_submit_poll_progress_cancel_over_a_real_server(ws, stub, clean_backend_env, dashboard_client,
+def test_submit_poll_progress_cancel_over_a_real_server(ws, stub, clean_backend_env, inproc_client,
                                                         monkeypatch):
     stub.respond("GET", "/viva/v1/composites/{id}/progress", 200, {
         "id": RUN_ID, "status": "running", "total": 4,
         "by_kind": {"simulation": {"completed": 1, "running": 2, "failed": 1}}})
     stub.respond("DELETE", "/viva/v1/composites/{id}", 202, {"run": _run("cancelled"), "pending": "dispatch"})
     _name_backend(monkeypatch, stub.url)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
 
     res = c.post("/api/remote-run-submit", json={"study": "demo"})
     assert res.status_code == 202, res.text
@@ -258,17 +258,17 @@ def test_submit_poll_progress_cancel_over_a_real_server(ws, stub, clean_backend_
     assert [x.method for x in stub.calls if x.method == "DELETE"] == ["DELETE"]
 
 
-def test_study_run_baseline_dispatches_through_the_run_surface(ws, stub, clean_backend_env, dashboard_client,
+def test_study_run_baseline_dispatches_through_the_run_surface(ws, stub, clean_backend_env, inproc_client,
                                                                monkeypatch):
     _name_backend(monkeypatch, stub.url)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     res = c.post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
     assert res.status_code == 202, res.text
     assert res.json()["run_id"] == RUN_ID
     assert len(stub.calls_to("viva-create-composite-run")) == 1
 
 
-def test_upstream_refusal_is_a_502_with_the_real_reason(ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+def test_upstream_refusal_is_a_502_with_the_real_reason(ws, stub, clean_backend_env, inproc_client, monkeypatch):
     orig = stub.handle  # 409 carries no JSON schema in the contract, so serve it raw
 
     def refuse(method, raw_path, raw_body):
@@ -278,13 +278,13 @@ def test_upstream_refusal_is_a_502_with_the_real_reason(ws, stub, clean_backend_
 
     stub.handle = refuse
     _name_backend(monkeypatch, stub.url)
-    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
+    res = inproc_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
     assert res.status_code == 502
     assert "building, not ready" in res.json()["error"] and res.json()["reachable"] is False
 
 
 def test_a_dependency_the_backend_does_not_allow_is_explained_not_reported_as_unreachable(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """The real backend answers 422 "'<dep>' is not in the compose allow list". That is a policy refusal from a reachable
     server, so the message says what to do about it, names the dependency, and keeps the backend's own wording."""
     orig = stub.handle
@@ -297,7 +297,7 @@ def test_a_dependency_the_backend_does_not_allow_is_explained_not_reported_as_un
 
     stub.handle = refuse
     _name_backend(monkeypatch, stub.url)
-    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
+    res = inproc_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
     body = res.json()
     assert res.status_code == 403, res.text
     assert body["reason"] == "not-allow-listed" and body["dependency"] == dep and body["reachable"] is True
@@ -306,7 +306,7 @@ def test_a_dependency_the_backend_does_not_allow_is_explained_not_reported_as_un
     assert "not in the compose allow list" in body["backend_error"]  # the backend's own words are kept
 
 
-def test_other_upstream_refusals_are_still_reported_as_before(ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+def test_other_upstream_refusals_are_still_reported_as_before(ws, stub, clean_backend_env, inproc_client, monkeypatch):
     orig = stub.handle
 
     def refuse(method, raw_path, raw_body):
@@ -316,7 +316,7 @@ def test_other_upstream_refusals_are_still_reported_as_before(ws, stub, clean_ba
 
     stub.handle = refuse
     _name_backend(monkeypatch, stub.url)
-    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
+    res = inproc_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
     assert res.status_code == 502 and "some other validation problem" in res.json()["error"]
     assert "reason" not in res.json()
 
@@ -439,12 +439,12 @@ def test_run_remote_with_a_supplied_client_never_uses_the_run_surface(ws, stub, 
 
 
 def test_a_composite_that_cannot_be_exported_is_a_422_with_the_reason_and_nothing_is_sent(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     (ws / "studies" / "demo" / "study.yaml").write_text(yaml.safe_dump({
         "name": "demo", "schema_version": 3,
         "baseline": [{"name": "core", "composite": "pbg_ws_increase_demo.composites.no-such", "params": {}}]}))
     _name_backend(monkeypatch, stub.url)
-    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
+    res = inproc_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
     assert res.status_code == 422 and "could not export composite" in res.json()["error"]
     assert stub.calls_to("viva-create-composite-run") == []
 
@@ -458,11 +458,11 @@ def _runs_db(ws: Path) -> sqlite3.Connection:
 
 
 def test_a_finished_viva_v1_study_run_lands_its_emitter_history_where_the_viewers_read_it(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     _name_backend(monkeypatch, stub.url)
     stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("completed"))
     _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     assert c.post("/api/remote-run-submit", json={"study": "demo"}).status_code == 202
     with _runs_db(ws) as db:  # the dispatch left its placeholder in the Runs tab
         assert [r["run_id"] for r in db.execute("SELECT run_id FROM runs_meta")] == [f"remote-pending-{RUN_ID}"]
@@ -487,24 +487,24 @@ def test_a_finished_viva_v1_study_run_lands_its_emitter_history_where_the_viewer
 
 
 def test_landing_an_unfinished_viva_v1_run_is_refused_and_downloads_nothing(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     _name_backend(monkeypatch, stub.url)
     stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("running"))
     _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
-    res = dashboard_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
+    res = inproc_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
     assert res.status_code == 409 and "running" in res.json()["error"]
     assert [c for c in stub.calls if c.path.endswith("/results")] == []
     assert not (ws / "studies" / "demo" / "runs.db").exists()
 
 
 def test_a_viva_v1_run_shows_in_the_run_list_while_pending_and_as_a_local_store_once_landed(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Pending: the list still renders (the run's id is the backend's string, not a number). Landed: its data is
     in this workspace's runs.db, so it is listed as a run whose data is here -- not as one whose data is remote."""
     _name_backend(monkeypatch, stub.url)
     stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("completed"))
     _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     assert c.post("/api/remote-run-submit", json={"study": "demo"}).status_code == 202
 
     pending = c.get("/api/simulations")
@@ -521,14 +521,14 @@ def test_a_viva_v1_run_shows_in_the_run_list_while_pending_and_as_a_local_store_
 
 
 def test_a_landed_viva_v1_run_still_says_which_backend_it_ran_on(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Regression: once landed, the row has no remote_origin (its data is local), and the Runs table's Origin column
     -- which read only remote_origin -- flipped from the backend's name to "local". Where a run RAN is separate from
     where its data IS: the landed row carries ``ran_on`` = the backend, and remote_origin stays None."""
     _name_backend(monkeypatch, stub.url)
     stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("completed"))
     _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     assert c.post("/api/remote-run-submit", json={"study": "demo"}).status_code == 202
     (pending,) = [r for r in c.get("/api/simulations").json()["simulations"]
                   if r.get("run_id") == f"remote-pending-{RUN_ID}"]
@@ -542,12 +542,12 @@ def test_a_landed_viva_v1_run_still_says_which_backend_it_ran_on(
 
 
 def test_the_run_lists_status_poll_reads_a_viva_v1_run_by_its_own_id(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """The Runs table polls a pending remote row by the id it recorded; for a /viva/v1 run that is the backend's
     string id, which must go to the run's status read, not the integer sms-api path."""
     _name_backend(monkeypatch, stub.url)
     stub.respond("GET", "/viva/v1/composites/{id}/status", 200, {"id": RUN_ID, "status": "completed", "message": None})
-    res = dashboard_client(ws).get(f"/api/remote-run-poll?simulation_id={RUN_ID}")
+    res = inproc_client(ws).get(f"/api/remote-run-poll?simulation_id={RUN_ID}")
     assert res.status_code == 200, res.text
     assert (res.json()["phase"], res.json()["run_id"]) == ("done", RUN_ID)
     assert stub.calls_to("viva-get-composite-run-status")
@@ -566,12 +566,12 @@ def test_a_simulation_far_below_its_job_row_is_still_found(ws, stub, clean_backe
     assert [c.path for c in stub.calls if c.path.endswith("/results")] == ["/viva/v1/compose/simulation/12/results"]
 
 
-def test_landing_the_same_run_twice_answers_the_first_landing(ws, stub, clean_backend_env, dashboard_client,
+def test_landing_the_same_run_twice_answers_the_first_landing(ws, stub, clean_backend_env, inproc_client,
                                                                monkeypatch):
     _name_backend(monkeypatch, stub.url)
     stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("completed"))
     _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     first = c.post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID}).json()
     again = c.post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID}).json()
     assert again == {"run_id": first["run_id"], "already_landed": True}
@@ -581,21 +581,21 @@ def test_landing_the_same_run_twice_answers_the_first_landing(ws, stub, clean_ba
 
 
 def test_a_string_id_is_not_landed_through_viva_v1_unless_a_document_backend_is_named(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Without `serve --backend-base-url` naming a document backend, the land route keeps its sign-in gate."""
     monkeypatch.setenv("VIVA_API_BASE", stub.url)  # an alias: does not opt in
-    res = dashboard_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
+    res = inproc_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
     assert res.status_code == 401
     assert stub.calls_to("viva-get-composite-run") == []
 
 
-def test_a_run_landed_before_ran_on_existed_heals_its_origin(ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+def test_a_run_landed_before_ran_on_existed_heals_its_origin(ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Runs landed by an older workbench have run-log records without ``ran_on``; the next listing must re-backfill
     them so their Origin names the backend instead of staying "local"."""
     _name_backend(monkeypatch, stub.url)
     stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("completed"))
     _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     assert c.post("/api/remote-run-submit", json={"study": "demo"}).status_code == 202
     run_id = c.post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID}).json()["run_id"]
     c.get("/api/simulations?refresh=true")
@@ -610,7 +610,7 @@ def test_a_run_landed_before_ran_on_existed_heals_its_origin(ws, stub, clean_bac
 
 
 def test_a_composite_explorer_run_on_the_backend_records_where_it_ran(
-        ws, stub, clean_backend_env, dashboard_client, monkeypatch):
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Regression: a Composite Explorer run sent to a named /viva/v1 backend recorded only its params, so its row had
     neither remote_origin nor ran_on and the Origin column said "local". The launch now records ``ran_on`` in the
     run's manifest -- never in its params, which a re-run sends back to the composite as its inputs."""
@@ -619,7 +619,7 @@ def test_a_composite_explorer_run_on_the_backend_records_where_it_ran(
     from vivarium_workbench.lib import rerun
 
     _name_backend(monkeypatch, stub.url)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     res = c.post("/api/composite-test-run", json={"id": COMPOSITE, "steps": 1})
     assert res.status_code in (200, 202), res.text
     run_id = res.json()["run_id"]
@@ -635,9 +635,9 @@ def test_a_composite_explorer_run_on_the_backend_records_where_it_ran(
 
 
 def test_a_local_composite_explorer_run_does_not_claim_a_backend(
-        ws, stub, clean_backend_env, dashboard_client):
+        ws, stub, clean_backend_env, inproc_client):
     """With no backend named the run is local: its manifest carries no ``ran_on`` and its Origin stays "local"."""
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     res = c.post("/api/composite-test-run", json={"id": COMPOSITE, "steps": 1})
     assert res.status_code in (200, 202), res.text
     run_id = res.json()["run_id"]

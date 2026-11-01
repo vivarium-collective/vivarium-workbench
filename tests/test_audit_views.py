@@ -2,7 +2,7 @@
 
 The FastAPI app import hits a pre-existing, unrelated
 ``process_bigraph.composite_spec`` ModuleNotFoundError in this environment, so
-the endpoint cannot be exercised via the ``dashboard_client`` fixture here. We
+the endpoint cannot be exercised via the ``inproc_client`` fixture here. We
 therefore test the library function directly (the route is a thin
 ``JSONResponse(build_audit(ws))`` passthrough, mirroring
 ``/api/investigation-graph``) and gate the route test behind an importability
@@ -214,9 +214,9 @@ def _app_imports() -> bool:
     reason="FastAPI app import hits the pre-existing process_bigraph.composite_spec "
     "ModuleNotFoundError (unrelated to this view); route covered by the lib test.",
 )
-def test_api_audit_route(dashboard_client, tmp_path):
+def test_api_audit_route(inproc_client, tmp_path):
     ws = _make_workspace(tmp_path / "ws")
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     r = client.get("/api/audit")
     assert r.status_code == 200
     body = r.json()
@@ -231,9 +231,9 @@ def test_api_audit_route(dashboard_client, tmp_path):
 class TestStudyAuditRoute:
     """GET /api/study-audit -- Fable G6 (mirrors /api/study-rigor)."""
 
-    def test_returns_payload_never_500(self, dashboard_client, tmp_path):
+    def test_returns_payload_never_500(self, inproc_client, tmp_path):
         ws = _audit_study_workspace(tmp_path / "ws")
-        client = dashboard_client(ws)
+        client = inproc_client(ws)
         r = client.get("/api/study-audit?study=s1")
         assert r.status_code == 200
         body = r.json()
@@ -244,16 +244,16 @@ class TestStudyAuditRoute:
         else:
             assert body.get("unavailable") is True
 
-    def test_missing_study_param_is_400(self, dashboard_client, tmp_path):
+    def test_missing_study_param_is_400(self, inproc_client, tmp_path):
         ws = _make_workspace(tmp_path / "ws")
-        client = dashboard_client(ws)
+        client = inproc_client(ws)
         r = client.get("/api/study-audit")
         assert r.status_code == 400
         assert r.json() == {"error": "missing ?study="}
 
-    def test_unknown_study_is_404(self, dashboard_client, tmp_path):
+    def test_unknown_study_is_404(self, inproc_client, tmp_path):
         ws = _make_workspace(tmp_path / "ws")
-        client = dashboard_client(ws)
+        client = inproc_client(ws)
         r = client.get("/api/study-audit?study=nope")
         assert r.status_code == 404
         assert r.json() == {"error": "study not found"}
