@@ -91,13 +91,6 @@ STEPS: list[dict[str, Any]] = [
              "anomalies.",
      "gate": "Measured against an empty baseline — a snapshot of current state, not a "
              "change since the last cycle."},
-    {"id": "transition", "label": "Transition model", "phase": "Composed model",
-     "module": "transition_model", "func": "transition_phase_report", "kind": "pure",
-     "depends_on": ["build_model"],
-     "desc": "Domain-specific (endosymbiosis): sweeps a hard-coded rule table over "
-             "proximity × pump × heredity and tallies the outcome.",
-     "gate": "Not a generic step and runs no simulation — the cells are a classification "
-             "of a would-be run."},
     {"id": "propose", "label": "Propose studies", "phase": "Growth",
      "module": "discover", "func": "suggest_studies", "kind": "pure",
      "depends_on": ["run_cycle"],
@@ -198,8 +191,6 @@ def _summarize(step_id: str, result: Any, viz_census: Any = None, viz_appr: Any 
         if step_id == "delta":
             return (f"+{len(result.get('added_or_qualified') or [])} · "
                     f"{len(result.get('model_disagreements') or [])} disagreements")
-        if step_id == "transition":
-            return " · ".join(f"{k}:{v}" for k, v in (result.get("tally") or {}).items()) or "—"
         if step_id == "propose":
             return f"{len(result.get('suggestions') or [])} proposals"
         if step_id == "select":
@@ -279,9 +270,6 @@ def _run_one(step_id: str, ctx: dict, M: Any) -> Any:
     if step_id == "delta":
         return M.evaluation.discovery_delta(inv_spec, studies, ctx.get("ev_state"))
 
-    if step_id == "transition":
-        return M.transition_model.transition_phase_report(inv_spec, studies)
-
     if step_id == "propose":
         sugg = M.discover.suggest_studies(ctx.get("cyc") or {}, inv_spec, studies)
         ctx["suggestions"] = sugg
@@ -341,11 +329,10 @@ class _Modules:
             except ImportError:
                 return _Missing(n)
         candidate_action, experiment_design, model_architect, evaluation, \
-            transition_model, study_seeding, study_refinement = (
+            study_seeding, study_refinement = (
                 _opt(n) for n in ("candidate_action", "experiment_design",
                                   "model_architect", "evaluation",
-                                  "transition_model", "study_seeding",
-                                  "study_refinement"))
+                                  "study_seeding", "study_refinement"))
         self.discover = discover
         self.de = de
         self.evidence_integrity = evidence_integrity
@@ -353,7 +340,6 @@ class _Modules:
         self.experiment_design = experiment_design
         self.model_architect = model_architect
         self.evaluation = evaluation
-        self.transition_model = transition_model
         self.study_seeding = study_seeding
         self.study_refinement = study_refinement
 

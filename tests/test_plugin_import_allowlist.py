@@ -63,7 +63,6 @@ ALLOWED_DISCOVERY: dict[str, str] = {
     "experiment_design": "Phase C: design a discriminating study",
     "model_architect": "Phase D: model catalog + acquisition routing",
     "evaluation": "Phase F: compare hypotheses, disagreement map, DiscoveryDelta",
-    "transition_model": "N+2: transition composition + phase diagram",
     "study_seeding": "Growth loop: select-for-launch + seed a study (preview)",
     "study_refinement": "Growth loop: refinement needs + refine a study (preview)",
     "band_provenance": "acceptance-band provenance",
