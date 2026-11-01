@@ -95,6 +95,7 @@ ALLOWED_DISCOVERY: dict[str, str] = {
     "synthesis": "synthesis spine + open-calls roll-up",
     "test_diff": "cross-iteration test diff (diff_reports)",
     "viz_freshness": "viz freshness/staleness",
+    "grader_freshness": "computed-grade freshness (fresh|stale) — Phase 2 graded-outcomes",
     "narrative_freshness": "investigation-tab freshness (verdict / narrative / decisions)",
     "workspace_catalog": "workspace catalog registration",
     "workspace_paths": "canonical workspace layout resolution",
