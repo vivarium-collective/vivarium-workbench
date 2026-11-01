@@ -2415,7 +2415,7 @@ wheels = [
 
 [[package]]
 name = "process-bigraph"
-version = "1.9.1"
+version = "1.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bigraph-schema" },
@@ -2426,9 +2426,9 @@ dependencies = [
     { name = "scipy" },
     { name = "sympy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/6a/b2c1620fdfab048c6de03d4f5a092aaf8177294b8dadfcfc0750499fa6a9/process_bigraph-1.9.1.tar.gz", hash = "sha256:9b476fa963688811a2c485ea2b17d683e61fa687b018921a44a159a85d53b7d0", size = 253316, upload-time = "2026-10-13T14:16:30.927Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/17/a2e8246a1c7149d3fd18e63e333353a45c13a93fd07ce3691b3badaecf87/process_bigraph-1.11.0.tar.gz", hash = "sha256:df0433e462a9a1cef3b6cf66290c789a202997e714a9f6f3e8984fadbc07a176", size = 273107, upload-time = "2026-11-01T03:13:27.295Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/59/f7cae4aebe79797d984b03ba07b7424053f1430d9c773e1c47c102f0e96f/process_bigraph-1.9.1-py3-none-any.whl", hash = "sha256:5a464e1cc8799cc2751e2f4e0c5128f542bbef34be95a40867d00fe7f864db0a", size = 274023, upload-time = "2026-10-13T14:16:28.438Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/8e/f0c2fca736d84dd1e6d18894b438419cf38619721d31e39b1b3b42678a1f/process_bigraph-1.11.0-py3-none-any.whl", hash = "sha256:c299fbe1b34f1c04e23ced19db3445ff33b1bc6fcdcce3d2dfed0a40938a62c7", size = 291298, upload-time = "2026-11-01T03:13:25.806Z" },
 ]
 
 [[package]]
@@ -3774,7 +3774,7 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'viz'" },
     { name = "playwright", marker = "extra == 'loom-render'", specifier = ">=1.40" },
     { name = "polars", marker = "extra == 'test'" },
-    { name = "process-bigraph", specifier = ">=1.9.1" },
+    { name = "process-bigraph", specifier = ">=1.11.0" },
     { name = "psutil", specifier = ">=5.9" },
     { name = "pyarrow", marker = "extra == 'test'" },
     { name = "pydantic", specifier = ">=2" },
