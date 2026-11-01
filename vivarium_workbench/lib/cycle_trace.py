@@ -526,6 +526,7 @@ _KIND_LABEL = {
     "viz_misplaced": "Figure in the wrong scope (cross-arm viz under a single study)",
     "viz_duplicated": "Same cross-arm figure hosted in multiple studies",
     "viz_untied": "Figure not tied to any observable",
+    "capability_gap": "Capability gap — a required mechanism needs a process built",
 }
 
 # The frontier-item kinds the engine lets a human/AI discharge with a resolution
@@ -634,6 +635,13 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
         for p in (inv_spec.get("viz_proposals") or []):
             if isinstance(p, dict):
                 props_by.setdefault(p.get("id"), p)
+        # capability gaps keyed by id — persisted (on-disk status wins) over freshly proposed,
+        # mirroring the engine frontier, so the panel shows the right accept/build affordance.
+        gaps_by: dict = {g.get("id"): g for g in (inv_spec.get("capability_gaps") or [])
+                         if isinstance(g, dict)}
+        for g in (cyc.get("capability_gaps") or []):
+            if isinstance(g, dict):
+                gaps_by.setdefault(g.get("id"), g)
         # viz records -> derivable_fix (an address inferred from a matching file on disk)
         fix_by: dict = {}
         for _r in (cyc.get("validations") or []):
@@ -654,6 +662,8 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
             kind = it.get("kind")
             p = cons_by.get((it.get("op"), it.get("target"))) or {}
             rationale = str(it.get("rationale") or "")
+            _gap = gaps_by.get(it.get("target")) if kind == "capability_gap" else None
+            _gst = (_gap or {}).get("status", "proposed")
             front_rows.append({
                 "kind": kind,
                 "kind_label": _KIND_LABEL.get(kind, kind),
@@ -675,6 +685,16 @@ def _cycle_summary(ctx: dict, M: _Modules) -> dict:
                                       .get("needs_author", True)) if kind == "viz_proposed" else False),
                 "suggested": ((props_by.get(it.get("target")) or {}).get("suggested")
                               if kind == "viz_proposed" else None),
+                # capability-gap affordances: a proposed gap awaits accept/reject; an
+                # accepted (or needs_author / failed-retry) gap awaits a build via the
+                # workspace build hook. close-on-coverage is automatic the next cycle.
+                "gap": kind == "capability_gap",
+                "gap_status": _gst if kind == "capability_gap" else None,
+                "mechanism": (_gap or {}).get("mechanism") if kind == "capability_gap" else None,
+                "gap_derivable": bool((_gap or {}).get("derivable")) if kind == "capability_gap" else False,
+                "acceptable_gap": kind == "capability_gap" and _gst == "proposed",
+                "rejectable_gap": kind == "capability_gap" and _gst == "proposed",
+                "buildable_gap": kind == "capability_gap" and _gst in ("accepted", "needs_author", "failed"),
                 "studies": _studies_for_item(kind, it.get("target"), rationale, members),
                 "context": (dn_ctx.get(it.get("target"), "")[:500] if kind == "open_decision" else ""),
             })
@@ -1127,6 +1147,98 @@ def accept_viz_proposal(ws_root, inv_slug: str, proposal: str, rationale: str,
 def reject_viz_proposal(ws_root, inv_slug: str, proposal: str, rationale: str) -> dict:
     """Terminally reject ONE ``vp:`` proposal (engine ``reject_viz_proposal``). Commits."""
     return _decide_viz_proposal(ws_root, inv_slug, proposal, rationale, "reject")
+
+
+def _ensure_capability_gaps_persisted(ws_root: Path, inv_slug: str, cg: str, M: Any) -> None:
+    """Capability gaps are proposed (pure) each cycle; accept/reject/build act on the
+    persisted ledger. If ``cg`` isn't on disk yet, persist the cycle exactly as
+    ``discover cycle`` would (engine ``persist_cycle``; the gap ledger is content-addressed)."""
+    inv_path, inv_spec, studies = M.discover.load_cycle_inputs(ws_root, inv_slug)
+    if any(isinstance(g, dict) and g.get("id") == cg for g in inv_spec.get("capability_gaps") or []):
+        return
+    vs = None
+    try:
+        vs = M.discover.viz_inventory(ws_root, inv_slug, studies)
+    except Exception:
+        pass
+    cyc = (M.discover.run_cycle(inv_spec, studies, viz_state=vs, viz_catalog=_viz_catalog(ws_root))
+           if vs is not None else M.discover.run_cycle(inv_spec, studies))
+    M.discover.persist_cycle(inv_path, inv_spec, cyc, studies=studies, viz_state=vs)
+
+
+def _decide_capability_gap(ws_root, inv_slug: str, gap: str, rationale: str, verb: str) -> dict:
+    if not engine_available():
+        return {"available": False}
+    M = _Modules()
+    ws_root = Path(ws_root)
+    if not str(gap or "").startswith("cg:"):
+        return {"available": True, "ok": False, "detail": "gap id must be a cg:<inv>:<hash> id"}
+    if not (rationale or "").strip():
+        return {"available": True, "ok": False, "detail": "a rationale is required"}
+    try:
+        _ensure_capability_gaps_persisted(ws_root, inv_slug, gap, M)
+        rec = getattr(M.discover, f"{verb}_capability_gap")(
+            ws_root, inv_slug, gap, rationale=rationale)
+    except Exception as e:
+        return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
+    commit = _git_commit(ws_root, _inv_commit_dirs(ws_root),
+                         f"discovery cycle: {verb} {gap} in {inv_slug}")
+    return {"available": True, "ok": True, "gap": rec, "commit": commit,
+            "after": build_cycle_trace(ws_root, inv_slug)}
+
+
+def accept_capability_gap(ws_root, inv_slug: str, gap: str, rationale: str) -> dict:
+    """Accept ONE ``cg:`` capability gap (engine ``accept_capability_gap``): authorizes a
+    build (never builds). Rationale required. Commits. Never raises."""
+    return _decide_capability_gap(ws_root, inv_slug, gap, rationale, "accept")
+
+
+def reject_capability_gap(ws_root, inv_slug: str, gap: str, rationale: str) -> dict:
+    """Terminally reject ONE ``cg:`` capability gap (engine ``reject_capability_gap``). Commits."""
+    return _decide_capability_gap(ws_root, inv_slug, gap, rationale, "reject")
+
+
+def build_capability_gap(ws_root, inv_slug: str, gap: str) -> dict:
+    """Build an ACCEPTED ``cg:`` gap via the workspace build hook
+    (``<pkg>.build_hook.register_build_hook``). The engine never builds itself; with no hook
+    registered this returns a clear, actionable message instead of pretending. On success the
+    gap -> ``built`` (close-on-coverage fires the next cycle); otherwise ``needs_author`` /
+    ``failed``. The build ACTION succeeding (even with a needs_author outcome) is ``ok: True``;
+    ``built`` reports whether a process was actually produced. Commits. Never raises."""
+    if not engine_available():
+        return {"available": False}
+    from discovery_engine.study_io import save_yaml_atomic
+    M = _Modules()
+    ws_root = Path(ws_root)
+    if not str(gap or "").startswith("cg:"):
+        return {"available": True, "ok": False, "detail": "gap id must be a cg:<inv>:<hash> id"}
+    try:
+        _ensure_capability_gaps_persisted(ws_root, inv_slug, gap, M)
+        _inv_path, _spec, g = M.discover._cap_gap_load(ws_root, inv_slug, gap)
+        if g.get("status") != "accepted":
+            return {"available": True, "ok": False,
+                    "detail": f"gap must be accepted before build (is {g.get('status')!r})"}
+        hook = M.discover.load_workspace_build_hook(ws_root)
+        if hook is None:
+            return {"available": True, "ok": False,
+                    "detail": "no workspace build hook registered — add <pkg>.build_hook."
+                              "register_build_hook to build this mechanism; until then it must be "
+                              "authored by hand"}
+        from discovery_engine.capability_gaps import build_capability_gap as _build
+        from discovery_engine.model_architect import build_catalog
+        _build(g, hook, ws_root=ws_root,
+               catalog=lambda: build_catalog(M.discover.load_cycle_inputs(ws_root, inv_slug)[2], ws_root))
+        # re-read + merge (the hook may have edited the investigation), then persist atomically
+        inv_path, spec, fresh = M.discover._cap_gap_load(ws_root, inv_slug, gap)
+        fresh.clear(); fresh.update(g)
+        save_yaml_atomic(inv_path, spec)
+    except Exception as e:
+        return {"available": True, "ok": False, "detail": f"{type(e).__name__}: {e}"}
+    commit = _git_commit(ws_root, _inv_commit_dirs(ws_root),
+                         f"discovery cycle: build {gap} in {inv_slug}")
+    return {"available": True, "ok": True, "built": g.get("status") == "built",
+            "status": g.get("status"), "gap": g, "commit": commit,
+            "after": build_cycle_trace(ws_root, inv_slug)}
 
 
 def ai_steer_decision(ws_root, inv_slug: str, target: str) -> dict:

@@ -463,10 +463,22 @@
       acts.push('<button class="dcyc-btn dcyc-btn-sm" data-vp-reject="' +
         esc(it.target) + '" title="Reject this proposal (terminal; rationale required)">Reject ▸</button>');
     }
+    if (it.acceptable_gap) {
+      acts.push('<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-cg-accept="' +
+        esc(it.target) + '" title="Accept this capability gap — authorizes a build (rationale required)">Accept ▸</button>');
+      acts.push('<button class="dcyc-btn dcyc-btn-sm" data-cg-reject="' +
+        esc(it.target) + '" title="Reject this gap (terminal; rationale required)">Reject ▸</button>');
+    }
+    if (it.buildable_gap) {
+      acts.push('<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-cg-build="' +
+        esc(it.target) + '" title="Build this mechanism via the workspace build hook">' +
+        (it.gap_status === "failed" ? "Retry build ▸" : "Build ▸") + "</button>");
+    }
     var desc = it.rationale || it.target || "";
     var form = (S.decideFor === it.target) ? decideFormHtml(it)
       : ((S.fixFor === it.target && it.declarable) ? fixFormHtml(it)
-      : ((S.vpFor && S.vpFor.id === it.target && it.acceptable) ? vpFormHtml(it) : ""));
+      : ((S.vpFor && S.vpFor.id === it.target && it.acceptable) ? vpFormHtml(it)
+      : ((S.cgFor && S.cgFor.id === it.target && it.acceptable_gap) ? cgFormHtml(it) : "")));
     var actionRow = (links || acts.length)
       ? ('<div class="dcyc-factions">' + links + acts.join("") + "</div>") : "";
     return '<div class="dcyc-fitem' + (it.blocking ? " blk" : "") + '">' +
@@ -511,6 +523,18 @@
       '<button class="dcyc-btn dcyc-btn-sm" data-vp-cancel="1">Cancel</button></div></div>';
   }
 
+  function cgFormHtml(it) {
+    var accept = S.cgFor.mode === "accept";
+    return '<div class="dcyc-decide">' +
+      '<textarea class="dcyc-decide-ta" id="dcyc-cg-why" placeholder="' +
+      (accept ? "Why accept this capability gap / authorize building the mechanism (required)"
+              : "Why reject this gap (required)") +
+      '"></textarea><div class="dcyc-row-actions">' +
+      '<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-cg-save="' + esc(it.target) + '">' +
+      (accept ? "Accept" : "Reject") + '</button>' +
+      '<button class="dcyc-btn dcyc-btn-sm" data-cg-cancel="1">Cancel</button></div></div>';
+  }
+
   function submitVizProposal(id) {
     var mode = S.vpFor && S.vpFor.mode;
     var why = el("dcyc-vp-why"), addr = el("dcyc-vp-addr");
@@ -542,6 +566,43 @@
         if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
         setStatus(j.ok ? ("Rendered " + target + ".") : ("Build failed: " + (j.detail || "unknown")));
         if (j.ok) refreshViews();
+      }).catch(function () { setStatus("Build request failed."); })
+      .finally(function () { S.busy = false; });
+  }
+
+  function submitCapabilityGap(id) {
+    var mode = S.cgFor && S.cgFor.mode;
+    var why = el("dcyc-cg-why");
+    var rationale = why ? why.value.trim() : "";
+    if (!rationale) { setStatus("Enter a rationale."); if (why) why.focus(); return; }
+    if (!S.slug || S.busy) return;
+    S.busy = true; setStatus((mode === "accept" ? "Accepting " : "Rejecting ") + id + "…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/" + mode + "-capability-gap",
+      { gap: id, rationale: rationale })
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (!j.ok) { setStatus(j.detail || "Could not record the decision."); return; }
+        S.cgFor = null;
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
+        var c = j.commit || {};
+        setStatus((mode === "accept" ? "Accepted — build it next" : "Rejected") +
+          (c.committed ? (" · committed " + c.sha) : "") + ".");
+        refreshViews();
+      }).catch(function () { setStatus("Request failed."); })
+      .finally(function () { S.busy = false; });
+  }
+
+  function buildCapabilityGap(target) {
+    if (!S.slug || S.busy) return;
+    S.busy = true; setStatus("Building " + target + "…");
+    postJSON("/api/discovery-cycle/" + encodeURIComponent(S.slug) + "/build-capability-gap", { gap: target })
+      .then(function (j) {
+        if (!j || j.available === false) { setStatus("Discovery engine unavailable."); return; }
+        if (!j.ok) { setStatus(j.detail || "Build could not start."); return; }
+        if (j.after && j.after.steps && j.after.steps.length) setTrace(j.after);
+        setStatus(j.built ? ("Built " + target + " — closes on coverage next cycle.")
+          : ("Build outcome: " + (j.status || "needs author") + " — a human must author the mechanism."));
+        refreshViews();
       }).catch(function () { setStatus("Build request failed."); })
       .finally(function () { S.busy = false; });
   }
@@ -772,6 +833,22 @@
     if (vcl) vcl.addEventListener("click", function (ev) { ev.stopPropagation(); S.vpFor = null; renderGraph(); });
     var vsv = g.querySelector("[data-vp-save]");
     if (vsv) vsv.addEventListener("click", function (ev) { ev.stopPropagation(); submitVizProposal(vsv.getAttribute("data-vp-save")); });
+    ["accept", "reject"].forEach(function (mode) {
+      Array.prototype.forEach.call(g.querySelectorAll("[data-cg-" + mode + "]"), function (b) {
+        b.addEventListener("click", function (ev) {
+          ev.stopPropagation(); S.cgFor = { id: b.getAttribute("data-cg-" + mode), mode: mode };
+          S.vpFor = null; S.fixFor = null; S.decideFor = null; renderGraph();
+          var a = el("dcyc-cg-why"); if (a) a.focus();
+        });
+      });
+    });
+    var ccl = g.querySelector("[data-cg-cancel]");
+    if (ccl) ccl.addEventListener("click", function (ev) { ev.stopPropagation(); S.cgFor = null; renderGraph(); });
+    var csv = g.querySelector("[data-cg-save]");
+    if (csv) csv.addEventListener("click", function (ev) { ev.stopPropagation(); submitCapabilityGap(csv.getAttribute("data-cg-save")); });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-cg-build]"), function (b) {
+      b.addEventListener("click", function (ev) { ev.stopPropagation(); buildCapabilityGap(b.getAttribute("data-cg-build")); });
+    });
     var fcl = g.querySelector("[data-fix-cancel]");
     if (fcl) fcl.addEventListener("click", function (ev) { ev.stopPropagation(); S.fixFor = null; renderGraph(); });
     var fsv = g.querySelector("[data-fix-save]");
