@@ -9808,16 +9808,23 @@
       //    accomplishment, not something to grey out;
       //  • authored closed/archived → intentionally retired: muted, but still
       //    legible and clickable (not dimmed to look disabled).
-      var derivedClosed = closed && iset.closure_source === 'derived';
       var archived = iset.status === 'archived';
-      var statusPill = derivedClosed
-        ? '<span class="status-pill" style="' + pillBase + 'background:#dcfce7;color:#166534;border:1px solid #86efac;font-weight:600" title="Closed by the discovery engine: acceptance criteria met by graded tests (derived, not authored)">Closed ✓</span>'
-        : closed
-          ? '<span class="status-pill" style="' + pillBase + 'background:#eef2f7;color:#475569;border:1px solid #cbd5e1" title="' + (archived ? 'Archived by the author.' : 'Closed by the author.') + '">' + (archived ? 'Archived' : 'Closed') + '</span>'
+      // A CLOSED investigation (authored or engine-derived) is a COMPLETED RESULT, not a
+      // disabled/avoidable item — it reads as an accomplishment (green, never dimmed). Only
+      // ARCHIVED (deliberately retired/shelved) is de-emphasised. Conflating "closed =
+      // finished successfully" with "archived = retired" was what greyed finished work out.
+      var accomplished = closed && !archived;
+      var statusPill = accomplished
+        ? '<span class="status-pill" style="' + pillBase + 'background:#dcfce7;color:#166534;border:1px solid #86efac;font-weight:600" title="' +
+          (iset.closure_source === 'derived'
+            ? 'Closed by the discovery engine: acceptance criteria met by graded tests.'
+            : 'Completed and closed — a finished result.') + '">Closed ✓</span>'
+        : archived
+          ? '<span class="status-pill" style="' + pillBase + 'background:#eef2f7;color:#475569;border:1px solid #cbd5e1" title="Archived by the author — retired, not an active line of work.">Archived</span>'
           : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '" title="' + _esc(statusTip) + '">' + _esc(meta.label) + '</span>';
       var cardStyle = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;' +
-        (derivedClosed ? 'border-color:#bbf7d0;background:linear-gradient(0deg,#f6fef9,#ffffff);'
-         : closed ? 'opacity:0.82;' : '');
+        (accomplished ? 'border-color:#bbf7d0;background:linear-gradient(0deg,#f6fef9,#ffffff);'
+         : archived ? 'opacity:0.72;' : '');
       var filterStatus = (closed ? 'closed' : effStatus);
 
       // Per-study status → a compact breakdown line + an expandable study list.
@@ -10809,18 +10816,21 @@
       var effStatus = iset.effective_status || iset.status || 'planning';
       var meta = _ISET_TABLE_STATUS_META[effStatus] || {label: effStatus, bg:'#f1f5f9', fg:'#475569', bd:'#cbd5e1'};
       var pillBase = 'font-size:0.72em;border-radius:9999px;padding:1px 9px;white-space:nowrap;';
-      // Derived closure (engine: acceptance criteria met) reads as a success, not
-      // a disabled row — green ✓, full opacity. Authored closed/archived stays
-      // muted but legible (not dimmed to 0.6).
-      var statusPill = derivedClosed
-        ? '<span class="status-pill" style="' + pillBase + 'background:#dcfce7;color:#166534;border:1px solid #86efac;font-weight:600" title="Closed by the discovery engine: acceptance criteria met by graded tests (derived, not authored)">Closed ✓</span>'
-        : closed
-          ? '<span class="status-pill" style="' + pillBase + 'background:#eef2f7;color:#475569;border:1px solid #cbd5e1">' + (archived ? 'Archived' : 'Closed') + '</span>'
+      // A CLOSED investigation (authored or engine-derived) is a COMPLETED RESULT —
+      // green ✓, full opacity, never dimmed. Only ARCHIVED (deliberately retired) is muted.
+      var accomplished = closed && !archived;
+      var statusPill = accomplished
+        ? '<span class="status-pill" style="' + pillBase + 'background:#dcfce7;color:#166534;border:1px solid #86efac;font-weight:600" title="' +
+          (iset.closure_source === 'derived'
+            ? 'Closed by the discovery engine: acceptance criteria met by graded tests.'
+            : 'Completed and closed — a finished result.') + '">Closed ✓</span>'
+        : archived
+          ? '<span class="status-pill" style="' + pillBase + 'background:#eef2f7;color:#475569;border:1px solid #cbd5e1" title="Archived by the author — retired, not an active line of work.">Archived</span>'
           : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '">' + _esc(meta.label) + '</span>';
       var q = iset.question ? String(iset.question).split('\n')[0].slice(0, 140) : '';
       var rowText = (String(iset.title || iset.name) + ' ' + effStatus + ' ' + q).toLowerCase();
       return '<tr data-row-text="' + _esc(rowText) + '" onclick="_showInvestigationWorkspace(\'' + _esc(iset.name) + '\')" ' +
-        'style="cursor:pointer;border-bottom:1px solid #f1f5f9' + (closed && !derivedClosed ? ';opacity:0.82' : '') + '" ' +
+        'style="cursor:pointer;border-bottom:1px solid #f1f5f9' + (archived ? ';opacity:0.72' : '') + '" ' +
         'onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
         '<td style="padding:7px 10px;font-weight:600;color:#1e293b">' + _esc(iset.title || iset.name) + '</td>' +
         '<td style="padding:7px 10px;white-space:nowrap">' + statusPill + '</td>' +
