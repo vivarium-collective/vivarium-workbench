@@ -1554,6 +1554,11 @@ def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict,
     inputs_store = {}
     run_labels = []
     for port, port_type in declared_inputs.items():
+        if port == "run_labels":
+            # Not an observable: the cross-run identity channel, populated from
+            # run params after this loop. Resolving it as an observable here
+            # would find nothing and clobber the labels with None (#1474).
+            continue
         observable_name = inputs_map.get(port, port)
         per_run_values = []
         for run in candidate_runs:
@@ -1579,7 +1584,14 @@ def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict,
         else:
             inputs_store[port] = per_run_values[0] if per_run_values else None
 
+    # Per-run identity labels. `_run_labels` is the legacy key, kept for
+    # back-compat; but a leading-underscore key is a schema key to
+    # bigraph-schema and never reaches a Step, so a viz that wants the labels
+    # must declare a real `run_labels` input port — delivered here and wired
+    # below like any other declared port (#1474).
     inputs_store["_run_labels"] = run_labels
+    if "run_labels" in declared_inputs:
+        inputs_store["run_labels"] = run_labels
 
     return {
         "inputs_store": inputs_store,
