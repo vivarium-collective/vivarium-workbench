@@ -102,3 +102,23 @@ def test_iter_iset_dirs_empty(tmp_path):
 
 def test_study_run_slugs_empty(tmp_path):
     assert inv.study_run_slugs(tmp_path) == set()
+
+
+# ── authoritative terminal status wins over the member aggregate (sbml-cycle finding) ──
+def test_closed_investigation_reads_complete_not_in_progress():
+    import vivarium_workbench.lib.investigation_status as inv
+    # a closed investigation whose members are mixed (some done, parked Planned follow-ups) would
+    # aggregate to "in_progress" — but the authoritative closed status must win.
+    mixed = ["complete", "planned", "planned"]
+    assert inv.compute_investigation_status(mixed) == "in_progress"            # member aggregate (unchanged)
+    assert inv.compute_investigation_status(mixed, authored_status="closed") == "complete"
+    assert inv.compute_investigation_status(mixed, authored_status="complete") == "complete"
+    assert inv.compute_investigation_status(mixed, closed=True) == "complete"
+
+
+def test_authored_failed_wins_and_absent_status_is_a_noop():
+    import vivarium_workbench.lib.investigation_status as inv
+    assert inv.compute_investigation_status(["running"], authored_status="failed") == "failed"
+    # absent/planning authored status does NOT override the aggregate (regression guard)
+    assert inv.compute_investigation_status(["complete", "planned"], authored_status="planning") == "in_progress"
+    assert inv.compute_investigation_status(["running"], authored_status=None) == "running"

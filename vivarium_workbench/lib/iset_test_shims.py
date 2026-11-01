@@ -123,7 +123,8 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
         studies_out.append(entry)
 
     author_status = spec.get("status", "planning")
-    effective_status = compute_investigation_status(statuses, has_runs=has_runs)
+    effective_status = compute_investigation_status(
+        statuses, has_runs=has_runs, authored_status=author_status)
     return {
         "name":             spec.get("name", name),
         "title":            spec.get("title", spec.get("name", name)),
