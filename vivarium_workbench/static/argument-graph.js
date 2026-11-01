@@ -37,6 +37,19 @@
     var k = _vk(v);
     return '<span class="ag-badge" style="background:' + k.bg + ";color:" + k.bd + '">' + k.mk + " " + _esc(v || "unassessed") + "</span>";
   }
+  // Escape a value for embedding inside a single-quoted inline JS string.
+  function _js(s) { return String(s == null ? "" : s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
+  // One click toggles a narrative point's evidence-refs list (bound once).
+  if (typeof window !== "undefined" && !window.__vivAgEvToggle) {
+    window.__vivAgEvToggle = function (a) {
+      try {
+        var body = a.closest(".ag-body"); if (!body) return;
+        var ul = body.querySelector(".ag-ev-list"); if (!ul) return;
+        var open = ul.classList.toggle("open");
+        a.innerHTML = a.innerHTML.replace(/[▸▾]\s*$/, open ? "▾" : "▸");
+      } catch (e) { /* ignore */ }
+    };
+  }
 
   function _ensureStyle() {
     if (document.getElementById("ag-style")) return;
@@ -47,6 +60,14 @@
       + ".ag-ord{color:#94a3b8;font-variant-numeric:tabular-nums;min-width:1.6em;text-align:right;padding-top:2px}"
       + ".ag-body{flex:1}.ag-prop{line-height:1.45}"
       + ".ag-meta{margin-top:4px;color:#94a3b8;font-size:0.82em}"
+      + ".ag-meta a.ag-link,.ag-ev-toggle{color:#2563eb;text-decoration:none;cursor:pointer;white-space:nowrap}"
+      + ".ag-meta a.ag-link:hover,.ag-ev-toggle:hover{text-decoration:underline}"
+      + ".ag-sep{color:#cbd5e1;margin:0 7px}"
+      + ".ag-ev-list{margin:7px 0 1px;padding:7px 11px;list-style:none;display:none;background:#f8fafc;border:1px solid #eef2f7;border-radius:8px}"
+      + ".ag-ev-list.open{display:block}"
+      + ".ag-ref{display:flex;gap:10px;align-items:baseline;padding:3px 0}"
+      + ".ag-ref .ag-ref-id{flex:1;color:#334155;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;word-break:break-word}"
+      + ".ag-ref .ag-link{font-size:0.9em;flex:none}"
       + ".ag-badge{font-size:0.74em;padding:1px 8px;border-radius:999px;white-space:nowrap}"
       + ".ag-gap{margin:6px 0 6px 2.6em;padding:6px 12px;font-size:0.86em;color:#92400e;border-left:3px solid #f59e0b;background:#fffbeb;border-radius:0 8px 8px 0}"
       + ".ag-sec{margin-top:18px}.ag-sec h5{margin:0 0 7px;font-size:0.92em;color:#334155}"
@@ -105,11 +126,37 @@
     var out = "";
     units.forEach(function (u, i) {
       var c = claims[u.claim_id] || {}, prop = u.proposition || c.proposition || u.claim_id;
-      var ev = (u.evidence_refs || c.evidence_refs || []).length;
+      var refs = u.evidence_refs || c.evidence_refs || [];
+      var slug = _slugOf(u.claim_id);   // "claim:<slug>" -> "<slug>"
       var scope = c.scope ? ' · scope: ' + _esc(c.scope) : "";
+      // Every narrative point is one study's claim; link it back to that study,
+      // let the evidence refs expand, and jump straight to the study's figures.
+      var openJs = slug ? "window._openStudyEmbeddedNewTab&&window._openStudyEmbeddedNewTab('" + _js(slug) + "');return false;" : "return false;";
+      var figJs  = slug ? "window._openStudyEmbeddedNewTab&&window._openStudyEmbeddedNewTab('" + _js(slug) + "','visualize');return false;" : "return false;";
+      var evLbl = refs.length + " evidence ref" + (refs.length === 1 ? "" : "s");
+      var toggle = refs.length
+        ? '<a href="#" class="ag-ev-toggle" title="Show each piece of evidence behind this point" onclick="window.__vivAgEvToggle(this);return false;">' + evLbl + " ▸</a>"
+        : "<span>" + evLbl + "</span>";
+      var evList = refs.length
+        ? '<ul class="ag-ev-list">' + refs.map(function (r) {
+            // Each ref deep-links to THAT exact finding / test / figure in the study.
+            var refJs = slug
+              ? "window._openStudyEmbeddedNewTab&&window._openStudyEmbeddedNewTab('" + _js(slug) + "',null,'" + _js(r) + "');return false;"
+              : "return false;";
+            return '<li class="ag-ref"><span class="ag-ref-id">' + _esc(r) + "</span>"
+              + (slug ? '<a href="#" class="ag-link" title="Open the study and jump to this evidence" onclick="' + refJs + '">↗ in study</a>' : "")
+              + "</li>";
+          }).join("") + "</ul>"
+        : "";
+      var links = slug
+        ? '<span class="ag-sep">|</span>'
+          + '<a href="#" class="ag-link" title="Open the study behind this point" onclick="' + openJs + '">open study ↗</a>'
+          + ' <a href="#" class="ag-link" title="Jump to this study’s figures" onclick="' + figJs + '">figures ↗</a>'
+        : "";
       out += '<div class="ag-unit"><div class="ag-ord">' + (i + 1) + "</div>"
         + '<div class="ag-body"><div class="ag-prop">' + _esc(prop) + "</div>"
-        + '<div class="ag-meta">' + _badge(u.verdict || c.verdict) + " &nbsp; " + ev + " evidence refs" + scope + "</div></div></div>";
+        + '<div class="ag-meta">' + _badge(u.verdict || c.verdict) + " &nbsp; " + toggle + scope + links + "</div>"
+        + evList + "</div></div>";
       if (i + 1 < units.length) {
         var g = gapBy[u.claim_id + "|" + units[i + 1].claim_id];
         if (g) out += '<div class="ag-gap">⚠ unsupported transition' + (g.verdict_escalation ? " ↑" : "")

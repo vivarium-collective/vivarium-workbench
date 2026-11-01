@@ -288,6 +288,9 @@
 /* findings */
 .findings-section{padding:14px 16px;background:#fafbff;border:1px solid #c7d2fe;border-radius:8px}
 .finding-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-left:5px solid #6366f1;border-radius:6px;background:#fff}
+/* Brief highlight when an item is reached via a ?ev= evidence deep-link. */
+.ev-flash{animation:ev-flash-kf 1.9s ease-out;scroll-margin-top:12px}
+@keyframes ev-flash-kf{0%{box-shadow:0 0 0 3px #fbbf24}70%{box-shadow:0 0 0 3px rgba(251,191,36,0.45)}100%{box-shadow:0 0 0 0 rgba(251,191,36,0)}}
 .finding-card.finding-status-confirms{border-left-color:#10b981}
 .finding-card.finding-status-partial{border-left-color:#f59e0b}
 .finding-card.finding-status-contradicts{border-left-color:#dc2626}
@@ -701,7 +704,7 @@
       {% set _glyph = {'confirms': '✓', 'partial': '◐', 'contradicts': '✗', 'novel': '◆'}.get(_status, '◆') %}
       {% set _ftok = (f.evidence.from_test or '').split(' ')[0] if f.evidence else '' %}
       {% set _rtok = (f.evidence.from_run or '').split(' ')[0] if f.evidence else '' %}
-      <div class="finding-card finding-kind-{{ f.kind or 'other' }} finding-status-{{ _status }}">
+      <div class="finding-card finding-kind-{{ f.kind or 'other' }} finding-status-{{ _status }}"{% if f.id %} id="finding-{{ f.id }}"{% endif %}>
         <details class="finding-details">
           <summary class="finding-row">
             <span class="finding-status-glyph">{{ _glyph }}</span>

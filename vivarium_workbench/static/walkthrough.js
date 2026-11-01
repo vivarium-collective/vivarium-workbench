@@ -10325,7 +10325,7 @@
   }
   window._nextStudySlug = _nextStudySlug;
 
-  function _wsOpenStudyTab(slug, tab) {
+  function _wsOpenStudyTab(slug, tab, ev) {
     var st = window._wsStudyTabs;
     st.active = slug;                       // single open study — replaces any prior
     _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
@@ -10345,6 +10345,7 @@
     if (frame) {
       var href = _studyHref(slug);
       if (tab) href += (href.indexOf('?') >= 0 ? '&' : '?') + 'tab=' + encodeURIComponent(tab);
+      if (ev) href += (href.indexOf('?') >= 0 ? '&' : '?') + 'ev=' + encodeURIComponent(ev);
       frame.src = href;
     }
     // Remember the tab we opened on, so the next prev/next step keeps it (the
@@ -15711,7 +15712,7 @@
   window._studyInInvestigation = _studyInInvestigation;
   window._investigationForStudy = _investigationForStudy;
 
-  function _openStudyEmbeddedNewTab(name, tab) {
+  function _openStudyEmbeddedNewTab(name, tab, ev) {
     // In a popped-out Studies panel window there is no investigation content to
     // show here — route the navigation to the opener (the main window) so the
     // popped-out list CONTROLS the main window's selected study, and reflect the
@@ -15720,7 +15721,7 @@
       if (document.body && document.body.classList.contains('viv-popout') &&
           window.opener && !window.opener.closed &&
           typeof window.opener._openStudyEmbeddedNewTab === 'function') {
-        window.opener._openStudyEmbeddedNewTab(name, tab);
+        window.opener._openStudyEmbeddedNewTab(name, tab, ev);
         // Opening a study from the GRAPH popout surfaces it in the opener (main
         // window), which now has room since the graph vacated the inset — bring
         // that window forward so the open is visible. (Studies popout keeps its
@@ -15744,7 +15745,7 @@
     if (inv) {
       if (window._wsInvestigation !== inv) _showInvestigationWorkspace(inv);
       else _showWorkspace();
-      _wsOpenStudyTab(name, tab);
+      _wsOpenStudyTab(name, tab, ev);
     } else {
       // Ungrouped study: minimal workspace (no graph), just the study tab.
       window._wsInvestigation = null;
@@ -15759,7 +15760,7 @@
       var tk = document.getElementById('ws-title-kicker'); if (tk) tk.textContent = 'Study';
       var a = document.getElementById('ws-actions'); if (a) a.innerHTML = '';
       _wsResetStudyTabs(null);
-      _wsOpenStudyTab(name, tab);
+      _wsOpenStudyTab(name, tab, ev);
     }
     _selectStudyInRail(name);
   }
