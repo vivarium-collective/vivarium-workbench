@@ -189,6 +189,49 @@
   }
   window._gotoStudyTab = _gotoStudyTab;
 
+  // Deep-link from an investigation Narrative evidence ref to the exact item in
+  // THIS study: a ?ev=<ref> on the study URL resolves to a finding
+  // (#finding-<id>, server-rendered on Overview), a behavior test (#bt-<name>,
+  // server-rendered on Audit), or a figure (#fig-<slug>, lazily built on the
+  // Visualizations tab) — switches to the tab that holds it and scrolls there.
+  function _evSlug(s) {
+    return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+  function _evFlash(el) {
+    try { el.classList.remove("ev-flash"); void el.offsetWidth; el.classList.add("ev-flash"); } catch (e) { /* ignore */ }
+  }
+  function _evWaitFor(id, timeoutMs, cb) {
+    var el = document.getElementById(id); if (el) { cb(el); return; }
+    var t0 = Date.now();
+    var iv = setInterval(function () {
+      var e = document.getElementById(id);
+      if (e) { clearInterval(iv); cb(e); }
+      else if (Date.now() - t0 > timeoutMs) { clearInterval(iv); }
+    }, 120);
+  }
+  function _gotoEvidence(ref) {
+    if (!ref) return;
+    var slug = _evSlug(ref);
+    // Targets present on load (findings on Overview, tests on Audit).
+    var immediate = ["finding-" + ref, "finding-" + slug, "bt-" + ref, "bt-" + slug];
+    for (var i = 0; i < immediate.length; i++) {
+      var el = document.getElementById(immediate[i]);
+      if (el) {
+        var p = el.closest && el.closest(".study-tab-panel");
+        _gotoStudyTab(p && p.dataset.kind ? p.dataset.kind : "overview", el.id);
+        (function (hit) { setTimeout(function () { _evFlash(hit); }, 350); })(el);
+        return;
+      }
+    }
+    // Otherwise treat it as a figure (lazy-built on the Visualizations tab).
+    _setStudyTab("visualize");
+    _evWaitFor("fig-" + slug, 4000, function (fe) {
+      try { fe.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) { /* ignore */ }
+      _evFlash(fe);
+    });
+  }
+  window._gotoEvidence = _gotoEvidence;
+
   // ── Readouts panel (Design's emit CONTRACT) ──────────────────────────────
   // Fetch /api/study-readouts ONCE and render its three blocks (spec §3.1):
   // Emitter & config (#readouts-emitter), Emitted paths (#readouts-table,
@@ -972,7 +1015,7 @@
             + escapeHtmlForTests(String(runId)) + ' ↗</a>'
           : '';
         host.innerHTML = names.map(function (n) {
-          return '<div class="figure-card">'
+          return '<div class="figure-card" id="fig-' + _evSlug(n) + '">'
             + '<iframe srcdoc="' + attr(panels[n]) + '" loading="lazy" '
             + 'class="figure-media-frame figure-media-frame--native"></iframe>'
             + '<div class="figure-caption-row">'
@@ -5659,6 +5702,12 @@
     } catch (_e) { /* no URLSearchParams — keep overview */ }
     _setStudyTab(_resolved.tab);
     if (_resolved.sub) _setSimSubtab(_resolved.sub);
+    // ?ev=<ref> — a Narrative evidence ref deep-link: jump to that finding /
+    // test / figure (overrides the default tab landing).
+    try {
+      var _ev = new URLSearchParams(window.location.search).get('ev');
+      if (_ev) _gotoEvidence(_ev);
+    } catch (_e2) { /* ignore */ }
   }
 
   // ── item 69 — baseline composite select: populate from the live registry,

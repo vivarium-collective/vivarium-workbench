@@ -139,8 +139,12 @@
         : "<span>" + evLbl + "</span>";
       var evList = refs.length
         ? '<ul class="ag-ev-list">' + refs.map(function (r) {
+            // Each ref deep-links to THAT exact finding / test / figure in the study.
+            var refJs = slug
+              ? "window._openStudyEmbeddedNewTab&&window._openStudyEmbeddedNewTab('" + _js(slug) + "',null,'" + _js(r) + "');return false;"
+              : "return false;";
             return '<li class="ag-ref"><span class="ag-ref-id">' + _esc(r) + "</span>"
-              + (slug ? '<a href="#" class="ag-link" title="Open the study to trace this evidence" onclick="' + openJs + '">↗ in study</a>' : "")
+              + (slug ? '<a href="#" class="ag-link" title="Open the study and jump to this evidence" onclick="' + refJs + '">↗ in study</a>' : "")
               + "</li>";
           }).join("") + "</ul>"
         : "";
