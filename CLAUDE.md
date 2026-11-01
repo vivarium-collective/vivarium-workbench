@@ -179,9 +179,18 @@ behavior, consider both the live and snapshot data sources.
 - **JSON serialization**: the server's `_json_default` handles numpy/dataclasses;
   `publish.py` writes with `allow_nan=False` on purpose (browser `JSON.parse`
   rejects `NaN`/`Infinity`) — sanitize non-finite floats before publishing.
-- **Tests** spawn a real server subprocess via the `dashboard_client` fixture
-  (`tests/conftest.py`) against a fixture workspace under `tests/_fixtures/`.
-  Fixture workspaces' own Python packages are auto-added to `sys.path`.
+- **Tests** have two client fixtures in `tests/conftest.py`. Prefer
+  **`inproc_client`** (in-process): it drives the app via Starlette's
+  `TestClient` with `get_workspace` overridden to the test's workspace — the app
+  imports once per worker (~1.4s) and each request is sub-100ms, ~65x cheaper per
+  call than booting a server. Use **`dashboard_client`** (spawns a real `uvicorn`
+  subprocess, ~6.75s boot) only when the test needs a real bound socket: SSE
+  streaming, concurrent-request timing, or asserting the real Host/Origin CSRF
+  guard with a forged `Origin` (the in-process client has no reachable
+  `base_url`). Both take a `workspace` and hit the same routes/middleware; env-
+  worker-backed endpoints (registry/composite walks) work under either, just not
+  faster in-process. Fixture workspaces live under `tests/_fixtures/` and their
+  own Python packages are auto-added to `sys.path`.
 - **Workspace package import**: at serve time the workspace root is prepended to
   `sys.path` so the workspace's own package (e.g. `pbg_<project>.core.build_core`)
   is importable for rendering composites.

@@ -10,10 +10,10 @@ def _ws(tmp_path):
     (inv / "investigation.yaml").write_text(yaml.safe_dump({"name": "demo-inv", "studies": []}))
 
 
-def test_discovery_delta_route(tmp_path, dashboard_client):
+def test_discovery_delta_route(tmp_path, inproc_client):
     pytest.importorskip("discovery_engine")
     _ws(tmp_path)
-    r = dashboard_client(workspace=tmp_path).get("/api/discovery-delta/demo-inv")
+    r = inproc_client(workspace=tmp_path).get("/api/discovery-delta/demo-inv")
     assert r.status_code == 200
     d = r.json()
     assert d["available"] is True
@@ -22,10 +22,10 @@ def test_discovery_delta_route(tmp_path, dashboard_client):
     assert d["unchanged"] is True  # no prior snapshot -> graceful
 
 
-def test_evidence_integrity_route(tmp_path, dashboard_client):
+def test_evidence_integrity_route(tmp_path, inproc_client):
     pytest.importorskip("discovery_engine")
     _ws(tmp_path)
-    r = dashboard_client(workspace=tmp_path).get("/api/evidence-integrity/demo-inv")
+    r = inproc_client(workspace=tmp_path).get("/api/evidence-integrity/demo-inv")
     assert r.status_code == 200
     d = r.json()
     assert d["available"] is True

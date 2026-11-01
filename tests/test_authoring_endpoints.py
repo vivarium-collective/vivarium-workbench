@@ -18,8 +18,8 @@ def ws_copy(tmp_path):
     return dst
 
 
-def test_scaffold_endpoint(dashboard_client, ws_copy):
-    client = dashboard_client(ws_copy)
+def test_scaffold_endpoint(inproc_client, ws_copy):
+    client = inproc_client(ws_copy)
     r = client.get("/api/registry/scaffold?kind=process&name=Foo")
     body = r.json()
     assert body["ok"] is True
@@ -27,16 +27,16 @@ def test_scaffold_endpoint(dashboard_client, ws_copy):
     assert body["target"].endswith("processes.py")
 
 
-def test_validate_endpoint(dashboard_client, ws_copy):
-    client = dashboard_client(ws_copy)
+def test_validate_endpoint(inproc_client, ws_copy):
+    client = inproc_client(ws_copy)
     tpl = client.get("/api/registry/scaffold?kind=process&name=Foo").json()
     r = client.post("/api/registry/validate",
                     json={"kind": "process", "name": "Foo", "source": tpl["source"]})
     assert r.json()["valid"] is True
 
 
-def test_create_then_registry_shows_it(dashboard_client, ws_copy):
-    client = dashboard_client(ws_copy)
+def test_create_then_registry_shows_it(inproc_client, ws_copy):
+    client = inproc_client(ws_copy)
     tpl = client.get("/api/registry/scaffold?kind=process&name=GrowthProc").json()
     created = client.post("/api/registry/create",
                           json={"kind": "process", "name": "GrowthProc", "source": tpl["source"]}).json()
@@ -49,8 +49,8 @@ def test_create_then_registry_shows_it(dashboard_client, ws_copy):
     assert any("GrowthProc" in a for a in addrs)
 
 
-def test_create_collision_refused(dashboard_client, ws_copy):
-    client = dashboard_client(ws_copy)
+def test_create_collision_refused(inproc_client, ws_copy):
+    client = inproc_client(ws_copy)
     tpl = client.get("/api/registry/scaffold?kind=process&name=IncreaseProcess").json()
     r = client.post("/api/registry/create",
                     json={"kind": "process", "name": "IncreaseProcess", "source": tpl["source"]})
