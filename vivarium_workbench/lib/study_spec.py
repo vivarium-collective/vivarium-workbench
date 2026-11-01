@@ -974,6 +974,17 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                     cgv["counts"] = count_test_outcomes(spec, spec.get("runs"))
                 except Exception:  # noqa: BLE001
                     pass
+            # #1476: a study whose acceptance surface is its pytest suite has no
+            # graded behavior-test verdict; fold its last_test_run pass/fail into
+            # the badge so a green suite isn't stuck blocked / diverging. A real
+            # behavior-test verdict always wins (see fold_pytest_into_verdict).
+            try:
+                from vivarium_workbench.lib.run_aware_investigation import (
+                    fold_pytest_into_verdict,
+                )
+                cgv = fold_pytest_into_verdict(spec, cgv)
+            except Exception:  # noqa: BLE001
+                pass
             spec["computed_gate_verdict"] = cgv
         except Exception:  # noqa: BLE001
             pass
