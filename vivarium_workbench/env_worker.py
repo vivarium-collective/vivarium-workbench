@@ -1500,11 +1500,40 @@ def _obs_available(params: dict) -> dict:
         state = (params or {}).get("state")
         schema = (params or {}).get("schema")
 
+    # #1471: realize the composite before collecting leaves. Both branches above
+    # hand us a raw generator *document* (build_generator output, or a parsed spec
+    # file), not a built composite. A store the document declares empty but that a
+    # process fills through its OUTPUT wires (e.g. ``vitals: {}`` written as
+    # ``vitals/<name>``) has no leaves in the document — so every such readout is
+    # flagged ``not_in_structure`` (never-fabricate), which permanently blocks the
+    # check-observables hard gate. Walking the raw document also surfaces the
+    # process node's own ``outputs``/``address``/``interval`` dict keys as if they
+    # were stores. ``Composite(...)`` runs ``initial_state()`` + the link_state
+    # pass, materialising the output-wired stores and dropping the process-node
+    # internals, so ``available_observables`` sees the REALIZED state tree its
+    # docstring asks for. Pre-filling the document is NOT an option (document
+    # values override ``initial_state()``). Realize only when a core is available;
+    # with no core we cannot build, so fall back to the raw document (the same
+    # degraded path static catalogs already take when ``_obs_build_core`` is None).
+    if core is not None:
+        try:
+            from process_bigraph import Composite
+            state = Composite({"state": state}, core=core).state
+        except Exception as e:  # noqa: BLE001
+            return {"__build_error__": f"composite realization failed: {e}"}
+
     try:
         available = available_observables(core, state, schema)
     except Exception as e:  # noqa: BLE001
         return {"__introspect_error__": f"observable introspection failed: {e}"}
-    return {"leaves": available.get("leaves", []) or [],
+    # Realizing the composite (above) introduces the framework's always-emitted
+    # ``global_time`` clock store. It is not a scientific observable a study
+    # readout targets — it is universally special-cased as the trajectory time
+    # axis (pinned in the composite card, SKIP-listed by the explorer) — and the
+    # raw-document path this replaces never surfaced it, so drop it to keep the
+    # observables list unchanged except for the now-visible output-wired stores.
+    leaves = [leaf for leaf in (available.get("leaves", []) or []) if leaf != "global_time"]
+    return {"leaves": leaves,
             "catalogs": available.get("catalogs", {}) or {}}
 
 
