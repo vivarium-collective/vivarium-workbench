@@ -1224,6 +1224,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
     effective_status = compute_investigation_status(
         member_statuses, has_runs=member_has_runs,
+        authored_status=spec.get("status"),   # authoritative closed/complete wins over the aggregate
     )
 
     computed_acceptance: Optional[dict] = None

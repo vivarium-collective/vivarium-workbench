@@ -184,10 +184,20 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict, runs=None) -> st
 def compute_investigation_status(
     study_statuses: list[str],
     has_runs: list[bool] | None = None,
+    *,
+    authored_status: str | None = None,
+    closed: bool = False,
 ) -> str:
-    """Derive an investigation's effective status from its member studies.
+    """Derive an investigation's effective status.
 
-    Rules, applied in order (first match wins):
+    An **authoritative terminal lifecycle wins over the member aggregate**: an investigation that
+    is authoritatively closed/complete (``authored_status`` in {closed, complete, archived}, or the
+    engine's ``closed`` closure) reads ``"complete"``, and an authored ``failed`` reads ``"failed"``
+    — even if parked ``Planned`` follow-ups remain. Otherwise the member-aggregate would mislabel a
+    settled investigation ``"in_progress"`` off its non-blocking follow-ups (sbml-cycle finding:
+    a closed investigation read ``in_progress`` in the dashboard header).
+
+    Member-aggregate rules (when not terminal), first match wins:
 
     1. Any child in ``{failed, invalid}`` -> ``"failed"``.
     2. All children in the done roll-up (non-empty) -> ``"complete"``.
@@ -197,6 +207,11 @@ def compute_investigation_status(
 
     ``has_runs`` is an optional parallel list of bools (one per study).
     """
+    _st = str(authored_status or "").strip().lower()
+    if _st == "failed":
+        return "failed"
+    if closed or _st in ("closed", "complete", "archived"):
+        return "complete"
     statuses = list(study_statuses or [])
     has_runs = list(has_runs or [False] * len(statuses))
 
@@ -384,7 +399,9 @@ def build_iset_summary(
             # Open/Closed: authored status closed/archived, else the engine's closure.
             "closed":           marks["closure"]["closed"],
             "closure_source":   marks["closure"]["source"],
-            "effective_status": compute_investigation_status(statuses, has_runs=has_runs),
+            "effective_status": compute_investigation_status(
+                statuses, has_runs=has_runs,
+                authored_status=spec.get("status"), closed=marks["closure"]["closed"]),
             "description":      _card_description(spec),
             "question":         spec.get("question", ""),
             "hypothesis":       spec.get("hypothesis", ""),
