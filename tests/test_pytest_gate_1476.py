@@ -108,3 +108,19 @@ def test_condition_satisfied_tests_passed_via_pytest():
     failing = dict(_PYTEST_STUDY,
                    last_test_run={"passed": 1, "failed": 2, "skipped": 0})
     assert _condition_satisfied(failing, "tests-passed") is False
+
+
+def test_condition_satisfied_behavior_fail_not_rescued_by_green_pytest():
+    """A graded behavior-test FAILURE keeps tests-passed False even when the
+    study also has a green pytest run — the behavior fail wins here too, as in
+    resolve_gate_status / fold_pytest_into_verdict."""
+    mixed = {
+        "name": "mixed",
+        "behavior_tests": [{"name": "t",
+                            "measure": {"kind": "generation_average", "path": "m"},
+                            "pass_if": {"op": "range", "low": 0, "high": 1}}],
+        "runs": [{"name": "r1", "status": "completed",
+                  "outcomes": {"t": {"result": "FAIL"}}}],
+        "last_test_run": {"passed": 5, "failed": 0, "skipped": 0},
+    }
+    assert _condition_satisfied(mixed, "tests-passed") is False
