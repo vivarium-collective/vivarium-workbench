@@ -147,6 +147,94 @@ def _find_run(runs: list, run_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Test ↔ run targeting (#1472)
+# ---------------------------------------------------------------------------
+# A behavior_test names the simulation it is graded against via
+# ``requires_simulation`` (a baseline / variant / simulation_set name — the same
+# targets ``study_verify._simulation_names`` validates) or, equivalently, via its
+# ``given`` selector (``given.run == variant`` → ``given.variant``). A run entry
+# carries which arm produced it in ``runs[].variant`` (the recorded label; absent
+# / "baseline" means the baseline arm) and in ``runs[].name`` (the run id). The
+# auto-evaluator must grade a test ONLY against the run(s) its target names and
+# leave it UNEVALUATED (absent from that run's outcomes) elsewhere — otherwise a
+# multi-arm study grades every arm's test against every arm's run and every
+# per-run ``outcomes`` block but one is wrong.
+
+def _baseline_names(spec: Mapping) -> set[str]:
+    """Baseline names declared by a study (v3 ``baseline[]`` / v4
+    ``conditions.baseline``). A test whose target is one of these grades against
+    the baseline run (the one with no ``variant`` tag)."""
+    names: set[str] = set()
+    conditions = spec.get("conditions") if isinstance(spec.get("conditions"), Mapping) else {}
+    base = conditions.get("baseline")
+    if isinstance(base, Mapping) and isinstance(base.get("name"), str):
+        names.add(base["name"])
+    bl = spec.get("baseline")
+    if isinstance(bl, list):
+        for b in bl:
+            if isinstance(b, Mapping) and isinstance(b.get("name"), str):
+                names.add(b["name"])
+    elif isinstance(bl, Mapping) and isinstance(bl.get("name"), str):
+        names.add(bl["name"])
+    return names
+
+
+def _test_targets(test: Mapping) -> list[str] | None:
+    """The simulation name(s) a behavior_test is graded against, or ``None`` when
+    it is unspecified (→ the baseline arm).
+
+    Reads ``requires_simulation`` (string or list) first, then falls back to the
+    ``given`` selector (``given.run == variant`` → ``given.variant``). ``None``
+    means "no explicit target" — a baseline / single-run test.
+    """
+    req = test.get("requires_simulation")
+    if isinstance(req, str) and req.strip():
+        return [req.strip()]
+    if isinstance(req, list):
+        targets = [str(x).strip() for x in req if isinstance(x, str) and str(x).strip()]
+        if targets:
+            return targets
+    given = test.get("given")
+    if isinstance(given, Mapping) and given.get("run") == "variant" and given.get("variant"):
+        return [str(given["variant"])]
+    return None
+
+
+def _run_matches_test(run: Mapping, test: Mapping, baseline_names: set[str]) -> bool:
+    """True when ``test`` should be graded against ``run``.
+
+    - An unspecified target (no ``requires_simulation`` / baseline ``given``)
+      grades against the baseline run — the entry with no ``variant`` tag.
+    - A target that names the run's ``variant`` or its ``name`` matches.
+    - A target that names a declared baseline grades against the baseline run.
+    """
+    targets = _test_targets(test)
+    run_variant = run.get("variant")
+    run_name = run.get("name")
+    if targets is None:
+        return not run_variant
+    for target in targets:
+        if run_variant is not None and str(run_variant) == target:
+            return True
+        if run_name is not None and str(run_name) == target:
+            return True
+        if target in baseline_names and not run_variant:
+            return True
+    return False
+
+
+def _tests_for_run(spec: Mapping, run: Mapping) -> list:
+    """The behavior_tests in ``spec`` that target ``run`` (#1472).
+
+    Tests that target a different arm are omitted so they are left UNEVALUATED on
+    this run rather than graded against the wrong simulation.
+    """
+    tests = spec.get("tests") or spec.get("behavior_tests") or []
+    baseline_names = _baseline_names(spec)
+    return [t for t in tests if isinstance(t, Mapping) and _run_matches_test(run, t, baseline_names)]
+
+
+# ---------------------------------------------------------------------------
 # Default test runner — reuse the closed measure/pass_if evaluator
 # ---------------------------------------------------------------------------
 
@@ -166,6 +254,14 @@ def _evaluator_test_runner(
     """
     from discovery_engine.study_evaluator import _resolve_run_store, evaluate_study  # noqa: PLC0415
 
+    # #1472: grade only the tests whose requires_simulation / given target names
+    # THIS run's arm. Tests targeting another arm are dropped from the spec the
+    # evaluator sees, so they are left unevaluated on this run (absent from its
+    # outcomes) rather than graded against the wrong simulation.
+    run_spec = dict(spec)
+    run_spec.pop("tests", None)
+    run_spec["behavior_tests"] = _tests_for_run(spec, run)
+
     store = _resolve_run_store(run, study_dir, ws_root)
     if store is None:
         if run.get("evaluation_only"):
@@ -176,12 +272,12 @@ def _evaluator_test_runner(
             # to the agent bucket honestly. Only evaluation-only runs take this
             # path — a real run whose store is missing still raises, preserving
             # that diagnostic.
-            return evaluate_study(spec, None, ws_root=ws_root)
+            return evaluate_study(run_spec, None, ws_root=ws_root)
         raise StoreUnresolved(f"no openable store for run {run.get('name')!r}")
     from viva_emitters import RunReader  # noqa: PLC0415  (evaluator extra)
 
     reader = RunReader.open(store)
-    return evaluate_study(spec, reader, ws_root=ws_root)
+    return evaluate_study(run_spec, reader, ws_root=ws_root)
 
 
 # ---------------------------------------------------------------------------

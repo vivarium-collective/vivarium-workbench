@@ -340,7 +340,21 @@ def _condition_satisfied(parent: Optional[dict], condition: str, runs=None) -> b
             from discovery_engine import study_status
 
             counts = study_status.count_test_outcomes(parent, parent.get("runs"))
-            return counts["fail"] == 0 and counts["pass"] > 0
+            if counts["fail"] == 0 and counts["pass"] > 0:
+                return True
+            # A graded behavior-test FAILURE wins and is NOT rescued by a green
+            # pytest run (mirrors resolve_gate_status / fold_pytest_into_verdict:
+            # a real behavior-test fail always beats the pytest fallback).
+            if counts["fail"] > 0:
+                return False
+        except Exception:
+            pass
+        # #1476: with no graded behavior-test verdict (no pass, no fail), a
+        # pytest-backed parent satisfies tests-passed via its recorded
+        # last_test_run.
+        try:
+            from vivarium_workbench.lib.run_aware_investigation import pytest_gate_result
+            return pytest_gate_result(parent) == "passed"
         except Exception:
             return False
     return False
