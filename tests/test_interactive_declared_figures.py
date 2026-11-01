@@ -255,7 +255,7 @@ def test_publish_helper_leaves_non_iframe_untouched_and_flags_missing(tmp_path):
     assert unresolved == ["gone"]
 
 
-def test_study_charts_api_carries_iframe_url_and_media(tmp_path, dashboard_client):
+def test_study_charts_api_carries_iframe_url_and_media(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     study_dir = ws / "studies" / "demo3d"
     study_dir.mkdir(parents=True)
@@ -275,7 +275,7 @@ def test_study_charts_api_carries_iframe_url_and_media(tmp_path, dashboard_clien
         encoding="utf-8",
     )
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/api/study-charts/demo3d")
     assert resp.status_code == 200
     body = resp.json()

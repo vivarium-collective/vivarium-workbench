@@ -18,7 +18,7 @@ Thin smoke tests over the served HTML/JS for the Rerun/Reproduce affordances:
      assertion here focuses on the two pieces above, per the brief).
 
 These are cheap "the wiring exists" checks against the live FastAPI app (via
-``dashboard_client``), not exhaustive behavioral tests — behavior of the
+``inproc_client``), not exhaustive behavioral tests — behavior of the
 endpoints themselves is covered by ``test_api_rerun.py``.
 """
 from __future__ import annotations
@@ -38,15 +38,15 @@ def ws_copy(tmp_path):
     return ws
 
 
-def test_index_html_has_investigation_rerun_button(dashboard_client, ws_copy):
-    client = dashboard_client(workspace=ws_copy)
+def test_index_html_has_investigation_rerun_button(inproc_client, ws_copy):
+    client = inproc_client(workspace=ws_copy)
     r = client.get("/")
     assert r.status_code == 200
     assert 'id="investigation-rerun"' in r.text
 
 
-def test_sim_table_js_has_rerun_action(dashboard_client, ws_copy):
-    client = dashboard_client(workspace=ws_copy)
+def test_sim_table_js_has_rerun_action(inproc_client, ws_copy):
+    client = inproc_client(workspace=ws_copy)
     r = client.get("/sim-table.js")
     assert r.status_code == 200
     # Task 4: the per-row control reproduces the recorded manifest via
@@ -55,7 +55,7 @@ def test_sim_table_js_has_rerun_action(dashboard_client, ws_copy):
     assert "Rerun" in r.text
 
 
-def test_sim_table_js_has_run_analysis_action(dashboard_client, ws_copy):
+def test_sim_table_js_has_run_analysis_action(inproc_client, ws_copy):
     """Backlog item 23: a per-row control that fires the analysis phase on an
     EXISTING completed remote simulation. The original gap was found by grepping
     static/*.js for any such client-side code and finding NONE — so this asserts
@@ -63,7 +63,7 @@ def test_sim_table_js_has_run_analysis_action(dashboard_client, ws_copy):
     endpoint it posts to, and the `data-remote-sim-id` attribute the delegated
     handler resolves the simulation id from (a button rendered without the
     attribute would silently no-op)."""
-    client = dashboard_client(workspace=ws_copy)
+    client = inproc_client(workspace=ws_copy)
     r = client.get("/sim-table.js")
     assert r.status_code == 200
     assert "run-analysis-btn" in r.text

@@ -55,7 +55,7 @@ def _panel(html, panel_id, next_panel_id=None):
 # Part A — inline expander at the report_card row; no double-render at top.
 # ---------------------------------------------------------------------------
 
-def test_report_card_row_has_inline_expander_not_scroll_link(tmp_path, dashboard_client):
+def test_report_card_row_has_inline_expander_not_scroll_link(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = _write_study(
         ws, "rc-study",
@@ -70,7 +70,7 @@ def test_report_card_row_has_inline_expander_not_scroll_link(tmp_path, dashboard
         json.dumps({"overall": "within_tol"}), encoding="utf-8"
     )
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/rc-study")
     assert resp.status_code == 200
     html = resp.text
@@ -91,7 +91,7 @@ def test_report_card_row_has_inline_expander_not_scroll_link(tmp_path, dashboard
     assert 'beh1' in tests_panel
 
 
-def test_top_report_cards_panel_present_but_plotly_gated(tmp_path, dashboard_client):
+def test_top_report_cards_panel_present_but_plotly_gated(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = _write_study(
         ws, "rc-plotly-study",
@@ -104,7 +104,7 @@ def test_top_report_cards_panel_present_but_plotly_gated(tmp_path, dashboard_cli
     )
     (sd / "viz" / "comparison_plotly.html").write_text("<div>plotly</div>", encoding="utf-8")
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     html = client.get("/studies/rc-plotly-study").text
     tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 
@@ -114,12 +114,12 @@ def test_top_report_cards_panel_present_but_plotly_gated(tmp_path, dashboard_cli
     assert 'id="report-cards-section"' in tests_panel
 
 
-def test_report_cards_section_absent_when_no_comparison_plotly(tmp_path, dashboard_client):
+def test_report_cards_section_absent_when_no_comparison_plotly(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     # A study with NO report cards and NO comparison plotly at all.
     _write_study(ws, "no-rc-study")
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     html = client.get("/studies/no-rc-study").text
     tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 
@@ -157,7 +157,7 @@ def test_js_top_panel_no_longer_maps_full_card_stack_but_keeps_plotly():
 # Part B — literature_anchors as an "Expectations" band, outcome vocabulary.
 # ---------------------------------------------------------------------------
 
-def test_expectations_band_renders_heading_and_anchor_fields(tmp_path, dashboard_client):
+def test_expectations_band_renders_heading_and_anchor_fields(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     _write_study(
         ws, "expect-study",
@@ -175,7 +175,7 @@ def test_expectations_band_renders_heading_and_anchor_fields(tmp_path, dashboard
         ],
     )
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     html = client.get("/studies/expect-study").text
     tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 
@@ -195,11 +195,11 @@ def test_expectations_band_renders_heading_and_anchor_fields(tmp_path, dashboard
     # for it specifically (absent != empty), but it still renders otherwise.
 
 
-def test_expectations_band_absent_when_no_literature_anchors(tmp_path, dashboard_client):
+def test_expectations_band_absent_when_no_literature_anchors(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     _write_study(ws, "no-anchors-study")
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     html = client.get("/studies/no-anchors-study").text
     tests_panel = _panel(html, "panel-audit", "panel-conclusions")
 

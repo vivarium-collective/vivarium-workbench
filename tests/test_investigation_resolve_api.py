@@ -69,8 +69,10 @@ def diamond_ws(tmp_path):
 
 
 def _post_with_origin(base_url: str, path: str, body: dict, *, origin: str) -> int:
-    """POST with an explicit cross-origin ``Origin`` header (dashboard_client's
-    ``_Client`` can't set arbitrary headers — see test_csrf_origin_guard.py)."""
+    """POST with an explicit cross-origin ``Origin`` header against a real bound
+    socket (the in-process client has no reachable base_url; this must exercise
+    the real CSRF/Origin guard — see test_csrf_origin_guard.py). The cross-origin
+    test below therefore keeps the subprocess ``dashboard_client``."""
     req = urllib.request.Request(
         base_url + path,
         data=json.dumps(body).encode(),
@@ -85,9 +87,9 @@ def _post_with_origin(base_url: str, path: str, body: dict, *, origin: str) -> i
 
 
 def test_investigation_resolve_unknown_investigation_returns_error_200(
-    dashboard_client, diamond_ws,
+    inproc_client, diamond_ws,
 ):
-    client = dashboard_client(workspace=diamond_ws)
+    client = inproc_client(workspace=diamond_ws)
     r = client.post("/api/investigation-resolve", json={"investigation": "nope"})
     assert r.status_code == 200
     body = r.json()
@@ -98,7 +100,7 @@ def test_investigation_resolve_unknown_investigation_returns_error_200(
 
 
 def test_investigation_resolve_all_cached_returns_structured_result(
-    dashboard_client, diamond_ws,
+    inproc_client, diamond_ws,
 ):
     # Pre-populate the artifact store in-process (cheap stub compute_fn) so
     # the live server's own (real-adapter) resolve call is an all-cache-hit
@@ -108,7 +110,7 @@ def test_investigation_resolve_all_cached_returns_structured_result(
     assert pre["error"] is None
     assert {n["status"] for n in pre["nodes"]} == {"computed"}
 
-    client = dashboard_client(workspace=diamond_ws)
+    client = inproc_client(workspace=diamond_ws)
     r = client.post("/api/investigation-resolve", json={"investigation": "inv1"})
     assert r.status_code == 200, r.text
     body = r.json()

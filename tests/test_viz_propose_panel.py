@@ -37,10 +37,10 @@ def _vp(c):
     return next(f for f in _frontier(c) if f["kind"] == "viz_proposed")
 
 
-def test_viz_kinds_are_resolvable_and_propose_step_present(tmp_path, dashboard_client):
+def test_viz_kinds_are_resolvable_and_propose_step_present(tmp_path, inproc_client):
     assert {"viz_broken", "viz_missing", "viz_stale", "viz_proposed"} <= ct._RESOLVABLE_KINDS
     ws, _ = _ws(tmp_path)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     tr = c.get("/api/discovery-cycle/inv").json()
     step = next(s for s in tr["steps"] if s["id"] == "propose_viz")
     assert len(step["result"]["proposals"]) == 1
@@ -49,9 +49,9 @@ def test_viz_kinds_are_resolvable_and_propose_step_present(tmp_path, dashboard_c
     assert item["needs_author"] is True      # no catalog class -> author supplies the address
 
 
-def test_accept_writes_entry_and_next_cycle_is_viz_missing(tmp_path, dashboard_client):
+def test_accept_writes_entry_and_next_cycle_is_viz_missing(tmp_path, inproc_client):
     ws, sd = _ws(tmp_path)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     vp = _vp(c)["proposal_id"]
     base = f"/api/discovery-cycle/inv/accept-viz-proposal"
     for bad in ({"proposal": vp, "address": "local:X", "rationale": "  "},
@@ -69,9 +69,9 @@ def test_accept_writes_entry_and_next_cycle_is_viz_missing(tmp_path, dashboard_c
     assert "viz_missing" in kinds and "viz_proposed" not in kinds
 
 
-def test_reject_is_terminal_and_blank_rationale_refused(tmp_path, dashboard_client):
+def test_reject_is_terminal_and_blank_rationale_refused(tmp_path, inproc_client):
     ws, sd = _ws(tmp_path)
-    c = dashboard_client(ws)
+    c = inproc_client(ws)
     vp = _vp(c)["proposal_id"]
     base = "/api/discovery-cycle/inv/reject-viz-proposal"
     r = c.post(base, json={"proposal": vp, "rationale": ""})

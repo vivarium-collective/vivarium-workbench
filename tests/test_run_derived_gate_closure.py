@@ -164,10 +164,10 @@ def test_unresolved_decisions_all_count(tmp_path):
 
 # endpoint smoke --------------------------------------------------------------
 
-def test_endpoints_carry_derived_markings(tmp_path, dashboard_client):
+def test_endpoints_carry_derived_markings(tmp_path, inproc_client):
     ws = _passing_ws(tmp_path, executive={"decisions_needed": ["a?"]})
     (ws / "workspace.yaml").write_text("name: test-ws\n")
-    c = dashboard_client(workspace=ws)
+    c = inproc_client(workspace=ws)
     det = c.get("/api/investigation/inv").json()
     assert det["closure"]["closed"] is True and det["closure"]["source"] == "derived"
     assert det["executive"]["decisions_open_count"] == 1
