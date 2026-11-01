@@ -13,12 +13,18 @@ response override (``respond``) is validated against the response schema too, so
 test cannot make the stub lie about the contract.
 
 Requests are recorded (``calls``) so a test can assert what a dispatch WOULD send.
+
+A ``multipart/form-data`` body (a file upload) is checked the same way: its part names
+against the form schema's properties, unknown ones refused, required ones demanded. Its
+recorded ``body`` is ``{part name: bytes}``.
 """
 from __future__ import annotations
 
 import copy
 import json
 import re
+from email.parser import BytesParser
+from email.policy import HTTP
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -118,11 +124,14 @@ class Call:
     body: Any
     operation_id: str | None
     status: int
+    headers: dict | None = None
 
 
 class VivaV1Stub:
-    def __init__(self, spec: dict | None = None) -> None:
+    def __init__(self, spec: dict | None = None, *, openapi_path: str | None = None) -> None:
+        """``openapi_path``: also serve the spec itself there, as a FastAPI server does (``/openapi.json``)."""
         self.spec = spec or load_spec()
+        self.openapi_path = openapi_path
         self.calls: list[Call] = []
         self._overrides: dict[tuple[str, str], tuple[int, Any]] = {}
         self._byte_overrides: dict[tuple[str, str], tuple[int, str, bytes]] = {}
@@ -135,6 +144,7 @@ class VivaV1Stub:
         self._routes.sort(key=lambda r: r[2].count("{"))
         self._strict_components = _strictify(self.spec["components"])
         self._server: ThreadingHTTPServer | None = None
+        self._request = threading.local()
 
     # -- schema helpers --------------------------------------------------
     def _validator(self, schema: dict, *, strict: bool) -> jsonschema.Draft202012Validator:
@@ -153,6 +163,14 @@ class VivaV1Stub:
         self.validate_response(method, tmpl, status, body)
         self._overrides[(method.upper(), tmpl)] = (status, body)
 
+    def respond_error(self, method: str, tmpl: str, status: int, body: Any) -> None:
+        """Override one operation's answer with an error the contract does not declare, but that any server behind
+        a proxy or an auth layer can give (a 403, a 5xx). Only an error status: a success must satisfy the
+        contract (``respond``)."""
+        assert status >= 400, "respond_error is for errors; use respond for a declared answer"
+        assert tmpl in self.spec["paths"] and method.lower() in self.spec["paths"][tmpl], f"{method} {tmpl}"
+        self._overrides[(method.upper(), tmpl)] = (status, body)
+
     def respond_bytes(self, method: str, tmpl: str, status: int, payload: bytes, content_type: str) -> None:
         """Override one operation's answer with a download. The operation must declare that media type."""
         declared = self.spec["paths"][tmpl][method.lower()]["responses"][str(status)].get("content") or {}
@@ -166,25 +184,37 @@ class VivaV1Stub:
                 return tmpl, op
         return None, None
 
-    def handle(self, method: str, raw_path: str, raw_body: bytes) -> tuple[int, str, bytes]:
+    def handle(self, method: str, raw_path: str, raw_body: bytes,
+               content_type: str | None = None) -> tuple[int, str, bytes]:
         parts = urlsplit(raw_path)
         query = parse_qs(parts.query)
         tmpl, op = self._match(method, parts.path)
         body: Any = None
-        if raw_body:
+        if content_type is None:
+            content_type = getattr(self._request, "content_type", None)
+        multipart = (content_type or "").startswith("multipart/form-data")
+        if raw_body and multipart:
+            message = BytesParser(policy=HTTP).parsebytes(
+                f"Content-Type: {content_type}\r\n\r\n".encode() + raw_body)
+            body = {part.get_param("name", header="content-disposition"): part.get_payload(decode=True)
+                    for part in message.iter_parts()}
+        elif raw_body:
             try:
                 body = json.loads(raw_body)
             except ValueError:
                 body = raw_body.decode("utf-8", "replace")
 
         def done(status: int, payload: Any, ctype: str = "application/json") -> tuple[int, str, bytes]:
-            self.calls.append(Call(method, parts.path, query, body, op and op.get("operationId"), status))
+            self.calls.append(Call(method, parts.path, query, body, op and op.get("operationId"), status,
+                                   getattr(self._request, "headers", None)))
             if isinstance(payload, bytes):
                 return status, ctype, payload
             if ctype != "application/json":
                 return status, ctype, str(payload).encode()
             return status, ctype, json.dumps(payload).encode()
 
+        if op is None and method == "GET" and self.openapi_path and parts.path == self.openapi_path:
+            return done(200, self.spec)
         if op is None:
             return done(404, {"detail": "Not Found"})
         declared = {p["name"]: p for p in op.get("parameters", []) if p["in"] == "query"}
@@ -200,7 +230,16 @@ class VivaV1Stub:
             if not any(validator.is_valid(c) for c in candidates):
                 return done(422, {"detail": f"query {name}={values!r} violates its schema"})
         rb = op.get("requestBody")
-        if rb:
+        if rb and "multipart/form-data" in rb["content"]:
+            form = _resolve(self.spec, rb["content"]["multipart/form-data"]["schema"])
+            given = set(body or {}) if multipart else set()
+            unknown = sorted(given - set(form.get("properties") or {}))
+            missing = sorted(set(form.get("required") or []) - given)
+            if not multipart and rb.get("required"):
+                return done(422, {"detail": "a multipart/form-data body is required"})
+            if unknown or missing:
+                return done(422, {"detail": f"form parts unknown {unknown}, missing {missing}"})
+        elif rb:
             schema = rb["content"]["application/json"]["schema"]
             if raw_body == b"" and rb.get("required"):
                 return done(422, {"detail": "request body required"})
@@ -229,6 +268,9 @@ class VivaV1Stub:
         class H(BaseHTTPRequestHandler):
             def _serve(self) -> None:
                 n = int(self.headers.get("Content-Length") or 0)
+                # handle() keeps its three-argument shape (tests wrap it): the content type rides per thread
+                stub._request.content_type = self.headers.get("Content-Type")
+                stub._request.headers = dict(self.headers.items())
                 status, ctype, payload = stub.handle(self.command, self.path, self.rfile.read(n) if n else b"")
                 self.send_response(status)
                 self.send_header("Content-Type", ctype)

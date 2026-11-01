@@ -35,6 +35,11 @@ dependencies = [
     # subprocess invocation resolves in a plain install. (Kept in `[dev]` too, so
     # dev installs are unchanged.)
     "pytest-json-report>=1.5",
+    # compose-api's client (lib/remote_run_compose.py, docs/backend-compose-api.md): the generated client and its
+    # hand-written session (httpx and attrs only; no [auth]/[cli] extras). 0.7.72 is the first release on PyPI
+    # that has the registry routes and cancel-simulation (0.7.34 added them; PyPI went 0.7.6 -> 0.7.72), and it
+    # types every error body.
+    "compose-api-client>=0.7.72",
     # Floor, not decoration: `lib/artifacts/hashing.py` re-exports
     # `process_bigraph.artifacts.artifact_id` instead of hand-porting it.
     # 1.7.0 is the release that narrows whole floats correctly, so `seed: 1`
