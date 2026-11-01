@@ -938,6 +938,16 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
             from discovery_engine import study_status as _ss
             runs = spec.get("runs") or []
             spec["derived_status"] = _ss.derive_status(spec, runs)
+            # Single source of truth for the progress pill: the detail spec MUST carry the
+            # same run-aware execution_status the investigation-graph node computes (via
+            # study_ontology.derive_execution_status), or the two views diverge — the graph
+            # shows "Completed" (run-aware) while the detail page's client falls through to
+            # the "planned" default because execution_status was absent. Deriving it here
+            # makes divergence structurally impossible; it still honours an authored value.
+            from vivarium_workbench.lib.study_ontology import (
+                derive_execution_status as _derive_exec,
+            )
+            spec["execution_status"] = _derive_exec(spec, runs=runs)
             diss = _ss.status_disagreements(spec, runs)
             if diss:
                 spec["status_disagreements"] = diss
