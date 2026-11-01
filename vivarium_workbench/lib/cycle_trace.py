@@ -87,10 +87,12 @@ STEPS: list[dict[str, Any]] = [
     {"id": "delta", "label": "Discovery delta", "phase": "Evaluation",
      "module": "evaluation", "func": "discovery_delta", "kind": "pure",
      "depends_on": ["evaluate"],
-     "desc": "Lists the currently supported/qualified claims, model disagreements, and "
-             "anomalies.",
-     "gate": "Measured against an empty baseline — a snapshot of current state, not a "
-             "change since the last cycle."},
+     "desc": "Lists the currently supported/qualified claims, model disagreements and "
+             "anomalies, and what changed (status/model-version transitions) since the "
+             "parent cycle.",
+     "gate": "Diffs against the parent cycle's persisted snapshot "
+             "(cycle_state.evaluation_snapshot); an unchanged cycle yields an empty "
+             "delta (changed=[], unchanged=true)."},
     {"id": "propose", "label": "Propose studies", "phase": "Growth",
      "module": "discover", "func": "suggest_studies", "kind": "pure",
      "depends_on": ["run_cycle"],
@@ -268,7 +270,13 @@ def _run_one(step_id: str, ctx: dict, M: Any) -> Any:
         return {"by_study": by_study, "model_disagreements": disagree}
 
     if step_id == "delta":
-        return M.evaluation.discovery_delta(inv_spec, studies, ctx.get("ev_state"))
+        # Diff against the parent cycle's persisted ScientificState snapshot (exactly as
+        # the `discover delta` CLI does), so an unchanged cycle yields an empty delta
+        # (changed=[], unchanged=True) instead of re-listing all state every run.
+        # cycle_state holds the last persisted (parent) cycle's evaluation_snapshot.
+        return M.evaluation.discovery_delta(
+            inv_spec, studies, ctx.get("ev_state"),
+            prev=(inv_spec.get("cycle_state") or {}).get("evaluation_snapshot"))
 
     if step_id == "propose":
         sugg = M.discover.suggest_studies(ctx.get("cyc") or {}, inv_spec, studies)
