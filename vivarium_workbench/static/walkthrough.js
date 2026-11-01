@@ -10487,6 +10487,20 @@
   function _showInvestigationWorkspace(name) {
     if (!name) return;
     window._wsInvestigation = name;
+    // Entering an investigation workspace IS the canonical "current
+    // investigation" context switch (the same role _openInvestigationDetail
+    // played in the older detail view), so publish the slug the rest of the SPA
+    // keys off — the Discovery-cycle panel, the argument graph, inline-edit, and
+    // sim scoping all read window._currentIsetSlug. Without this, opening an
+    // investigation here left the slug empty and the cycle panel reported "No
+    // investigation open in the workbench." Re-sync the left-rail Studies groups
+    // when it changes, matching _openInvestigationDetail.
+    if (window._currentIsetSlug !== name) {
+      window._currentIsetSlug = name;
+      if (typeof window._renderRailInvestigationGroups === 'function') {
+        try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+      }
+    }
     _showWorkspace();
     var title = document.getElementById('ws-title');
     if (title) {
