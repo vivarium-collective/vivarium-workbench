@@ -73,10 +73,13 @@ vivarium-workbench doctor          # exits non-zero if process-bigraph/viva-supe
 vivarium-workbench gen-readme --workspace /path/to/ws [--check]
 ```
 
-There is no separate build step (pure Python + static assets) and no linter
-configured in the repo. Dependencies are managed with `uv` (`uv.lock`); install
-editable with `pip install -e .` (or `uv pip install -e .`) into the venv that
-will run it. Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
+There is no separate build step (pure Python + static assets). Linting/typing is
+enforced in CI (`.github/workflows/types.yml`): `ruff check vivarium_workbench
+vivarium_dashboard`, `mypy` on the typed modules, and `lint-imports` (import-linter)
+for the package-boundary allowlist — run them the same way locally, e.g.
+`uv run ruff check vivarium_workbench vivarium_dashboard` and `uv run mypy`.
+Dependencies are managed with `uv` (`uv.lock`); install editable with
+`pip install -e .` (or `uv pip install -e .`) into the venv that will run it. Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
 `discovery-engine` are direct git/path deps.
 
 ## Architecture
