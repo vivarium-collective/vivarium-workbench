@@ -67,6 +67,15 @@
   function _execState(s) {
     s = s || {};
     var ex = String(s.execution_status || '').trim().toLowerCase();
+    // A parked:true study (deliberately-deferred future direction) reads 'parked'
+    // UNLESS it carries a real terminal/in-flight execution status. Some payloads
+    // (the investigation-detail d.studies the DAG cards render from) pass the
+    // `parked` flag through WITHOUT recomputing the execution axis, so it arrives
+    // as execution_status 'planned'/'proposed' — honor the flag here, before
+    // trusting a not-yet-started execution_status. (The graph endpoint already
+    // derives execution_status='parked', caught by the _EXEC_META line below.)
+    // Precedence matches the server: terminal/in-flight → parked → lifecycle.
+    if (s.parked === true && (ex === '' || ex === 'proposed' || ex === 'planned')) return 'parked';
     if (_EXEC_META[ex]) return ex;
     // Client fallback (server normally sets execution_status): derive from the
     // legacy multi-axis fields. A gate/evaluation that reached a result means the
