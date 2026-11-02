@@ -510,6 +510,20 @@ wheels = [
 ]
 
 [[package]]
+name = "compose-api-client"
+version = "0.7.72"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "httpx" },
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/ff/c2bfb09aa2537c142fd775b53acc70892189c41d68d43404892fa6d5320a/compose_api_client-0.7.72.tar.gz", hash = "sha256:cfd495eb472502728f95dbba4cb47ecff33fee36fe4638d4c1f849109e12a26e", size = 193083, upload-time = "2026-10-29T02:42:39.735Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/a4/71968fa987f8624b799b22ac7e903bb94ac90bd2f0b7ddb21dadb186a50f/compose_api_client-0.7.72-py3-none-any.whl", hash = "sha256:0dd56f5d6d95389c6b9b8a7349ca47f3b950416b603b60a01f334c0e935cf4c0", size = 384441, upload-time = "2026-10-29T02:42:38.24Z" },
+]
+
+[[package]]
 name = "contourpy"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1244,7 +1258,7 @@ name = "importlib-metadata"
 version = "9.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp", marker = "python_full_version < '3.12'" },
+    { name = "zipp" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6f/7e/1e7e8dc30634b93ebb3d58a3dea569ad146e656218d3960ab04f62047b29/importlib_metadata-9.0.1.tar.gz", hash = "sha256:ab830580bc0ef3db61ce8fae716389e5462b67e033018bab6d8f80ef17172f99", size = 59124, upload-time = "2026-08-28T15:30:34.646Z" }
 wheels = [
@@ -3699,6 +3713,7 @@ source = { editable = "." }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "boto3" },
+    { name = "compose-api-client" },
     { name = "discovery-engine" },
     { name = "fastapi" },
     { name = "investigation-contracts" },
@@ -3757,6 +3772,7 @@ viz = [
 requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
     { name = "boto3", specifier = ">=1.34" },
+    { name = "compose-api-client", specifier = ">=0.7.72" },
     { name = "discovery-engine", git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },

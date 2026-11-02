@@ -384,7 +384,8 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         remote_origin = None
     # Where the run RAN, kept apart from where its data IS: a /viva/v1 run landed into this workspace has no
     # remote_origin (its data is local now), but it still ran on the backend its record names.
-    ran_on = prov.get("source") if (remote_origin or isinstance(prov.get("viva_v1"), dict)) else None
+    ran_on = prov.get("source") if (remote_origin or isinstance(prov.get("viva_v1"), dict)
+                                    or isinstance(prov.get("compose"), dict)) else None
     if not ran_on:   # a Composite Explorer run sent to a backend records it in its manifest (params stay its inputs)
         ran_on = _ran_on_from_manifest(row["manifest_json"] if "manifest_json" in row.keys() else None)
     # A remote run lands its native store next to runs.db (a .zarr or parquet-runs
@@ -607,6 +608,7 @@ _NON_COMPOSITE_RUN_KINDS = frozenset({"synthesis"})
 _RUN_PROVENANCE_KEYS = frozenset({
     "source", "simulation_id", "experiment_id", "backend", "s3_uri", "store_path",
     "viva_v1",  # a landed /viva/v1 run's record of itself (remote_run_viva_v1.land)
+    "compose",  # a landed compose-api run's record of itself (remote_run_compose.land)
 })
 
 

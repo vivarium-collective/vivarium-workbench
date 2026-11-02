@@ -44,25 +44,44 @@ from pathlib import Path
 from vivarium_workbench.lib import composite_runs as cr
 
 
-def land_composite_results(archive: Path, db_file: Path, run_id: str) -> int:
+def _is_root_pber(name: str) -> bool:
+    """A ``results_<date>.pber`` at the archive's root (compose-api zips ``output/`` as ``./<file>``)."""
+    base = name[2:] if name.startswith("./") else name
+    return "/" not in base and base.startswith("results_") and base.endswith(".pber")
+
+
+def land_composite_results(archive: Path, db_file: Path, run_id: str, emitter: "str | None" = None) -> int:
     """Land a generic composite run's results archive into the run store; return the steps landed.
 
     A compose simulation that ran a document serves a zip: ``emitter_history.json`` (the emitter's states,
-    ``{<emitter name>: [state per emitted step]}``), the event log and the final state. The run store's
+    ``{<emitter name>: [state per emitted step]}``), the event log and the final state. compose-api's runners
+    (pbest, a workspace image's own runner) write the same mapping as ``results_<date>.pber`` at the archive's
+    root instead (``gather_emitter_results`` as JSON, keyed by the emitter's path); either is read. The run store's
     ``history`` table is one row per step -- ``(simulation_id, step, global_time, state)``, the table every
     existing viewer reads -- so landing is that mapping: each state stored whole, its time taken from the
     state when it carries one. Landing a run again replaces its rows. An archive that is not exactly one
     emitter's history is refused before anything is written: which emitter a state came from cannot be
-    guessed, and an unreadable result must not be recorded as a run.
+    guessed, and an unreadable result must not be recorded as a run. ``emitter`` names the one to land when the
+    caller knows it (the emitter it added to the document), and the others are then left alone.
     """
     with zipfile.ZipFile(archive) as z:
-        try:
-            history = json.loads(z.read("emitter_history.json"))
-        except KeyError:
-            raise ValueError(f"{Path(archive).name} has no emitter_history.json: not a composite run's results") from None
+        names = z.namelist()
+        pber = sorted(n for n in names if _is_root_pber(n))
+        if "emitter_history.json" in names:
+            member = "emitter_history.json"
+        elif len(pber) == 1:
+            member = pber[0]
+        elif pber:
+            raise ValueError(f"{Path(archive).name} holds several results files ({', '.join(pber)}): which run is this?")
+        else:
+            raise ValueError(f"{Path(archive).name} has no emitter_history.json or results_*.pber: "
+                             "not a composite run's results")
+        history = json.loads(z.read(member))
+    if emitter is not None and isinstance(history, dict) and isinstance(history.get(emitter), list):
+        history = {emitter: history[emitter]}
     if not isinstance(history, dict) or len(history) != 1 or not isinstance(next(iter(history.values())), list):
         raise ValueError(
-            "emitter_history.json must hold exactly one emitter's list of states, got "
+            f"{member.lstrip('./')} must hold exactly one emitter's list of states, got "
             f"{sorted(history) if isinstance(history, dict) else type(history).__name__}")
     (states,) = history.values()
     rows = [
