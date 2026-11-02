@@ -882,18 +882,15 @@ def load_spec(path: Path) -> dict:
     # Auto-migrate legacy ``composites:`` specs to v2 ``variants:`` shape
     # before parsing. The migration helper is idempotent and atomic.
     # ------------------------------------------------------------------
-    try:
-        _peek = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as e:
-        raise InvestigationSpecError(f"malformed YAML: {e}") from e
+    # Parse once via the per-process mtime-keyed cache (shared with the status / figures /
+    # acceptance builders, so an investigation page parses each study.yaml once, not ~8×).
+    from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
+    _peek = read_spec_yaml_cached(path)
     if isinstance(_peek, dict) and "composites" in _peek and "variants" not in _peek:
         migrate_study_to_v2_vocabulary(path)
-
-    text = path.read_text(encoding="utf-8")
-    try:
-        spec = yaml.safe_load(text) or {}
-    except yaml.YAMLError as e:
-        raise InvestigationSpecError(f"malformed YAML: {e}") from e
+        spec = read_spec_yaml_cached(path)   # migration rewrote the file → mtime bump → fresh parse
+    else:
+        spec = _peek   # no migration — reuse the parse (both are independent deep copies)
 
     if not isinstance(spec, dict):
         raise InvestigationSpecError("spec must be a YAML mapping at top level")

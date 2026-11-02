@@ -942,9 +942,9 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     read_only = False
     spec_path = wp.investigations / name / "investigation.yaml"
     if spec_path.is_file():
-        try:
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-        except Exception:  # noqa: BLE001
+        from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
+        spec = read_spec_yaml_cached(spec_path)
+        if not spec:
             return None
     else:
         # Federation fallback. A read-only investigation shipped by a linked

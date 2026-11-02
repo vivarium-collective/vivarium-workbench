@@ -36,8 +36,6 @@ from html import escape as _escape
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 from vivarium_workbench.lib.study_charts import (
     _resolve_figure_path,
@@ -55,21 +53,17 @@ def _load_investigation(ws_root: Path, name: str) -> Optional[dict]:
     f = WorkspacePaths.load(ws_root).investigations / name / "investigation.yaml"
     if not f.is_file():
         return None
-    try:
-        return yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return None
+    from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
+    return read_spec_yaml_cached(f) or None
 
 
 def _load_study(ws_root: Path, slug: str) -> tuple[Optional[Path], dict]:
+    from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
     try:
         sdir = study_dir(ws_root, slug, must_exist=True)
     except Exception:
         return None, {}
-    try:
-        spec = yaml.safe_load((sdir / "study.yaml").read_text(encoding="utf-8")) or {}
-    except Exception:
-        spec = {}
+    spec = read_spec_yaml_cached(sdir / "study.yaml")
     return sdir, spec
 
 
