@@ -10278,7 +10278,19 @@
           _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
       }).join('');
     } else {
-      H += '<div style="margin-top:4px;color:#94a3b8"><em>pending evidence</em></div>';
+      // No structured findings. Fall back to the study's one-line claim headline —
+      // completed studies carry it even with an empty findings[] (the collapsed
+      // preview already shows it). Only when there is neither do we show a
+      // placeholder, and a parked study is a deliberately-deferred future
+      // direction, not pending work, so it must not read "pending evidence".
+      var claim = (s.claim || '').replace(/\s+/g, ' ').trim();
+      if (claim) {
+        H += '<div style="margin-top:4px">' + _esc(claim) + '</div>';
+      } else if (_execState(s) === 'parked') {
+        H += '<div style="margin-top:4px;color:#94a3b8"><em>future direction — not yet investigated</em></div>';
+      } else {
+        H += '<div style="margin-top:4px;color:#94a3b8"><em>pending evidence</em></div>';
+      }
     }
     try { var plan = _dagPlanHtml(s); if (plan) H += '<div style="margin-top:14px">' + plan + '</div>'; } catch (e) { /* no plan layer */ }
     return H;
@@ -13260,7 +13272,9 @@
         (_opts.finds
           ? '<div class="aig-clamp" data-clamp="5" style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
               '<span style="font-weight:600;color:#475569">Finds:</span> ' +
-              (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
+              (claim ? _esc(claim)
+                     : (isParked ? '<em style="color:#94a3b8">future direction — not yet investigated</em>'
+                                 : '<em style="color:#94a3b8">pending evidence</em>')) +
             '</div>'
           : '') +
         // Universal "show full card" affordance: expands the card IN PLACE so ANY
