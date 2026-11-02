@@ -148,6 +148,18 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             _rows = None
         _node["execution_status"] = _derive_execution_status(
             study_spec, _node_status, runs=_rows)
+        # Parked ontology (parity with investigation_status._study_display_status, #1549): a
+        # parked:true future-direction study reads 'parked' on the execution axis — distinct
+        # from in-flight 'planned' — unless it has already reached a terminal state (precedence
+        # terminal -> parked -> lifecycle). The raw flag is passed through so the render's chip
+        # and the "X complete · Y parked" tally read it directly.
+        if study_spec.get("parked"):
+            _node["parked"] = True
+            # Only a NOT-YET-STARTED study (execution axis ``proposed``/``planned``) reads
+            # 'parked'; a running/completed/failed study has executed, so its real execution
+            # status wins (precedence terminal/in-flight -> parked -> lifecycle).
+            if str(_node["execution_status"]).lower() in ("proposed", "planned"):
+                _node["execution_status"] = "parked"
         _verdict, _vsrc = _resolve_verdict(study_spec)
         if _verdict:
             _node["verdict"] = _verdict
