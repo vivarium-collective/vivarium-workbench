@@ -133,14 +133,15 @@ def _resolve_spec_params(ws_root: Path, ref: str) -> dict:
     build. Mirrors ``build_composite_state_for_observables``'s spec-parse branch.
     Raises ``LookupError`` (→404) if unresolved, other exceptions (→400) on parse
     failure. The file I/O stays workbench-side (science record; §11)."""
-    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
+    ws_data = read_spec_yaml_cached(ws_root / "workspace.yaml")   # re-read per study otherwise
     pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
     from vivarium_workbench.lib.composite_lookup import find_composite_path, substitute_parameters
     path = find_composite_path(ws_root, pkg, ref)
     if path is None or not path.is_file():
         raise LookupError(f"composite not found: {ref}")
-    text = path.read_text(encoding="utf-8")
-    spec = json.loads(text) if path.suffix.lower() == ".json" else (yaml.safe_load(text) or {})
+    spec = (json.loads(path.read_text(encoding="utf-8"))
+            if path.suffix.lower() == ".json" else read_spec_yaml_cached(path))
     state = substitute_parameters(spec.get("state") or {}, spec.get("parameters") or {}, {})
     return {"state": state, "schema": spec.get("schema") or spec.get("composition")}
 
@@ -236,7 +237,10 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
     try:
         # Project legacy v2 shape (baseline: <str>) into the v3 baseline list.
         from vivarium_workbench.lib.spec_migration import migrate_v2_to_v3
-        spec = migrate_v2_to_v3(yaml.safe_load(sf.read_text(encoding="utf-8")) or {})
+        from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
+        # Cached read: the Audit tab calls this per study, re-parsing study.yaml uncached each
+        # time. read_spec_yaml_cached returns a deep copy, so migrate_v2_to_v3 may mutate freely.
+        spec = migrate_v2_to_v3(read_spec_yaml_cached(sf))
         # v4 studies carry the baseline composite under conditions.baseline;
         # project it onto the legacy v3 baseline-list shape this worker reads
         # (mirrors readouts_views.py / study_runs.py / investigations.py).
