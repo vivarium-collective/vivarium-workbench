@@ -232,7 +232,7 @@ def export_composite_pbg(
         yaml.safe_load(ws_yaml.read_text(encoding="utf-8"))
         if ws_yaml.is_file()
         else {}
-    )
+    ) or {}  # an empty workspace.yaml loads as None
     pkg = ws_data.get("package_path") or (
         "pbg_" + str(ws_data.get("name", "")).replace("-", "_")
     )

@@ -51,6 +51,14 @@ async function run(response) {
   assert.ok(!last.startsWith('<span class="inv-run-err">'), 'not shown as an error: ' + last);
   assert.strictEqual(dispatched.button.disabled, false);
 
+  // The two warnings say different things (HEAD is not the pinned commit; the manifest is from another image):
+  // when a submission carries both, both are shown.
+  const both = await run({ status: 202, body: { run_id: 'compose-4707', phase: 'running',
+    warning: 'HEAD is not the pinned commit', manifest_warning: 'the manifest is from another image' } });
+  const bothLast = both.shown[both.shown.length - 1];
+  assert.ok(bothLast.includes('HEAD is not the pinned commit'), 'the HEAD warning is shown: ' + bothLast);
+  assert.ok(bothLast.includes('the manifest is from another image'), 'the manifest warning is shown: ' + bothLast);
+
   const refused = await run({ status: 409, body: { error: 'no environment runs this workspace' } });
   assert.ok(refused.shown[refused.shown.length - 1].includes('inv-run-err'));
   console.log('ok test_configure_run_remote_dispatch');
