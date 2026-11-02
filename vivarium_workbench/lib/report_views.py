@@ -1222,6 +1222,11 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             # kind (e.g. "synthesis") — carried so the card can scope rendering; omitted before,
             # which is why the synthesis verdict couldn't be seeded client-side.
             "kind":                  _two_axis.get("kind"),
+            # Predicted direction for a parked (not-yet-investigated) card — the
+            # authored hypothesis, surfaced only when the node renders as parked so
+            # the card shows what it WOULD test instead of a generic label. None for
+            # any non-parked study. (Set by study_ontology.two_axis_node_fields.)
+            "hypothesis":            _two_axis.get("hypothesis"),
             "evidence_tier":         study_spec.get("evidence_tier"),
             # viva-superpowers #285 — the split verdict ledger (or None).
             "verdict_count_split":   _count_split,
