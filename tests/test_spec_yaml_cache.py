@@ -39,3 +39,19 @@ def test_missing_or_malformed_returns_empty_dict(tmp_path):
     nonmap = tmp_path / "list.yaml"
     nonmap.write_text("- a\n- b\n")       # a YAML list, not a mapping
     assert read_spec_yaml_cached(nonmap) == {}
+
+
+def test_study_yaml_run_rows_uses_cache_and_invalidates(tmp_path):
+    """_study_yaml_run_rows (called ~2x/study by _study_has_active_run across the whole
+    investigations list) now reads study.yaml through the mtime cache — the dominant
+    /api/investigations cost. It still reflects an edit (mtime bump)."""
+    import yaml
+    from vivarium_workbench.lib import study_spec as ss
+    sd = tmp_path / "studies" / "s1"
+    sd.mkdir(parents=True)
+    (tmp_path / "workspace.yaml").write_text("name: w\n")
+    (sd / "study.yaml").write_text(yaml.safe_dump({"name": "s1", "runs": [{"name": "r1"}]}))
+    assert len(ss._study_yaml_run_rows(tmp_path, "s1")) == 1
+    import time as _t; _t.sleep(0.01)
+    (sd / "study.yaml").write_text(yaml.safe_dump({"name": "s1", "runs": []}))
+    assert ss._study_yaml_run_rows(tmp_path, "s1") == []

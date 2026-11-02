@@ -420,14 +420,15 @@ def _study_yaml_run_rows(ws_root: Path, name: str) -> list[dict]:
     than a per-step ``runs.db``. Uses a light direct YAML read to avoid recursing
     through :func:`load_study_detail_spec`.  Mirrors ``server._study_yaml_run_rows``.
     """
-    try:
-        path = study_spec_path(ws_root, name)
-        if not path or not Path(path).is_file():
-            return []
-        spec = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 — never let a malformed spec break the view
+    path = study_spec_path(ws_root, name)
+    if not path or not Path(path).is_file():
         return []
-    if not isinstance(spec, dict):
+    # Route through the per-request mtime cache: _study_has_active_run / _study_display_status
+    # call this for EVERY study on the investigations list (and detail), re-parsing study.yaml
+    # ~2×/study uncached — the dominant cost of /api/investigations. read_spec_yaml_cached
+    # returns {} on a missing/malformed spec, matching the old except-> [] behavior below.
+    spec = read_spec_yaml_cached(path)
+    if not isinstance(spec, dict) or not spec:
         return []
     rows: list[dict] = []
     for r in spec.get("runs", []) or []:
