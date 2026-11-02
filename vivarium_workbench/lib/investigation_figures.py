@@ -36,8 +36,6 @@ from html import escape as _escape
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 from vivarium_workbench.lib.study_charts import (
     _resolve_figure_path,
