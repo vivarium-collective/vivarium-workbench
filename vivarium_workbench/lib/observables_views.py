@@ -31,7 +31,6 @@ import json
 import re
 from pathlib import Path
 
-import yaml
 
 # Observables build cache — keyed ("observables", str(ws_root), ref) →
 # (built_at_epoch, payload_dict).  Building a whole-cell composite is ~1s+, so
