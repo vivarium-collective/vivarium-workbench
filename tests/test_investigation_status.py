@@ -122,3 +122,50 @@ def test_authored_failed_wins_and_absent_status_is_a_noop():
     # absent/planning authored status does NOT override the aggregate (regression guard)
     assert inv.compute_investigation_status(["complete", "planned"], authored_status="planning") == "in_progress"
     assert inv.compute_investigation_status(["running"], authored_status=None) == "running"
+
+
+# --- parked ontology (deferred future directions distinct from pending) ---
+
+def test_parked_study_reads_parked_not_pending(tmp_path):
+    """A study flagged parked:true reads 'parked' (deferred), not a pending lifecycle value."""
+    # planned + parked -> parked (the 3 future-direction studies sbml normalizes)
+    parked = {"name": "recover-enzyme-moiety-aware", "status": "planned", "parked": True,
+              "kind": "refinement"}
+    assert inv._study_display_status(tmp_path, "p-x", parked) == "parked"
+    # NOT parked -> the ordinary planned lifecycle, unchanged
+    not_parked = {"name": "s", "status": "planned", "kind": "refinement"}
+    assert inv._study_display_status(tmp_path, "p-y", not_parked) == "planned"
+
+
+def test_parked_is_overridden_by_a_terminal_state(tmp_path):
+    """terminal -> parked -> lifecycle: a parked study that reached a done/failed axis
+    keeps the terminal state (parked never masks a real conclusion)."""
+    done = {"name": "s", "status": "planned", "parked": True, "evaluation_status": "evaluated"}
+    assert inv._study_display_status(tmp_path, "p-z", done) == "evaluated"
+    # a terminal invalid stays invalid (the display helper returns the raw terminal; the
+    # failed-rollup happens in compute_investigation_status) — parked must not mask it.
+    failed = {"name": "s", "status": "invalid", "parked": True}
+    assert inv._study_display_status(tmp_path, "p-w", failed) == "invalid"
+
+
+def test_synthesis_with_claim_reads_complete_not_pending(tmp_path):
+    """A kind:synthesis study carries a claim but no runs by design -> 'complete', not the
+    'Completed · pending' weak render."""
+    synth = {"name": "recoverability-frontier", "status": "planned", "kind": "synthesis",
+             "claim": "The recoverable frontier is bounded by data richness."}
+    assert inv._study_display_status(tmp_path, "syn", synth) == "complete"
+    # a synthesis with no claim stays weak (nothing to conclude yet)
+    empty = {"name": "s", "status": "planned", "kind": "synthesis"}
+    assert inv._study_display_status(tmp_path, "syn2", empty) == "planned"
+
+
+def test_compute_investigation_status_excludes_parked_from_completeness():
+    c = inv.compute_investigation_status
+    # 6 complete members + 3 parked -> complete (parked don't block completeness)
+    statuses = ["complete"] * 6 + ["planned"] * 3
+    parked = [False] * 6 + [True] * 3
+    assert c(statuses, parked=parked) == "complete"
+    # without the parked exclusion the trailing planned members would read in_progress
+    assert c(statuses) == "in_progress"
+    # all-parked (or empty non-parked) -> planning, never complete
+    assert c(["planned", "planned"], parked=[True, True]) == "planning"

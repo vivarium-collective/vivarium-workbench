@@ -1161,6 +1161,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             "name":                  study_spec["name"],
             "status":                raw_status,
             "effective_status":      _eff_status,
+            # Parked passthrough: a deliberately-deferred future direction. The render
+            # keys the "Parked · future direction" chip + the "X complete · Y parked"
+            # tally off this raw flag; _eff_status already reads "parked" for it too.
+            "parked":                bool(study_spec.get("parked")),
             "phase":                 study_spec.get("phase"),
             "title":                 study_spec.get("title"),
             "question":              question,
@@ -1244,9 +1248,11 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     member_statuses = [s.get("effective_status") or s.get("status", "planning")
                        for s in studies_out]
     member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
+    member_parked = [bool(s.get("parked")) for s in studies_out]
     effective_status = compute_investigation_status(
         member_statuses, has_runs=member_has_runs,
         authored_status=spec.get("status"),   # authoritative closed/complete wins over the aggregate
+        parked=member_parked,                 # deferred future-direction members don't block completeness
     )
 
     computed_acceptance: Optional[dict] = None
