@@ -178,6 +178,25 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict, runs=None) -> st
                 alt = str(v).strip()
                 break
         status = alt or "planning"
+
+    # Synthesis-complete (parked ontology, rule 2): a ``kind: synthesis`` study is a
+    # claim-only roll-up that by design produces no runs of its own, so a run-driven
+    # headline leaves it reading "pending" forever (the "Completed · pending" render).
+    # Once it carries a claim/conclusion it IS concluded -> promote a weak headline to
+    # "complete"; never override a real done/failed axis.
+    if (str(spec.get("kind") or "").strip().lower() == "synthesis"
+            and (spec.get("claim") or spec.get("conclusion"))
+            and status.lower() in _WEAK_DISPLAY):
+        status = "complete"
+
+    # Parked (parked ontology, rule 1): a study flagged ``parked: true`` is a
+    # deliberately-deferred future direction, DISTINCT from in-flight pending work — it
+    # must not read "pending evidence" and must not count toward completeness. It reads
+    # "parked" unless it has already reached a terminal state (terminal wins over parked).
+    if (spec.get("parked")
+            and status.lower() not in _STUDY_STATUS_DONE_ROLLUP
+            and status.lower() not in _STUDY_STATUS_FAILED):
+        return "parked"
     return status
 
 
@@ -187,6 +206,7 @@ def compute_investigation_status(
     *,
     authored_status: str | None = None,
     closed: bool = False,
+    parked: list[bool] | None = None,
 ) -> str:
     """Derive an investigation's effective status.
 
@@ -205,7 +225,12 @@ def compute_investigation_status(
     4. At least one child done OR with accumulated runs, but not all -> ``"in_progress"``.
     5. Otherwise (empty, or all planned/planning/unknown) -> ``"planning"``.
 
-    ``has_runs`` is an optional parallel list of bools (one per study).
+    ``has_runs`` is an optional parallel list of bools (one per study). ``parked`` is an
+    optional parallel list of bools: a parked member is a deliberately-deferred future
+    direction, so it is **excluded from the aggregate** — all NON-parked members done
+    reads ``"complete"`` even while parked follow-ups remain (the parked count is a render
+    concern, surfaced separately). An all-parked (or empty) investigation reads
+    ``"planning"``.
     """
     _st = str(authored_status or "").strip().lower()
     if _st == "failed":
@@ -214,6 +239,15 @@ def compute_investigation_status(
         return "complete"
     statuses = list(study_statuses or [])
     has_runs = list(has_runs or [False] * len(statuses))
+    parked = list(parked or [False] * len(statuses))
+    # A parked member is deferred future work, not incomplete current work — drop it
+    # from the aggregate (with its paired has_runs) so it neither blocks completeness
+    # nor counts as pending. Pad/truncate defensively if the lists are mismatched.
+    if any(parked):
+        kept = [(s, (has_runs[i] if i < len(has_runs) else False))
+                for i, s in enumerate(statuses) if not (i < len(parked) and parked[i])]
+        statuses = [s for s, _ in kept]
+        has_runs = [r for _, r in kept]
 
     if any(s in _STUDY_STATUS_FAILED for s in statuses):
         return "failed"
@@ -371,6 +405,9 @@ def build_iset_summary(
         marks = derive_markings(spec, member_specs)
         statuses = [s for s, _ in statuses_and_runs]
         has_runs = [r for _, r in statuses_and_runs]
+        # Parked members (deferred future directions) don't block the investigation's
+        # completeness aggregate (parked ontology, rule 3).
+        parked = [bool((member_specs.get(s) or {}).get("parked")) for s in study_slugs]
         # Number of downloadable figures — gates the card's ↓ figures action.
         # Count ALL figure files (study panels + post-study composites), i.e.
         # exactly what the figures.zip contains — not just the stitched
@@ -401,7 +438,8 @@ def build_iset_summary(
             "closure_source":   marks["closure"]["source"],
             "effective_status": compute_investigation_status(
                 statuses, has_runs=has_runs,
-                authored_status=spec.get("status"), closed=marks["closure"]["closed"]),
+                authored_status=spec.get("status"), closed=marks["closure"]["closed"],
+                parked=parked),
             "description":      _card_description(spec),
             "question":         spec.get("question", ""),
             "hypothesis":       spec.get("hypothesis", ""),
