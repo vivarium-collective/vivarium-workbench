@@ -35,11 +35,13 @@ def test_list_container_not_inline_grid():
     assert 'grid-template-columns' not in p[i:i + 200]  # grid moved to .investigations-grid
 
 
-def test_render_groups_and_filter_function():
+def test_render_combined_list_and_filter_function():
     assert 'function _filterInvestigations' in JS
     assert 'window._filterInvestigations' in JS
-    assert 'iset-group-head' in JS
-    assert "_groupHtml('Active'" in JS and "_groupHtml('Closed'" in JS
+    # Investigations render as ONE combined list (active-first by default), NOT
+    # split into ACTIVE/CLOSED sections — guard against the split returning.
+    assert "_groupHtml('Active'" not in JS and "_groupHtml('Closed'" not in JS
+    assert "_groupHtml('', _sortIsets(active.concat(closedItems)))" in JS
     assert 'investigations-grid' in JS and 'grid-template-columns' in JS
     assert 'data-iset-status' in JS
 
