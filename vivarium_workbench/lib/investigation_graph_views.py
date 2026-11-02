@@ -164,6 +164,21 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
         if _verdict:
             _node["verdict"] = _verdict
             _node["verdict_source"] = _vsrc
+        # Synthesis verdict from terminal confidence: a kind:synthesis study is a claim-only
+        # roll-up with no graded tests of its own, so resolve_verdict reports 'pending' even
+        # when its confidence is Accepted/Refuted — the two pills then disagree ("Completed ·
+        # pending"). Seed the verdict from a TERMINAL display confidence so they agree. Scoped
+        # to synthesis: a non-synthesis study with Accepted confidence but no verdict may be
+        # legitimately ungraded, so it keeps its pending verdict.
+        if not _node.get("verdict") and str(study_spec.get("kind") or "").strip().lower() == "synthesis":
+            # Read the AUTHORED confidence, not the derived display confidence — derive_confidence
+            # resolves 'Accepted' from a completed status regardless of the authored value, so it
+            # can't distinguish Accepted from Refuted intent.
+            _conf_verdict = {"accepted": "supported", "refuted": "refuted"}.get(
+                str(study_spec.get("confidence") or "").strip().lower())
+            if _conf_verdict:
+                _node["verdict"] = _conf_verdict
+                _node["verdict_source"] = "derived"
         if study_spec.get("evidence_tier"):
             _node["evidence_tier"] = study_spec["evidence_tier"]
         studies_out.append(_node)
