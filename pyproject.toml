@@ -115,7 +115,9 @@ dependencies = [
     # 500. The hosted image is currently built without `[chat]` (Dockerfile).
     # Background: docs/ARCHITECTURE.md, "Coupling note".
     "viva-superpowers[evaluator]>=0.23.0",
-    "discovery-engine",
+    # PyPI distribution is `viva-discovery-engine`; the import package stays
+    # `discovery_engine` (see root_packages + import-linter below).
+    "viva-discovery-engine",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
@@ -183,7 +185,7 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
-discovery-engine = { git = "https://github.com/vivarium-collective/discovery-engine.git", branch = "main" }
+viva-discovery-engine = { git = "https://github.com/vivarium-collective/discovery-engine.git", branch = "main" }
 # viva-superpowers: sourced from git (NOT PyPI 0.22.0) because only main has
 # migrated off pbg-emitters onto viva-emitters>=0.2.3 — the whole point of this
 # change. Pinned to a REV, not `branch = "main"`, matching the deliberate choice

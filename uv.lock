@@ -657,29 +657,6 @@ wheels = [
 ]
 
 [[package]]
-name = "discovery-engine"
-version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main#8e6c43604940249ee821aacc92d964652ffa793c" }
-dependencies = [
-    { name = "bigraph-schema" },
-    { name = "click" },
-    { name = "filelock" },
-    { name = "jinja2" },
-    { name = "jsonschema", extra = ["format-nongpl"] },
-    { name = "numpy" },
-    { name = "polars" },
-    { name = "process-bigraph" },
-    { name = "psutil" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "ruamel-yaml" },
-    { name = "scipy" },
-    { name = "typer" },
-    { name = "viva-emitters", extra = ["parquet"] },
-    { name = "viva-workspace" },
-]
-
-[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3628,6 +3605,29 @@ version = "0.1.0"
 source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?rev=4e72e3b7f6c88d9683ae113a58e59bcafc5efb65#4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
 
 [[package]]
+name = "viva-discovery-engine"
+version = "0.1.0"
+source = { git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main#ff7cad0cb6f91328c98be1e1e26cc363c7621864" }
+dependencies = [
+    { name = "bigraph-schema" },
+    { name = "click" },
+    { name = "filelock" },
+    { name = "jinja2" },
+    { name = "jsonschema", extra = ["format-nongpl"] },
+    { name = "numpy" },
+    { name = "polars" },
+    { name = "process-bigraph" },
+    { name = "psutil" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "ruamel-yaml" },
+    { name = "scipy" },
+    { name = "typer" },
+    { name = "viva-emitters", extra = ["parquet"] },
+    { name = "viva-workspace" },
+]
+
+[[package]]
 name = "viva-emitters"
 version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3662,7 +3662,7 @@ xarray = [
 [[package]]
 name = "viva-superpowers"
 version = "0.24.0"
-source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#f67ff2b1004021fb9542d2c479961c1d83de00b5" }
+source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#551f0e8b4eb0dba7ccca4a3f051ed7452d9cfb14" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "click" },
@@ -3674,6 +3674,7 @@ dependencies = [
     { name = "pypdf" },
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
+    { name = "viva-discovery-engine" },
     { name = "viva-emitters" },
     { name = "viva-workspace" },
 ]
@@ -3699,7 +3700,6 @@ source = { editable = "." }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "boto3" },
-    { name = "discovery-engine" },
     { name = "fastapi" },
     { name = "investigation-contracts" },
     { name = "jinja2" },
@@ -3714,6 +3714,7 @@ dependencies = [
     { name = "uvicorn" },
     { name = "viva-basic-processes" },
     { name = "viva-catalog" },
+    { name = "viva-discovery-engine" },
     { name = "viva-emitters", extra = ["parquet", "xarray"] },
     { name = "viva-superpowers", extra = ["evaluator"] },
     { name = "viva-workspace" },
@@ -3757,7 +3758,6 @@ viz = [
 requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
     { name = "boto3", specifier = ">=1.34" },
-    { name = "discovery-engine", git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
@@ -3790,6 +3790,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.29" },
     { name = "viva-basic-processes", git = "https://github.com/vivarium-collective/viva-basic-processes.git?branch=main" },
     { name = "viva-catalog", git = "https://github.com/vivarium-collective/viva-marketplace.git?rev=4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" },
+    { name = "viva-discovery-engine", git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main" },
     { name = "viva-emitters", extras = ["sqlite", "xarray", "parquet"], specifier = ">=0.4.3" },
     { name = "viva-superpowers", extras = ["evaluator"], git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main" },
     { name = "viva-workspace", git = "https://github.com/vivarium-collective/viva-workspace.git?branch=main" },
