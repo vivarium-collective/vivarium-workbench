@@ -40,5 +40,31 @@ assert(detailFn.indexOf('s.claim') < detailFn.indexOf('pending evidence</em>'),
 assert(/isParked\s*\?\s*'<em[^>]*>future direction/.test(src),
   'collapsed preview shows "future direction" for parked (gated on isParked)');
 
+// --- parked predicted direction (#1564 builder surfaces s.hypothesis) ---
+// A parked card with no claim shows its authored hypothesis (the predicted
+// direction), trimmed to the first sentence; both render sites consume it.
+const fnSrc = src.slice(
+  src.indexOf('function _parkedDirection'),
+  src.indexOf('window._parkedDirection'));
+assert(fnSrc.length > 0, '_parkedDirection defined');
+assert(/s\.hypothesis/.test(fnSrc), '_parkedDirection reads s.hypothesis');
+const _parkedDirection = new Function('return (' + fnSrc + ')')();
+assert(
+  _parkedDirection({ hypothesis:
+    'Removing the conserved-moiety rank deficiency lets the sparse fit isolate the true three reactions. A second clause that must be dropped.' })
+  === 'Removing the conserved-moiety rank deficiency lets the sparse fit isolate the true three reactions.',
+  '_parkedDirection returns only the first sentence');
+assert(_parkedDirection({}) === null, '_parkedDirection returns null with no hypothesis');
+assert(_parkedDirection({ hypothesis: '   ' }) === null, '_parkedDirection returns null on whitespace-only');
+const long = _parkedDirection({ hypothesis: 'x'.repeat(400) });
+assert(long.length <= 200 && long.endsWith('…'), '_parkedDirection caps an over-long single sentence with an ellipsis');
+
+// both render sites consume the predicted direction for parked studies
+assert(/_parkedDirection\(s\)/.test(detailFn),
+  'expanded card consumes _parkedDirection for the parked predicted direction');
+const collapsedParked = src.slice(src.indexOf("isParked\n"), src.indexOf("pending evidence</em>'"));
+assert(/_parkedDirection\(s\)/.test(collapsedParked) || src.split('_parkedDirection(s)').length - 1 >= 2,
+  'collapsed preview consumes _parkedDirection for the parked predicted direction');
+
 if (failed) { console.error(failed + ' assertion(s) failed'); process.exit(1); }
 console.log('PASS test_card_finds_fallback');
