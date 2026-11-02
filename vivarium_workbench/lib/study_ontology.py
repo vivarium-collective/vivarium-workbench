@@ -179,6 +179,47 @@ def derive_verdict(spec: dict):
     return resolve_verdict(spec)[0]
 
 
+def two_axis_node_fields(spec: dict, node_status: str = "", runs=None) -> dict:
+    """The execution_status × verdict two-axis node fields for a study, with the **parked
+    override** and the **synthesis-verdict seed** applied.
+
+    This is the single source both the investigation GRAPH builder
+    (``investigation_graph_views.build_investigation_graph``) and the investigation DETAIL
+    endpoint's study builder (``report_views.build_iset_detail``) call, so the DAG cards —
+    which render from the detail payload — and the graph never diverge on parked/synthesis
+    again (the split that produced "Planned · pending" on parked follow-ups and "Completed ·
+    pending" on a claim-only synthesis).
+
+    Returns a dict to merge into a node: ``{execution_status, verdict?, verdict_source?,
+    parked?, kind?}``. Precedence on the execution axis: terminal/in-flight -> parked ->
+    lifecycle (a running/completed/failed study keeps its real status; only a not-yet-started
+    ``proposed``/``planned`` parked study reads ``parked``).
+    """
+    out: dict = {}
+    es = derive_execution_status(spec, node_status, runs=runs)
+    if spec.get("parked"):
+        out["parked"] = True
+        if str(es).lower() in ("proposed", "planned"):
+            es = "parked"
+    out["execution_status"] = es
+    verdict, vsrc = resolve_verdict(spec)
+    if not verdict and str(spec.get("kind") or "").strip().lower() == "synthesis":
+        # A kind:synthesis is a claim-only roll-up with no graded tests, so resolve_verdict is
+        # pending even when confidence is Accepted/Refuted. Seed from the AUTHORED confidence
+        # (not derive_confidence, which resolves 'Accepted' from a completed status regardless
+        # of authored intent). Scoped to synthesis: a non-synthesis study keeps pending.
+        verdict = {"accepted": "supported", "refuted": "refuted"}.get(
+            str(spec.get("confidence") or "").strip().lower())
+        if verdict:
+            vsrc = "derived"
+    if verdict:
+        out["verdict"] = verdict
+        out["verdict_source"] = vsrc
+    if spec.get("kind"):
+        out["kind"] = spec["kind"]
+    return out
+
+
 def _parse_verdict_text(spec: dict):
     rep = spec.get("report") if isinstance(spec.get("report"), dict) else {}
     card = spec.get("study_card") if isinstance(spec.get("study_card"), dict) else {}

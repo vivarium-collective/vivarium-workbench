@@ -25,8 +25,6 @@ _PRE_EVAL_STATUSES = frozenset({"build", "planned", "implementation", "design", 
 # study-card detail serializer (report_views) can never drift.
 from vivarium_workbench.lib.study_ontology import (  # noqa: E402
     canon_relation as _canon_relation,
-    derive_execution_status as _derive_execution_status,
-    resolve_verdict as _resolve_verdict,
 )
 
 
@@ -146,39 +144,13 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             _rows = study_run_rows(ws_root, slug, study_spec, wp)
         except Exception:  # noqa: BLE001
             _rows = None
-        _node["execution_status"] = _derive_execution_status(
-            study_spec, _node_status, runs=_rows)
-        # Parked ontology (parity with investigation_status._study_display_status, #1549): a
-        # parked:true future-direction study reads 'parked' on the execution axis — distinct
-        # from in-flight 'planned' — unless it has already reached a terminal state (precedence
-        # terminal -> parked -> lifecycle). The raw flag is passed through so the render's chip
-        # and the "X complete · Y parked" tally read it directly.
-        if study_spec.get("parked"):
-            _node["parked"] = True
-            # Only a NOT-YET-STARTED study (execution axis ``proposed``/``planned``) reads
-            # 'parked'; a running/completed/failed study has executed, so its real execution
-            # status wins (precedence terminal/in-flight -> parked -> lifecycle).
-            if str(_node["execution_status"]).lower() in ("proposed", "planned"):
-                _node["execution_status"] = "parked"
-        _verdict, _vsrc = _resolve_verdict(study_spec)
-        if _verdict:
-            _node["verdict"] = _verdict
-            _node["verdict_source"] = _vsrc
-        # Synthesis verdict from terminal confidence: a kind:synthesis study is a claim-only
-        # roll-up with no graded tests of its own, so resolve_verdict reports 'pending' even
-        # when its confidence is Accepted/Refuted — the two pills then disagree ("Completed ·
-        # pending"). Seed the verdict from a TERMINAL display confidence so they agree. Scoped
-        # to synthesis: a non-synthesis study with Accepted confidence but no verdict may be
-        # legitimately ungraded, so it keeps its pending verdict.
-        if not _node.get("verdict") and str(study_spec.get("kind") or "").strip().lower() == "synthesis":
-            # Read the AUTHORED confidence, not the derived display confidence — derive_confidence
-            # resolves 'Accepted' from a completed status regardless of the authored value, so it
-            # can't distinguish Accepted from Refuted intent.
-            _conf_verdict = {"accepted": "supported", "refuted": "refuted"}.get(
-                str(study_spec.get("confidence") or "").strip().lower())
-            if _conf_verdict:
-                _node["verdict"] = _conf_verdict
-                _node["verdict_source"] = "derived"
+        # Two-axis node fields (execution_status with the parked override, verdict with the
+        # synthesis seed, and kind) come from the SHARED helper so the DAG CARDS — which render
+        # from the detail payload, a different builder — derive these identically and never
+        # diverge again (the split that produced parked-as-pending and synthesis "Completed ·
+        # pending"). build_iset_detail calls the same helper.
+        from vivarium_workbench.lib.study_ontology import two_axis_node_fields  # noqa: PLC0415
+        _node.update(two_axis_node_fields(study_spec, _node_status, _rows))
         if study_spec.get("evidence_tier"):
             _node["evidence_tier"] = study_spec["evidence_tier"]
         studies_out.append(_node)

@@ -43,8 +43,8 @@ from vivarium_workbench.lib.run_aware_investigation import (
 from vivarium_workbench.lib import readouts_views as _readouts_views
 from vivarium_workbench.lib import study_derivations as _study_derivations
 from vivarium_workbench.lib.study_ontology import (
-    derive_execution_status as _derive_execution_status,
     resolve_verdict as _resolve_verdict,
+    two_axis_node_fields as _two_axis_node_fields,
 )
 
 
@@ -80,16 +80,13 @@ def _unloadable_study_node(sp: "Path", slug: str, error: str) -> dict:
         # Keep the authored lifecycle status (e.g. "planned"); only fall back to
         # the legacy "invalid" sentinel when the file carries no status at all.
         "status": authored_status or "invalid",
-        # Always carry the derived execution axis so the client honours it
-        # (execution_status wins in _execState) instead of inferring "failed"
-        # from the "invalid" status sentinel.
-        "execution_status": _derive_execution_status(raw, authored_status),
         "spec_error": error,
     }
-    _verdict, _vsrc = _resolve_verdict(raw)
-    if _verdict:
-        node["verdict"] = _verdict
-        node["verdict_source"] = _vsrc
+    # Always carry the two-axis fields (execution_status w/ parked override, verdict w/
+    # synthesis seed, kind) via the SAME shared helper the main path + the graph use, so even
+    # a spec-error node agrees with the graph (and a parked spec-error study still reads parked,
+    # not "failed" from the invalid sentinel).
+    node.update(_two_axis_node_fields(raw, authored_status))
     return node
 
 
@@ -1077,6 +1074,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         from vivarium_workbench.lib.investigation_status import study_run_rows  # noqa: PLC0415
         _run_rows = study_run_rows(ws_root, study_spec["name"], study_spec)
         _verdict_pair = _resolve_verdict(study_spec)
+        # Shared two-axis derivation (execution_status w/ parked override, verdict w/ synthesis
+        # seed, kind) — identical to the graph builder so the DAG cards (rendered from THIS
+        # detail payload) never diverge from the graph on parked/synthesis.
+        _two_axis = _two_axis_node_fields(study_spec, raw_status, _run_rows)
         _gate_pair = resolve_gate_status(study_spec)
         _eff_status = _study_display_status(
             ws_root, study_spec["name"], study_spec, runs=_run_rows)
@@ -1214,10 +1215,13 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             # is always derived (every card gets a Progress pill); verdict is set
             # only when authored or derivable (else the card shows "pending").
             # Same derivation as the typed graph builder (shared study_ontology).
-            "execution_status":      _derive_execution_status(study_spec, raw_status, runs=_run_rows),
-            "verdict":               _verdict_pair[0],
+            "execution_status":      _two_axis["execution_status"],
+            "verdict":               _two_axis.get("verdict"),
             # "authored" | "derived" (engine roll-up of graded tests) | None
-            "verdict_source":        _verdict_pair[1],
+            "verdict_source":        _two_axis.get("verdict_source"),
+            # kind (e.g. "synthesis") — carried so the card can scope rendering; omitted before,
+            # which is why the synthesis verdict couldn't be seeded client-side.
+            "kind":                  _two_axis.get("kind"),
             "evidence_tier":         study_spec.get("evidence_tier"),
             # viva-superpowers #285 — the split verdict ledger (or None).
             "verdict_count_split":   _count_split,
