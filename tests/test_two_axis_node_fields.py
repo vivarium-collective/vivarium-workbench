@@ -36,6 +36,32 @@ def test_kind_is_carried_through():
     assert "kind" not in f({"name": "s"})
 
 
+def test_parked_node_carries_hypothesis_as_predicted_direction():
+    # A not-yet-investigated parked study has no claim/finding, so the card falls
+    # back to its authored hypothesis (the predicted direction) instead of a
+    # generic "future direction" label.
+    r = f({"name": "s", "status": "planned", "parked": True,
+           "hypothesis": "  Low-copy noise defeats a smooth RHS fit.  "})
+    assert r["execution_status"] == "parked"
+    assert r["hypothesis"] == "Low-copy noise defeats a smooth RHS fit."
+
+
+def test_executed_parked_study_omits_hypothesis():
+    # parked flag but the study actually ran -> it shows its real status + claim,
+    # not the predicted direction, so no hypothesis is surfaced.
+    r = f({"name": "s", "status": "complete", "parked": True,
+           "hypothesis": "Low-copy noise defeats a smooth RHS fit."})
+    assert r["execution_status"] == "completed"
+    assert "hypothesis" not in r
+
+
+def test_non_parked_planned_study_omits_hypothesis():
+    # an active (non-parked) study's direction comes from its claim/findings, not
+    # a surfaced hypothesis.
+    r = f({"name": "s", "status": "planned", "hypothesis": "X exceeds Y."})
+    assert "hypothesis" not in r
+
+
 def test_graph_and_detail_builders_use_the_same_helper(tmp_path):
     """Parity: a parked study's node from build_investigation_graph and its study entry from
     build_iset_detail agree on execution_status + parked (both route through the helper)."""
@@ -47,9 +73,15 @@ def test_graph_and_detail_builders_use_the_same_helper(tmp_path):
     inv.joinpath("investigation.yaml").write_text(yaml.safe_dump({"name": "demo", "studies": ["p1"]}))
     sd = tmp_path / "studies" / "p1"; sd.mkdir(parents=True)
     sd.joinpath("study.yaml").write_text(yaml.safe_dump(
-        {"schema_version": 4, "name": "p1", "status": "planned", "parked": True, "kind": "refinement"}))
+        {"schema_version": 4, "name": "p1", "status": "planned", "parked": True, "kind": "refinement",
+         "hypothesis": "A conserved moiety makes the regression ill-conditioned."}))
     gnode = {n["slug"]: n for n in build_investigation_graph(tmp_path, "demo")[0]["studies"]}["p1"]
     detail = build_iset_detail(tmp_path, "demo")
     dstudy = {s["name"]: s for s in (detail.get("studies") or [])}["p1"]
     assert gnode["execution_status"] == dstudy["execution_status"] == "parked"
     assert gnode.get("parked") == dstudy.get("parked") is True
+    # The parked predicted-direction (hypothesis) must reach BOTH the graph node and
+    # the detail payload — the detail main path cherry-picks keys, so a missing
+    # passthrough there is exactly how the card would fall back to a generic label.
+    assert gnode.get("hypothesis") == dstudy.get("hypothesis") \
+        == "A conserved moiety makes the regression ill-conditioned."

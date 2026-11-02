@@ -191,7 +191,9 @@ def two_axis_node_fields(spec: dict, node_status: str = "", runs=None) -> dict:
     pending" on a claim-only synthesis).
 
     Returns a dict to merge into a node: ``{execution_status, verdict?, verdict_source?,
-    parked?, kind?}``. Precedence on the execution axis: terminal/in-flight -> parked ->
+    parked?, kind?, hypothesis?}`` (``hypothesis`` only when the node renders as parked,
+    carrying the predicted direction for a card with no claim/finding yet). Precedence on
+    the execution axis: terminal/in-flight -> parked ->
     lifecycle (a running/completed/failed study keeps its real status; only a not-yet-started
     ``proposed``/``planned`` parked study reads ``parked``).
     """
@@ -217,6 +219,17 @@ def two_axis_node_fields(spec: dict, node_status: str = "", runs=None) -> dict:
         out["verdict_source"] = vsrc
     if spec.get("kind"):
         out["kind"] = spec["kind"]
+    # A node that renders as ``parked`` is a not-yet-investigated future direction
+    # with no claim or finding to show as its "Finds" line. Surface the authored
+    # ``hypothesis`` (the predicted direction) so the card can show WHAT the study
+    # would test instead of a generic "future direction" label. Scoped to the
+    # parked execution state: a parked study that actually ran keeps its real
+    # status and reads from its claim/findings, and an active (non-parked) study's
+    # direction comes from its own results — neither surfaces the hypothesis here.
+    if str(out["execution_status"]).lower() == "parked":
+        hyp = str(spec.get("hypothesis") or "").strip()
+        if hyp:
+            out["hypothesis"] = hyp
     return out
 
 
