@@ -181,6 +181,29 @@ def test_a_generator_composite_exports_when_nothing_has_imported_its_module(tmp_
     assert done.stdout.strip().splitlines()[-1] == "True"
 
 
+def test_an_empty_workspace_yaml_does_not_break_exporting_a_composite_whose_spec_is_found(ws, tmp_path):
+    """workspace.yaml is read before the spec lookup (the generator fallback needs the package name), so every export
+    reads it: an empty file loads as None and must read as 'no settings', not fail a composite that needs nothing
+    from it. Run in a fresh interpreter, since the spec registry is per process."""
+    import sys
+
+    (ws / "workspace.yaml").write_text("", encoding="utf-8")
+    script = ("import sys; from pathlib import Path\n"
+              "from process_bigraph import allocate_core\n"
+              "from process_bigraph.composite_spec import get\n"
+              "from vivarium_workbench.lib.pbg_export import export_composite_pbg\n"
+              "ws = Path(sys.argv[1]); cid = 'pbg_ws_increase_demo.composites.hint_test'\n"
+              "sys.path.insert(0, str(ws))\n"
+              "import pbg_ws_increase_demo  # registers its composites\n"
+              "assert get(cid) is not None, 'precondition: the spec is found without the workspace.yaml fallback'\n"
+              "export_composite_pbg(ws, cid, Path(sys.argv[2]), core=allocate_core())\n"
+              "print('exported')\n")
+    done = subprocess.run([sys.executable, "-c", script, str(ws), str(tmp_path / "e.pbg")],
+                          capture_output=True, text=True, cwd=tmp_path, timeout=300)
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert done.stdout.strip().splitlines()[-1] == "exported"
+
+
 def test_a_numpy_array_exports_as_the_list_it_is_realized_from_and_an_unknown_value_is_refused(ws, tmp_path):
     import numpy as np
 
@@ -720,6 +743,26 @@ def test_an_openapi_document_that_is_not_json_reads_as_legacy(ws, backend_env, d
             return super().handle(method, raw_path, raw_body, content_type)
 
     s = NotJson(json.loads(SPEC_PATH.read_text(encoding="utf-8")))
+    s.url = s.start()
+    try:
+        _name(backend_env, s.url, environment=None)
+        res = dashboard_client(ws).get("/api/remote-run-config")
+        assert res.status_code == 200 and res.json()["backend"]["dispatch"] == sc.DISPATCH_LEGACY
+    finally:
+        s.stop()
+
+
+@pytest.mark.parametrize("paths", [["/simulation/run"], "paths"], ids=["array", "string"])
+def test_an_openapi_document_whose_paths_is_not_an_object_reads_as_legacy(ws, backend_env, dashboard_client, paths):
+    """``backend_profile`` never raises. JSON that is not an OpenAPI document (here, ``paths`` that is truthy and not an
+    object) is not compose-api's either, and must not fail the routes that ask which backend they are talking to."""
+    class OddPaths(VivaV1Stub):
+        def handle(self, method, raw_path, raw_body, content_type=None):
+            if raw_path.startswith("/openapi.json"):
+                return 200, "application/json", json.dumps({"info": {"version": "9.9.9"}, "paths": paths}).encode()
+            return super().handle(method, raw_path, raw_body, content_type)
+
+    s = OddPaths(json.loads(SPEC_PATH.read_text(encoding="utf-8")))
     s.url = s.start()
     try:
         _name(backend_env, s.url, environment=None)

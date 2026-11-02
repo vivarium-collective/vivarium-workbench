@@ -841,9 +841,10 @@ class SmsApiClient:
         doc = self._get("/openapi.json")
         doc = doc if isinstance(doc, dict) else {}
         info = doc.get("info") if isinstance(doc.get("info"), dict) else {}
+        paths = doc.get("paths") if isinstance(doc.get("paths"), dict) else {}
         operations = frozenset(
             str(op["operationId"])
-            for item in (doc.get("paths") or {}).values() if isinstance(item, dict)
+            for item in paths.values() if isinstance(item, dict)
             for op in item.values() if isinstance(op, dict) and op.get("operationId"))
         return (str(info["version"]) if info.get("version") else None), operations
 

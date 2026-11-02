@@ -464,6 +464,8 @@ def _dispatch(session: "ComposeSession", ws_root: Path, composite_id: str, param
                     "reason": "uncertain", "may_exist": True, "dispatch_tag": dispatch_tag,
                     "reachable": True}, 502) from e
             return found, env
+    # compose-api's contract (compose_api/api/routers/simulations.py): the id POST /simulation/run returns as
+    # simulation_database_id is the simulation_id every other route takes (_find_dispatched reads the same one back).
     return int(experiment.simulation_database_id), env
 
 
@@ -732,6 +734,9 @@ def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str) -> Non
         pass
 
 
+# "submitting" is everything before a run has a SLURM job (compose-api's requested, preparing, submitting), and compose-api
+# ends that itself: its submission worker resumes a run after a restart and fails one it cannot send, with a reason
+# (compose-api's docs/plan-durable-submission.md). Before compose-api 0.7.9 a lost submission stayed there for good (compose-api#238).
 def _phase(raw: str) -> str:
     raw = str(raw or "").lower()
     return ("done" if raw in _TERMINAL_OK else "failed" if raw in _TERMINAL_BAD

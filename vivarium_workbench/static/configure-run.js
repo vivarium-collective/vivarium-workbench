@@ -272,7 +272,7 @@
     _post("/api/study-run-baseline", { study: ctxState.study, overrides: overrides, steps: steps }).then(function (res) {
       if (res.status === 202 && res.body && res.body.run_id) {
         // Dispatched to the named backend: the run is tracked (and landed) from the Runs tab.
-        var warning = res.body.warning || res.body.manifest_warning;
+        var warning = [res.body.warning, res.body.manifest_warning].filter(Boolean).join(' ');
         _status(el, '<strong>✓ Dispatched</strong> remote run ' + esc(res.body.run_id) + ' — track it in the Runs tab.'
           + (warning ? ' <span class="inv-run-err">' + esc(warning) + '</span>' : ''));
         _reenableBtn();
