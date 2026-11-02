@@ -1,4 +1,4 @@
-// walkthrough.js — v0.8.1: Investigations list is now ONE combined list (active-first by default) — the ACTIVE/CLOSED section split is removed (_groupHtml is header-optional; the user sort orders the whole set). v0.8.0: Registry Full view is now directly runnable — the config bar IS the editable config and the left ports ARE the editable input fields (no "Run this process" dropdown); Run lives in the body, outputs on the right. Middle (grid) zoom shows ports+types inline (no dropdown); double-click a card → runnable Full. Modules table split into Installed-here vs Marketplace sections with a Repos (imported-into) column, GitHub link on the name, and Install/Uninstall in one Action column (n_repos from module_stats federation scan). bigraph-loom: Explore (graph) is the default left tab; the right dock defaults to Processes with Nodes/Inspector collapsed. v0.7.0: Composites semantic zoom (Table/Cards full-row compact/Loom on-demand embed) + double-click to zoom in; /api/composites now runs in the WARM pooled worker (flake fix). v0.6.9: registry filter now data-driven (works in Table/Cards/Full); middle Cards zoom is full-row with composite/study usage split + details; double-click zooms in centered; select persists across zoom; run panel input ports as per-field form (type + resolved default, auto-grow) + Copy outputs; loom config bar lightened to match workbench palette. v0.6.8: run panel lazy-loads RESOLVED defaults (core.fill via /api/registry/process-template) into a per-field config form + inputs JSON (no more null-heavy templates); loom card restyled as a crisp rectangle. v0.6.7: Registry Full-view interactive runner — editable config + input-port JSON, Run → outputs (POST /api/registry/run-process; env_worker._run_process instantiates + Step.update / Process.update(interval)); loom inputs left / outputs right. v0.6.6: Registry semantic zoom (compact/detailed/full loom-rectangle: inputs left, outputs right, config top) + Cards⇄Table sortable view (_setRegistryZoom/_setRegistryView/_renderRegistryTable); rail pins hover-only + ungrouped back to a collapsible folder. v0.6.5: Registry processes sorted by USE (most-referenced across composites/runners first) with a use-count badge (build_registry._annotate_use_counts source-scan). v0.6.4: Registry page — "Discovered registry"→"Registry" (main tab), "Modules"→"Marketplace"; rich registry entries (description + inputs/outputs ports/contract + full config schema, loom-like) and a new Report Cards tab (_renderRegistryEntry/_regPortColumn). v0.6.3: STUDIES rail — per-study pin toggle (localStorage) with a "Pinned" strip at the top for quick access, and ungrouped studies rendered as a flat list at the bottom instead of a collapsible dropdown (_toggleStudyPin/_loadPinnedStudies; _railStudyItem + _renderRailInvestigationGroups). v0.6.2: Marketplace merged into the Modules tab — Modules grid loads the FULL ecosystem via /api/marketplace (available modules under the "Available to install" divider), installed cards gain an Uninstall action gated by an impact-confirmation modal (_showUninstallImpactModal via /api/catalog-uninstall-impact), viva-* display names + stat chips. v0.6.1: Marketplace sub-tab — browse the FULL viva ecosystem (unfiltered by registry.include) + install (_loadMarketplace/_renderMarketplace via /api/marketplace; shared _renderModuleGrid/_moduleActionFor with the Modules tab). v0.6.0: system-deps awareness — pre-install check + consent modal (_installFromCatalog → _showSystemDepsModal; new _checkSystemDepsForInstalled on Registry rows); v0.5.3: investigation detail panel — Spec/Runs/Visualizations tabs + Run button + Delete; v0.5.2: composite explorer UX fixes (no focus-mode hijack, one-row-per-param layout, lazy-load composite cache); v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
+// walkthrough.js — v0.8.2: PARKED study state — a deliberately-deferred future direction renders as "Parked · future direction" (violet), NOT "Planned · pending": new _EXEC_META.parked + _VERDICT_PARKED, _execState/_studyStatusState detect the orthogonal `parked` flag / effective_status==='parked' (precedence terminal→parked→lifecycle); graph legend + iset-card breakdown pick it up automatically. v0.8.1: Investigations list is now ONE combined list (active-first by default) — the ACTIVE/CLOSED section split is removed (_groupHtml is header-optional; the user sort orders the whole set). v0.8.0: Registry Full view is now directly runnable — the config bar IS the editable config and the left ports ARE the editable input fields (no "Run this process" dropdown); Run lives in the body, outputs on the right. Middle (grid) zoom shows ports+types inline (no dropdown); double-click a card → runnable Full. Modules table split into Installed-here vs Marketplace sections with a Repos (imported-into) column, GitHub link on the name, and Install/Uninstall in one Action column (n_repos from module_stats federation scan). bigraph-loom: Explore (graph) is the default left tab; the right dock defaults to Processes with Nodes/Inspector collapsed. v0.7.0: Composites semantic zoom (Table/Cards full-row compact/Loom on-demand embed) + double-click to zoom in; /api/composites now runs in the WARM pooled worker (flake fix). v0.6.9: registry filter now data-driven (works in Table/Cards/Full); middle Cards zoom is full-row with composite/study usage split + details; double-click zooms in centered; select persists across zoom; run panel input ports as per-field form (type + resolved default, auto-grow) + Copy outputs; loom config bar lightened to match workbench palette. v0.6.8: run panel lazy-loads RESOLVED defaults (core.fill via /api/registry/process-template) into a per-field config form + inputs JSON (no more null-heavy templates); loom card restyled as a crisp rectangle. v0.6.7: Registry Full-view interactive runner — editable config + input-port JSON, Run → outputs (POST /api/registry/run-process; env_worker._run_process instantiates + Step.update / Process.update(interval)); loom inputs left / outputs right. v0.6.6: Registry semantic zoom (compact/detailed/full loom-rectangle: inputs left, outputs right, config top) + Cards⇄Table sortable view (_setRegistryZoom/_setRegistryView/_renderRegistryTable); rail pins hover-only + ungrouped back to a collapsible folder. v0.6.5: Registry processes sorted by USE (most-referenced across composites/runners first) with a use-count badge (build_registry._annotate_use_counts source-scan). v0.6.4: Registry page — "Discovered registry"→"Registry" (main tab), "Modules"→"Marketplace"; rich registry entries (description + inputs/outputs ports/contract + full config schema, loom-like) and a new Report Cards tab (_renderRegistryEntry/_regPortColumn). v0.6.3: STUDIES rail — per-study pin toggle (localStorage) with a "Pinned" strip at the top for quick access, and ungrouped studies rendered as a flat list at the bottom instead of a collapsible dropdown (_toggleStudyPin/_loadPinnedStudies; _railStudyItem + _renderRailInvestigationGroups). v0.6.2: Marketplace merged into the Modules tab — Modules grid loads the FULL ecosystem via /api/marketplace (available modules under the "Available to install" divider), installed cards gain an Uninstall action gated by an impact-confirmation modal (_showUninstallImpactModal via /api/catalog-uninstall-impact), viva-* display names + stat chips. v0.6.1: Marketplace sub-tab — browse the FULL viva ecosystem (unfiltered by registry.include) + install (_loadMarketplace/_renderMarketplace via /api/marketplace; shared _renderModuleGrid/_moduleActionFor with the Modules tab). v0.6.0: system-deps awareness — pre-install check + consent modal (_installFromCatalog → _showSystemDepsModal; new _checkSystemDepsForInstalled on Registry rows); v0.5.3: investigation detail panel — Spec/Runs/Visualizations tabs + Run button + Delete; v0.5.2: composite explorer UX fixes (no focus-mode hijack, one-row-per-param layout, lazy-load composite cache); v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
 (function () {
   "use strict";
   // Cache-bust token for the bigraph-loom iframe, captured once per page load.
@@ -62,6 +62,7 @@
     running:   {color: '#ca8a04', icon: '◑', label: 'Running'},
     completed: {color: '#475569', icon: '●', label: 'Completed'},
     failed:    {color: '#dc2626', icon: '⊘', label: 'Failed'},
+    parked:    {color: '#7c3aed', icon: '◴', label: 'Parked'},
   };
   function _execState(s) {
     s = s || {};
@@ -78,6 +79,11 @@
     if (['passed', 'failed', 'needs_calibration', 'stale'].indexOf(gate) >= 0) return 'completed';
     if (sim === 'ran' && (ev === 'evaluated' || ev === 'failed_evaluation')) return 'completed';
     if (['complete', 'completed', 'ran', 'decided', 'evaluated'].indexOf(life) >= 0) return 'completed';
+    // Parked = a deliberately-deferred future direction (the orthogonal `parked`
+    // flag, or server-derived effective_status='parked'). Not running, not pending.
+    // Precedence matches the engine: terminal (completed/failed above) → parked →
+    // the normal lifecycle (running/planned) below.
+    if (s.parked === true || life === 'parked') return 'parked';
     if (sim === 'running' || ['running', 'analyzing', 'in_progress'].indexOf(life) >= 0) return 'running';
     var conf = String(s.confidence || '').trim().toLowerCase();
     if (conf === 'accepted') return 'completed';
@@ -104,6 +110,9 @@
   };
   // Shown in the Verdict pill when a study carries no (derivable) verdict yet.
   var _VERDICT_PENDING = {color: '#94a3b8', icon: '·', label: 'pending'};
+  // Second-pill descriptor for a PARKED study: it is not awaiting a verdict, it is
+  // deliberately deferred — so show "future direction", never "pending".
+  var _VERDICT_PARKED = {color: '#7c3aed', icon: '◴', label: 'future direction'};
   var _TIER_META = {
     'conceptual_demonstration': {pips: 1, label: 'demonstration'},
     'mechanistic_prediction':   {pips: 2, label: 'mechanistic'},
@@ -140,6 +149,7 @@
     Planned:       {color: '#2563eb', icon: '○', label: 'Planned'},
     Blocked:       {color: '#64748b', icon: '⊘', label: 'Blocked'},
     Refuted:       {color: '#dc2626', icon: '✗', label: 'Refuted'},
+    Parked:        {color: '#7c3aed', icon: '◴', label: 'Parked'},
   };
   function _studyStatusState(s) {
     s = s || {};
@@ -151,6 +161,9 @@
     var life = String(s.effective_status || s.status || '').trim().toLowerCase();
     if (life.indexOf('blocked') !== -1) return 'Blocked';
     if (life.indexOf('fail') !== -1 || life === 'invalid' || life === 'refuted') return 'Refuted';
+    // Parked (deferred future direction) — distinct from in-flight work; beats
+    // the lifecycle/confidence fallbacks below but not a terminal gate verdict.
+    if (s.parked === true || life === 'parked') return 'Parked';
     var conf = String(s.confidence || '').trim();
     if (_STATUS_META[conf]) return conf;
     if (['complete', 'completed', 'ran', 'passed', 'evaluated', 'decided'].indexOf(life) >= 0) return 'Accepted';
@@ -9833,7 +9846,7 @@
       // green "done" states, so a passed study never mislabels as "planned".
       var studyObjs = _isetStudyObjs(iset);
       // Group the summary chips by the SAME canonical status the dots + graph use.
-      var _stOrder = ['Accepted', 'Investigating', 'Blocked', 'Planned', 'Refuted'];
+      var _stOrder = ['Accepted', 'Investigating', 'Blocked', 'Planned', 'Refuted', 'Parked'];
       var byStatus = {};
       studyObjs.forEach(function(s) {
         var meta = _studyStatusMeta(s);
@@ -13111,10 +13124,13 @@
       // verdict color once the study is completed (the finding is the headline),
       // else the execution-progress color.
       var execMeta = _execMeta(s);
-      var isCompleted = _execState(s) === 'completed';
-      var verdictMeta = _verdictMeta(s);              // null → pending
+      var _execNow = _execState(s);
+      var isCompleted = _execNow === 'completed';
+      var isParked = _execNow === 'parked';
+      var verdictMeta = _verdictMeta(s);              // null → pending (or parked)
       var headColor = (isCompleted && verdictMeta) ? verdictMeta.color : execMeta.color;
-      var confidence = execMeta.label + (verdictMeta ? ' · ' + verdictMeta.label : '');
+      var confidence = execMeta.label +
+        (verdictMeta ? ' · ' + verdictMeta.label : (isParked ? ' · future direction' : ''));
       // Overview (far) band collapses the pills to glyphs only to stay readable.
       var _pillCompact = !_opts.asks;
       var followUps = s.follow_up_studies || [];
@@ -13216,10 +13232,11 @@
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px">' +
           '<span style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
             _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact) +
-            _aigPill(verdictMeta || _VERDICT_PENDING,
+            _aigPill(verdictMeta || (isParked ? _VERDICT_PARKED : _VERDICT_PENDING),
                      verdictMeta ? ('Verdict: ' + verdictMeta.label +
                        (s.verdict_source === 'derived' ? ' (derived from graded tests, not authored)' : ''))
-                       : 'Verdict: pending — not yet concluded',
+                       : (isParked ? 'Parked — a deliberately-deferred future direction, not pending work'
+                                   : 'Verdict: pending — not yet concluded'),
                      'aig-verdict-pill', _pillCompact) +
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
