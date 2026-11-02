@@ -8025,6 +8025,10 @@
     // Restore Vivarium left-rail collapsed state (V4).
     _vivRestoreRailState();
 
+    // Position the collapsed-rail hover flyouts (fixed-positioned so they escape
+    // the now-scrollable icon list). Idempotent — safe on every page init.
+    _vivInitRailFlyoutPositioning();
+
     // _refreshGitStatus is registered on DOMContentLoaded at the bottom of this file;
     // no duplicate call needed here.
 
@@ -8122,6 +8126,45 @@
     _vivSyncRailToggleLabel(collapsed);
   }
   window._vivRestoreRailState = _vivRestoreRailState;
+
+  // ---- Collapsed-rail hover flyouts: fixed-position placement ---------------
+  // In the collapsed rail the icon list scrolls (overflow-y:auto), which forces
+  // overflow-x to clip too, so the per-icon name flyout can no longer escape the
+  // scroller as an absolutely-positioned child. It is `position:fixed` in CSS
+  // instead; here we set its anchor (--viv-fly-x/y) to the right edge + vertical
+  // centre of the hovered/focused icon. Only matters when collapsed; a no-op
+  // otherwise (the label is display:none when expanded).
+  function _vivPlaceRailFlyout(link) {
+    var rail = document.getElementById('viv-rail');
+    if (!rail || !rail.classList.contains('viv-rail-collapsed')) return;
+    var icon = link.querySelector('.viv-rail-link-icon') || link;
+    var r = icon.getBoundingClientRect();
+    link.style.setProperty('--viv-fly-x', r.right + 'px');
+    link.style.setProperty('--viv-fly-y', (r.top + r.height / 2) + 'px');
+  }
+  function _vivInitRailFlyoutPositioning() {
+    var rail = document.getElementById('viv-rail');
+    if (!rail || rail._vivFlyoutWired) return;
+    rail._vivFlyoutWired = true;
+    var place = function (ev) {
+      var t = ev.target;
+      var link = t && t.closest ? t.closest('.viv-rail-link') : null;
+      if (link && rail.contains(link)) _vivPlaceRailFlyout(link);
+    };
+    // pointerover/focusin bubble, so one delegated listener covers every icon,
+    // including ones added later by the investigations-rail render.
+    rail.addEventListener('pointerover', place);
+    rail.addEventListener('focusin', place);
+    // Keep the flyout glued to its icon while the list scrolls under the pointer.
+    var scroll = rail.querySelector('.viv-rail-scroll');
+    if (scroll) {
+      scroll.addEventListener('scroll', function () {
+        var hovered = rail.querySelector('.viv-rail-link:hover');
+        if (hovered) _vivPlaceRailFlyout(hovered);
+      }, { passive: true });
+    }
+  }
+  window._vivInitRailFlyoutPositioning = _vivInitRailFlyoutPositioning;
 
   // ---- Rail resize (drag the right edge to widen; snap to normal; drag
   //      narrower to snap into the collapsed bar) ----------------------------
