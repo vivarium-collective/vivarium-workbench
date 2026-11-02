@@ -11797,6 +11797,16 @@
         window._currentIsetData = d;
         try { _vivLoadEvidence(name); } catch (_) {}
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
+        // Also refresh the VISIBLE chrome header (#ws-title) from the authoritative
+        // detail payload. _showInvestigationWorkspace set it from _isetIndex, which
+        // may not have loaded yet on a ?investigation= deep-link / auto-open — then
+        // it fell back to the slug (e.g. "eukaryogenesis" instead of "The
+        // Endosymbiotic Transition"). The detail payload always carries the display title.
+        var _wsTitleEl = document.getElementById('ws-title');
+        if (_wsTitleEl) {
+          var _wsLabel = d.title || d.name;
+          if (_wsLabel) { _wsTitleEl.textContent = _wsLabel; _wsTitleEl.title = _wsLabel; }
+        }
         var statusEl   = document.getElementById('investigation-detail-status');
         var effStatus  = d.effective_status || d.status || 'planning';
         var authStatus = d.status || 'planning';
