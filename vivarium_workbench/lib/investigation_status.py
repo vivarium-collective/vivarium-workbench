@@ -339,10 +339,8 @@ def read_study_status(
     except FileNotFoundError:
         sp = ws_root / "investigations" / slug / "spec.yaml"
     if sp.is_file():
-        try:
-            spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
-        except Exception:
-            return "planning", False
+        from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
+        spec = read_spec_yaml_cached(sp)
         status = _study_display_status(ws_root, slug, spec)
         if specs_out is not None:
             specs_out[slug] = spec

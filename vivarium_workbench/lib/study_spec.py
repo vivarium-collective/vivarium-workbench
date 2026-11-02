@@ -48,6 +48,41 @@ from vivarium_workbench.lib import study_derivations as _study_derivations
 # address (see that function's docstring).
 _OBSERVABLE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
+
+# A per-process cache of parsed spec YAMLs (study.yaml / investigation.yaml), keyed by
+# (absolute path, mtime_ns). An investigation page loads each member study.yaml many times
+# across the status / figures / acceptance / payload builders — without this, a 14-study
+# detail re-parsed study.yaml ~110×. An edit bumps the mtime and re-parses automatically; a
+# DEEP COPY is returned so callers can mutate freely without corrupting the cache.
+_SPEC_YAML_CACHE: "dict[str, tuple[int, dict]]" = {}
+
+
+def read_spec_yaml_cached(path) -> dict:
+    """Parse a spec YAML, cached by (path, mtime_ns); returns a deep copy, ``{}`` on error.
+
+    Use for repeatedly-read, infrequently-written workspace spec files (study.yaml,
+    investigation.yaml). NOT for runs.db or anything with a WAL mtime race — this keys on the
+    file mtime, which is reliable for plain YAML written via atomic rename but not for a
+    live-appended sqlite db."""
+    import copy as _copy
+    try:
+        p = Path(path)
+        mtime = p.stat().st_mtime_ns
+    except OSError:
+        return {}
+    key = str(p)
+    ent = _SPEC_YAML_CACHE.get(key)
+    if ent is None or ent[0] != mtime:
+        try:
+            parsed = yaml.safe_load(p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — a malformed spec never breaks a read path
+            parsed = {}
+        if not isinstance(parsed, dict):
+            parsed = {}
+        ent = (mtime, parsed)
+        _SPEC_YAML_CACHE[key] = ent
+    return _copy.deepcopy(ent[1])
+
 # Slug pattern shared by server.py and api/app.py (neither imports the other).
 # Study/investigation names are generated with underscores (e.g. derived from
 # composite names like ``monod_kinetics``), so the pattern allows ``_``
