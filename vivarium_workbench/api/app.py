@@ -1104,17 +1104,29 @@ def create_app() -> FastAPI:
         return build_discovery_delta(ws, slug)
 
     @app.get(
-        "/api/explorer-url",
+        "/api/explorer-open",
         tags=["Explore"],
-        summary="URL of the v2ecoli molecule Explorer for this workspace (launch-on-demand)",
+        summary="Launch + open the v2ecoli molecule Explorer for this workspace",
     )
-    def explorer_url_route(ws: Path = Depends(get_workspace)) -> dict:
-        # Launches (or adopts) the standalone v2ecoli.browser Explorer for this
-        # workspace, pointed at its ParCa cache + run store, and returns the URL the
-        # "Molecules" tab iframes. Returns a status/message instead when there is no
-        # cache yet or the launch fails, so the tab can show it rather than a blank frame.
+    def explorer_open_route(ws: Path = Depends(get_workspace)):
+        # The "Molecule Explorer" card in the Explore tab opens this. It launches
+        # (or adopts) the standalone v2ecoli.browser Explorer for this workspace —
+        # pointed at its ParCa cache + run store — and redirects to it, so the tool
+        # opens full-window like the other Analysis Tools. When there is no cache /
+        # the launch fails, it shows the message instead of redirecting to nothing.
+        from starlette.responses import HTMLResponse, RedirectResponse
+
         from vivarium_workbench.lib.explorer_server import ensure_explorer
-        return ensure_explorer(ws)
+        r = ensure_explorer(ws)
+        if r.get("url"):
+            return RedirectResponse(r["url"])
+        msg = r.get("message") or "The molecule Explorer is unavailable."
+        return HTMLResponse(
+            "<!doctype html><meta charset=utf-8>"
+            "<body style='font:14px system-ui,sans-serif;padding:2rem;max-width:40rem'>"
+            f"<h3>Molecule Explorer</h3><p>{msg}</p></body>",
+            status_code=503,
+        )
 
     @app.get(
         "/api/evidence-integrity/{slug}",

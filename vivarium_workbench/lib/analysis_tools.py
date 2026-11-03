@@ -151,4 +151,26 @@ def build_analysis_tools(ws_root) -> list[dict]:
             continue
         t["unmatched_reason"] = ""
         tools.append(t)
+
+    # Molecule Explorer (v2ecoli.browser) — a WORKSPACE-level tool, not matched to a
+    # single run: it indexes the whole model (every molecule / reaction / process and
+    # what changes them in a run) and has its own run picker. Surfaced whenever the
+    # workspace has a ParCa cache it can index; opens full-window via the
+    # launch-on-demand redirect (GET /api/explorer-open), like the other viewers.
+    if ("molecule-explorer" not in excluded
+            and (ws_root / "out" / "cache" / "simData.cPickle").is_file()):
+        _target = {"href": "/api/explorer-open", "label": "model + recorded runs"}
+        tools.append({
+            "id": "molecule-explorer",
+            "title": "Molecule Explorer",
+            "description": (
+                "Browse every molecule, reaction and process in the model — and what "
+                "changes them in a run. Pick the sim in the Explorer's own run picker."
+            ),
+            "kind": "launcher",
+            "requires": [],
+            "targets": [_target],
+            "matched": [_target],
+            "unmatched_reason": "",
+        })
     return tools
