@@ -10444,25 +10444,33 @@
   function _aigCardDetailHtml(s) {
     var q = (s.question || '').replace(/\s+/g, ' ').trim();
     var finds = _asFindings(s.findings);
+    // The collapsed card's "Finds:" row teases the study's one-line `claim`
+    // (line-clamped to a few lines). Expanding MUST reveal that SAME text in
+    // full — otherwise the claim the reader was previewing simply vanishes
+    // behind the structured findings list, with no way to read the rest of it
+    // (the bug this block fixes). So show the full claim headline first (when
+    // authored), then the structured findings beneath it.
+    var claim = (s.claim || '').replace(/\s+/g, ' ').trim();
     var H = '';
     if (q) H += '<div style="margin-top:4px"><span style="font-weight:700;color:#475569">Asks:</span> ' + _esc(q) + '</div>';
     H += '<div style="margin-top:12px;font-weight:700;color:#475569">Finds:</div>';
+    if (claim) {
+      // Full, un-clamped claim headline — the complete text behind the collapsed
+      // teaser. Slightly emphasized so it reads as the headline above the
+      // itemized findings rather than as another finding row.
+      H += '<div style="margin-top:4px;font-weight:600;color:#334155">' + _esc(claim) + '</div>';
+    }
     if (finds && finds.length) {
       H += finds.map(function (f) {
         return '<div style="margin-top:6px;padding-left:10px;border-left:2px solid #e2e8f0">' +
           _evBadgeHtml(s.name, f.id) +
           _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
       }).join('');
-    } else {
-      // No structured findings. Fall back to the study's one-line claim headline —
-      // completed studies carry it even with an empty findings[] (the collapsed
-      // preview already shows it). Only when there is neither do we show a
-      // placeholder, and a parked study is a deliberately-deferred future
-      // direction, not pending work, so it must not read "pending evidence".
-      var claim = (s.claim || '').replace(/\s+/g, ' ').trim();
-      if (claim) {
-        H += '<div style="margin-top:4px">' + _esc(claim) + '</div>';
-      } else if (_execState(s) === 'parked') {
+    } else if (!claim) {
+      // Neither a structured finding nor a claim headline. A parked study is a
+      // deliberately-deferred future direction, not pending work, so it must not
+      // read "pending evidence" — surface its predicted direction when known.
+      if (_execState(s) === 'parked') {
         var dir = _parkedDirection(s);
         H += '<div style="margin-top:4px;color:#94a3b8"><em>future direction — ' +
           (dir ? _esc(dir) : 'not yet investigated') + '</em></div>';
