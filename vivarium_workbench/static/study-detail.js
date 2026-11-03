@@ -5839,7 +5839,11 @@
 
   // One marker = a clickable pill (glyph + label) that toggles its own popover.
   // `rows` is [[label, value], …]; missing signals are omitted by the caller.
-  function _axisMarkerHtml(id, meta, axisLabel, rows) {
+  // `rows` renders as the compact key/value signal list; `extraHtml` (optional) is
+  // appended full-width below it — used to show the study's findings in FULL, which
+  // do not fit the two-column row layout. The popover scrolls when the content is
+  // tall so a long finding list stays readable instead of overflowing the viewport.
+  function _axisMarkerHtml(id, meta, axisLabel, rows, extraHtml) {
     var e = _esc;
     var body = rows.length
       ? rows.map(function (r) {
@@ -5847,7 +5851,7 @@
             + '<span class="muted">' + e(r[0]) + '</span>'
             + '<span style="font-family:ui-monospace,monospace">' + e(r[1]) + '</span></div>';
         }).join('')
-      : '<div class="muted" style="margin-top:4px">No further signals recorded.</div>';
+      : (extraHtml ? '' : '<div class="muted" style="margin-top:4px">No further signals recorded.</div>');
     return '<span class="study-axis-wrap" style="position:relative;display:inline-flex">'
       + '<button type="button" id="' + id + '-btn" class="study-axis-marker" aria-haspopup="true" aria-expanded="false" '
       + 'style="display:inline-flex;align-items:center;gap:4px;font-size:0.82em;font-weight:700;cursor:pointer;'
@@ -5857,10 +5861,10 @@
       + '<span style="font-size:1.1em;line-height:1">' + meta.icon + '</span>' + e(meta.label) + '</button>'
       + '<div id="' + id + '-popover" role="dialog" style="display:none;position:absolute;left:0;top:100%;margin-top:6px;'
       + 'background:var(--card, #fff);border:1px solid var(--border, #e2e8f0);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);'
-      + 'z-index:70;min-width:230px;max-width:340px;padding:10px 12px;font-size:0.82em;color:var(--text-muted, #334155);'
+      + 'z-index:70;min-width:230px;max-width:360px;max-height:min(62vh,460px);overflow:auto;padding:10px 12px;font-size:0.82em;color:var(--text-muted, #334155);'
       + 'white-space:normal;text-align:left;font-weight:400">'
       + '<div style="font-weight:700;color:' + meta.color + '">' + meta.icon + ' ' + e(axisLabel) + ': ' + e(meta.label) + '</div>'
-      + body + '</div></span>';
+      + body + (extraHtml || '') + '</div></span>';
   }
 
   function _wireAxisPopover(id) {
@@ -5914,16 +5918,36 @@
       if (trk && trk.result) vRows.push([t[1], String(trk.result)]);
     });
     if (s.confidence) vRows.push(['confidence', String(s.confidence)]);
-    var findings = Array.isArray(s.findings) ? s.findings : [];
-    findings.slice(0, 2).forEach(function (f, i) {
-      var txt = (f && (f.statement || f.summary)) || '';
-      if (txt) vRows.push(['finding ' + (i + 1), String(txt).slice(0, 80) + (String(txt).length > 80 ? '…' : '')]);
-    });
+    // Findings in FULL (no truncation) as a scrollable block below the verdict
+    // signals — the popover is where the whole finding is meant to be readable
+    // (the collapsed header/card only teases it). Accept the list / {entries} /
+    // id-keyed-dict shapes the rest of the app normalizes.
+    var findings = Array.isArray(s.findings)
+      ? s.findings
+      : (s.findings && typeof s.findings === 'object'
+          ? (Array.isArray(s.findings.entries)
+              ? s.findings.entries
+              : Object.keys(s.findings).map(function (k) { return s.findings[k]; }))
+          : []);
+    var fBody = findings.map(function (f, i) {
+      var txt = (f && (f.statement || f.summary || f.id)) || '';
+      if (!txt) return '';
+      var st = f && f.status ? String(f.status).trim() : '';
+      return '<div style="margin-top:7px">'
+        + '<span class="muted" style="font-weight:600">finding ' + (i + 1) + '</span>'
+        + (st ? ' <span class="muted" style="font-size:0.9em">· ' + _esc(st) + '</span>' : '')
+        + '<div style="margin-top:2px;line-height:1.45;color:var(--text, #1e293b)">'
+        + _esc(String(txt).replace(/\s+/g, ' ').trim()) + '</div></div>';
+    }).join('');
+    var findingsHtml = fBody
+      ? '<div style="margin-top:8px;border-top:1px solid var(--border, #eef2f7);padding-top:6px">'
+          + '<div class="muted" style="font-weight:700">Finds</div>' + fBody + '</div>'
+      : '';
 
     container.innerHTML =
       _axisMarkerHtml('study-progress-marker', exMeta, 'Progress', exRows)
       + ' '
-      + _axisMarkerHtml('study-verdict-marker', vMeta, 'Verdict', vRows);
+      + _axisMarkerHtml('study-verdict-marker', vMeta, 'Verdict', vRows, findingsHtml);
     _wireAxisPopover('study-progress-marker');
     _wireAxisPopover('study-verdict-marker');
   }

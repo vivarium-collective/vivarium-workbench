@@ -139,13 +139,131 @@
       ? Object.assign({}, _VERDICT_META[v], {derived: true}) : _VERDICT_META[v];
   }
   // A rounded two-axis pill: glyph + (optionally) label, tinted by the axis color.
-  function _aigPill(meta, title, cls, compact) {
-    return '<span class="' + cls + '" title="' + title + '" ' +
+  // When `axis` ('progress' | 'verdict') is passed the pill becomes CLICKABLE and
+  // opens the breakdown popover (same interrogation the standalone study page
+  // offers on its header markers) — the card loop stashes the breakdown data on
+  // the node as `node._axisData[axis]`, wired up after innerHTML is set.
+  function _aigPill(meta, title, cls, compact, axis) {
+    var clickCls = axis ? ' aig-axis-pill' : '';
+    var cursor   = axis ? 'cursor:pointer;' : '';
+    var attrs    = axis ? ' data-axis="' + axis + '" role="button" tabindex="0"' : '';
+    var ttl      = axis ? (title + ' — click for the full breakdown') : title;
+    return '<span class="' + cls + clickCls + '"' + attrs + ' title="' + ttl + '" ' +
       'style="display:inline-flex;align-items:center;gap:3px;font-size:0.6em;font-weight:700;' +
-      'white-space:nowrap;border-radius:9999px;padding:1px 7px;color:' + meta.color + ';' +
+      'white-space:nowrap;border-radius:9999px;padding:1px 7px;' + cursor + 'color:' + meta.color + ';' +
       'background:' + meta.color + '14;border:1px solid ' + meta.color + '40">' +
       '<span style="font-size:1.1em;line-height:1">' + meta.icon + '</span>' +
       (compact ? '' : _esc(meta.label)) + (meta.derived ? '<sup title="derived">*</sup>' : '') + '</span>';
+  }
+
+  // ── Clickable axis-marker breakdown (graph cards) ────────────────────────────
+  // Mirrors study-detail.js's header markers so the SAME information is one click
+  // away on a graph card's Progress / Verdict pill: the underlying lifecycle /
+  // verdict signals AND the study's findings in FULL (the card preview clamps the
+  // one-line claim; this is where the whole thing is readable). A single shared,
+  // viewport-fixed popover is filled on demand from the clicked card's stashed
+  // `_axisData` — no per-card hidden DOM across a canvas of many cards.
+  function _aigProgressRows(s) {
+    var rows = [];
+    [['status', s.status], ['simulation_status', s.simulation_status],
+     ['evaluation_status', s.evaluation_status], ['gate_status', s.gate_status],
+     ['confidence', s.confidence]].forEach(function (r) {
+      if (r[1] != null && String(r[1]).trim() !== '') rows.push([r[0], String(r[1])]);
+    });
+    return rows;
+  }
+  function _aigVerdictRows(s) {
+    var rows = [];
+    if (s.verdict) rows.push(['verdict', String(s.verdict)]);
+    if (s.report && s.report.verdict) rows.push(['report.verdict', String(s.report.verdict)]);
+    var cv = (s.derived || {}).conclusion_verdicts || {};
+    [['regression_compatibility', 'regression'], ['biological_validation', 'biology'],
+     ['explanatory_gain', 'insight']].forEach(function (t) {
+      var trk = cv[t[0]];
+      if (trk && trk.result) rows.push([t[1], String(trk.result)]);
+    });
+    if (s.confidence) rows.push(['confidence', String(s.confidence)]);
+    return rows;
+  }
+  function _aigAxisFindingsHtml(findings) {
+    var fs = _asFindings(findings);
+    if (!fs.length) return '';
+    var body = fs.map(function (f, i) {
+      var txt = (f && (f.statement || f.summary || f.id)) || '';
+      if (!txt) return '';
+      var st = f && f.status ? String(f.status).trim() : '';
+      return '<div style="margin-top:7px">' +
+        '<span style="color:#64748b;font-weight:600">finding ' + (i + 1) + '</span>' +
+        (st ? ' <span style="color:#94a3b8;font-size:0.9em">· ' + _esc(st) + '</span>' : '') +
+        '<div style="margin-top:2px;line-height:1.45;color:#1e293b">' +
+          _esc(String(txt).replace(/\s+/g, ' ').trim()) + '</div></div>';
+    }).join('');
+    return body
+      ? '<div style="margin-top:8px;border-top:1px solid #eef2f7;padding-top:6px">' +
+          '<div style="color:#475569;font-weight:700;font-size:0.95em">Finds</div>' + body + '</div>'
+      : '';
+  }
+  function _aigAxisPopoverEl() {
+    var el = document.getElementById('aig-axis-popover');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'aig-axis-popover';
+      el.setAttribute('role', 'dialog');
+      el.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:240px;max-width:360px;' +
+        'max-height:min(62vh,460px);overflow:auto;background:#fff;border:1px solid #e2e8f0;' +
+        'border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.16);padding:10px 12px;' +
+        'font-size:0.8rem;line-height:1.45;color:#334155;text-align:left;font-weight:400';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function _aigAxisPopoverHtml(d) {
+    var meta = d.meta;
+    var rowsHtml = d.rows.length
+      ? d.rows.map(function (r) {
+          return '<div style="display:flex;gap:8px;justify-content:space-between;margin-top:4px">' +
+            '<span style="color:#64748b">' + _esc(r[0]) + '</span>' +
+            '<span style="font-family:ui-monospace,monospace">' + _esc(r[1]) + '</span></div>';
+        }).join('')
+      : '<div style="color:#94a3b8;margin-top:4px">No further signals recorded.</div>';
+    return '<div style="font-weight:700;color:' + meta.color + '">' + meta.icon + ' ' +
+      _esc(d.label) + ': ' + _esc(meta.label) + '</div>' + rowsHtml + (d.findingsHtml || '');
+  }
+  var _aigAxisPopoverPill = null;   // the pill element whose popover is open
+  function _aigToggleAxisPopover(pill, node, axis) {
+    var el = _aigAxisPopoverEl();
+    var d = node._axisData && node._axisData[axis];
+    var isOpen = (_aigAxisPopoverPill === pill && el.style.display === 'block');
+    if (!d || isOpen) { el.style.display = 'none'; _aigAxisPopoverPill = null; return; }
+    el.innerHTML = _aigAxisPopoverHtml(d);
+    el.style.display = 'block';
+    var r = pill.getBoundingClientRect();
+    var w = el.offsetWidth, h = el.offsetHeight;
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 10));
+    var top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);   // flip up if no room below
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    _aigAxisPopoverPill = pill;
+  }
+  if (typeof window !== 'undefined' && !window._aigAxisPopoverWired) {
+    window._aigAxisPopoverWired = true;
+    var _closeAxisPop = function () {
+      var el = document.getElementById('aig-axis-popover');
+      if (el) { el.style.display = 'none'; }
+      _aigAxisPopoverPill = null;
+    };
+    // Outside-click (capture, so it runs before the pill's own handler re-opens).
+    document.addEventListener('click', function (ev) {
+      var t = ev.target;
+      if (t.closest && (t.closest('.aig-axis-pill') || t.closest('#aig-axis-popover'))) return;
+      _closeAxisPop();
+    }, true);
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') _closeAxisPop(); });
+    // The canvas scrolls; a viewport-fixed popover would detach from its pill.
+    window.addEventListener('scroll', function () {
+      if (_aigAxisPopoverPill) _closeAxisPop();
+    }, true);
   }
 
   // Legacy single-axis status model — still used by the rail dot, the sidebar,
@@ -13312,13 +13430,13 @@
         // opens it.)
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px">' +
           '<span style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
-            _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact) +
+            _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact, 'progress') +
             _aigPill(verdictMeta || (isParked ? _VERDICT_PARKED : _VERDICT_PENDING),
                      verdictMeta ? ('Verdict: ' + verdictMeta.label +
                        (s.verdict_source === 'derived' ? ' (derived from graded tests, not authored)' : ''))
                        : (isParked ? 'Parked — a deliberately-deferred future direction, not pending work'
                                    : 'Verdict: pending — not yet concluded'),
-                     'aig-verdict-pill', _pillCompact) +
+                     'aig-verdict-pill', _pillCompact, 'verdict') +
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
             _tierPipsHtml(s) +
@@ -13381,6 +13499,17 @@
         _dagTriggerControlsHtml(s.name);
       node._followUps = followUps;
       node._study = s;                       // the in-place expanded detail reads this
+      // Breakdown behind each clickable axis pill (read on click by
+      // _aigToggleAxisPopover): the derived marker + the underlying signals, and
+      // for Verdict the study's findings in FULL.
+      node._axisData = {
+        progress: { meta: execMeta, label: 'Progress', rows: _aigProgressRows(s) },
+        verdict: {
+          meta: verdictMeta || (isParked ? _VERDICT_PARKED : _VERDICT_PENDING),
+          label: 'Verdict', rows: _aigVerdictRows(s),
+          findingsHtml: _aigAxisFindingsHtml(s.findings)
+        }
+      };
       node.dataset.headColor = headColor;    // card's top accent
       nodesHost.appendChild(node);
       // Wire the pull-or-compute buttons (stopPropagation so the card's own
@@ -13389,6 +13518,21 @@
         b.addEventListener('click', function (ev) {
           ev.stopPropagation();
           _triggerStudy(b.getAttribute('data-slug'), 'error', b);
+        });
+      });
+      // Clickable Progress / Verdict pills → the breakdown popover. stopPropagation
+      // so a pill click interrogates the marker rather than selecting/opening the
+      // card. Enter/Space match the click for keyboard users (role="button").
+      node.querySelectorAll('.aig-axis-pill').forEach(function (pill) {
+        pill.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          _aigToggleAxisPopover(pill, node, pill.getAttribute('data-axis'));
+        });
+        pill.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault(); ev.stopPropagation();
+            _aigToggleAxisPopover(pill, node, pill.getAttribute('data-axis'));
+          }
         });
       });
       node.querySelectorAll('.dag-trigger-continue').forEach(function (b) {
