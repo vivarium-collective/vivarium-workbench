@@ -955,6 +955,38 @@
   // Menu navigation (v0.3.5)
   // -------------------------------------------------------------------------
 
+  // Lazily launch + embed the v2ecoli molecule Explorer in the Molecules tab.
+  // GET /api/explorer-url launches (or adopts) the Explorer for the active
+  // workspace and returns {status, url, message}. The iframe src is set once on a
+  // successful launch; any other status shows the message instead of a blank frame.
+  var _explorerFrameLoaded = false;
+  function _loadMoleculeExplorer() {
+    if (_explorerFrameLoaded) return;
+    var frame = document.getElementById('explore-frame');
+    var status = document.getElementById('explore-status');
+    if (!frame) return;
+    fetch(_api('/api/explorer-url'), { headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d && d.url) {
+          frame.src = d.url;
+          frame.style.display = 'block';
+          if (status) status.style.display = 'none';
+          _explorerFrameLoaded = true;   // only memoize a successful launch
+        } else if (status) {
+          status.textContent = (d && d.message) || 'The molecule Explorer is unavailable.';
+          status.style.display = 'block';
+          frame.style.display = 'none';
+        }
+      })
+      .catch(function(e) {
+        if (status) {
+          status.textContent = 'Could not start the molecule Explorer: ' + ((e && e.message) || e);
+          status.style.display = 'block';
+        }
+      });
+  }
+
   function _switchPage(pageId) {
     pageId = pageId || 'resources';
     // Back-compat: the former "Inputs" page (#workspace-inputs) was merged into
@@ -968,6 +1000,11 @@
       // workspace switcher (repo navigator + Sync-to-local). 'studies' (the legacy
       // flat list) redirects to the investigations view.
       if (pageId === 'studies') {
+        pageId = 'investigations';
+      }
+      // The molecule Explorer needs a live backend to launch; no backend in a
+      // published snapshot, so send its tab to the investigations view.
+      if (pageId === 'molecules') {
         pageId = 'investigations';
       }
     }
@@ -1025,6 +1062,11 @@
     if (pageId === 'composite-explore') {
       window._initCompositeExplorer();
     }
+    // Molecules: lazily launch + embed the v2ecoli molecule Explorer. The URL is
+    // fetched once; the backend adopts an already-running instance on later visits.
+    if (pageId === 'molecules') {
+      _loadMoleculeExplorer();
+    }
     if (pageId === 'simulations') {
       _wireSimulationsUiOnce();
       _initSimulations();
@@ -1063,7 +1105,7 @@
       var _snapshot = document.body.classList.contains('snapshot');
       var validPages = _snapshot
         ? ['workspace-inputs', 'simulation-setup', 'modules', 'market', 'investigations', 'simulations', 'visualizations', 'resources', 'audit', 'composite-explore', 'github', 'about']
-        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'resources', 'modules', 'market', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
+        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'molecules', 'resources', 'modules', 'market', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -1095,7 +1137,7 @@
         var _snap = document.body.classList.contains('snapshot');
         var validPages = _snap
           ? ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'resources', 'audit', 'composite-explore', 'github', 'about']
-          : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'resources', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
+          : ['workspace-inputs', 'modules', 'market', 'simulation-setup', 'visualizations', 'molecules', 'resources', 'investigations', 'studies', 'simulations', 'audit', 'composite-explore', 'github', 'about'];
         // Default landing view is Studies (the #investigations page) when there's
         // no (or an unknown) hash.
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'investigations');

@@ -1022,6 +1022,20 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         </span>
         <span class="viv-rail-link-label">Explore</span>
       </a>
+      <!-- Molecules: the v2ecoli molecule Explorer (v2ecoli.browser), embedded in
+           an iframe. Icon = a hexagonal ring of bonded atoms (molecule). The tab
+           lazy-launches the Explorer server for the active workspace and points it
+           at that workspace's ParCa cache + run store (its own run picker selects
+           the sim). Live-only: a published snapshot has no backend to run it. -->
+      <a href="#molecules"         class="viv-rail-link menu-link" data-page="molecules">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="12" cy="4" r="2"/><circle cx="5" cy="9" r="2"/><circle cx="19" cy="9" r="2"/><circle cx="7.5" cy="18" r="2"/><circle cx="16.5" cy="18" r="2"/>
+            <path d="M12 6v3m-1.3 1-4-1.3M5 11v5m3.6 1.4 2.8-1.4m2 0 2.8 1.4M19 11v5m-5.7-6.3 4-1.3"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Molecules</span>
+      </a>
       <!-- The Branch page (#github) is no longer a rail item — it's reached by
            clicking the workspace source display at the top of the rail (see
            #viv-workspace-switcher). Hash route #github kept for back-compat.
@@ -1283,6 +1297,18 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     </div>
   </div>
 
+</section>
+
+<!-- ===== PAGE: MOLECULES — the v2ecoli molecule Explorer (v2ecoli.browser),
+      embedded via <iframe>. The frame's src is set lazily on first navigation from
+      GET /api/explorer-url, which launches (or adopts) the Explorer server for the
+      active workspace. While it boots, or when there is no ParCa cache / the launch
+      fails, #explore-status shows the message instead of a blank frame. ===== -->
+<section id="page-molecules" class="page" data-page="molecules">
+  <div class="page-fill">
+    <div id="explore-status" class="empty-state" style="padding:1.5rem">Loading the molecule Explorer&hellip;</div>
+    <iframe id="explore-frame" title="v2ecoli molecule Explorer" src="" style="width:100%;height:100%;border:0;display:none"></iframe>
+  </div>
 </section>
 
 <!-- ===== PAGE: RESOURCES — the workspace's source material on ONE scrolling

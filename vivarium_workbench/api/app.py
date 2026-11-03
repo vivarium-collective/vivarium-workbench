@@ -1104,6 +1104,19 @@ def create_app() -> FastAPI:
         return build_discovery_delta(ws, slug)
 
     @app.get(
+        "/api/explorer-url",
+        tags=["Explore"],
+        summary="URL of the v2ecoli molecule Explorer for this workspace (launch-on-demand)",
+    )
+    def explorer_url_route(ws: Path = Depends(get_workspace)) -> dict:
+        # Launches (or adopts) the standalone v2ecoli.browser Explorer for this
+        # workspace, pointed at its ParCa cache + run store, and returns the URL the
+        # "Molecules" tab iframes. Returns a status/message instead when there is no
+        # cache yet or the launch fails, so the tab can show it rather than a blank frame.
+        from vivarium_workbench.lib.explorer_server import ensure_explorer
+        return ensure_explorer(ws)
+
+    @app.get(
         "/api/evidence-integrity/{slug}",
         tags=["Investigations"],
         summary="Per-finding evidence-integrity ledger, summary and by-study roll-up",
