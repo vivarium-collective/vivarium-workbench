@@ -10308,6 +10308,21 @@
   // inline preview) so it reads the same at any zoom. Rendered hidden inside each
   // node and revealed in place by _aigSetNodeExpanded when the user expands the
   // card — it is NOT a floating panel.
+  // A parked (not-yet-investigated) study has no claim/findings, so its card
+  // shows its authored PREDICTED DIRECTION — the hypothesis the detail builder
+  // surfaces ONLY for parked nodes (#1564; absent on executed or non-parked
+  // studies). Trim to the first sentence so the card stays compact. Returns null
+  // when there's no hypothesis, which falls back to the generic label.
+  function _parkedDirection(s) {
+    var h = ((s && s.hypothesis) || '').replace(/\s+/g, ' ').trim();
+    if (!h) return null;
+    var m = h.match(/^[\s\S]*?[.!?](?=\s|$)/);
+    var sent = (m ? m[0] : h).trim();
+    if (sent.length > 200) sent = sent.slice(0, 199).trim() + '…';
+    return sent;
+  }
+  window._parkedDirection = _parkedDirection;
+
   function _aigCardDetailHtml(s) {
     var q = (s.question || '').replace(/\s+/g, ' ').trim();
     var finds = _asFindings(s.findings);
@@ -10330,7 +10345,9 @@
       if (claim) {
         H += '<div style="margin-top:4px">' + _esc(claim) + '</div>';
       } else if (_execState(s) === 'parked') {
-        H += '<div style="margin-top:4px;color:#94a3b8"><em>future direction — not yet investigated</em></div>';
+        var dir = _parkedDirection(s);
+        H += '<div style="margin-top:4px;color:#94a3b8"><em>future direction — ' +
+          (dir ? _esc(dir) : 'not yet investigated') + '</em></div>';
       } else {
         H += '<div style="margin-top:4px;color:#94a3b8"><em>pending evidence</em></div>';
       }
@@ -13316,8 +13333,10 @@
           ? '<div class="aig-clamp" data-clamp="5" style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
               '<span style="font-weight:600;color:#475569">Finds:</span> ' +
               (claim ? _esc(claim)
-                     : (isParked ? '<em style="color:#94a3b8">future direction — not yet investigated</em>'
-                                 : '<em style="color:#94a3b8">pending evidence</em>')) +
+                     : (isParked
+                          ? '<em style="color:#94a3b8">future direction — ' +
+                              (_parkedDirection(s) ? _esc(_parkedDirection(s)) : 'not yet investigated') + '</em>'
+                          : '<em style="color:#94a3b8">pending evidence</em>')) +
             '</div>'
           : '') +
         // Universal "show full card" affordance: expands the card IN PLACE so ANY
