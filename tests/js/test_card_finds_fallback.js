@@ -66,5 +66,52 @@ const collapsedParked = src.slice(src.indexOf("isParked\n"), src.indexOf("pendin
 assert(/_parkedDirection\(s\)/.test(collapsedParked) || src.split('_parkedDirection(s)').length - 1 >= 2,
   'collapsed preview consumes _parkedDirection for the parked predicted direction');
 
+// --- HONEST "Finds:" — claim is gated on real evidence (v0.8.3) ----------------
+// A planned/proposed/running study's authored `claim:` is a forward-looking
+// PREDICTION, not a finding, and must NOT render under "Finds:". The shared gate
+// `_studyHasEvidence(s)` is the single source of that rule; both render sites
+// must consult it before using s.claim.
+
+// Behavioral test of the gate itself, with its three collaborators stubbed so the
+// function can run in isolation (it closes over _asFindings/_execState/_verdictMeta,
+// injected here as the outer Function's parameters).
+const evFnSrc = src.slice(
+  src.indexOf('function _studyHasEvidence'),
+  src.indexOf('// A rounded two-axis pill'));
+assert(evFnSrc.length > 0, '_studyHasEvidence located');
+assert(/_asFindings\([^)]*\)\.length\s*>\s*0/.test(evFnSrc),
+  '_studyHasEvidence counts structured findings as evidence');
+assert(/_execState\(s\)\s*===\s*'completed'/.test(evFnSrc),
+  '_studyHasEvidence counts a completed execution as evidence');
+assert(/\.derived/.test(evFnSrc),
+  '_studyHasEvidence counts an engine-DERIVED verdict as evidence');
+const _studyHasEvidence = new Function(
+  '_asFindings', '_execState', '_verdictMeta',
+  'return (' + evFnSrc + ')')(
+    function (f) { return Array.isArray(f) ? f : []; },      // _asFindings stub
+    function (s) { return (s && s._exec) || 'planned'; },    // _execState stub
+    function (s) { return (s && s._verdict) || null; });     // _verdictMeta stub
+// planned study with ONLY an authored claim → NOT evidence (the reported bug)
+assert(_studyHasEvidence({ claim: 'provisional prediction', findings: [] }) === false,
+  'planned study with only a claim has no evidence (claim is withheld)');
+// recorded structured findings → evidence
+assert(_studyHasEvidence({ findings: [{ id: 'f1' }] }) === true,
+  'a study with structured findings has evidence');
+// completed execution (it ran) → evidence
+assert(_studyHasEvidence({ findings: [], _exec: 'completed' }) === true,
+  'a completed execution has evidence');
+// engine-derived verdict → evidence
+assert(_studyHasEvidence({ findings: [], _verdict: { derived: true } }) === true,
+  'an engine-derived verdict has evidence');
+// a hand-authored (non-derived) verdict alone does NOT pass this gate
+assert(_studyHasEvidence({ findings: [], _verdict: { derived: false } }) === false,
+  'an authored-only verdict (not derived, no runs/findings) is not evidence');
+
+// Contract: BOTH render sites gate the claim on _studyHasEvidence(s).
+assert(/var claim = _studyHasEvidence\(s\) \?/.test(detailFn),
+  'expanded card gates s.claim on _studyHasEvidence');
+assert((src.split('var claim = _studyHasEvidence(s) ?').length - 1) >= 2,
+  'both the collapsed and expanded cards gate the claim on _studyHasEvidence');
+
 if (failed) { console.error(failed + ' assertion(s) failed'); process.exit(1); }
 console.log('PASS test_card_finds_fallback');
