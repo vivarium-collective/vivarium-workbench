@@ -1127,6 +1127,30 @@ def create_app() -> FastAPI:
         from vivarium_workbench.lib.investigation_report import build_generation_requests
         return build_generation_requests(ws, slug) or {}
 
+    @app.post(
+        "/api/generation-gates/{slug}",
+        tags=["Investigations"],
+        summary="Set the investigation's generation GateConfig (autonomy control)",
+    )
+    def generation_gates_route(slug: str, payload: dict = Body(default={}),
+                               ws: Path = Depends(get_workspace)):
+        """Persist the per-kind auto/review gates (or a one-click preset) to
+        ``investigation.yaml`` ``discovery.gates`` — the operator's autonomy control
+        for the generation contract. ``payload`` = ``{preset}`` (free_run |
+        all_gated | propose_review) or ``{default, by_kind}``. MUTATES
+        investigation.yaml. Backed by
+        ``lib.investigation_report.set_generation_gates``."""
+        from vivarium_workbench.lib.investigation_report import set_generation_gates
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        try:
+            return set_generation_gates(ws, name, preset=p.get("preset"),
+                                        default=p.get("default"), by_kind=p.get("by_kind"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
     @app.get(
         "/api/discovery-cycle-steps",
         tags=["Investigations"],

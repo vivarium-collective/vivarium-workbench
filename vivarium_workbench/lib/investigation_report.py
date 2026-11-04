@@ -1064,10 +1064,62 @@ def build_generation_requests(ws_root, inv_slug: str) -> "dict | None":
             "total": len(reqs),
             "by_kind": by_kind,
             "by_gate": by_gate,
+            "gates": {"default": gc.default, "by_kind": dict(gc.by_kind)},
             "requests": [r.to_dict() for r in reqs],
         }
     except Exception:
         return None
+
+
+def set_generation_gates(ws_root, inv_slug: str, *, preset: "str | None" = None,
+                         default: "str | None" = None,
+                         by_kind: "dict | None" = None) -> dict:
+    """Persist the investigation's generation-request GateConfig to
+    ``investigation.yaml`` under ``discovery.gates`` (comment-preserving, atomic).
+
+    ``preset`` (``free_run`` | ``all_gated`` | ``propose_review``) expands via the
+    engine's :class:`GateConfig`; otherwise ``default`` / ``by_kind`` are written as
+    given (validated against the engine's KINDS/GATES). Returns the written
+    ``{default, by_kind}``. Raises ``ValueError`` on an unknown preset / invalid
+    gate, ``FileNotFoundError`` if the investigation is absent."""
+    import ruamel.yaml
+    from io import StringIO
+    from discovery_engine.generation import GATES, KINDS, GateConfig
+    from vivarium_workbench.lib.atomic_io import atomic_write_text
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+    if preset:
+        gc = GateConfig.preset(str(preset))          # raises ValueError on unknown
+        cfg = {"default": gc.default, "by_kind": dict(gc.by_kind)}
+    else:
+        cfg = {}
+        if default is not None:
+            if default not in GATES:
+                raise ValueError(f"default must be one of {GATES}")
+            cfg["default"] = default
+        bk = {}
+        for k, v in (by_kind or {}).items():
+            if k not in KINDS or v not in GATES:
+                raise ValueError(f"invalid gate {k!r}={v!r} (kinds={KINDS}, gates={GATES})")
+            bk[k] = v
+        cfg["by_kind"] = bk
+
+    inv_path = WorkspacePaths.load(Path(ws_root)).investigations / inv_slug / "investigation.yaml"
+    if not inv_path.exists():
+        raise FileNotFoundError(f"no investigation.yaml for {inv_slug!r}")
+    ry = ruamel.yaml.YAML()
+    ry.preserve_quotes = True
+    ry.width = 4096
+    doc = ry.load(inv_path.read_text(encoding="utf-8")) or ruamel.yaml.CommentedMap()
+    disc = doc.get("discovery")
+    if not isinstance(disc, dict):
+        disc = ruamel.yaml.CommentedMap()
+        doc["discovery"] = disc
+    disc["gates"] = cfg
+    buf = StringIO()
+    ry.dump(doc, buf)
+    atomic_write_text(inv_path, buf.getvalue())
+    return cfg
 
 
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:

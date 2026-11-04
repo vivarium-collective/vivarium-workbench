@@ -669,8 +669,15 @@
         (r.rationale ? '<div style="font-size:12px;opacity:.75;margin-left:16px">' + esc(r.rationale) + "</div>" : "") +
         "</li>";
     }).join("");
+    var cur = (d.gates && d.gates.default) || "per-kind";
+    var presets = ["all_gated", "propose_review", "free_run"].map(function (name) {
+      var on = (d.gates && d.gates.default === name);
+      return '<button data-genpreset="' + name + '" style="font-size:11px;margin-right:4px;padding:1px 6px;' +
+        (on ? "font-weight:600;" : "") + '">' + esc(name.replace(/_/g, " ")) + "</button>";
+    }).join("");
     return '<div class="dcyc-banner dcyc-bn-open"><div class="dcyc-bn-h">Generation requests · ' + d.total +
       ' <span class="dcyc-bn-sub">' + (g.review || 0) + " review · " + (g.auto || 0) + " auto</span></div>" +
+      '<div class="dcyc-bn-sub" style="margin:4px 0">Autonomy (' + esc(cur) + "): " + presets + "</div>" +
       '<ul style="list-style:none;padding-left:4px;margin:6px 0 0">' + rows + "</ul></div>";
   }
 
@@ -827,6 +834,15 @@
     if (dm) dm.addEventListener("click", function () { S.applyReport = null; renderGraph(); });
     var gh = el("dcyc-gates-h");
     if (gh) gh.addEventListener("click", function () { S.gatesOpen = !S.gatesOpen; renderGraph(); });
+    // generation-request autonomy presets: persist discovery.gates, then re-emit
+    Array.prototype.forEach.call(g.querySelectorAll("[data-genpreset]"), function (b) {
+      b.addEventListener("click", function () {
+        if (!S.slug) return;
+        postJSON("/api/generation-gates/" + encodeURIComponent(S.slug), { preset: b.getAttribute("data-genpreset") })
+          .then(function () { loadGenRequests(); })
+          .catch(function () { /* optional surface */ });
+      });
+    });
     // gate-item actions: jump to a study, open the decide form, record / AI-steer
     Array.prototype.forEach.call(g.querySelectorAll("[data-study]"), function (b) {
       b.addEventListener("click", function (ev) {
