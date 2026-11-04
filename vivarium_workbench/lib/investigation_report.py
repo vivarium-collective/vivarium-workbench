@@ -1030,6 +1030,46 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
         return None
 
 
+def build_generation_requests(ws_root, inv_slug: str) -> "dict | None":
+    """The typed GenerationRequest list the frontier emits for one investigation
+    (AI-drivable discovery cycle, Phase 1). Each request is a generative act the
+    cycle wants performed — propose_study / acquire_model / author_tests /
+    interpret_finding / resolve_decision / explain / visualize — carrying a gate
+    (auto|review) resolved from the investigation's ``discovery.gates``. Pure
+    read: the engine EMITS requests (a projection over the same opportunities the
+    discovery surface already builds); nothing is written here. Degrades to
+    ``None`` on an engine without the generation contract so the panel never breaks."""
+    try:
+        from discovery_engine import discover
+        from discovery_engine import discovery_engine as de
+        from discovery_engine.generation import GateConfig
+        from discovery_engine.generation_emit import generation_requests
+    except Exception:
+        return None
+    try:
+        _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
+        cyc = discover.run_cycle(inv_spec, studies)
+        opps = de.opportunities(cyc, inv_spec)
+        gates = (inv_spec.get("discovery") or {}).get("gates") if isinstance(inv_spec, dict) else None
+        gc = (GateConfig(default=gates.get("default"), by_kind=gates.get("by_kind") or {})
+              if isinstance(gates, dict) else GateConfig())
+        reqs = generation_requests(opps, gates=gc, inv_spec=inv_spec)
+        by_kind: dict = {}
+        by_gate = {"auto": 0, "review": 0}
+        for r in reqs:
+            by_kind[r.kind] = by_kind.get(r.kind, 0) + 1
+            by_gate[r.gate] = by_gate.get(r.gate, 0) + 1
+        return {
+            "investigation": inv_slug,
+            "total": len(reqs),
+            "by_kind": by_kind,
+            "by_gate": by_gate,
+            "requests": [r.to_dict() for r in reqs],
+        }
+    except Exception:
+        return None
+
+
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
     """Assemble the pure report-data dict for one investigation from existing
     files only. Raises FileNotFoundError if the investigation is missing.

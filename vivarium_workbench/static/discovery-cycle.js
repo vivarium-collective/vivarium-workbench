@@ -331,6 +331,7 @@
     S.steps.forEach(function (s) { S.byId[s.id] = s; });
     renderGraph();
     loadDelta();
+    loadGenRequests();
   }
 
 
@@ -644,6 +645,35 @@
       "</div></div>";
   }
 
+  // Typed GenerationRequests the frontier emits (AI-drivable cycle, Phase 1):
+  // GET /api/generation-requests/{slug}. Live-only, read-only projection — the
+  // engine emits typed generative acts (each gated auto|review) a filler fills.
+  function loadGenRequests() {
+    if (isSnapshot() || !S.slug) { S.genRequests = null; return; }
+    var slug = S.slug;
+    getJSON("/api/generation-requests/" + encodeURIComponent(slug)).then(function (d) {
+      if (slug !== S.slug) return;
+      S.genRequests = (d && d.total != null) ? d : null;
+      renderGraph();
+    }).catch(function () { /* optional surface */ });
+  }
+  function requestsHtml() {
+    var d = S.genRequests;
+    if (!d || !d.total) return "";
+    var g = d.by_gate || {};
+    var rows = (d.requests || []).map(function (r) {
+      var v = (r.value && r.value.score != null) ? " · value " + r.value.score : "";
+      var col = r.gate === "auto" ? "#2e7d32" : "#b26a00";
+      var gate = '<span style="font-size:11px;font-weight:600;color:' + col + '">[' + esc(r.gate) + "]</span>";
+      return '<li style="margin:3px 0">' + gate + ' <code>' + esc(r.kind) + "</code> " + esc(r.target) + v +
+        (r.rationale ? '<div style="font-size:12px;opacity:.75;margin-left:16px">' + esc(r.rationale) + "</div>" : "") +
+        "</li>";
+    }).join("");
+    return '<div class="dcyc-banner dcyc-bn-open"><div class="dcyc-bn-h">Generation requests · ' + d.total +
+      ' <span class="dcyc-bn-sub">' + (g.review || 0) + " review · " + (g.auto || 0) + " auto</span></div>" +
+      '<ul style="list-style:none;padding-left:4px;margin:6px 0 0">' + rows + "</ul></div>";
+  }
+
   function frontierHtml() {
     var m = S.summary;
     if (!m || !m.frontier || !m.frontier.length) return "";
@@ -789,7 +819,7 @@
     if (!S.steps.length) { g.innerHTML = '<p class="empty-state">Load an investigation to see its cycle.</p>'; return; }
     var phases = [];
     S.steps.forEach(function (s) { if (phases.indexOf(s.phase) < 0) phases.push(s.phase); });
-    g.innerHTML = applyReportHtml() + deltaHtml() + bannerHtml() + frontierHtml() + phases.map(function (ph) {
+    g.innerHTML = applyReportHtml() + deltaHtml() + bannerHtml() + requestsHtml() + frontierHtml() + phases.map(function (ph) {
       var nodes = S.steps.filter(function (s) { return s.phase === ph; });
       return '<div class="dcyc-phase-h">' + esc(ph) + "</div>" + nodes.map(nodeHtml).join("");
     }).join("");

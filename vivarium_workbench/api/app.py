@@ -1113,6 +1113,21 @@ def create_app() -> FastAPI:
         return build_evidence_integrity(ws, slug)
 
     @app.get(
+        "/api/generation-requests/{slug}",
+        tags=["Investigations"],
+        summary="Typed GenerationRequests the frontier emits (AI-drivable cycle, Phase 1)",
+    )
+    def generation_requests_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """The typed generation contract for one investigation: the frontier's
+        generative acts (propose_study / acquire_model / author_tests /
+        interpret_finding / resolve_decision / explain / visualize), each with a
+        gate (auto|review) resolved from ``discovery.gates``. Read-only projection;
+        nothing is written. ``{}`` on an engine without the generation contract.
+        Backed by ``lib.investigation_report.build_generation_requests``."""
+        from vivarium_workbench.lib.investigation_report import build_generation_requests
+        return build_generation_requests(ws, slug) or {}
+
+    @app.get(
         "/api/discovery-cycle-steps",
         tags=["Investigations"],
         summary="Discovery-engine cycle step graph (static metadata)",
