@@ -391,16 +391,23 @@ def render_study_visualizations(ws_root, study_dir, spec, spec_id):
         # investigation-end hook (_render_investigation_comparative_visualisations)
         # which fires on a different schedule; purging them on a per-study
         # run would delete legitimately-current cross-run overlays.
-        purge_stale_viz(study_dir, written)
+        # Declared figure FILES (html:/threejs:/image:… addresses) are never
+        # re-rendered, so they always predate the run — keep them too.
+        from vivarium_workbench.lib.study_charts import resolve_declared_figure_ref
+        declared_refs = [resolve_declared_figure_ref(v)[0] for v in merged]
+        purge_stale_viz(study_dir, written,
+                        keep=[Path(ref).name for ref in declared_refs if ref])
         return written, []
     except Exception as e:  # noqa: BLE001
         return [], [{"error": f"render_visualizations failed: "
                      f"{type(e).__name__}: {e}"}]
 
 
-def purge_stale_viz(study_dir: Path, just_written: list[str]) -> None:
+def purge_stale_viz(study_dir: Path, just_written: list[str],
+                    keep: "list[str] | None" = None) -> None:
     """Delete *.html in study_dir/viz/ whose mtime is older than the
-    latest run's started_at AND not in the just-written set AND not
+    latest run's started_at AND not in the just-written set AND not in
+    ``keep`` (file names of declared pre-rendered figures) AND not
     a comparative_ viz (those are owned by a separate dispatch).
 
     No-op on any error — viz cleanup is best-effort, not load-bearing.
@@ -413,7 +420,7 @@ def purge_stale_viz(study_dir: Path, just_written: list[str]) -> None:
         cutoff = latest_run_timestamp(runs_db)
         if cutoff is None:
             return
-        kept_names = {Path(p).name for p in just_written}
+        kept_names = {Path(p).name for p in just_written} | set(keep or [])
         for html in viz_dir.glob("*.html"):
             if html.name in kept_names:
                 continue

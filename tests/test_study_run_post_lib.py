@@ -115,6 +115,26 @@ def test_purge_stale_viz_deletes_old_keeps_fresh_and_comparative(tmp_path):
     assert keep.exists()
 
 
+def test_purge_stale_viz_keeps_declared_figure_files(tmp_path):
+    sd = tmp_path / "study"
+    viz = sd / "viz"
+    viz.mkdir(parents=True)
+    _make_runs_db(sd, started=1000.0, completed=1000.0)
+
+    figure = viz / "dose-response.html"
+    figure.write_text("fig", encoding="utf-8")
+    _set_mtime(figure, 500.0)           # old, BUT a declared figure -> kept
+
+    stale = viz / "stale.html"
+    stale.write_text("old", encoding="utf-8")
+    _set_mtime(stale, 500.0)
+
+    srp.purge_stale_viz(sd, [], keep=["dose-response.html"])
+
+    assert figure.exists()
+    assert not stale.exists()
+
+
 def test_purge_stale_viz_noop_without_runs_db(tmp_path):
     sd = tmp_path / "study"
     viz = sd / "viz"
@@ -541,6 +561,37 @@ def test_render_study_visualizations_happy_writes_and_passes_effective_spec(tmp_
     assert written == ["viz/v1.html"]
     assert (study_dir / "viz" / "v1.html").exists()
     assert captured["name"] == "study-x"
+
+
+def test_render_study_visualizations_preserves_prerendered_html_figure(tmp_path, monkeypatch):
+    """REGRESSION: a study declaring ``address: html:<file>`` got its committed
+    figure deleted by the stale-viz purge and replaced by a "Visualization class
+    not registered" stub named after the entry after every run."""
+    ws = tmp_path / "ws"
+    _write_workspace_yaml(ws)
+    study_dir = tmp_path / "study"
+    (study_dir / "viz").mkdir(parents=True)
+    _make_runs_db(study_dir, started=1000.0, completed=1000.0)
+    figure = study_dir / "viz" / "dose-response.html"
+    figure.write_text("<html>real figure</html>", encoding="utf-8")
+    _set_mtime(figure, 500.0)           # committed before the run
+
+    import vivarium_workbench.lib.composite_lookup as cl
+    import vivarium_workbench.lib.viz_render as vr
+    monkeypatch.setattr(cl, "_discover_generators_via_worker", lambda ws_root: {})
+    monkeypatch.setattr(vr, "viz_render_hooks",
+                        lambda ws_root: ({}, lambda doc, _r=None: "<html>"))
+    # The fixture runs.db only carries runs_meta (for the purge cutoff).
+    import vivarium_workbench.lib.investigations as inv
+    monkeypatch.setattr(inv, "gather_emitter_outputs", lambda db: {})
+
+    spec = {"name": "study-x", "visualizations": [
+        {"name": "Dose response", "address": "html:dose-response.html"}]}
+    written, errors = srp.render_study_visualizations(ws, study_dir, spec, "spec.id")
+
+    assert (written, errors) == ([], [])
+    assert figure.read_text(encoding="utf-8") == "<html>real figure</html>"
+    assert sorted(p.name for p in (study_dir / "viz").iterdir()) == ["dose-response.html"]
 
 
 def test_run_post_run_scripts_detects_write_with_stale_mtime(tmp_path, monkeypatch):

@@ -397,6 +397,35 @@ def test_render_visualizations_v2_writes_html(tmp_path):
     assert '<p>obs=' in text
 
 
+def test_render_visualizations_skips_prerendered_html_figures(tmp_path):
+    """html:/threejs: addresses point at a self-contained page on disk: never
+    dispatched as a Visualization class, never overwritten with an error stub."""
+    from vivarium_workbench.lib.investigations import render_visualizations
+
+    inv_dir = tmp_path / "studies" / "demo"
+    (inv_dir / "viz").mkdir(parents=True)
+    _setup_db_with_schema(inv_dir)
+    figure = inv_dir / "viz" / "dose-response.html"
+    figure.write_text("<html>real figure</html>", encoding="utf-8")
+
+    def fail_build_and_run(doc, registry_arg):
+        raise AssertionError("pre-rendered figure must not be dispatched")
+
+    spec = {"visualizations": [
+        {"name": "Dose response", "address": "html:dose-response.html"},
+        {"name": "Scene", "address": "threejs:scene.html"},
+    ]}
+    skipped = []
+    paths = render_visualizations(spec, inv_dir, "demo", core_registry={},
+                                  inputs_by_class={},
+                                  build_and_run=fail_build_and_run,
+                                  skipped=skipped)
+    assert paths == []
+    assert figure.read_text(encoding="utf-8") == "<html>real figure</html>"
+    assert sorted(p.name for p in (inv_dir / "viz").iterdir()) == ["dose-response.html"]
+    assert [s["reason"] for s in skipped] == ["pre-rendered html figure"] * 2
+
+
 # ---------------------------------------------------------------------------
 # Per-run labels delivery to cross-run visualizations (#1474)
 # ---------------------------------------------------------------------------

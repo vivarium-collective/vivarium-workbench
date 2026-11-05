@@ -2181,6 +2181,15 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                 if skipped is not None:
                     skipped.append({"name": vname, "reason": "image not found"})
                 continue
+        elif _is_prerendered_html_viz(viz_spec):
+            # A pre-rendered interactive figure (address html:/threejs:<file>) is
+            # already a self-contained page on disk, served as an iframe by the
+            # gallery/report (study_charts.resolve_declared_figure_ref). Nothing to
+            # render — and dispatching it would write a "Visualization class not
+            # registered" stub — so leave the file as-is.
+            if skipped is not None:
+                skipped.append({"name": vname, "reason": "pre-rendered html figure"})
+            continue
         else:
             try:
                 doc = build_viz_composite(viz_spec, gathered, core_registry or {},
@@ -2236,6 +2245,18 @@ def _is_static_image_viz(viz_spec: dict) -> bool:
     addr = str(viz_spec.get("address", "")).strip()
     scheme = addr.split(":", 1)[0].strip().lower() if ":" in addr else ""
     return scheme in _STATIC_IMAGE_SCHEMES or str(viz_spec.get("chart", "")).lower() == "image"
+
+
+# Pre-rendered interactive-figure address schemes (mirrors
+# study_charts._IFRAME_ADDR_SCHEMES): a viz whose address points at a
+# self-contained HTML file on disk, shown as an iframe — never dispatched.
+_PRERENDERED_HTML_SCHEMES = {"threejs", "html"}
+
+
+def _is_prerendered_html_viz(viz_spec: dict) -> bool:
+    addr = str(viz_spec.get("address", "")).strip()
+    scheme = addr.split(":", 1)[0].strip().lower() if ":" in addr else ""
+    return scheme in _PRERENDERED_HTML_SCHEMES
 
 
 def _render_image_viz_html(viz_spec: dict, base_dir: Path) -> str:
