@@ -1030,6 +1030,98 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
         return None
 
 
+def build_generation_requests(ws_root, inv_slug: str) -> "dict | None":
+    """The typed GenerationRequest list the frontier emits for one investigation
+    (AI-drivable discovery cycle, Phase 1). Each request is a generative act the
+    cycle wants performed — propose_study / acquire_model / author_tests /
+    interpret_finding / resolve_decision / explain / visualize — carrying a gate
+    (auto|review) resolved from the investigation's ``discovery.gates``. Pure
+    read: the engine EMITS requests (a projection over the same opportunities the
+    discovery surface already builds); nothing is written here. Degrades to
+    ``None`` on an engine without the generation contract so the panel never breaks."""
+    try:
+        from discovery_engine import discover
+        from discovery_engine import discovery_engine as de
+        from discovery_engine.generation import GateConfig
+        from discovery_engine.generation_emit import generation_requests
+    except Exception:
+        return None
+    try:
+        _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
+        cyc = discover.run_cycle(inv_spec, studies)
+        opps = de.opportunities(cyc, inv_spec)
+        gates = (inv_spec.get("discovery") or {}).get("gates") if isinstance(inv_spec, dict) else None
+        gc = (GateConfig(default=gates.get("default"), by_kind=gates.get("by_kind") or {})
+              if isinstance(gates, dict) else GateConfig())
+        reqs = generation_requests(opps, gates=gc, inv_spec=inv_spec)
+        by_kind: dict = {}
+        by_gate = {"auto": 0, "review": 0}
+        for r in reqs:
+            by_kind[r.kind] = by_kind.get(r.kind, 0) + 1
+            by_gate[r.gate] = by_gate.get(r.gate, 0) + 1
+        return {
+            "investigation": inv_slug,
+            "total": len(reqs),
+            "by_kind": by_kind,
+            "by_gate": by_gate,
+            "gates": {"default": gc.default, "by_kind": dict(gc.by_kind)},
+            "requests": [r.to_dict() for r in reqs],
+        }
+    except Exception:
+        return None
+
+
+def set_generation_gates(ws_root, inv_slug: str, *, preset: "str | None" = None,
+                         default: "str | None" = None,
+                         by_kind: "dict | None" = None) -> dict:
+    """Persist the investigation's generation-request GateConfig to
+    ``investigation.yaml`` under ``discovery.gates`` (comment-preserving, atomic).
+
+    ``preset`` (``free_run`` | ``all_gated`` | ``propose_review``) expands via the
+    engine's :class:`GateConfig`; otherwise ``default`` / ``by_kind`` are written as
+    given (validated against the engine's KINDS/GATES). Returns the written
+    ``{default, by_kind}``. Raises ``ValueError`` on an unknown preset / invalid
+    gate, ``FileNotFoundError`` if the investigation is absent."""
+    import ruamel.yaml
+    from io import StringIO
+    from discovery_engine.generation import GATES, KINDS, GateConfig
+    from vivarium_workbench.lib.atomic_io import atomic_write_text
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+    if preset:
+        gc = GateConfig.preset(str(preset))          # raises ValueError on unknown
+        cfg = {"default": gc.default, "by_kind": dict(gc.by_kind)}
+    else:
+        cfg = {}
+        if default is not None:
+            if default not in GATES:
+                raise ValueError(f"default must be one of {GATES}")
+            cfg["default"] = default
+        bk = {}
+        for k, v in (by_kind or {}).items():
+            if k not in KINDS or v not in GATES:
+                raise ValueError(f"invalid gate {k!r}={v!r} (kinds={KINDS}, gates={GATES})")
+            bk[k] = v
+        cfg["by_kind"] = bk
+
+    inv_path = WorkspacePaths.load(Path(ws_root)).investigations / inv_slug / "investigation.yaml"
+    if not inv_path.exists():
+        raise FileNotFoundError(f"no investigation.yaml for {inv_slug!r}")
+    ry = ruamel.yaml.YAML()
+    ry.preserve_quotes = True
+    ry.width = 4096
+    doc = ry.load(inv_path.read_text(encoding="utf-8")) or ruamel.yaml.CommentedMap()
+    disc = doc.get("discovery")
+    if not isinstance(disc, dict):
+        disc = ruamel.yaml.CommentedMap()
+        doc["discovery"] = disc
+    disc["gates"] = cfg
+    buf = StringIO()
+    ry.dump(doc, buf)
+    atomic_write_text(inv_path, buf.getvalue())
+    return cfg
+
+
 def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = None) -> dict:
     """Assemble the pure report-data dict for one investigation from existing
     files only. Raises FileNotFoundError if the investigation is missing.

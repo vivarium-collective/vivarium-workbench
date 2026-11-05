@@ -119,7 +119,7 @@ dependencies = [
     # `discovery_engine` (see root_packages + import-linter below). Pinned to a
     # PyPI semver range, not git branch=main, so installs are coherent and bumps
     # are visible Renovate PRs rather than silent commit drift.
-    "viva-discovery-engine>=0.1,<0.2",
+    "viva-discovery-engine>=0.2,<0.3",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
@@ -187,7 +187,10 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
-# viva-discovery-engine needs no source override — it resolves from PyPI (>=0.1,<0.2).
+# viva-discovery-engine: pinned to the git tag v0.2.0 — the AI-drivable generation
+# contract (emit/apply/runner) is released as v0.2.0 but not yet on PyPI (the
+# engine's distribution model is git tags; see discovery-engine release.yml).
+viva-discovery-engine = { git = "https://github.com/vivarium-collective/discovery-engine.git", tag = "v0.2.0" }
 # viva-superpowers: sourced from git (NOT PyPI 0.22.0) because only main has
 # migrated off pbg-emitters onto viva-emitters>=0.2.3 — the whole point of this
 # change. Pinned to a REV, not `branch = "main"`, matching the deliberate choice

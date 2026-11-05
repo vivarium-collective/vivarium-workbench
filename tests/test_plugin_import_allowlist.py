@@ -71,6 +71,8 @@ ALLOWED_DISCOVERY: dict[str, str] = {
     "discover": "read-only discovery cycle (run_cycle / load_cycle_inputs)",
     "discovery_engine": "crank/frontier/closure/opportunities/diagnose projection",
     "finding_observations": "finding observation slots",
+    "generation": "AI-drivable cycle: GenerationRequest contract + GateConfig",
+    "generation_emit": "AI-drivable cycle: opportunities -> typed GenerationRequests projection",
     "hypotheses": "hypothesis support log",
     "investigation_close": "close mechanic (backs /api/iset-close)",
     "investigation_inputs": "investigation input resolution",

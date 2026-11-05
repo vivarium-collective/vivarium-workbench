@@ -1113,6 +1113,45 @@ def create_app() -> FastAPI:
         return build_evidence_integrity(ws, slug)
 
     @app.get(
+        "/api/generation-requests/{slug}",
+        tags=["Investigations"],
+        summary="Typed GenerationRequests the frontier emits (AI-drivable cycle, Phase 1)",
+    )
+    def generation_requests_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """The typed generation contract for one investigation: the frontier's
+        generative acts (propose_study / acquire_model / author_tests /
+        interpret_finding / resolve_decision / explain / visualize), each with a
+        gate (auto|review) resolved from ``discovery.gates``. Read-only projection;
+        nothing is written. ``{}`` on an engine without the generation contract.
+        Backed by ``lib.investigation_report.build_generation_requests``."""
+        from vivarium_workbench.lib.investigation_report import build_generation_requests
+        return build_generation_requests(ws, slug) or {}
+
+    @app.post(
+        "/api/generation-gates/{slug}",
+        tags=["Investigations"],
+        summary="Set the investigation's generation GateConfig (autonomy control)",
+    )
+    def generation_gates_route(slug: str, payload: dict = Body(default={}),
+                               ws: Path = Depends(get_workspace)):
+        """Persist the per-kind auto/review gates (or a one-click preset) to
+        ``investigation.yaml`` ``discovery.gates`` — the operator's autonomy control
+        for the generation contract. ``payload`` = ``{preset}`` (free_run |
+        all_gated | propose_review) or ``{default, by_kind}``. MUTATES
+        investigation.yaml. Backed by
+        ``lib.investigation_report.set_generation_gates``."""
+        from vivarium_workbench.lib.investigation_report import set_generation_gates
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        try:
+            return set_generation_gates(ws, name, preset=p.get("preset"),
+                                        default=p.get("default"), by_kind=p.get("by_kind"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
+    @app.get(
         "/api/discovery-cycle-steps",
         tags=["Investigations"],
         summary="Discovery-engine cycle step graph (static metadata)",

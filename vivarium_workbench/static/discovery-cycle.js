@@ -331,6 +331,7 @@
     S.steps.forEach(function (s) { S.byId[s.id] = s; });
     renderGraph();
     loadDelta();
+    loadGenRequests();
   }
 
 
@@ -644,6 +645,42 @@
       "</div></div>";
   }
 
+  // Typed GenerationRequests the frontier emits (AI-drivable cycle, Phase 1):
+  // GET /api/generation-requests/{slug}. Live-only, read-only projection — the
+  // engine emits typed generative acts (each gated auto|review) a filler fills.
+  function loadGenRequests() {
+    if (isSnapshot() || !S.slug) { S.genRequests = null; return; }
+    var slug = S.slug;
+    getJSON("/api/generation-requests/" + encodeURIComponent(slug)).then(function (d) {
+      if (slug !== S.slug) return;
+      S.genRequests = (d && d.total != null) ? d : null;
+      renderGraph();
+    }).catch(function () { /* optional surface */ });
+  }
+  function requestsHtml() {
+    var d = S.genRequests;
+    if (!d || !d.total) return "";
+    var g = d.by_gate || {};
+    var rows = (d.requests || []).map(function (r) {
+      var v = (r.value && r.value.score != null) ? " · value " + r.value.score : "";
+      var col = r.gate === "auto" ? "#2e7d32" : "#b26a00";
+      var gate = '<span style="font-size:11px;font-weight:600;color:' + col + '">[' + esc(r.gate) + "]</span>";
+      return '<li style="margin:3px 0">' + gate + ' <code>' + esc(r.kind) + "</code> " + esc(r.target) + v +
+        (r.rationale ? '<div style="font-size:12px;opacity:.75;margin-left:16px">' + esc(r.rationale) + "</div>" : "") +
+        "</li>";
+    }).join("");
+    var cur = (d.gates && d.gates.default) || "per-kind";
+    var presets = ["all_gated", "propose_review", "free_run"].map(function (name) {
+      var on = (d.gates && d.gates.default === name);
+      return '<button data-genpreset="' + name + '" style="font-size:11px;margin-right:4px;padding:1px 6px;' +
+        (on ? "font-weight:600;" : "") + '">' + esc(name.replace(/_/g, " ")) + "</button>";
+    }).join("");
+    return '<div class="dcyc-banner dcyc-bn-open"><div class="dcyc-bn-h">Generation requests · ' + d.total +
+      ' <span class="dcyc-bn-sub">' + (g.review || 0) + " review · " + (g.auto || 0) + " auto</span></div>" +
+      '<div class="dcyc-bn-sub" style="margin:4px 0">Autonomy (' + esc(cur) + "): " + presets + "</div>" +
+      '<ul style="list-style:none;padding-left:4px;margin:6px 0 0">' + rows + "</ul></div>";
+  }
+
   function frontierHtml() {
     var m = S.summary;
     if (!m || !m.frontier || !m.frontier.length) return "";
@@ -789,7 +826,7 @@
     if (!S.steps.length) { g.innerHTML = '<p class="empty-state">Load an investigation to see its cycle.</p>'; return; }
     var phases = [];
     S.steps.forEach(function (s) { if (phases.indexOf(s.phase) < 0) phases.push(s.phase); });
-    g.innerHTML = applyReportHtml() + deltaHtml() + bannerHtml() + frontierHtml() + phases.map(function (ph) {
+    g.innerHTML = applyReportHtml() + deltaHtml() + bannerHtml() + requestsHtml() + frontierHtml() + phases.map(function (ph) {
       var nodes = S.steps.filter(function (s) { return s.phase === ph; });
       return '<div class="dcyc-phase-h">' + esc(ph) + "</div>" + nodes.map(nodeHtml).join("");
     }).join("");
@@ -797,6 +834,15 @@
     if (dm) dm.addEventListener("click", function () { S.applyReport = null; renderGraph(); });
     var gh = el("dcyc-gates-h");
     if (gh) gh.addEventListener("click", function () { S.gatesOpen = !S.gatesOpen; renderGraph(); });
+    // generation-request autonomy presets: persist discovery.gates, then re-emit
+    Array.prototype.forEach.call(g.querySelectorAll("[data-genpreset]"), function (b) {
+      b.addEventListener("click", function () {
+        if (!S.slug) return;
+        postJSON("/api/generation-gates/" + encodeURIComponent(S.slug), { preset: b.getAttribute("data-genpreset") })
+          .then(function () { loadGenRequests(); })
+          .catch(function () { /* optional surface */ });
+      });
+    });
     // gate-item actions: jump to a study, open the decide form, record / AI-steer
     Array.prototype.forEach.call(g.querySelectorAll("[data-study]"), function (b) {
       b.addEventListener("click", function (ev) {
