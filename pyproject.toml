@@ -187,10 +187,9 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
-# viva-discovery-engine: pinned to the git tag v0.2.0 — the AI-drivable generation
-# contract (emit/apply/runner) is released as v0.2.0 but not yet on PyPI (the
-# engine's distribution model is git tags; see discovery-engine release.yml).
-viva-discovery-engine = { git = "https://github.com/vivarium-collective/discovery-engine.git", tag = "v0.2.0" }
+# viva-discovery-engine: resolves from PyPI (>=0.2,<0.3 -> 0.2.1). The AI-drivable
+# generation contract (emit/apply/runner) and the consistent_with_zero evidence
+# grading (DE #43) are published there.
 # viva-superpowers: sourced from git (NOT PyPI 0.22.0) because only main has
 # migrated off pbg-emitters onto viva-emitters>=0.2.3 — the whole point of this
 # change. Pinned to a REV, not `branch = "main"`, matching the deliberate choice
