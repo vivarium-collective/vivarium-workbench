@@ -1,0 +1,81 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "viva-cpm"
+version = "0.1.3"
+description = "A process-bigraph Cellular Potts Model framework: a fast Rust CPM engine (2D/3D) with pluggable subcellular models, structural constraints, and metrics."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Vivarium Collective" }]
+keywords = ["cellular-potts-model", "process-bigraph", "multiscale", "tissue", "vivarium"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "process-bigraph>=1.8.5",  # @composite_generator (composite discovery)
+    "bigraph-schema>=1.4.4",  # fill_sites / sites substrate
+    "bigraph-viz>=2.0.3",
+    "pyyaml>=6.0",
+    "jsonschema[format-nongpl]>=4.21",
+    "jinja2>=3.1",
+    "pypdf>=4.0",
+    "matplotlib",
+    "plotly",
+    "vivarium-workbench",
+]
+
+[project.optional-dependencies]
+# SBML/ODE subcellular models (viva_cpm.subcellular.sbml -> viva-tellurium/RoadRunner).
+sbml = ["libroadrunner>=2.9", "tellurium>=2.2", "viva-tellurium"]
+# Human Reference Atlas FTU illustration -> CPM conversion (viva_cpm.ftu).
+ftu = ["numpy", "matplotlib"]
+# Everything, for running the full demo suite.
+all = ["viva-cpm[sbml,ftu]"]
+# Test tooling — pytest plus the optional stacks the test suite exercises
+# (SBML subcell, FTU). CI installs `.[dev]`, so pytest must live here.
+dev = ["pytest>=7", "viva-cpm[sbml,ftu]"]
+
+[project.urls]
+Homepage = "https://github.com/vivarium-collective/viva-cpm"
+Repository = "https://github.com/vivarium-collective/viva-cpm"
+
+# Non-PyPI deps resolved from git so `uv sync` works in CI (publish-dashboard).
+# vivarium-workbench (the dashboard/publish CLI) and viva-tellurium (sbml extra)
+# ship only 0.1.0 local placeholders with no registry entry; without these
+# sources `uv sync` fails resolution before the publish step runs.
+[tool.uv.sources]
+vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-workbench.git", branch = "main" }
+viva-tellurium = { git = "https://github.com/vivarium-collective/viva-tellurium.git", branch = "main" }
+
+[tool.maturin]
+manifest-path = "crates/cpm-py/Cargo.toml"
+module-name = "viva_cpm.cpm_core"
+python-source = "."
+# LICENSE lives at the repo root, outside the crate dir, so maturin's sdist
+# doesn't pick it up by default — yet the metadata declares `License-File:
+# LICENSE`, which makes PyPI reject the sdist ("License-File LICENSE does not
+# exist in distribution file"). Include it explicitly so the sdist is valid.
+include = [
+  "LICENSE",
+  # The studies workspace, staged into the package dir at release-build time
+  # (see .github/workflows/release.yml) so a wheel/PyPI install federates the
+  # studies — mirroring viva-munk #24 / viva-tumor-tcell #5, but adapted for the
+  # maturin build. The dev layout (workspace/ + workspace.yaml at the repo root)
+  # is unchanged; these in-package paths exist only during the release build and
+  # are git-ignored. python-source="." means they land at the same in-package
+  # path in the wheel (no remap), which is where federation's
+  # find_spec("viva_cpm_studies") lookup resolves them.
+  "viva_cpm_studies/workspace.yaml",
+  "viva_cpm_studies/workspace/**/*",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+markers = ["perf: performance budget tests"]

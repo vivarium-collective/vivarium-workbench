@@ -99,7 +99,8 @@ def test_every_module_that_can_push_is_accounted_for():
     remote-run-build are excluded; ``remote_push_and_sha`` callers listed here are covered by that."""
     import re
     pat = re.compile(r"""["']push["']\s*[,\]]|remote_push_and_sha|remote_commit_and_push|\bgit\b[^\n]*\bpush\b""")
-    skip = {"models.py", "generate_ts.py", "ai_chat.py", "ai_tools.py"}      # prose mentions only
+    # prose mentions only; compose_entry.py runs read-only git and has no route, its messages just tell a person to push
+    skip = {"models.py", "generate_ts.py", "ai_chat.py", "ai_tools.py", "compose_entry.py"}
     found = {f.name for f in (REPO / "vivarium_workbench" / "lib").glob("*.py")
              if f.name not in skip and pat.search(f.read_text())}
     expected = {"git_status.py", "git_commit_views.py", "work_mutations.py", "work_pr_views.py",

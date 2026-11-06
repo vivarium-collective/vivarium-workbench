@@ -1,0 +1,115 @@
+# Single self-contained environment for viva-pde-particle.
+#
+#   pixi install            # conda-forge engines + pypi ecosystem + this package (editable)
+#   pixi run build-smoldyn  # build the (patched) Smoldyn python module from external/Smoldyn
+#   pixi run test
+#   pixi run serve          # vivarium-workbench dashboard (the `workbench` feature, in `default` and `dev`)
+#
+# Environments: `default` and `dev` carry the vivarium-workbench dashboard; `compose` is `default` without it, for the
+# compose-api image (docker/compose.Dockerfile). Same solve group, so `compose` has exactly `default`'s versions.
+#
+# Conda-forge supplies the compiled engines (FEniCSx/dolfinx + MPI/PETSc) and the
+# Smoldyn build toolchain. PyPI supplies the process-bigraph / viva ecosystem and the
+# VCell reference solver (pyvcell-fvsolver, libvcell). Smoldyn itself is NOT on
+# conda-forge and its PyPI wheels are Windows-only (2.75) or x86_64-only on macOS,
+# and we need it built with OPTION_VCELL plus our grid ValueProvider patch anyway, so
+# it is built from the external/Smoldyn submodule by the build-smoldyn task.
+#
+# pyproject.toml stays the template's lightweight, uv-installable package definition
+# (used by the generated workspace-ci workflow); this file is the research env.
+
+[workspace]
+name = "viva-pde-particle"
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+# pyvcell-fvsolver wheels are tagged macosx_15_0 (pixi assumes 13.0 by default).
+[system-requirements]
+macos = "15.0"
+
+[dependencies]
+python = "3.12.*"
+# PDE engine (Phase 4). 0.10 matches virtualcell/vcell-fenics.
+fenics-dolfinx = "0.10.*"
+# Unstructured meshes for Investigation B (gmsh is GPL; used here as a meshing tool only).
+gmsh = "*"
+python-gmsh = "*"
+mpich = "*"
+numpy = "*"
+scipy = "*"
+matplotlib = "*"
+h5py = "*"
+pyyaml = "*"
+pip = "*"
+pytest = "*"
+# Smoldyn build toolchain
+cmake = ">=3.20"
+ninja = "*"
+cxx-compiler = "*"
+c-compiler = "*"
+setuptools = "*"
+wheel = "*"
+zlib = "*"
+# Geometry (Phase 7e): VCell-style GeometryDescription realized with Netgen through vcell-fenics.
+# vcell-fenics declares its deps in pixi, not package metadata; these are what its geometry stack
+# (formalism + backend.realize) imports. vtk is also used by reference/vcell_vtk.py.
+netgen = ">=6.2.2602,<7"
+scikit-image = "*"
+pydantic = ">=2.10,<3"
+vtk = "*"
+pyvista = ">=0.49.0,<0.50"
+imageio = ">=2.38.0,<3"
+
+[pypi-dependencies]
+# Not the `dev` extra: it pulls in vivarium-workbench, which only the `workbench` feature below should add.
+viva-pde-particle = { path = ".", editable = true, extras = ["reference"] }
+# A release, never a commit: 1.9.1 carries #229 (per-process event files) and #230 (groundness check), which the
+# e5325c1 pin was for. Keep in step with pyproject.toml.
+process-bigraph = ">=1.9.1"
+# 0.11.1: the hybrid fixes for zeroth-order creation, second solves and histogram binning (vcell-fvsolver#32-#34).
+# Python >=3.12 only, so it is pinned here rather than in pyproject (CI resolves that on 3.11).
+pyvcell-fvsolver = ">=0.11.1"
+bigraph-schema = "*"
+# Results bundles (viz3d/bundle.py, viz3d/web.py) are zarr v2 groups. Listed directly: it used to arrive only through
+# vivarium-workbench, which the `compose` environment (the compose-api image) leaves out.
+zarr = ">=3.1,<4"
+# Ecosystem packages tracked from git main, mirroring vivarium-workbench main's own
+# [tool.uv.sources] (pixi does not read transitive uv sources, so they are listed here).
+viva-superpowers = { git = "https://github.com/vivarium-collective/viva-superpowers.git", branch = "main" }
+viva-workspace = { git = "https://github.com/vivarium-collective/viva-workspace.git", branch = "main" }
+viva-catalog = { git = "https://github.com/vivarium-collective/viva-marketplace.git", branch = "main" }
+viva-basic-processes = { git = "https://github.com/vivarium-collective/viva-basic-processes.git", branch = "main" }
+investigation-contracts = { git = "https://github.com/vivarium-collective/investigation-contracts.git", rev = "65c793fd231d952e49a9cfe4244797dadde1bedc" }
+# GeometryDescription (VCell-style geometry formalism) and its Netgen realization (Phase 7e).
+# rev: vcell-fenics main, merge of #211 (lazy backend imports, so realize() needs no solver-only deps such
+# as scifem).
+vcell-fenics = { git = "https://github.com/virtualcell/vcell-fenics.git", rev = "4dab281e1ed3f7c2b2bb60c6c2d1a8ccb251ca17" }
+
+[tasks]
+build-smoldyn = { cmd = "bash scripts/build_smoldyn.sh", description = "Build + install the Smoldyn python module (OPTION_VCELL) from external/Smoldyn" }
+test = { cmd = "pytest tests -v", description = "Run the test suite" }
+lint = { cmd = "python scripts/lint-workspace.py", description = "Validate workspace.yaml / studies / investigations" }
+check-engines = { cmd = "python scripts/check_engines.py", description = "Report versions of every engine importable in this env" }
+# VCell's vtk.wasm field viewer over recorded bundles: pixi run view3d path/to/run.fenics [...]
+# (needs ../vcell/webapp-viewer with `npm run fetch:vtk-wasm` run once, or --viewer / VCELL_WEBAPP_VIEWER).
+view3d = { cmd = "python -m viva_pde_particle.viz3d.viewer_server", description = "Serve results bundles to VCell's vtk.wasm field viewer" }
+# Local development against sibling checkouts in ../ (overrides the git/PyPI pins in this env only).
+dev-link = { cmd = "pip install --no-deps -e ../pyvcell -e ../vivarium-workbench -e ../process-bigraph -e ../bigraph-schema", description = "Editable-install sibling checkouts over the pinned versions" }
+
+# Development environment: sibling checkouts in ../ as editable installs, for co-developing upstream
+# packages (e.g. pyvcell's spatial-hybrid support) before they are released. CI uses `default`.
+#   pixi run -e dev test
+[feature.dev.pypi-dependencies]
+pyvcell = { path = "../pyvcell", editable = true, extras = ["solver", "native"] }
+
+# The vivarium-workbench dashboard. Kept out of the `compose` environment (the compose-api simulation image).
+[feature.workbench.pypi-dependencies]
+vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-workbench.git", branch = "main" }
+
+[feature.workbench.tasks]
+serve = { cmd = "vivarium-workbench serve --workspace .", description = "Start the vivarium-workbench dashboard" }
+
+[environments]
+default = { features = ["workbench"], solve-group = "default" }
+compose = { features = [], solve-group = "default" }
+dev = { features = ["dev", "workbench"], solve-group = "dev" }

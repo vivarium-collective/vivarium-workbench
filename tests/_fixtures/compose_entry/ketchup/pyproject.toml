@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "viva-ketchup"
+version = "0.1.0"
+description = "Process-bigraph wrapper for KETCHUP kinetic parameter estimation"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "Eran Agmon", email = "agmon.eran@gmail.com"}]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "bigraph-schema>=0.0.60",
+    "process-bigraph>=0.0.66",
+    # KETCHUP's own stack. ipopt itself is a compiled solver — install it via
+    # conda (conda-forge::ipopt) or `idaes get-extensions`; see README.
+    "pyomo>=6.9",
+    "cobra>=0.29",
+    "openpyxl>=3.1",
+    "pandas",
+    "scipy",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "plotly", "bigraph-viz2"]
+
+[project.urls]
+Homepage = "https://github.com/vivarium-collective/viva-ketchup"
+Issues = "https://github.com/vivarium-collective/viva-ketchup/issues"
+Upstream = "https://github.com/maranasgroup/KETCHUP"
+
+[tool.hatch.build.targets.wheel]
+packages = ["viva_ketchup", "pbg_ketchup"]  # viva_ketchup real; pbg_ketchup = back-compat import shim
