@@ -1,7 +1,8 @@
-"""On a phone the dockable panels (Studies/Chat/Code/Graph) can't tile — each
-opens as a full-screen sheet. mobile-panels.js adds one bottom bar that launches
-AND switches them (one panel at a time), shown only for panels relevant to the
-current page, and the sheet shrinks to sit above it. These pin that contract.
+"""On a phone the dockable panels (Studies/Cycle/Registry/Chat/Code/Graph) can't
+tile — each opens as a full-screen sheet. mobile-panels.js adds one bottom bar
+that launches AND switches them (one panel at a time), shown only for panels
+relevant to the current page, in the same order and with the same icons as the
+desktop rail, and the sheet shrinks to sit above it. These pin that contract.
 """
 from pathlib import Path
 
@@ -19,12 +20,39 @@ def test_switcher_script_is_loaded_after_the_panels_it_drives():
 
 def test_switcher_knows_every_dockable_panel_and_how_to_toggle_it():
     js = (STATIC / "mobile-panels.js").read_text()
-    # Each of the four panels is represented by its panel element id...
-    for panel_id in ("viv-studies-panel", "viv-ai-panel", "viv-code-rail", "viv-graph-panel"):
+    # Every dockable panel is represented by its panel element id...
+    for panel_id in (
+        "viv-studies-panel", "viv-cycle-panel", "viv-registry-panel",
+        "viv-ai-panel", "viv-code-rail", "viv-graph-panel",
+    ):
         assert panel_id in js, panel_id
     # ...and driven through each controller's public toggle/open API.
-    assert "StudiesPanel" in js and "ProcessCode" in js and "GraphPanel" in js
+    assert "StudiesPanel" in js and "CyclePanel" in js and "RegistryPanel" in js
+    assert "ProcessCode" in js and "GraphPanel" in js
     assert "viv-ai-toggle" in js                      # chat has no API → click its launcher
+
+
+def test_mobile_tabs_match_the_desktop_rail_order_and_icons():
+    """The bottom bar mirrors the rail: Studies · Cycle · Registry · (Chat) · Code,
+    and each tab reuses its rail launcher's icon geometry (copied verbatim from
+    templates/index.html.j2) so the same panel reads identically on both."""
+    js = (STATIC / "mobile-panels.js").read_text()
+    template = TEMPLATE.read_text()
+
+    # Panel order in the switcher follows the rail: studies → cycle → registry.
+    assert js.index('key: "studies"') < js.index('key: "cycle"') < js.index('key: "registry"')
+
+    # Each panel's icon is the SAME SVG as the desktop rail toggle — pin a distinctive
+    # path fragment from each rail launcher and require it to appear in the bar's ICON map.
+    rail_signatures = {
+        "studies": 'd="M3 6v4c0 1.1.9 2 2 2h3"',
+        "cycle": 'd="M21 3v5h-5"',
+        "registry": 'd="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71',
+        "code": 'd="m14.5 4-5 16"',
+    }
+    for key, sig in rail_signatures.items():
+        assert sig in template, f"rail signature for {key} drifted in the template"
+        assert sig in js, f"mobile {key} icon no longer reuses the rail icon"
 
 
 def test_relevance_tracks_launcher_visibility_and_the_investigations_page():
