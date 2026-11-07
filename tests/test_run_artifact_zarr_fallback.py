@@ -4,6 +4,7 @@ exercising the actual code path a GovCloud/Ray-dispatched run hits.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -139,3 +140,59 @@ def test_local_viz_json_present_is_unaffected_by_the_fallback(tmp_path):
     assert status == 200
     assert b"hand-rendered" in content
     assert b"Plotly.newPlot" not in content
+
+
+_NO_OUTPUT = "No output was rendered for this panel"
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        # inline Visualization steps: render_results -> {"html": ...}, stored as-is by run_runner
+        ({"html": "<p>dict-panel</p>"}, "<p>dict-panel</p>"),
+        ({"html": "<p>dict-extra-keys</p>", "kind": "gif"}, "<p>dict-extra-keys</p>"),
+        # the documented shape (run_viz): a bare html string
+        ("<p>string-panel</p>", "<p>string-panel</p>"),
+        # nothing to show: say so, never the repr
+        ({"html": ""}, _NO_OUTPUT),
+        ({"html": None}, _NO_OUTPUT),
+        ({"html": "   "}, _NO_OUTPUT),
+        ("", _NO_OUTPUT),
+    ],
+    ids=["dict", "dict-extra-keys", "string", "dict-empty", "dict-none", "dict-blank", "string-empty"],
+)
+def test_viz_panel_value_shapes(tmp_path, value, shown):
+    run_dir = tmp_path / ".pbg" / "runs" / "rs"
+    run_dir.mkdir(parents=True)
+    (run_dir / "viz.json").write_text(json.dumps({"panel": value}))
+
+    content, _mt, _dl, status = build_run_artifact(tmp_path, "rs", "viz")
+    page = content.decode("utf-8")
+    assert status == 200
+    assert shown in page
+    assert "{'html'" not in page and "'html':" not in page   # no Python repr leaks
+    if shown != _NO_OUTPUT:
+        assert _NO_OUTPUT not in page                         # a real panel gets no notice
+
+
+def test_viz_json_html_dict_values_render_as_html_not_a_python_repr(tmp_path):
+    """The failing file from workbench #1577: ``render_results`` gives ``{name: {"html":
+    "<img ...>"}}`` for inline viz steps while run_viz writes ``{name: html}``, and one
+    viz.json can hold both. The page must embed the HTML either way, never ``str(dict)``;
+    a panel with no html says so."""
+    ws = tmp_path
+    run_dir = ws / ".pbg" / "runs" / "r5"
+    run_dir.mkdir(parents=True)
+    (run_dir / "viz.json").write_text(json.dumps({
+        "multibody_viz": {"html": '<img alt="colony-gif" src="data:image/gif;base64,R0lGODlh">'},
+        "cell_mass_traces": {"html": ""},
+        "string_shaped": "<p>plain-string-panel</p>",
+    }))
+
+    content, _mt, _dl, status = build_run_artifact(ws, "r5", "viz")
+    page = content.decode("utf-8")
+    assert status == 200
+    assert '<img alt="colony-gif"' in page          # the dict's html is embedded
+    assert "plain-string-panel" in page             # the documented string shape still works
+    assert "{'html'" not in page                    # no Python repr leaks into the page
+    assert "No output was rendered for this panel" in page  # the empty panel says so
