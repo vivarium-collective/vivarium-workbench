@@ -410,9 +410,18 @@ def build_run_artifact(ws_root, run_id: str, name: str) -> tuple[bytes, str, "st
             return buf.getvalue(), "application/zip", f"{safe}_viz.zip", 200
 
         # Otherwise: viz.json is {viz_name: html_string}; wrap into a viewable page.
+        # Inline Visualization steps are rendered by ``render_results`` as
+        # {path: {"html": ...}} and run_runner stores them as-is, so a viz.json can hold
+        # that shape next to plain strings (see also study_native_gallery._panel_html).
+        # Unwrap it (interpolating the dict would print its Python repr onto the page),
+        # and say so when a panel has no html.
         import html as _html
         sections = []
         for vname, vhtml in items:
+            if isinstance(vhtml, dict) and "html" in vhtml:
+                vhtml = vhtml["html"]
+            if not str(vhtml or "").strip():
+                vhtml = '<p style="color:#6b7280">No output was rendered for this panel.</p>'
             sections.append(
                 f'<section style="margin:18px 0"><h3 style="font-family:system-ui;'
                 f'color:#111827">{_html.escape(str(vname))}</h3>{vhtml}</section>'
