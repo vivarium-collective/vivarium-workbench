@@ -164,6 +164,16 @@ def test_render_dashboard_with_base():
     assert "🔬" not in out  # plain, not the old slop callout
 
 
+def test_render_investigations_links_to_published_report_path():
+    # The published investigation report lives at
+    # <base>/workbench/reports/investigation-<slug>.html (publish.py), NOT at
+    # <base>/investigations/<slug>.html — a stale path that 404s on gh-pages.
+    rows = [{"name": "alpha", "title": "Alpha", "status": "active", "question": "Q?"}]
+    out = gen_readme.render_investigations(rows, "https://owner.github.io/repo")
+    assert "https://owner.github.io/repo/workbench/reports/investigation-alpha.html" in out
+    assert "/repo/investigations/alpha.html" not in out
+
+
 def test_render_badges_with_remote(tmp_path: Path):
     out = gen_readme.render_badges(tmp_path, "owner/repo", "https://owner.github.io/repo")
     assert "actions/workflows/workspace-ci.yml/badge.svg" in out

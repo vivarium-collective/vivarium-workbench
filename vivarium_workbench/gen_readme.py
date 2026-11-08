@@ -208,7 +208,11 @@ def render_investigations(rows: list[dict], base: str | None) -> str:
         label = _md_cell(r["title"])
         if r["status"]:
             label += f" _({_md_cell(r['status'])})_"
-        cell = f"[{label}]({base}/investigations/{r['name']}.html)" if base else label
+        cell = (
+            f"[{label}]({base}/workbench/reports/investigation-{r['name']}.html)"
+            if base
+            else label
+        )
         lines.append(f"| {cell} | {_md_cell(_first_sentence(r['question']))} |")
     return "\n".join(lines)
 
