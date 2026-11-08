@@ -248,7 +248,8 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
                        runtime, origin, study=None, pkg=None,
                        generation_id=None, ws_root=None,
                        cache_fingerprint=None, fingerprint_fields=None,
-                       seed=None, declared_environment=None) -> dict:
+                       seed=None, declared_environment=None,
+                       environment_ref=None) -> dict:
     """Assemble the canonical per-run replay manifest (spec Part A).
 
     A complete, self-contained record of everything a rerun needs to
@@ -318,10 +319,48 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
     run_seed = seed
     if run_seed is None:
         run_seed = (params or {}).get("seed")
+
+    # Named-environment declaration (environment-declaration): a composite or
+    # study condition may reference a named environment in environments.yaml.
+    # Resolving it drives which packages the fingerprint captures, and the
+    # capture is then verified against the declaration so drift is recorded on
+    # the run. Best-effort: an unresolved reference is recorded as a
+    # verification failure, never a crash — a run must still be recorded.
+    declared_env = None
+    env_resolve_error = None
     try:
-        env = env_fingerprint.compute_env(ws_root=ws_root, cache_fingerprint=cf)
+        from vivarium_workbench.lib.environments import (
+            resolve_environment, _declared_pins,
+        )
+        declared_env = resolve_environment(ws_root, environment_ref=environment_ref)
+    except Exception as e:  # noqa: BLE001 — unresolved/malformed is flagged, not fatal
+        env_resolve_error = str(e)
+
+    env_packages = None
+    if declared_env:
+        try:
+            env_packages = list(_declared_pins(declared_env).keys())
+        except Exception:  # noqa: BLE001
+            env_packages = None
+
+    try:
+        env = env_fingerprint.compute_env(
+            ws_root=ws_root, cache_fingerprint=cf, packages=env_packages)
     except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
         env = None
+
+    try:
+        from vivarium_workbench.lib.environments import verify as _verify_env
+        environment_verification = _verify_env(declared_env, env)
+    except Exception:  # noqa: BLE001 — verification must never block a run
+        environment_verification = {"matches": True, "environment": None, "drift": []}
+    if env_resolve_error:
+        environment_verification = {
+            "matches": False,
+            "environment": environment_ref,
+            "drift": [{"package": None, "declared": environment_ref,
+                       "captured": None, "reason": env_resolve_error}],
+        }
 
     # Multi-entry environment pins (dual-engine W1). Primary = the workspace
     # env this run executes in; best-effort like every provenance field.
@@ -393,6 +432,16 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
         # Multi-entry environment pins (dual-engine W1, additive like
         # code_version.repo in #868 — no manifest version bump; readers .get()).
         "environments": environments,
+        # Named-environment declaration + verification (environment-declaration).
+        # ``environment_ref`` is the name (in environments.yaml) this run
+        # declared it must execute in — or the workspace default — and
+        # ``environment_verification`` is {matches, environment, drift}: whether
+        # the captured ``env`` fingerprint satisfies that declaration. Additive,
+        # best-effort; a run that declares nothing has ref None and matches True.
+        "environment_ref": (
+            environment_ref or (declared_env.get("name") if declared_env else None)
+        ),
+        "environment_verification": environment_verification,
         "fingerprint_fields": (
             list(fingerprint_fields) if fingerprint_fields is not None
             else list(emit_paths or [])

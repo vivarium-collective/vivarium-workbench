@@ -486,7 +486,7 @@ def _declared_scale_exceeds_budget(params) -> "tuple[int, int] | None":
 def launch_into_study(ws_root, study, spec_id, params, n_steps, *, seed=None,
                       emitter=None, emit_paths=None, runtime=None, label=None,
                       dry_run=False, reran_from=None, skip_analyses=False,
-                      declared_environment=None):
+                      declared_environment=None, environment_ref=None):
     """Launch a run into a Study's ``runs.db`` from EXPLICIT replay inputs.
 
     Factored out of ``run_study_baseline`` (spec Part C) so a rerun can
@@ -602,6 +602,7 @@ def launch_into_study(ws_root, study, spec_id, params, n_steps, *, seed=None,
         n_steps=n_steps, emitter=emitter, emit_paths=emit_paths,
         runtime=runtime, pkg=pkg, ws_root=ws_root, seed=effective_seed,
         declared_environment=declared_environment,
+        environment_ref=environment_ref,
     )
 
     return _launch_run_and_flush(
@@ -664,6 +665,13 @@ def run_study_baseline(ws_root, body):
     # (the user believes their run is pinned to it).
     try:
         declared_env = study_spec.condition_environment(spec, "baseline")
+    except ValueError as e:
+        return {"error": str(e)}, 400
+    # The NAMED environment this condition declares (environments.yaml), read
+    # from the RAW v4 spec for the same reason as the dual-engine pin above.
+    # A malformed declaration is a loud 400, never silently dropped.
+    try:
+        env_ref = study_spec.condition_environment_ref(spec, "baseline")
     except ValueError as e:
         return {"error": str(e)}, 400
     # v4-redesign projection: synthesises legacy fields (baseline list,
@@ -792,6 +800,7 @@ def run_study_baseline(ws_root, body):
         dry_run=dry_run,
         skip_analyses=skip_analyses,
         declared_environment=declared_env,
+        environment_ref=env_ref,
     )
 
 

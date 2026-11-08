@@ -42,3 +42,21 @@ def test_compute_env_threads_cache_fingerprint_and_lockfile_hash(tmp_path):
     assert env["lockfile_hash"] is not None
     assert env["python"] is not None
     assert env["platform"] is not None
+
+
+def test_compute_env_default_packages_unchanged():
+    # Back-compat: with no packages arg, the captured set is the built-in
+    # _SIM_PACKAGES list (byte-for-byte today's behavior for v2ecoli).
+    from vivarium_workbench.lib.env_fingerprint import _SIM_PACKAGES
+    env = compute_env()
+    assert set(env["sim_packages"]) == set(_SIM_PACKAGES)
+
+
+def test_compute_env_captures_declared_packages():
+    # A workspace declares its own members (e.g. viva-pulse: viva_pulse +
+    # protobuf, which the v2ecoli-shaped default list would miss). Capture is
+    # driven by that list so the fingerprint covers the right packages.
+    env = compute_env(packages=["process-bigraph", "protobuf", "viva_pulse"])
+    assert set(env["sim_packages"]) == {"process-bigraph", "protobuf", "viva_pulse"}
+    for info in env["sim_packages"].values():
+        assert set(info) == {"version", "git_sha"}

@@ -91,7 +91,7 @@ def _lockfile_hash(ws_root) -> str | None:
         return None
 
 
-def compute_env(*, ws_root=None, cache_fingerprint=None) -> dict:
+def compute_env(*, ws_root=None, cache_fingerprint=None, packages=None) -> dict:
     """Best-effort snapshot of the environment a run executed under.
 
     Every field independently degrades to ``None`` on failure — this must
@@ -100,9 +100,18 @@ def compute_env(*, ws_root=None, cache_fingerprint=None) -> dict:
     ``run_condition_multigen_parquet.cache_fingerprint()`` short hash);
     passed straight through rather than recomputed here, since only the
     caller knows which cache directory produced the run.
+
+    ``packages`` is the set of distributions to capture versions/SHAs for.
+    When ``None`` it is the built-in :data:`_SIM_PACKAGES` (byte-for-byte
+    back-compat). A workspace that declares a named environment
+    (``environments.yaml``) passes that environment's members here — a
+    v2ecoli-shaped default list would otherwise miss, say, viva-pulse's
+    ``viva_pulse``/``protobuf``, making the fingerprint blind to the very
+    packages whose pins make that workspace reproducible.
     """
+    names = list(packages) if packages is not None else list(_SIM_PACKAGES)
     sim_packages = {}
-    for name in _SIM_PACKAGES:
+    for name in names:
         try:
             sim_packages[name] = _sim_package_info(name)
         except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
