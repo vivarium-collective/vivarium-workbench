@@ -89,8 +89,15 @@ def _study_verdict(spec, computed_gate) -> str:
 def _outcome_counts(spec) -> dict:
     passed = skipped = failed = 0
     for r in (spec.get("runs") or []):
-        for o in ((r.get("outcomes") or {}).values()):
-            res = str((o or {}).get("result", "")).upper()
+        outcomes = r.get("outcomes") or {}
+        # outcomes may be a dict (test -> outcome) or a list of outcomes; each
+        # outcome may be a dict ({"result": ...}) or a bare result string.
+        values = outcomes.values() if isinstance(outcomes, dict) else outcomes
+        for o in values:
+            if isinstance(o, dict):
+                res = str(o.get("result", "")).upper()
+            else:
+                res = str(o or "").upper()
             if res == "PASS":
                 passed += 1
             elif res in ("SKIP", "SKIPPED", "NA", "N/A"):
