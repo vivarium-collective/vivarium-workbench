@@ -115,7 +115,7 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
         # parent_relations). Carries the real leads-to/alternative-to/refutes/
         # precedes typing instead of only the synthesized input/prerequisite rel.
         try:
-            from discovery_engine.relations import study_relations as _sr
+            from discovery_engine.projection.relations import study_relations as _sr
             _rels = _sr(study_spec)
         except Exception:  # noqa: BLE001
             _rels = [r for r in (study_spec.get("parent_relations") or []) if isinstance(r, dict)]
@@ -130,7 +130,7 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
         # the rail never disagree. The frontend prefers this over its own
         # status-fallback derivation (`s.confidence || …`). Derive-only; optional.
         try:
-            from discovery_engine.study_verdict import derive_confidence as _dc
+            from discovery_engine.study.verdict import derive_confidence as _dc
             _node["confidence"] = _dc(study_spec)
         except Exception:  # noqa: BLE001 — viva_superpowers optional; frontend falls back
             pass
@@ -249,8 +249,8 @@ def build_argument_overlay(ws_root, inv_slug, *, derive_fn=None, narrate_fn=None
 
     if derive_fn is None or narrate_fn is None or audit_fn is None:
         try:
-            from discovery_engine.argument_store import derive_argument
-            from discovery_engine.narrative import audit as _audit, narrate as _narrate
+            from discovery_engine.projection.argument import derive_argument
+            from discovery_engine.projection.narrative import audit as _audit, narrate as _narrate
         except Exception:  # noqa: BLE001 — derivation layer absent: degrade, never 500
             return _empty_argument_overlay(inv_slug)
         derive_fn = derive_fn or derive_argument
@@ -282,11 +282,11 @@ def build_argument_overlay(ws_root, inv_slug, *, derive_fn=None, narrate_fn=None
         return _empty_argument_overlay(inv_slug)
 
     # Synthesis spine (Plan-progress) + unified open calls (Decisions). Tolerant:
-    # if discovery_engine.synthesis isn't importable the UI just omits them.
+    # if discovery_engine.projection.synthesis isn't importable the UI just omits them.
     gates: list = []
     decisions: list = []
     try:
-        from discovery_engine.synthesis import open_calls, synthesize_gates
+        from discovery_engine.projection.synthesis import open_calls, synthesize_gates
         gates = synthesize_gates(spec, graph.get("claims", {}))
         decisions = open_calls(spec, graph.get("claims", {}), gaps)
     except Exception:  # noqa: BLE001

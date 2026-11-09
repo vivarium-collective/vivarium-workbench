@@ -34,10 +34,8 @@ from typing import Any, Callable
 from discovery_engine.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib import linkage_index
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
-from discovery_engine import rigor
-from discovery_engine import viz_freshness
-
-
+from discovery_engine.reporting import rigor
+from discovery_engine.viz import freshness as viz_freshness
 # ---------------------------------------------------------------------------
 # Item shape + ranking
 # ---------------------------------------------------------------------------
@@ -301,7 +299,7 @@ def _unregistered_confirmatory_items(slug: str, spec: dict) -> list[dict]:
     if rigor._study_type(spec) != "confirmatory":
         return []
     try:
-        from discovery_engine.study_verdict import preregistration_status
+        from discovery_engine.study.verdict import preregistration_status
         pre = preregistration_status(spec)
     except Exception:  # noqa: BLE001 — defensive cross-module import
         return []
@@ -351,7 +349,7 @@ def _primary_test_failed(spec: dict) -> bool:
     result, not a primary failure). Unclassified counts as primary so a real
     failure is never silently missed. Tolerant: missing outcomes → False."""
     try:
-        from discovery_engine.study_verdict import canonical_outcomes
+        from discovery_engine.study.verdict import canonical_outcomes
         outcomes = canonical_outcomes(spec)
     except Exception:  # noqa: BLE001
         return False
@@ -372,7 +370,7 @@ def _diagnostic_branch_items(slug: str, spec: dict) -> list[dict]:
     high-severity prompt to seed a diagnostic study.
     """
     try:
-        from discovery_engine.study_verdict import roll_up_verdict
+        from discovery_engine.study.verdict import roll_up_verdict
         result = roll_up_verdict(spec).get("result")
     except Exception:  # noqa: BLE001 — defensive
         return []
@@ -579,8 +577,8 @@ def _narrative_gap_items(ws_root: Path, inv_slug: str, wp: "WorkspacePaths",
     unavailable (so the scan degrades, never raises).
     """
     try:
-        from discovery_engine.argument_store import derive_argument
-        from discovery_engine.narrative import audit, narrate
+        from discovery_engine.projection.argument import derive_argument
+        from discovery_engine.projection.narrative import audit, narrate
     except Exception:  # noqa: BLE001
         return []
     studies_by_slug = {slug: spec for slug, spec in _member_studies(wp, inv_spec)}
@@ -957,8 +955,8 @@ def open_epistemic_debts(spec: dict, viz_records: list[dict] | None = None) -> l
     Returns a severity-sorted list of ``{"kind", "ref", "note", "severity"}``
     where ``kind`` is one of ``claim-untested | control-absent |
     metric-uncalibrated | alternative-not-excluded | region-unexplored |
-    viz-stale``. PURE; reuses :mod:`discovery_engine.rigor` +
-    :mod:`discovery_engine.viz_freshness` rather than reinventing the harvest, so
+    viz-stale``. PURE; reuses :mod:`discovery_engine.reporting.rigor` +
+    :mod:`discovery_engine.viz.freshness` rather than reinventing the harvest, so
     it can't drift from the scorecard. Tolerant of a minimal/empty spec.
     """
     spec = spec or {}

@@ -39,8 +39,7 @@ def source_switch(body: dict, *, switch_active: bool = True) -> tuple[dict, int]
     ``docs/session-registry.md`` §8): validate + resolve the source, but leave the
     global root and other sessions untouched.
     """
-    from discovery_engine import workspace_catalog
-
+    from discovery_engine.integration import workspace_catalog
     body = body or {}
     path = str(body.get("path") or "").strip()
     name = str(body.get("name") or "").strip()

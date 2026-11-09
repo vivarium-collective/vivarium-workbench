@@ -28,8 +28,8 @@ from pathlib import Path
 
 import yaml
 
-from discovery_engine.band_provenance import bands_missing_provenance
-from discovery_engine.investigation_inputs import investigation_inputs
+from discovery_engine.study.band_provenance import bands_missing_provenance
+from discovery_engine.investigation.inputs import investigation_inputs
 from discovery_engine.workspace_paths import WorkspacePaths
 
 

@@ -176,7 +176,7 @@ class TestBuildInvestigationComposites:
 
 
 # NOTE: investigation-rigor is intentionally NOT ported in this batch (deferred
-# to Batch 3 — needs the per-study run-merging loader that discovery_engine.rigor
+# to Batch 3 — needs the per-study run-merging loader that discovery_engine.reporting.rigor
 # reads via spec["runs"]). No lib builder / parity test for rigor here.
 
 

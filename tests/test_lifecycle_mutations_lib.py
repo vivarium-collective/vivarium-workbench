@@ -216,8 +216,7 @@ def test_study_sync_runs_unknown_study(ws: Path) -> None:
 
 
 def test_study_sync_runs_happy(ws: Path) -> None:
-    from discovery_engine import run_registry, study_io
-
+    from discovery_engine.study import run_registry, io as study_io
     d = ws / "studies" / "s1"
     d.mkdir()
     study_io.save_yaml_atomic(d / "study.yaml", {"name": "s1", "runs": []})

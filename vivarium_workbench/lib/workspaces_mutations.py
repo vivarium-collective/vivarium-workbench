@@ -5,7 +5,7 @@ Behaviour-preserving ports of the stdlib handlers
 ``_post_workspaces_cleanup_stale``.
 
 These 3 POSTs edit the **GLOBAL** ``~/.pbg`` workspace catalog via
-``discovery_engine.workspace_catalog`` (already a lib; process-global, NOT server
+``discovery_engine.integration.workspace_catalog`` (already a lib; process-global, NOT server
 state).  They take a ``path`` from the request body and use NO workspace /
 ws_root — so the builders take ONLY ``body`` and operate on the global catalog.
 There is nothing to thread through: a FastAPI call mutates the global ``~/.pbg``
@@ -26,9 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from discovery_engine import workspace_catalog
-
-
+from discovery_engine.integration import workspace_catalog
 def workspaces_add(body: Any) -> tuple[dict, int]:
     """POST /api/workspaces/add — register an existing workspace in the catalog.
 

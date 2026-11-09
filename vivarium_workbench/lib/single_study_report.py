@@ -276,7 +276,7 @@ def _preregistration_status(spec: dict) -> dict | None:
     ``study_verdict.preregistration_status``. Returns None when pbg-superpowers
     (or the function) isn't importable so the chip simply doesn't render."""
     try:
-        from discovery_engine.study_verdict import preregistration_status
+        from discovery_engine.study.verdict import preregistration_status
     except Exception:
         return None
     try:
@@ -671,7 +671,7 @@ def _render_controls_and_falsifiability(spec: dict) -> str:
 def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     """Evidence & rigor scorecard section — deterministic skeptic-feedback
     (replication, negative controls, alternative hypotheses, claim discipline,
-    falsifiability, engineered-vs-emergent) computed by discovery_engine.rigor.
+    falsifiability, engineered-vs-emergent) computed by discovery_engine.reporting.rigor.
 
     Returns '' if pbg-superpowers isn't importable, so the report degrades
     gracefully.
@@ -682,7 +682,7 @@ def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     renders it as its own ordered section immediately below.
     """
     try:
-        from discovery_engine.rigor import study_rigor
+        from discovery_engine.reporting.rigor import study_rigor
     except Exception:
         return ""
     sc = study_rigor(study_spec)
@@ -748,13 +748,13 @@ _WEIGHT_CHIP_COLORS = {
 
 
 def _finding_weight(spec: dict, finding: dict) -> dict | None:
-    """W8 — per-finding evidential weight via discovery_engine.rigor.
+    """W8 — per-finding evidential weight via discovery_engine.reporting.rigor.
 
     Defensive: returns None when pbg-superpowers (or the new function) isn't
     importable, so the chip simply doesn't render and the report degrades.
     """
     try:
-        from discovery_engine.rigor import finding_evidential_weight
+        from discovery_engine.reporting.rigor import finding_evidential_weight
     except Exception:
         return None
     try:
@@ -885,7 +885,7 @@ def _lifecycle_floor(spec: dict, finding: dict) -> str | None:
     Returns None when pbg-superpowers (or the function) isn't importable, so the
     chip falls back to the authored value (or nothing)."""
     try:
-        from discovery_engine.study_verdict import lifecycle_floor
+        from discovery_engine.study.verdict import lifecycle_floor
     except Exception:
         return None
     try:

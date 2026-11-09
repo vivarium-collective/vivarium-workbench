@@ -1,6 +1,6 @@
 """Phase 2.1d — GET /api/report-lint applies `.pbg/report-lint-overrides.json`
 server-side, the same way the old `/viva-report` skill/CLI did for Pass B
-(`discovery_engine.report.render_workspace_report`'s lint step, via
+(`discovery_engine.reporting.report.render_workspace_report`'s lint step, via
 `report_linter.apply_overrides`).
 
 Before this change the endpoint ran the linter but never consulted the
@@ -19,7 +19,7 @@ import yaml
 
 from vivarium_workbench.lib.report_views import build_report_lint
 
-report_linter = pytest.importorskip("discovery_engine.report_linter")
+report_linter = pytest.importorskip("discovery_engine.reporting.linter")
 
 
 @pytest.fixture

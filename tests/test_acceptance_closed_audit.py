@@ -55,7 +55,7 @@ def test_non_dict_skips():
 # --- the fold into build_audit's investigation blocks -----------------------
 
 def _stub_workspace_audit(monkeypatch, investigations):
-    import discovery_engine.study_audit as sa
+    import discovery_engine.study.audit as sa
 
     class _FakeReport:
         def as_dict(self):

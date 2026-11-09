@@ -337,8 +337,7 @@ def _condition_satisfied(parent: Optional[dict], condition: str, runs=None) -> b
         return exec_status == "completed"
     if condition == "tests-passed":
         try:
-            from discovery_engine import study_status
-
+            from discovery_engine.study import status as study_status
             counts = study_status.count_test_outcomes(parent, parent.get("runs"))
             if counts["fail"] == 0 and counts["pass"] > 0:
                 return True

@@ -5,7 +5,7 @@ the per-study loader that resolves a study's spec, **merges the runs recorded in
 ``studies/<slug>/runs.db``** on top of any ``spec.runs`` persisted in
 study.yaml, **reconciles ``simulation_set``** with what actually ran, and
 **auto-discovers pre-rendered viz HTML**.  Several routes need exactly this
-merged spec — most importantly rigor (``discovery_engine.rigor`` reads
+merged spec — most importantly rigor (``discovery_engine.reporting.rigor`` reads
 ``spec["runs"]`` for the replication + run-persistence dimensions), and
 ``GET /api/study/{slug}`` (Phase A, Batch 4).
 
@@ -476,7 +476,7 @@ def read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]:
     conn = sqlite3.connect(str(runs_db)) if runs_db.is_file() else None
     if conn is not None:
         conn.row_factory = sqlite3.Row
-    # Every record read from this database is persisted in it, and says so: the rigor scorecard (discovery_engine.rigor,
+    # Every record read from this database is persisted in it, and says so: the rigor scorecard (discovery_engine.reporting.rigor,
     # run persistence) accepts a run only if its record carries an emitter or a run-db reference such as ``db_path``.
     db_path = os.path.relpath(runs_db, ws_root).replace(os.sep, "/") if conn is not None else None
     try:
@@ -971,7 +971,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # flag any stored axis (or legacy planning headline) that contradicts
         # execution state. Stops the "planning status after execution" drift.
         try:
-            from discovery_engine import study_status as _ss
+            from discovery_engine.study import status as _ss
             runs = spec.get("runs") or []
             spec["derived_status"] = _ss.derive_status(spec, runs)
             # Single source of truth for the progress pill: the detail spec MUST carry the
@@ -1007,7 +1007,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
             if isinstance(persisted_ge, dict) and persisted_ge.get("result"):
                 cgv = dict(persisted_ge)
             else:
-                from discovery_engine.study_verdict import roll_up_verdict
+                from discovery_engine.study.verdict import roll_up_verdict
                 cgv = roll_up_verdict(spec)
             # Attach the per-test counts the verdict was derived from so the SPA
             # can show "4 passed · 1 skipped" beside the badge (workbench#758) —
@@ -1016,7 +1016,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
             # predate it, so backfill render-time (never persisted → no churn).
             if isinstance(cgv, dict) and "counts" not in cgv:
                 try:
-                    from discovery_engine.study_status import count_test_outcomes
+                    from discovery_engine.study.status import count_test_outcomes
                     cgv["counts"] = count_test_outcomes(spec, spec.get("runs"))
                 except Exception:  # noqa: BLE001
                     pass
@@ -1038,7 +1038,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # Rigor count-split (viva-superpowers #285): the pins-vs-acceptance-vs-
         # expected-fail verdict ledger, so views can render "pins 2/2 ·
         # acceptance 1/2 · expected-fail behaved 1/1" instead of one conflated
-        # "gate: passed". gate_rigor delegates to discovery_engine.study_verdict
+        # "gate: passed". gate_rigor delegates to discovery_engine.study.verdict
         # .verdict_count_split when importable, mirrors the buckets locally
         # otherwise. Render-only; best-effort.
         try:
@@ -1054,7 +1054,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # function in pbg-superpowers; render-only, never modifies study.yaml.
         # Defensive: degrade silently if pbg-superpowers isn't importable.
         try:
-            from discovery_engine.study_verdict import preregistration_status
+            from discovery_engine.study.verdict import preregistration_status
             ps = preregistration_status(spec)
             if isinstance(ps, dict) and ps.get("preregistered"):
                 spec["preregistration_status"] = ps
@@ -1075,10 +1075,10 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
 
         # Wave 3b #25 — attach the derived lifecycle floor to each finding (the
         # report-data path so the SPA renders the chip without a JS recompute).
-        # Defensive: a missing discovery_engine.study_verdict.lifecycle_floor
+        # Defensive: a missing discovery_engine.study.verdict.lifecycle_floor
         # leaves findings untouched (the chip then shows only the authored state).
         try:
-            from discovery_engine.study_verdict import lifecycle_floor as _lf
+            from discovery_engine.study.verdict import lifecycle_floor as _lf
             for _f in (spec.get("findings") or []):
                 if not isinstance(_f, dict) or "_lifecycle_floor" in _f:
                     continue
@@ -1713,7 +1713,7 @@ _COMPLETE_STATUSES = {"complete", "completed", "ran", "done"}
 def _latest_outcomes(spec: dict) -> tuple[dict, dict]:
     """Resolve the study's authoritative per-test outcomes from the single
     *canonical* run (see ``_canonical_run``), mirroring the client's
-    ``discovery_engine.study_outcomes.canonical_outcomes``.
+    ``discovery_engine.study.outcomes.canonical_outcomes``.
 
     Previously this aggregated last-run-wins across ALL runs and ignored the
     ``canonical:`` flag, so the report (client, canonical-run) and the study

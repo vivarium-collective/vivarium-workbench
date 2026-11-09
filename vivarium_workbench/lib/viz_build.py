@@ -1,7 +1,7 @@
 """Single render dispatcher for one declared figure (discovery viz loop, Build).
 
 ``render_one(ws_root, study, name)`` renders ONE ``visualizations[]`` entry of a
-study by its derived kind (``discovery_engine.viz_freshness.normalize_entry``):
+study by its derived kind (``discovery_engine.viz.freshness.normalize_entry``):
 
   * ``command``     -> the entry's ``render:`` recipe via ``refresh_study_viz``
   * ``class``       -> a ``local:`` viz-class composite via ``render_visualizations``
@@ -39,7 +39,7 @@ def render_one(ws_root, study: str, name: str, *, build_and_run=None,
                inputs_by_class: dict | None = None, core_registry: dict | None = None) -> dict:
     """Render one figure. Returns ``{ok, chart, source_run_id, detail}``."""
     try:
-        from discovery_engine.viz_freshness import normalize_entry, stamp_meta
+        from discovery_engine.viz.freshness import normalize_entry, stamp_meta
     except ImportError:
         return _fail("discovery_engine is not available")
     sdir = find_study_dir(ws_root, study)

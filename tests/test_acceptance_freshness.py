@@ -1,7 +1,7 @@
 """Phase 2b pt3: the acceptance roll-up carries a server-side fresh|stale flag — stale if ANY member
 study's computed grade is behind the current grader, so the Audit tab shows 'stale -> re-grade'
 instead of trusting a roll-up over outdated grades. The Phase-2 grade_freshness does the comparison
-(stubbed here via a fake discovery_engine.grader_freshness module)."""
+(stubbed here via a fake discovery_engine.reporting.grader_freshness module)."""
 from __future__ import annotations
 
 import sys
@@ -15,9 +15,9 @@ from vivarium_workbench.lib.report_views import _acceptance_freshness
 @pytest.fixture
 def stub_grade_freshness(monkeypatch):
     def _install(fn):
-        mod = types.ModuleType("discovery_engine.grader_freshness")
+        mod = types.ModuleType("discovery_engine.reporting.grader_freshness")
         mod.grade_freshness = fn
-        monkeypatch.setitem(sys.modules, "discovery_engine.grader_freshness", mod)
+        monkeypatch.setitem(sys.modules, "discovery_engine.reporting.grader_freshness", mod)
     return _install
 
 
@@ -44,11 +44,11 @@ def test_stale_when_any_member_behind(stub_grade_freshness):
 
 def test_none_when_resolver_unavailable(monkeypatch):
     # ensure the real (absent) module is used -> ImportError path -> None
-    monkeypatch.delitem(sys.modules, "discovery_engine.grader_freshness", raising=False)
+    monkeypatch.delitem(sys.modules, "discovery_engine.reporting.grader_freshness", raising=False)
     import builtins
     real_import = builtins.__import__
     def _blocked(name, *a, **k):
-        if name == "discovery_engine.grader_freshness":
+        if name == "discovery_engine.reporting.grader_freshness":
             raise ImportError("blocked")
         return real_import(name, *a, **k)
     monkeypatch.setattr(builtins, "__import__", _blocked)

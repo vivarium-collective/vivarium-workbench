@@ -1,6 +1,4 @@
-from discovery_engine import study_status
-
-
+from discovery_engine.study import status as study_status
 def _passed(parent):
     counts = study_status.count_test_outcomes(parent, parent.get("runs"))
     return counts["fail"] == 0 and counts["pass"] > 0

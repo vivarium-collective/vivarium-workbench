@@ -32,7 +32,7 @@ from typing import Any
 
 from discovery_engine.paths import find_workspace_root
 from vivarium_workbench.lib.workspace_paths import study_yaml_path
-from discovery_engine.study_io import (
+from discovery_engine.study.io import (
     atomic_write as _atomic_write,
     dump_yaml as _dump,
     load_yaml_mapping as _load,

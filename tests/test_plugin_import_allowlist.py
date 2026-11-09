@@ -50,56 +50,25 @@ ALLOWED: dict[str, str] = {
 }
 
 
-# discovery_engine submodules the workbench imports (the investigation/study
-# framework + discovery cycle that moved out of viva_superpowers in #387). This
-# is the intended core, enumerated from the current tree; a new one must be
-# added here deliberately.
+# discovery_engine modules the workbench imports (the investigation/study
+# framework + discovery cycle that moved out of viva_superpowers in #387, now
+# organized into subpackages). The scanner keys on the component right after
+# ``discovery_engine.`` — so this allowlist is at SUBPACKAGE granularity
+# (``study``, ``phases``, …) plus the handful of top-level modules. A new
+# subpackage/module the workbench pulls in must be added here deliberately.
 ALLOWED_DISCOVERY: dict[str, str] = {
-    "argument_store": "claims + argument-graph projection",
-    # DE2.0 cycle phase modules — pure, read-only projections the Discovery Engine
-    # (Cycle) panel runs as its traced step graph (lib/cycle_trace.py). None writes.
-    "evidence_integrity": "Phase A: reconcile evidence integrity (VERIFIED/PROVISIONAL/…)",
-    "candidate_action": "Phase B: plan candidate actions + select portfolio",
-    "experiment_design": "Phase C: design a discriminating study",
-    "model_architect": "Phase D: model catalog + acquisition routing",
-    "capability_gaps": "capability-gap loop: propose/accept/reject/build + close-on-coverage",
-    "evaluation": "Phase F: compare hypotheses, disagreement map, DiscoveryDelta",
-    "study_seeding": "Growth loop: select-for-launch + seed a study (preview)",
-    "study_refinement": "Growth loop: refinement needs + refine a study (preview)",
-    "band_provenance": "acceptance-band provenance",
+    "projection": "Layer-1 projection: crank/frontier/closure/opportunities/diagnose, knowledge/argument/narrative, resolution",
+    "phases": "Layer-2 cycle A–F: evidence_integrity, candidate_action, experiment_design, model_architect, evaluation, hypotheses, generation",
+    "growth": "growth loop: select-for-launch + seed + refine (previews)",
+    "study": "study data model + lifecycle: io, audit, evaluator, verdict, status, outcomes, readouts, band_provenance, finding_observations",
+    "investigation": "investigation lifecycle: close, inputs, status, reconcile",
+    "reporting": "reports/cards/grading: report linter, rigor, validation, card_*, test_*, grader_freshness",
+    "viz": "figure freshness / appropriateness / proposals",
+    "feedback": "feedback compiler + capability gaps",
+    "integration": "workspace/server plumbing: scaffold, workspace_catalog, workspace_lint, post_sim",
+    "discover": "read-only discovery cycle entry (run_cycle / load_cycle_inputs)",
     "bibtex": "citation parsing for the report linter",
-    "discover": "read-only discovery cycle (run_cycle / load_cycle_inputs)",
-    "discovery_engine": "crank/frontier/closure/opportunities/diagnose projection",
-    "finding_observations": "finding observation slots",
-    "generation": "AI-drivable cycle: GenerationRequest contract + GateConfig",
-    "generation_emit": "AI-drivable cycle: opportunities -> typed GenerationRequests projection",
-    "hypotheses": "hypothesis support log",
-    "investigation_close": "close mechanic (backs /api/iset-close)",
-    "investigation_inputs": "investigation input resolution",
-    "investigation_status": "investigation acceptance roll-up",
-    "knowledge_store": "canonical-verdict + concept projection",
-    "narrative": "narrate + audit projection over the argument graph",
     "paths": "offline workspace-root/layout resolution",
-    "post_sim": "post-sim Step family + build_report",
-    "readout_migration": "readout-migration status/apply",
-    "readout_resolver": "readout resolution",
-    "relations": "study-relation projection",
-    "report_linter": "report structural lint",
-    "rigor": "rigor scorecard",
-    "scaffold": "workspace/investigation scaffolding",
-    "seed_from_followup": "follow-up seeding for the report linter",
-    "study_audit": "L0-L5 audit",
-    "study_evaluator": "outcome evaluation",
-    "study_io": "atomic YAML load/save",
-    "study_outcomes": "study outcomes",
-    "study_status": "study test bucketing/status",
-    "study_verdict": "lifecycle verdicts + severity_gate",
-    "synthesis": "synthesis spine + open-calls roll-up",
-    "test_diff": "cross-iteration test diff (diff_reports)",
-    "viz_freshness": "viz freshness/staleness",
-    "grader_freshness": "computed-grade freshness (fresh|stale) — Phase 2 graded-outcomes",
-    "narrative_freshness": "investigation-tab freshness (verdict / narrative / decisions)",
-    "workspace_catalog": "workspace catalog registration",
     "workspace_paths": "canonical workspace layout resolution",
 }
 

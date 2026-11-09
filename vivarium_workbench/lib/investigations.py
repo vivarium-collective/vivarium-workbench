@@ -2211,7 +2211,7 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
         if stamp:
             try:
                 import time as _time
-                from discovery_engine.viz_freshness import stamp_meta
+                from discovery_engine.viz.freshness import stamp_meta
                 stamp_meta(target, source_run_id=latest_run, generation_id=None,
                            rendered_at=_time.time(),
                            command=f"render_visualizations:{vname}")

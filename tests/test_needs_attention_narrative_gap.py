@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("discovery_engine.argument_store")
-pytest.importorskip("discovery_engine.narrative")
+pytest.importorskip("discovery_engine.projection.argument")
+pytest.importorskip("discovery_engine.projection.narrative")
 
-from discovery_engine import study_io  # noqa: E402
+from discovery_engine.study import io as study_io  # noqa: E402
 from vivarium_workbench.lib.needs_attention import scan_investigation  # noqa: E402
 
 
@@ -56,7 +56,7 @@ def test_narrative_gap_becomes_a_needs_attention_item(tmp_path, monkeypatch):
     # question tracked in #1499.
     root = _ws_two_unlinked_claims(tmp_path)
 
-    import discovery_engine.argument_store as _argstore
+    import discovery_engine.projection.argument as _argstore
 
     def _graph_with_declared_gap(_inv_spec, _studies_by_slug):
         return {
@@ -70,7 +70,7 @@ def test_narrative_gap_becomes_a_needs_attention_item(tmp_path, monkeypatch):
                        "type": "association", "relation": "authored"}],
         }
 
-    # _narrative_gap_items does `from discovery_engine.argument_store import
+    # _narrative_gap_items does `from discovery_engine.projection.argument import
     # derive_argument` at call time, so patching the source attribute takes effect.
     monkeypatch.setattr(_argstore, "derive_argument", _graph_with_declared_gap)
 

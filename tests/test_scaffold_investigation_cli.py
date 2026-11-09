@@ -2,8 +2,8 @@
 (``cli.cmd_scaffold_investigation``).
 
 Phase 2.1k step 0: wraps
-``discovery_engine.scaffold.scaffold_investigation_from_wrapper`` so the
-``/viva-expert`` skill can stop shelling ``python -m discovery_engine.scaffold
+``discovery_engine.integration.scaffold.scaffold_investigation_from_wrapper`` so the
+``/viva-expert`` skill can stop shelling ``python -m discovery_engine.integration.scaffold
 investigation-from-wrapper``. Bootstrap (pre-server) op → a ``vwb`` verb.
 """
 import json
@@ -45,9 +45,9 @@ def test_requires_studies(tmp_path, capsys):
 
 
 def test_scaffolds_investigation_and_studies(tmp_path, capsys):
-    scaffold = pytest.importorskip("discovery_engine.scaffold")
+    scaffold = pytest.importorskip("discovery_engine.integration.scaffold")
     if not hasattr(scaffold, "scaffold_investigation_from_wrapper"):
-        pytest.skip("installed discovery_engine.scaffold predates investigation-from-wrapper")
+        pytest.skip("installed discovery_engine.integration.scaffold predates investigation-from-wrapper")
     ws = _mk_ws(tmp_path)
     rc = cli.cmd_scaffold_investigation(_args(
         workspace=str(ws), name="DnaA Replication",

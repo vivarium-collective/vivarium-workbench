@@ -1622,7 +1622,7 @@ def _render_perf_sweep_charts(conn) -> list[dict]:
 def latest_run_row(runs_db) -> dict | None:
     """Newest runs_meta row as {run_id, completed_at, generation_id, emitter_path},
     tolerating older DBs missing the optional columns. Mirrors
-    discovery_engine.run_registry.latest_run (not importable here)."""
+    discovery_engine.study.run_registry.latest_run (not importable here)."""
     runs_db = Path(runs_db)
     if not runs_db.is_file():
         return None
@@ -1701,7 +1701,7 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
     import yaml as _yaml
 
     from vivarium_workbench.lib.simulations_index import discover_default_baseline_db
-    from discovery_engine.viz_freshness import chart_freshness, manifest_diff
+    from discovery_engine.viz.freshness import chart_freshness, manifest_diff
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     # Layout-aware: a study may live nested under

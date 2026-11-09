@@ -34,7 +34,7 @@ from typing import Any, Callable, Iterable
 import yaml
 
 from discovery_engine.bibtex import bib_keys
-from discovery_engine.study_io import load_yaml, save_yaml_atomic
+from discovery_engine.study.io import load_yaml, save_yaml_atomic
 from discovery_engine.workspace_paths import WorkspacePaths
 
 from vivarium_workbench.lib.expert_search import search_expert_docs

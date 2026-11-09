@@ -16,13 +16,13 @@ def _inputs(ws_root, slug: str):
 
 
 def _ev_state(inv_spec, studies, runs_by):
-    from discovery_engine import evidence_integrity
+    from discovery_engine.phases import evidence_integrity
     return evidence_integrity.reconcile_evidence_state(inv_spec, studies, runs_by)
 
 
 def build_discovery_delta(ws_root, slug: str) -> dict:
     try:
-        from discovery_engine import evaluation
+        from discovery_engine.phases import evaluation
         inv_spec, studies, runs_by = _inputs(ws_root, slug)
     except Exception as e:
         return {"available": False, "error": f"{type(e).__name__}: {e}"}

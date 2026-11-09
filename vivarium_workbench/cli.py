@@ -135,7 +135,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     def _unregister():
         try:
-            from discovery_engine import workspace_catalog
+            from discovery_engine.integration import workspace_catalog
             workspace_catalog.unregister_server(workspace)
         except Exception:
             pass
@@ -154,7 +154,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # non-fatal — the dashboard still works, it just won't appear in other
     # dashboards' switchers.
     try:
-        from discovery_engine import workspace_catalog
+        from discovery_engine.integration import workspace_catalog
         ws_name = _workspace_name(workspace)
         # Ensure this workspace appears in OTHER dashboards' switchers.
         # add() is idempotent; safe to call on every boot.
@@ -954,12 +954,12 @@ def cmd_add_dashboard(args: argparse.Namespace) -> int:
 
 def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
     """Scaffold a new process-bigraph workspace (bootstrap — runs before any
-    server exists). Wraps ``discovery_engine.scaffold`` (Phase 2.1i rewire-
+    server exists). Wraps ``discovery_engine.integration.scaffold`` (Phase 2.1i rewire-
     first: the plugin still owns the scaffold payload; only the caller — the
-    ``/viva-workspace`` skill — moves from ``python -m discovery_engine.scaffold``
+    ``/viva-workspace`` skill — moves from ``python -m discovery_engine.integration.scaffold``
     to this ``vwb`` verb. The module move is 2.1k)."""
     try:
-        from discovery_engine import scaffold
+        from discovery_engine.integration import scaffold
     except ImportError as e:  # noqa: BLE001
         print(f"error: workspace scaffolding requires viva_superpowers: {e}", file=sys.stderr)
         return 1
@@ -986,10 +986,10 @@ def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
 def cmd_catalog_add(args: argparse.Namespace) -> int:
     """Register a workspace in ``~/.pbg/workspaces.json`` so it appears in the
     dashboard's workspace switcher (idempotent). Wraps
-    ``discovery_engine.workspace_catalog.add`` — the same call ``vwb serve``
+    ``discovery_engine.integration.workspace_catalog.add`` — the same call ``vwb serve``
     already makes on boot (Phase 2.1i rewire-first)."""
     try:
-        from discovery_engine import workspace_catalog
+        from discovery_engine.integration import workspace_catalog
     except ImportError as e:  # noqa: BLE001
         print(f"error: catalog registration requires viva_superpowers: {e}", file=sys.stderr)
         return 1
@@ -1009,11 +1009,11 @@ def cmd_catalog_add(args: argparse.Namespace) -> int:
 def cmd_scaffold_investigation(args: argparse.Namespace) -> int:
     """Scaffold an investigation + one skeleton study per composite generator
     (the ``investigation-from-wrapper`` bootstrap). Wraps
-    ``discovery_engine.scaffold.scaffold_investigation_from_wrapper`` (Phase
+    ``discovery_engine.integration.scaffold.scaffold_investigation_from_wrapper`` (Phase
     2.1k step 0 — completes the ``/viva-expert`` rewire; the plugin still owns
     the scaffold payload, only the caller moves)."""
     try:
-        from discovery_engine import scaffold
+        from discovery_engine.integration import scaffold
     except ImportError as e:  # noqa: BLE001
         print(f"error: investigation scaffolding requires viva_superpowers: {e}", file=sys.stderr)
         return 1

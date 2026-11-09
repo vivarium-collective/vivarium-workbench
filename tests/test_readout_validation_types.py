@@ -34,7 +34,7 @@ class TestTypesMap:
         assert "leaves" in res and "catalogs" in res
 
 
-from discovery_engine.readout_resolver import ResolvedReadout
+from discovery_engine.study.readout_resolver import ResolvedReadout
 from vivarium_workbench.lib.readout_validation import _validate_resolved, _units_compatible
 
 

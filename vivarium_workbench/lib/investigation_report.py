@@ -985,7 +985,7 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
     viva_superpowers predates the discovery engine, so the report never breaks."""
     try:
         from discovery_engine import discover
-        from discovery_engine import discovery_engine as de
+        from discovery_engine.projection import engine as de
         _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
         cyc = discover.run_cycle(inv_spec, studies)
         clo = de.closure(cyc, inv_spec)
@@ -1048,9 +1048,9 @@ def build_generation_requests(ws_root, inv_slug: str) -> "dict | None":
     ``None`` on an engine without the generation contract so the panel never breaks."""
     try:
         from discovery_engine import discover
-        from discovery_engine import discovery_engine as de
-        from discovery_engine.generation import GateConfig
-        from discovery_engine.generation_emit import generation_requests
+        from discovery_engine.projection import engine as de
+        from discovery_engine.phases.generation import GateConfig
+        from discovery_engine.phases.generation_emit import generation_requests
     except Exception:
         return None
     try:
@@ -1091,7 +1091,7 @@ def set_generation_gates(ws_root, inv_slug: str, *, preset: "str | None" = None,
     gate, ``FileNotFoundError`` if the investigation is absent."""
     import ruamel.yaml
     from io import StringIO
-    from discovery_engine.generation import GATES, KINDS, GateConfig
+    from discovery_engine.phases.generation import GATES, KINDS, GateConfig
     from vivarium_workbench.lib.atomic_io import atomic_write_text
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
@@ -1270,7 +1270,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
     except Exception:  # noqa: BLE001
         _synthesis["validation"] = {"items": [], "summary": {"total": 0, "by_kind": {}, "by_severity": {}}}
     # Also fold in the EXISTING report-readiness linter (report_views.build_report_lint
-    # → discovery_engine.report_linter + the dashboard's composite-resolution,
+    # → discovery_engine.reporting.linter + the dashboard's composite-resolution,
     # readout-emit-plan, question/approach and visualization-gap checks). Same
     # deterministic infra the live report-lint endpoint uses — reused, not rebuilt.
     try:

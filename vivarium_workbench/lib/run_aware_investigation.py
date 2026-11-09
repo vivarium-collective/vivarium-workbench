@@ -147,7 +147,7 @@ def resolve_gate_status(spec: dict) -> tuple[Optional[str], Optional[str]]:
         return authored, "authored"
     result = None
     try:
-        from discovery_engine.study_verdict import roll_up_verdict  # noqa: PLC0415
+        from discovery_engine.study.verdict import roll_up_verdict  # noqa: PLC0415
         result = (roll_up_verdict(spec) or {}).get("result")
     except Exception:  # noqa: BLE001 -- engine optional
         result = None
@@ -176,7 +176,7 @@ def engine_view(inv_spec: dict, studies_by_slug: dict) -> Optional[dict]:
     """One discovery cycle -> ``{closure, open_decision_targets}`` (or None)."""
     try:
         from discovery_engine import discover  # noqa: PLC0415
-        from discovery_engine import discovery_engine as de  # noqa: PLC0415
+        from discovery_engine.projection import engine as de  # noqa: PLC0415
         slugs = _members(inv_spec, studies_by_slug)
         spec = dict(inv_spec)
         spec["studies"] = slugs
