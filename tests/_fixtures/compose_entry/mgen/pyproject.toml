@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "viva-mgen"
+version = "0.1.0"
+description = "Viva-native (process-bigraph) reproduction of the Karr et al. 2012 Mycoplasma genitalium whole-cell model"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [{name = "Eran Agmon", email = "agmon.eran@gmail.com"}]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+# Core scientific runtime — all on PyPI, so `pip install viva-mgen` works.
+# pyyaml + jsonschema are here (not just the workspace extra) because the
+# workspace linter (scripts/lint-workspace.py, run in CI) needs them.
+dependencies = [
+    "bigraph-schema",
+    "process-bigraph",
+    "numpy",
+    "scipy",
+    "plotly",
+    "cobra",
+    "pyyaml>=6.0",
+    "jsonschema[format-nongpl]>=4.21",
+    "viva-parsimony",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib"]
+# The pbg-superpowers workspace/dashboard stack (study runners, publish, gen-readme).
+# Some pieces are installed from source clones during development.
+workspace = [
+    "bigraph-viz>=2.0.3",
+    "jinja2>=3.1",
+    "pypdf>=4.0",
+    "matplotlib",
+    "vivarium-workbench",
+    "xarray",
+    "zarr",
+]
+
+[project.urls]
+Homepage = "https://github.com/vivarium-collective/viva-Mgen"
+Issues = "https://github.com/vivarium-collective/viva-Mgen/issues"
+
+[tool.uv.sources]
+viva-parsimony = { git = "https://github.com/vivarium-collective/viva-parsimony", branch = "main" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["viva_mgen"]
+
+# Ship the datasets (iPS189 SBML, gene list, fitted constants) inside the wheel
+# so `pip install viva-mgen` works without the repo checkout. viva_mgen.kb
+# resolves them from viva_mgen/datasets/ when repo-root datasets/ is absent.
+[tool.hatch.build.targets.wheel.force-include]
+"datasets" = "viva_mgen/datasets"
