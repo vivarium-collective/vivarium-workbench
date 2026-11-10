@@ -50,3 +50,12 @@ def test_a_listing_that_reports_an_error_is_not_remembered(ws):
     data = q.composites_via_subprocess(ws)
     assert data is not None and data.get("error"), f"expected the listing to report the failure: {data}"
     assert _remembered(ws) == (False, False)
+
+
+def test_a_poisoned_disk_entry_from_an_earlier_version_is_ignored(ws):
+    """Versions before this fix persisted a failed listing; it must not keep serving after the upgrade."""
+    sig = cdc.catalog_signature(ws)
+    assert sig != cdc.DISABLED
+    cdc.store(ws, "composites", sig, {"composites": [], "error": "POST .../workers/relay failed: timed out"})
+    data = q.composites_via_subprocess(ws)
+    assert data and data.get("composites") and not data.get("error"), data

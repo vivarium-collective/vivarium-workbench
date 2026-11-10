@@ -616,7 +616,11 @@ def build_registry(ws_root: Path, *, bypass_cache: bool = False) -> dict:
     except Exception as e:
         data = {"error": str(e), "processes": [], "types": []}
 
-    _REGISTRY_CACHE[_cache_key] = {"data": data, "ts": now}
+    # Never remember a failed build: the TTL is an hour, and a transient failure (for
+    # example a cold env worker that timed out) would leave the Registry empty for all
+    # of it. The error is returned to the caller; the next request retries.
+    if not data.get("error"):
+        _REGISTRY_CACHE[_cache_key] = {"data": data, "ts": now}
     return data
 
 

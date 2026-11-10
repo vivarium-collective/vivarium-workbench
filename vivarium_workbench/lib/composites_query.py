@@ -103,7 +103,9 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
     sig = catalog_disk_cache.catalog_signature(ws_root)
     if not bypass_cache:
         cached = catalog_disk_cache.load(ws_root, "composites", sig)
-        if cached is not None:
+        # An entry carrying an `error` was persisted by a version that cached failures;
+        # serving it would keep the tab empty after the upgrade. Recompute instead.
+        if cached is not None and not (isinstance(cached, dict) and cached.get("error")):
             _COMPOSITES_CACHE[ws_root_str] = {"data": cached, "ts": now}
             return cached
 
