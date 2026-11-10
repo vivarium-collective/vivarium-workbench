@@ -1609,25 +1609,20 @@ def _discover_composites() -> dict:
         merged = {}
     for gid, entry in merged.items():
         if isinstance(entry, dict) and entry.get("kind") == "generator":
-            # Count the composite's own process/step nodes (excluding the emitter)
-            # by building its doc from the registry spec — the generator just
-            # returns the node dict, so this doesn't instantiate the processes.
-            # Self-contained + guarded: None on any failure.
+            # #1574: do NOT build the composite document here just to count its
+            # process/step nodes. Building runs the generator's BODY, and a
+            # generator body may do arbitrary, expensive work with on-disk side
+            # effects (v2ecoli's `parca_prep` kicks off a full ParCa inside its
+            # body — ~163s, ~4.5 GB of untracked files — on a workspace with no
+            # cache). A read-only listing must never execute a generator body.
+            #
+            # The process count is not available as declared metadata, so it is
+            # computed lazily OFF the listing path: the frontend fills each
+            # card's "· N processes" badge on demand via /api/composite-resolve
+            # when (and only when) that specific card is viewed (see
+            # static/composite-card.js `_ensureCompositeProcCount`). Leaving
+            # n_processes None here triggers exactly that lazy fallback.
             n_proc = None
-            try:
-                from process_bigraph.composite_generator import (
-                    _REGISTRY as _REG, build_generator as _bg,
-                )
-                _spec = _REG.get(gid)
-                if _spec is not None:
-                    doc = _bg(_spec) or {}
-                    n_proc = sum(
-                        1 for v in doc.values()
-                        if isinstance(v, dict) and v.get("_type") in ("process", "step")
-                        and "Emitter" not in str(v.get("address") or "")
-                    )
-            except Exception:  # noqa: BLE001 — never block discovery on the count
-                n_proc = None
             out[gid] = {
                 "name": entry.get("name"),
                 "description": entry.get("description", ""),
