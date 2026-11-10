@@ -116,6 +116,36 @@ def build_composite_run_state(
     return {"run_id": run_id, "step": step, "state": state}, 200
 
 
+def _salient_error_excerpt(text: str) -> str:
+    """The meaningful tail of a failed run's log, leading with the real error.
+
+    Issue #1573: a failed composite build prints an early ``UserWarning`` (e.g.
+    from ``composite_generator.py``) long before the actual failure, so the naive
+    last-2000-chars slice leads with that warning whenever the whole log fits in
+    the window — and the UI shows a *warning* as the failure reason. Anchor the
+    excerpt at the real error instead: the ``composite build failed`` line the
+    runner prints on a build failure, else the final traceback, else the last
+    non-empty line. Still capped at 2000 chars; the full log stays at ``log_path``.
+    """
+    lines = text.splitlines()
+    nonempty = [i for i, ln in enumerate(lines) if ln.strip()]
+    if not nonempty:
+        return text[-2000:]
+    start: int | None = None
+    for i in reversed(nonempty):
+        if "composite build failed" in lines[i].lower():
+            start = i
+            break
+    if start is None:
+        for i in reversed(nonempty):
+            if lines[i].lstrip().startswith("Traceback (most recent call last)"):
+                start = i
+                break
+    if start is None:
+        start = nonempty[-1]
+    return "\n".join(lines[start:])[-2000:]
+
+
 def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
     """Worker for ``GET /api/composite-run/{run_id}/status``.
 
@@ -191,7 +221,8 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
             resp["log_path"] = log_rel
             log_full = ws_root / log_rel
             if log_full.is_file():
-                resp["error"] = log_full.read_text(encoding="utf-8")[-2000:]
+                resp["error"] = _salient_error_excerpt(
+                    log_full.read_text(encoding="utf-8"))
     elif meta["status"] == "completed":
         wp = WorkspacePaths.load(ws_root)
         run_dir = wp.pbg / "runs" / run_id
