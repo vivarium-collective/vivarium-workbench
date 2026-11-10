@@ -13,7 +13,6 @@ build_dirty_status   → GET /api/dirty-status
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
@@ -158,8 +157,7 @@ def remote_push_and_sha(ws_root: Path) -> str:
     token = env.get("GH_TOKEN") or env.get("GITHUB_TOKEN")
     cmd = ["git"]
     if token:
-        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-        cmd += ["-c", f"http.extraHeader=AUTHORIZATION: basic {basic}"]
+        cmd += ["-c", f"http.extraHeader={github_auth.basic_auth_header(token)}"]
     cmd += ["push", "-u", "origin", branch]
     push = subprocess.run(
         cmd, cwd=ws_root,
