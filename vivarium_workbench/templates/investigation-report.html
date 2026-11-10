@@ -572,16 +572,52 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
 
 <main id="app"></main>
 
-<button class="fbfloat" id="fbfloat">Review &amp; export <span class="cnt" id="fbcnt">0</span></button>
-<div class="modal-bg" id="modalbg"><div class="modal">
-  <h3>Feedback report</h3>
-  <div class="sub">Your notes across the report, as a YAML feedback document — the same shape the workbench ingests. Copy it, or select all and save.</div>
-  <textarea id="fbyaml" spellcheck="false" readonly></textarea>
-  <div class="mfoot">
-    <button id="fbcopy">Copy YAML</button>
-    <button class="primary" id="fbclose">Close</button>
-  </div>
-</div></div>
+<!-- Inline expert-feedback: the shared engine (single source:
+     static/study-feedback.js) decorates every `.fbsection` and study card with a
+     hover-corner 💬 and shows a bottom-right export button once notes exist. The
+     engine source is inlined by render_html (token below) so the downloaded
+     report stays self-contained; it emits the canonical meta+annotations YAML. -->
+<script>window.__VIVA_FB_META__ = __FEEDBACK_META__;</script>
+<script>
+window.__VIVA_FB_CONFIG__ = (function () {
+  function slugify(s) { return (String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48)) || "x"; }
+  function meta() { return window.__VIVA_FB_META__ || {}; }
+  function cardOf(el) { return el.closest && el.closest('section.card[id^="s-"]'); }
+  function cardSlug(card) { return card ? (card.id || "").replace(/^s-/, "") : ""; }
+  function cardTitle(card) { var t = card && card.querySelector(".ctitle"); return (t && t.textContent.trim()) || cardSlug(card); }
+  function localKey(el) {
+    var id = (el.id || "").trim();
+    if (id) return slugify(id);
+    var sl = el.querySelector(":scope > .slabel"); if (sl) return slugify(sl.textContent);
+    var h = el.querySelector(".sec-h h2, h2, h3, figcaption"); if (h) return slugify(h.textContent);
+    return "section";
+  }
+  function sectionLabel(el) {
+    var h = el.querySelector(":scope > .slabel, .sec-h h2, h2, h3, figcaption");
+    return (h && h.textContent.trim().slice(0, 80)) || localKey(el);
+  }
+  return {
+    context: "investigation",
+    observeRoot: "#app",
+    title: "Feedback on " + ((meta().title) || meta().investigation || "investigation"),
+    meta: { investigation: function () { return meta().investigation || ""; } },
+    storeId: "inv." + slugify(meta().investigation || "investigation"),
+    allowInvestigationEdit: false,
+    noSave: true,
+    groups: [{ id: "studies", name: "Per-study" }, { id: "investigation", name: "Investigation" }],
+    regions: [
+      { sel: 'section.card[id^="s-"]', group: "studies",
+        sid: function (el) { return "study-" + slugify(cardSlug(el)); },
+        label: function (el) { return "Study: " + cardTitle(el); } },
+      { sel: ".fbsection",
+        group: function (el) { return cardOf(el) ? "studies" : "investigation"; },
+        sid: function (el) { var c = cardOf(el); return c ? "study-" + slugify(cardSlug(c)) + "-" + localKey(el) : "investigation-" + localKey(el); },
+        label: function (el) { var c = cardOf(el); return c ? cardTitle(c) + " · " + sectionLabel(el) : sectionLabel(el); } }
+    ]
+  };
+})();
+</script>
+<script>__FEEDBACK_JS__</script>
 
 <footer><div class="wrap">
   <div>Rendered from workspace <span class="mono" id="foot-ws"></span> · deterministic from investigation + study YAML.</div>
@@ -1063,7 +1099,11 @@ function fmt(n){ if(typeof n!=='number') return esc(n); return Number.isInteger(
 function provText(p){ if(!p) return ''; if(typeof p==='string') return p;
   if(typeof p==='object') return String(p.note||p.rationale||p.kind||Object.values(p).filter(v=>typeof v==='string').join(' · ')||''); return String(p); }
 
-function fbBubble(key,label){ return `<button class="fbbubble ${FB[key]?'has':''}" data-fb="${esc(key)}" data-fblabel="${esc(label)}" title="Add feedback to this section" aria-label="Add feedback to ${esc(label)}">💬</button>`; }
+// Legacy inline bubble — superseded by the shared feedback engine
+// (static/study-feedback.js, inlined near the end of this document), which
+// decorates every `.fbsection` / study card with a hover-corner. Kept as a
+// no-op so the render markup (which still calls it) stays intact.
+function fbBubble(key,label){ return ''; }
 function part(label, body, key, klabel){ if(!body) return '';
   return `<div class="substage fbsection">${key?fbBubble(key,klabel||label):''}<div class="slabel">${label}</div>${body}</div>`; }
 
@@ -1624,15 +1664,9 @@ function setFB(key,patch){ FB[key]={...(FB[key]||{}),...patch};
   if(!FB[key].note && !FB[key].disp) delete FB[key]; saveFB(); }
 function fbCount(){ return Object.keys(FB).length; }
 function updateCount(){ const el=document.getElementById('fbcnt'); if(el) el.textContent=fbCount(); }
-function feedbackRow(key,label){ const f=FB[key]||{};
-  return `<div class="fbrow" data-fbkey="${esc(key)}">
-    <span class="fblabel">Feedback · ${esc(label)}</span>
-    <div class="fbdisp">
-      <button data-disp="ok" class="${f.disp==='ok'?'on-ok':''}">👍 Looks right</button>
-      <button data-disp="revise" class="${f.disp==='revise'?'on-rev':''}">✏️ Needs revision</button>
-    </div>
-    <input class="fbnote" placeholder="Add a note…" value="${esc(f.note||'')}"></div>`;
-}
+// Legacy inline editor row — superseded by the shared feedback engine's popover.
+// No-op so render markup that calls feedbackRow('overall', …) stays intact.
+function feedbackRow(key,label){ return ''; }
 function yq(s){ return '"'+String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\n/g,' ')+'"'; }
 function genYaml(inv){
   const L=['feedback_report:','  investigation: '+inv.slug,'  title: '+yq(inv.title),
@@ -2950,27 +2984,8 @@ app.addEventListener('click',e=>{
   const head=e.target.closest('.card-h');
   if(head){ head.closest('.card').classList.toggle('collapsed'); }
 });
-// modal
-const modalbg=document.getElementById('modalbg');
-// "Review & export" downloads the YAML feedback report straight to the downloads
-// folder (no modal). A Blob + transient <a download> — works in the served page.
-document.getElementById('fbfloat').onclick=()=>{
-  const yaml=genYaml(INV);
-  const blob=new Blob([yaml],{type:'application/x-yaml'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download='feedback-'+(INV.slug||'investigation')+'.yaml';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),1000);
-  const btn=document.getElementById('fbfloat');
-  const prev=btn.innerHTML; btn.innerHTML='Downloaded ✓';
-  setTimeout(()=>{btn.innerHTML=prev;},1600);
-};
-document.getElementById('fbclose').onclick=()=>modalbg.classList.remove('open');
-modalbg.onclick=e=>{ if(e.target===modalbg) modalbg.classList.remove('open'); };
-document.getElementById('fbcopy').onclick=()=>{ const ta=document.getElementById('fbyaml'); ta.select();
-  try{ navigator.clipboard.writeText(ta.value); }catch(e){ document.execCommand&&document.execCommand('copy'); }
-  document.getElementById('fbcopy').textContent='Copied ✓'; setTimeout(()=>document.getElementById('fbcopy').textContent='Copy YAML',1500); };
+// (Legacy export button + modal removed — the shared feedback engine
+// [static/study-feedback.js, inlined] now owns collection + export.)
 render(INV);
 </script>
 </body>

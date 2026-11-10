@@ -21,8 +21,8 @@ def ws_copy(tmp_path):
     return ws
 
 
-def test_analysis_tools_endpoint(dashboard_client, ws_copy):
-    client = dashboard_client(workspace=ws_copy)
+def test_analysis_tools_endpoint(inproc_client, ws_copy):
+    client = inproc_client(workspace=ws_copy)
     r = client.get("/api/analysis-tools")
     assert r.status_code == 200
     body = r.json()

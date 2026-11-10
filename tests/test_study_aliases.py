@@ -39,19 +39,19 @@ def _study_ws(tmp_path, slug="demo-study"):
     return ws, slug
 
 
-def test_study_detail_alias_route_resolves(tmp_path, dashboard_client):
+def test_study_detail_alias_route_resolves(tmp_path, inproc_client):
     """GET /api/study/<slug> (the surviving study alias) serves the study spec."""
     ws, slug = _study_ws(tmp_path)
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     r = client.get(f"/api/study/{slug}")
     assert r.status_code == 200
     assert r.json().get("name") == slug
 
 
-def test_study_detail_alias_route_404_for_unknown(tmp_path, dashboard_client):
+def test_study_detail_alias_route_404_for_unknown(tmp_path, inproc_client):
     """A registered route (not a missing one) returns the loader's 404 body."""
     ws, _ = _study_ws(tmp_path)
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     r = client.get("/api/study/does-not-exist")
     assert r.status_code == 404
     assert "not found" in r.json().get("error", "")

@@ -351,6 +351,65 @@ def test_flat_and_nested_builders_record_same_keys():
         "stores": {"x": ["stores", "x"], "y": ["stores", "y"]}}
 
 
+def test_declared_emitter_skips_agents0_mirror_without_agents_map():
+    """#1473: collect_emit_paths_from_spec unconditionally adds an ``agents/0/``
+    mirror of every declared path (so v2ecoli single-cell composites, which
+    scope every store under ``agents/0/``, capture their biology). For a
+    composite that has NO ``agents`` store that mirror resolves nowhere and
+    gets wired as an empty ``{"agents": {"0": {...}}}`` into every
+    history.state row. The declared-emitter builder must drop the mirror when
+    the state has no real ``agents`` map."""
+    from vivarium_workbench.lib.composite_runs import (
+        inject_emitter_for_declared_paths,
+    )
+
+    state = {"vitals": {"mean_arterial_pressure_mmHg": 80.0}, "global_time": 0.0}
+    declared = ["vitals/mean_arterial_pressure_mmHg",
+                "agents/0/vitals/mean_arterial_pressure_mmHg"]
+    em = inject_emitter_for_declared_paths(state, declared)["user_emitter"]
+    emit = em["config"]["emit"]
+    inputs = em["inputs"]
+    assert "agents" not in emit
+    assert "agents" not in inputs
+    # the real (literal) path is still wired
+    assert "vitals" in emit and "vitals" in inputs
+
+
+def test_declared_emitter_keeps_agents0_mirror_when_composite_has_agents():
+    """The legitimate v2ecoli single-cell case: when the state DOES carry an
+    ``agents`` map the agent-scoped path is the one that actually holds data,
+    so it must stay wired (the #1473 guard must not break this)."""
+    from vivarium_workbench.lib.composite_runs import (
+        inject_emitter_for_declared_paths,
+    )
+
+    state = {"agents": {"0": {"vitals": {"mean_arterial_pressure_mmHg": 80.0}}},
+             "global_time": 0.0}
+    declared = ["vitals/mean_arterial_pressure_mmHg",
+                "agents/0/vitals/mean_arterial_pressure_mmHg"]
+    em = inject_emitter_for_declared_paths(state, declared)["user_emitter"]
+    emit = em["config"]["emit"]
+    inputs = em["inputs"]
+    assert "agents" in emit and "0" in emit["agents"]
+    assert "agents" in inputs and "0" in inputs["agents"]
+
+
+def test_declared_emitter_keeps_standalone_agent_path_with_no_literal_sibling():
+    """The #1473 guard must only drop a spurious MIRROR (an ``agents/0/p``
+    duplicate of a literal ``p`` that is also declared). A standalone
+    ``agents/0/...`` path with no literal sibling — e.g. an ``agents`` map
+    created at run time by a process output — must stay wired even though the
+    spec-time state has no ``agents`` store."""
+    from vivarium_workbench.lib.composite_runs import (
+        inject_emitter_for_declared_paths,
+    )
+
+    state = {"inoculate": {"_type": "process", "address": "local:Inoculate"}}
+    em = inject_emitter_for_declared_paths(state, ["agents/0"])["user_emitter"]
+    assert "agents" in em["config"]["emit"]
+    assert "0" in em["config"]["emit"]["agents"]
+
+
 # -- all_store_paths ---------------------------------------------------------
 
 def test_all_store_paths_returns_store_keys_skipping_steps_and_processes():

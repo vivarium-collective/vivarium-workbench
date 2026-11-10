@@ -29,7 +29,7 @@ def test_remote_run_start_requires_login(monkeypatch, tmp_path):
 
 
 def test_test_suite_cannot_reach_a_live_deployment(
-    dashboard_client, tmp_path, _isolate_viva_api_base
+    inproc_client, tmp_path, _isolate_viva_api_base
 ):
     """The isolation itself, asserted — otherwise it can regress silently and
     the only symptom is tests quietly talking to real infrastructure again.
@@ -51,7 +51,7 @@ def test_test_suite_cannot_reach_a_live_deployment(
     ws.mkdir()
     (ws / "workspace.yaml").write_text("name: isolation-ws\n")
     (ws / ".pbg").mkdir()
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     res = client.get("/api/source/remote-health")
     assert res.status_code == 200, res.text
     body = res.json()

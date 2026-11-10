@@ -253,6 +253,35 @@ never a hang or a 500:
 The failing `uv` output tail is the actionable part — it's what a user needs to fix
 their lockfile — so it is captured and returned, not swallowed.
 
+**Private git dependencies.** `uv sync` fetches git-pinned dependencies itself (sms-ecoli
+pins the private `vivarium-collective/v2ecoli`), with git prompts disabled and no
+credential helper in the container. `materialize` therefore hands the subprocess the
+signed-in GitHub session's token through git's own environment config
+(`github_auth.git_https_env`: `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, scoped to
+`https://github.com/`, appended after any config the operator already set, written to
+no file, on no command line or URL); the failure tail is scrubbed with `mask_token`
+before it reaches the browser.
+
+- **No session** (or the session lookup fails, which never fails a build that needs no
+  credential): the sync runs without one and fails as before with
+  `fatal: could not read Username for 'https://github.com': terminal prompts disabled`
+  in the tail. Sign in from the GitHub panel, then start the build again from the
+  Environment panel ("Use this environment"). The toast's Retry re-runs only managed
+  `repo@ref` builds; for a switched build it just reloads the page.
+- **The account must be able to read the dependency.** An expired or revoked token is
+  rejected by GitHub (sign in again); an account outside the organisation, or one its
+  SSO / OAuth-app policy has not authorised, gets a 403 or 404 even though the header
+  is correct.
+- **Exposure.** The token is in the environment of `uv`, so also of every build backend
+  or `setup.py` it runs, and readable by same-user processes (`/proc/<pid>/environ`).
+  That is inherent to handing a credential to a tool that spawns git itself. The session
+  is process-wide, and a venv is cached by lock coordinate, so a venv built with one
+  user's token is shared by whoever opens the same lock.
+- **Not covered:** the managed clone phase (`repo_source._git`), catalog and `uv pip`
+  installs (`catalog_install_views`, `install_views`) and `git push` outside
+  `git_status.remote_push_and_sha` (`work_mutations`, `work_pr_views`) still pass no
+  credential.
+
 ## 7. Where it runs, and restart reconciliation
 
 - A detached materializer process (or a bounded worker pool) does the clone +

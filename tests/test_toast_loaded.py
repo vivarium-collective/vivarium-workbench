@@ -39,8 +39,8 @@ def _assert_toast_before_callers(html: str, page: str) -> None:
             assert at < pos, f"{page} loads {caller} before toast.js"
 
 
-def test_live_dashboard_and_study_page_load_the_toast(dashboard_client, ws_with_study):
-    client = dashboard_client(workspace=ws_with_study)
+def test_live_dashboard_and_study_page_load_the_toast(inproc_client, ws_with_study):
+    client = inproc_client(workspace=ws_with_study)
     home = client.get("/")
     assert home.status_code == 200
     assert _script_pos(home.text, "sim-table.js") != -1 and _script_pos(home.text, "walkthrough.js") != -1

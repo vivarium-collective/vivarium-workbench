@@ -53,6 +53,19 @@ def test_rerun_investigation(monkeypatch, tmp_path):
     assert launched == ["s1", "s2"] and resp["count"] == 2
 
 
+def test_rerun_investigation_counts_simulation_id_as_launched(monkeypatch, tmp_path):
+    # #1492: run_study_baseline returns the id as `simulation_id` (not `run_id`).
+    # A successful baseline must be counted as launched, not recorded as an error.
+    monkeypatch.setattr(rerun, "_investigation_studies", lambda ws, inv: ["s1", "s2"])
+    monkeypatch.setattr(rerun.study_runs, "run_study_baseline",
+        lambda ws, body: ({"simulation_id": "sim-" + body["study"], "status": "running"}, 200))
+    resp, status = rerun.rerun_investigation(tmp_path, "inv1")
+    assert status == 200
+    assert resp["errors"] == []
+    assert resp["count"] == 2
+    assert [r["run_id"] for r in resp["launched"]] == ["sim-s1", "sim-s2"]
+
+
 # ---------------------------------------------------------------------------
 # reproducible-rerun-spine Task 7 — rerun_investigation executes the
 # inputs.from DAG in topological order, with per-study upstream gating.

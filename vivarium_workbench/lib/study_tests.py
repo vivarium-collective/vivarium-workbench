@@ -14,6 +14,24 @@ from vivarium_workbench.lib.atomic_io import atomic_write_text
 
 from .workspace_paths import WorkspacePaths
 
+# Phase 2b: resolve a computed-grade's freshness SERVER-SIDE so the Tests/Audit view (and the
+# published bundle) render a baked fresh|stale flag instead of recomputing. Imported defensively —
+# dormant until the workbench's discovery_engine is bumped to the Phase-2 grader_freshness.
+try:
+    from discovery_engine.grader_freshness import grade_freshness as _grade_freshness
+except ImportError:  # pragma: no cover - pre-Phase-2 discovery_engine
+    _grade_freshness = None
+
+
+def _run_freshness(computed_outcomes: dict | None) -> str | None:
+    """``"fresh"`` | ``"stale"`` for a run's ``computed_outcomes`` block (by its ``_grader`` stamp),
+    or ``None`` when ungraded or the Phase-2 resolver isn't available. Stale means the stored grade
+    was produced by a grader behind the current one — re-derive (sync) before trusting it."""
+    if not isinstance(computed_outcomes, dict) or _grade_freshness is None:
+        return None
+    grader = computed_outcomes.get("_grader")
+    return _grade_freshness(grader) if isinstance(grader, dict) and grader else None
+
 
 class StudyTestsConcurrentError(RuntimeError):
     """Raised when a second test run is requested while one is already running."""
@@ -205,6 +223,7 @@ def _run_spine_tests(
     )
     computed = (run or {}).get("computed_outcomes") or {}
     authored = (run or {}).get("outcomes") or {}
+    freshness = _run_freshness(computed)   # Phase 2b: fresh|stale, resolved server-side
 
     passed = failed = skipped = 0
     tests = []
@@ -248,12 +267,16 @@ def _run_spine_tests(
             f"code={meta.get('tests_code', 0)} agent={meta.get('tests_agent', 0)} "
             f"(latest run: {run.get('name', '?')})"
         )
+        if freshness == "stale":
+            note += " — ⚠ stale: grades were produced by an older grader, re-derive (sync)"
     # NB: do NOT call _write_last_results here — it round-trips study.yaml via
     # yaml.safe_dump, which STRIPS the research-log comments. compute_outcomes
     # already persisted computed_outcomes via a comment-preserving ruamel pass,
     # so the spine path must not rewrite the file.
     return StudyTestsResult(
-        summary={"passed": passed, "failed": failed, "skipped": skipped, "duration_s": duration},
+        summary={"passed": passed, "failed": failed, "skipped": skipped, "duration_s": duration,
+                 "freshness": freshness,                       # Phase 2b: fresh|stale|None
+                 "grader_version": (computed.get("_grader") or {}).get("version")},
         tests=tests, note=note,
     )
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_workbench.lib import materialization_jobs as mj
+from vivarium_workbench.lib import github_auth, materialization_jobs as mj
 from vivarium_workbench.lib.materialization import MaterializationError
 
 
@@ -241,6 +241,8 @@ def test_managed_real_clone_and_sync_end_to_end(reg, tmp_path, monkeypatch):
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REPO_STORE", str(tmp_path / "repos"))
     monkeypatch.setenv("VIVARIUM_WORKBENCH_VENV_STORE", str(tmp_path / "venvs"))
     monkeypatch.setenv("UV_PYTHON", __import__("sys").executable)
+    # Not under test: GitHub session discovery shells out to `gh` (ambient on a laptop or CI).
+    monkeypatch.setattr(github_auth, "current_session", lambda: None)
     origin = tmp_path / "origin"
     origin.mkdir()
 

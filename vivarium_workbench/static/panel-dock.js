@@ -294,9 +294,26 @@
 
     // Collapse the panel to a thin edge strip (body hidden, a small expand handle
     // shown via CSS .vp-collapsed); expand restores it. State is persisted.
+    var COLLAPSED_PX = 16;   // thin edge strip width/height when collapsed
     function setCollapsed(c, persist) {
       collapsed = !!c;
       panel.classList.toggle('vp-collapsed', collapsed);
+      // The per-side stack owns the OUTER size (its width/height is set inline by
+      // the resize drag and by ensureStack). The .vp-collapsed CSS shrinks only the
+      // PANEL to a 16px strip — so without also shrinking the stack, a panel that
+      // had a drag width collapses into a 16px strip sitting inside a still-wide
+      // stack, i.e. a wide blank gap. Shrink the stack to the strip on collapse, and
+      // restore its persisted size on expand.
+      var st = STACKS[dock];
+      if (st) {
+        var axis = isVertical(dock) ? 'height' : 'width';
+        if (collapsed) {
+          st.style.setProperty(axis, COLLAPSED_PX + 'px');
+        } else {
+          var n = parseInt(lsGet(stackSizeKey(dock), ''), 10);
+          st.style.setProperty(axis, (n > 0 ? n : defaultSideSize(dock)) + 'px');
+        }
+      }
       if (persist) lsSet(K.collapsed, collapsed ? '1' : '0');
       syncVars();
       if (opts.onCollapse) opts.onCollapse(collapsed);
@@ -561,11 +578,15 @@
                   : dock === 'right' ? r0.right - m.clientX
                   : dock === 'top' ? m.clientY - r0.top
                   : r0.bottom - m.clientY;                              // bottom
-          // Drag the resize edge toward the dock edge, past the threshold, to
-          // collapse to a thin strip; drag back out to expand (solo panels only).
+          // Standard dockable feel: a panel resizes down to a usable MINIMUM and
+          // then RESISTS — it does not shrink into an unusable sliver. Collapse to a
+          // thin strip is a deliberate act: shove the edge past COLLAPSE_AT (to within
+          // ~48px of the dock edge), well inside the min, so a normal resize can't
+          // trip it by accident; drag back out to expand (solo panels only).
           if (canCollapse && raw < COLLAPSE_AT) { if (!collapsed) setCollapsed(true); return; }
           if (collapsed) setCollapsed(false);
-          var px = C.clampDock(dock, raw, innerWidth, innerHeight);
+          var MIN_OPEN = isVertical(dock) ? 120 : 160;   // below this we resist, not sliver
+          var px = C.clampDock(dock, raw < MIN_OPEN ? MIN_OPEN : raw, innerWidth, innerHeight);
           if (STACKS[dock]) STACKS[dock].style.setProperty(isVertical(dock) ? 'height' : 'width', px + 'px');
         }
         function up() {
@@ -722,6 +743,7 @@
       }
       if (kind === 'studies' && typeof window._openStudiesPanel === 'function') { window._openStudiesPanel(); return; }
       if (kind === 'registry' && typeof window._openRegistryPanel === 'function') { window._openRegistryPanel(); return; }
+      if (kind === 'cycle' && typeof window._openCyclePanel === 'function') { window._openCyclePanel(); return; }
       if (kind === 'code' && window.ProcessCode) {
         var addr = p.get('address'), comp = p.get('composite');
         if (addr) window.ProcessCode.open(addr);

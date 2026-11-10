@@ -25,8 +25,8 @@ def ws_copy(tmp_path):
     return dst
 
 
-def test_get_process_source(dashboard_client, ws_copy):
-    client = dashboard_client(ws_copy)
+def test_get_process_source(inproc_client, ws_copy):
+    client = inproc_client(ws_copy)
     r = client.get(f"/api/registry/process-source?address={_ADDR}")
     assert r.status_code == 200
     body = r.json()
@@ -35,8 +35,8 @@ def test_get_process_source(dashboard_client, ws_copy):
     assert body["editable"] is True
 
 
-def test_post_process_source_saves_file(dashboard_client, ws_copy):
-    client = dashboard_client(ws_copy)
+def test_post_process_source_saves_file(inproc_client, ws_copy):
+    client = inproc_client(ws_copy)
     proc_file = ws_copy / "pbg_ws_increase_demo" / "processes.py"
     edited = proc_file.read_text().replace("rate', 1.0", "rate', 2.0")
     r = client.post(
@@ -48,8 +48,8 @@ def test_post_process_source_saves_file(dashboard_client, ws_copy):
     assert proc_file.read_text() == edited
 
 
-def test_post_process_source_rejects_bad_syntax(dashboard_client, ws_copy):
-    client = dashboard_client(ws_copy)
+def test_post_process_source_rejects_bad_syntax(inproc_client, ws_copy):
+    client = inproc_client(ws_copy)
     proc_file = ws_copy / "pbg_ws_increase_demo" / "processes.py"
     original = proc_file.read_text()
     r = client.post(

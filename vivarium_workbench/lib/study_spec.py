@@ -48,6 +48,41 @@ from vivarium_workbench.lib import study_derivations as _study_derivations
 # address (see that function's docstring).
 _OBSERVABLE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
+
+# A per-process cache of parsed spec YAMLs (study.yaml / investigation.yaml), keyed by
+# (absolute path, mtime_ns). An investigation page loads each member study.yaml many times
+# across the status / figures / acceptance / payload builders — without this, a 14-study
+# detail re-parsed study.yaml ~110×. An edit bumps the mtime and re-parses automatically; a
+# DEEP COPY is returned so callers can mutate freely without corrupting the cache.
+_SPEC_YAML_CACHE: "dict[str, tuple[int, dict]]" = {}
+
+
+def read_spec_yaml_cached(path) -> dict:
+    """Parse a spec YAML, cached by (path, mtime_ns); returns a deep copy, ``{}`` on error.
+
+    Use for repeatedly-read, infrequently-written workspace spec files (study.yaml,
+    investigation.yaml). NOT for runs.db or anything with a WAL mtime race — this keys on the
+    file mtime, which is reliable for plain YAML written via atomic rename but not for a
+    live-appended sqlite db."""
+    import copy as _copy
+    try:
+        p = Path(path)
+        mtime = p.stat().st_mtime_ns
+    except OSError:
+        return {}
+    key = str(p)
+    ent = _SPEC_YAML_CACHE.get(key)
+    if ent is None or ent[0] != mtime:
+        try:
+            parsed = yaml.safe_load(p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — a malformed spec never breaks a read path
+            parsed = {}
+        if not isinstance(parsed, dict):
+            parsed = {}
+        ent = (mtime, parsed)
+        _SPEC_YAML_CACHE[key] = ent
+    return _copy.deepcopy(ent[1])
+
 # Slug pattern shared by server.py and api/app.py (neither imports the other).
 # Study/investigation names are generated with underscores (e.g. derived from
 # composite names like ``monod_kinetics``), so the pattern allows ``_``
@@ -385,14 +420,15 @@ def _study_yaml_run_rows(ws_root: Path, name: str) -> list[dict]:
     than a per-step ``runs.db``. Uses a light direct YAML read to avoid recursing
     through :func:`load_study_detail_spec`.  Mirrors ``server._study_yaml_run_rows``.
     """
-    try:
-        path = study_spec_path(ws_root, name)
-        if not path or not Path(path).is_file():
-            return []
-        spec = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 — never let a malformed spec break the view
+    path = study_spec_path(ws_root, name)
+    if not path or not Path(path).is_file():
         return []
-    if not isinstance(spec, dict):
+    # Route through the per-request mtime cache: _study_has_active_run / _study_display_status
+    # call this for EVERY study on the investigations list (and detail), re-parsing study.yaml
+    # ~2×/study uncached — the dominant cost of /api/investigations. read_spec_yaml_cached
+    # returns {} on a missing/malformed spec, matching the old except-> [] behavior below.
+    spec = read_spec_yaml_cached(path)
+    if not isinstance(spec, dict) or not spec:
         return []
     rows: list[dict] = []
     for r in spec.get("runs", []) or []:
@@ -938,6 +974,16 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
             from discovery_engine import study_status as _ss
             runs = spec.get("runs") or []
             spec["derived_status"] = _ss.derive_status(spec, runs)
+            # Single source of truth for the progress pill: the detail spec MUST carry the
+            # same run-aware execution_status the investigation-graph node computes (via
+            # study_ontology.derive_execution_status), or the two views diverge — the graph
+            # shows "Completed" (run-aware) while the detail page's client falls through to
+            # the "planned" default because execution_status was absent. Deriving it here
+            # makes divergence structurally impossible; it still honours an authored value.
+            from vivarium_workbench.lib.study_ontology import (
+                derive_execution_status as _derive_exec,
+            )
+            spec["execution_status"] = _derive_exec(spec, runs=runs)
             diss = _ss.status_disagreements(spec, runs)
             if diss:
                 spec["status_disagreements"] = diss
@@ -974,6 +1020,17 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                     cgv["counts"] = count_test_outcomes(spec, spec.get("runs"))
                 except Exception:  # noqa: BLE001
                     pass
+            # #1476: a study whose acceptance surface is its pytest suite has no
+            # graded behavior-test verdict; fold its last_test_run pass/fail into
+            # the badge so a green suite isn't stuck blocked / diverging. A real
+            # behavior-test verdict always wins (see fold_pytest_into_verdict).
+            try:
+                from vivarium_workbench.lib.run_aware_investigation import (
+                    fold_pytest_into_verdict,
+                )
+                cgv = fold_pytest_into_verdict(spec, cgv)
+            except Exception:  # noqa: BLE001
+                pass
             spec["computed_gate_verdict"] = cgv
         except Exception:  # noqa: BLE001
             pass

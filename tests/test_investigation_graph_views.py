@@ -154,3 +154,54 @@ def test_chain_nodes_enriched_with_statement_outcome_source(tmp_path):
     assert "source" in f                                # provenance justification (may be "")
     d = nodes["decision/d1"]
     assert d.get("outcome") == "accept"                 # decision carries its outcome
+
+
+def test_parked_study_node_reads_parked_not_planned(tmp_path):
+    """A parked:true future-direction study renders execution_status='parked' on its DAG node
+    (not 'planned') and passes the raw `parked` flag through — parity with #1549's
+    _study_display_status (terminal -> parked -> lifecycle)."""
+    import yaml as _y
+    from vivarium_workbench.lib.investigation_graph_views import build_investigation_graph
+    ws = _ws(tmp_path)
+    # add a parked future-direction member + a terminal-but-parked member
+    inv = ws / "investigations" / "demo-inv" / "investigation.yaml"
+    inv.write_text(_y.safe_dump({"name": "demo-inv", "studies": ["s1", "s2", "p1", "p2"]}))
+    (ws / "studies" / "p1").mkdir(parents=True)
+    (ws / "studies" / "p1" / "study.yaml").write_text(_y.safe_dump(
+        {"schema_version": 4, "name": "p1", "status": "planned", "parked": True}))
+    (ws / "studies" / "p2").mkdir(parents=True)
+    (ws / "studies" / "p2" / "study.yaml").write_text(_y.safe_dump(
+        {"schema_version": 4, "name": "p2", "status": "complete", "parked": True}))  # executed
+    body, status = build_investigation_graph(ws, "demo-inv")
+    assert status == 200
+    nodes = {n["slug"]: n for n in body["studies"]}
+    assert nodes["p1"]["execution_status"] == "parked" and nodes["p1"]["parked"] is True
+    # a study that actually executed keeps its execution status though still flagged parked
+    # (precedence: terminal/in-flight execution wins over parked)
+    assert nodes["p2"]["execution_status"] == "completed" and nodes["p2"]["parked"] is True
+    # a non-parked study is unaffected (no parked field, normal status)
+    assert nodes["s1"].get("parked") is None and nodes["s1"]["execution_status"] != "parked"
+
+
+def test_synthesis_verdict_seeded_from_terminal_authored_confidence(tmp_path):
+    """A kind:synthesis claim-roll-up has no graded tests, so resolve_verdict is pending even
+    when confidence is Accepted/Refuted. The node seeds the verdict from the TERMINAL authored
+    confidence so the two pills agree (Accepted->supported, Refuted->refuted). Scoped to
+    synthesis; non-synthesis nodes keep their pending verdict; an authored verdict wins."""
+    import yaml as _y
+    from vivarium_workbench.lib.investigation_graph_views import build_investigation_graph
+    ws = _ws(tmp_path)
+    ws.joinpath("investigations", "demo-inv", "investigation.yaml").write_text(
+        _y.safe_dump({"name": "demo-inv", "studies": ["syn", "ref", "nonsyn"]}))
+    for slug, spec in [
+        ("syn",    {"kind": "synthesis", "status": "complete", "claim": "bounded", "confidence": "Accepted"}),
+        ("ref",    {"kind": "synthesis", "status": "complete", "claim": "no", "confidence": "Refuted"}),
+        ("nonsyn", {"status": "complete", "confidence": "Accepted"}),  # NOT synthesis
+    ]:
+        d = ws / "studies" / slug; d.mkdir(parents=True, exist_ok=True)
+        (d / "study.yaml").write_text(_y.safe_dump({"schema_version": 4, "name": slug, **spec}))
+    nodes = {n["slug"]: n for n in build_investigation_graph(ws, "demo-inv")[0]["studies"]}
+    assert nodes["syn"]["verdict"] == "supported" and nodes["syn"]["verdict_source"] == "derived"
+    assert nodes["ref"]["verdict"] == "refuted"
+    # a non-synthesis study with Accepted confidence but no verdict stays pending
+    assert nodes["nonsyn"].get("verdict") is None

@@ -1,0 +1,81 @@
+schema_version: 2
+name: cpm-studies
+created: "2026-07-14"
+plugin_version: 0.15.0
+package_path: viva_cpm_studies
+
+# Directory layout. New workspaces group their research directories under a
+# tidy `workspace/` subtree (the dirs below); the hidden `.pbg/` machine state
+# stays at the root like `.git/`. Tooling (dashboard, lint, skills) resolves
+# these via the shared WorkspacePaths resolver. Any key you remove falls back
+# to its flat top-level default — so you can move things back if you prefer.
+layout:
+  studies: workspace/studies
+  investigations: workspace/investigations
+  composites: workspace/composites
+  references: workspace/references
+  datasets: workspace/datasets
+  notes: workspace/notes
+  experiments: workspace/experiments
+  reports: workspace/reports
+
+# The four arrays below start empty; the dashboard populates them as you
+# work. Hand-editing is fine for small adds, but the dashboard's writers
+# also keep cross-references (studies, runs, viz wiring) consistent.
+
+# Observable specs: name + store_path + index_by. Populated by the Studies
+# tab when you declare a behavior_test or readout. See .pbg/schemas/study.schema.json
+# (readouts section) for shape.
+observables: []
+
+# Visualization wiring (address + config). Populated by the Visualizations
+# tab and /pbg-viz.
+visualizations: []
+
+# Reproducible simulation specs (composite + steps + params). Populated by
+# the Composites tab "Run" button and by `/pbg-study run-baseline`.
+simulations: []
+
+# Workspace-scoped datasets (file path + format + provenance). Populated by
+# the Inputs tab "Attach dataset" action.
+datasets: []
+
+references_bib: workspace/references/papers.bib
+
+# Published reference PDFs, keyed by their BibTeX entry in papers.bib.
+references_pdfs:
+- bib_key: glazier1993
+  path: workspace/references/papers/glazier-graner-1993.pdf
+  sha256: 992386f9a5140f49d6b9bdaf60fbfd564ea9ea98a5f1bed7eafb37378ef52590
+- bib_key: sego2022influenza
+  path: workspace/references/papers/sego-2022-influenza.pdf
+  sha256: 846684a16af74ab39241650d5f1e20e999f9c6a2d9fdceb8f9bd9e59b2125830
+
+# Curated expert / reference-model documents (not published papers).
+expert_docs:
+- name: openvt-cell-sorting-spec
+  path: workspace/references/papers/cell-sorting-specification.pdf
+  sha256: d54e2fd8e1de4af791267e890f80cf15072d82bbfe744a103c078ef9dd4960c8
+  description: >-
+    OpenVT Workshop (Graz, 12 Jul 2026) reference-model brief "Cell Sorting from
+    Differential Adhesion" — defines the target ICs (random checkerboard 50/50;
+    block split upper-half A / lower-half B for engulfment), the parameter
+    regimes (sorting / engulfment / mixing), and the canonical observable
+    (normalised heterotypic contact length run to within 5% of equilibrium).
+  contributor: eran agmon
+- name: vivarium-semantic-modeling-layer
+  path: workspace/references/expert/vivarium-semantic-modeling-layer.pdf
+  sha256: dae55c7b435c2b5d37865750d0408272054a9aacaf6b8f7bad7a13574050a62e
+  description: >-
+    "The Vivarium Semantic Modeling Layer" (Draft RFC 0.2) — the design
+    specification for which this investigation's claim bundle is the reference
+    slice: the Biological Claim / Conceptual Mechanism / Realization trio,
+    scientific-closure predicates, the epistemic envelope and range tiers, and a
+    mapping of each pillar to shipping Vivarium code. Chemotactic recruitment is
+    its worked example throughout.
+  contributor: eran agmon
+  claims_supported:
+  - claim:chemotactic-recruitment
+
+server:
+  enabled: false

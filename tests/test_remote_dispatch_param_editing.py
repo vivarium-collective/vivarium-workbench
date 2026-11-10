@@ -17,9 +17,9 @@ Server-side behavior — the study-baseline-add/-remove round trip, the new
 required-field validation on ``/api/remote-run-submit``, and (via a tiny
 local stand-in for the genuinely-external sms-api network boundary) the
 exact values reaching the outbound dispatch call — is exercised through the
-real ``dashboard_client`` fixture: a real FastAPI server subprocess against a
+real ``inproc_client`` fixture: a real FastAPI server subprocess against a
 real workspace on disk, per this project's own testing convention (see
-tests/conftest.py's ``dashboard_client`` and test_study_runs.py's
+tests/conftest.py's ``inproc_client`` and test_study_runs.py's
 ``_over_real_http``-suffixed tests, which this file's naming mirrors).
 Nothing here mocks study_baseline_add/study_baseline_remove or
 remote_run_submit itself — the only thing ever faked is the literal outbound
@@ -74,12 +74,12 @@ def _make_ws(tmp_path: Path, *, ws_name: str, params: dict | None = None) -> Pat
 # ---------------------------------------------------------------------------
 
 
-def test_edited_baseline_param_survives_save_and_reload_over_real_http(tmp_path, dashboard_client):
+def test_edited_baseline_param_survives_save_and_reload_over_real_http(tmp_path, inproc_client):
     ws = _make_ws(
         tmp_path, ws_name="param-edit-ws",
         params={"n_generations": 1, "n_seeds": 1, "temperature": 37},
     )
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
 
     # Mirrors _saveModelParams exactly: merge the edited field into a COPY of
     # the CURRENT full params (never a bare single-field payload — that would
@@ -111,13 +111,13 @@ def test_edited_baseline_param_survives_save_and_reload_over_real_http(tmp_path,
 
 
 def test_remote_run_submit_blocks_with_clear_error_when_unset_over_real_http(
-    tmp_path, dashboard_client, monkeypatch
+    tmp_path, inproc_client, monkeypatch
 ):
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
     monkeypatch.setenv(
         "VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/vivarium-collective/v2ecoli")
     ws = _make_ws(tmp_path, ws_name="blocked-dispatch-ws")
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
 
     res = client.post("/api/remote-run-submit", json={"study": "demo", "simulator_id": 66})
     assert res.status_code == 400, res.text
@@ -135,7 +135,7 @@ def test_remote_run_submit_blocks_with_clear_error_when_unset_over_real_http(
 #    genuinely external network service (identical in kind to "AWS Batch"
 #    itself) — this project's own existing tests already fake exactly this
 #    boundary (test_remote_run_views_lib.py's _FakeThinClient). Because
-#    dashboard_client spawns a real subprocess, that in-process fake can't
+#    inproc_client spawns a real subprocess, that in-process fake can't
 #    cross the process boundary, so this stands up a tiny real local HTTP
 #    server (stdlib only) speaking sms-api's actual wire shape and points
 #    VIVA_API_BASE at it — a real end-to-end HTTP round trip proving the
@@ -187,7 +187,7 @@ def fake_sms_api():
 
 
 def test_remote_run_submit_forwards_correct_values_over_real_http(
-    tmp_path, dashboard_client, monkeypatch, fake_sms_api
+    tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):
     base_url, handler = fake_sms_api
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
@@ -195,7 +195,7 @@ def test_remote_run_submit_forwards_correct_values_over_real_http(
         "VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/vivarium-collective/v2ecoli")
     monkeypatch.setenv("VIVA_API_BASE", base_url)
     ws = _make_ws(tmp_path, ws_name="dispatch-values-ws")
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
 
     res = client.post("/api/remote-run-submit", json={
         "study": "demo", "simulator_id": 66, "num_generations": 7, "num_seeds": 3,
@@ -216,7 +216,7 @@ def test_remote_run_submit_forwards_correct_values_over_real_http(
 
 
 def test_remote_run_submit_forwards_config_filename_over_real_http(
-    tmp_path, dashboard_client, monkeypatch, fake_sms_api
+    tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):
     """Real regression test for the config_filename gap: sms-api's own
     default (api_simulation_default.json) only exists in the public
@@ -234,7 +234,7 @@ def test_remote_run_submit_forwards_config_filename_over_real_http(
         "VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/vivarium-collective/v2ecoli")
     monkeypatch.setenv("VIVA_API_BASE", base_url)
     ws = _make_ws(tmp_path, ws_name="config-filename-ws")
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
 
     res = client.post("/api/remote-run-submit", json={
         "study": "demo", "simulator_id": 66, "num_generations": 7, "num_seeds": 3,

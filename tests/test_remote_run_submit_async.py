@@ -44,7 +44,7 @@ asynchronous (not just that this repo doesn't add extra delay of its own) is
 out of scope for a workbench-only test -- that requires real AWS Batch
 submission timing, covered by viva-api's own test suite instead. What IS
 provable here, and is exactly what this repo owns: a real FastAPI server
-subprocess (``dashboard_client``, per this project's standing rule against
+subprocess (``inproc_client``, per this project's standing rule against
 mocking the layer under test) talking real HTTP to a real local stand-in
 server for the genuinely-external sms-api/viva-api boundary (mirroring
 test_remote_dispatch_param_editing.py's own ``fake_sms_api`` pattern) shows
@@ -164,12 +164,12 @@ def _pin(monkeypatch, base_url: str) -> None:
 
 
 def test_remote_run_submit_returns_fast_for_large_chain_dispatch_over_real_http(
-    tmp_path, dashboard_client, monkeypatch, fake_sms_api
+    tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):
     base_url, _handler = fake_sms_api
     _pin(monkeypatch, base_url)
     ws = _make_ws(tmp_path, ws_name="large-dispatch-ws")
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
 
     start = time.monotonic()
     res = client.post("/api/remote-run-submit", json={
@@ -195,14 +195,14 @@ def test_remote_run_submit_returns_fast_for_large_chain_dispatch_over_real_http(
 
 
 def test_remote_run_submit_surfaces_upstream_error_as_502_not_generic_500_over_real_http(
-    tmp_path, dashboard_client, monkeypatch, fake_sms_api
+    tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):
     base_url, handler = fake_sms_api
     handler.submit_status = 500
     handler.submit_body = {"error": "simulated upstream failure"}
     _pin(monkeypatch, base_url)
     ws = _make_ws(tmp_path, ws_name="upstream-error-ws")
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
 
     res = client.post("/api/remote-run-submit", json={
         "study": "demo", "simulator_id": 66, "num_generations": 3, "num_seeds": 2,
@@ -227,13 +227,13 @@ def test_remote_run_submit_surfaces_upstream_error_as_502_not_generic_500_over_r
 
 
 def test_remote_run_submit_then_poll_reflects_real_status_transition_over_real_http(
-    tmp_path, dashboard_client, monkeypatch, fake_sms_api
+    tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):
     base_url, handler = fake_sms_api
     handler.status_sequence = [{"status": "running"}, {"status": "completed"}]
     _pin(monkeypatch, base_url)
     ws = _make_ws(tmp_path, ws_name="poll-transition-ws")
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
 
     submit_res = client.post("/api/remote-run-submit", json={
         "study": "demo", "simulator_id": 66, "num_generations": 10, "num_seeds": 1000,

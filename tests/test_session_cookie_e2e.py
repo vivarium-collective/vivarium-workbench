@@ -12,8 +12,8 @@ _WS = _FIXTURES / "ws_increase_demo"
 
 
 @pytest.mark.skipif(not _WS.is_dir(), reason="fixture workspace not present")
-def test_session_cookie_minted_and_behavior_preserved(dashboard_client):
-    client = dashboard_client(_WS)
+def test_session_cookie_minted_and_behavior_preserved(inproc_client):
+    client = inproc_client(_WS)
 
     # Behavior-preserving: the endpoint still answers exactly as before.
     r = client.get("/health")

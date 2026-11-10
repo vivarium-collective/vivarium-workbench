@@ -1,0 +1,48 @@
+name: upstream-drift-canary
+
+# Detection leg of the "decoupled but in sync" seam. Every other workflow installs
+# `uv sync --frozen` (from uv.lock), so main stays green against the engine/companion
+# commits it was locked with and an upstream `branch=main` merge can't ambush an
+# unrelated PR. `standalone.yml` does a non-frozen install but only runs `vwb smoke`,
+# and only on this repo's own push/PR — so a `discovery-engine` / `viva-superpowers`
+# advance still goes unnoticed until the next workbench push.
+#
+# This canary closes that: on a schedule it installs the deps LIVE (current upstream
+# tips, NOT the lock) and runs the FULL gate, so drift between this repo and current
+# upstream main surfaces same-day with a dated, attributable signal. It only DETECTS;
+# the bump stays an intentional lockfile change (`uv lock --upgrade-package …` /
+# Renovate), so it never duplicates a bump mechanism. A red run means: current upstream
+# main breaks this repo — do not bump uv.lock until it is reconciled.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"        # daily, 07:00 UTC (offset from test-durations' 06:00)
+  workflow_dispatch: {}         # manual: run before cutting an upstream lock-bump PR
+
+concurrency:
+  group: upstream-drift-canary
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    # Scheduled workflows run only on the default branch, so no PR noise.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      UV_PYTHON: "3.12.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install against CURRENT upstream main (LIVE — deliberately not --frozen)
+        # The point of the canary: resolve the git branch=main deps (discovery-engine,
+        # viva-superpowers, bigraph-loom, …) to their tips, so we test against what a
+        # lock bump would actually pull in next.
+        run: uv sync --extra dev --extra test --extra chat
+      - name: Full gate against live upstream
+        run: |
+          echo "::notice::Canary resolved upstream deps LIVE (not uv.lock). A failure here"
+          echo "::notice::means current upstream main breaks this repo — do NOT bump uv.lock"
+          echo "::notice::until reconciled; it is NOT a regression in this PR's code."
+          uv run bash scripts/pytest_gate.sh

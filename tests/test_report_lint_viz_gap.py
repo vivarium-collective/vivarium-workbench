@@ -4,7 +4,7 @@ Recalibrated by Task Vcal into three outcomes (warning / info / silent),
 driven by ``lib.viz_gate.study_visualization_status``'s ``gap_severity``.
 
 Mirrors ``tests/test_report_lint_question.py``'s style for the lib-level
-findings builder, plus a live-server test (via the ``dashboard_client``
+findings builder, plus a live-server test (via the ``inproc_client``
 factory) confirming the finding actually rides ``/api/report-lint`` and is
 counted the same way the readiness panel counts gaps: ``severity in
 {"warning", "error"}`` (see ``static/study-detail.js``'s
@@ -169,13 +169,13 @@ def test_vcal_qualifying_and_empty_still_behave(tmp_path):
 # way the readiness panel counts "N readiness gaps" (severity warning/error).
 # ---------------------------------------------------------------------------
 
-def test_rides_report_lint_endpoint_and_counts_as_a_readiness_gap(dashboard_client, tmp_path):
+def test_rides_report_lint_endpoint_and_counts_as_a_readiness_gap(inproc_client, tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text("name: viz-gap-ws\n", encoding="utf-8")
     _study_with_no_figures(ws, slug="no-viz")
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     r = client.get("/api/report-lint")
     assert r.status_code == 200
     findings = r.json()["findings"]
@@ -189,7 +189,7 @@ def test_rides_report_lint_endpoint_and_counts_as_a_readiness_gap(dashboard_clie
     assert gaps >= 1, "visualization_gap finding should be counted in N readiness gaps"
 
 
-def test_vcal_info_findings_do_not_count_toward_readiness_gap_pill(dashboard_client, tmp_path):
+def test_vcal_info_findings_do_not_count_toward_readiness_gap_pill(inproc_client, tmp_path):
     """Task Vcal: a study with an 'info' visualization_gap finding must NOT
     inflate the readiness-panel gap count — only warning/error do (per
     _renderReadinessPanel's `sev.error + sev.warning` arithmetic)."""
@@ -198,7 +198,7 @@ def test_vcal_info_findings_do_not_count_toward_readiness_gap_pill(dashboard_cli
     (ws / "workspace.yaml").write_text("name: viz-gap-ws\n", encoding="utf-8")
     _study_with_interactive_embed(ws, "info-nudge", has_recorded_run=True)
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     r = client.get("/api/report-lint")
     assert r.status_code == 200
     findings = r.json()["findings"]

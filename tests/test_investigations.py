@@ -398,6 +398,103 @@ def test_render_visualizations_v2_writes_html(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Per-run labels delivery to cross-run visualizations (#1474)
+# ---------------------------------------------------------------------------
+
+
+def _two_run_gathered():
+    """Gathered emitter output with two runs differing only by `rate` param."""
+    return {
+        'schemas': {},
+        'by_sim': {'baseline': [
+            {'run_id': 'r1', 'params': {'rate': 1.0}, 'sim_name': 'baseline',
+             'observables': {'level': [1.0, 2.0, 4.0], 'time': [0.0, 1.0, 2.0]}},
+            {'run_id': 'r2', 'params': {'rate': 2.0}, 'sim_name': 'baseline',
+             'observables': {'level': [1.0, 3.0, 9.0], 'time': [0.0, 1.0, 2.0]}},
+        ]},
+    }
+
+
+def test_build_viz_composite_delivers_run_labels_to_declared_port():
+    """#1474: when a viz class declares a non-underscore `run_labels` port,
+    build_viz_composite must put the per-run parameter labels on that port AND
+    wire it into the viz step. Before the fix, `run_labels` was treated as an
+    observable to resolve (found nothing -> None) and the labels only lived on
+    the never-wired `_run_labels` key, so they never reached the Step."""
+    viz_spec = {
+        'name': 'levels', 'address': 'local:TimeSeriesPlot',
+        'config': {'title': 'Demo', 'inputs_map': {'observable': 'level'}},
+    }
+
+    class _Stub:
+        def inputs(self):
+            return {'observable': 'list[float]', 'time': 'list[float]',
+                    'run_labels': 'list[string]'}
+        def outputs(self): return {'html': 'string'}
+
+    doc = build_viz_composite(viz_spec, _two_run_gathered(), {'TimeSeriesPlot': _Stub})
+    labels = ['rate=1.0', 'rate=2.0']
+
+    # The declared non-underscore port carries the real labels (not None/blank)...
+    assert doc['inputs_store']['run_labels'] == labels
+    # ...and it is wired into the viz step, so the Step actually receives it.
+    assert doc['visualization']['inputs']['run_labels'] == ['inputs_store', 'run_labels']
+    # Legacy key preserved for back-compat.
+    assert doc['inputs_store']['_run_labels'] == labels
+    # The observable port is unharmed: two runs -> list-of-lists (multi-line).
+    assert doc['inputs_store']['observable'] == [[1.0, 2.0, 4.0], [1.0, 3.0, 9.0]]
+
+
+def test_build_viz_composite_run_labels_absent_when_port_not_declared():
+    """A viz class that does NOT declare `run_labels` keeps the pre-#1474 shape:
+    only declared ports are wired, and `_run_labels` still carries the labels."""
+    viz_spec = {
+        'name': 'levels', 'address': 'local:TimeSeriesPlot',
+        'config': {'title': 'Demo', 'inputs_map': {'observable': 'level'}},
+    }
+
+    class _Stub:
+        def inputs(self): return {'observable': 'list[float]', 'time': 'list[float]'}
+        def outputs(self): return {'html': 'string'}
+
+    doc = build_viz_composite(viz_spec, _two_run_gathered(), {'TimeSeriesPlot': _Stub})
+    assert 'run_labels' not in doc['visualization']['inputs']
+    assert 'run_labels' not in doc['inputs_store']
+    assert doc['inputs_store']['_run_labels'] == ['rate=1.0', 'rate=2.0']
+
+
+def test_cross_run_labels_reach_real_time_series_plot():
+    """#1474 end-to-end: the per-run labels must appear in the HTML rendered by
+    the real process_bigraph TimeSeriesPlot for a cross-run (multi-line) figure.
+
+    Guarded on the companion process-bigraph change (the `run_labels` input
+    port): until an installed pb ships it, this skips rather than fails CI."""
+    from process_bigraph import Composite, allocate_core
+    try:
+        from process_bigraph.visualizations import TimeSeriesPlot
+    except Exception:  # pragma: no cover - pb without visualizations
+        pytest.skip("process_bigraph.visualizations.TimeSeriesPlot unavailable")
+    if 'run_labels' not in TimeSeriesPlot.__new__(TimeSeriesPlot).inputs():
+        pytest.skip("installed process-bigraph has no run_labels port yet (companion PR)")
+
+    viz_spec = {
+        'name': 'levels', 'address': 'local:TimeSeriesPlot',
+        'config': {'title': 'Demo', 'inputs_map': {'observable': 'level'}},
+    }
+    doc = build_viz_composite(viz_spec, _two_run_gathered(), {'TimeSeriesPlot': TimeSeriesPlot})
+
+    core = allocate_core()
+    core.register_link('TimeSeriesPlot', TimeSeriesPlot)
+    comp = Composite({'state': doc}, core=core)
+    comp.run(1)
+    html = comp.state.get('output_store') or ''
+    if isinstance(html, dict):
+        html = html.get('value') or html.get('_value') or ''
+
+    assert 'rate=1.0' in html and 'rate=2.0' in html
+
+
+# ---------------------------------------------------------------------------
 # Multi-composite (composites: list) shape tests
 # ---------------------------------------------------------------------------
 

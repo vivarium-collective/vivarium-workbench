@@ -25,6 +25,7 @@ captured stdout/stderr from gh-cli or HTTP responses.
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -36,6 +37,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from threading import Lock
 from typing import Literal
@@ -63,9 +65,11 @@ _DEVICE_CODE_URL = "https://github.com/login/device/code"
 _TOKEN_URL = "https://github.com/login/oauth/access_token"
 _USER_URL = "https://api.github.com/user"
 
-# Token-shape regex covers all current GitHub PAT/OAuth prefixes. Used by
-# :func:`mask_token` to scrub log output before write/return.
-_TOKEN_RE = re.compile(r"\bgh[opusr]_[A-Za-z0-9_]{20,}\b")
+# Token-shape regex covers all current GitHub PAT/OAuth prefixes, plus the Basic-auth
+# header value :func:`basic_auth_header` builds (base64 hides the token's own shape).
+# Used by :func:`mask_token` to scrub log output before write/return.
+_TOKEN_RE = re.compile(
+    r"\bgh[opusr]_[A-Za-z0-9_]{20,}\b|(?i:authorization:\s*basic\s+)[A-Za-z0-9+/=]{16,}")
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +579,45 @@ def current_token_env() -> dict:
         "GH_TOKEN": session.token,
         "GITHUB_TOKEN": session.token,
         "GH_USER": session.login,
+    }
+
+
+def basic_auth_header(token: str) -> str:
+    """The ``Authorization`` header GitHub accepts for git over HTTPS (the one
+    ``actions/checkout`` sends). ``GH_TOKEN`` alone does not authenticate plain
+    git: there is no credential helper in the workbench container."""
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return f"AUTHORIZATION: basic {basic}"
+
+
+def git_https_env(environ: Mapping[str, str] = os.environ) -> dict:
+    """Env vars that make git over HTTPS to ``github.com`` authenticate as the
+    current session, for a subprocess that runs git itself (``uv sync`` fetching
+    a private git dependency) where a ``-c`` flag cannot be added.
+
+    Uses git's own environment config (``GIT_CONFIG_COUNT``/``KEY_n``/``VALUE_n``):
+    the token appears on no command line and in no URL (so no git/uv error text
+    can echo it), is written nowhere, and is scoped to ``https://github.com/``
+    only. It is appended after any entries already present in ``environ``, never
+    over them. Empty dict if no session is active, **or if looking one up fails**
+    (an unreachable GitHub, keyring or ``gh`` must not fail the build it decorates:
+    a build without private dependencies needs no credential), or if
+    ``GIT_CONFIG_COUNT`` is not a count (git itself rejects that). Caller pattern::
+
+        env = dict(os.environ, **git_https_env())
+    """
+    try:
+        session = current_session()
+        n = int(environ.get("GIT_CONFIG_COUNT") or 0)
+    except Exception as e:  # noqa: BLE001 — see docstring
+        log.warning("no git credential for this subprocess: %s", mask_token(str(e)))
+        return {}
+    if session is None or n < 0:
+        return {}
+    return {
+        "GIT_CONFIG_COUNT": str(n + 1),
+        f"GIT_CONFIG_KEY_{n}": "http.https://github.com/.extraHeader",
+        f"GIT_CONFIG_VALUE_{n}": basic_auth_header(session.token),
     }
 
 

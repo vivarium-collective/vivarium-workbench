@@ -25,8 +25,6 @@ _PRE_EVAL_STATUSES = frozenset({"build", "planned", "implementation", "design", 
 # study-card detail serializer (report_views) can never drift.
 from vivarium_workbench.lib.study_ontology import (  # noqa: E402
     canon_relation as _canon_relation,
-    derive_execution_status as _derive_execution_status,
-    derive_verdict as _derive_verdict,
 )
 
 
@@ -141,10 +139,18 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
         # Progress pill; the verdict (what the evidence supports) is only set when
         # authored or derivable, so an unmarked study shows "pending". Authored
         # fields win over derivation.
-        _node["execution_status"] = _derive_execution_status(study_spec, _node_status)
-        _verdict = _derive_verdict(study_spec)
-        if _verdict:
-            _node["verdict"] = _verdict
+        try:
+            from vivarium_workbench.lib.investigation_status import study_run_rows  # noqa: PLC0415
+            _rows = study_run_rows(ws_root, slug, study_spec, wp)
+        except Exception:  # noqa: BLE001
+            _rows = None
+        # Two-axis node fields (execution_status with the parked override, verdict with the
+        # synthesis seed, and kind) come from the SHARED helper so the DAG CARDS — which render
+        # from the detail payload, a different builder — derive these identically and never
+        # diverge again (the split that produced parked-as-pending and synthesis "Completed ·
+        # pending"). build_iset_detail calls the same helper.
+        from vivarium_workbench.lib.study_ontology import two_axis_node_fields  # noqa: PLC0415
+        _node.update(two_axis_node_fields(study_spec, _node_status, _rows))
         if study_spec.get("evidence_tier"):
             _node["evidence_tier"] = study_spec["evidence_tier"]
         studies_out.append(_node)

@@ -71,12 +71,24 @@ vivarium-workbench doctor          # exits non-zero if process-bigraph/viva-supe
 # workspace itself (between <!-- BEGIN:composites/investigations --> markers).
 # --check exits 1 if stale (wire into the workspace's CI).
 vivarium-workbench gen-readme --workspace /path/to/ws [--check]
+
+# The compose-api registry entry for a workspace (paste under `entries:` in compose-api's
+# manifest.yaml), derived from the workspace's own files and from the commit it pins: module
+# roots are the packages that commit's build ships. Refuses a dirty or unpushed HEAD, a workspace
+# that is not a repository root, and a level above `listed` without --evidence; warns about what
+# only a person can decide (dev tooling in the runtime dependencies, a pixi.toml, non-Python
+# parts). --check compares the registry's existing entry with the workspace instead (exit 1 on
+# module roots that share nothing with what it ships; the checkout's state is only a warning).
+vivarium-workbench compose-entry --workspace /path/to/ws [--registry URL|FILE] [--level tested --evidence TEXT] [--check]
 ```
 
-There is no separate build step (pure Python + static assets) and no linter
-configured in the repo. Dependencies are managed with `uv` (`uv.lock`); install
-editable with `pip install -e .` (or `uv pip install -e .`) into the venv that
-will run it. Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
+There is no separate build step (pure Python + static assets). Linting/typing is
+enforced in CI (`.github/workflows/types.yml`): `ruff check vivarium_workbench
+vivarium_dashboard`, `mypy` on the typed modules, and `lint-imports` (import-linter)
+for the package-boundary allowlist — run them the same way locally, e.g.
+`uv run ruff check vivarium_workbench vivarium_dashboard` and `uv run mypy`.
+Dependencies are managed with `uv` (`uv.lock`); install editable with
+`pip install -e .` (or `uv pip install -e .`) into the venv that will run it. Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
 `discovery-engine` are direct git/path deps.
 
 ## Architecture
@@ -106,10 +118,15 @@ framework and the discovery cycle: study audit/evaluation/verdict/status, rigor,
 the report linter, the argument/knowledge/narrative projections, post-sim steps,
 and `viz_freshness`. `viva_superpowers` is the skills-first facade plus the helpers
 that stayed behind (`catalog`, `feedback_import`, `feedback_tracking`,
-`chart_store`, `run_params`, `loop_state`, `test_audit`); for moved modules it
-keeps only back-compat shims. New workbench code imports moved modules from
-`discovery_engine.*` directly, and `tests/test_plugin_import_allowlist.py` plus
-the import-linter config govern both packages.
+`chart_store`, `run_params`, `loop_state`, `test_audit`); for every moved module it
+keeps only a **back-compat shim** that re-exports the engine
+(`sys.modules[__name__] = discovery_engine.<m>`), so `viva_superpowers.<m>` *is* the
+same module object as `discovery_engine.<m>` — a permanent facade with **no forks and
+no divergence** (viva-superpowers' own `test_discovery_engine_facade.py` asserts that
+object identity across the whole set). **New workbench code imports moved modules from
+`discovery_engine.*` directly** (never through the shim); `tests/test_plugin_import_allowlist.py`
+(the allowlist) plus the import-linter config govern which modules the workbench may
+import from each package.
 
 Supporting the typed contract: `lib/models.py` holds pydantic models for the JSON
 payloads (many still `extra="allow"` passthroughs — tightening them is tracked in
@@ -174,9 +191,18 @@ behavior, consider both the live and snapshot data sources.
 - **JSON serialization**: the server's `_json_default` handles numpy/dataclasses;
   `publish.py` writes with `allow_nan=False` on purpose (browser `JSON.parse`
   rejects `NaN`/`Infinity`) — sanitize non-finite floats before publishing.
-- **Tests** spawn a real server subprocess via the `dashboard_client` fixture
-  (`tests/conftest.py`) against a fixture workspace under `tests/_fixtures/`.
-  Fixture workspaces' own Python packages are auto-added to `sys.path`.
+- **Tests** have two client fixtures in `tests/conftest.py`. Prefer
+  **`inproc_client`** (in-process): it drives the app via Starlette's
+  `TestClient` with `get_workspace` overridden to the test's workspace — the app
+  imports once per worker (~1.4s) and each request is sub-100ms, ~65x cheaper per
+  call than booting a server. Use **`dashboard_client`** (spawns a real `uvicorn`
+  subprocess, ~6.75s boot) only when the test needs a real bound socket: SSE
+  streaming, concurrent-request timing, or asserting the real Host/Origin CSRF
+  guard with a forged `Origin` (the in-process client has no reachable
+  `base_url`). Both take a `workspace` and hit the same routes/middleware; env-
+  worker-backed endpoints (registry/composite walks) work under either, just not
+  faster in-process. Fixture workspaces live under `tests/_fixtures/` and their
+  own Python packages are auto-added to `sys.path`.
 - **Workspace package import**: at serve time the workspace root is prepended to
   `sys.path` so the workspace's own package (e.g. `pbg_<project>.core.build_core`)
   is importable for rendering composites.

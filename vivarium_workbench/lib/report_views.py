@@ -37,11 +37,14 @@ from vivarium_workbench.lib.investigations_index import (
 from vivarium_workbench.lib.spec_norm import normalize_requirements as _normalize_requirements
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
+from vivarium_workbench.lib.run_aware_investigation import (
+    derive_markings, resolve_gate_status,
+)
 from vivarium_workbench.lib import readouts_views as _readouts_views
 from vivarium_workbench.lib import study_derivations as _study_derivations
 from vivarium_workbench.lib.study_ontology import (
-    derive_execution_status as _derive_execution_status,
-    derive_verdict as _derive_verdict,
+    resolve_verdict as _resolve_verdict,
+    two_axis_node_fields as _two_axis_node_fields,
 )
 
 
@@ -77,15 +80,13 @@ def _unloadable_study_node(sp: "Path", slug: str, error: str) -> dict:
         # Keep the authored lifecycle status (e.g. "planned"); only fall back to
         # the legacy "invalid" sentinel when the file carries no status at all.
         "status": authored_status or "invalid",
-        # Always carry the derived execution axis so the client honours it
-        # (execution_status wins in _execState) instead of inferring "failed"
-        # from the "invalid" status sentinel.
-        "execution_status": _derive_execution_status(raw, authored_status),
         "spec_error": error,
     }
-    _verdict = _derive_verdict(raw)
-    if _verdict:
-        node["verdict"] = _verdict
+    # Always carry the two-axis fields (execution_status w/ parked override, verdict w/
+    # synthesis seed, kind) via the SAME shared helper the main path + the graph use, so even
+    # a spec-error node agrees with the graph (and a parked spec-error study still reads parked,
+    # not "failed" from the invalid sentinel).
+    node.update(_two_axis_node_fields(raw, authored_status))
     return node
 
 
@@ -896,6 +897,28 @@ def _resolve_bib_references(ws_root: Path) -> dict:
         return {}
 
 
+def _acceptance_freshness(studies_by_name: dict) -> Optional[str]:
+    """``fresh`` | ``stale`` | ``None`` for an acceptance roll-up (Phase 2b). ``stale`` if ANY member
+    study's canonical computed grade was produced by a grader behind the current one — the whole
+    roll-up then needs re-deriving. ``None`` when nothing is graded or the Phase-2 resolver is
+    unavailable (imported defensively — dormant until discovery_engine is bumped to Phase 2)."""
+    try:
+        from discovery_engine.grader_freshness import grade_freshness
+    except ImportError:  # pragma: no cover - pre-Phase-2 discovery_engine
+        return None
+    saw_graded = False
+    for spec in (studies_by_name or {}).values():
+        if not isinstance(spec, dict):
+            continue
+        for run in (spec.get("runs") or []):
+            g = (run.get("computed_outcomes") or {}).get("_grader") if isinstance(run, dict) else None
+            if isinstance(g, dict) and g:
+                saw_graded = True
+                if grade_freshness(g) == "stale":
+                    return "stale"
+    return "fresh" if saw_graded else None
+
+
 def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     """GET /api/investigation/<name> builder.
 
@@ -916,9 +939,9 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     read_only = False
     spec_path = wp.investigations / name / "investigation.yaml"
     if spec_path.is_file():
-        try:
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-        except Exception:  # noqa: BLE001
+        from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
+        spec = read_spec_yaml_cached(spec_path)
+        if not spec:
             return None
     else:
         # Federation fallback. A read-only investigation shipped by a linked
@@ -1048,7 +1071,16 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # study whose stale `status:` still said `planned` showed as "planned" in
         # the graph card while the sidebar (multi-axis) showed it done. Sharing
         # one helper makes the rail dot and the card badge agree by construction.
-        _eff_status = _study_display_status(ws_root, study_spec["name"], study_spec)
+        from vivarium_workbench.lib.investigation_status import study_run_rows  # noqa: PLC0415
+        _run_rows = study_run_rows(ws_root, study_spec["name"], study_spec)
+        _verdict_pair = _resolve_verdict(study_spec)
+        # Shared two-axis derivation (execution_status w/ parked override, verdict w/ synthesis
+        # seed, kind) — identical to the graph builder so the DAG cards (rendered from THIS
+        # detail payload) never diverge from the graph on parked/synthesis.
+        _two_axis = _two_axis_node_fields(study_spec, raw_status, _run_rows)
+        _gate_pair = resolve_gate_status(study_spec)
+        _eff_status = _study_display_status(
+            ws_root, study_spec["name"], study_spec, runs=_run_rows)
         # Safeguard: a study can carry a COMPLETED evaluation as committed
         # report-card verdicts (viz/report_card/*.verdict.json) yet be left at a
         # pre-eval status (e.g. `build`) with no local runs.db — its report cards
@@ -1130,6 +1162,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             "name":                  study_spec["name"],
             "status":                raw_status,
             "effective_status":      _eff_status,
+            # Parked passthrough: a deliberately-deferred future direction. The render
+            # keys the "Parked · future direction" chip + the "X complete · Y parked"
+            # tally off this raw flag; _eff_status already reads "parked" for it too.
+            "parked":                bool(study_spec.get("parked")),
             "phase":                 study_spec.get("phase"),
             "title":                 study_spec.get("title"),
             "question":              question,
@@ -1171,14 +1207,26 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             "implementation_status": study_spec.get("implementation_status"),
             "simulation_status":     study_spec.get("simulation_status"),
             "evaluation_status":     study_spec.get("evaluation_status"),
-            "gate_status":           study_spec.get("gate_status"),
+            "gate_status":           _gate_pair[0],
+            # "authored" | "derived" (graded acceptance behaviors) | None
+            "gate_status_source":    _gate_pair[1],
             "expert_review_status":  study_spec.get("expert_review_status"),
             # Two-axis ontology — the graph card reads these directly. execution
             # is always derived (every card gets a Progress pill); verdict is set
             # only when authored or derivable (else the card shows "pending").
             # Same derivation as the typed graph builder (shared study_ontology).
-            "execution_status":      _derive_execution_status(study_spec, raw_status),
-            "verdict":               _derive_verdict(study_spec),
+            "execution_status":      _two_axis["execution_status"],
+            "verdict":               _two_axis.get("verdict"),
+            # "authored" | "derived" (engine roll-up of graded tests) | None
+            "verdict_source":        _two_axis.get("verdict_source"),
+            # kind (e.g. "synthesis") — carried so the card can scope rendering; omitted before,
+            # which is why the synthesis verdict couldn't be seeded client-side.
+            "kind":                  _two_axis.get("kind"),
+            # Predicted direction for a parked (not-yet-investigated) card — the
+            # authored hypothesis, surfaced only when the node renders as parked so
+            # the card shows what it WOULD test instead of a generic label. None for
+            # any non-parked study. (Set by study_ontology.two_axis_node_fields.)
+            "hypothesis":            _two_axis.get("hypothesis"),
             "evidence_tier":         study_spec.get("evidence_tier"),
             # viva-superpowers #285 — the split verdict ledger (or None).
             "verdict_count_split":   _count_split,
@@ -1203,17 +1251,24 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         if _study_steps:
             _study_step_values.append(_study_steps)
 
-    member_statuses = [s.get("status", "planning") for s in studies_out]
+    # Same run-aware per-study headline the summaries/cards roll up
+    # (_study_display_status), NOT the raw authored `status`, so the detail
+    # header can never disagree with the investigation card.
+    member_statuses = [s.get("effective_status") or s.get("status", "planning")
+                       for s in studies_out]
     member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
+    member_parked = [bool(s.get("parked")) for s in studies_out]
     effective_status = compute_investigation_status(
         member_statuses, has_runs=member_has_runs,
+        authored_status=spec.get("status"),   # authoritative closed/complete wins over the aggregate
+        parked=member_parked,                 # deferred future-direction members don't block completeness
     )
 
     computed_acceptance: Optional[dict] = None
+    studies_by_name: dict = {}
     try:
         from discovery_engine.investigation_status import roll_up_acceptance
         from discovery_engine import study_io as _sio
-        studies_by_name: dict = {}
         for _sd in study_wp.iter_study_dirs():
             _syp = _sd / "study.yaml"
             if _syp.exists():
@@ -1228,8 +1283,26 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
                 computed_acceptance["diverges_from_authored"] = (
                     persisted_acc.get("diverges_from_authored")
                 )
+        # Phase 2b: resolve the roll-up's freshness server-side — stale if ANY member study's
+        # computed grade was produced by a grader behind the current one, so the Audit tab shows
+        # "stale → re-grade" rather than trusting a roll-up over outdated grades.
+        if isinstance(computed_acceptance, dict):
+            computed_acceptance["freshness"] = _acceptance_freshness(studies_by_name)
     except Exception:  # noqa: BLE001
         pass
+
+    # Run-aware closure / verdict_status / open-decision count from ONE engine
+    # cycle over the already-loaded member specs (authored wins; derived flagged).
+    _member_set = set(investigation_member_slugs(spec))
+    _marks = derive_markings(
+        spec, {k: v for k, v in studies_by_name.items()
+               if not _member_set or k in _member_set})
+    _executive = dict(spec.get("executive") or {})
+    _executive["verdict_status"] = _marks["verdict_status"]
+    _executive["verdict_status_source"] = _marks["verdict_status_source"]
+    _executive["decisions_open_count"] = _marks["decisions_open_count"]
+    _executive["decisions_open_source"] = _marks["decisions_open_source"]
+    _executive["decisions_engine_resolved"] = _marks["decisions_engine_resolved"]
 
     # Campaign plan docs — the expert dossiers that lay out the investigation's
     # plan/roadmap. Merge the top-level ``expert_docs`` (repo-level list, often
@@ -1276,10 +1349,15 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             _ss = load_spec(_sp)
         except InvestigationSpecError:
             continue
-        _gate_member_specs[_slug] = _ss
+        _gs = resolve_gate_status(_ss)
+        # The workspace's own plan_progress derivation reads the spec's gate_status:
+        # hand it the run-aware value (authored still wins).
+        _gate_member_specs[_slug] = (
+            {**_ss, "gate_status": _gs[0]} if _gs[1] == "derived" else _ss)
         _board_studies.setdefault(_slug, {
             "name": _ss.get("name") or _slug,
-            "gate_status": _ss.get("gate_status"),
+            "gate_status": _gs[0],
+            "gate_status_source": _gs[1],
             "findings": _ss.get("findings") or [],
         })
 
@@ -1357,7 +1435,9 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         "expert_docs":         _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
         "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
         "computed_acceptance": computed_acceptance,
-        "executive":           spec.get("executive") or {},
+        "executive":           _executive,
+        # Open/Closed: {closed, source: authored|derived|None, unaddressed_criteria, ...}
+        "closure":             _marks["closure"],
         "scientific_argument": spec.get("scientific_argument") or {},
         # Comparative framing for the rigor scorecard — the interpretive lenses
         # this investigation adjudicates among (each {name, relation}). Dropped

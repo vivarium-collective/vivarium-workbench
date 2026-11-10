@@ -408,6 +408,17 @@ def cmd_runs(args) -> int:
     return 0
 
 
+def cmd_render_viz(args) -> int:
+    from vivarium_workbench.lib.viz_build import render_one
+    res = render_one(Path(args.workspace).resolve(), args.slug, args.viz)
+    if args.json:
+        print(json.dumps(res, indent=2, default=str))
+    else:
+        print(("rendered " if res["ok"] else "FAILED: ") + str(res.get("chart") or "")
+              + ("" if res["ok"] else " - " + str(res.get("detail"))))
+    return 0 if res["ok"] else 1
+
+
 def cmd_status(args) -> int:
     from vivarium_workbench.lib import cli_runs
     _db, row = cli_runs.find_run(Path(args.workspace).resolve(), args.run_id)
@@ -693,6 +704,46 @@ def cmd_gen_readme(args: argparse.Namespace) -> int:
     from vivarium_workbench.gen_readme import generate
 
     return generate(ws, check=args.check, readme=args.readme)
+
+
+def cmd_compose_entry(args: argparse.Namespace) -> int:
+    """The compose-api registry entry for this workspace (stdout, to paste under ``entries:`` in compose-api's
+    manifest.yaml, indented to fit), derived from the workspace; what stands in its way or needs a person goes to stderr. With
+    ``--check`` it reports how the registry's existing entry differs from the workspace instead. Exits 1 on an
+    error finding, 2 when the arguments cannot be used."""
+    import json
+    import textwrap
+
+    import yaml
+
+    from vivarium_workbench.lib import compose_entry as ce
+
+    ws = Path(args.workspace).resolve()
+    if not (ws / "workspace.yaml").is_file():
+        print(f"error: not a workspace (no workspace.yaml): {ws}", file=sys.stderr)
+        return 2
+    if args.check and not args.registry:
+        print("error: --check needs --registry (a compose-api base URL, a JSON list of entries, or manifest.yaml)",
+              file=sys.stderr)
+        return 2
+    try:
+        registry = ce.load_registry(args.registry) if args.registry else None
+    except (OSError, ValueError, KeyError) as e:
+        print(f"error: cannot read the registry {args.registry!r}: {e}", file=sys.stderr)
+        return 2
+    derived = ce.derive(ws, level=args.level, registry=registry, evidence=args.evidence or (), check_only=args.check)
+    findings = list(derived.findings)
+    if args.check and registry is not None:
+        findings += ce.check(derived, registry)
+    if args.json:
+        print(json.dumps({"entry": derived.entry, "module_roots": derived.roots,
+                          "findings": [vars(f) for f in findings]}, indent=2))
+    else:
+        if derived.entry is not None and not args.check:
+            print(textwrap.indent(yaml.safe_dump([derived.entry], sort_keys=False, width=118), "  "), end="")
+        for f in findings:
+            print(f"{f.severity}: {f.code}: {f.message}", file=sys.stderr)
+    return 1 if any(f.severity == "error" for f in findings) else 0
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
@@ -1669,6 +1720,12 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(pl)
     pl.set_defaults(func=cmd_runs)
 
+    prv = sub.add_parser("render-viz", help="Render one declared figure of a study (stamps provenance)")
+    prv.add_argument("slug")
+    prv.add_argument("--viz", required=True, help="visualization name")
+    _add_common(prv)
+    prv.set_defaults(func=cmd_render_viz)
+
     pst = sub.add_parser("status", help="Show one run's state + progress")
     pst.add_argument("run_id")
     _add_common(pst)
@@ -1691,6 +1748,26 @@ def main(argv: list[str] | None = None) -> int:
     p_genrdm.add_argument("--readme", default=None, metavar="PATH",
                           help="README path (default: <workspace>/README.md)")
     p_genrdm.set_defaults(func=cmd_gen_readme)
+
+    p_centry = sub.add_parser(
+        "compose-entry",
+        help="Print the compose-api registry entry for this workspace, derived from the workspace itself "
+             "(or, with --check, how the registry's existing entry differs from it)",
+    )
+    p_centry.add_argument("--workspace", default=".", help="Path to workspace root (default: cwd)")
+    p_centry.add_argument("--level", default="listed", choices=["listed", "installable", "tested"],
+                          help="the level to write (default: listed; raising it needs evidence in the PR)")
+    p_centry.add_argument("--evidence", action="append", metavar="TEXT",
+                          help="what supports the level, for the entry's `evidence` (repeat for several); a level above "
+                               "listed needs it, because compose-api's tests refuse an entry without it")
+    p_centry.add_argument("--registry", default=None, metavar="URL|FILE",
+                          help="a compose-api base URL, a JSON list of entries, or manifest.yaml: reuses the id the "
+                               "registry already gives this repository, and is what --check compares with")
+    p_centry.add_argument("--check", action="store_true",
+                          help="report how the registry's entry for this repository differs from the workspace "
+                               "(needs --registry); exit 1 on an error")
+    p_centry.add_argument("--json", action="store_true", help="emit the entry and findings as JSON")
+    p_centry.set_defaults(func=cmd_compose_entry)
 
     p_audit = sub.add_parser(
         "audit",

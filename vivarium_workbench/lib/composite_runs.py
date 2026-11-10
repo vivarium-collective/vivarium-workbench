@@ -404,7 +404,8 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
 def save_metadata(conn, *, spec_id, run_id, params, label, started_at,
                   n_steps, log_path=None, generation_id=None,
                   workspace=None, emitter=None, study_slug=None,
-                  investigation_slug=None, origin="local", manifest=None):
+                  investigation_slug=None, origin="local", manifest=None,
+                  pkg=None):
     """Insert a run row (status='running') and, if ``workspace`` is given,
     append a 'started' event to the JSONL run log (durable metadata).
 
@@ -431,7 +432,7 @@ def save_metadata(conn, *, spec_id, run_id, params, label, started_at,
                 spec_id=spec_id, params=params, n_steps=n_steps,
                 emitter=emitter, emit_paths=[], runtime={}, origin=origin,
                 study=study_slug, generation_id=generation_id,
-                ws_root=workspace,
+                ws_root=workspace, pkg=pkg,
             )
         except Exception:  # noqa: BLE001 — best-effort, never block a run
             manifest = None
@@ -1364,6 +1365,26 @@ def inject_emitter_for_declared_paths(state: dict,
     if not declared_paths:
         return state
     paths = list(declared_paths)
+    # #1473: collect_emit_paths_from_spec unconditionally mirrors every declared
+    # path ``p`` under ``agents/0/p`` (v2ecoli single-cell composites scope their
+    # stores there, so the agent-scoped form is the one that carries data). A
+    # composite with NO ``agents`` store never materialises those mirrors, so
+    # wiring them records an empty ``{"agents": {"0": {...}}}`` into every
+    # history.state row. Drop a mirror only when (a) the state has no real
+    # ``agents`` map AND (b) its literal sibling ``p`` is itself declared — that
+    # precisely targets the spurious duplicates while preserving a standalone
+    # ``agents/...`` path (e.g. an ``agents`` map created at run time by a
+    # process output, whose only declared path is the agent-scoped one).
+    if not isinstance(state.get("agents"), dict):
+        declared_set = set(paths)
+        kept = []
+        for p in paths:
+            segs = [s for s in p.split("/") if s]
+            if (segs[:2] == ["agents", "0"] and len(segs) > 2
+                    and "/".join(segs[2:]) in declared_set):
+                continue  # spurious #1473 mirror of a literal declared path
+            kept.append(p)
+        paths = kept
     if "global_time" not in paths:
         paths.append("global_time")
 

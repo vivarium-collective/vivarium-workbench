@@ -29,7 +29,7 @@ def _v3_study(name, tests, runs):
                 behavior_tests=tests, runs=runs)
 
 
-def test_iset_response_carries_computed_acceptance(tmp_path, dashboard_client):
+def test_iset_response_carries_computed_acceptance(tmp_path, inproc_client):
     """GET /api/investigation/<inv> carries computed_acceptance with per-criterion entries."""
     ws = tmp_path / "ws"
     inv_dir = ws / "investigations" / "my-inv"
@@ -45,7 +45,7 @@ def test_iset_response_carries_computed_acceptance(tmp_path, dashboard_client):
         "acceptance_criteria": [{"study": "s1", "behavior": "beh-a"}],
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/api/investigation/my-inv")
     assert resp.status_code == 200
     data = resp.json()
@@ -56,7 +56,7 @@ def test_iset_response_carries_computed_acceptance(tmp_path, dashboard_client):
     assert ca["criteria"][0]["result"] == "passing"
 
 
-def test_iset_response_surfaces_persisted_divergence(tmp_path, dashboard_client):
+def test_iset_response_surfaces_persisted_divergence(tmp_path, inproc_client):
     """When executive.computed_acceptance.diverges_from_authored is persisted,
     the response surfaces it (not recomputed)."""
     ws = tmp_path / "ws"
@@ -84,7 +84,7 @@ def test_iset_response_surfaces_persisted_divergence(tmp_path, dashboard_client)
         },
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     data = client.get("/api/investigation/div-inv").json()
     ca = data.get("computed_acceptance")
     assert ca is not None

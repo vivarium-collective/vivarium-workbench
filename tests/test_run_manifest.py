@@ -28,6 +28,26 @@ def test_save_metadata_no_manifest_is_null(tmp_path):
     assert row[0] is None
 
 
+def test_save_metadata_threads_pkg_into_fallback_manifest(tmp_path):
+    # #1475: the investigation runner's VARIANT path records a run via
+    # run_composite_subprocess -> save_metadata WITHOUT a prebuilt manifest, so
+    # save_metadata builds one via its best-effort fallback. The baseline path
+    # builds its manifest with build_run_manifest(pkg=pkg), so it records
+    # manifest["pkg"] and code_version.package; the fallback must thread pkg the
+    # same way or the two kinds of run in one runs.db disagree (pkg empty,
+    # code_version.package null on variants). "pytest" stands in for the
+    # workspace package: it is installed, so its version resolves.
+    conn = cr.connect(tmp_path / "runs.db")
+    cr.save_metadata(conn, spec_id="s", run_id="rv", params={"seed": 0},
+                     label="variant", started_at=0.0, n_steps=5,
+                     workspace=tmp_path, pkg="pytest")
+    row = conn.execute(
+        "SELECT manifest_json FROM runs_meta WHERE run_id='rv'").fetchone()
+    man = json.loads(row[0])
+    assert man["pkg"] == "pytest"
+    assert man["code_version"]["package"] is not None
+
+
 def test_build_run_manifest_shape():
     m = cr.build_run_manifest(spec_id="s", params={"seed": 0}, n_steps=100,
                               emitter="parquet", emit_paths=["bulk"], runtime={"x": 1},

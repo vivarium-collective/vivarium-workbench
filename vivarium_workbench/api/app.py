@@ -90,6 +90,8 @@ from vivarium_workbench.lib import study_narrative_command_views as _study_narra
 from vivarium_workbench.lib import study_findings_views as _study_findings_views
 from vivarium_workbench.lib import readout_migration_status_views as _readout_migration_status_views
 from vivarium_workbench.lib import feedback_record_views as _feedback_record_views
+from vivarium_workbench.lib import feedback_save_views as _feedback_save_views
+from vivarium_workbench.lib import prose_edit_views as _prose_edit_views
 from vivarium_workbench.lib import iset_close_views as _iset_close_views
 from vivarium_workbench.lib import scaffold_mutations as _scaffold_mut
 from vivarium_workbench.lib import composite_state_views as _composite_state_views
@@ -261,6 +263,10 @@ from vivarium_workbench.lib.models import (
     StudyFindingsResult,
     StudyReadoutMigrationStatusResult,
     FeedbackRecordActionBody,
+    FeedbackSaveBody,
+    FeedbackSaveResult,
+    ProseEditBody,
+    ProseEditResult,
     ISetCloseBody,
     ISetCloseResult,
     FeedbackRecordActionResult,
@@ -1087,6 +1093,353 @@ def create_app() -> FastAPI:
         ``lib.investigation_report._build_discovery``."""
         from vivarium_workbench.lib.investigation_report import _build_discovery
         return _build_discovery(ws, slug) or {}
+
+    @app.get(
+        "/api/discovery-delta/{slug}",
+        tags=["Investigations"],
+        summary="What changed this discovery cycle (engine discovery_delta)",
+    )
+    def discovery_delta_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        from vivarium_workbench.lib.discovery_surface import build_discovery_delta
+        return build_discovery_delta(ws, slug)
+
+    @app.get(
+        "/api/evidence-integrity/{slug}",
+        tags=["Investigations"],
+        summary="Per-finding evidence-integrity ledger, summary and by-study roll-up",
+    )
+    def evidence_integrity_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        from vivarium_workbench.lib.discovery_surface import build_evidence_integrity
+        return build_evidence_integrity(ws, slug)
+
+    @app.get(
+        "/api/generation-requests/{slug}",
+        tags=["Investigations"],
+        summary="Typed GenerationRequests the frontier emits (AI-drivable cycle, Phase 1)",
+    )
+    def generation_requests_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """The typed generation contract for one investigation: the frontier's
+        generative acts (propose_study / acquire_model / author_tests /
+        interpret_finding / resolve_decision / explain / visualize), each with a
+        gate (auto|review) resolved from ``discovery.gates``. Read-only projection;
+        nothing is written. ``{}`` on an engine without the generation contract.
+        Backed by ``lib.investigation_report.build_generation_requests``."""
+        from vivarium_workbench.lib.investigation_report import build_generation_requests
+        return build_generation_requests(ws, slug) or {}
+
+    @app.post(
+        "/api/generation-gates/{slug}",
+        tags=["Investigations"],
+        summary="Set the investigation's generation GateConfig (autonomy control)",
+    )
+    def generation_gates_route(slug: str, payload: dict = Body(default={}),
+                               ws: Path = Depends(get_workspace)):
+        """Persist the per-kind auto/review gates (or a one-click preset) to
+        ``investigation.yaml`` ``discovery.gates`` — the operator's autonomy control
+        for the generation contract. ``payload`` = ``{preset}`` (free_run |
+        all_gated | propose_review) or ``{default, by_kind}``. MUTATES
+        investigation.yaml. Backed by
+        ``lib.investigation_report.set_generation_gates``."""
+        from vivarium_workbench.lib.investigation_report import set_generation_gates
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        try:
+            return set_generation_gates(ws, name, preset=p.get("preset"),
+                                        default=p.get("default"), by_kind=p.get("by_kind"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
+    @app.get(
+        "/api/discovery-cycle-steps",
+        tags=["Investigations"],
+        summary="Discovery-engine cycle step graph (static metadata)",
+    )
+    def discovery_cycle_steps() -> dict:
+        """The canonical ordered step graph of the discovery cycle (nodes + data
+        dependencies + pure/mutating kind) — lets the Discovery Engine panel draw
+        the diagram before any run. Backed by ``lib.cycle_trace.STEPS``."""
+        from vivarium_workbench.lib.cycle_trace import STEPS, engine_available
+        return {"available": engine_available(), "steps": STEPS}
+
+    @app.get(
+        "/api/discovery-cycle-investigations",
+        tags=["Investigations"],
+        summary="Investigations the discovery cycle can run on (have investigation.yaml)",
+    )
+    def discovery_cycle_investigations(ws: Path = Depends(get_workspace)) -> dict:
+        """The cycle-runnable investigations for the picker — only those with an
+        ``investigation.yaml`` on disk, so the panel never offers a study-granularity
+        row that would fail to load. Backed by ``lib.cycle_trace.list_cycle_investigations``."""
+        from vivarium_workbench.lib.cycle_trace import list_cycle_investigations
+        return {"investigations": list_cycle_investigations(ws)}
+
+    @app.get(
+        "/api/discovery-cycle/{slug}",
+        tags=["Investigations"],
+        summary="Run the full analytical discovery cycle and trace every step",
+    )
+    def discovery_cycle(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """Run one full pass of the pure analytical cycle for an investigation and
+        return a per-step trace: each step's status, timing, one-line summary, and
+        full result. Read-only — no step here writes to disk. Backed by
+        ``lib.cycle_trace.build_cycle_trace``."""
+        from vivarium_workbench.lib.cycle_trace import build_cycle_trace
+        return build_cycle_trace(ws, slug)
+
+    @app.get(
+        "/api/discovery-cycle/{slug}/step/{step_id}",
+        tags=["Investigations"],
+        summary="Re-run one step of the discovery cycle (fresh result)",
+    )
+    def discovery_cycle_step(slug: str, step_id: str,
+                             ws: Path = Depends(get_workspace)) -> dict:
+        """Re-run a single cycle step. Its dependency chain is recomputed so the
+        result is fresh and consistent. Rejects the mutating ``advance`` step
+        (use the sandboxed advance). Backed by ``lib.cycle_trace.rerun_step``."""
+        from vivarium_workbench.lib.cycle_trace import rerun_step
+        return rerun_step(ws, slug, step_id)
+
+    @app.get(
+        "/api/discovery-cycle/{slug}/advance",
+        tags=["Investigations"],
+        summary="Drive the cycle toward closure in a sandboxed copy (never mutates real files)",
+    )
+    def discovery_cycle_advance(slug: str, max_runs: int = 4,
+                                ws: Path = Depends(get_workspace)) -> dict:
+        """Advance the cycle (Phase E execute) against a throwaway COPY of the
+        investigation, so the real workspace is never mutated, then report the
+        frontier before/after. Backed by ``lib.cycle_trace.sandbox_advance``."""
+        from vivarium_workbench.lib.cycle_trace import sandbox_advance
+        return sandbox_advance(ws, slug, max_runs=max(1, min(int(max_runs), 12)))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/apply",
+        tags=["Investigations"],
+        summary="Write the cycle's findings back to the real investigation + studies",
+    )
+    def discovery_cycle_apply(slug: str, payload: dict = Body(default={}),
+                              ws: Path = Depends(get_workspace)) -> dict:
+        """Apply the discovery cycle's findings to the REAL artifacts: write each
+        study's engine-evaluated verdict onto study.yaml, enrich the builds-on edges,
+        persist the cycle_state onto investigation.yaml, and commit the changed files
+        to the workspace git (auditable + revertible). Human-only decisions are left
+        for the human. ``payload`` may set ``scope`` (all | verdicts | state). This
+        MUTATES research files — reached only via the panel's explicit Apply button.
+        Backed by ``lib.cycle_trace.apply_cycle``."""
+        from vivarium_workbench.lib.cycle_trace import apply_cycle
+        scope = str((payload or {}).get("scope") or "all")
+        return apply_cycle(ws, slug, scope=scope)
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/resolve",
+        tags=["Investigations"],
+        summary="Resolve (discharge) one open frontier item of the discovery cycle",
+    )
+    def discovery_cycle_resolve(slug: str, payload: dict = Body(default={}),
+                                ws: Path = Depends(get_workspace)) -> dict:
+        """Record a human decision/resolution for one gate item so it stops being
+        raised on the frontier (the panel's 'decide from the menu'). ``payload`` =
+        ``{kind, target, rationale}`` — a rationale is required. MUTATES
+        investigation.yaml and commits it (revertible). Backed by
+        ``lib.cycle_trace.resolve_frontier_item``."""
+        from vivarium_workbench.lib.cycle_trace import resolve_frontier_item
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        return resolve_frontier_item(ws, name, str(p.get("kind") or ""),
+                                     str(p.get("target") or ""),
+                                     str(p.get("rationale") or ""))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/build-viz",
+        tags=["Investigations"],
+        summary="Render one declared figure (fig:<study>/<name>) of the discovery cycle",
+    )
+    def discovery_cycle_build_viz(slug: str, payload: dict = Body(default={}),
+                                  ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Build button: renders ONE figure in-process via the engine's
+        render branch (``render_hook=viz_build.render_one``). ``payload`` = ``{target}``.
+        Backed by ``lib.cycle_trace.build_viz``."""
+        from vivarium_workbench.lib.cycle_trace import build_viz
+        name = _path_safety.plain_name(slug, "investigation")
+        return build_viz(ws, name, str((payload or {}).get("target") or ""))
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/declare-viz",
+        tags=["Investigations"],
+        summary="Apply a viz_broken fix: declare address/render on a broken figure entry",
+    )
+    def discovery_cycle_declare_viz(slug: str, payload: dict = Body(default={}),
+                                    ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Apply-fix button (``discover viz --declare``). ``payload`` =
+        ``{target, declare:{address|render|requires}, rationale}``; a rationale is
+        required. MUTATES study.yaml + investigation.yaml and commits (revertible).
+        Backed by ``lib.cycle_trace.declare_viz_fix``."""
+        from vivarium_workbench.lib.cycle_trace import declare_viz_fix
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        return declare_viz_fix(ws, name, str(p.get("target") or ""),
+                               p.get("declare") if isinstance(p.get("declare"), dict) else {},
+                               str(p.get("rationale") or ""))
+
+    @app.get(
+        "/api/investigation/{slug}/freshness",
+        tags=["Investigations"],
+        summary="Derived per-tab freshness (verdict / decisions / narrative)",
+    )
+    def investigation_tab_freshness(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """Engine-derived ``{verdict, decisions, narrative, any_expired}``; read-only."""
+        from vivarium_workbench.lib.cycle_trace import investigation_freshness
+        return investigation_freshness(ws, _path_safety.plain_name(slug, "investigation"))
+
+    @app.post(
+        "/api/investigation/{slug}/accept-verdict",
+        tags=["Investigations"],
+        summary="Accept the computed verdict (rationale required)",
+    )
+    def investigation_accept_verdict(slug: str, payload: dict = Body(default={}),
+                                     ws: Path = Depends(get_workspace)) -> dict:
+        """Verdict tab Refresh. ``payload`` = ``{rationale}`` (400 if blank). Commits."""
+        from vivarium_workbench.lib.cycle_trace import accept_verdict
+        out = accept_verdict(ws, _path_safety.plain_name(slug, "investigation"),
+                             str((payload or {}).get("rationale") or ""))
+        return JSONResponse(out, status_code=400) if out.get("ok") is False else out
+
+    @app.post(
+        "/api/investigation/{slug}/refresh-narrative",
+        tags=["Investigations"],
+        summary="Refresh the narrative basis stamp (rationale required)",
+    )
+    def investigation_refresh_narrative(slug: str, payload: dict = Body(default={}),
+                                        ws: Path = Depends(get_workspace)) -> dict:
+        """Narrative tab Refresh. ``payload`` = ``{rationale}`` (400 if blank). Commits."""
+        from vivarium_workbench.lib.cycle_trace import refresh_narrative
+        out = refresh_narrative(ws, _path_safety.plain_name(slug, "investigation"),
+                                str((payload or {}).get("rationale") or ""))
+        return JSONResponse(out, status_code=400) if out.get("ok") is False else out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/accept-viz-proposal",
+        tags=["Investigations"],
+        summary="Accept a proposed visualization (declares it; rationale required)",
+    )
+    def discovery_cycle_accept_viz(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Accept button. ``payload`` = ``{proposal, rationale, address?}``;
+        a rationale is required (4xx otherwise), and an address for a needs_author
+        proposal. MUTATES study.yaml + investigation.yaml and commits (revertible).
+        Backed by ``lib.cycle_trace.accept_viz_proposal``."""
+        from vivarium_workbench.lib.cycle_trace import accept_viz_proposal
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = accept_viz_proposal(ws, name, str(p.get("proposal") or ""),
+                                  str(p.get("rationale") or ""), p.get("address"))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/reject-viz-proposal",
+        tags=["Investigations"],
+        summary="Reject a proposed visualization (terminal; rationale required)",
+    )
+    def discovery_cycle_reject_viz(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Reject button. ``payload`` = ``{proposal, rationale}``; a rationale
+        is required (4xx otherwise). Backed by ``lib.cycle_trace.reject_viz_proposal``."""
+        from vivarium_workbench.lib.cycle_trace import reject_viz_proposal
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = reject_viz_proposal(ws, name, str(p.get("proposal") or ""),
+                                  str(p.get("rationale") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/accept-capability-gap",
+        tags=["Investigations"],
+        summary="Accept a proposed capability gap (authorizes a build; rationale required)",
+    )
+    def discovery_cycle_accept_gap(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Accept button for a capability gap. ``payload`` = ``{gap, rationale}``;
+        a rationale is required (4xx otherwise). MUTATES investigation.yaml and commits
+        (revertible). Backed by ``lib.cycle_trace.accept_capability_gap``."""
+        from vivarium_workbench.lib.cycle_trace import accept_capability_gap
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = accept_capability_gap(ws, name, str(p.get("gap") or ""), str(p.get("rationale") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/reject-capability-gap",
+        tags=["Investigations"],
+        summary="Reject a proposed capability gap (terminal; rationale required)",
+    )
+    def discovery_cycle_reject_gap(slug: str, payload: dict = Body(default={}),
+                                   ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Reject button for a capability gap. ``payload`` = ``{gap, rationale}``;
+        a rationale is required (4xx otherwise). Backed by ``lib.cycle_trace.reject_capability_gap``."""
+        from vivarium_workbench.lib.cycle_trace import reject_capability_gap
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        out = reject_capability_gap(ws, name, str(p.get("gap") or ""), str(p.get("rationale") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/build-capability-gap",
+        tags=["Investigations"],
+        summary="Build an accepted capability gap via the workspace build hook",
+    )
+    def discovery_cycle_build_gap(slug: str, payload: dict = Body(default={}),
+                                  ws: Path = Depends(get_workspace)) -> dict:
+        """The panel's Build button for an accepted capability gap. ``payload`` = ``{gap}``;
+        routes it to the workspace build hook. A 4xx is returned only for a client error
+        (bad id, not accepted, no hook registered); a ``needs_author`` / ``failed`` OUTCOME
+        is a 200 carrying the resulting status. Backed by ``lib.cycle_trace.build_capability_gap``."""
+        from vivarium_workbench.lib.cycle_trace import build_capability_gap
+        name = _path_safety.plain_name(slug, "investigation")
+        out = build_capability_gap(ws, name, str((payload or {}).get("gap") or ""))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/toggle-untied",
+        tags=["Investigations"],
+        summary="Turn the viz_untied rollout flag on/off for an investigation",
+    )
+    def discovery_cycle_toggle_untied(slug: str, payload: dict = Body(default={}),
+                                      ws: Path = Depends(get_workspace)) -> dict:
+        """``payload`` = ``{enabled: bool}``. Sets ``cycle_flags.viz_untied`` in
+        investigation.yaml and commits (revertible). Backed by ``lib.cycle_trace.set_viz_untied``."""
+        from vivarium_workbench.lib.cycle_trace import set_viz_untied
+        name = _path_safety.plain_name(slug, "investigation")
+        out = set_viz_untied(ws, name, bool((payload or {}).get("enabled")))
+        if out.get("ok") is False:
+            return JSONResponse(out, status_code=400)
+        return out
+
+    @app.post(
+        "/api/discovery-cycle/{slug}/steer",
+        tags=["Investigations"],
+        summary="Let the AI steer (decide) one open decision of the discovery cycle",
+    )
+    def discovery_cycle_steer(slug: str, payload: dict = Body(default={}),
+                              ws: Path = Depends(get_workspace)) -> dict:
+        """Drive ONE open decision via the engine's AI decider path (records an
+        ai-driven resolution, ``by='discovery-ai'``). Degrades with a clear message
+        when no decider is configured. ``payload`` = ``{target}``. Backed by
+        ``lib.cycle_trace.ai_steer_decision``."""
+        from vivarium_workbench.lib.cycle_trace import ai_steer_decision
+        name = _path_safety.plain_name(slug, "investigation")
+        return ai_steer_decision(ws, name, str((payload or {}).get("target") or ""))
 
     @app.get(
         "/api/investigation-report/{slug}",
@@ -6043,6 +6396,59 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return FeedbackRecordActionResult.model_validate(body)
+
+    @app.post(
+        "/api/feedback-save",
+        response_model=FeedbackSaveResult,
+        tags=["Studies"],
+        summary="Persist collected inline feedback into the workspace feedback dir",
+    )
+    def feedback_save(
+        req: FeedbackSaveBody,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[FeedbackSaveResult, JSONResponse]:
+        """Wraps ``viva_superpowers.feedback_import.write_feedback_payload``.
+
+        Body: a canonical ``{meta:{investigation, study?, reviewer?, ...},
+        annotations:{section_id: [{author, text, ts, ...}]}}`` payload from the
+        study page's inline-feedback widget (``static/study-feedback.js``).
+        Writes it to ``investigations/<inv>/feedback/<ts>.yaml`` — the path the
+        dashboard and the responder skills scan. Returns ``{saved, path}``. 400
+        missing ``meta.investigation`` / empty annotations, 404 unknown
+        investigation, 500 on failure.
+        """
+        body, status = _feedback_save_views.feedback_save(
+            ws, req.model_dump(exclude_unset=True)
+        )
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return FeedbackSaveResult.model_validate(body)
+
+    @app.post(
+        "/api/prose-edit",
+        response_model=ProseEditResult,
+        tags=["Studies"],
+        summary="Edit one whitelisted prose field in a study/investigation yaml",
+    )
+    def prose_edit(
+        req: ProseEditBody,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[ProseEditResult, JSONResponse]:
+        """Wraps ``lib.prose_edit_views.prose_edit``.
+
+        Body ``{kind: study|investigation, slug, field, value}`` from the
+        inline-edit client (``static/inline-edit.js``). Writes the one
+        whitelisted prose field back into study.yaml / investigation.yaml
+        (comment-preserving), so the edit shows up in ``git diff`` and the user
+        commits it. Returns ``{saved, file}``. 400 bad kind/field/value or field
+        not editable, 404 slug/field not found, 500 on write failure.
+        """
+        body, status = _prose_edit_views.prose_edit(
+            ws, req.model_dump(exclude_unset=True)
+        )
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return ProseEditResult.model_validate(body)
 
     @app.post(
         "/api/iset-close",

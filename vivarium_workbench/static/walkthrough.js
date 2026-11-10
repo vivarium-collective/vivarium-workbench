@@ -1,4 +1,4 @@
-// walkthrough.js — v0.8.0: Registry Full view is now directly runnable — the config bar IS the editable config and the left ports ARE the editable input fields (no "Run this process" dropdown); Run lives in the body, outputs on the right. Middle (grid) zoom shows ports+types inline (no dropdown); double-click a card → runnable Full. Modules table split into Installed-here vs Marketplace sections with a Repos (imported-into) column, GitHub link on the name, and Install/Uninstall in one Action column (n_repos from module_stats federation scan). bigraph-loom: Explore (graph) is the default left tab; the right dock defaults to Processes with Nodes/Inspector collapsed. v0.7.0: Composites semantic zoom (Table/Cards full-row compact/Loom on-demand embed) + double-click to zoom in; /api/composites now runs in the WARM pooled worker (flake fix). v0.6.9: registry filter now data-driven (works in Table/Cards/Full); middle Cards zoom is full-row with composite/study usage split + details; double-click zooms in centered; select persists across zoom; run panel input ports as per-field form (type + resolved default, auto-grow) + Copy outputs; loom config bar lightened to match workbench palette. v0.6.8: run panel lazy-loads RESOLVED defaults (core.fill via /api/registry/process-template) into a per-field config form + inputs JSON (no more null-heavy templates); loom card restyled as a crisp rectangle. v0.6.7: Registry Full-view interactive runner — editable config + input-port JSON, Run → outputs (POST /api/registry/run-process; env_worker._run_process instantiates + Step.update / Process.update(interval)); loom inputs left / outputs right. v0.6.6: Registry semantic zoom (compact/detailed/full loom-rectangle: inputs left, outputs right, config top) + Cards⇄Table sortable view (_setRegistryZoom/_setRegistryView/_renderRegistryTable); rail pins hover-only + ungrouped back to a collapsible folder. v0.6.5: Registry processes sorted by USE (most-referenced across composites/runners first) with a use-count badge (build_registry._annotate_use_counts source-scan). v0.6.4: Registry page — "Discovered registry"→"Registry" (main tab), "Modules"→"Marketplace"; rich registry entries (description + inputs/outputs ports/contract + full config schema, loom-like) and a new Report Cards tab (_renderRegistryEntry/_regPortColumn). v0.6.3: STUDIES rail — per-study pin toggle (localStorage) with a "Pinned" strip at the top for quick access, and ungrouped studies rendered as a flat list at the bottom instead of a collapsible dropdown (_toggleStudyPin/_loadPinnedStudies; _railStudyItem + _renderRailInvestigationGroups). v0.6.2: Marketplace merged into the Modules tab — Modules grid loads the FULL ecosystem via /api/marketplace (available modules under the "Available to install" divider), installed cards gain an Uninstall action gated by an impact-confirmation modal (_showUninstallImpactModal via /api/catalog-uninstall-impact), viva-* display names + stat chips. v0.6.1: Marketplace sub-tab — browse the FULL viva ecosystem (unfiltered by registry.include) + install (_loadMarketplace/_renderMarketplace via /api/marketplace; shared _renderModuleGrid/_moduleActionFor with the Modules tab). v0.6.0: system-deps awareness — pre-install check + consent modal (_installFromCatalog → _showSystemDepsModal; new _checkSystemDepsForInstalled on Registry rows); v0.5.3: investigation detail panel — Spec/Runs/Visualizations tabs + Run button + Delete; v0.5.2: composite explorer UX fixes (no focus-mode hijack, one-row-per-param layout, lazy-load composite cache); v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
+// walkthrough.js — v0.8.3: HONEST "Finds:" — a graph card may headline a study's claim/finding ONLY when the study has produced evidence (structured findings[], a completed execution, or an engine-DERIVED verdict). A planned/proposed/running study's authored `claim:` is a forward-looking PREDICTION, not a finding, and is now withheld: the row reads "pending evidence" (or "future direction" when parked), matching the honest Verdict pill. Single shared gate `_studyHasEvidence(s)` used by BOTH the collapsed card (Finds: teaser) and the expanded `_aigCardDetailHtml`. Fixes planned studies (e.g. multicellularity S04–S06) showing their design-time claim as if it were a result. v0.8.2: PARKED study state — a deliberately-deferred future direction renders as "Parked · future direction" (violet), NOT "Planned · pending": new _EXEC_META.parked + _VERDICT_PARKED, _execState/_studyStatusState detect the orthogonal `parked` flag / effective_status==='parked' (precedence terminal→parked→lifecycle); graph legend + iset-card breakdown pick it up automatically. v0.8.1: Investigations list is now ONE combined list (active-first by default) — the ACTIVE/CLOSED section split is removed (_groupHtml is header-optional; the user sort orders the whole set). v0.8.0: Registry Full view is now directly runnable — the config bar IS the editable config and the left ports ARE the editable input fields (no "Run this process" dropdown); Run lives in the body, outputs on the right. Middle (grid) zoom shows ports+types inline (no dropdown); double-click a card → runnable Full. Modules table split into Installed-here vs Marketplace sections with a Repos (imported-into) column, GitHub link on the name, and Install/Uninstall in one Action column (n_repos from module_stats federation scan). bigraph-loom: Explore (graph) is the default left tab; the right dock defaults to Processes with Nodes/Inspector collapsed. v0.7.0: Composites semantic zoom (Table/Cards full-row compact/Loom on-demand embed) + double-click to zoom in; /api/composites now runs in the WARM pooled worker (flake fix). v0.6.9: registry filter now data-driven (works in Table/Cards/Full); middle Cards zoom is full-row with composite/study usage split + details; double-click zooms in centered; select persists across zoom; run panel input ports as per-field form (type + resolved default, auto-grow) + Copy outputs; loom config bar lightened to match workbench palette. v0.6.8: run panel lazy-loads RESOLVED defaults (core.fill via /api/registry/process-template) into a per-field config form + inputs JSON (no more null-heavy templates); loom card restyled as a crisp rectangle. v0.6.7: Registry Full-view interactive runner — editable config + input-port JSON, Run → outputs (POST /api/registry/run-process; env_worker._run_process instantiates + Step.update / Process.update(interval)); loom inputs left / outputs right. v0.6.6: Registry semantic zoom (compact/detailed/full loom-rectangle: inputs left, outputs right, config top) + Cards⇄Table sortable view (_setRegistryZoom/_setRegistryView/_renderRegistryTable); rail pins hover-only + ungrouped back to a collapsible folder. v0.6.5: Registry processes sorted by USE (most-referenced across composites/runners first) with a use-count badge (build_registry._annotate_use_counts source-scan). v0.6.4: Registry page — "Discovered registry"→"Registry" (main tab), "Modules"→"Marketplace"; rich registry entries (description + inputs/outputs ports/contract + full config schema, loom-like) and a new Report Cards tab (_renderRegistryEntry/_regPortColumn). v0.6.3: STUDIES rail — per-study pin toggle (localStorage) with a "Pinned" strip at the top for quick access, and ungrouped studies rendered as a flat list at the bottom instead of a collapsible dropdown (_toggleStudyPin/_loadPinnedStudies; _railStudyItem + _renderRailInvestigationGroups). v0.6.2: Marketplace merged into the Modules tab — Modules grid loads the FULL ecosystem via /api/marketplace (available modules under the "Available to install" divider), installed cards gain an Uninstall action gated by an impact-confirmation modal (_showUninstallImpactModal via /api/catalog-uninstall-impact), viva-* display names + stat chips. v0.6.1: Marketplace sub-tab — browse the FULL viva ecosystem (unfiltered by registry.include) + install (_loadMarketplace/_renderMarketplace via /api/marketplace; shared _renderModuleGrid/_moduleActionFor with the Modules tab). v0.6.0: system-deps awareness — pre-install check + consent modal (_installFromCatalog → _showSystemDepsModal; new _checkSystemDepsForInstalled on Registry rows); v0.5.3: investigation detail panel — Spec/Runs/Visualizations tabs + Run button + Delete; v0.5.2: composite explorer UX fixes (no focus-mode hijack, one-row-per-param layout, lazy-load composite cache); v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
 (function () {
   "use strict";
   // Cache-bust token for the bigraph-loom iframe, captured once per page load.
@@ -62,10 +62,20 @@
     running:   {color: '#ca8a04', icon: '◑', label: 'Running'},
     completed: {color: '#475569', icon: '●', label: 'Completed'},
     failed:    {color: '#dc2626', icon: '⊘', label: 'Failed'},
+    parked:    {color: '#7c3aed', icon: '◴', label: 'Parked'},
   };
   function _execState(s) {
     s = s || {};
     var ex = String(s.execution_status || '').trim().toLowerCase();
+    // A parked:true study (deliberately-deferred future direction) reads 'parked'
+    // UNLESS it carries a real terminal/in-flight execution status. Some payloads
+    // (the investigation-detail d.studies the DAG cards render from) pass the
+    // `parked` flag through WITHOUT recomputing the execution axis, so it arrives
+    // as execution_status 'planned'/'proposed' — honor the flag here, before
+    // trusting a not-yet-started execution_status. (The graph endpoint already
+    // derives execution_status='parked', caught by the _EXEC_META line below.)
+    // Precedence matches the server: terminal/in-flight → parked → lifecycle.
+    if (s.parked === true && (ex === '' || ex === 'proposed' || ex === 'planned')) return 'parked';
     if (_EXEC_META[ex]) return ex;
     // Client fallback (server normally sets execution_status): derive from the
     // legacy multi-axis fields. A gate/evaluation that reached a result means the
@@ -78,6 +88,11 @@
     if (['passed', 'failed', 'needs_calibration', 'stale'].indexOf(gate) >= 0) return 'completed';
     if (sim === 'ran' && (ev === 'evaluated' || ev === 'failed_evaluation')) return 'completed';
     if (['complete', 'completed', 'ran', 'decided', 'evaluated'].indexOf(life) >= 0) return 'completed';
+    // Parked = a deliberately-deferred future direction (the orthogonal `parked`
+    // flag, or server-derived effective_status='parked'). Not running, not pending.
+    // Precedence matches the engine: terminal (completed/failed above) → parked →
+    // the normal lifecycle (running/planned) below.
+    if (s.parked === true || life === 'parked') return 'parked';
     if (sim === 'running' || ['running', 'analyzing', 'in_progress'].indexOf(life) >= 0) return 'running';
     var conf = String(s.confidence || '').trim().toLowerCase();
     if (conf === 'accepted') return 'completed';
@@ -104,6 +119,9 @@
   };
   // Shown in the Verdict pill when a study carries no (derivable) verdict yet.
   var _VERDICT_PENDING = {color: '#94a3b8', icon: '·', label: 'pending'};
+  // Second-pill descriptor for a PARKED study: it is not awaiting a verdict, it is
+  // deliberately deferred — so show "future direction", never "pending".
+  var _VERDICT_PARKED = {color: '#7c3aed', icon: '◴', label: 'future direction'};
   var _TIER_META = {
     'conceptual_demonstration': {pips: 1, label: 'demonstration'},
     'mechanistic_prediction':   {pips: 2, label: 'mechanistic'},
@@ -115,16 +133,163 @@
   }
   function _verdictMeta(s) {
     var v = _studyVerdict(s);
-    return v ? _VERDICT_META[v] : null;  // null → render the pending pill
+    if (!v) return null;  // null → render the pending pill
+    // Engine-derived (not authored/Applied): same look, flagged with a "*".
+    return s && s.verdict_source === 'derived'
+      ? Object.assign({}, _VERDICT_META[v], {derived: true}) : _VERDICT_META[v];
+  }
+  // Honesty gate for the "Finds:" headline — the SINGLE source every graph card
+  // shares. A study may surface its claim/finding under "Finds:" ONLY when it has
+  // actually produced evidence:
+  //   • recorded structured findings[],  OR
+  //   • a completed execution (the study ran),  OR
+  //   • an engine-DERIVED verdict (graded from its tests, carries verdict_source
+  //     'derived').
+  // A bare authored `claim:` on a planned / proposed / running study is a
+  // forward-looking PREDICTION, not a finding, so it is withheld here and the row
+  // reads "pending evidence" (or "future direction" for a parked study). This is
+  // what keeps the graph honest: the headline reflects EVIDENCE, never a
+  // hypothesis an author wrote down before any run existed.
+  //
+  // NOTE on the soft edges (both authored, not graded): a study hand-set to
+  // execution 'completed' or `confidence: accepted` with no runs, and a study
+  // with a hand-authored (non-derived) verdict, both still pass this gate. That
+  // matches today's two-axis display (an authored verdict shows in the pill
+  // without the derived "*"), and is the deliberately-narrow fix for the reported
+  // bug (planned studies showing a claim). Tightening those to require graded
+  // backing is a separate, data-touching decision — see the sweep write-up.
+  function _studyHasEvidence(s) {
+    if (_asFindings(s && s.findings).length > 0) return true;
+    if (_execState(s) === 'completed') return true;
+    var vm = _verdictMeta(s);
+    return !!(vm && vm.derived);
   }
   // A rounded two-axis pill: glyph + (optionally) label, tinted by the axis color.
-  function _aigPill(meta, title, cls, compact) {
-    return '<span class="' + cls + '" title="' + title + '" ' +
+  // When `axis` ('progress' | 'verdict') is passed the pill becomes CLICKABLE and
+  // opens the breakdown popover (same interrogation the standalone study page
+  // offers on its header markers) — the card loop stashes the breakdown data on
+  // the node as `node._axisData[axis]`, wired up after innerHTML is set.
+  function _aigPill(meta, title, cls, compact, axis) {
+    var clickCls = axis ? ' aig-axis-pill' : '';
+    var cursor   = axis ? 'cursor:pointer;' : '';
+    var attrs    = axis ? ' data-axis="' + axis + '" role="button" tabindex="0"' : '';
+    var ttl      = axis ? (title + ' — click for the full breakdown') : title;
+    return '<span class="' + cls + clickCls + '"' + attrs + ' title="' + ttl + '" ' +
       'style="display:inline-flex;align-items:center;gap:3px;font-size:0.6em;font-weight:700;' +
-      'white-space:nowrap;border-radius:9999px;padding:1px 7px;color:' + meta.color + ';' +
+      'white-space:nowrap;border-radius:9999px;padding:1px 7px;' + cursor + 'color:' + meta.color + ';' +
       'background:' + meta.color + '14;border:1px solid ' + meta.color + '40">' +
       '<span style="font-size:1.1em;line-height:1">' + meta.icon + '</span>' +
-      (compact ? '' : _esc(meta.label)) + '</span>';
+      (compact ? '' : _esc(meta.label)) + (meta.derived ? '<sup title="derived">*</sup>' : '') + '</span>';
+  }
+
+  // ── Clickable axis-marker breakdown (graph cards) ────────────────────────────
+  // Mirrors study-detail.js's header markers so the SAME information is one click
+  // away on a graph card's Progress / Verdict pill: the underlying lifecycle /
+  // verdict signals AND the study's findings in FULL (the card preview clamps the
+  // one-line claim; this is where the whole thing is readable). A single shared,
+  // viewport-fixed popover is filled on demand from the clicked card's stashed
+  // `_axisData` — no per-card hidden DOM across a canvas of many cards.
+  function _aigProgressRows(s) {
+    var rows = [];
+    [['status', s.status], ['simulation_status', s.simulation_status],
+     ['evaluation_status', s.evaluation_status], ['gate_status', s.gate_status],
+     ['confidence', s.confidence]].forEach(function (r) {
+      if (r[1] != null && String(r[1]).trim() !== '') rows.push([r[0], String(r[1])]);
+    });
+    return rows;
+  }
+  function _aigVerdictRows(s) {
+    var rows = [];
+    if (s.verdict) rows.push(['verdict', String(s.verdict)]);
+    if (s.report && s.report.verdict) rows.push(['report.verdict', String(s.report.verdict)]);
+    var cv = (s.derived || {}).conclusion_verdicts || {};
+    [['regression_compatibility', 'regression'], ['biological_validation', 'biology'],
+     ['explanatory_gain', 'insight']].forEach(function (t) {
+      var trk = cv[t[0]];
+      if (trk && trk.result) rows.push([t[1], String(trk.result)]);
+    });
+    if (s.confidence) rows.push(['confidence', String(s.confidence)]);
+    return rows;
+  }
+  function _aigAxisFindingsHtml(findings) {
+    var fs = _asFindings(findings);
+    if (!fs.length) return '';
+    var body = fs.map(function (f, i) {
+      var txt = (f && (f.statement || f.summary || f.id)) || '';
+      if (!txt) return '';
+      var st = f && f.status ? String(f.status).trim() : '';
+      return '<div style="margin-top:7px">' +
+        '<span style="color:#64748b;font-weight:600">finding ' + (i + 1) + '</span>' +
+        (st ? ' <span style="color:#94a3b8;font-size:0.9em">· ' + _esc(st) + '</span>' : '') +
+        '<div style="margin-top:2px;line-height:1.45;color:#1e293b">' +
+          _esc(String(txt).replace(/\s+/g, ' ').trim()) + '</div></div>';
+    }).join('');
+    return body
+      ? '<div style="margin-top:8px;border-top:1px solid #eef2f7;padding-top:6px">' +
+          '<div style="color:#475569;font-weight:700;font-size:0.95em">Finds</div>' + body + '</div>'
+      : '';
+  }
+  function _aigAxisPopoverEl() {
+    var el = document.getElementById('aig-axis-popover');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'aig-axis-popover';
+      el.setAttribute('role', 'dialog');
+      el.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:240px;max-width:360px;' +
+        'max-height:min(62vh,460px);overflow:auto;background:#fff;border:1px solid #e2e8f0;' +
+        'border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.16);padding:10px 12px;' +
+        'font-size:0.8rem;line-height:1.45;color:#334155;text-align:left;font-weight:400';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function _aigAxisPopoverHtml(d) {
+    var meta = d.meta;
+    var rowsHtml = d.rows.length
+      ? d.rows.map(function (r) {
+          return '<div style="display:flex;gap:8px;justify-content:space-between;margin-top:4px">' +
+            '<span style="color:#64748b">' + _esc(r[0]) + '</span>' +
+            '<span style="font-family:ui-monospace,monospace">' + _esc(r[1]) + '</span></div>';
+        }).join('')
+      : '<div style="color:#94a3b8;margin-top:4px">No further signals recorded.</div>';
+    return '<div style="font-weight:700;color:' + meta.color + '">' + meta.icon + ' ' +
+      _esc(d.label) + ': ' + _esc(meta.label) + '</div>' + rowsHtml + (d.findingsHtml || '');
+  }
+  var _aigAxisPopoverPill = null;   // the pill element whose popover is open
+  function _aigToggleAxisPopover(pill, node, axis) {
+    var el = _aigAxisPopoverEl();
+    var d = node._axisData && node._axisData[axis];
+    var isOpen = (_aigAxisPopoverPill === pill && el.style.display === 'block');
+    if (!d || isOpen) { el.style.display = 'none'; _aigAxisPopoverPill = null; return; }
+    el.innerHTML = _aigAxisPopoverHtml(d);
+    el.style.display = 'block';
+    var r = pill.getBoundingClientRect();
+    var w = el.offsetWidth, h = el.offsetHeight;
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 10));
+    var top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);   // flip up if no room below
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    _aigAxisPopoverPill = pill;
+  }
+  if (typeof window !== 'undefined' && !window._aigAxisPopoverWired) {
+    window._aigAxisPopoverWired = true;
+    var _closeAxisPop = function () {
+      var el = document.getElementById('aig-axis-popover');
+      if (el) { el.style.display = 'none'; }
+      _aigAxisPopoverPill = null;
+    };
+    // Outside-click (capture, so it runs before the pill's own handler re-opens).
+    document.addEventListener('click', function (ev) {
+      var t = ev.target;
+      if (t.closest && (t.closest('.aig-axis-pill') || t.closest('#aig-axis-popover'))) return;
+      _closeAxisPop();
+    }, true);
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') _closeAxisPop(); });
+    // The canvas scrolls; a viewport-fixed popover would detach from its pill.
+    window.addEventListener('scroll', function () {
+      if (_aigAxisPopoverPill) _closeAxisPop();
+    }, true);
   }
 
   // Legacy single-axis status model — still used by the rail dot, the sidebar,
@@ -137,6 +302,7 @@
     Planned:       {color: '#2563eb', icon: '○', label: 'Planned'},
     Blocked:       {color: '#64748b', icon: '⊘', label: 'Blocked'},
     Refuted:       {color: '#dc2626', icon: '✗', label: 'Refuted'},
+    Parked:        {color: '#7c3aed', icon: '◴', label: 'Parked'},
   };
   function _studyStatusState(s) {
     s = s || {};
@@ -148,6 +314,9 @@
     var life = String(s.effective_status || s.status || '').trim().toLowerCase();
     if (life.indexOf('blocked') !== -1) return 'Blocked';
     if (life.indexOf('fail') !== -1 || life === 'invalid' || life === 'refuted') return 'Refuted';
+    // Parked (deferred future direction) — distinct from in-flight work; beats
+    // the lifecycle/confidence fallbacks below but not a terminal gate verdict.
+    if (s.parked === true || life === 'parked') return 'Parked';
     var conf = String(s.confidence || '').trim();
     if (_STATUS_META[conf]) return conf;
     if (['complete', 'completed', 'ran', 'passed', 'evaluated', 'decided'].indexOf(life) >= 0) return 'Accepted';
@@ -3138,6 +3307,51 @@
     };
     if (document.readyState !== 'loading') sync();
     else document.addEventListener('DOMContentLoaded', sync);
+  })();
+
+  // ── Settings popover (the rail gear) ────────────────────────────────────
+  // The gear opens a small popover of app settings; the light/dark theme switch
+  // lives inside it (same #viv-theme-toggle id, so _setTheme/_toggleTheme drive
+  // it unchanged). The popover is position:fixed and anchored to the gear on open
+  // so it escapes the rail's overflow clip in the expanded state. Close with the
+  // gear, Escape, or a click outside.
+  function _vivCloseSettings() {
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (pop) pop.setAttribute('hidden', '');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  window._vivCloseSettings = _vivCloseSettings;
+  function _vivAnchorSettings() {
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (!pop || pop.hasAttribute('hidden') || !btn) return;
+    var r = btn.getBoundingClientRect();
+    pop.style.left = (r.right + 8) + 'px';
+    pop.style.bottom = (window.innerHeight - r.bottom) + 'px';
+    pop.style.top = 'auto';
+    pop.style.right = 'auto';
+  }
+  window._vivAnchorSettings = _vivAnchorSettings;
+  function _vivToggleSettings(ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    var pop = document.getElementById('viv-settings-popover');
+    var btn = document.getElementById('viv-settings-toggle');
+    if (!pop) return;
+    if (!pop.hasAttribute('hidden')) { _vivCloseSettings(); return; }
+    pop.removeAttribute('hidden');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    _vivAnchorSettings();
+  }
+  window._vivToggleSettings = _vivToggleSettings;
+  (function () {
+    document.addEventListener('click', function (e) {
+      var pop = document.getElementById('viv-settings-popover');
+      if (!pop || pop.hasAttribute('hidden')) return;
+      if (e.target.closest && (e.target.closest('#viv-settings-popover') || e.target.closest('#viv-settings-toggle'))) return;
+      _vivCloseSettings();
+    }, true);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') _vivCloseSettings(); });
   })();
 
   function _syncRegistryToolbar() {
@@ -7955,6 +8169,10 @@
     // Restore Vivarium left-rail collapsed state (V4).
     _vivRestoreRailState();
 
+    // Position the collapsed-rail hover flyouts (fixed-positioned so they escape
+    // the now-scrollable icon list). Idempotent — safe on every page init.
+    _vivInitRailFlyoutPositioning();
+
     // _refreshGitStatus is registered on DOMContentLoaded at the bottom of this file;
     // no duplicate call needed here.
 
@@ -7987,13 +8205,29 @@
     var label = collapsed ? 'Open sidebar' : 'Collapse sidebar';
     btn.setAttribute('title', label);
     btn.setAttribute('aria-label', label);
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    var txt = document.getElementById('viv-rail-toggle-text');
+    if (txt) txt.textContent = collapsed ? 'Expand' : 'Collapse';
   }
 
   function _vivToggleRail() {
-    // The rail is permanently collapsed (icon bar); toggling is a no-op so no
-    // stray caller can expand it back out.
+    // Flip the rail between the collapsed icon bar and the expanded, labelled
+    // sidebar, persisting the choice. The expanded width + edge-drag resize are
+    // driven by _vivRailResizeStart / the saved vivarium.rail-width.
     var rail = document.getElementById('viv-rail');
-    if (rail) rail.classList.add('viv-rail-collapsed');
+    if (!rail) return;
+    var collapsed = !rail.classList.contains('viv-rail-collapsed');  // target state
+    if (collapsed) {
+      rail.classList.add('viv-rail-collapsed');
+    } else {
+      rail.classList.remove('viv-rail-collapsed');
+      _vivRailApplyWidth(rail, _vivRailSavedWidth());
+    }
+    try { localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0'); } catch (e) { /* private mode */ }
+    _vivSyncRailToggleLabel(collapsed);
+    // The sidebar toggle lives in the settings popover; the rail resize shifts the
+    // gear it is anchored to, so re-anchor it once the width transition settles.
+    if (typeof window._vivAnchorSettings === 'function') setTimeout(window._vivAnchorSettings, 200);
   }
   window._vivToggleRail = _vivToggleRail;
 
@@ -8020,14 +8254,61 @@
   window._vivToggleRailSearch = _vivToggleRailSearch;
 
   function _vivRestoreRailState() {
-    // The rail is now PERMANENTLY collapsed — a fixed icon bar. The expand/resize
-    // mechanism (drag handle + width restore) was removed, so always keep the
-    // collapsed class regardless of any stored width/choice from older builds.
+    // Restore the rail's collapsed/expanded choice (defaults to collapsed for a
+    // first visit). The expanded width comes from the saved vivarium.rail-width;
+    // the header toggle + edge-drag keep both in sync.
     var rail = document.getElementById('viv-rail');
-    if (rail) rail.classList.add('viv-rail-collapsed');
-    _vivSyncRailToggleLabel(true);
+    if (!rail) return;
+    var collapsed = true;
+    try { collapsed = localStorage.getItem('vivarium.rail-collapsed') !== '0'; } catch (e) { /* private mode */ }
+    if (collapsed) {
+      rail.classList.add('viv-rail-collapsed');
+    } else {
+      rail.classList.remove('viv-rail-collapsed');
+      _vivRailApplyWidth(rail, _vivRailSavedWidth());
+    }
+    _vivSyncRailToggleLabel(collapsed);
   }
   window._vivRestoreRailState = _vivRestoreRailState;
+
+  // ---- Collapsed-rail hover flyouts: fixed-position placement ---------------
+  // In the collapsed rail the icon list scrolls (overflow-y:auto), which forces
+  // overflow-x to clip too, so the per-icon name flyout can no longer escape the
+  // scroller as an absolutely-positioned child. It is `position:fixed` in CSS
+  // instead; here we set its anchor (--viv-fly-x/y) to the right edge + vertical
+  // centre of the hovered/focused icon. Only matters when collapsed; a no-op
+  // otherwise (the label is display:none when expanded).
+  function _vivPlaceRailFlyout(link) {
+    var rail = document.getElementById('viv-rail');
+    if (!rail || !rail.classList.contains('viv-rail-collapsed')) return;
+    var icon = link.querySelector('.viv-rail-link-icon') || link;
+    var r = icon.getBoundingClientRect();
+    link.style.setProperty('--viv-fly-x', r.right + 'px');
+    link.style.setProperty('--viv-fly-y', (r.top + r.height / 2) + 'px');
+  }
+  function _vivInitRailFlyoutPositioning() {
+    var rail = document.getElementById('viv-rail');
+    if (!rail || rail._vivFlyoutWired) return;
+    rail._vivFlyoutWired = true;
+    var place = function (ev) {
+      var t = ev.target;
+      var link = t && t.closest ? t.closest('.viv-rail-link') : null;
+      if (link && rail.contains(link)) _vivPlaceRailFlyout(link);
+    };
+    // pointerover/focusin bubble, so one delegated listener covers every icon,
+    // including ones added later by the investigations-rail render.
+    rail.addEventListener('pointerover', place);
+    rail.addEventListener('focusin', place);
+    // Keep the flyout glued to its icon while the list scrolls under the pointer.
+    var scroll = rail.querySelector('.viv-rail-scroll');
+    if (scroll) {
+      scroll.addEventListener('scroll', function () {
+        var hovered = rail.querySelector('.viv-rail-link:hover');
+        if (hovered) _vivPlaceRailFlyout(hovered);
+      }, { passive: true });
+    }
+  }
+  window._vivInitRailFlyoutPositioning = _vivInitRailFlyoutPositioning;
 
   // ---- Rail resize (drag the right edge to widen; snap to normal; drag
   //      narrower to snap into the collapsed bar) ----------------------------
@@ -8183,6 +8464,36 @@
     });
   }
   window._vivRefreshInvestigationsRail = _vivRefreshInvestigationsRail;
+
+  // Single "discovery state changed" refresh path. Called after a discovery
+  // mutation succeeds (cycle Run/Advance/Apply, decision Resolve, AI-steer).
+  // Re-fetches the FETCH-ONCE live-engine surfaces for the open investigation:
+  // argument overlay + discovery panel (via the 'viv:discovery-changed' event,
+  // which clears their per-slug guards), the investigation detail (cards,
+  // needs-attention chip) and the rail. Debounced; event-driven, no polling;
+  // no-op in snapshot mode or when no investigation is open.
+  var _vivDiscRefreshTimer = null;
+  function _vivRefreshDiscoveryViews(slug) {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return;
+    slug = (typeof slug === 'string' && slug) || window._currentIset || window._currentIsetSlug || '';
+    if (!slug) return;
+    if (_vivDiscRefreshTimer) clearTimeout(_vivDiscRefreshTimer);
+    _vivDiscRefreshTimer = setTimeout(function () {
+      _vivDiscRefreshTimer = null;
+      try { document.dispatchEvent(new CustomEvent('viv:discovery-changed', { detail: { slug: slug } })); } catch (_) {}
+      var detailView = document.getElementById('investigation-detail-view');
+      var open = detailView && detailView.style.display !== 'none';
+      try {
+        if (open && window._currentIset === slug && typeof _openInvestigationDetail === 'function') {
+          _openInvestigationDetail(slug);   // re-fetches /api/investigation/{slug}, graph, needs-attention
+        } else if (typeof _renderInvNeedsAttention === 'function') {
+          _renderInvNeedsAttention(slug);
+        }
+      } catch (_) {}
+      try { _vivRefreshInvestigationsRail(); } catch (_) {}
+    }, 250);
+  }
+  window._vivRefreshDiscoveryViews = _vivRefreshDiscoveryViews;
 
   function _vivRenderInvestigationsRail(investigations) {
     var host = document.getElementById('viv-rail-investigations');
@@ -9669,7 +9980,9 @@
     });
 
     function _isetCardHtml(iset, full) {
-      var closed = (iset.status === 'archived' || iset.status === 'closed');
+      // Closed = authored closed/archived, OR the engine's closure (run-aware,
+      // server-derived: iset.closed with closure_source 'derived').
+      var closed = (iset.status === 'archived' || iset.status === 'closed' || iset.closed === true);
       var descFull = (iset.description || '').split('\n')[0];
       var desc = full ? descFull : descFull.slice(0, 240);
       // Prefer server effective_status; fall back to author status. Intent
@@ -9698,11 +10011,29 @@
       var currentPill = iset.current
         ? '<span class="iset-here-chip" title="You are working on this investigation — it is the current git branch." style="' + pillBase + 'background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-weight:600">⎇ current branch</span>'
         : '';
-      var statusPill = closed
-        ? '<span class="status-pill" style="' + pillBase + 'background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db">Closed</span>'
-        : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '" title="' + _esc(statusTip) + '">' + _esc(meta.label) + '</span>';
+      // A closed investigation is a RESULT, not a disabled card. Distinguish:
+      //  • derived closure (the engine: acceptance criteria met by graded tests)
+      //    → a success/"done" treatment (green ✓), because reaching closure is an
+      //    accomplishment, not something to grey out;
+      //  • authored closed/archived → intentionally retired: muted, but still
+      //    legible and clickable (not dimmed to look disabled).
+      var archived = iset.status === 'archived';
+      // A CLOSED investigation (authored or engine-derived) is a COMPLETED RESULT, not a
+      // disabled/avoidable item — it reads as an accomplishment (green, never dimmed). Only
+      // ARCHIVED (deliberately retired/shelved) is de-emphasised. Conflating "closed =
+      // finished successfully" with "archived = retired" was what greyed finished work out.
+      var accomplished = closed && !archived;
+      var statusPill = accomplished
+        ? '<span class="status-pill" style="' + pillBase + 'background:#dcfce7;color:#166534;border:1px solid #86efac;font-weight:600" title="' +
+          (iset.closure_source === 'derived'
+            ? 'Closed by the discovery engine: acceptance criteria met by graded tests.'
+            : 'Completed and closed — a finished result.') + '">Closed ✓</span>'
+        : archived
+          ? '<span class="status-pill" style="' + pillBase + 'background:#eef2f7;color:#475569;border:1px solid #cbd5e1" title="Archived by the author — retired, not an active line of work.">Archived</span>'
+          : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '" title="' + _esc(statusTip) + '">' + _esc(meta.label) + '</span>';
       var cardStyle = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;' +
-        (closed ? 'opacity:0.6;' : '');
+        (accomplished ? 'border-color:#bbf7d0;background:linear-gradient(0deg,#f6fef9,#ffffff);'
+         : archived ? 'opacity:0.72;' : '');
       var filterStatus = (closed ? 'closed' : effStatus);
 
       // Per-study status → a compact breakdown line + an expandable study list.
@@ -9711,7 +10042,7 @@
       // green "done" states, so a passed study never mislabels as "planned".
       var studyObjs = _isetStudyObjs(iset);
       // Group the summary chips by the SAME canonical status the dots + graph use.
-      var _stOrder = ['Accepted', 'Investigating', 'Blocked', 'Planned', 'Refuted'];
+      var _stOrder = ['Accepted', 'Investigating', 'Blocked', 'Planned', 'Refuted', 'Parked'];
       var byStatus = {};
       studyObjs.forEach(function(s) {
         var meta = _studyStatusMeta(s);
@@ -9803,11 +10134,17 @@
 
     var GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;margin:6px 0 14px';
     var _isetFull = (window._isetZoom === 'full');
+    // Render a grid of investigation cards. A header is drawn only when `label`
+    // is given; called with '' it yields one flat, headerless grid (the single
+    // combined list — no Active/Closed section split).
     function _groupHtml(label, items) {
       if (!items.length) return '';
-      return '<div class="iset-group" data-group-label="' + label + '">' +
-        '<h3 class="iset-group-head" style="font-size:0.9em;color:#475569;font-weight:700;margin:10px 0 2px;text-transform:uppercase;letter-spacing:0.04em">' +
-          label + ' <span class="iset-group-count" style="color:#94a3b8;font-weight:600">(' + items.length + ')</span></h3>' +
+      var head = label
+        ? '<h3 class="iset-group-head" style="font-size:0.9em;color:#475569;font-weight:700;margin:10px 0 2px;text-transform:uppercase;letter-spacing:0.04em">' +
+            label + ' <span class="iset-group-count" style="color:#94a3b8;font-weight:600">(' + items.length + ')</span></h3>'
+        : '';
+      return '<div class="iset-group"' + (label ? ' data-group-label="' + label + '"' : '') + '>' +
+        head +
         '<div class="investigations-grid" style="' + GRID + '">' +
           items.map(function (iset) { return _isetCardHtml(iset, _isetFull); }).join('') +
         '</div>' +
@@ -9821,7 +10158,8 @@
       else active.push(iset);
     });
 
-    // User sort (applied WITHIN the Active/Closed grouping so the split stays).
+    // User sort. Default keeps active investigations first (then closed) as one
+    // combined list; the other sort modes order the whole set together.
     var _sortMode = window._isetSort || 'default';
     var _statusRank = { running: 0, in_progress: 1, planning: 2, failed: 3, complete: 4, closed: 5, archived: 5 };
     function _isetUpdatedAt(iset) {
@@ -9849,9 +10187,9 @@
       });
     }
 
+    // One combined list — active-first by default, no Active/Closed section split.
     list.innerHTML =
-      _groupHtml('Active', _sortIsets(active)) +
-      _groupHtml('Closed', _sortIsets(closedItems)) +
+      _groupHtml('', _sortIsets(active.concat(closedItems))) +
       '<p id="investigations-empty" class="empty-state" style="display:none">No investigations match the filter.</p>';
 
     _applyIsetCols();
@@ -10051,23 +10389,124 @@
   window._aigApplySelection = _aigApplySelection;
 
   // ── Selected-card FULL DETAIL (inline) ─────────────────────────────────────
+  // ---- Evidence-integrity trust badges (GET /api/evidence-integrity/{slug}) ----
+  // VERIFIED / PROVISIONAL / CONTRADICTED / UNSUPPORTED per finding, plus an
+  // investigation-level summary chip. Cached per investigation; placeholders are
+  // painted after the fetch resolves. No-op in snapshot mode (no live engine).
+  var _EV_STYLE = {
+    verified:     {bg: '#d1fae5', fg: '#065f46', bd: '#10b981'},
+    provisional:  {bg: '#fef3c7', fg: '#92400e', bd: '#f59e0b'},
+    contradicted: {bg: '#fee2e2', fg: '#991b1b', bd: '#ef4444'},
+    unsupported:  {bg: '#f1f5f9', fg: '#475569', bd: '#94a3b8'}
+  };
+  window._vivEvidence = window._vivEvidence || {slug: '', byKey: {}, summary: null};
+  function _evBadgeInner(rec) {
+    var st = _EV_STYLE[rec.status] || _EV_STYLE.unsupported;
+    return '<span class="viv-ev-badge" data-status="' + _esc(rec.status) + '" title="' + _esc(rec.reason || '') + '" ' +
+      'style="display:inline-block;font-size:0.62em;font-weight:700;letter-spacing:.03em;text-transform:uppercase;' +
+      'padding:1px 6px;margin-right:6px;border-radius:9999px;border:1px solid ' + st.bd + ';background:' + st.bg + ';color:' + st.fg + '">' +
+      _esc(rec.status) + '</span>';
+  }
+  function _evBadgeHtml(study, findingId) {
+    var rec = (window._vivEvidence.byKey || {})[study + '|' + findingId];
+    return '<span class="viv-ev-slot" data-ev-study="' + _esc(study) + '" data-ev-finding="' + _esc(findingId) + '">' +
+      (rec ? _evBadgeInner(rec) : '') + '</span>';
+  }
+  function _vivPaintEvidence() {
+    var ev = window._vivEvidence;
+    Array.prototype.forEach.call(document.querySelectorAll('.viv-ev-slot'), function (el) {
+      var rec = ev.byKey[el.getAttribute('data-ev-study') + '|' + el.getAttribute('data-ev-finding')];
+      el.innerHTML = rec ? _evBadgeInner(rec) : '';
+    });
+    var host = document.getElementById('investigation-detail-status');
+    if (!host || !host.parentNode) return;
+    var chip = document.getElementById('viv-ev-summary');
+    var sm = ev.summary;
+    if (!sm || !(sm.verified + sm.provisional + sm.contradicted + sm.unsupported)) { if (chip) chip.remove(); return; }
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.id = 'viv-ev-summary';
+      chip.style.cssText = 'display:inline-block;margin-left:8px;font-size:0.75em;padding:2px 9px;border-radius:9999px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155';
+      host.parentNode.insertBefore(chip, host.nextSibling);
+    }
+    chip.title = 'Evidence integrity: findings checked against registered runs';
+    chip.textContent = sm.verified + ' verified · ' + sm.provisional + ' provisional · ' + sm.contradicted + ' contradicted' +
+      (sm.unsupported ? ' · ' + sm.unsupported + ' unsupported' : '');
+  }
+  function _vivLoadEvidence(slug) {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot' || !slug) return;
+    fetch('/api/evidence-integrity/' + encodeURIComponent(slug), {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.available || window._currentIset !== slug) return;
+        var byKey = {};
+        (j.ledger || []).forEach(function (r) { byKey[r.study + '|' + r.finding] = r; });
+        window._vivEvidence = {slug: slug, byKey: byKey, summary: j.summary || null};
+        _vivPaintEvidence();
+      }).catch(function () { /* optional surface */ });
+  }
+  window._vivLoadEvidence = _vivLoadEvidence;
+  window._vivPaintEvidence = _vivPaintEvidence;
+
   // The full Asks / Finds / plan body, from the study DATA (not the band-limited
   // inline preview) so it reads the same at any zoom. Rendered hidden inside each
   // node and revealed in place by _aigSetNodeExpanded when the user expands the
   // card — it is NOT a floating panel.
+  // A parked (not-yet-investigated) study has no claim/findings, so its card
+  // shows its authored PREDICTED DIRECTION — the hypothesis the detail builder
+  // surfaces ONLY for parked nodes (#1564; absent on executed or non-parked
+  // studies). Trim to the first sentence so the card stays compact. Returns null
+  // when there's no hypothesis, which falls back to the generic label.
+  function _parkedDirection(s) {
+    var h = ((s && s.hypothesis) || '').replace(/\s+/g, ' ').trim();
+    if (!h) return null;
+    var m = h.match(/^[\s\S]*?[.!?](?=\s|$)/);
+    var sent = (m ? m[0] : h).trim();
+    if (sent.length > 200) sent = sent.slice(0, 199).trim() + '…';
+    return sent;
+  }
+  window._parkedDirection = _parkedDirection;
+
   function _aigCardDetailHtml(s) {
     var q = (s.question || '').replace(/\s+/g, ' ').trim();
     var finds = _asFindings(s.findings);
+    // The collapsed card's "Finds:" row teases the study's one-line `claim`
+    // (line-clamped to a few lines). Expanding MUST reveal that SAME text in
+    // full — otherwise the claim the reader was previewing simply vanishes
+    // behind the structured findings list, with no way to read the rest of it
+    // (the bug this block fixes). So show the full claim headline first (when
+    // authored), then the structured findings beneath it.
+    // Honesty gate (same rule as the collapsed card, via the shared helper): an
+    // unevidenced study's authored `claim:` is a prediction, not a finding, so it
+    // is withheld here too — with no claim and no findings[], the block below
+    // renders "pending evidence" ("future direction" when parked).
+    var claim = _studyHasEvidence(s) ? (s.claim || '').replace(/\s+/g, ' ').trim() : '';
     var H = '';
     if (q) H += '<div style="margin-top:4px"><span style="font-weight:700;color:#475569">Asks:</span> ' + _esc(q) + '</div>';
     H += '<div style="margin-top:12px;font-weight:700;color:#475569">Finds:</div>';
+    if (claim) {
+      // Full, un-clamped claim headline — the complete text behind the collapsed
+      // teaser. Slightly emphasized so it reads as the headline above the
+      // itemized findings rather than as another finding row.
+      H += '<div style="margin-top:4px;font-weight:600;color:#334155">' + _esc(claim) + '</div>';
+    }
     if (finds && finds.length) {
       H += finds.map(function (f) {
         return '<div style="margin-top:6px;padding-left:10px;border-left:2px solid #e2e8f0">' +
+          _evBadgeHtml(s.name, f.id) +
           _esc((f.summary || f.statement || f.id || '').replace(/\s+/g, ' ').trim()) + '</div>';
       }).join('');
-    } else {
-      H += '<div style="margin-top:4px;color:#94a3b8"><em>pending evidence</em></div>';
+    } else if (!claim) {
+      // Neither a structured finding nor a claim headline. A parked study is a
+      // deliberately-deferred future direction, not pending work, so it must not
+      // read "pending evidence" — surface its predicted direction when known.
+      if (_execState(s) === 'parked') {
+        var dir = _parkedDirection(s);
+        H += '<div style="margin-top:4px;color:#94a3b8"><em>future direction — ' +
+          (dir ? _esc(dir) : 'not yet investigated') + '</em></div>';
+      } else {
+        H += '<div style="margin-top:4px;color:#94a3b8"><em>pending evidence</em></div>';
+      }
     }
     try { var plan = _dagPlanHtml(s); if (plan) H += '<div style="margin-top:14px">' + plan + '</div>'; } catch (e) { /* no plan layer */ }
     return H;
@@ -10143,7 +10582,7 @@
   }
   window._nextStudySlug = _nextStudySlug;
 
-  function _wsOpenStudyTab(slug, tab) {
+  function _wsOpenStudyTab(slug, tab, ev) {
     var st = window._wsStudyTabs;
     st.active = slug;                       // single open study — replaces any prior
     _wsHighlightActiveDagNode(slug);        // mark the open node in the graph
@@ -10163,6 +10602,7 @@
     if (frame) {
       var href = _studyHref(slug);
       if (tab) href += (href.indexOf('?') >= 0 ? '&' : '?') + 'tab=' + encodeURIComponent(tab);
+      if (ev) href += (href.indexOf('?') >= 0 ? '&' : '?') + 'ev=' + encodeURIComponent(ev);
       frame.src = href;
     }
     // Remember the tab we opened on, so the next prev/next step keeps it (the
@@ -10321,6 +10761,20 @@
   function _showInvestigationWorkspace(name) {
     if (!name) return;
     window._wsInvestigation = name;
+    // Entering an investigation workspace IS the canonical "current
+    // investigation" context switch (the same role _openInvestigationDetail
+    // played in the older detail view), so publish the slug the rest of the SPA
+    // keys off — the Discovery-cycle panel, the argument graph, inline-edit, and
+    // sim scoping all read window._currentIsetSlug. Without this, opening an
+    // investigation here left the slug empty and the cycle panel reported "No
+    // investigation open in the workbench." Re-sync the left-rail Studies groups
+    // when it changes, matching _openInvestigationDetail.
+    if (window._currentIsetSlug !== name) {
+      window._currentIsetSlug = name;
+      if (typeof window._renderRailInvestigationGroups === 'function') {
+        try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+      }
+    }
     _showWorkspace();
     var title = document.getElementById('ws-title');
     if (title) {
@@ -10628,17 +11082,27 @@
           'border-bottom:1px solid #e5e7eb;white-space:nowrap">' + c[0] + '</th>';
       }).join('');
     var rows = items.map(function (iset) {
-      var closed = (iset.status === 'archived' || iset.status === 'closed');
+      var closed = (iset.status === 'archived' || iset.status === 'closed' || iset.closed === true);
+      var derivedClosed = closed && iset.closure_source === 'derived';
+      var archived = iset.status === 'archived';
       var effStatus = iset.effective_status || iset.status || 'planning';
       var meta = _ISET_TABLE_STATUS_META[effStatus] || {label: effStatus, bg:'#f1f5f9', fg:'#475569', bd:'#cbd5e1'};
       var pillBase = 'font-size:0.72em;border-radius:9999px;padding:1px 9px;white-space:nowrap;';
-      var statusPill = closed
-        ? '<span class="status-pill" style="' + pillBase + 'background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db">Closed</span>'
-        : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '">' + _esc(meta.label) + '</span>';
+      // A CLOSED investigation (authored or engine-derived) is a COMPLETED RESULT —
+      // green ✓, full opacity, never dimmed. Only ARCHIVED (deliberately retired) is muted.
+      var accomplished = closed && !archived;
+      var statusPill = accomplished
+        ? '<span class="status-pill" style="' + pillBase + 'background:#dcfce7;color:#166534;border:1px solid #86efac;font-weight:600" title="' +
+          (iset.closure_source === 'derived'
+            ? 'Closed by the discovery engine: acceptance criteria met by graded tests.'
+            : 'Completed and closed — a finished result.') + '">Closed ✓</span>'
+        : archived
+          ? '<span class="status-pill" style="' + pillBase + 'background:#eef2f7;color:#475569;border:1px solid #cbd5e1" title="Archived by the author — retired, not an active line of work.">Archived</span>'
+          : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '">' + _esc(meta.label) + '</span>';
       var q = iset.question ? String(iset.question).split('\n')[0].slice(0, 140) : '';
       var rowText = (String(iset.title || iset.name) + ' ' + effStatus + ' ' + q).toLowerCase();
       return '<tr data-row-text="' + _esc(rowText) + '" onclick="_showInvestigationWorkspace(\'' + _esc(iset.name) + '\')" ' +
-        'style="cursor:pointer;border-bottom:1px solid #f1f5f9' + (closed ? ';opacity:0.6' : '') + '" ' +
+        'style="cursor:pointer;border-bottom:1px solid #f1f5f9' + (archived ? ';opacity:0.72' : '') + '" ' +
         'onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
         '<td style="padding:7px 10px;font-weight:600;color:#1e293b">' + _esc(iset.title || iset.name) + '</td>' +
         '<td style="padding:7px 10px;white-space:nowrap">' + statusPill + '</td>' +
@@ -11115,12 +11579,24 @@
   }
   window._planBoardHtml = _planBoardHtml;
 
+  // Inline-edit attribute string (consumed by static/inline-edit.js). The value
+  // is the RAW yaml source, not the rendered (markdown / whitespace-collapsed)
+  // text, so a save writes back losslessly.
+  function _ieAttrs(field, value, label, multiline) {
+    return ' data-edit-kind="investigation" data-edit-field="' + _esc(field) + '"' +
+      ' data-edit-value="' + _esc(value || '') + '"' +
+      ' data-edit-label="' + _esc(label) + '"' +
+      (multiline ? ' data-edit-multiline' : '');
+  }
+
   function _renderInvOpening(d) {
     d = d || {};
     var ex = d.executive || {};
     var whatIs  = (ex.what_is_this || '').trim();
     var verdict = (ex.verdict || '').trim();
     var vs      = (ex.verdict_status || 'in-progress').trim();
+    // Run-aware: a derived verdict_status (member roll-up) is marked with '*'.
+    var vsDerived = ex.verdict_status_source === 'derived';
     var oneline = function(t) { return (t || '').replace(/\s+/g, ' ').trim(); };
     var q   = oneline(d.question);
     var hyp = oneline(d.hypothesis);
@@ -11138,8 +11614,9 @@
     }
 
     var key = String(vs).toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    var vsClass = ({ 'passed':'passed','complete':'passed','in-progress':'progress',
-                     'blocked':'blocked','failed':'blocked','planning':'planning' })[key] || 'default';
+    var vsClass = ({ 'passed':'passed','complete':'passed','passing':'passed','in-progress':'progress',
+                     'blocked':'blocked','failed':'blocked','failing':'blocked','planning':'planning' })[key] || 'default';
+    var vsLabel = vs.toUpperCase() + (vsDerived ? '*' : '');
 
     // The question/framing fields run long — keep the headline to the opening
     // sentence (through the first "?" for questions, else the first period) and
@@ -11237,12 +11714,13 @@
     var whatIsLede = whatIs ? whatIs.split(/\n\s*\n/)[0].trim() : '';
     var ovParts = [];
     if (whatIsLede)
-      ovParts.push('<div class="inv-brief-prose inv-brief-overview-lede">' +
+      ovParts.push('<div class="inv-brief-prose inv-brief-overview-lede"' +
+        _ieAttrs('executive.what_is_this', whatIs, 'Overview', true) + '>' +
         _renderInvLeadMarkdown(whatIsLede) + '</div>');
     if (verdict)
       ovParts.push('<div class="inv-brief-overview-verdict inv-vs-' + vsClass + '" ' +
         'style="margin-top:10px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">' +
-        '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span> ' +
+        '<span class="inv-vs-pill"' + (vsDerived ? ' title="Derived from member studies\' graded tests (not authored)"' : '') + '>' + _esc(vsLabel) + '</span> ' +
         '<span class="inv-brief-overview-verdict-text" style="color:#475569">' +
         _invInline(headlineOf(verdict)) + '</span></div>');
     if (ovParts.length)
@@ -11250,9 +11728,10 @@
 
     // 2. Verdict — the full campaign answer (executive.verdict); behind a click.
     if (verdict)
-      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vs.toUpperCase() : '',
-        html: '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
-          '<span class="inv-vs-pill">' + _esc(vs.toUpperCase()) + '</span>' +
+      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vsLabel : '',
+        html: '<div class="inv-fresh-mount" data-fresh-tab="verdict" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
+          '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
+          '<span class="inv-vs-pill">' + _esc(vsLabel) + '</span>' +
           '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' +
           // Claims (RFC-0005 synthesis layer): each claim, its verdict, and what
           // supports/challenges it — filled async by argument-graph.js.
@@ -11262,10 +11741,15 @@
     // structured argument (Hypothesis & evidence folded in here per the owner).
     var bgParts = [];
     if (leadProse)
-      bgParts.push('<div class="inv-brief-prose">' + _renderInvLeadMarkdown(leadProse) + '</div>');
+      bgParts.push('<div class="inv-brief-prose"' +
+        _ieAttrs(d.lead ? 'lead' : 'description', leadProse, 'Background', true) + '>' +
+        _renderInvLeadMarkdown(leadProse) + '</div>');
     var _bgMeta = [];
-    if (q) _bgMeta.push('<span class="inv-brief-meta-item"><em>Question</em> ' + _invInline(oneline(q)) + '</span>');
-    if (hyp) _bgMeta.push('<span class="inv-brief-meta-item"><em>Hypothesis</em> ' + _invInline(hyp) + '</span>');
+    // Only the text (inner span) is editable, so the <em> label survives a save.
+    if (q) _bgMeta.push('<span class="inv-brief-meta-item"><em>Question</em> <span' +
+      _ieAttrs('question', d.question, 'Question', true) + '>' + _invInline(oneline(q)) + '</span></span>');
+    if (hyp) _bgMeta.push('<span class="inv-brief-meta-item"><em>Hypothesis</em> <span' +
+      _ieAttrs('hypothesis', d.hypothesis, 'Hypothesis', true) + '>' + _invInline(hyp) + '</span></span>');
     if (_bgMeta.length) bgParts.push('<div class="inv-brief-meta">' + _bgMeta.join('') + '</div>');
     var _evBody = _evidenceBody();
     if (_evBody)
@@ -11279,6 +11763,7 @@
     // inline. A derived document, next to Background. Filled async by
     // argument-graph.js; shows nothing if the derivation layer is unavailable.
     tabs.push({ id:'narrative', label:'Narrative', html:
+      '<div class="inv-fresh-mount" data-fresh-tab="narrative" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
       '<div id="inv-narrative-mount" class="inv-narrative-mount">' +
       '<p class="muted" style="padding:16px">Loading narrative…</p></div>' });
 
@@ -11326,7 +11811,11 @@
     var _decHtml = _invDecisionTabHtml(d);
     var _hasStudies = Array.isArray(d.studies) && d.studies.length;
     if (_decHtml || _hasStudies) {
-      var _nDec = (((d.executive || {}).decisions_needed) || []).length;
+      // Engine-aware: decisions the cycle considers resolved stop counting even
+      // before Apply trims the authored list (falls back to the authored length).
+      var _exD = d.executive || {};
+      var _nDec = (typeof _exD.decisions_open_count === 'number')
+        ? _exD.decisions_open_count : ((_exD.decisions_needed) || []).length;
       // #inv-discovery-mount ← /api/investigation-discovery (argument-graph.js poller);
       // _decHtml = the authored Resolve cockpit; #inv-decisions-mount ← derived open
       // items (audit gaps, open-question claims, divergences) from the overlay.
@@ -11379,7 +11868,10 @@
 
     if (!needed.length && !resolved.length && !docs.length) return '';
 
-    var n = needed.length;
+    // Decisions the cycle already resolved (server: ex.decisions_engine_resolved)
+    // are hidden/uncounted; data-index keeps pointing at the authored list.
+    var engRes = Array.isArray(ex.decisions_engine_resolved) ? ex.decisions_engine_resolved : [];
+    var n = needed.length - engRes.filter(function (k) { return k >= 0 && k < needed.length; }).length;
     var accent = n ? '#b45309' : '#16a34a';      // amber when open, green when all clear
     var H = [];
     H.push('<div style="padding:2px 0 4px">');
@@ -11410,6 +11902,7 @@
     if (n) {
       H.push('<div style="display:grid;gap:10px">');
       needed.forEach(function (dec, i) {
+        if (engRes.indexOf(i) !== -1) return;
         dec = dec || {};
         var question = (typeof dec === 'string') ? dec : (dec.question || dec.title || '');
         var context = (typeof dec === 'string') ? '' : (dec.context || dec.detail || '');
@@ -11500,7 +11993,8 @@
         var ok = 'Decision resolved — ' + ((res.j && res.j.remaining) || 0) + ' still open';
         if (typeof _showToast === 'function') _showToast(ok);
         // Refresh the detail so the cockpit, log and count badge re-render.
-        if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(invName);
+        if (typeof _vivRefreshDiscoveryViews === 'function') _vivRefreshDiscoveryViews(invName);
+        else if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(invName);
       })
       .catch(function (err) {
         var msg = 'Could not resolve: ' + err;
@@ -11558,7 +12052,18 @@
     _isetDetailFetch
       .then(function(d) {
         window._currentIsetData = d;
+        try { _vivLoadEvidence(name); } catch (_) {}
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
+        // Also refresh the VISIBLE chrome header (#ws-title) from the authoritative
+        // detail payload. _showInvestigationWorkspace set it from _isetIndex, which
+        // may not have loaded yet on a ?investigation= deep-link / auto-open — then
+        // it fell back to the slug (e.g. "eukaryogenesis" instead of "The
+        // Endosymbiotic Transition"). The detail payload always carries the display title.
+        var _wsTitleEl = document.getElementById('ws-title');
+        if (_wsTitleEl) {
+          var _wsLabel = d.title || d.name;
+          if (_wsLabel) { _wsTitleEl.textContent = _wsLabel; _wsTitleEl.title = _wsLabel; }
+        }
         var statusEl   = document.getElementById('investigation-detail-status');
         var effStatus  = d.effective_status || d.status || 'planning';
         var authStatus = d.status || 'planning';
@@ -12296,10 +12801,10 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      // Keep the "Overview" text label beside the caret (iTerm-style labeled
+      // Keep the "Investigation" text label beside the caret (iTerm-style labeled
       // control); only the caret direction reflects collapsed/expanded.
-      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Overview';
-      btn.setAttribute('title', collapsed ? 'Show overview' : 'Hide overview');
+      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Investigation';
+      btn.setAttribute('title', collapsed ? 'Show investigation' : 'Hide investigation');
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
   }
@@ -12856,10 +13361,13 @@
       // verdict color once the study is completed (the finding is the headline),
       // else the execution-progress color.
       var execMeta = _execMeta(s);
-      var isCompleted = _execState(s) === 'completed';
-      var verdictMeta = _verdictMeta(s);              // null → pending
+      var _execNow = _execState(s);
+      var isCompleted = _execNow === 'completed';
+      var isParked = _execNow === 'parked';
+      var verdictMeta = _verdictMeta(s);              // null → pending (or parked)
       var headColor = (isCompleted && verdictMeta) ? verdictMeta.color : execMeta.color;
-      var confidence = execMeta.label + (verdictMeta ? ' · ' + verdictMeta.label : '');
+      var confidence = execMeta.label +
+        (verdictMeta ? ' · ' + verdictMeta.label : (isParked ? ' · future direction' : ''));
       // Overview (far) band collapses the pills to glyphs only to stay readable.
       var _pillCompact = !_opts.asks;
       var followUps = s.follow_up_studies || [];
@@ -12876,9 +13384,13 @@
       var _qFull = (s.question || '').replace(/\s+/g, ' ').trim();
       var asks = _opts.asksFull ? _qFull : _qFull.split(/[.?]/)[0].trim();
       var findings = _asFindings(s.findings);
-      var claim = (s.claim ||
+      // Honesty gate: only an EVIDENCED study may headline its claim/finding under
+      // "Finds:". For a planned/proposed/running study the authored `claim:` is a
+      // prediction, so `claim` is left empty and the render below falls through to
+      // "pending evidence" (or "future direction" for a parked study).
+      var claim = _studyHasEvidence(s) ? (s.claim ||
         (findings[0] && (findings[0].summary || findings[0].statement || findings[0].id)) || ''
-      ).replace(/\s+/g, ' ').trim();
+      ).replace(/\s+/g, ' ').trim() : '';
       var moreN = findings.length > 1 ? findings.length - 1 : 0;
       // Shared line-clamp style — keeps every DAG card compact regardless of
       // how long its question/claim text is.
@@ -12960,10 +13472,13 @@
         // opens it.)
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px">' +
           '<span style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
-            _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact) +
-            _aigPill(verdictMeta || _VERDICT_PENDING,
-                     verdictMeta ? ('Verdict: ' + verdictMeta.label) : 'Verdict: pending — not yet concluded',
-                     'aig-verdict-pill', _pillCompact) +
+            _aigPill(execMeta, 'Progress (execution): ' + execMeta.label, 'aig-progress-pill aig-status-badge', _pillCompact, 'progress') +
+            _aigPill(verdictMeta || (isParked ? _VERDICT_PARKED : _VERDICT_PENDING),
+                     verdictMeta ? ('Verdict: ' + verdictMeta.label +
+                       (s.verdict_source === 'derived' ? ' (derived from graded tests, not authored)' : ''))
+                       : (isParked ? 'Parked — a deliberately-deferred future direction, not pending work'
+                                   : 'Verdict: pending — not yet concluded'),
+                     'aig-verdict-pill', _pillCompact, 'verdict') +
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
             _tierPipsHtml(s) +
@@ -12977,7 +13492,11 @@
         (_opts.finds
           ? '<div class="aig-clamp" data-clamp="5" style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
               '<span style="font-weight:600;color:#475569">Finds:</span> ' +
-              (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
+              (claim ? _esc(claim)
+                     : (isParked
+                          ? '<em style="color:#94a3b8">future direction — ' +
+                              (_parkedDirection(s) ? _esc(_parkedDirection(s)) : 'not yet investigated') + '</em>'
+                          : '<em style="color:#94a3b8">pending evidence</em>')) +
             '</div>'
           : '') +
         // Universal "show full card" affordance: expands the card IN PLACE so ANY
@@ -13022,6 +13541,17 @@
         _dagTriggerControlsHtml(s.name);
       node._followUps = followUps;
       node._study = s;                       // the in-place expanded detail reads this
+      // Breakdown behind each clickable axis pill (read on click by
+      // _aigToggleAxisPopover): the derived marker + the underlying signals, and
+      // for Verdict the study's findings in FULL.
+      node._axisData = {
+        progress: { meta: execMeta, label: 'Progress', rows: _aigProgressRows(s) },
+        verdict: {
+          meta: verdictMeta || (isParked ? _VERDICT_PARKED : _VERDICT_PENDING),
+          label: 'Verdict', rows: _aigVerdictRows(s),
+          findingsHtml: _aigAxisFindingsHtml(s.findings)
+        }
+      };
       node.dataset.headColor = headColor;    // card's top accent
       nodesHost.appendChild(node);
       // Wire the pull-or-compute buttons (stopPropagation so the card's own
@@ -13030,6 +13560,21 @@
         b.addEventListener('click', function (ev) {
           ev.stopPropagation();
           _triggerStudy(b.getAttribute('data-slug'), 'error', b);
+        });
+      });
+      // Clickable Progress / Verdict pills → the breakdown popover. stopPropagation
+      // so a pill click interrogates the marker rather than selecting/opening the
+      // card. Enter/Space match the click for keyboard users (role="button").
+      node.querySelectorAll('.aig-axis-pill').forEach(function (pill) {
+        pill.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          _aigToggleAxisPopover(pill, node, pill.getAttribute('data-axis'));
+        });
+        pill.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault(); ev.stopPropagation();
+            _aigToggleAxisPopover(pill, node, pill.getAttribute('data-axis'));
+          }
         });
       });
       node.querySelectorAll('.dag-trigger-continue').forEach(function (b) {
@@ -15472,7 +16017,7 @@
   window._studyInInvestigation = _studyInInvestigation;
   window._investigationForStudy = _investigationForStudy;
 
-  function _openStudyEmbeddedNewTab(name, tab) {
+  function _openStudyEmbeddedNewTab(name, tab, ev) {
     // In a popped-out Studies panel window there is no investigation content to
     // show here — route the navigation to the opener (the main window) so the
     // popped-out list CONTROLS the main window's selected study, and reflect the
@@ -15481,7 +16026,7 @@
       if (document.body && document.body.classList.contains('viv-popout') &&
           window.opener && !window.opener.closed &&
           typeof window.opener._openStudyEmbeddedNewTab === 'function') {
-        window.opener._openStudyEmbeddedNewTab(name, tab);
+        window.opener._openStudyEmbeddedNewTab(name, tab, ev);
         // Opening a study from the GRAPH popout surfaces it in the opener (main
         // window), which now has room since the graph vacated the inset — bring
         // that window forward so the open is visible. (Studies popout keeps its
@@ -15505,7 +16050,7 @@
     if (inv) {
       if (window._wsInvestigation !== inv) _showInvestigationWorkspace(inv);
       else _showWorkspace();
-      _wsOpenStudyTab(name, tab);
+      _wsOpenStudyTab(name, tab, ev);
     } else {
       // Ungrouped study: minimal workspace (no graph), just the study tab.
       window._wsInvestigation = null;
@@ -15520,7 +16065,7 @@
       var tk = document.getElementById('ws-title-kicker'); if (tk) tk.textContent = 'Study';
       var a = document.getElementById('ws-actions'); if (a) a.innerHTML = '';
       _wsResetStudyTabs(null);
-      _wsOpenStudyTab(name, tab);
+      _wsOpenStudyTab(name, tab, ev);
     }
     _selectStudyInRail(name);
   }

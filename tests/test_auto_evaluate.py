@@ -251,3 +251,97 @@ def test_store_unresolved_status_from_default_runner(tmp_path):
     assert summary["status"] in ("store_unresolved", "evaluator_unavailable")  \
         or summary["status"].startswith("evaluator_unavailable")
     assert summary["changed"] is False
+
+
+# ---------------------------------------------------------------------------
+# #1472 — grade a test only against its target run (requires_simulation / given)
+# ---------------------------------------------------------------------------
+
+# Two arms, each with a test that only makes sense against its own arm's run.
+_MULTI_ARM_SPEC = {
+    "name": "multi-arm",
+    "baseline": [{"name": "base"}],
+    "variants": [{"name": "severity-0.2"}, {"name": "severity-0.8"}],
+    "behavior_tests": [
+        {"name": "low_keeps_map", "requires_simulation": "severity-0.2",
+         "measure": {"kind": "generation_average", "path": "map"},
+         "pass_if": {"op": "range", "low": 0, "high": 2}},
+        {"name": "high_drops_map", "requires_simulation": "severity-0.8",
+         "measure": {"kind": "generation_average", "path": "map"},
+         "pass_if": {"op": "gte", "value": 8}},
+        {"name": "baseline_sane",
+         "measure": {"kind": "generation_average", "path": "map"},
+         "pass_if": {"op": "range", "low": 0, "high": 100}},
+    ],
+    "runs": [
+        {"name": "run-base", "status": "completed"},                      # baseline (no variant)
+        {"name": "run-low", "status": "completed", "variant": "severity-0.2"},
+        {"name": "run-high", "status": "completed", "variant": "severity-0.8"},
+    ],
+}
+
+
+def _run(spec, name):
+    return next(r for r in spec["runs"] if r["name"] == name)
+
+
+def test_tests_for_run_matches_only_target_arm():
+    s = _MULTI_ARM_SPEC
+    def names(run_name):
+        return {t["name"] for t in ae._tests_for_run(s, _run(s, run_name))}
+    # The severity-0.2 run grades only its own test (+ the untargeted baseline test
+    # is NOT graded on a variant arm).
+    assert names("run-low") == {"low_keeps_map"}
+    assert names("run-high") == {"high_drops_map"}
+    # The baseline run grades the untargeted test (target None → baseline arm) and
+    # NOT the variant-specific tests.
+    assert names("run-base") == {"baseline_sane"}
+
+
+def test_tests_for_run_matches_by_run_name_and_given():
+    spec = {
+        "variants": [{"name": "arm-x"}],
+        "behavior_tests": [
+            {"name": "by_name", "requires_simulation": "run-x"},
+            {"name": "by_given", "given": {"run": "variant", "variant": "arm-x"}},
+        ],
+        "runs": [{"name": "run-x", "variant": "arm-x"}],
+    }
+    assert {t["name"] for t in ae._tests_for_run(spec, spec["runs"][0])} == {"by_name", "by_given"}
+
+
+def test_evaluator_runner_filters_tests_per_run(tmp_path, monkeypatch):
+    """The default runner hands evaluate_study ONLY the tests that target the run
+    — so a cross-arm test is left unevaluated (absent) on the other arm's run."""
+    import ruamel.yaml
+    d = tmp_path / "studies" / "ma"
+    d.mkdir(parents=True)
+    ry = ruamel.yaml.YAML()
+    spec = dict(_MULTI_ARM_SPEC)
+    # Mark runs evaluation_only so the default runner grades with reader=None and
+    # never needs a real emitter store / RunReader.
+    spec["runs"] = [dict(r, evaluation_only=True) for r in spec["runs"]]
+    with open(d / "study.yaml", "w", encoding="utf-8") as fh:
+        ry.dump(spec, fh)
+
+    seen: dict = {}
+
+    def spy_evaluate_study(received_spec, reader, ws_root=None, run_opener=None):
+        tests = received_spec.get("tests") or received_spec.get("behavior_tests") or []
+        names = [t["name"] for t in tests]
+        seen.setdefault("calls", []).append(names)
+        return {n: {"result": "PASS", "evaluated_by": "code"} for n in names}
+
+    import discovery_engine.study_evaluator as se
+    monkeypatch.setattr(se, "evaluate_study", spy_evaluate_study)
+
+    ae.evaluate_on_run_completion(d, "run-low")
+    ae.evaluate_on_run_completion(d, "run-high")
+
+    assert seen["calls"] == [["low_keeps_map"], ["high_drops_map"]]
+
+    spec_after = study_io.load_yaml_mapping(d / "study.yaml")
+    by = {r["name"]: r for r in spec_after["runs"]}
+    # Each run's outcomes carry ONLY its own test; the cross-arm test is unevaluated.
+    assert set(by["run-low"].get("outcomes") or {}) == {"low_keeps_map"}
+    assert set(by["run-high"].get("outcomes") or {}) == {"high_drops_map"}

@@ -66,7 +66,7 @@ def test_render_study_detail_html_preserves_explicit_kind(monkeypatch, tmp_path)
 # Task 4: header restructure (7 elements -> 3) — real served-HTML assertions.
 # ---------------------------------------------------------------------------
 
-def test_header_has_kind_tag_and_question_and_no_spine(tmp_path, dashboard_client):
+def test_header_has_kind_tag_and_question_and_no_spine(tmp_path, inproc_client):
     """End-to-end: GET /studies/<slug> must emit the kind tag + promoted
     question headline, and must NOT emit the retired #spine-summary table.
 
@@ -89,7 +89,7 @@ def test_header_has_kind_tag_and_question_and_no_spine(tmp_path, dashboard_clien
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/kind-question-study")
     assert resp.status_code == 200
     html = resp.text
@@ -105,7 +105,7 @@ def test_header_has_kind_tag_and_question_and_no_spine(tmp_path, dashboard_clien
 # Task 5: readiness -> inline link; #spine-summary populator removed.
 # ---------------------------------------------------------------------------
 
-def test_readiness_is_inline_not_banner(tmp_path, dashboard_client):
+def test_readiness_is_inline_not_banner(tmp_path, inproc_client):
     """The header gate pill + readiness dropdown are gone; the status row now
     carries the two-axis Progress × Verdict markers (#study-axis-markers, filled
     client-side). Readiness moved into the Audit tab. Assert the server-side
@@ -125,7 +125,7 @@ def test_readiness_is_inline_not_banner(tmp_path, dashboard_client):
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/readiness-inline-study")
     assert resp.status_code == 200
     html = resp.text
@@ -144,7 +144,7 @@ def test_readiness_is_inline_not_banner(tmp_path, dashboard_client):
 # drop the counts strip.
 # ---------------------------------------------------------------------------
 
-def test_overview_no_biology_lean(tmp_path, dashboard_client):
+def test_overview_no_biology_lean(tmp_path, inproc_client):
     """The standalone biology block (heading + derived-from-findings
     restatement) and the counts strip must both be gone."""
     ws = tmp_path / "ws"
@@ -162,7 +162,7 @@ def test_overview_no_biology_lean(tmp_path, dashboard_client):
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/no-biology-study")
     assert resp.status_code == 200
     html = resp.text
@@ -172,7 +172,7 @@ def test_overview_no_biology_lean(tmp_path, dashboard_client):
     assert "study-counts-strip" not in html
 
 
-def test_overview_biological_summary_folds_into_qa_card(tmp_path, dashboard_client):
+def test_overview_biological_summary_folds_into_qa_card(tmp_path, inproc_client):
     """An authored `biological_summary` renders as a fourth card inside the
     Question & Approach section (same `purpose-callout` class family as the
     Question/Hypothesis/Mechanism cards), not as a standalone "Biology"
@@ -196,7 +196,7 @@ def test_overview_biological_summary_folds_into_qa_card(tmp_path, dashboard_clie
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/qa-summary-study")
     assert resp.status_code == 200
     html = resp.text
@@ -216,7 +216,7 @@ def test_overview_biological_summary_folds_into_qa_card(tmp_path, dashboard_clie
     assert html.index(">Claim</h2>") < summary_idx < html.index(">Model &amp; approach</h2>")
 
 
-def test_overview_biological_summary_renders_for_legacy_schema_too(tmp_path, dashboard_client):
+def test_overview_biological_summary_renders_for_legacy_schema_too(tmp_path, inproc_client):
     """Fix round 1: a legacy-schema study (no `purpose` block, so the
     `{% else %}` branch renders) with an authored `biological_summary` must
     still get the Summary card — it must not silently drop the text just
@@ -236,7 +236,7 @@ def test_overview_biological_summary_renders_for_legacy_schema_too(tmp_path, das
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/legacy-summary-study")
     assert resp.status_code == 200
     html = resp.text
@@ -261,7 +261,7 @@ def test_overview_biological_summary_renders_for_legacy_schema_too(tmp_path, das
 # round 1 of this task missed.
 # ---------------------------------------------------------------------------
 
-def test_decide_empirical_rename_and_no_prose(tmp_path, dashboard_client):
+def test_decide_empirical_rename_and_no_prose(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = ws / "studies" / "decide-empirical-study"
     sd.mkdir(parents=True)
@@ -285,7 +285,7 @@ def test_decide_empirical_rename_and_no_prose(tmp_path, dashboard_client):
         },
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/decide-empirical-study")
     assert resp.status_code == 200
     html = resp.text
@@ -314,7 +314,7 @@ def test_decide_empirical_rename_and_no_prose(tmp_path, dashboard_client):
 # HTML — assert only the mount + absence of the removed controls).
 # ---------------------------------------------------------------------------
 
-def test_simulations_is_readonly_table(tmp_path, dashboard_client):
+def test_simulations_is_readonly_table(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = ws / "studies" / "sims-readonly-study"
     sd.mkdir(parents=True)
@@ -338,7 +338,7 @@ def test_simulations_is_readonly_table(tmp_path, dashboard_client):
         }],
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/sims-readonly-study")
     assert resp.status_code == 200
     html = resp.text
@@ -350,7 +350,7 @@ def test_simulations_is_readonly_table(tmp_path, dashboard_client):
     assert 'id="study-sim-table"' in html
 
 
-def test_visualizations_stripped_to_gallery(tmp_path, dashboard_client):
+def test_visualizations_stripped_to_gallery(tmp_path, inproc_client):
     """6-tab layout: the Visualizations tab holds the figure gallery as a
     "Figures" section. It stays one gallery with no explanatory prose and no
     per-mount section chrome, just the three mounts (native gallery, embedded-viz
@@ -370,7 +370,7 @@ def test_visualizations_stripped_to_gallery(tmp_path, dashboard_client):
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/viz-gallery-study")
     assert resp.status_code == 200
     html = resp.text
@@ -395,7 +395,7 @@ def test_visualizations_stripped_to_gallery(tmp_path, dashboard_client):
     assert 'No baseline figures yet' not in html
 
 
-def test_visualizations_empty_state_unions_all_three_sources(tmp_path, dashboard_client):
+def test_visualizations_empty_state_unions_all_three_sources(tmp_path, inproc_client):
     """Fable A #3: the "No figures yet." empty state must not be baked into
     the served HTML as visible text next to real figures. It lives in a
     single shared #figures-empty-message element, hidden by default, that JS
@@ -421,7 +421,7 @@ def test_visualizations_empty_state_unions_all_three_sources(tmp_path, dashboard
         ],
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/viz-gallery-study-embeds")
     assert resp.status_code == 200
     html = resp.text
@@ -440,7 +440,7 @@ def test_visualizations_empty_state_unions_all_three_sources(tmp_path, dashboard
     assert 'style="display:none"' in html[tag_start:tag_end]
 
 
-def test_visualizations_gallery_one_figure_card_no_source_chrome(tmp_path, dashboard_client):
+def test_visualizations_gallery_one_figure_card_no_source_chrome(tmp_path, inproc_client):
     """Task V2 (Fable §4.5): the three figure sources collapse into ONE
     flowing gallery of a single `.figure-card` style — the `<h2>Figures</h2>`
     and the old `.embed-viz-card` header-bar chrome are gone, and every card
@@ -465,7 +465,7 @@ def test_visualizations_gallery_one_figure_card_no_source_chrome(tmp_path, dashb
         ],
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/viz-gallery-study-v2")
     assert resp.status_code == 200
     html = resp.text
@@ -493,7 +493,7 @@ def test_visualizations_gallery_one_figure_card_no_source_chrome(tmp_path, dashb
     assert 'class="figure-run-link"' not in html
 
 
-def test_visualizations_embed_with_run_id_renders_run_link(tmp_path, dashboard_client):
+def test_visualizations_embed_with_run_id_renders_run_link(tmp_path, inproc_client):
     """Task V3: an embed sourced from studies/<name>/viz/*.html (auto-rendered
     by render_visualizations against runs.db) carries a genuine run_id, and
     the server-rendered card must render the `from run … ↗` link — reading
@@ -534,7 +534,7 @@ def test_visualizations_embed_with_run_id_renders_run_link(tmp_path, dashboard_c
     viz_dir.mkdir()
     (viz_dir / "trace.html").write_text("<html>hi</html>")
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/viz-gallery-study-run-embed")
     assert resp.status_code == 200
     html = resp.text
@@ -543,7 +543,7 @@ def test_visualizations_embed_with_run_id_renders_run_link(tmp_path, dashboard_c
     assert "from run run-embed-1" in html
 
 
-def test_visualizations_stale_embed_omits_run_link(tmp_path, dashboard_client):
+def test_visualizations_stale_embed_omits_run_link(tmp_path, inproc_client):
     """V3 review fix (round 1): a STALE studies/<name>/viz/*.html — one that
     predates the latest of two recorded runs — must NOT be attributed to
     that latest run. The card renders (with its "may predate" warning) but
@@ -594,7 +594,7 @@ def test_visualizations_stale_embed_omits_run_link(tmp_path, dashboard_client):
     leftover.write_text("<html>hi</html>")
     os.utime(leftover, (20.0, 20.0))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/viz-gallery-study-stale-embed")
     assert resp.status_code == 200
     html = resp.text
@@ -605,7 +605,7 @@ def test_visualizations_stale_embed_omits_run_link(tmp_path, dashboard_client):
     assert "from run run-old" not in html
 
 
-def test_visualizations_empty_study_shows_empty_state_element(tmp_path, dashboard_client):
+def test_visualizations_empty_study_shows_empty_state_element(tmp_path, inproc_client):
     """Regression guard (Fable A #3 union logic, unaffected by Task V2): a
     study with no embed_visualizations still server-renders the shared,
     hidden `#figures-empty-message` line (JS reveals it once the async
@@ -624,7 +624,7 @@ def test_visualizations_empty_study_shows_empty_state_element(tmp_path, dashboar
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/viz-gallery-study-empty")
     assert resp.status_code == 200
     html = resp.text
@@ -644,7 +644,7 @@ def test_visualizations_empty_study_shows_empty_state_element(tmp_path, dashboar
 # gate/audit summary strip. No separate "Report Cards" tab/pillar remains.
 # ---------------------------------------------------------------------------
 
-def test_tests_merged_single_concept(tmp_path, dashboard_client):
+def test_tests_merged_single_concept(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = ws / "studies" / "tests-merged-study"
     sd.mkdir(parents=True)
@@ -666,7 +666,7 @@ def test_tests_merged_single_concept(tmp_path, dashboard_client):
     (sd / "viz").mkdir(parents=True)
     (sd / "viz" / "comparison_plotly.html").write_text("<div>plotly</div>", encoding="utf-8")
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/tests-merged-study")
     assert resp.status_code == 200
     html = resp.text
@@ -704,7 +704,7 @@ def test_tests_merged_single_concept(tmp_path, dashboard_client):
 # a second per-gate list — that detail lives ONCE, in #tests-list.
 # ---------------------------------------------------------------------------
 
-def test_tests_gate_summary_not_duplicated_by_behavioral_list(tmp_path, dashboard_client):
+def test_tests_gate_summary_not_duplicated_by_behavioral_list(tmp_path, inproc_client):
     import re
     from pathlib import Path
     import vivarium_workbench
@@ -729,7 +729,7 @@ def test_tests_gate_summary_not_duplicated_by_behavioral_list(tmp_path, dashboar
         ],
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/gate-dedup-study")
     assert resp.status_code == 200
     html = resp.text
@@ -777,7 +777,7 @@ def test_tests_gate_summary_not_duplicated_by_behavioral_list(tmp_path, dashboar
 # simulate.py for the current home of these assertions.
 # ---------------------------------------------------------------------------
 
-def test_exports_tab_and_panel_removed(tmp_path, dashboard_client):
+def test_exports_tab_and_panel_removed(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = ws / "studies" / "exports-study"
     sd.mkdir(parents=True)
@@ -792,7 +792,7 @@ def test_exports_tab_and_panel_removed(tmp_path, dashboard_client):
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/exports-study")
     assert resp.status_code == 200
     html = resp.text
@@ -816,7 +816,7 @@ def test_exports_tab_and_panel_removed(tmp_path, dashboard_client):
 # raw Python dict or JSON blob in the default view).
 # ---------------------------------------------------------------------------
 
-def test_modified_processes_renders_fields_not_dict_repr(tmp_path, dashboard_client):
+def test_modified_processes_renders_fields_not_dict_repr(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = ws / "studies" / "modified-processes-study"
     sd.mkdir(parents=True)
@@ -843,7 +843,7 @@ def test_modified_processes_renders_fields_not_dict_repr(tmp_path, dashboard_cli
         },
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/modified-processes-study")
     assert resp.status_code == 200
     html = resp.text
@@ -874,7 +874,7 @@ def test_modified_processes_renders_fields_not_dict_repr(tmp_path, dashboard_cli
 # Findings / Question&approach / Conclusion must keep rendering.
 # ---------------------------------------------------------------------------
 
-def test_overview_deleted_blocks_absent_core_content_kept(tmp_path, dashboard_client):
+def test_overview_deleted_blocks_absent_core_content_kept(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = ws / "studies" / "overview-declutter-study"
     sd.mkdir(parents=True)
@@ -897,7 +897,7 @@ def test_overview_deleted_blocks_absent_core_content_kept(tmp_path, dashboard_cl
         "report": {"conclusion": "The model reproduces the expected behavior."},
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/overview-declutter-study")
     assert resp.status_code == 200
     html = resp.text
@@ -930,7 +930,7 @@ def test_overview_deleted_blocks_absent_core_content_kept(tmp_path, dashboard_cl
 # `.study-pillar` buttons drive tab switching directly.
 # ---------------------------------------------------------------------------
 
-def test_pillars_drive_tabs_directly_no_subnav(tmp_path, dashboard_client):
+def test_pillars_drive_tabs_directly_no_subnav(tmp_path, inproc_client):
     """Real served-HTML assertion (not just static grep): the second tab
     row (#study-subnav) must be entirely absent, all 11 `.study-pillar`
     buttons must be present and wired to call `_setStudyTab(<kind>)`
@@ -954,7 +954,7 @@ def test_pillars_drive_tabs_directly_no_subnav(tmp_path, dashboard_client):
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/pillars-direct-study")
     assert resp.status_code == 200
     html = resp.text
@@ -995,7 +995,7 @@ def test_pillars_drive_tabs_directly_no_subnav(tmp_path, dashboard_client):
 # §9.2 (five acts), §9.3 (revised tab bar + act rail).
 # ---------------------------------------------------------------------------
 
-def test_act_rail_renders_above_tab_nav(tmp_path, dashboard_client):
+def test_act_rail_renders_above_tab_nav(tmp_path, inproc_client):
     """5-tab study layout (mockup refinement): the per-act group-label headers
     (THE STUDY / DESIGN / EVIDENCE / ASSURANCE / DECISION) and their gate dots
     were removed — with only five tabs they were clutter. The nav is now ONE
@@ -1015,7 +1015,7 @@ def test_act_rail_renders_above_tab_nav(tmp_path, dashboard_client):
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/act-rail-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1040,7 +1040,7 @@ def test_act_rail_renders_above_tab_nav(tmp_path, dashboard_client):
     assert nav.count('class="pillar-label"') == 6
 
 
-def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
+def test_act_clusters_group_label_with_own_tabs(tmp_path, inproc_client):
     """5-tab study layout (mockup refinement): the `.act-cluster` grouping was
     dropped — each pillar is a direct child of the single `study-tabs-row` nav
     and pairs its own inline-SVG icon with its own label. This asserts the
@@ -1066,7 +1066,7 @@ def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/pillar-nav-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1100,7 +1100,7 @@ def test_act_clusters_group_label_with_own_tabs(tmp_path, dashboard_client):
     assert 'data-kind="data"' not in nav
 
 
-def test_readouts_repositioned_to_slot_three(tmp_path, dashboard_client):
+def test_readouts_repositioned_to_slot_three(tmp_path, inproc_client):
     """5-tab study layout (Phase 1): the pillar row is exactly Overview, Model,
     Simulations, Audit, Decide — in that order. Readouts is no longer its own
     pillar (it folds into Model); panel switching is unaffected
@@ -1119,7 +1119,7 @@ def test_readouts_repositioned_to_slot_three(tmp_path, dashboard_client):
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/readouts-order-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1136,7 +1136,7 @@ def test_readouts_repositioned_to_slot_three(tmp_path, dashboard_client):
     assert 'data-kind="data"' not in html
 
 
-def test_readouts_panel_renders_three_contract_blocks(tmp_path, dashboard_client):
+def test_readouts_panel_renders_three_contract_blocks(tmp_path, inproc_client):
     """5-tab study layout (Phase 1): the Readouts contract (emitter summary +
     emitted-paths table) is re-homed into the Model (compose) panel under a
     "Readouts" sub-section, with its element ids preserved. The old "Outputs &
@@ -1155,7 +1155,7 @@ def test_readouts_panel_renders_three_contract_blocks(tmp_path, dashboard_client
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/readouts-blocks-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1377,8 +1377,8 @@ def test_visualization_gap_unreadable_study_no_downgrade_no_500(monkeypatch):
     (which is what a live request would turn into a 500) -- matching V4's
     tolerance for an unreadable study.
 
-    Exercised directly against `build_gate_ladder` (no `dashboard_client`):
-    `dashboard_client` spawns a real server SUBPROCESS (see conftest.py), so
+    Exercised directly against `build_gate_ladder` (no `inproc_client`):
+    `inproc_client` spawns a real server SUBPROCESS (see conftest.py), so
     an in-process monkeypatch of `study_visualization_status` would silently
     have no effect there -- this is the only way to actually force the
     exception path."""
@@ -1507,7 +1507,7 @@ def _write_g4_investigation_and_study(ws, inv_slug, study_slug, criteria, verdic
     }))
 
 
-def test_acceptance_criteria_band_renders_with_spine_acceptance(tmp_path, dashboard_client):
+def test_acceptance_criteria_band_renders_with_spine_acceptance(tmp_path, inproc_client):
     """A study with spine_acceptance criteria (via its owning investigation's
     persisted computed_acceptance) renders the Acceptance-criteria band at
     the top of the Tests tab: criterion behavior, an outcome from the G3
@@ -1519,7 +1519,7 @@ def test_acceptance_criteria_band_renders_with_spine_acceptance(tmp_path, dashbo
         verdict_status="failing",
     )
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/g4-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1549,7 +1549,7 @@ def test_acceptance_criteria_band_renders_with_spine_acceptance(tmp_path, dashbo
     assert 'id="bt-oric_timing"' in tests_panel
 
 
-def test_acceptance_criteria_band_absent_without_spine_acceptance(tmp_path, dashboard_client):
+def test_acceptance_criteria_band_absent_without_spine_acceptance(tmp_path, inproc_client):
     """A study with no owning investigation (so no spine_acceptance) renders
     NO acceptance-criteria band at all — absent, not an empty box (§2 R2:
     absent != empty; never fabricate criteria)."""
@@ -1567,7 +1567,7 @@ def test_acceptance_criteria_band_absent_without_spine_acceptance(tmp_path, dash
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/g4-lonely-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1586,7 +1586,7 @@ def test_acceptance_criteria_band_absent_without_spine_acceptance(tmp_path, dash
 # MOVED from the Tests panel to the new Assurance › Audit panel.
 # ---------------------------------------------------------------------------
 
-def test_quality_check_group_mount_renders_in_audit_panel(tmp_path, dashboard_client):
+def test_quality_check_group_mount_renders_in_audit_panel(tmp_path, inproc_client):
     """The #check-group-quality mount lives in the Audit panel (not Tests),
     so client-side JS has somewhere to fill in the rigor scorecard --
     present regardless of whether rigor can compute."""
@@ -1604,7 +1604,7 @@ def test_quality_check_group_mount_renders_in_audit_panel(tmp_path, dashboard_cl
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/g5-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1621,7 +1621,7 @@ def test_quality_check_group_mount_renders_in_audit_panel(tmp_path, dashboard_cl
     assert 'data-check-group="quality"' in audit_panel
 
 
-def test_reproducibility_check_group_mount_renders_in_audit_panel(tmp_path, dashboard_client):
+def test_reproducibility_check_group_mount_renders_in_audit_panel(tmp_path, inproc_client):
     """The #check-group-reproducibility mount (Fable G6) lives in the Audit
     panel, alongside #check-group-quality (G5) and the sufficiency group --
     present regardless of whether study_audit can compute."""
@@ -1639,7 +1639,7 @@ def test_reproducibility_check_group_mount_renders_in_audit_panel(tmp_path, dash
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/g6-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1707,7 +1707,7 @@ def test_panel_audit_folds_tests_and_build_removed_from_model(tmp_path):
 # longer duplicates it (#decide-readiness mount removed).
 # ---------------------------------------------------------------------------
 
-def test_readiness_gaps_at_top_of_audit_and_absent_from_decide(tmp_path, dashboard_client):
+def test_readiness_gaps_at_top_of_audit_and_absent_from_decide(tmp_path, inproc_client):
     ws = tmp_path / "ws"
     sd = ws / "studies" / "readiness-placement-study"
     sd.mkdir(parents=True)
@@ -1722,7 +1722,7 @@ def test_readiness_gaps_at_top_of_audit_and_absent_from_decide(tmp_path, dashboa
         "status": "in_progress",
     }))
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/readiness-placement-study")
     assert resp.status_code == 200
     html = resp.text
@@ -1749,7 +1749,7 @@ def test_readiness_gaps_at_top_of_audit_and_absent_from_decide(tmp_path, dashboa
 # out to Audit. A multi-card fixture proves none are dropped.
 # ---------------------------------------------------------------------------
 
-def test_tests_panel_renders_every_report_card_from_multi_card_fixture(tmp_path, dashboard_client):
+def test_tests_panel_renders_every_report_card_from_multi_card_fixture(tmp_path, inproc_client):
     import json
 
     ws = tmp_path / "ws"
@@ -1786,7 +1786,7 @@ def test_tests_panel_renders_every_report_card_from_multi_card_fixture(tmp_path,
             ]}},
         }), encoding="utf-8")
 
-    client = dashboard_client(ws)
+    client = inproc_client(ws)
     resp = client.get("/studies/multi-card-study")
     assert resp.status_code == 200
     html = resp.text

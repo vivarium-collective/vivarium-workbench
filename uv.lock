@@ -671,29 +671,6 @@ wheels = [
 ]
 
 [[package]]
-name = "discovery-engine"
-version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main#64d4854f90e3a6f6d0314e6f2010274b0334ddad" }
-dependencies = [
-    { name = "bigraph-schema" },
-    { name = "click" },
-    { name = "filelock" },
-    { name = "jinja2" },
-    { name = "jsonschema", extra = ["format-nongpl"] },
-    { name = "numpy" },
-    { name = "polars" },
-    { name = "process-bigraph" },
-    { name = "psutil" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "ruamel-yaml" },
-    { name = "scipy" },
-    { name = "typer" },
-    { name = "viva-emitters", extra = ["parquet"] },
-    { name = "viva-workspace" },
-]
-
-[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1258,7 +1235,7 @@ name = "importlib-metadata"
 version = "9.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6f/7e/1e7e8dc30634b93ebb3d58a3dea569ad146e656218d3960ab04f62047b29/importlib_metadata-9.0.1.tar.gz", hash = "sha256:ab830580bc0ef3db61ce8fae716389e5462b67e033018bab6d8f80ef17172f99", size = 59124, upload-time = "2026-08-28T15:30:34.646Z" }
 wheels = [
@@ -2429,7 +2406,7 @@ wheels = [
 
 [[package]]
 name = "process-bigraph"
-version = "1.9.1"
+version = "1.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bigraph-schema" },
@@ -2440,9 +2417,9 @@ dependencies = [
     { name = "scipy" },
     { name = "sympy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/6a/b2c1620fdfab048c6de03d4f5a092aaf8177294b8dadfcfc0750499fa6a9/process_bigraph-1.9.1.tar.gz", hash = "sha256:9b476fa963688811a2c485ea2b17d683e61fa687b018921a44a159a85d53b7d0", size = 253316, upload-time = "2026-10-13T14:16:30.927Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/17/a2e8246a1c7149d3fd18e63e333353a45c13a93fd07ce3691b3badaecf87/process_bigraph-1.11.0.tar.gz", hash = "sha256:df0433e462a9a1cef3b6cf66290c789a202997e714a9f6f3e8984fadbc07a176", size = 273107, upload-time = "2026-11-01T03:13:27.295Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/59/f7cae4aebe79797d984b03ba07b7424053f1430d9c773e1c47c102f0e96f/process_bigraph-1.9.1-py3-none-any.whl", hash = "sha256:5a464e1cc8799cc2751e2f4e0c5128f542bbef34be95a40867d00fe7f864db0a", size = 274023, upload-time = "2026-10-13T14:16:28.438Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/8e/f0c2fca736d84dd1e6d18894b438419cf38619721d31e39b1b3b42678a1f/process_bigraph-1.11.0-py3-none-any.whl", hash = "sha256:c299fbe1b34f1c04e23ced19db3445ff33b1bc6fcdcce3d2dfed0a40938a62c7", size = 291298, upload-time = "2026-11-01T03:13:25.806Z" },
 ]
 
 [[package]]
@@ -3642,6 +3619,33 @@ version = "0.1.0"
 source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?rev=4e72e3b7f6c88d9683ae113a58e59bcafc5efb65#4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
 
 [[package]]
+name = "viva-discovery-engine"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "bigraph-schema" },
+    { name = "click" },
+    { name = "filelock" },
+    { name = "jinja2" },
+    { name = "jsonschema", extra = ["format-nongpl"] },
+    { name = "numpy" },
+    { name = "polars" },
+    { name = "process-bigraph" },
+    { name = "psutil" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "ruamel-yaml" },
+    { name = "scipy" },
+    { name = "typer" },
+    { name = "viva-emitters", extra = ["parquet"] },
+    { name = "viva-workspace" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6b/c4/bdf88a7d08363e03f6116c60e92f3f181e5a8cf54ae30bfed0a467702647/viva_discovery_engine-0.2.1.tar.gz", hash = "sha256:bcaccc94c6cbf77c34943e336d9d8a1317f0bb9210d2e98f54288e3fe3ac9a37", size = 3304324, upload-time = "2026-11-06T00:10:19.923Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/e8/a3606453ac8dad586a9f1910f5c7ae78e528ee59c46e9d0a3e02edd93d87/viva_discovery_engine-0.2.1-py3-none-any.whl", hash = "sha256:47355a3cf88a43887d84ff1007e0c4fb71b0f352e116c868e8e1020df616e483", size = 492324, upload-time = "2026-11-06T00:10:18.126Z" },
+]
+
+[[package]]
 name = "viva-emitters"
 version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3675,8 +3679,8 @@ xarray = [
 
 [[package]]
 name = "viva-superpowers"
-version = "0.24.0"
-source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#f67ff2b1004021fb9542d2c479961c1d83de00b5" }
+version = "0.25.0"
+source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#88faa72068bc1c5678a47c85c3ddce371f493cfd" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "click" },
@@ -3688,6 +3692,7 @@ dependencies = [
     { name = "pypdf" },
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
+    { name = "viva-discovery-engine" },
     { name = "viva-emitters" },
     { name = "viva-workspace" },
 ]
@@ -3714,7 +3719,6 @@ dependencies = [
     { name = "bigraph-schema" },
     { name = "boto3" },
     { name = "compose-api-client" },
-    { name = "discovery-engine" },
     { name = "fastapi" },
     { name = "investigation-contracts" },
     { name = "jinja2" },
@@ -3729,6 +3733,7 @@ dependencies = [
     { name = "uvicorn" },
     { name = "viva-basic-processes" },
     { name = "viva-catalog" },
+    { name = "viva-discovery-engine" },
     { name = "viva-emitters", extra = ["parquet", "xarray"] },
     { name = "viva-superpowers", extra = ["evaluator"] },
     { name = "viva-workspace" },
@@ -3773,7 +3778,6 @@ requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
     { name = "boto3", specifier = ">=1.34" },
     { name = "compose-api-client", specifier = ">=0.7.72" },
-    { name = "discovery-engine", git = "https://github.com/vivarium-collective/discovery-engine.git?branch=main" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
@@ -3790,7 +3794,7 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'viz'" },
     { name = "playwright", marker = "extra == 'loom-render'", specifier = ">=1.40" },
     { name = "polars", marker = "extra == 'test'" },
-    { name = "process-bigraph", specifier = ">=1.9.1" },
+    { name = "process-bigraph", specifier = ">=1.11.0" },
     { name = "psutil", specifier = ">=5.9" },
     { name = "pyarrow", marker = "extra == 'test'" },
     { name = "pydantic", specifier = ">=2" },
@@ -3806,6 +3810,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.29" },
     { name = "viva-basic-processes", git = "https://github.com/vivarium-collective/viva-basic-processes.git?branch=main" },
     { name = "viva-catalog", git = "https://github.com/vivarium-collective/viva-marketplace.git?rev=4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" },
+    { name = "viva-discovery-engine", specifier = ">=0.2,<0.3" },
     { name = "viva-emitters", extras = ["sqlite", "xarray", "parquet"], specifier = ">=0.4.3" },
     { name = "viva-superpowers", extras = ["evaluator"], git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main" },
     { name = "viva-workspace", git = "https://github.com/vivarium-collective/viva-workspace.git?branch=main" },

@@ -795,12 +795,12 @@ def test_iset_clone_source_precheck_honors_layout_override(_ws_custom_layout):
     assert "clone_investigation.py" in resp["error"]
 
 
-def test_iset_create_then_get_via_http_under_custom_layout(dashboard_client, tmp_path):
+def test_iset_create_then_get_via_http_under_custom_layout(inproc_client, tmp_path):
     """End-to-end regression: the real HTTP path the UI's investigation-create
     action drives — POST /api/investigation-create then
     GET /api/investigation/<name> — against a workspace whose workspace.yaml
     relocates investigations/ via `layout:` (mirrors the real sms-ecoli
-    workspace). Exercises the live FastAPI app via the dashboard_client
+    workspace). Exercises the live FastAPI app via the inproc_client
     subprocess fixture, not just the lib functions directly."""
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -808,7 +808,7 @@ def test_iset_create_then_get_via_http_under_custom_layout(dashboard_client, tmp
         "name: ws\nlayout:\n  investigations: workspace/investigations\n"
     )
     (ws / "workspace" / "investigations").mkdir(parents=True)
-    client = dashboard_client(workspace=ws)
+    client = inproc_client(workspace=ws)
 
     r = client.post(
         "/api/investigation-create",

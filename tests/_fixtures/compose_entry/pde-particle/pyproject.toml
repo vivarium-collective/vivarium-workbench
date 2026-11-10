@@ -1,0 +1,58 @@
+[project]
+name = "viva-pde-particle"
+version = "0.0.0"
+description = "PDE/particle hybrid co-simulation (finite volume / FEniCSx + Smoldyn) with process-bigraph, benchmarked against vcell-fvsolver"
+requires-python = ">=3.11"
+dependencies = [
+    # Floor 1.9.1, a release (no commit pins): it carries #229 (per-process event files, which compose-api's job script
+    # reads) and #230 (groundness check), which an earlier pin to main (e5325c1) was for.
+    # Before that, 1.8.5 ships the composite `core_extensions` mechanism (1.8.0) the
+    # dashboard relies on AND the emitter fix (#217) + `requests`/`fire` server
+    # deps. Below this, composite type-registration and agent-embedded emits
+    # break — the root cause behind the map[...] type errors seen in the field.
+    "process-bigraph>=1.9.1",
+    "bigraph-schema",
+    "bigraph-viz>=2.0.3",
+    "pyyaml>=6.0",
+    "jsonschema[format-nongpl]>=4.21",
+    "jinja2>=3.1",
+    "pypdf>=4.0",
+    "matplotlib",
+    "plotly",
+    "numpy",
+    "scipy",
+]
+
+[project.optional-dependencies]
+# Web-based workspace dashboard (server + templates + assets + lib helpers). Extracted from viva-template as of
+# v0.4.16; provides the `vivarium-workbench serve` CLI invoked by scripts/serve.sh. An extra rather than a dependency
+# so the compose-api image (docker/compose.Dockerfile, pixi `compose` env) does not carry a web app: process-bigraph's
+# discovery imports every package that depends on bigraph-schema, workbench's optional AI-chat modules included.
+# `dev` pulls it in, so the generated workflows' `.[dev]` / `--extra dev` installs keep the dashboard.
+workbench = ["vivarium-workbench"]
+dev = ["pytest>=7.4", "viva-pde-particle[workbench]"]
+# VCell reference solver (embedded fvsolver hybrid) + VCML/SBML tooling. pyvcell needs Python >=3.12;
+# the marker keeps the 3.11 resolution (workspace-ci, publish workflows) satisfiable. The SBML hybrid path needs
+# pyvcell 0.4.2 (load_sbml_str unit_system=) and libvcell 0.0.19 (vcell#2175). pyvcell's floor stays at 0.3.3
+# because its source tree carries that placeholder version (releases set it from the tag), and the `dev`
+# environment installs ../pyvcell editable; pixi.lock pins the default environment to 0.4.2.
+reference = ["pyvcell[solver,native]>=0.3.3; python_version >= '3.12'", "libvcell>=0.0.19; python_version >= '3.12'"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Allow ecosystem git-direct-reference deps (viva-superpowers / vivarium-workbench
+# @ git+https://…) that workspaces commonly add — hatchling rejects them otherwise.
+[tool.hatch.metadata]
+allow-direct-references = true
+
+# Declare the workspace Python package explicitly so this workspace is
+# pip-installable (e.g. `pip install git+<repo>@<sha>`).  sms-api injects it
+# as an extra_pip_dep so the container runner can import the workspace's
+# processes from a committed + pushed git ref.
+[tool.hatch.build.targets.wheel]
+packages = ["viva_pde_particle"]
+
+[tool.uv.sources]
+vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-workbench.git", branch = "main" }

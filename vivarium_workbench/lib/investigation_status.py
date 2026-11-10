@@ -83,7 +83,40 @@ def _study_has_active_run(
     return False
 
 
-def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
+def study_run_rows(ws_root: Path, slug: str, spec: dict, wp=None) -> list[dict]:
+    """Lightweight run rows (``[{"status": ...}]``) for run-derived status.
+
+    One ``SELECT status FROM runs_meta`` against the study's runs.db plus the
+    ``runs[]`` recorded in study.yaml. Deliberately NOT ``read_runs_db_for_study``
+    (which joins tables and parses params) -- the index calls this per study.
+    Never raises.
+    """
+    rows: list[dict] = [
+        {"status": r.get("status")} for r in (spec.get("runs") or [])
+        if isinstance(r, dict)
+    ]
+    try:
+        import sqlite3
+        from vivarium_workbench.lib.investigations_index import _study_runs_db
+        db = _study_runs_db(ws_root, slug, wp)
+        if db is not None:
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                rows += [{"status": r[0]} for r in
+                         conn.execute("SELECT status FROM runs_meta")]
+            finally:
+                conn.close()
+    except Exception:  # noqa: BLE001 -- missing table / locked db => no evidence
+        pass
+    return rows
+
+
+_WEAK_DISPLAY = frozenset({
+    "", "none", "not_run", "not_evaluated", "pending", "planned", "planning",
+})
+
+
+def _study_display_status(ws_root: Path, slug: str, spec: dict, runs=None) -> str:
     """A study's headline status for investigation roll-ups.
 
     ``running`` is a LIVE claim, so it is decided ONLY by an actual active run
@@ -97,6 +130,17 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
     """
     if _study_has_active_run(ws_root, slug, spec):
         return "running"
+
+    # Run-aware: fill absent/weak simulation/evaluation axes from runs.db so a
+    # study with completed runs never reads "planning". Authored values win.
+    if runs is None:
+        runs = study_run_rows(ws_root, slug, spec)
+    run_ran = False
+    if runs:
+        from vivarium_workbench.lib.study_ontology import with_run_derived_axes
+        merged = with_run_derived_axes(spec, runs)
+        run_ran = merged.get("simulation_status") == "ran"
+        spec = merged
 
     status = None
     chosen_axis = None
@@ -119,6 +163,11 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
     if chosen_axis == "gate_status" and status.lower() in _GATE_VERDICT_REFUTED:
         status = "evaluated"
 
+    # A weak headline ("planned"/"not_evaluated"/...) is contradicted by a
+    # completed run: report the study as having run.
+    if run_ran and status.lower() in _WEAK_DISPLAY:
+        status = "ran"
+
     if status.lower() in _STUDY_STATUS_RUNNING:
         # No live run → a running-ish headline is stale. Demote to the first
         # non-running axis value (its real design/impl/gate state), else "planning".
@@ -129,16 +178,46 @@ def _study_display_status(ws_root: Path, slug: str, spec: dict) -> str:
                 alt = str(v).strip()
                 break
         status = alt or "planning"
+
+    # Synthesis-complete (parked ontology, rule 2): a ``kind: synthesis`` study is a
+    # claim-only roll-up that by design produces no runs of its own, so a run-driven
+    # headline leaves it reading "pending" forever (the "Completed · pending" render).
+    # Once it carries a claim/conclusion it IS concluded -> promote a weak headline to
+    # "complete"; never override a real done/failed axis.
+    if (str(spec.get("kind") or "").strip().lower() == "synthesis"
+            and (spec.get("claim") or spec.get("conclusion"))
+            and status.lower() in _WEAK_DISPLAY):
+        status = "complete"
+
+    # Parked (parked ontology, rule 1): a study flagged ``parked: true`` is a
+    # deliberately-deferred future direction, DISTINCT from in-flight pending work — it
+    # must not read "pending evidence" and must not count toward completeness. It reads
+    # "parked" unless it has already reached a terminal state (terminal wins over parked).
+    if (spec.get("parked")
+            and status.lower() not in _STUDY_STATUS_DONE_ROLLUP
+            and status.lower() not in _STUDY_STATUS_FAILED):
+        return "parked"
     return status
 
 
 def compute_investigation_status(
     study_statuses: list[str],
     has_runs: list[bool] | None = None,
+    *,
+    authored_status: str | None = None,
+    closed: bool = False,
+    parked: list[bool] | None = None,
 ) -> str:
-    """Derive an investigation's effective status from its member studies.
+    """Derive an investigation's effective status.
 
-    Rules, applied in order (first match wins):
+    An **authoritative terminal lifecycle wins over the member aggregate**: an investigation that
+    is authoritatively closed/complete (``authored_status`` in {closed, complete, archived}, or the
+    engine's ``closed`` closure) reads ``"complete"``, and an authored ``failed`` reads ``"failed"``
+    — even if parked ``Planned`` follow-ups remain. Otherwise the member-aggregate would mislabel a
+    settled investigation ``"in_progress"`` off its non-blocking follow-ups (sbml-cycle finding:
+    a closed investigation read ``in_progress`` in the dashboard header).
+
+    Member-aggregate rules (when not terminal), first match wins:
 
     1. Any child in ``{failed, invalid}`` -> ``"failed"``.
     2. All children in the done roll-up (non-empty) -> ``"complete"``.
@@ -146,10 +225,29 @@ def compute_investigation_status(
     4. At least one child done OR with accumulated runs, but not all -> ``"in_progress"``.
     5. Otherwise (empty, or all planned/planning/unknown) -> ``"planning"``.
 
-    ``has_runs`` is an optional parallel list of bools (one per study).
+    ``has_runs`` is an optional parallel list of bools (one per study). ``parked`` is an
+    optional parallel list of bools: a parked member is a deliberately-deferred future
+    direction, so it is **excluded from the aggregate** — all NON-parked members done
+    reads ``"complete"`` even while parked follow-ups remain (the parked count is a render
+    concern, surfaced separately). An all-parked (or empty) investigation reads
+    ``"planning"``.
     """
+    _st = str(authored_status or "").strip().lower()
+    if _st == "failed":
+        return "failed"
+    if closed or _st in ("closed", "complete", "archived"):
+        return "complete"
     statuses = list(study_statuses or [])
     has_runs = list(has_runs or [False] * len(statuses))
+    parked = list(parked or [False] * len(statuses))
+    # A parked member is deferred future work, not incomplete current work — drop it
+    # from the aggregate (with its paired has_runs) so it neither blocks completeness
+    # nor counts as pending. Pad/truncate defensively if the lists are mismatched.
+    if any(parked):
+        kept = [(s, (has_runs[i] if i < len(has_runs) else False))
+                for i, s in enumerate(statuses) if not (i < len(parked) and parked[i])]
+        statuses = [s for s, _ in kept]
+        has_runs = [r for _, r in kept]
 
     if any(s in _STUDY_STATUS_FAILED for s in statuses):
         return "failed"
@@ -226,26 +324,52 @@ StudyHasRuns = Callable[[str, dict], bool]
 
 
 def read_study_status(
-    ws_root: Path, slug: str, *, study_has_runs: StudyHasRuns
+    ws_root: Path, slug: str, *, study_has_runs: StudyHasRuns,
+    specs_out: "dict | None" = None,
 ) -> tuple[str, bool]:
     """Read (status, has_runs) for a member study referenced by an iset.
 
     Returns ``("planning", False)`` if the study can't be located or parsed.
     ``study_has_runs(slug, spec)`` supplies the runs-presence signal (injected so
-    the workspace-coupled runs.db reader stays in the caller).
+    the workspace-coupled runs.db reader stays in the caller). ``specs_out``, when
+    given, collects the parsed spec by slug so callers can reuse it (no re-read).
     """
     try:
         sp = WorkspacePaths.load(ws_root).study_dir(slug, must_exist=True) / "study.yaml"
     except FileNotFoundError:
         sp = ws_root / "investigations" / slug / "spec.yaml"
     if sp.is_file():
-        try:
-            spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
-        except Exception:
-            return "planning", False
+        from vivarium_workbench.lib.study_spec import read_spec_yaml_cached
+        spec = read_spec_yaml_cached(sp)
         status = _study_display_status(ws_root, slug, spec)
+        if specs_out is not None:
+            specs_out[slug] = spec
         return status, study_has_runs(slug, spec)
     return "planning", False
+
+
+def _card_description(spec: dict) -> str:
+    """The one-line blurb for an investigation card. The authored top-level
+    ``description`` wins; otherwise fall back to the narrative an investigation actually
+    authors — ``executive.what_is_this``, then the ``lead``'s first paragraph, then
+    ``scientific_argument.main_claim`` — so a card is never blank when the spine is filled.
+    Whitespace/newlines are collapsed to a single line."""
+    spec = spec or {}
+    authored = (spec.get("description") or "").strip()
+    if authored:
+        return authored
+    ex = spec.get("executive")
+    ex = ex if isinstance(ex, dict) else {}
+    sa = spec.get("scientific_argument")
+    sa = sa if isinstance(sa, dict) else {}
+    lead = spec.get("lead") or ""
+    for cand in (ex.get("what_is_this"),
+                 lead.split("\n\n")[0] if lead else None,
+                 sa.get("main_claim")):
+        cand = (cand or "").strip()
+        if cand:
+            return " ".join(cand.split())
+    return ""
 
 
 def build_iset_summary(
@@ -268,12 +392,20 @@ def build_iset_summary(
         # pre- and post-migration schema render (safe superset: `members` is
         # only consulted when `studies` is absent/empty).
         study_slugs = investigation_member_slugs(spec)
+        member_specs: dict = {}
         statuses_and_runs = [
-            read_study_status(ws_root, s, study_has_runs=study_has_runs)
+            read_study_status(ws_root, s, study_has_runs=study_has_runs,
+                              specs_out=member_specs)
             for s in study_slugs
         ]
+        # Run-aware closure / verdict_status (authored wins; derived is flagged).
+        from vivarium_workbench.lib.run_aware_investigation import derive_markings
+        marks = derive_markings(spec, member_specs)
         statuses = [s for s, _ in statuses_and_runs]
         has_runs = [r for _, r in statuses_and_runs]
+        # Parked members (deferred future directions) don't block the investigation's
+        # completeness aggregate (parked ontology, rule 3).
+        parked = [bool((member_specs.get(s) or {}).get("parked")) for s in study_slugs]
         # Number of downloadable figures — gates the card's ↓ figures action.
         # Count ALL figure files (study panels + post-study composites), i.e.
         # exactly what the figures.zip contains — not just the stitched
@@ -296,10 +428,17 @@ def build_iset_summary(
             # executive block, falling back to the lifecycle status). Surfaced
             # here so the investigations list can badge each card without
             # fetching the full detail.
-            "verdict_status":   (spec.get("executive") or {}).get("verdict_status")
-                                or spec.get("status") or "planning",
-            "effective_status": compute_investigation_status(statuses, has_runs=has_runs),
-            "description":      spec.get("description", ""),
+            "verdict_status":   marks["verdict_status"],
+            # "authored" | "derived" (roll-up of member run-aware verdicts)
+            "verdict_status_source": marks["verdict_status_source"],
+            # Open/Closed: authored status closed/archived, else the engine's closure.
+            "closed":           marks["closure"]["closed"],
+            "closure_source":   marks["closure"]["source"],
+            "effective_status": compute_investigation_status(
+                statuses, has_runs=has_runs,
+                authored_status=spec.get("status"), closed=marks["closure"]["closed"],
+                parked=parked),
+            "description":      _card_description(spec),
             "question":         spec.get("question", ""),
             "hypothesis":       spec.get("hypothesis", ""),
             "n_studies":        len(study_slugs),
@@ -325,7 +464,7 @@ def build_iset_summary(
             "verdict_status":   (fspec.get("executive") or {}).get("verdict_status")
                                 or fspec.get("status") or "planning",
             "effective_status": "federated",
-            "description":      fspec.get("description", ""),
+            "description":      _card_description(fspec),
             "question":         fspec.get("question", ""),
             "hypothesis":       fspec.get("hypothesis", ""),
             "n_studies":        len(fi.get("member_studies", [])),
