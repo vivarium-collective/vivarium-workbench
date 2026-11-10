@@ -103,7 +103,9 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
     sig = catalog_disk_cache.catalog_signature(ws_root)
     if not bypass_cache:
         cached = catalog_disk_cache.load(ws_root, "composites", sig)
-        if cached is not None:
+        # An entry carrying an `error` was persisted by a version that cached failures;
+        # serving it would keep the tab empty after the upgrade. Recompute instead.
+        if cached is not None and not (isinstance(cached, dict) and cached.get("error")):
             _COMPOSITES_CACHE[ws_root_str] = {"data": cached, "ts": now}
             return cached
 
@@ -165,8 +167,14 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
         data = json.loads(json_text)
     except (json.JSONDecodeError, ValueError):
         return None
-    # Cache successful discovery only; failures (None above) are never cached so
-    # a transient import error re-tries on the next request.
+    # Cache successful discovery only; failures are never cached so a transient
+    # error re-tries on the next request. A failure is `None` above, but ALSO a
+    # payload carrying an `error`: the child turns an exception into
+    # `{"composites": [], "error": ...}` (for example a cold env worker that timed
+    # out). That is returned to the caller but not remembered, in memory or on disk,
+    # or the tab stays empty after the cause is gone.
+    if isinstance(data, dict) and data.get("error"):
+        return data
     _COMPOSITES_CACHE[ws_root_str] = {"data": data, "ts": now}
     catalog_disk_cache.store(ws_root, "composites", sig, data)
     return data
