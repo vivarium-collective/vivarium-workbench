@@ -13,7 +13,7 @@ verdicts — so the report never shows a "pending" pill for a study that ran.
 Deterministic + dashboard-callable orchestration. The behavior-test evaluation
 is pluggable via an injected ``test_runner`` callable so the orchestration is
 unit-testable without a live dashboard or a real ``RunReader``. The default
-runner reuses :func:`discovery_engine.study_evaluator.evaluate_study` against a
+runner reuses :func:`discovery_engine.study.evaluator.evaluate_study` against a
 ``RunReader`` opened on the run's store.
 
 Relationship to ``study_evaluator.compute_outcomes``: that writes a *parallel*
@@ -43,8 +43,8 @@ from vivarium_workbench.lib.atomic_io import atomic_write_text
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from discovery_engine import study_io
-from discovery_engine.study_outcomes import canonical_run
+from discovery_engine.study import io as study_io
+from discovery_engine.study.outcomes import canonical_run
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ def _evaluator_test_runner(
     optional ``[evaluator]`` extra (``viva_emitters.RunReader``) is absent — the
     orchestrator turns both into a clean ``status`` rather than a crash.
     """
-    from discovery_engine.study_evaluator import _resolve_run_store, evaluate_study  # noqa: PLC0415
+    from discovery_engine.study.evaluator import resolve_run_store, evaluate_study  # noqa: PLC0415
 
     # #1472: grade only the tests whose requires_simulation / given target names
     # THIS run's arm. Tests targeting another arm are dropped from the spec the
@@ -262,7 +262,7 @@ def _evaluator_test_runner(
     run_spec.pop("tests", None)
     run_spec["behavior_tests"] = _tests_for_run(spec, run)
 
-    store = _resolve_run_store(run, study_dir, ws_root)
+    store = resolve_run_store(run, study_dir, ws_root)
     if store is None:
         if run.get("evaluation_only"):
             # Store-less grading for a run-less (params-only) study: its behavior

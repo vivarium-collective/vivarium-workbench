@@ -182,7 +182,7 @@ def prose_edit(ws_root: Path, body: dict) -> "tuple[dict, int]":
         return {"saved": False, "error": f"edit failed: {e}"}, 500
 
     try:
-        from discovery_engine import study_io
+        from discovery_engine.study import io as study_io
         study_io.atomic_write(target, buf.getvalue())
     except Exception:  # noqa: BLE001 — fall back to a plain atomic write
         try:

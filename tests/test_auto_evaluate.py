@@ -9,9 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from vivarium_workbench.lib import auto_evaluate as ae
-from discovery_engine import study_io
-
-
+from discovery_engine.study import io as study_io
 def _write_study(tmp_path: Path, text: str) -> Path:
     d = tmp_path / "studies" / "s1"
     d.mkdir(parents=True)
@@ -332,7 +330,7 @@ def test_evaluator_runner_filters_tests_per_run(tmp_path, monkeypatch):
         seen.setdefault("calls", []).append(names)
         return {n: {"result": "PASS", "evaluated_by": "code"} for n in names}
 
-    import discovery_engine.study_evaluator as se
+    import discovery_engine.study.evaluator as se
     monkeypatch.setattr(se, "evaluate_study", spy_evaluate_study)
 
     ae.evaluate_on_run_completion(d, "run-low")

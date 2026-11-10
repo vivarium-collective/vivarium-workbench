@@ -45,49 +45,49 @@ STEPS: list[dict[str, Any]] = [
              "from the authored specs + recorded run outcomes. Generates no prose, writes nothing.",
      "gate": "Authored values win over derived; a plain run never writes to disk."},
     {"id": "propose_viz", "label": "Propose visualizations", "phase": "Core",
-     "module": "viz_proposals", "func": "propose_visualizations", "kind": "pure",
+     "module": "viz.proposals", "func": "propose_visualizations", "kind": "pure",
      "depends_on": ["run_cycle"],
      "desc": "Proposes figures for gates, discriminating observables and model disagreements "
              "that no declared visualization covers (typed, content-addressed proposals).",
      "gate": "Propose-only: nothing is declared or rendered until a human accepts, with a "
              "rationale. Non-blocking."},
     {"id": "reconcile_evidence", "label": "Reconcile evidence", "phase": "Evidence",
-     "module": "evidence_integrity", "func": "reconcile_evidence_state", "kind": "pure",
+     "module": "phases.evidence_integrity", "func": "reconcile_evidence_state", "kind": "pure",
      "depends_on": ["load_inputs"],
      "desc": "Classifies each study finding by provenance into verified / provisional / "
              "contradicted / unsupported, using the study's runs.db run-ids.",
      "gate": "Verified = a numeric value that cites a registered run-id and passes its own "
              "pass_if band (it does not re-check the run produced that value)."},
     {"id": "plan", "label": "Plan candidate actions", "phase": "Plan",
-     "module": "candidate_action", "func": "plan_candidate_actions", "kind": "pure",
+     "module": "phases.candidate_action", "func": "plan_candidate_actions", "kind": "pure",
      "depends_on": ["run_cycle", "reconcile_evidence"],
      "desc": "Re-casts the open frontier into ranked candidate actions "
              "(repair / resolve / extend) with a heuristic value score.",
      "gate": "A RESOLVE needs ≥2 competing hypotheses; a REPAIR is ordered first when "
              "any evidence is still unverified."},
     {"id": "design", "label": "Design experiment", "phase": "Experiment design",
-     "module": "experiment_design", "func": "design_discriminating_study", "kind": "pure",
+     "module": "phases.experiment_design", "func": "design_discriminating_study", "kind": "pure",
      "depends_on": ["load_inputs"],
      "desc": "For each study with competing hypotheses, lays out a discriminating "
              "experiment: arms, controls, and a pre-committed decision rule.",
      "gate": "Returns a design only when a study has ≥2 hypotheses whose numeric "
              "prediction bands are disjoint."},
     {"id": "build_model", "label": "Model architect", "phase": "Models",
-     "module": "model_architect", "func": "build_catalog", "kind": "pure",
+     "module": "phases.model_architect", "func": "build_catalog", "kind": "pure",
      "depends_on": ["load_inputs"],
      "desc": "Inventories the distinct composite paths the studies' arms cite, with a "
              "capability signature per component.",
      "gate": "Lexical only — it lists cited composite paths; it does not verify a "
              "composite exists or imports."},
     {"id": "evaluate", "label": "Evaluate hypotheses", "phase": "Evaluation",
-     "module": "evaluation", "func": "compare_hypotheses", "kind": "pure",
+     "module": "phases.evaluation", "func": "compare_hypotheses", "kind": "pure",
      "depends_on": ["run_cycle", "reconcile_evidence"],
      "desc": "Scores each study's hypotheses from findings + prose and assigns a status "
              "(supported / contested / unresolved / gated).",
      "gate": "'supported' requires net support > 0 AND the study's evidence verified in "
              "Phase A; otherwise 'provisionally-supported'."},
     {"id": "delta", "label": "Discovery delta", "phase": "Evaluation",
-     "module": "evaluation", "func": "discovery_delta", "kind": "pure",
+     "module": "phases.evaluation", "func": "discovery_delta", "kind": "pure",
      "depends_on": ["evaluate"],
      "desc": "Lists the currently supported/qualified claims, model disagreements and "
              "anomalies, and what changed (status/model-version transitions) since the "
@@ -103,19 +103,19 @@ STEPS: list[dict[str, Any]] = [
      "gate": "Divergence / open-question proposals are held 'awaiting expert'; they carry "
              "no spec until seeded."},
     {"id": "select", "label": "Select for launch", "phase": "Growth",
-     "module": "study_seeding", "func": "select_for_launch", "kind": "pure",
+     "module": "growth.seeding", "func": "select_for_launch", "kind": "pure",
      "depends_on": ["propose"],
      "desc": "Applies the autonomy policy to decide which proposals launch vs. are held.",
      "gate": "Default human-in-the-loop holds everything unless explicitly approved or "
              "running autonomously."},
     {"id": "seed", "label": "Seed study (preview)", "phase": "Growth",
-     "module": "study_seeding", "func": "build_seeded_study", "kind": "pure",
+     "module": "growth.seeding", "func": "build_seeded_study", "kind": "pure",
      "depends_on": ["select"],
      "desc": "Previews a new child study spec from a parent + proposal.",
      "gate": "Preview only — written to disk solely via `seed-study --write`, and only "
              "when run-ready."},
     {"id": "refine", "label": "Refine study (preview)", "phase": "Growth",
-     "module": "study_refinement", "func": "refine_study", "kind": "pure",
+     "module": "growth.refinement", "func": "refine_study", "kind": "pure",
      "depends_on": ["load_inputs"],
      "desc": "Previews refinements to a study — replicates, parameter sweeps, higher "
              "fidelity.",
@@ -325,9 +325,8 @@ class _Modules:
     def __init__(self) -> None:
         import importlib
         from discovery_engine import discover
-        from discovery_engine import discovery_engine as de
-        from discovery_engine import evidence_integrity
-
+        from discovery_engine.projection import engine as de
+        from discovery_engine.phases import evidence_integrity
         class _Missing:  # a not-yet-shipped engine module: its step errors, others run
             def __init__(self, n): self._n = n
             def __getattr__(self, a):
@@ -340,9 +339,9 @@ class _Modules:
                 return _Missing(n)
         candidate_action, experiment_design, model_architect, evaluation, \
             study_seeding, study_refinement = (
-                _opt(n) for n in ("candidate_action", "experiment_design",
-                                  "model_architect", "evaluation",
-                                  "study_seeding", "study_refinement"))
+                _opt(n) for n in ("phases.candidate_action", "phases.experiment_design",
+                                  "phases.model_architect", "phases.evaluation",
+                                  "growth.seeding", "growth.refinement"))
         self.discover = discover
         self.de = de
         self.evidence_integrity = evidence_integrity
@@ -1211,7 +1210,7 @@ def build_capability_gap(ws_root, inv_slug: str, gap: str) -> dict:
     ``built`` reports whether a process was actually produced. Commits. Never raises."""
     if not engine_available():
         return {"available": False}
-    from discovery_engine.study_io import save_yaml_atomic
+    from discovery_engine.study.io import save_yaml_atomic
     M = _Modules()
     ws_root = Path(ws_root)
     if not str(gap or "").startswith("cg:"):
@@ -1228,8 +1227,8 @@ def build_capability_gap(ws_root, inv_slug: str, gap: str) -> dict:
                     "detail": "no workspace build hook registered — add <pkg>.build_hook."
                               "register_build_hook to build this mechanism; until then it must be "
                               "authored by hand"}
-        from discovery_engine.capability_gaps import build_capability_gap as _build
-        from discovery_engine.model_architect import build_catalog
+        from discovery_engine.feedback.capability_gaps import build_capability_gap as _build
+        from discovery_engine.phases.model_architect import build_catalog
         _build(g, hook, ws_root=ws_root,
                catalog=lambda: build_catalog(M.discover.load_cycle_inputs(ws_root, inv_slug)[2], ws_root))
         # re-read + merge (the hook may have edited the investigation), then persist atomically
@@ -1295,7 +1294,7 @@ def investigation_freshness(ws_root, inv_slug: str) -> dict:
     try:
         M = _Modules()
         _p, spec, studies = M.discover.load_cycle_inputs(Path(ws_root), inv_slug)
-        from discovery_engine.narrative_freshness import investigation_freshness as _fr
+        from discovery_engine.projection.narrative_freshness import investigation_freshness as _fr
         cv = (spec.get("executive") or {}).get("computed_verdict_status")
         return {"available": True, "freshness": _fr(spec, studies, computed_verdict_status=cv)}
     except FileNotFoundError:

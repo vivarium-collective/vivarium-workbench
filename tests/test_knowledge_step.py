@@ -1,5 +1,5 @@
 """KnowledgeStep — the thin process-bigraph adapter around
-discovery_engine.knowledge_store.derive_knowledge.
+discovery_engine.projection.knowledge.derive_knowledge.
 
 These tests drive the REAL process-bigraph engine (as the skeleton tests do):
 a Composite containing one KnowledgeStep runs on init and must populate the

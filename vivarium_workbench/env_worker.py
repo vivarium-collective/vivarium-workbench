@@ -487,7 +487,7 @@ def _list_visualizations() -> dict:
         pass
 
     # Append report-card / test classes. They auto-register into
-    # discovery_engine.post_sim.TEST_REGISTRY (REPORT_CARD_REGISTRY is the same
+    # discovery_engine.integration.post_sim.TEST_REGISTRY (REPORT_CARD_REGISTRY is the same
     # dict) when the modules that define them are imported — the same
     # import-time-registration contract as the Analysis classes above, so import
     # the card modules first. Surfaces them in the Registry's "Tests" tab.
@@ -496,7 +496,7 @@ def _list_visualizations() -> dict:
     except Exception:  # noqa: BLE001
         pass
     _seen_rc: set = set()
-    for _modname, _regattr in (("discovery_engine.post_sim", "TEST_REGISTRY"),
+    for _modname, _regattr in (("discovery_engine.integration.post_sim", "TEST_REGISTRY"),
                                ("v2ecoli.workflow.post_sim", "REPORT_CARD_REGISTRY")):
         try:
             _mod = __import__(_modname, fromlist=[_regattr])
@@ -1730,7 +1730,7 @@ def _run_study_analyses(params: dict) -> dict:
 
     Two kinds of analysis are dispatched, partitioned by base class:
 
-    - **Generic** record-based analyses — ``discovery_engine.post_sim.AnalysisStep``
+    - **Generic** record-based analyses — ``discovery_engine.integration.post_sim.AnalysisStep``
       subclasses (e.g. viva-simularium's ``SimulariumAnalysis``) — run directly
       over a ``ResultsHandle`` built from the run's emitter output. These need no
       v2ecoli, so a plain workspace's analyses run in the flush. See
@@ -1767,7 +1767,7 @@ def _run_study_analyses(params: dict) -> dict:
     generic: list = []      # (name, params, cls)
     remaining: list = []    # entries handed to the v2ecoli path
     try:
-        from discovery_engine.post_sim import (
+        from discovery_engine.integration.post_sim import (
             ANALYSIS_REGISTRY as _VIVA_REG,
             AnalysisStep as _AStep,
             Analysis as _LiveAnalysis,
@@ -1819,7 +1819,7 @@ def _run_generic_analyses(generic: list, store_paths, simulation_id, output_dir,
     if not store_paths:
         return [], [{"error": "no store path for generic analyses"}]
     try:
-        from discovery_engine.post_sim import ResultsHandle
+        from discovery_engine.integration.post_sim import ResultsHandle
         from bigraph_schema import allocate_core
     except Exception as exc:  # noqa: BLE001
         return [], [{"error": f"viva_superpowers post-sim unavailable: {exc}"}]

@@ -32,7 +32,7 @@ def build_framework_metrics(ws_root: Path) -> dict:
 
     Aggregates framework-self metrics across EVERY study + every investigation
     in the workspace via the deterministic
-    ``discovery_engine.rigor.framework_metrics`` (each metric is
+    ``discovery_engine.reporting.rigor.framework_metrics`` (each metric is
     ``{fraction, count, total}``).
 
     AI-free + tolerant: an absent/old viva_superpowers, or an unreadable
@@ -76,7 +76,7 @@ def build_framework_metrics(ws_root: Path) -> dict:
         "n_studies": len(study_specs),
     }
     try:
-        from discovery_engine.rigor import framework_metrics
+        from discovery_engine.reporting.rigor import framework_metrics
     except Exception:  # noqa: BLE001 — older viva_superpowers lacks the function
         return base
     try:

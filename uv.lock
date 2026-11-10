@@ -3620,7 +3620,7 @@ source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?re
 
 [[package]]
 name = "viva-discovery-engine"
-version = "0.2.1"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bigraph-schema" },
@@ -3640,9 +3640,9 @@ dependencies = [
     { name = "viva-emitters", extra = ["parquet"] },
     { name = "viva-workspace" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6b/c4/bdf88a7d08363e03f6116c60e92f3f181e5a8cf54ae30bfed0a467702647/viva_discovery_engine-0.2.1.tar.gz", hash = "sha256:bcaccc94c6cbf77c34943e336d9d8a1317f0bb9210d2e98f54288e3fe3ac9a37", size = 3304324, upload-time = "2026-11-06T00:10:19.923Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/48/39994ea09b8b33d8d3a8ad0a382f9c49f5913748b3dd9b35dee97dd8e09a/viva_discovery_engine-0.3.0.tar.gz", hash = "sha256:31f468991558e0a04451809b5d87385e52019c8fd46f78deeacea39670702e5f", size = 3313619, upload-time = "2026-11-10T01:47:19.017Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/49/e8/a3606453ac8dad586a9f1910f5c7ae78e528ee59c46e9d0a3e02edd93d87/viva_discovery_engine-0.2.1-py3-none-any.whl", hash = "sha256:47355a3cf88a43887d84ff1007e0c4fb71b0f352e116c868e8e1020df616e483", size = 492324, upload-time = "2026-11-06T00:10:18.126Z" },
+    { url = "https://files.pythonhosted.org/packages/10/de/1fb3f5c62c9b0a46b323037d6d8768320d8d09af3602245cff38a262e557/viva_discovery_engine-0.3.0-py3-none-any.whl", hash = "sha256:7494ea3700d35cbf9aea3eb8264ffbe5a1353ab7061dbd0f0beb9c3302705df0", size = 527686, upload-time = "2026-11-10T01:47:17.203Z" },
 ]
 
 [[package]]
@@ -3679,8 +3679,8 @@ xarray = [
 
 [[package]]
 name = "viva-superpowers"
-version = "0.25.0"
-source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#88faa72068bc1c5678a47c85c3ddce371f493cfd" }
+version = "0.26.0"
+source = { git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main#6f1c3ef54c02574435105fa50919c1722f41db2a" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "click" },
@@ -3810,7 +3810,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.29" },
     { name = "viva-basic-processes", git = "https://github.com/vivarium-collective/viva-basic-processes.git?branch=main" },
     { name = "viva-catalog", git = "https://github.com/vivarium-collective/viva-marketplace.git?rev=4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" },
-    { name = "viva-discovery-engine", specifier = ">=0.2,<0.3" },
+    { name = "viva-discovery-engine", specifier = ">=0.3,<0.4" },
     { name = "viva-emitters", extras = ["sqlite", "xarray", "parquet"], specifier = ">=0.4.3" },
     { name = "viva-superpowers", extras = ["evaluator"], git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main" },
     { name = "viva-workspace", git = "https://github.com/vivarium-collective/viva-workspace.git?branch=main" },

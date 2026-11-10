@@ -63,7 +63,7 @@ def run_derived_axes(spec: dict, runs) -> dict:
     runs = [r for r in (runs or []) if isinstance(r, dict)]
     if not runs:
         return {"simulation_status": "not_run", "evaluation_status": "not_evaluated"}
-    for mod in ("discovery_engine.study_status", "viva_superpowers.study_status"):
+    for mod in ("discovery_engine.study.status", "viva_superpowers.study_status"):
         try:
             import importlib
             d = importlib.import_module(mod).derive_status(spec, runs)
@@ -142,11 +142,11 @@ def derive_execution_status(spec: dict, node_status: str = "", runs=None) -> str
 
 def _engine_derived_verdict(spec: dict):
     """The engine's canonical verdict derived from the spec's graded behavior-test
-    outcomes (``discovery_engine.knowledge_store.canonical_verdict`` ->
+    outcomes (``discovery_engine.projection.knowledge.canonical_verdict`` ->
     ``study_verdict.roll_up_verdict``), or None when nothing is graded yet
     (``unassessed``) or the engine is absent. Reads only the in-memory spec."""
     try:
-        from discovery_engine.knowledge_store import canonical_verdict  # noqa: PLC0415
+        from discovery_engine.projection.knowledge import canonical_verdict  # noqa: PLC0415
         rec = canonical_verdict({k: v for k, v in spec.items()
                                  if k not in ("verdict", "conclusion_verdict")})
     except Exception:  # noqa: BLE001 -- engine optional: fall back to authored/pending

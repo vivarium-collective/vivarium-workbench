@@ -2818,7 +2818,7 @@ def create_app() -> FastAPI:
 
         Returns ``{hypotheses: [...], investigation: name}``.  Each hypothesis
         carries a computed ``support_log`` (via
-        ``discovery_engine.hypotheses.rollup_support`` / ``score_support``).
+        ``discovery_engine.phases.hypotheses.rollup_support`` / ``score_support``).
         Always HTTP 200 — missing investigations return an empty list rather
         than 404; import / compute failures degrade to the authored hypotheses.
 
@@ -2852,7 +2852,7 @@ def create_app() -> FastAPI:
         """Per-study rigor scorecard, backing the Tests tab's Quality check group.
 
         Computes the deterministic evidence & rigor scorecard
-        (``discovery_engine.rigor.study_rigor`` — replication, controls,
+        (``discovery_engine.reporting.rigor.study_rigor`` — replication, controls,
         alternatives, claim discipline, falsifiability, and the rest of the
         dimension set) over the study's run-merged spec. This scorecard already
         runs in CI; this route is the thin read-seam that makes it visible on
@@ -2861,7 +2861,7 @@ def create_app() -> FastAPI:
         HTTP 400 when ``?study=`` is missing (``{"error": "missing ?study="}``);
         HTTP 404 when no study.yaml/spec.yaml exists for the slug
         (``{"error": "study not found"}``). Never HTTP 500: an unimportable
-        ``discovery_engine.rigor`` or any scoring failure degrades to a 200
+        ``discovery_engine.reporting.rigor`` or any scoring failure degrades to a 200
         body ``{"unavailable": true, "reason": "..."}`` — never a fabricated
         empty scorecard (spec §2 R2, "absent != empty").
 
@@ -2915,7 +2915,7 @@ def create_app() -> FastAPI:
         """Per-study L0-L5 reproducibility audit, backing the Tests tab's
         Reproducibility check group.
 
-        Runs the deterministic ``discovery_engine.study_audit.audit_workspace``
+        Runs the deterministic ``discovery_engine.study.audit.audit_workspace``
         evaluator (already run in CI as the reproducibility gate) and returns
         just this study's block: ``{"slug", "worst", "checks": [{"level":
         "L0".."L5", "name", "status": "pass"|"warn"|"fail", "tier":
@@ -2925,7 +2925,7 @@ def create_app() -> FastAPI:
         HTTP 400 when ``?study=`` is missing (``{"error": "missing ?study="}``);
         HTTP 404 when no study.yaml/spec.yaml exists for the slug
         (``{"error": "study not found"}``). Never HTTP 500: an unimportable
-        ``discovery_engine.study_audit``, any audit failure, or the audit
+        ``discovery_engine.study.audit``, any audit failure, or the audit
         simply not reporting a block for this slug all degrade to a 200 body
         ``{"unavailable": true, "reason": "..."}`` — never a fabricated empty
         check list (spec §2 R2, "absent != empty"). Dynamic/passthrough shape
@@ -3117,7 +3117,7 @@ def create_app() -> FastAPI:
     def report_lint(ws: Path = Depends(get_workspace)) -> ReportLint:
         """Run the deterministic workspace report-linter and return its findings.
 
-        Runs ``discovery_engine.report_linter.lint_workspace_report`` over the
+        Runs ``discovery_engine.reporting.linter.lint_workspace_report`` over the
         workspace and returns ``{findings: [{study, check, severity, message,
         field_path}]}``, in the linter's stable error→warning→info order.
 
@@ -3167,7 +3167,7 @@ def create_app() -> FastAPI:
         """Uncited acceptance bands for a study — the ``/viva-cite-bands``
         skill's Step 1 read.
 
-        Wraps ``discovery_engine.band_provenance.bands_missing_provenance``.
+        Wraps ``discovery_engine.study.band_provenance.bands_missing_provenance``.
         Returns ``{study, missing: [{name, kind, band, field_path}]}``;
         ``missing`` is ``[]`` when every band already carries a ``cites``.
 
@@ -3196,7 +3196,7 @@ def create_app() -> FastAPI:
         """Write a band's ``cites`` (and optional ``calibration_anchor``) —
         the ``/viva-cite-bands`` skill's ONLY sanctioned write path.
 
-        Wraps ``discovery_engine.band_provenance.set_band_provenance`` (a
+        Wraps ``discovery_engine.study.band_provenance.set_band_provenance`` (a
         ruamel comment-preserving round-trip onto ``study.yaml``; never
         fabricates an entry).
 
@@ -3369,7 +3369,7 @@ def create_app() -> FastAPI:
     def audit(ws: Path = Depends(get_workspace)):
         """Read-only L0-L5 reproducibility audit for the workspace (the visible
         companion to the CI gate). Runs
-        ``discovery_engine.study_audit.audit_workspace`` and returns its
+        ``discovery_engine.study.audit.audit_workspace`` and returns its
         ``as_dict()`` — per-study/-investigation checks + a summary. Purely
         informational: no gate, no allowlist, no writes. Tolerant — a workspace
         with no studies or any audit error still returns 200 with an empty
@@ -3586,7 +3586,7 @@ def create_app() -> FastAPI:
     ) -> Union[FrameworkMetrics, JSONResponse]:
         """Framework-self metrics scorecard for GET /api/framework-metrics.
 
-        Aggregates ``discovery_engine.rigor.framework_metrics`` over every
+        Aggregates ``discovery_engine.reporting.rigor.framework_metrics`` over every
         study + investigation in the workspace.  Returns
         ``{metrics: {…}, n_investigations: int, n_studies: int}``.
 
@@ -6203,7 +6203,7 @@ def create_app() -> FastAPI:
         req: StudyReadoutMigrateBody,
         ws: Path = Depends(get_workspace),
     ) -> dict:
-        """Wraps ``discovery_engine.readout_migration.migrate_study_file``.
+        """Wraps ``discovery_engine.study.readout_migration.migrate_study_file``.
 
         Body: ``{study, write?: bool, apply?: bool}`` — ``write``/``apply``
         default to ``False`` (dry-run: compute the migration report without
@@ -6238,7 +6238,7 @@ def create_app() -> FastAPI:
         req: StudyFindingsPopulateBody,
         ws: Path = Depends(get_workspace),
     ) -> Union[StudyFindingsPopulateResult, JSONResponse]:
-        """Wraps ``discovery_engine.finding_observations.populate_finding_observations``.
+        """Wraps ``discovery_engine.study.finding_observations.populate_finding_observations``.
 
         Body: ``{study}``. Fills only ABSENT code-owned finding slots
         (``evidence.observed``/``units``/``divergence_factor``,
@@ -6358,7 +6358,7 @@ def create_app() -> FastAPI:
         """Read-only STATUS sibling of ``POST /api/study-readout-migrate``.
 
         Wraps the PURE classifier
-        ``discovery_engine.readout_migration.readout_migration_status`` — it
+        ``discovery_engine.study.readout_migration.readout_migration_status`` — it
         only reads ``study.yaml`` and buckets every readout into
         ``{canonical, migratable, needs_human}``. No writes. 400 missing
         ``?study=``, 404 study not found, 500 on failure. Phase 2.1g
@@ -6460,7 +6460,7 @@ def create_app() -> FastAPI:
         req: ISetCloseBody,
         ws: Path = Depends(get_workspace),
     ) -> Union[ISetCloseResult, JSONResponse]:
-        """Wraps ``discovery_engine.investigation_close.close_investigation``.
+        """Wraps ``discovery_engine.investigation.close.close_investigation``.
 
         Body: ``{slug, dry_run?, no_pr?, skip_report?}``. Renders the workspace
         report, copies it under the investigation dir, stamps the investigation
@@ -8506,7 +8506,7 @@ def create_app() -> FastAPI:
     # Workspaces — global ~/.pbg catalog WRITE routes (3 POSTs)
     #
     # These 3 POSTs edit the GLOBAL ~/.pbg workspace catalog via
-    # discovery_engine.workspace_catalog (process-global, NOT server state; no
+    # discovery_engine.integration.workspace_catalog (process-global, NOT server state; no
     # workspace/ws_root).  All three call the pure lib.workspaces_mutations
     # builders, which take ONLY the request body's ``path``.  Every path
     # (success AND error) is returned via JSONResponse so the lib-returned

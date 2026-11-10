@@ -45,7 +45,7 @@ def _sync_parent_investigation(ws_root: Any, study_dir: Any) -> None:
     a record error must not fail a successful sync.
     """
     try:
-        from discovery_engine import investigation_status
+        from discovery_engine.investigation import status as investigation_status
         from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
         write_acceptance = getattr(
@@ -464,7 +464,7 @@ def study_sync_runs(ws_root: Path, body: dict) -> "tuple[dict, int]":
 
     Body: ``{study: <slug>}``
     """
-    from discovery_engine import study_outcomes
+    from discovery_engine.study import outcomes as study_outcomes
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     slug = (body or {}).get("study")

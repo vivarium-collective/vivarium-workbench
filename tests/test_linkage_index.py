@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from discovery_engine import study_io
+from discovery_engine.study import io as study_io
 from vivarium_workbench.lib.linkage_index import (
     build_index,
     ac_gating_matrix,

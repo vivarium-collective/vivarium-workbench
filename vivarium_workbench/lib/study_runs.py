@@ -341,7 +341,7 @@ def _run_post_run_flush(ws_root, study_dir, spec, spec_id, run_id, full_params,
         if analysis_errors:
             response.setdefault("analysis_errors", []).extend(analysis_errors)
     try:
-        from discovery_engine import study_outcomes
+        from discovery_engine.study import outcomes as study_outcomes
         study_outcomes.sync(study_dir)  # record runs + compute outcomes
     except Exception as exc:  # never fail a successful run on a record error
         print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
@@ -1107,7 +1107,7 @@ def run_study_variant(ws_root, body):
             if analysis_errors:
                 response.setdefault("analysis_errors", []).extend(analysis_errors)
         try:
-            from discovery_engine import study_outcomes
+            from discovery_engine.study import outcomes as study_outcomes
             study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)

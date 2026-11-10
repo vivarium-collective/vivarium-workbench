@@ -828,7 +828,7 @@ class StudyRigor(BaseModel):
     """``GET /api/study-rigor`` payload (lib.rigor_views.build_study_rigor, Fable G5).
 
     The per-study evidence & rigor scorecard from
-    ``discovery_engine.rigor.study_rigor`` (``dimensions`` / ``score`` /
+    ``discovery_engine.reporting.rigor.study_rigor`` (``dimensions`` / ``score`` /
     ``summary`` / ``study_type`` / ``mode`` / ``descriptive``), or the
     ``{"unavailable": true, "reason": ...}`` degrade shape when rigor could not
     be computed (missing dependency, malformed spec, ...) — never a fabricated
@@ -843,7 +843,7 @@ class InvestigationRigor(BaseModel):
     """``GET /api/investigation-rigor`` payload (lib.rigor_views.build_investigation_rigor).
 
     The rigor roll-up across member studies from
-    ``discovery_engine.rigor.investigation_rigor`` (``dimensions`` / ``per_study``
+    ``discovery_engine.reporting.rigor.investigation_rigor`` (``dimensions`` / ``per_study``
     / ``score`` / ``summary``), or one of the 200-shaped error fallbacks.  Like
     :class:`StudyRigor`, a pure pass-through (``extra="allow"``, no declared
     fields) so nothing is stripped or injected.
@@ -945,7 +945,7 @@ class BandProvenanceMissing(BaseModel):
     (lib.cite_bands_views.build_band_provenance_missing).
 
     Shape: ``{study, missing: [{name, kind, band, field_path}]}`` — exactly
-    ``discovery_engine.band_provenance.bands_missing_provenance``'s output,
+    ``discovery_engine.study.band_provenance.bands_missing_provenance``'s output,
     wrapped with the resolved study slug. Empty ``missing`` means every band
     is already cited.
 
@@ -1672,7 +1672,7 @@ class StudyReadoutMigrateBody(BaseModel):
     """POST /api/study-readout-migrate {study, write?, apply?}
 
     ``write`` (or its alias ``apply``) defaults to ``False`` (dry-run),
-    mirroring ``discovery_engine.readout_migration.migrate_study_file``'s own
+    mirroring ``discovery_engine.study.readout_migration.migrate_study_file``'s own
     ``write`` keyword.
     """
 
@@ -1689,7 +1689,7 @@ class StudyFindingsPopulateBody(BaseModel):
     Fills only ABSENT code-owned finding slots from ``computed_outcomes`` +
     band + readouts (inherently fill-absent-only + idempotent — no dry-run
     flag; mirrors
-    ``discovery_engine.finding_observations.populate_finding_observations``).
+    ``discovery_engine.study.finding_observations.populate_finding_observations``).
     """
 
     model_config = ConfigDict(extra="allow")
@@ -1701,7 +1701,7 @@ class StudyFindingsPopulateResult(BaseModel):
     """``POST /api/study-findings-populate-observations`` response.
 
     Shape is exactly
-    ``discovery_engine.finding_observations.populate_finding_observations``'s
+    ``discovery_engine.study.finding_observations.populate_finding_observations``'s
     ``{filled, skipped}`` plus the resolved ``study`` slug.
 
     Source: ``lib.finding_observations_views.study_findings_populate_observations``.
@@ -1822,7 +1822,7 @@ class StudyFindingsResult(BaseModel):
 
 class StudyReadoutMigrationStatusResult(BaseModel):
     """GET /api/study-readout-migration-status result — verbatim passthrough of
-    ``discovery_engine.readout_migration.readout_migration_status`` (three
+    ``discovery_engine.study.readout_migration.readout_migration_status`` (three
     buckets classifying a study's readouts) plus the resolved ``study`` slug.
     PURE read: never modifies study.yaml.
 
@@ -1940,7 +1940,7 @@ class ISetCloseBody(BaseModel):
     investigation YAML (``status: closed`` + ``closed_at`` + ``report_url`` +
     ``contributors[]``), commits on the investigation branch, and — unless
     ``no_pr`` — opens/refreshes a PR (NEVER ``--auto``). Wraps
-    ``discovery_engine.investigation_close.close_investigation``.
+    ``discovery_engine.investigation.close.close_investigation``.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -1974,7 +1974,7 @@ class BandProvenanceSetBody(BaseModel):
     ``cites`` is a non-empty list of bib_keys (required — this is the
     ``/viva-cite-bands`` skill's write op). ``calibration_anchor`` is an
     optional object, written verbatim when provided (mirrors
-    ``discovery_engine.band_provenance.set_band_provenance``'s keyword).
+    ``discovery_engine.study.band_provenance.set_band_provenance``'s keyword).
     """
 
     model_config = ConfigDict(extra="allow")
@@ -2953,7 +2953,7 @@ class WorkLinkBranchResponse(BaseModel):
 # C-state-3h1: workspace-registry POST routes
 #   POST /api/workspaces/add /api/workspaces/forget /api/workspaces/cleanup-stale
 # All three edit the GLOBAL ~/.pbg workspace catalog via
-# discovery_engine.workspace_catalog (no ws_root) through the pure
+# discovery_engine.integration.workspace_catalog (no ws_root) through the pure
 # lib.workspaces_mutations builders; every path (success AND error) is returned
 # via JSONResponse so the lib-returned status code is preserved verbatim.  The
 # request model's ``path`` is Optional so an omitted path reaches the lib
@@ -3016,7 +3016,7 @@ class RenderRequest(BaseModel):
 
     Phase 2.1d — makes ``/api/render`` a thin server-side equivalent of the old
     ``/viva-report`` skill's CLI render usage
-    (``discovery_engine.report.render_workspace_report``):
+    (``discovery_engine.reporting.report.render_workspace_report``):
 
       * ``today`` — forwarded into the render as the generation date, for a
         byte-stable CI render (the old ``--today`` option).

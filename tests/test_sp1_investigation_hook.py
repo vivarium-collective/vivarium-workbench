@@ -6,7 +6,7 @@ through the study-sync endpoint (behavioral).
 """
 from pathlib import Path
 
-from discovery_engine import study_io, run_registry
+from discovery_engine.study import io as study_io, run_registry
 from vivarium_workbench.lib import lifecycle_mutations, study_runs
 
 

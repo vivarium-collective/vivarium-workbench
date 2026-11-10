@@ -2,7 +2,7 @@
 knowledge store (Concepts + canonical Verdicts) at an event boundary.
 
 It is the thin pbg adapter around
-``discovery_engine.knowledge_store.derive_knowledge``: the pure derivation and
+``discovery_engine.projection.knowledge.derive_knowledge``: the pure derivation and
 its unit tests live in viva-superpowers; this Step wires it into the engine.
 Like the other investigation Steps it runs at a transaction boundary, NOT on the
 biological simulation schedule, and writes a read-only ``knowledge`` node — it
@@ -68,7 +68,7 @@ class KnowledgeStep(process_bigraph.Step):
         return {"knowledge": "node"}
 
     def update(self, state=None):
-        from discovery_engine.knowledge_store import derive_knowledge
+        from discovery_engine.projection.knowledge import derive_knowledge
 
         inv_spec, studies_by_slug = _load_knowledge_inputs(
             self.config["workspace"], self.config["investigation_slug"])

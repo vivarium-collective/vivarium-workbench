@@ -124,7 +124,7 @@ dependencies = [
     # `discovery_engine` (see root_packages + import-linter below). Pinned to a
     # PyPI semver range, not git branch=main, so installs are coherent and bumps
     # are visible Renovate PRs rather than silent commit drift.
-    "viva-discovery-engine>=0.2,<0.3",
+    "viva-discovery-engine>=0.3,<0.4",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
