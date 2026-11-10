@@ -240,3 +240,111 @@ def test_provision_passes_cache_env(tmp_path, monkeypatch):
     assert captured["env"] is not None
     # Honors a deployment-set UV_CACHE_DIR and mirrors it to PIP_CACHE_DIR.
     assert captured["env"].get("PIP_CACHE_DIR") == str(tmp_path / "uvc")
+
+
+# ---- #1575: provisioning must work against a REAL uv-created venv -----------
+# uv-created venvs do NOT ship ``pip``; the old code ran ``<py> -m pip install``,
+# which failed for *every* declared module with ``No module named pip`` (so the
+# pool logged "N module(s) failed" at startup). The fix: skip modules already
+# importable in the worker interpreter, and when an install IS needed, use
+# ``uv pip install --python <interpreter>`` rather than the venv's absent pip.
+# These tests drive a real uv venv (not a fake interpreter), per the issue.
+
+import os  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import base64  # noqa: E402
+import hashlib  # noqa: E402
+import zipfile  # noqa: E402
+
+
+_UV = shutil.which("uv")
+requires_uv = pytest.mark.skipif(_UV is None, reason="uv not on PATH")
+
+
+def _make_real_uv_venv(tmp_path):
+    """Create a genuine uv venv and return the path to its interpreter.
+
+    A real uv venv is the point of this regression: it has NO ``pip``, which is
+    exactly what broke provisioning in #1575."""
+    venv = tmp_path / "uvenv"
+    subprocess.run([_UV, "venv", str(venv)], check=True, capture_output=True)
+    py = venv / "bin" / "python"
+    if not py.exists():  # Windows layout (CI is Linux/macOS, but be safe)
+        py = venv / "Scripts" / "python.exe"
+    return str(py)
+
+
+def _make_minimal_wheel(dir_path, name="probe1575", version="0.0.1"):
+    """A hand-built pure-python wheel so the install is genuine but fully offline
+    (no build backend, no network) — installing a ``.whl`` needs no pip."""
+    whl = os.path.join(dir_path, f"{name}-{version}-py3-none-any.whl")
+    files = {
+        f"{name}/__init__.py": b"VALUE = 1575\n",
+        f"{name}-{version}.dist-info/METADATA":
+            f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n".encode(),
+        f"{name}-{version}.dist-info/WHEEL":
+            b"Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+    }
+    record = []
+    for arc, data in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        record.append(f"{arc},sha256={digest},{len(data)}")
+    record.append(f"{name}-{version}.dist-info/RECORD,,")
+    files[f"{name}-{version}.dist-info/RECORD"] = ("\n".join(record) + "\n").encode()
+    with zipfile.ZipFile(whl, "w", zipfile.ZIP_DEFLATED) as z:
+        for arc, data in files.items():
+            z.writestr(arc, data)
+    return whl
+
+
+@requires_uv
+def test_real_uv_venv_has_no_pip(tmp_path):
+    # Guards the premise of #1575: a uv venv cannot run ``python -m pip``.
+    py = _make_real_uv_venv(tmp_path)
+    proc = subprocess.run([py, "-m", "pip", "--version"], capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "No module named pip" in (proc.stderr + proc.stdout)
+
+
+@requires_uv
+def test_install_command_uses_uv_when_interpreter_has_no_pip(tmp_path):
+    # The crux: for a pip-less uv venv the install command must be the uv form
+    # (``uv pip install --python <interpreter>``), NOT ``<py> -m pip`` (#1575).
+    py = _make_real_uv_venv(tmp_path)
+    cmd = env_worker._install_command("some-pkg", str(tmp_path / "site"), py)
+    assert cmd is not None
+    assert cmd[0] == _UV and cmd[1:3] == ["pip", "install"]
+    assert "--python" in cmd and cmd[cmd.index("--python") + 1] == py
+    assert "--target" in cmd and "some-pkg" in cmd
+    # Never the broken "<py> -m pip" that failed on uv venvs.
+    assert not (cmd[0] == py and "pip" in cmd and "-m" in cmd)
+
+
+@requires_uv
+def test_provision_skips_importable_module_in_real_uv_venv(tmp_path):
+    # (a) A module already importable in the worker interpreter is SKIPPED — no
+    # install subprocess is spawned. ``json`` is in every uv venv's stdlib.
+    py = _make_real_uv_venv(tmp_path)
+    res = env_worker._provision_modules(
+        [{"name": "json", "mode": "pypi", "pypi_name": "json", "package": "json"}],
+        target=str(tmp_path / "site"), interpreter=py)
+    assert res == [{"name": "json", "ok": True, "detail": "already importable"}]
+
+
+@requires_uv
+def test_provision_installs_missing_module_via_uv_in_real_uv_venv(tmp_path):
+    # (b) A module NOT importable in the pip-less uv venv is genuinely installed
+    # via ``uv pip install --python``. On the OLD code this returned
+    # ``No module named pip``; now it succeeds and lands on disk.
+    py = _make_real_uv_venv(tmp_path)
+    wheel = _make_minimal_wheel(str(tmp_path))
+    target = tmp_path / "site"
+    res = env_worker._provision_modules(
+        [{"name": "probe1575", "mode": "pypi",
+          "pypi_name": str(wheel),       # local .whl path -> installable, offline
+          "package": "probe1575"}],      # not importable anywhere -> forces install
+        target=str(target), interpreter=py)
+    assert res[0]["ok"] is True, res
+    assert res[0]["detail"] == "installed"
+    assert (target / "probe1575" / "__init__.py").exists()
